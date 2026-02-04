@@ -7,6 +7,7 @@
 
 use reth_libmdbx::*;
 use std::{
+    collections::HashMap,
     sync::{Arc, Barrier},
     thread,
 };
@@ -46,8 +47,14 @@ fn test_dupsort_upsert_stress() {
         txn.commit().unwrap();
     }
 
+    // Track all expected data across iterations
+    let mut all_expected: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+
     for iteration in 0..NUM_ITERATIONS {
         let mut main_txn = env.begin_rw_txn().expect("Failed to begin txn");
+
+        // Track what we write in this iteration
+        let mut iteration_expected: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
 
         // Use nested transaction (like save_blocks does)
         let nested_txn = main_txn.begin_nested_txn().expect("Failed to begin nested txn");
@@ -72,28 +79,88 @@ fn test_dupsort_upsert_stress() {
                             iteration, key_id, value_id, e
                         )
                     });
+
+                // Track for verification
+                iteration_expected
+                    .entry(key.as_bytes().to_vec())
+                    .or_default()
+                    .push(value.as_bytes().to_vec());
             }
         }
 
         nested_txn.commit().expect("Failed to commit nested txn");
         main_txn.commit().expect("Failed to commit main txn");
 
-        if iteration % 5 == 4 {
-            let txn = env.begin_ro_txn().unwrap();
-            let db = txn.open_db(Some("hashed_storages")).unwrap();
-            let stat = txn.db_stat(db.dbi()).unwrap();
-            println!("Iteration {}: {} entries", iteration + 1, stat.entries());
+        // Merge iteration data into all_expected
+        for (key, values) in iteration_expected {
+            all_expected.entry(key).or_default().extend(values);
+        }
+
+        // Verify reads match writes after commit
+        {
+            let read_txn = env.begin_ro_txn().expect("Failed to begin read txn");
+            let db = read_txn.open_db(Some("hashed_storages")).expect("Failed to open db");
+            let mut cursor = read_txn.cursor(db.dbi()).expect("Failed to create cursor");
+
+            for (key, expected_values) in &all_expected {
+                let actual_values: Vec<Vec<u8>> = cursor
+                    .iter_dup_of::<Vec<u8>, Vec<u8>>(key)
+                    .map(|r| r.expect("Failed to read value").1)
+                    .collect();
+
+                assert_eq!(
+                    actual_values.len(),
+                    expected_values.len(),
+                    "Iteration {}: key {:?} value count mismatch: got {}, expected {}",
+                    iteration,
+                    String::from_utf8_lossy(key),
+                    actual_values.len(),
+                    expected_values.len()
+                );
+
+                // Verify each expected value exists in actual (order may differ due to sorting)
+                let mut expected_sorted = expected_values.clone();
+                expected_sorted.sort();
+                let mut actual_sorted = actual_values.clone();
+                actual_sorted.sort();
+
+                assert_eq!(
+                    actual_sorted, expected_sorted,
+                    "Iteration {}: key {:?} values mismatch",
+                    iteration,
+                    String::from_utf8_lossy(key)
+                );
+            }
+
+            let stat = read_txn.db_stat(db.dbi()).unwrap();
+            if iteration % 5 == 4 {
+                println!(
+                    "Iteration {}: {} entries verified",
+                    iteration + 1,
+                    stat.entries()
+                );
+            }
         }
     }
 
-    // Verify final state
+    // Final verification
     let txn = env.begin_ro_txn().unwrap();
     let db = txn.open_db(Some("hashed_storages")).unwrap();
     let stat = txn.db_stat(db.dbi()).unwrap();
-    println!("Final: {} entries", stat.entries());
 
-    // We should have entries (exact count depends on upsert behavior)
-    assert!(stat.entries() > 0, "Expected entries to be written");
+    let total_expected: usize = all_expected.values().map(|v| v.len()).sum();
+    assert_eq!(
+        stat.entries(),
+        total_expected,
+        "Final entry count mismatch: got {}, expected {}",
+        stat.entries(),
+        total_expected
+    );
+    println!(
+        "Final: {} entries verified (all {} keys checked)",
+        stat.entries(),
+        all_expected.len()
+    );
 }
 
 /// Test that exercises DupSort with rapid subpage -> subtree conversion.
@@ -331,4 +398,103 @@ fn test_dupsort_multithreaded_serialized() {
 
     let expected = NUM_THREADS * ITERATIONS_PER_THREAD * ENTRIES_PER_ITERATION;
     assert_eq!(stat.entries(), expected);
+}
+
+/// Test that verifies data written in nested transactions can be read back correctly.
+/// This catches any corruption from page_auxbuf or other parallel write issues.
+#[test]
+fn test_nested_txn_write_read_integrity() {
+    const NUM_KEYS: usize = 50;
+    const VALUES_PER_KEY: usize = 20;
+
+    let dir = tempdir().unwrap();
+    let env = Environment::builder()
+        .set_max_dbs(10)
+        .set_geometry(Geometry {
+            size: Some(10 * 1024 * 1024..1024 * 1024 * 1024),
+            ..Default::default()
+        })
+        .open(dir.path())
+        .unwrap();
+
+    // Create DupSort table
+    {
+        let txn = env.begin_rw_txn().unwrap();
+        txn.create_db(Some("test_db"), DatabaseFlags::DUP_SORT).unwrap();
+        txn.commit().unwrap();
+    }
+
+    // Track what we write
+    let mut expected: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+
+    // Write data in nested transaction
+    {
+        let mut main_txn = env.begin_rw_txn().unwrap();
+        let nested_txn = main_txn.begin_nested_txn().unwrap();
+        let db = nested_txn.open_db(Some("test_db")).unwrap();
+
+        for key_id in 0..NUM_KEYS {
+            let key = format!("key_{:08}", key_id);
+
+            for value_id in 0..VALUES_PER_KEY {
+                let value = format!("value_{:08}_{:08}", key_id, value_id);
+
+                nested_txn
+                    .put(db.dbi(), key.as_bytes(), value.as_bytes(), WriteFlags::empty())
+                    .unwrap();
+
+                expected.entry(key.clone()).or_default().push(value);
+            }
+        }
+
+        nested_txn.commit().unwrap();
+        main_txn.commit().unwrap();
+    }
+
+    // Verify all data can be read back correctly
+    {
+        let txn = env.begin_ro_txn().unwrap();
+        let db = txn.open_db(Some("test_db")).unwrap();
+        let mut cursor = txn.cursor(db.dbi()).unwrap();
+
+        let mut actual_count = 0;
+
+        for (key, expected_values) in &expected {
+            let actual_values: Vec<Vec<u8>> = cursor
+                .iter_dup_of::<Vec<u8>, Vec<u8>>(key.as_bytes())
+                .collect::<Result<Vec<_>>>()
+                .unwrap()
+                .into_iter()
+                .map(|(_, v)| v)
+                .collect();
+
+            assert_eq!(
+                actual_values.len(),
+                expected_values.len(),
+                "Key {:?}: expected {} values, got {}",
+                key,
+                expected_values.len(),
+                actual_values.len()
+            );
+
+            for (i, expected_val) in expected_values.iter().enumerate() {
+                let actual_val = String::from_utf8_lossy(&actual_values[i]);
+                assert_eq!(
+                    actual_val.as_ref(),
+                    expected_val.as_str(),
+                    "Key {:?} value {}: expected {:?}, got {:?}",
+                    key,
+                    i,
+                    expected_val,
+                    actual_val
+                );
+            }
+
+            actual_count += actual_values.len();
+        }
+
+        assert_eq!(actual_count, NUM_KEYS * VALUES_PER_KEY);
+        println!("Verified {} key-value pairs", actual_count);
+    }
 }
