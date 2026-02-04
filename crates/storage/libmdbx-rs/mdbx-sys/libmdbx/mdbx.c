@@ -4768,6 +4768,9 @@ static inline bool dbi_changed(const MDBX_txn *txn, const size_t dbi) {
 
 static inline int dbi_check(const MDBX_txn *txn, const size_t dbi) {
   const uint8_t state = dbi_state(txn, dbi);
+  if (txn->flags & txn_parallel_subtx)
+    fprintf(stderr, "[dbi_check] Parallel subtxn %p dbi=%zu state=0x%x LINDO=%d VALID=%d changed=%d\n",
+            (void*)txn, dbi, state, (state & DBI_LINDO) != 0, (state & DBI_VALID) != 0, dbi_changed(txn, dbi));
   if (likely((state & DBI_LINDO) != 0 && !dbi_changed(txn, dbi)))
     return (state & DBI_VALID) ? MDBX_SUCCESS : MDBX_BAD_DBI;
 
@@ -5224,6 +5227,8 @@ static __always_inline int check_txn(const MDBX_txn *txn, int bad_bits) {
       return MDBX_EPERM;
 
     if (unlikely(txn->flags & bad_bits)) {
+      fprintf(stderr, "[check_txn] FAIL: txn=%p flags=0x%x bad_bits=0x%x intersection=0x%x\n",
+              (void*)txn, txn->flags, bad_bits, txn->flags & bad_bits);
       if ((bad_bits & MDBX_TXN_RDONLY) && unlikely(txn->flags & MDBX_TXN_RDONLY))
         return MDBX_EACCESS;
       if ((bad_bits & MDBX_TXN_PARKED) == 0)
@@ -5238,8 +5243,11 @@ static __always_inline int check_txn(const MDBX_txn *txn, int bad_bits) {
   if ((txn->flags & (MDBX_NOSTICKYTHREADS | MDBX_TXN_FINISHED)) != MDBX_NOSTICKYTHREADS &&
       !(bad_bits /* abort/reset/txn-break */ == 0 &&
         ((txn->flags & (MDBX_TXN_RDONLY | MDBX_TXN_FINISHED)) == (MDBX_TXN_RDONLY | MDBX_TXN_FINISHED))) &&
-      unlikely(txn->owner != osal_thread_self()))
+      unlikely(txn->owner != osal_thread_self())) {
+    fprintf(stderr, "[check_txn] OWNER MISMATCH: txn=%p owner=%llu self=%llu\n",
+            (void*)txn, (unsigned long long)txn->owner, (unsigned long long)osal_thread_self());
     return txn->owner ? MDBX_THREAD_MISMATCH : MDBX_BAD_TXN;
+  }
 #endif /* MDBX_TXN_CHECKOWNER */
 
   return MDBX_SUCCESS;
@@ -5569,6 +5577,7 @@ MDBX_MAYBE_UNUSED static inline int __must_check_result cursor_push(MDBX_cursor 
   TRACE("pushing page %" PRIaPGNO " on db %d cursor %p", mp->pgno, cursor_dbi_dbg(mc), __Wpedantic_format_voidptr(mc));
   if (unlikely(mc->top >= CURSOR_STACK_SIZE - 1)) {
     be_poor(mc);
+    fprintf(stderr, "[SET_TXN_ERROR @5577] cursor_push overflow dbi=%d txn=%p\n", cursor_dbi_dbg(mc), (void*)mc->txn);
     mc->txn->flags |= MDBX_TXN_ERROR;
     return MDBX_CURSOR_FULL;
   }
@@ -8293,6 +8302,8 @@ int mdbx_cursor_bind(MDBX_txn *txn, MDBX_cursor *mc, MDBX_dbi dbi) {
     return LOG_IFERR(rc);
   }
 
+  if (txn->flags & txn_parallel_subtx)
+    fprintf(stderr, "[cursor_bind] Parallel subtxn %p dbi=%u flags=0x%x BEFORE check_txn\n", (void*)txn, dbi, txn->flags);
   int rc = check_txn(txn, MDBX_TXN_FINISHED | MDBX_TXN_HAS_CHILD);
   if (unlikely(rc != MDBX_SUCCESS))
     return LOG_IFERR(rc);
@@ -15649,8 +15660,8 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   memcpy(txn->dbi_sparse, parent->dbi_sparse, bitmap_bytes);
 #endif /* MDBX_ENABLE_DBI_SPARSE */
 
-  /* Copy parent's dbs and state, but clear DBI_FRESH/DIRTY/CREAT flags so that
-   * only DBIs actually modified by this subtxn get merged back to parent */
+  /* Copy parent's dbs and state, but clear DBI_FRESH/CREAT/DIRTY flags so that
+   * only DBIs actually modified by this subtxn get merged back to parent. */
   memcpy(txn->dbs, parent->dbs, parent->n_dbi * sizeof(tree_t));
   memcpy(txn->dbi_seqs, parent->dbi_seqs, parent->n_dbi * sizeof(uint32_t));
   for (size_t i = 0; i < parent->n_dbi; ++i)
@@ -15663,6 +15674,8 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   txn->n_dbi = parent->n_dbi;
   txn->owner = osal_thread_self();
   txn->txnid = parent->txnid;
+  /* For parallel subtxns, use same front_txnid as parent.
+   * The tree_search scan loop handles finding parent's front_txnid for validation. */
   txn->front_txnid = parent->front_txnid;
   txn->geo = parent->geo;
   txn->canary = parent->canary;
@@ -15699,6 +15712,8 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   txn->tw.assigned_dbi = dbi;
 
   DEBUG("created parallel subtx %p for dbi %u", (void *)txn, dbi);
+  fprintf(stderr, "[create_parallel_subtxn] Created subtxn %p for dbi %u with flags=0x%x\n", 
+          (void*)txn, dbi, txn->flags);
 
   *subtxn = txn;
   return MDBX_SUCCESS;
@@ -16530,6 +16545,10 @@ static int touch_dbi(MDBX_cursor *mc) {
   mc->txn->flags |= MDBX_TXN_DIRTY;
 
   if (!cursor_is_core(mc)) {
+    /* For parallel subtxns, skip MAIN_DBI modification - parent already touched it */
+    if (mc->txn->flags & txn_parallel_subtx) {
+      return MDBX_SUCCESS;
+    }
     /* Touch DB record of named DB */
     cursor_couple_t cx;
     int rc = dbi_check(mc->txn, MAIN_DBI);
@@ -16743,6 +16762,7 @@ int cursor_init(MDBX_cursor *mc, const MDBX_txn *txn, size_t dbi) {
 
 __cold static int unexpected_dupsort(MDBX_cursor *mc) {
   ERROR("unexpected dupsort-page/node for non-dupsort db/cursor (dbi %zu)", cursor_dbi(mc));
+  fprintf(stderr, "[SET_TXN_ERROR @16757] unexpected_dupsort dbi=%zu txn=%p\n", cursor_dbi(mc), (void*)mc->txn);
   mc->txn->flags |= MDBX_TXN_ERROR;
   be_poor(mc);
   return MDBX_CORRUPTED;
@@ -16981,12 +17001,24 @@ static __always_inline int cursor_bring(const bool inner, const bool tend2first,
 /* Функция-шаблон: Устанавливает курсор в начало или конец. */
 static __always_inline int cursor_brim(const bool inner, const bool tend2first, MDBX_cursor *__restrict mc,
                                        MDBX_val *__restrict key, MDBX_val *__restrict data) {
+  if (mc->txn->flags & txn_parallel_subtx) {
+    fprintf(stderr, "[cursor_brim] Parallel subtxn %p top=%d flags=0x%x\n", (void*)mc->txn, mc->top, mc->txn->flags);
+    fflush(stderr);
+  }
   if (mc->top != 0) {
     int err = tree_search(mc, nullptr, tend2first ? Z_FIRST : Z_LAST);
+    if (mc->txn->flags & txn_parallel_subtx) {
+      fprintf(stderr, "[cursor_brim] tree_search returned %d, top=%d flags=0x%x\n", err, mc->top, mc->txn->flags);
+      fflush(stderr);
+    }
     if (unlikely(err != MDBX_SUCCESS))
       return err;
   }
   const size_t nkeys = page_numkeys(mc->pg[mc->top]);
+  if (mc->txn->flags & txn_parallel_subtx) {
+    fprintf(stderr, "[cursor_brim] nkeys=%zu top=%d pg=%p\n", nkeys, mc->top, (void*)mc->pg[mc->top]);
+    fflush(stderr);
+  }
   cASSERT(mc, nkeys > 0);
   mc->ki[mc->top] = tend2first ? 0 : nkeys - 1;
   return cursor_bring(inner, tend2first, mc, key, data, !tend2first);
@@ -18902,11 +18934,12 @@ __noinline int dbi_import(MDBX_txn *txn, const size_t dbi) {
   lindo:
     /* dbi-слот еще не инициализирован в транзакции, а хендл не использовался */
     txn->cursors[dbi] = nullptr;
-    MDBX_txn *const parent = txn->parent;
+    MDBX_txn *const parent = txn->parent ? txn->parent : 
+        ((txn->flags & txn_parallel_subtx) ? txn->tw.subparent : nullptr);
     if (unlikely(parent)) {
       /* вложенная пишущая транзакция */
       int rc = dbi_check(parent, dbi);
-      /* копируем состояние table очищая new-флаги. */
+      /* копируем состояние table очищая new-флаги */
       eASSERT(env, txn->dbi_seqs == parent->dbi_seqs);
       txn->dbi_state[dbi] = parent->dbi_state[dbi] & ~(DBI_FRESH | DBI_CREAT | DBI_DIRTY);
       if (likely(rc == MDBX_SUCCESS)) {
@@ -18916,6 +18949,7 @@ __noinline int dbi_import(MDBX_txn *txn, const size_t dbi) {
           if (unlikely(rc != MDBX_SUCCESS)) {
             /* не получилось забекапить курсоры */
             txn->dbi_state[dbi] = DBI_OLDEN | DBI_LINDO | DBI_STALE;
+            fprintf(stderr, "[SET_TXN_ERROR @18931] dbi=%u txn=%p rc=%d\n", dbi, (void*)txn, rc);
             txn->flags |= MDBX_TXN_ERROR;
           }
         }
@@ -31998,6 +32032,11 @@ __cold int page_check(const MDBX_cursor *const mc, const page_t *const mp) {
 
 static __always_inline int check_page_header(const uint16_t ILL, const page_t *page, MDBX_txn *const txn,
                                              const txnid_t front) {
+  if (txn->flags & txn_parallel_subtx) {
+    fprintf(stderr, "[check_page_header] Parallel subtxn %p page=%u flags=0x%x txnid=%llu front=%llu\n",
+            (void*)txn, page->pgno, page->flags, (unsigned long long)page->txnid, (unsigned long long)front);
+    fflush(stderr);
+  }
   if (unlikely(page->flags & ILL)) {
     if (ILL == P_ILL_BITS || (page->flags & P_ILL_BITS))
       return bad_page(page, "invalid page's flags (%u)\n", page->flags);
@@ -32059,6 +32098,9 @@ static __always_inline pgr_t page_get_inline(const uint16_t ILL, const MDBX_curs
   pgr_t r;
   if (unlikely(pgno >= txn->geo.first_unallocated)) {
     ERROR("page #%" PRIaPGNO " beyond next-pgno", pgno);
+    if (txn->flags & txn_parallel_subtx)
+      fprintf(stderr, "[page_get_inline] FAIL: pgno=%u first_unallocated=%u txn=%p parallel_subtx=1\n", 
+              pgno, txn->geo.first_unallocated, (void*)txn);
     r.page = nullptr;
     r.err = MDBX_PAGE_NOTFOUND;
   bailout:
@@ -36177,6 +36219,11 @@ __hot int tree_search(MDBX_cursor *mc, const MDBX_val *key, int flags) {
   }
 
   const pgno_t root = mc->tree->root;
+  if (mc->txn->flags & txn_parallel_subtx) {
+    fprintf(stderr, "[tree_search] Parallel subtxn %p dbi=%zu root=%u height=%u items=%llu flags=0x%x\n",
+            (void*)mc->txn, dbi, root, mc->tree->height, (unsigned long long)mc->tree->items, mc->txn->flags);
+    fflush(stderr);
+  }
   if (unlikely(root == P_INVALID)) {
     DEBUG("%s", "tree is empty");
     cASSERT(mc, is_poor(mc));
@@ -36195,11 +36242,18 @@ __hot int tree_search(MDBX_cursor *mc, const MDBX_val *key, int flags) {
           pp_txnid = scan->front_txnid;
           break;
         }
-      while (unlikely((scan = scan->parent) != nullptr));
+      while (unlikely((scan = scan->parent ? scan->parent : 
+                       ((scan->flags & txn_parallel_subtx) ? scan->tw.subparent : nullptr)) != nullptr));
     }
     err = page_get(mc, root, &mc->pg[0], pp_txnid);
-    if (unlikely(err != MDBX_SUCCESS))
+    if (unlikely(err != MDBX_SUCCESS)) {
+      if (mc->txn->flags & txn_parallel_subtx) {
+        fprintf(stderr, "[tree_search] page_get FAILED: root=%u pp_txnid=%llu err=%d\n", 
+                root, (unsigned long long)pp_txnid, err);
+        fflush(stderr);
+      }
       goto bailout;
+    }
   }
 
   mc->top = 0;
