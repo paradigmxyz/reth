@@ -12,7 +12,7 @@ use crate::tree::{
 };
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip1898::BlockWithParent;
-use alloy_evm::block::StateChangeSource;
+use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use executor::WorkloadExecutor;
@@ -22,7 +22,6 @@ use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
-    block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
     ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
     TxEnvFor,
@@ -96,7 +95,7 @@ pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
-    WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
+    WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxTuple>::Tx>,
     <I as ExecutableTxTuple>::Error,
     <N as NodePrimitives>::Receipt,
 >;
@@ -235,7 +234,7 @@ where
             + 'static,
     {
         // start preparing transactions immediately
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx, _) = self.spawn_tx_iterator(transactions);
 
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
@@ -352,7 +351,7 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx, _) = self.spawn_tx_iterator(transactions);
         // This path doesn't use multiproof, so V2 proofs flag doesn't matter
         let prewarm_handle =
             self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal, false);
@@ -371,8 +370,9 @@ where
         &self,
         transactions: I,
     ) -> (
-        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
-        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
+        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Tx>>,
+        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
+        usize,
     ) {
         let (ooo_tx, ooo_rx) = mpsc::channel();
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
@@ -383,10 +383,7 @@ where
             let (transactions, convert) = transactions.into();
             transactions.into_par_iter().enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
                 let tx = convert(tx);
-                let tx = tx.map(|tx| {
-                    let (tx_env, tx) = tx.into_parts();
-                    WithTxEnv { tx_env, tx: Arc::new(tx) }
-                });
+                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
                 // Only send Ok(_) variants to prewarming task.
                 if let Ok(tx) = &tx {
                     let _ = prewarm_tx.send(tx.clone());
@@ -417,7 +414,7 @@ where
             }
         });
 
-        (prewarm_rx, execute_rx)
+        (prewarm_rx, execute_rx, 0)
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.

@@ -6,9 +6,9 @@
 use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
-    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthTxResult},
+    eth::{EthBlockExecutionCtx, EthBlockExecutor},
     precompiles::PrecompilesMap,
-    revm::context::Block as _,
+    revm::context::{result::ResultAndState, Block as _},
     EthEvm, EthEvmFactory,
 };
 use alloy_sol_types::{sol, SolCall};
@@ -38,7 +38,7 @@ use reth_ethereum::{
     primitives::{Header, SealedBlock, SealedHeader},
     provider::BlockExecutionResult,
     rpc::types::engine::ExecutionData,
-    Block, EthPrimitives, Receipt, TransactionSigned, TxType,
+    Block, EthPrimitives, Receipt, TransactionSigned,
 };
 use std::{fmt::Display, sync::Arc};
 
@@ -195,7 +195,6 @@ where
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
     type Evm = E;
-    type Result = EthTxResult<E::HaltReason, TxType>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
@@ -208,12 +207,16 @@ where
     fn execute_transaction_without_commit(
         &mut self,
         tx: impl ExecutableTx<Self>,
-    ) -> Result<Self::Result, BlockExecutionError> {
+    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
         self.inner.execute_transaction_without_commit(tx)
     }
 
-    fn commit_transaction(&mut self, output: Self::Result) -> Result<u64, BlockExecutionError> {
-        self.inner.commit_transaction(output)
+    fn commit_transaction(
+        &mut self,
+        output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        self.inner.commit_transaction(output, tx)
     }
 
     fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), BlockExecutionError> {

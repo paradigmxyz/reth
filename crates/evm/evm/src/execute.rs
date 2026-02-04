@@ -9,7 +9,7 @@ use alloy_eips::{
 };
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
-    block::{CommitChanges, ExecutableTxParts},
+    block::{CommitChanges, ExecutableTx},
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::{Address, B256};
@@ -413,31 +413,49 @@ where
 
 /// Conversions for executable transactions.
 pub trait ExecutorTx<Executor: BlockExecutor> {
-    /// Converts the transaction into a tuple of [`TxEnvFor`] and [`Recovered`].
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>);
+    /// Converts the transaction into [`ExecutableTx`].
+    fn as_executable(&self) -> impl ExecutableTx<Executor>;
+
+    /// Converts the transaction into [`Recovered`].
+    fn into_recovered(self) -> Recovered<Executor::Transaction>;
 }
 
 impl<Executor: BlockExecutor> ExecutorTx<Executor>
     for WithEncoded<Recovered<Executor::Transaction>>
 {
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
-        (self.to_tx_env(), self.1)
+    fn as_executable(&self) -> impl ExecutableTx<Executor> {
+        self
+    }
+
+    fn into_recovered(self) -> Recovered<Executor::Transaction> {
+        self.1
     }
 }
 
 impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Transaction> {
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Self) {
-        (self.to_tx_env(), self)
+    fn as_executable(&self) -> impl ExecutableTx<Executor> {
+        self
+    }
+
+    fn into_recovered(self) -> Self {
+        self
     }
 }
 
-impl<Executor> ExecutorTx<Executor>
-    for WithTxEnv<<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>>
+impl<T, Executor> ExecutorTx<Executor>
+    for WithTxEnv<<<Executor as BlockExecutor>::Evm as Evm>::Tx, T>
 where
-    Executor: BlockExecutor<Transaction: Clone>,
+    T: ExecutorTx<Executor> + Clone,
+    Executor: BlockExecutor,
+    <<Executor as BlockExecutor>::Evm as Evm>::Tx: Clone,
+    Self: RecoveredTx<Executor::Transaction>,
 {
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
-        (self.tx_env, Arc::unwrap_or_clone(self.tx))
+    fn as_executable(&self) -> impl ExecutableTx<Executor> {
+        self
+    }
+
+    fn into_recovered(self) -> Recovered<Executor::Transaction> {
+        Arc::unwrap_or_clone(self.tx).into_recovered()
     }
 }
 
@@ -476,13 +494,13 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        let (tx_env, tx) = tx.into_parts();
         if let Some(gas_used) =
-            self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
+            self.executor.execute_transaction_with_commit_condition(tx.as_executable(), f)?
         {
-            self.transactions.push(tx);
+            self.transactions.push(tx.into_recovered());
             // Bump BAL index after each committed transaction (EIP-7928)
             self.executor.evm_mut().db_mut().bump_bal_index();
+
             Ok(Some(gas_used))
         } else {
             Ok(None)
@@ -624,31 +642,25 @@ where
     }
 }
 
-/// A helper trait marking a 'static type that can be converted into an [`ExecutableTxParts`] for
-/// block executor.
+/// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
+/// executor.
 pub trait ExecutableTxFor<Evm: ConfigureEvm>:
-    ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>> + RecoveredTx<TxTy<Evm::Primitives>>
+    ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
 }
 
 impl<T, Evm: ConfigureEvm> ExecutableTxFor<Evm> for T where
-    T: ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>> + RecoveredTx<TxTy<Evm::Primitives>>
+    T: ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
 }
 
 /// A container for a transaction and a transaction environment.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WithTxEnv<TxEnv, T> {
     /// The transaction environment for EVM.
     pub tx_env: TxEnv,
     /// The recovered transaction.
     pub tx: Arc<T>,
-}
-
-impl<TxEnv: Clone, T> Clone for WithTxEnv<TxEnv, T> {
-    fn clone(&self) -> Self {
-        Self { tx_env: self.tx_env.clone(), tx: self.tx.clone() }
-    }
 }
 
 impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {
@@ -661,11 +673,9 @@ impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {
     }
 }
 
-impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<TxEnv, T> {
-    type Recovered = Arc<T>;
-
-    fn into_parts(self) -> (TxEnv, Self::Recovered) {
-        (self.tx_env, self.tx)
+impl<TxEnv: Clone, T> ToTxEnv<TxEnv> for WithTxEnv<TxEnv, T> {
+    fn to_tx_env(&self) -> TxEnv {
+        self.tx_env.clone()
     }
 }
 
