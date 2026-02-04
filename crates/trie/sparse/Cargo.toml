@@ -82,7 +82,3 @@ arbitrary = [
     "reth-trie-common/arbitrary",
     "smallvec/arbitrary",
 ]
-
-[[bench]]
-name = "root"
-harness = false
