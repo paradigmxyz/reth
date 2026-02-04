@@ -148,6 +148,16 @@ where
                 eprintln!("[cursor::get PARALLEL] AFTER mdbx_cursor_get, rc={}, key_len={}, data_len={}", 
                     rc, key_val.iov_len, data_val.iov_len);
                 let v = mdbx_result(rc)?;
+                
+                // Check for NULL data pointer (can happen on partial matches)
+                if data_val.iov_base.is_null() && data_val.iov_len > 0 {
+                    return Err(Error::NotFound);
+                }
+                // Check for NULL key pointer (can happen on partial matches)
+                if key_val.iov_base.is_null() && key_val.iov_len > 0 {
+                    return Err(Error::NotFound);
+                }
+                
                 assert_ne!(data_ptr, data_val.iov_base);
                 eprintln!("[cursor::get PARALLEL] BEFORE decode_val, key_base={:p}, data_base={:p}", 
                     key_val.iov_base, data_val.iov_base);
