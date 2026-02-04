@@ -394,6 +394,17 @@ pub trait EthApi<
         address: Address,
         block: BlockId,
     ) -> RpcResult<alloy_rpc_types_eth::AccountInfo>;
+
+    /// Returns the EIP-7928 block access list for a block by hash.
+    #[method(name = "getBlockAccessListByBlockHash")]
+    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Bytes>>;
+
+    /// Returns the EIP-7928 block access list for a block by number.
+    #[method(name = "getBlockAccessListByBlockNumber")]
+    async fn block_access_list_by_block_number(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> RpcResult<Option<Bytes>>;
 }
 
 #[async_trait::async_trait]
@@ -880,5 +891,20 @@ where
     ) -> RpcResult<alloy_rpc_types_eth::AccountInfo> {
         trace!(target: "rpc::eth", "Serving eth_getAccountInfo");
         Ok(EthState::get_account_info(self, address, block).await?)
+    }
+
+    /// Handler for: `eth_getBlockAccessListByBlockHash`
+    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getBlockAccessListByBlockHash");
+        Err(internal_rpc_err("unimplemented"))
+    }
+
+    /// Handler for: `eth_getBlockAccessListByBlockNumber`
+    async fn block_access_list_by_block_number(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> RpcResult<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?number, "Serving eth_getBlockAccessListByBlockNumber");
+        Err(internal_rpc_err("unimplemented"))
     }
 }

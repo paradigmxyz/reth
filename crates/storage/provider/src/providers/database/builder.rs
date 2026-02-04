@@ -100,13 +100,13 @@ impl<N> ProviderFactoryBuilder<N> {
         self,
         chainspec: Arc<N::ChainSpec>,
         config: impl Into<ReadOnlyConfig>,
-    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
+    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>>
     where
         N: NodeTypesForProvider,
     {
         let ReadOnlyConfig { db_dir, db_args, static_files_dir, rocksdb_dir, watch_static_files } =
             config.into();
-        self.db(Arc::new(open_db_read_only(db_dir, db_args)?))
+        self.db(open_db_read_only(db_dir, db_args)?)
             .chainspec(chainspec)
             .static_file(StaticFileProvider::read_only(static_files_dir, watch_static_files)?)
             .rocksdb_provider(RocksDBProvider::builder(&rocksdb_dir).with_default_tables().build()?)

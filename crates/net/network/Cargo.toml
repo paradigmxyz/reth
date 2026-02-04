@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
+reth-evm-ethereum = { workspace = true, optional = true }
 reth-fs-util.workspace = true
 reth-primitives-traits.workspace = true
 reth-net-banlist.workspace = true
@@ -136,6 +137,8 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "dep:reth-evm-ethereum",
+    "reth-evm-ethereum?/test-utils",
 ]
 
 [[bench]]

@@ -93,6 +93,7 @@ jobs:
           VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
           VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
           VERGEN_GIT_DIRTY: ${{ steps.git.outputs.dirty }}
+          DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
         with:
           project: ${{ vars.DEPOT_PROJECT_ID }}
           files: docker-bake.hcl
@@ -101,3 +102,26 @@ jobs:
           set: |
             ethereum.tags=${{ steps.params.outputs.ethereum_tags }}
             optimism.tags=${{ steps.params.outputs.optimism_tags }}
+
+      - name: Verify image architectures
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          ./.github/scripts/verify_image_arch.sh \
+            "${{ steps.params.outputs.targets }}" \
+            "ghcr.io/${{ github.repository_owner }}" \
+            "${{ steps.params.outputs.ethereum_tags }}" \
+            "${{ steps.params.outputs.optimism_tags }}"
+
+  notify:
+    name: Notify on failure
+    runs-on: ubuntu-latest
+    needs: build
+    if: failure() && github.event_name == 'schedule'
+    steps:
+      - name: Slack Webhook Action
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}

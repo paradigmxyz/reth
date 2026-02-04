@@ -102,13 +102,15 @@ where
     /// Establish `WebSocket` connection to the `EthStats` server
     ///
     /// Attempts to connect to the server using the credentials and handles
-    /// connection timeouts and errors.
+    /// connection timeouts and errors. Uses either `ws://` or `wss://` based
+    /// on the credentials configuration.
     async fn connect(&self) -> Result<(), EthStatsError> {
         debug!(
             target: "ethstats",
             "Attempting to connect to EthStats server at {}", self.credentials.host
         );
-        let full_url = format!("ws://{}/api", self.credentials.host);
+        let protocol = if self.credentials.use_tls { "wss" } else { "ws" };
+        let full_url = format!("{}://{}/api", protocol, self.credentials.host);
         let url = Url::parse(&full_url).map_err(EthStatsError::Url)?;
 
         match timeout(CONNECT_TIMEOUT, connect_async(url.as_str())).await {

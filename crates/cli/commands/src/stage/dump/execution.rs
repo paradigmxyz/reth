@@ -26,7 +26,7 @@ pub(crate) async fn dump_execution_stage<N, E, C>(
     consensus: C,
 ) -> eyre::Result<()>
 where
-    N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
+    N: ProviderNodeTypes<DB = DatabaseEnv>,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
     C: FullConsensus<E::Primitives> + 'static,
 {
@@ -39,7 +39,7 @@ where
     if should_run {
         dry_run(
             ProviderFactory::<N>::new(
-                Arc::new(output_db),
+                output_db,
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,

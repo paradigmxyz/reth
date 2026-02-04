@@ -1,4 +1,7 @@
-use alloy_primitives::{map::HashMap, B256};
+use alloy_primitives::{
+    map::{B256Map, HashMap},
+    B256,
+};
 use reth_db::DatabaseError;
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory},
@@ -19,7 +22,7 @@ struct EntryDiff<T> {
 struct TrieUpdatesDiff {
     account_nodes: HashMap<Nibbles, EntryDiff<Option<BranchNodeCompact>>>,
     removed_nodes: HashMap<Nibbles, EntryDiff<bool>>,
-    storage_tries: HashMap<B256, StorageTrieUpdatesDiff>,
+    storage_tries: B256Map<StorageTrieUpdatesDiff>,
 }
 
 impl TrieUpdatesDiff {
@@ -98,7 +101,7 @@ impl StorageTrieUpdatesDiff {
 
 /// Compares the trie updates from state root task, regular state root calculation and database,
 /// and logs the differences if there's any.
-pub(super) fn compare_trie_updates(
+pub(crate) fn compare_trie_updates(
     trie_cursor_factory: impl TrieCursorFactory,
     task: TrieUpdates,
     regular: TrieUpdates,
@@ -186,7 +189,8 @@ fn compare_storage_trie_updates<C: TrieCursor>(
     task: &mut StorageTrieUpdates,
     regular: &mut StorageTrieUpdates,
 ) -> Result<StorageTrieUpdatesDiff, DatabaseError> {
-    let database_not_exists = trie_cursor()?.next()?.is_none();
+    // Check if the storage trie exists by seeking to the first entry
+    let database_not_exists = trie_cursor()?.seek(Nibbles::default())?.is_none();
     let mut diff = StorageTrieUpdatesDiff {
         // If the deletion is a no-op, meaning that the entry is not in the
         // database, do not add it to the diff.

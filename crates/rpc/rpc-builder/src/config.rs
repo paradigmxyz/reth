@@ -107,6 +107,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .pending_block_kind(self.rpc_pending_block)
             .raw_tx_forwarder(self.rpc_forwarder.clone())
             .rpc_evm_memory_limit(self.rpc_evm_memory_limit)
+            .force_blob_sidecar_upcasting(self.rpc_force_blob_sidecar_upcasting)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
@@ -122,6 +123,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             max_receipts: self.rpc_state_cache.max_receipts,
             max_headers: self.rpc_state_cache.max_headers,
             max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
+            max_cached_tx_hashes: self.rpc_state_cache.max_cached_tx_hashes,
         }
     }
 
