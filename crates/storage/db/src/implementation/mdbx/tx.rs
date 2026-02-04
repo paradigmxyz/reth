@@ -442,10 +442,6 @@ impl Tx<RW> {
     /// Ok(()) on success, or an error if subtransaction creation fails.
     pub fn enable_parallel_writes(&self) -> Result<(), DatabaseError> {
         let dbis: Vec<MDBX_dbi> = self.dbis.values().copied().collect();
-        println!("[enable_parallel_writes] Creating subtxns for {} DBIs:", dbis.len());
-        for (name, dbi) in self.dbis.iter() {
-            println!("  Table '{}' -> DBI {}", name, dbi);
-        }
         self.inner.enable_parallel_writes(&dbis).map_err(|e| DatabaseError::InitCursor(e.into()))
     }
 
@@ -490,19 +486,6 @@ impl Tx<RW> {
     pub fn enable_parallel_writes_for_tables(&self, tables: &[&str]) -> Result<(), DatabaseError> {
         let dbis: Vec<MDBX_dbi> =
             tables.iter().filter_map(|name| self.dbis.get(*name).copied()).collect();
-
-        println!(
-            "[enable_parallel_writes_for_tables] Requested {} tables, found {} DBIs",
-            tables.len(),
-            dbis.len()
-        );
-        for name in tables {
-            if let Some(dbi) = self.dbis.get(*name) {
-                println!("  Table '{}' -> DBI {}", name, dbi);
-            } else {
-                println!("  Table '{}' -> NOT FOUND", name);
-            }
-        }
 
         if dbis.is_empty() {
             return Ok(());

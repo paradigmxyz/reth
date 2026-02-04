@@ -4615,6 +4615,40 @@ mod tests {
             "SUCCESS: Allocated {} new pages with parallel subtxns",
             final_last_pgno - initial_last_pgno
         );
+
+        // Verify with read-only transaction
+        let provider_ro = factory.provider().unwrap();
+
+        // Sample verification of accounts
+        for i in 0..10u64 {
+            let test_addr = Address::with_last_byte((i % 256) as u8);
+            let account = provider_ro.basic_account(&test_addr).unwrap();
+            assert!(account.is_some(), "Account {} should exist", test_addr);
+            let acc = account.unwrap();
+            assert_eq!(acc.nonce, 3, "Account {} should have nonce 3 from last block", test_addr);
+        }
+
+        // Verify storage values
+        let test_addr = Address::with_last_byte(0);
+        let mut storage_cursor = provider_ro
+            .tx_ref()
+            .cursor_dup_read::<tables::PlainStorageState>()
+            .unwrap();
+        for slot in 0..5u64 {
+            let storage_key = B256::from(U256::from(slot));
+            let entry = storage_cursor.seek_by_key_subkey(test_addr, storage_key).unwrap();
+            let value = entry.filter(|e| e.key == storage_key).map(|e| e.value);
+            let expected = U256::from(3 * 1000 + slot); // block 3: value = 3*1000 + slot
+            assert!(value.is_some(), "Storage slot {} should exist for {}", slot, test_addr);
+            assert_eq!(
+                value.unwrap(),
+                expected,
+                "Storage slot {} should have correct value",
+                slot
+            );
+        }
+
+        println!("✓ Read verification passed: accounts and storage values correct");
     }
 
     #[test]
@@ -4757,6 +4791,51 @@ mod tests {
             "Should have allocated pages for {} unique accounts",
             total_accounts
         );
+
+        // Verify with read-only transaction
+        let provider_ro = factory.provider().unwrap();
+        use crate::StateProvider;
+
+        // Sample verification from different iterations
+        let mut verified_accounts = 0;
+        for iteration in [0, 5, 10, 19].iter() {
+            let base_account = iteration * accounts_per_iteration;
+            for i in 0..5 {
+                let account_id = base_account + i;
+                let mut addr_bytes = [0u8; 20];
+                addr_bytes[16..20].copy_from_slice(&(account_id as u32).to_be_bytes());
+                let address = Address::from(addr_bytes);
+
+                let account = provider_ro.basic_account(&address).unwrap();
+                assert!(
+                    account.is_some(),
+                    "Account {} (iteration {}, id {}) should exist",
+                    address,
+                    iteration,
+                    account_id
+                );
+                verified_accounts += 1;
+
+                // Verify a storage slot
+                let storage_key = B256::from(U256::from(0u64));
+                let mut storage_cursor = provider_ro
+                    .tx_ref()
+                    .cursor_dup_read::<tables::PlainStorageState>()
+                    .unwrap();
+                let entry = storage_cursor.seek_by_key_subkey(address, storage_key).unwrap();
+                let value = entry.filter(|e| e.key == storage_key).map(|e| e.value);
+                assert!(
+                    value.is_some(),
+                    "Storage slot 0 should exist for account {}",
+                    address
+                );
+            }
+        }
+
+        println!(
+            "✓ Read verification passed: {} accounts verified with correct storage",
+            verified_accounts
+        );
     }
 
     /// 5-minute continuous stress test for parallel subtxn writes.
@@ -4891,13 +4970,72 @@ mod tests {
             if iteration % 10 == 0 {
                 let elapsed = start.elapsed().as_secs();
                 let remaining = duration_secs.saturating_sub(elapsed);
+
+                let provider_ro = factory.provider().unwrap();
+
+                let mut verified_accounts = 0;
+                let mut verified_storage = 0;
+                for i in (0..accounts_per_iteration).step_by(50) {
+                    let account_id = base_account + i;
+                    let mut addr_bytes = [0u8; 20];
+                    addr_bytes[12..20].copy_from_slice(&(account_id as u64).to_be_bytes());
+                    let address = Address::from(addr_bytes);
+
+                    let account = provider_ro.basic_account(&address).unwrap();
+                    assert!(
+                        account.is_some(),
+                        "Account {} should exist after commit (iteration {})",
+                        account_id,
+                        iteration
+                    );
+                    verified_accounts += 1;
+
+                    let mut storage_cursor = provider_ro
+                        .tx_ref()
+                        .cursor_dup_read::<tables::PlainStorageState>()
+                        .unwrap();
+                    for s in (0..storage_slots).step_by(10) {
+                        let slot = B256::from(U256::from(s));
+                        let entry = storage_cursor.seek_by_key_subkey(address, slot).unwrap();
+                        let value = entry.filter(|e| e.key == slot).map(|e| e.value);
+                        assert!(
+                            value.is_some(),
+                            "Storage slot {} for account {} should exist",
+                            s,
+                            account_id
+                        );
+                        verified_storage += 1;
+                    }
+                }
+
+                let plain_account_count = provider_ro
+                    .tx_ref()
+                    .cursor_read::<tables::PlainAccountState>()
+                    .unwrap()
+                    .walk(None)
+                    .unwrap()
+                    .count();
+                let plain_storage_count = provider_ro
+                    .tx_ref()
+                    .cursor_read::<tables::PlainStorageState>()
+                    .unwrap()
+                    .walk(None)
+                    .unwrap()
+                    .count();
+
+                drop(provider_ro);
+
                 println!(
-                    "[{:3}s] Iteration {:4}: {} blocks, {:?}/iter, {} remaining",
+                    "[{:3}s] Iteration {:4}: {} blocks, {:?}/iter, {} remaining | verified: {} accounts, {} storage | tables: {} accounts, {} storage",
                     elapsed,
                     iteration,
                     blocks.len(),
                     iter_elapsed,
-                    remaining
+                    remaining,
+                    verified_accounts,
+                    verified_storage,
+                    plain_account_count,
+                    plain_storage_count
                 );
             }
 

@@ -748,18 +748,9 @@ impl Transaction<RW> {
             self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst);
         if parallel_enabled {
             let subtxns = self.subtxns.read();
-            println!(
-                "[get_txn_ptr_for_dbi] DBI {}, parallel={}, subtxns_count={}",
-                dbi,
-                parallel_enabled,
-                subtxns.len()
-            );
             if let Some(subtxn) = subtxns.get(&dbi) {
-                let ptr = subtxn.txn_ptr();
-                println!("[get_txn_ptr_for_dbi] Found subtxn for DBI {} -> {:?}", dbi, ptr.txn);
-                return ptr;
+                return subtxn.txn_ptr();
             }
-            println!("[get_txn_ptr_for_dbi] NO subtxn for DBI {}, falling back to parent", dbi);
         }
         self.inner.txn.clone()
     }
