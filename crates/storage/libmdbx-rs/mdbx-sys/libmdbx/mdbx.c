@@ -23443,6 +23443,10 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
     }
     parent->geo.first_unallocated = new_first;
     txn->geo.first_unallocated = new_first;
+    // Sync all sibling subtxns to prevent stale geo.first_unallocated
+    for (MDBX_txn *sibling = parent->tw.subtxn_list; sibling; sibling = sibling->tw.subtxn_next) {
+      sibling->geo.first_unallocated = new_first;
+    }
     osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
     return page_alloc_finalize(env, txn, mc, pgno, 1);
   }
