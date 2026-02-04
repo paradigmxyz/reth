@@ -1385,6 +1385,73 @@ impl ParallelSparseTrie {
         );
     }
 
+    /// Prunes memory by clearing entire lower subtries instead of depth-based DFS.
+    ///
+    /// This is much faster than `prune_preserving` when we only need to free some memory,
+    /// as it operates on 256 subtries instead of traversing millions of nodes.
+    ///
+    /// # Algorithm
+    ///
+    /// 1. Compute memory for each of the 256 lower subtries (parallel)
+    /// 2. Sort by size (largest first), excluding hot account subtries
+    /// 3. Clear subtries until we've freed enough memory
+    ///
+    /// # Arguments
+    ///
+    /// * `excess_memory` - How many bytes over the budget we need to free
+    /// * `hot_accounts` - Hot accounts to preserve (their subtries won't be cleared)
+    ///
+    /// # Returns
+    ///
+    /// Number of bytes freed and count of subtries cleared.
+    #[cfg(feature = "std")]
+    pub fn prune_by_subtrie(
+        &mut self,
+        excess_memory: usize,
+        hot_accounts: &reth_trie_sparse::hot_accounts::HotAccounts,
+    ) -> (usize, usize) {
+        use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
+        if excess_memory == 0 {
+            return (0, 0);
+        }
+
+        // Decay heat for subtries not modified this cycle
+        self.subtrie_modifications.decay_and_reset();
+
+        // Collect (index, memory_size, is_hot) for each revealed subtrie in parallel
+        let subtrie_info: Vec<(usize, usize, bool)> = (0..NUM_LOWER_SUBTRIES)
+            .into_par_iter()
+            .filter_map(|idx| {
+                self.lower_subtries[idx].as_revealed_ref().map(|subtrie| {
+                    let mem = subtrie.memory_size();
+                    // Check if this subtrie's path prefix leads to a hot account
+                    let is_hot = hot_accounts.any_starts_with(&subtrie.path);
+                    (idx, mem, is_hot)
+                })
+            })
+            .collect();
+
+        // Sort by: cold first (is_hot=false < is_hot=true), then by size descending
+        let mut subtries: Vec<(usize, usize, bool)> = subtrie_info;
+        subtries.sort_unstable_by_key(|(_, mem, is_hot)| (*is_hot, std::cmp::Reverse(*mem)));
+
+        // Clear subtries until we've freed enough
+        let mut bytes_freed = 0usize;
+        let mut subtries_cleared = 0usize;
+
+        for (idx, size, _) in subtries {
+            if bytes_freed >= excess_memory {
+                break;
+            }
+            self.lower_subtries[idx].clear();
+            bytes_freed += size;
+            subtries_cleared += 1;
+        }
+
+        (bytes_freed, subtries_cleared)
+    }
+
     /// Returns true if retaining updates is enabled for the overall trie.
     const fn updates_enabled(&self) -> bool {
         self.updates.is_some()
