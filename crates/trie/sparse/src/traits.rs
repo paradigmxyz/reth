@@ -315,6 +315,19 @@ pub trait SparseTrieExt: SparseTrie {
         updates: &mut B256Map<LeafUpdate>,
         proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()>;
+
+    /// Returns the number of known accessible paths cached for find_leaf optimization.
+    /// Default implementation returns 0 for tries that don't support this.
+    fn known_accessible_paths_count(&self) -> usize {
+        0
+    }
+
+    /// Takes and resets find_leaf statistics. Returns a tuple of:
+    /// (total_calls, cache_hits, found, blinded)
+    /// Default implementation returns zeros for tries that don't track stats.
+    fn take_find_leaf_stats(&mut self) -> (usize, usize, usize, usize) {
+        (0, 0, 0, 0)
+    }
 }
 
 /// Tracks modifications to the sparse trie structure.
