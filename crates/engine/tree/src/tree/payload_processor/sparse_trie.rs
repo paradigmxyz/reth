@@ -586,7 +586,7 @@ where
 
         // Start with processing all storage updates in parallel.
         let prep_start = Instant::now();
-        let storage_results = self
+        let prepared: Vec<_> = self
             .storage_updates
             .iter_mut()
             .map(|(address, updates)| {
@@ -595,6 +595,12 @@ where
 
                 (address, updates, fetched, trie)
             })
+            .collect();
+        let prep_elapsed = prep_start.elapsed();
+
+        let par_start = Instant::now();
+        let storage_results = prepared
+            .into_iter()
             .par_bridge()
             .map(|(address, updates, mut fetched, mut trie)| {
                 let mut targets = Vec::new();
@@ -615,7 +621,7 @@ where
                 SparseTrieResult::Ok((address, targets, fetched, trie))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let parallel_elapsed = prep_start.elapsed();
+        let parallel_elapsed = par_start.elapsed();
 
         let reinsert_start = Instant::now();
         for (address, targets, fetched, trie) in storage_results {
@@ -636,7 +642,7 @@ where
         let total_elapsed = total_start.elapsed();
         if num_storage_accounts > 0 || self.account_updates.len() > 0 {
             println!(
-                "process_leaf_updates total={total_elapsed:?} parallel={parallel_elapsed:?} reinsert={reinsert_elapsed:?} accounts={account_elapsed:?} storage_tries={num_storage_accounts} account_updates={}",
+                "process_leaf_updates total={total_elapsed:?} prep={prep_elapsed:?} parallel={parallel_elapsed:?} reinsert={reinsert_elapsed:?} accounts={account_elapsed:?} storage_tries={num_storage_accounts} account_updates={}",
                 self.account_updates.len()
             );
         }
