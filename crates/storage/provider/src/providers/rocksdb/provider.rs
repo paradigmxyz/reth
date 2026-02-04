@@ -933,6 +933,32 @@ impl RocksDBProvider {
         Ok(())
     }
 
+    /// Flushes and compacts all tables in `RocksDB`.
+    ///
+    /// This:
+    /// 1. Flushes all column family memtables to SST files
+    /// 2. Flushes the Write-Ahead Log (WAL) with sync
+    /// 3. Triggers manual compaction on all column families to reclaim disk space
+    ///
+    /// Use this after large delete operations (like pruning) to reclaim disk space.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
+    pub fn flush_and_compact(&self) -> ProviderResult<()> {
+        self.flush(ROCKSDB_TABLES)?;
+
+        let db = self.0.db_rw();
+
+        for cf_name in ROCKSDB_TABLES {
+            if let Some(cf) = db.cf_handle(cf_name) {
+                db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates a raw iterator over all entries in the specified table.
     ///
     /// Returns raw `(key_bytes, value_bytes)` pairs without decoding.
