@@ -430,7 +430,7 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Executes a closure with a `RocksDB` batch, automatically registering it for commit.
     ///
     /// This helper encapsulates all the cfg-gated `RocksDB` batch handling.
@@ -658,43 +658,96 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 (Arc::new(HashedPostStateSorted::default()), Arc::new(TrieUpdatesSorted::default()))
             };
 
-            // Sequential MDBX writes
+            // Sequential block index writes (fast, no parallelization needed)
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
                 let start = Instant::now();
                 self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
                 timings.insert_block += start.elapsed();
-
-                if save_mode.with_state() {
-                    let execution_output = block.execution_outcome();
-
-                    // Write state and changesets to the database.
-                    // Must be written after blocks because of the receipt lookup.
-                    let start = Instant::now();
-                    self.write_state(
-                        WriteStateInput::Single {
-                            outcome: execution_output,
-                            block: recovered_block.number(),
-                        },
-                        OriginalValuesKnown::No,
-                        StateWriteConfig {
-                            write_receipts: !sf_ctx.write_receipts,
-                            write_account_changesets: !sf_ctx.write_account_changesets,
-                            write_storage_changesets: !sf_ctx.write_storage_changesets,
-                        },
-                    )?;
-                    timings.write_state += start.elapsed();
-                }
             }
 
-            // Write hashed state and trie updates
+            // Write state, hashed state, and trie updates
             if save_mode.with_state() {
-                if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
-                }
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
+                let state_write_config = StateWriteConfig {
+                    write_receipts: !sf_ctx.write_receipts,
+                    write_account_changesets: !sf_ctx.write_account_changesets,
+                    write_storage_changesets: !sf_ctx.write_storage_changesets,
+                };
+
+                // In edge mode, we can parallelize writes across different table groups:
+                // - Thread 1: PlainAccountState, PlainStorageState, Bytecodes (write_state)
+                // - Thread 2: HashedAccounts, HashedStorages (write_hashed_state)
+                // - Thread 3: AccountsTrie, StoragesTrie (write_trie_updates_sorted)
+                if use_parallel_writes {
+                    std::thread::scope(|s| {
+                        // Thread 1: write_state for all blocks
+                        let state_handle = s.spawn(|| {
+                            let start = Instant::now();
+                            for block in blocks.iter() {
+                                let recovered_block = block.recovered_block();
+                                let execution_output = block.execution_outcome();
+                                self.write_state(
+                                    WriteStateInput::Single {
+                                        outcome: execution_output,
+                                        block: recovered_block.number(),
+                                    },
+                                    OriginalValuesKnown::No,
+                                    state_write_config,
+                                )?;
+                            }
+                            Ok::<_, ProviderError>(start.elapsed())
+                        });
+
+                        // Thread 2: write_hashed_state (merged batch)
+                        let hashed_handle = s.spawn(|| {
+                            let start = Instant::now();
+                            if !merged_hashed_state.is_empty() {
+                                self.write_hashed_state(&merged_hashed_state)?;
+                            }
+                            Ok::<_, ProviderError>(start.elapsed())
+                        });
+
+                        // Thread 3: write_trie_updates_sorted (merged batch)
+                        let trie_handle = s.spawn(|| {
+                            let start = Instant::now();
+                            if !merged_trie.is_empty() {
+                                self.write_trie_updates_sorted(&merged_trie)?;
+                            }
+                            Ok::<_, ProviderError>(start.elapsed())
+                        });
+
+                        // Collect results
+                        timings.write_state = state_handle.join().expect("state thread panicked")?;
+                        timings.write_hashed_state += hashed_handle.join().expect("hashed thread panicked")?;
+                        timings.write_trie_updates += trie_handle.join().expect("trie thread panicked")?;
+
+                        Ok::<_, ProviderError>(())
+                    })?;
+                } else {
+                    // Sequential path for non-edge mode
+                    for block in blocks.iter() {
+                        let recovered_block = block.recovered_block();
+                        let execution_output = block.execution_outcome();
+
+                        let start = Instant::now();
+                        self.write_state(
+                            WriteStateInput::Single {
+                                outcome: execution_output,
+                                block: recovered_block.number(),
+                            },
+                            OriginalValuesKnown::No,
+                            state_write_config,
+                        )?;
+                        timings.write_state += start.elapsed();
+                    }
+
+                    if !merged_hashed_state.is_empty() {
+                        self.write_hashed_state(&merged_hashed_state)?;
+                    }
+                    if !merged_trie.is_empty() {
+                        self.write_trie_updates_sorted(&merged_trie)?;
+                    }
                 }
             }
 
@@ -1284,7 +1337,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Insert history index to the database.
     ///
     /// For each updated partial key, this function retrieves the last shard from the database
@@ -2240,7 +2293,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> StateWriter
     for DatabaseProvider<TX, N>
 {
     type Receipt = ReceiptTy<N>;
@@ -3017,7 +3070,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypes> HistoryWriter for DatabaseProvider<TX, N> {
     fn unwind_account_history_indices<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
@@ -3161,7 +3214,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {
     fn take_block_and_execution_above(
@@ -3204,7 +3257,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> BlockWriter
     for DatabaseProvider<TX, N>
 {
     type Block = BlockTy<N>;
