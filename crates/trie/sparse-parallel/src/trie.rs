@@ -40,6 +40,19 @@ pub struct ParallelismThresholds {
     pub min_updated_nodes: usize,
 }
 
+/// Statistics for tracking `find_leaf` call patterns during `update_leaves`.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct FindLeafStats {
+    /// Total number of find_leaf calls for Touched updates.
+    pub total_calls: usize,
+    /// Number of calls that hit cached accessible paths (would be skipped with optimization).
+    pub cache_hits: usize,
+    /// Number of calls where leaf was found (accessible).
+    pub found: usize,
+    /// Number of calls where path was blinded (needs proof).
+    pub blinded: usize,
+}
+
 /// A revealed sparse trie with subtries that can be updated in parallel.
 ///
 /// ## Structure
@@ -126,6 +139,10 @@ pub struct ParallelSparseTrie {
     /// Tracks heat of lower subtries for smart pruning decisions.
     /// Hot subtries are skipped during pruning to keep frequently-used data revealed.
     subtrie_heat: SubtrieModifications,
+    /// Paths that are known to be accessible (not blinded). Used to skip redundant find_leaf calls.
+    known_accessible_paths: alloy_primitives::map::HashSet<Nibbles>,
+    /// Statistics for find_leaf call patterns (for instrumentation).
+    find_leaf_stats: FindLeafStats,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
@@ -147,6 +164,8 @@ impl Default for ParallelSparseTrie {
             update_actions_buffers: Vec::default(),
             parallelism_thresholds: Default::default(),
             subtrie_heat: SubtrieModifications::default(),
+            known_accessible_paths: Default::default(),
+            find_leaf_stats: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -1074,7 +1093,7 @@ impl SparseTrieExt for ParallelSparseTrie {
         upper_count + lower_count
     }
 
-    fn prune(&mut self, max_depth: usize) -> usize {
+    fn prune(&mut self, max_depth: usize) -> Vec<Nibbles> {
         // Decay heat for subtries not modified this cycle
         self.subtrie_heat.decay_and_reset();
 
@@ -1150,10 +1169,8 @@ impl SparseTrieExt for ParallelSparseTrie {
         }
 
         if effective_pruned_roots.is_empty() {
-            return 0;
+            return Vec::new();
         }
-
-        let nodes_converted = effective_pruned_roots.len();
 
         // Sort roots by subtrie type (upper first), then by path for efficient partitioning.
         effective_pruned_roots.sort_unstable_by(|(path_a, _), (path_b, _)| {
@@ -1225,7 +1242,21 @@ impl SparseTrieExt for ParallelSparseTrie {
             }
         });
 
-        nodes_converted
+        // Clear known accessible paths that fall under pruned roots
+        let accessible_before = self.known_accessible_paths.len();
+        self.known_accessible_paths.retain(|path| {
+            !effective_pruned_roots.iter().any(|(root, _)| path.starts_with(root))
+        });
+
+        debug!(
+            target: "trie::sparse",
+            pruned_roots = effective_pruned_roots.len(),
+            accessible_before,
+            accessible_after = self.known_accessible_paths.len(),
+            "ParallelSparseTrie::prune cleared accessible paths"
+        );
+
+        effective_pruned_roots.into_iter().map(|(path, _)| path).collect()
     }
 
     fn update_leaves(
@@ -1278,19 +1309,44 @@ impl SparseTrieExt for ParallelSparseTrie {
                     }
                 }
                 LeafUpdate::Touched => {
+                    self.find_leaf_stats.total_calls += 1;
+
+                    // Check if path is already known to be accessible (cache hit).
+                    if self.known_accessible_paths.contains(&full_path) {
+                        self.find_leaf_stats.cache_hits += 1;
+                        continue;
+                    }
+
                     // Touched is read-only: check if path is accessible, request proof if blinded.
                     match self.find_leaf(&full_path, None) {
                         Err(LeafLookupError::BlindedNode { path, .. }) => {
+                            self.find_leaf_stats.blinded += 1;
                             let (target_key, min_len) =
                                 Self::proof_target_for_path(key, &full_path, &path);
                             proof_required_fn(target_key, min_len);
                             updates.insert(key, LeafUpdate::Touched);
                         }
                         // Path is fully revealed (exists or proven non-existent), no action needed.
-                        Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {}
+                        Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {
+                            self.find_leaf_stats.found += 1;
+                            self.known_accessible_paths.insert(full_path);
+                        }
                     }
                 }
             }
+        }
+
+        // Debug print for instrumentation
+        let stats = &self.find_leaf_stats;
+        if stats.total_calls > 0 {
+            println!(
+                "[FIND_LEAF DEBUG] total={} cache_hits={} found={} blinded={} accessible_paths={}",
+                stats.total_calls,
+                stats.cache_hits,
+                stats.found,
+                stats.blinded,
+                self.known_accessible_paths.len()
+            );
         }
 
         Ok(())
@@ -1302,6 +1358,21 @@ impl ParallelSparseTrie {
     pub const fn with_parallelism_thresholds(mut self, thresholds: ParallelismThresholds) -> Self {
         self.parallelism_thresholds = thresholds;
         self
+    }
+
+    /// Returns the current find_leaf statistics and resets them.
+    pub fn take_find_leaf_stats(&mut self) -> FindLeafStats {
+        std::mem::take(&mut self.find_leaf_stats)
+    }
+
+    /// Returns a reference to the current find_leaf statistics.
+    pub const fn find_leaf_stats(&self) -> &FindLeafStats {
+        &self.find_leaf_stats
+    }
+
+    /// Returns the number of known accessible paths.
+    pub fn known_accessible_paths_count(&self) -> usize {
+        self.known_accessible_paths.len()
     }
 
     /// Returns true if retaining updates is enabled for the overall trie.
