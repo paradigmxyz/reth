@@ -1,8 +1,4 @@
-// Docker Bake configuration for reth and op-reth images
-// Usage:
-//   docker buildx bake ethereum    # Build reth
-//   docker buildx bake optimism    # Build op-reth
-//   docker buildx bake             # Build all
+// Docker Bake configuration for reth images
 
 variable "REGISTRY" {
   default = "ghcr.io/paradigmxyz"
@@ -39,7 +35,7 @@ group "default" {
 }
 
 group "nightly" {
-  targets = ["ethereum", "ethereum-profiling", "ethereum-edge-profiling", "optimism", "optimism-profiling", "optimism-edge-profiling"]
+  targets = ["ethereum", "ethereum-profiling", "ethereum-edge-profiling", "optimism", "optimism-profiling"]
 }
 
 // Base target with shared configuration
@@ -53,6 +49,16 @@ target "_base" {
     VERGEN_GIT_DESCRIBE = "${VERGEN_GIT_DESCRIBE}"
     VERGEN_GIT_DIRTY   = "${VERGEN_GIT_DIRTY}"
   }
+  secret = [
+    {
+      type = "env"
+      id   = "DEPOT_TOKEN"
+    }
+  ]
+}
+target "_base_profiling" {
+  inherits = ["_base"]
+  platforms  = ["linux/amd64"]
 }
 
 // Ethereum (reth)
@@ -66,7 +72,7 @@ target "ethereum" {
 }
 
 target "ethereum-profiling" {
-  inherits = ["_base"]
+  inherits = ["_base_profiling"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
@@ -77,7 +83,7 @@ target "ethereum-profiling" {
 }
 
 target "ethereum-edge-profiling" {
-  inherits = ["_base"]
+  inherits = ["_base_profiling"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
@@ -98,7 +104,7 @@ target "optimism" {
 }
 
 target "optimism-profiling" {
-  inherits = ["_base"]
+  inherits = ["_base_profiling"]
   args = {
     BINARY        = "op-reth"
     MANIFEST_PATH = "crates/optimism/bin"
@@ -109,7 +115,7 @@ target "optimism-profiling" {
 }
 
 target "optimism-edge-profiling" {
-  inherits = ["_base"]
+  inherits = ["_base_profiling"]
   args = {
     BINARY        = "op-reth"
     MANIFEST_PATH = "crates/optimism/bin"

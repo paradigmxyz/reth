@@ -303,20 +303,8 @@ impl EngineNodeLauncher {
             // the CL
             loop {
                 tokio::select! {
-                    shutdown_req = &mut shutdown_rx => {
-                        if let Ok(req) = shutdown_req {
-                            debug!(target: "reth::cli", "received engine shutdown request");
-                            engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(
-                                FromOrchestrator::Terminate { tx: req.done_tx }.into()
-                            );
-                        }
-                    }
-                    payload = built_payloads.select_next_some() => {
-                        if let Some(executed_block) = payload.executed_block() {
-                            debug!(target: "reth::cli", block=?executed_block.recovered_block.num_hash(),  "inserting built payload");
-                            engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block.into_executed_payload()).into());
-                        }
-                    }
+                    biased;
+
                     event = engine_service.next() => {
                         let Some(event) = event else { break };
                         debug!(target: "reth::cli", "Event: {event}");
@@ -362,6 +350,20 @@ impl EngineNodeLauncher {
                                 }
                                 event_sender.notify(ev);
                             }
+                        }
+                    }
+                    payload = built_payloads.select_next_some() => {
+                        if let Some(executed_block) = payload.executed_block() {
+                            debug!(target: "reth::cli", block=?executed_block.recovered_block.num_hash(),  "inserting built payload");
+                            engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block.into_executed_payload()).into());
+                        }
+                    }
+                    shutdown_req = &mut shutdown_rx => {
+                        if let Ok(req) = shutdown_req {
+                            debug!(target: "reth::cli", "received engine shutdown request");
+                            engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(
+                                FromOrchestrator::Terminate { tx: req.done_tx }.into()
+                            );
                         }
                     }
                 }

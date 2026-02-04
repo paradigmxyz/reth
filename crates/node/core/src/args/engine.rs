@@ -1,7 +1,10 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::{builder::Resettable, Args};
-use reth_engine_primitives::{TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE};
+use reth_engine_primitives::{
+    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+    DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+};
 use std::sync::OnceLock;
 
 use crate::node_config::{
@@ -22,7 +25,6 @@ pub struct DefaultEngineValues {
     legacy_state_root_task_enabled: bool,
     state_cache_disabled: bool,
     prewarming_disabled: bool,
-    parallel_sparse_trie_disabled: bool,
     state_provider_metrics: bool,
     cross_block_cache_size: usize,
     state_root_task_compare_updates: bool,
@@ -36,8 +38,11 @@ pub struct DefaultEngineValues {
     allow_unwind_canonical_header: bool,
     storage_worker_count: Option<usize>,
     account_worker_count: Option<usize>,
-    enable_proof_v2: bool,
+    disable_proof_v2: bool,
     cache_metrics_disabled: bool,
+    enable_sparse_trie_as_cache: bool,
+    sparse_trie_prune_depth: usize,
+    sparse_trie_max_storage_tries: usize,
 }
 
 impl DefaultEngineValues {
@@ -78,12 +83,6 @@ impl DefaultEngineValues {
     /// Set whether to disable prewarming by default
     pub const fn with_prewarming_disabled(mut self, v: bool) -> Self {
         self.prewarming_disabled = v;
-        self
-    }
-
-    /// Set whether to disable parallel sparse trie by default
-    pub const fn with_parallel_sparse_trie_disabled(mut self, v: bool) -> Self {
-        self.parallel_sparse_trie_disabled = v;
         self
     }
 
@@ -168,15 +167,33 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set whether to enable proof V2 by default
-    pub const fn with_enable_proof_v2(mut self, v: bool) -> Self {
-        self.enable_proof_v2 = v;
+    /// Set whether to disable proof V2 by default
+    pub const fn with_disable_proof_v2(mut self, v: bool) -> Self {
+        self.disable_proof_v2 = v;
         self
     }
 
     /// Set whether to disable cache metrics by default
     pub const fn with_cache_metrics_disabled(mut self, v: bool) -> Self {
         self.cache_metrics_disabled = v;
+        self
+    }
+
+    /// Set whether to enable sparse trie as cache by default
+    pub const fn with_enable_sparse_trie_as_cache(mut self, v: bool) -> Self {
+        self.enable_sparse_trie_as_cache = v;
+        self
+    }
+
+    /// Set the sparse trie prune depth by default
+    pub const fn with_sparse_trie_prune_depth(mut self, v: usize) -> Self {
+        self.sparse_trie_prune_depth = v;
+        self
+    }
+
+    /// Set the maximum number of storage tries to retain after sparse trie pruning by default
+    pub const fn with_sparse_trie_max_storage_tries(mut self, v: usize) -> Self {
+        self.sparse_trie_max_storage_tries = v;
         self
     }
 }
@@ -189,7 +206,6 @@ impl Default for DefaultEngineValues {
             legacy_state_root_task_enabled: false,
             state_cache_disabled: false,
             prewarming_disabled: false,
-            parallel_sparse_trie_disabled: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             state_root_task_compare_updates: false,
@@ -203,8 +219,11 @@ impl Default for DefaultEngineValues {
             allow_unwind_canonical_header: false,
             storage_worker_count: None,
             account_worker_count: None,
-            enable_proof_v2: false,
+            disable_proof_v2: false,
             cache_metrics_disabled: false,
+            enable_sparse_trie_as_cache: false,
+            sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+            sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
         }
     }
 }
@@ -244,14 +263,14 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-prewarming", alias = "engine.disable-caching-and-prewarming", default_value_t = DefaultEngineValues::get_global().prewarming_disabled)]
     pub prewarming_disabled: bool,
 
-    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-parallel-sparse-trie
-    /// if you want to disable usage of the `ParallelSparseTrie`.
+    /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
     #[deprecated]
     #[arg(long = "engine.parallel-sparse-trie", default_value = "true", hide = true)]
     pub parallel_sparse_trie_enabled: bool,
 
-    /// Disable the parallel sparse trie in the engine.
-    #[arg(long = "engine.disable-parallel-sparse-trie", default_value_t = DefaultEngineValues::get_global().parallel_sparse_trie_disabled)]
+    /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
+    #[deprecated]
+    #[arg(long = "engine.disable-parallel-sparse-trie", default_value = "false", hide = true)]
     pub parallel_sparse_trie_disabled: bool,
 
     /// Enable state provider latency metrics. This allows the engine to collect and report stats
@@ -325,13 +344,25 @@ pub struct EngineArgs {
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
 
-    /// Enable V2 storage proofs for state root calculations
-    #[arg(long = "engine.enable-proof-v2", default_value_t = DefaultEngineValues::get_global().enable_proof_v2)]
-    pub enable_proof_v2: bool,
+    /// Disable V2 storage proofs for state root calculations
+    #[arg(long = "engine.disable-proof-v2", default_value_t = DefaultEngineValues::get_global().disable_proof_v2)]
+    pub disable_proof_v2: bool,
 
     /// Disable cache metrics recording, which can take up to 50ms with large cached state.
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
+
+    /// Enable sparse trie as cache.
+    #[arg(long = "engine.enable-sparse-trie-as-cache", default_value_t = DefaultEngineValues::get_global().enable_sparse_trie_as_cache, conflicts_with = "disable_proof_v2")]
+    pub enable_sparse_trie_as_cache: bool,
+
+    /// Sparse trie prune depth.
+    #[arg(long = "engine.sparse-trie-prune-depth", default_value_t = DefaultEngineValues::get_global().sparse_trie_prune_depth, requires = "enable_sparse_trie_as_cache")]
+    pub sparse_trie_prune_depth: usize,
+
+    /// Maximum number of storage tries to retain after sparse trie pruning.
+    #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries, requires = "enable_sparse_trie_as_cache")]
+    pub sparse_trie_max_storage_tries: usize,
 }
 
 #[allow(deprecated)]
@@ -343,7 +374,6 @@ impl Default for EngineArgs {
             legacy_state_root_task_enabled,
             state_cache_disabled,
             prewarming_disabled,
-            parallel_sparse_trie_disabled,
             state_provider_metrics,
             cross_block_cache_size,
             state_root_task_compare_updates,
@@ -357,8 +387,11 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            enable_proof_v2,
+            disable_proof_v2,
             cache_metrics_disabled,
+            enable_sparse_trie_as_cache,
+            sparse_trie_prune_depth,
+            sparse_trie_max_storage_tries,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -369,7 +402,7 @@ impl Default for EngineArgs {
             state_cache_disabled,
             prewarming_disabled,
             parallel_sparse_trie_enabled: true,
-            parallel_sparse_trie_disabled,
+            parallel_sparse_trie_disabled: false,
             state_provider_metrics,
             cross_block_cache_size,
             accept_execution_requests_hash,
@@ -383,8 +416,11 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            enable_proof_v2,
+            disable_proof_v2,
             cache_metrics_disabled,
+            enable_sparse_trie_as_cache,
+            sparse_trie_prune_depth,
+            sparse_trie_max_storage_tries,
         }
     }
 }
@@ -392,13 +428,12 @@ impl Default for EngineArgs {
 impl EngineArgs {
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
-        let mut config = TreeConfig::default()
+        TreeConfig::default()
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
-            .with_disable_parallel_sparse_trie(self.parallel_sparse_trie_disabled)
             .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
@@ -410,20 +445,14 @@ impl EngineArgs {
             .with_always_process_payload_attributes_on_canonical_head(
                 self.always_process_payload_attributes_on_canonical_head,
             )
-            .with_unwind_canonical_header(self.allow_unwind_canonical_header);
-
-        if let Some(count) = self.storage_worker_count {
-            config = config.with_storage_worker_count(count);
-        }
-
-        if let Some(count) = self.account_worker_count {
-            config = config.with_account_worker_count(count);
-        }
-
-        config = config.with_enable_proof_v2(self.enable_proof_v2);
-        config = config.without_cache_metrics(self.cache_metrics_disabled);
-
-        config
+            .with_unwind_canonical_header(self.allow_unwind_canonical_header)
+            .with_storage_worker_count_opt(self.storage_worker_count)
+            .with_account_worker_count_opt(self.account_worker_count)
+            .with_disable_proof_v2(self.disable_proof_v2)
+            .without_cache_metrics(self.cache_metrics_disabled)
+            .with_enable_sparse_trie_as_cache(self.enable_sparse_trie_as_cache)
+            .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
+            .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
     }
 }
 
@@ -457,7 +486,7 @@ mod tests {
             state_cache_disabled: true,
             prewarming_disabled: true,
             parallel_sparse_trie_enabled: true,
-            parallel_sparse_trie_disabled: true,
+            parallel_sparse_trie_disabled: false,
             state_provider_metrics: true,
             cross_block_cache_size: 256,
             state_root_task_compare_updates: true,
@@ -472,8 +501,11 @@ mod tests {
             allow_unwind_canonical_header: true,
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
-            enable_proof_v2: false,
+            disable_proof_v2: false,
             cache_metrics_disabled: true,
+            enable_sparse_trie_as_cache: true,
+            sparse_trie_prune_depth: 10,
+            sparse_trie_max_storage_tries: 100,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -485,7 +517,6 @@ mod tests {
             "--engine.legacy-state-root",
             "--engine.disable-state-cache",
             "--engine.disable-prewarming",
-            "--engine.disable-parallel-sparse-trie",
             "--engine.state-provider-metrics",
             "--engine.cross-block-cache-size",
             "256",
@@ -505,6 +536,11 @@ mod tests {
             "--engine.account-worker-count",
             "8",
             "--engine.disable-cache-metrics",
+            "--engine.enable-sparse-trie-as-cache",
+            "--engine.sparse-trie-prune-depth",
+            "10",
+            "--engine.sparse-trie-max-storage-tries",
+            "100",
         ])
         .args;
 

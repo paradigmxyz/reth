@@ -20,12 +20,7 @@ use reth_trie::{
     HashedPostStateSorted, KeccakKeyHasher, StateRoot, TrieInputSorted,
 };
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
-use std::{
-    collections::{BTreeMap, HashMap},
-    ops::RangeInclusive,
-    sync::Arc,
-    time::Instant,
-};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
 use tracing::debug;
 
 #[cfg(feature = "metrics")]
@@ -219,11 +214,12 @@ where
     let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
 
     // Step 5: Collect all account trie nodes that changed in the target block
-    let mut account_nodes = Vec::new();
+    let account_nodes_ref = changesets.account_nodes_ref();
+    let mut account_nodes = Vec::with_capacity(account_nodes_ref.len());
     let mut account_cursor = cursor_factory.account_trie_cursor()?;
 
     // Iterate over the account nodes from the changesets
-    for (nibbles, _old_node) in changesets.account_nodes_ref() {
+    for (nibbles, _old_node) in account_nodes_ref {
         // Look up the current value of this trie node using the overlay cursor
         let node_value = account_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
         account_nodes.push((*nibbles, node_value));
@@ -235,10 +231,11 @@ where
     // Iterate over the storage tries from the changesets
     for (hashed_address, storage_changeset) in changesets.storage_tries_ref() {
         let mut storage_cursor = cursor_factory.storage_trie_cursor(*hashed_address)?;
-        let mut storage_nodes = Vec::new();
+        let storage_nodes_ref = storage_changeset.storage_nodes_ref();
+        let mut storage_nodes = Vec::with_capacity(storage_nodes_ref.len());
 
         // Iterate over the storage nodes for this account
-        for (nibbles, _old_node) in storage_changeset.storage_nodes_ref() {
+        for (nibbles, _old_node) in storage_nodes_ref {
             // Look up the current value of this storage trie node
             let node_value = storage_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
             storage_nodes.push((*nibbles, node_value));
@@ -533,7 +530,7 @@ impl ChangesetCache {
 #[derive(Debug)]
 struct ChangesetCacheInner {
     /// Cache entries: block hash -> (block number, changesets)
-    entries: HashMap<B256, (u64, Arc<TrieUpdatesSorted>)>,
+    entries: B256Map<(u64, Arc<TrieUpdatesSorted>)>,
 
     /// Block number to hashes mapping for eviction
     block_numbers: BTreeMap<u64, Vec<B256>>,
@@ -577,7 +574,7 @@ impl ChangesetCacheInner {
     /// via the `evict()` method to manage memory usage.
     fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: B256Map::default(),
             block_numbers: BTreeMap::new(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
@@ -681,7 +678,7 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::map::B256Map;
+    use alloy_primitives::map::{B256Map, HashMap};
 
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
@@ -758,7 +755,7 @@ mod tests {
         let mut cache = ChangesetCacheInner::new();
 
         // Insert blocks 100-165
-        let mut hashes = std::collections::HashMap::new();
+        let mut hashes = HashMap::new();
         for i in 100..=165 {
             let hash = B256::random();
             cache.insert(hash, i, create_test_changesets());

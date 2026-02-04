@@ -28,8 +28,8 @@ reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
 # misc
-smallvec.workspace = true
 rayon = { workspace = true, optional = true }
+smallvec.workspace = true
 
 [dev-dependencies]
 # reth

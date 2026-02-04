@@ -9,7 +9,7 @@ use reth_db_api::table::Table;
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDBAdapter;
 use reth_provider::RocksDBProviderFactory;
-use std::{hash::Hasher, sync::Arc, time::Instant};
+use std::{hash::Hasher, time::Instant};
 use tracing::info;
 
 /// RocksDB tables that can be checksummed.
@@ -36,7 +36,7 @@ impl RocksDbTable {
 
 /// Computes a checksum for a RocksDB table.
 pub fn checksum_rocksdb<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
-    tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+    tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     table: RocksDbTable,
     limit: Option<usize>,
 ) -> eyre::Result<()> {

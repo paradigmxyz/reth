@@ -501,6 +501,11 @@ RPC State Cache:
 
           [default: 512]
 
+      --rpc-cache.max-cached-tx-hashes <MAX_CACHED_TX_HASHES>
+          Maximum number of transaction hashes to cache for transaction lookups
+
+          [default: 30000]
+
 Gas Price Oracle:
       --gpo.blocks <BLOCKS>
           Number of recent blocks to check for gas price
@@ -534,6 +539,11 @@ Gas Price Oracle:
           Skip invalid transactions in `testing_buildBlockV1` instead of failing.
 
           When enabled, transactions that fail execution will be skipped, and all subsequent transactions from the same sender will also be skipped.
+
+      --rpc.force-blob-sidecar-upcasting
+          Force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
+
+          When enabled, blob transactions submitted via `eth_sendRawTransaction` with EIP-4844 sidecars will be automatically converted to EIP-7594 format if the next block is Osaka. By default this is disabled, meaning transactions are submitted as-is.
 
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
@@ -827,7 +837,7 @@ Dev testnet:
 
 Pruning:
       --full
-          Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored
+          Run full node. Only the most recent [`MINIMUM_UNWIND_SAFE_DISTANCE`] block states are stored
 
       --minimal
           Run minimal storage mode with maximum pruning and smaller static files.
@@ -914,7 +924,7 @@ RocksDB:
       --rocksdb.storages-history <STORAGES_HISTORY>
           Route storages history tables to `RocksDB` instead of MDBX.
 
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
 
           [default: false]
           [possible values: true, false]
@@ -922,7 +932,7 @@ RocksDB:
       --rocksdb.account-history <ACCOUNT_HISTORY>
           Route account history tables to `RocksDB` instead of MDBX.
 
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
 
           [default: false]
           [possible values: true, false]
@@ -948,9 +958,6 @@ Engine:
 
       --engine.disable-prewarming
           Disable parallel prewarming
-
-      --engine.disable-parallel-sparse-trie
-          Disable the parallel sparse trie in the engine
 
       --engine.state-provider-metrics
           Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls
@@ -999,11 +1006,24 @@ Engine:
       --engine.account-worker-count <ACCOUNT_WORKER_COUNT>
           Configure the number of account proof workers in the Tokio blocking pool. If not specified, defaults to the same count as storage workers
 
-      --engine.enable-proof-v2
-          Enable V2 storage proofs for state root calculations
+      --engine.disable-proof-v2
+          Disable V2 storage proofs for state root calculations
 
       --engine.disable-cache-metrics
           Disable cache metrics recording, which can take up to 50ms with large cached state
+
+      --engine.enable-sparse-trie-as-cache
+          Enable sparse trie as cache
+
+      --engine.sparse-trie-prune-depth <SPARSE_TRIE_PRUNE_DEPTH>
+          Sparse trie prune depth
+
+          [default: 4]
+
+      --engine.sparse-trie-max-storage-tries <SPARSE_TRIE_MAX_STORAGE_TRIES>
+          Maximum number of storage tries to retain after sparse trie pruning
+
+          [default: 100]
 
 ERA:
       --era.enable

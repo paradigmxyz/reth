@@ -72,3 +72,11 @@ derive_more.workspace = true
 [[test]]
 name = "e2e_testsuite"
 path = "tests/e2e-testsuite/main.rs"
+
+[[test]]
+name = "rocksdb"
+path = "tests/rocksdb/main.rs"
+required-features = ["edge"]
+
+[features]
+edge = ["reth-node-core/edge", "reth-provider/rocksdb", "reth-cli-commands/edge"]

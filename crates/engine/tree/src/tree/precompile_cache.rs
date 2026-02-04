@@ -1,9 +1,9 @@
 //! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
 
 use alloy_primitives::Bytes;
-use dashmap::DashMap;
 use moka::policy::EvictionPolicy;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
+use reth_primitives_traits::dashmap::DashMap;
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
 use std::{hash::Hash, sync::Arc};
@@ -21,7 +21,8 @@ impl<S> PrecompileCacheMap<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
-    pub(crate) fn cache_for_address(&self, address: Address) -> PrecompileCache<S> {
+    /// Get the precompile cache for the given address.
+    pub fn cache_for_address(&self, address: Address) -> PrecompileCache<S> {
         // Try just using `.get` first to avoid acquiring a write lock.
         if let Some(cache) = self.0.get(&address) {
             return cache.clone();
@@ -90,7 +91,7 @@ impl<S> CacheEntry<S> {
 
 /// A cache for precompile inputs / outputs.
 #[derive(Debug)]
-pub(crate) struct CachedPrecompile<S>
+pub struct CachedPrecompile<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
@@ -109,7 +110,7 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// `CachedPrecompile` constructor.
-    pub(crate) const fn new(
+    pub const fn new(
         precompile: DynPrecompile,
         cache: PrecompileCache<S>,
         spec_id: S,
@@ -118,7 +119,8 @@ where
         Self { precompile, cache, spec_id, metrics }
     }
 
-    pub(crate) fn wrap(
+    /// Wrap the given precompile in a cached precompile.
+    pub fn wrap(
         precompile: DynPrecompile,
         cache: PrecompileCache<S>,
         spec_id: S,
@@ -196,18 +198,18 @@ where
 /// Metrics for the cached precompile.
 #[derive(reth_metrics::Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
-pub(crate) struct CachedPrecompileMetrics {
+pub struct CachedPrecompileMetrics {
     /// Precompile cache hits
-    precompile_cache_hits: metrics::Counter,
+    pub precompile_cache_hits: metrics::Counter,
 
     /// Precompile cache misses
-    precompile_cache_misses: metrics::Counter,
+    pub precompile_cache_misses: metrics::Counter,
 
     /// Precompile cache size. Uses the LRU cache length as the size metric.
-    precompile_cache_size: metrics::Gauge,
+    pub precompile_cache_size: metrics::Gauge,
 
     /// Precompile execution errors.
-    precompile_errors: metrics::Counter,
+    pub precompile_errors: metrics::Counter,
 }
 
 impl CachedPrecompileMetrics {
@@ -215,7 +217,7 @@ impl CachedPrecompileMetrics {
     ///
     /// Adds address as an `address` label padded with zeros to at least two hex symbols, prefixed
     /// by `0x`.
-    pub(crate) fn new_with_address(address: Address) -> Self {
+    pub fn new_with_address(address: Address) -> Self {
         Self::new_with_labels(&[("address", format!("0x{address:02x}"))])
     }
 }

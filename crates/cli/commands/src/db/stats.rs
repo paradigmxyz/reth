@@ -16,7 +16,7 @@ use reth_provider::{
     RocksDBProviderFactory,
 };
 use reth_static_file_types::SegmentRangeInclusive;
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command
@@ -48,7 +48,7 @@ impl Command {
     pub fn execute<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         self,
         data_dir: ChainPath<DataDirPath>,
-        tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+        tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     ) -> eyre::Result<()> {
         if self.checksum {
             let checksum_report = self.checksum_report(tool)?;
@@ -72,7 +72,7 @@ impl Command {
         Ok(())
     }
 
-    fn db_stats_table<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>>(
+    fn db_stats_table<N: NodeTypesWithDB<DB = DatabaseEnv>>(
         &self,
         tool: &DbTool<N>,
     ) -> eyre::Result<ComfyTable> {
@@ -92,10 +92,10 @@ impl Command {
             db_tables.sort();
             let mut total_size = 0;
             for db_table in db_tables {
-                let table_db = tx.inner.open_db(Some(db_table)).wrap_err("Could not open db.")?;
+                let table_db = tx.inner().open_db(Some(db_table)).wrap_err("Could not open db.")?;
 
                 let stats = tx
-                    .inner
+                    .inner()
                     .db_stat(table_db.dbi())
                     .wrap_err(format!("Could not find table: {db_table}"))?;
 
@@ -136,9 +136,9 @@ impl Command {
                 .add_cell(Cell::new(human_bytes(total_size as f64)));
             table.add_row(row);
 
-            let freelist = tx.inner.env().freelist()?;
+            let freelist = tx.inner().env().freelist()?;
             let pagesize =
-                tx.inner.db_stat(mdbx::Database::freelist_db().dbi())?.page_size() as usize;
+                tx.inner().db_stat(mdbx::Database::freelist_db().dbi())?.page_size() as usize;
             let freelist_size = freelist * pagesize;
 
             let mut row = Row::new();

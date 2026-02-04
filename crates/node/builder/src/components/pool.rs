@@ -1,7 +1,7 @@
 //! Pool component for the node builder.
 
 use crate::{BuilderContext, FullNodeTypes};
-use alloy_primitives::Address;
+use alloy_primitives::map::AddressSet;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{BlockTy, NodeTypes, TxTy};
@@ -9,10 +9,10 @@ use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, BlobStore, CoinbaseTipOrdering, PoolConfig, PoolTransaction,
     SubPoolLimit, TransactionPool, TransactionValidationTaskExecutor, TransactionValidator,
 };
-use std::{collections::HashSet, future::Future};
+use std::future::Future;
 
 /// A type that knows how to build the transaction pool.
-pub trait PoolBuilder<Node: FullNodeTypes>: Send {
+pub trait PoolBuilder<Node: FullNodeTypes, Evm>: Send {
     /// The transaction pool to build.
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
@@ -22,16 +22,17 @@ pub trait PoolBuilder<Node: FullNodeTypes>: Send {
     fn build_pool(
         self,
         ctx: &BuilderContext<Node>,
+        evm_config: Evm,
     ) -> impl Future<Output = eyre::Result<Self::Pool>> + Send;
 }
 
-impl<Node, F, Fut, Pool> PoolBuilder<Node> for F
+impl<Node, F, Fut, Pool, Evm> PoolBuilder<Node, Evm> for F
 where
     Node: FullNodeTypes,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
+    F: FnOnce(&BuilderContext<Node>, Evm) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Pool>> + Send,
 {
     type Pool = Pool;
@@ -39,8 +40,9 @@ where
     fn build_pool(
         self,
         ctx: &BuilderContext<Node>,
+        evm_config: Evm,
     ) -> impl Future<Output = eyre::Result<Self::Pool>> {
-        self(ctx)
+        self(ctx, evm_config)
     }
 }
 
@@ -60,7 +62,7 @@ pub struct PoolBuilderConfigOverrides {
     /// Minimum base fee required by the protocol.
     pub minimal_protocol_basefee: Option<u64>,
     /// Addresses that will be considered as local. Above exemptions apply.
-    pub local_addresses: HashSet<Address>,
+    pub local_addresses: AddressSet,
     /// Additional tasks to validate new transactions.
     pub additional_validation_tasks: Option<usize>,
 }

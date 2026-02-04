@@ -90,7 +90,7 @@ impl StaticFilesArgs {
     /// args.
     ///
     /// If `minimal` is true, uses [`MINIMAL_BLOCKS_PER_FILE`] blocks per file as the default for
-    /// headers, transactions, and receipts segments.
+    /// all segments.
     pub fn merge_with_config(&self, config: StaticFilesConfig, minimal: bool) -> StaticFilesConfig {
         let minimal_blocks_per_file = minimal.then_some(MINIMAL_BLOCKS_PER_FILE);
         StaticFilesConfig {
@@ -109,12 +109,15 @@ impl StaticFilesArgs {
                     .or(config.blocks_per_file.receipts),
                 transaction_senders: self
                     .blocks_per_file_transaction_senders
+                    .or(minimal_blocks_per_file)
                     .or(config.blocks_per_file.transaction_senders),
                 account_change_sets: self
                     .blocks_per_file_account_change_sets
+                    .or(minimal_blocks_per_file)
                     .or(config.blocks_per_file.account_change_sets),
                 storage_change_sets: self
                     .blocks_per_file_storage_change_sets
+                    .or(minimal_blocks_per_file)
                     .or(config.blocks_per_file.storage_change_sets),
             },
         }
