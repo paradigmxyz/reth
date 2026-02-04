@@ -79,7 +79,7 @@ use std::{
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::Arc,
     thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tracing::{debug, instrument, trace};
 
