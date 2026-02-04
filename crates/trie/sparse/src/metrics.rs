@@ -1,6 +1,6 @@
 //! Metrics for the sparse state trie
 
-use reth_metrics::{metrics::Histogram, Metrics};
+use reth_metrics::{metrics, metrics::Histogram, Metrics};
 
 /// Metrics for the sparse state trie
 #[derive(Debug, Default)]
@@ -94,6 +94,10 @@ pub struct PruneTrieMetrics {
     pub storage_tries_prune_duration: Histogram,
     /// Histogram of state trie pruning duration in microseconds
     pub state_prune_duration: Histogram,
+    /// Histogram of state subtries cleared during pruning
+    pub state_subtries_cleared: Histogram,
+    /// Counter for how many times state trie was actually pruned
+    pub state_prune_count: metrics::Counter,
     /// Histogram of storage tries pruning duration in microseconds
     pub storage_prune_duration: Histogram,
     /// Histogram of state trie memory usage in bytes after pruning

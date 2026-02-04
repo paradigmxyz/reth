@@ -1105,6 +1105,9 @@ where
                     self.revealed_account_paths.retain(|path| {
                         !outcome.pruned_roots.iter().any(|root| path.starts_with(root))
                     });
+
+                    #[cfg(feature = "metrics")]
+                    self.metrics.prune.state_prune_count.increment(1);
                 }
 
                 (outcome, start.elapsed(), memory)
@@ -1144,6 +1147,10 @@ where
                 .storage_tries_prune_duration
                 .record(storage_prune_duration.as_micros() as f64);
             self.metrics.prune.state_prune_duration.record(state_prune_duration.as_micros() as f64);
+            self.metrics
+                .prune
+                .state_subtries_cleared
+                .record(account_outcome.pruned_roots.len() as f64);
             self.metrics.prune.storage_prune_duration.record(storage_duration.as_micros() as f64);
             self.metrics.prune.state_memory_bytes.record(state_memory as f64);
             self.metrics.prune.storage_memory_bytes.record(storage_memory as f64);
