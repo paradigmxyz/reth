@@ -160,7 +160,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_edge_parallel_writes_total_last{$instance_label=\"$instance\"}",
+          "expr": "avg(reth_storage_providers_database_edge_parallel_writes_total{$instance_label=\"$instance\", quantile=\"$quantile\"})",
           "legendFormat": "Total (incl. preprocessing)",
           "range": true,
           "refId": "A"
@@ -171,7 +171,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_edge_parallel_wall_last{$instance_label=\"$instance\"}",
+          "expr": "avg(reth_storage_providers_database_edge_parallel_wall{$instance_label=\"$instance\", quantile=\"$quantile\"})",
           "legendFormat": "Parallel Wall Time",
           "range": true,
           "refId": "B"
@@ -182,7 +182,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_edge_preprocessing_last{$instance_label=\"$instance\"}",
+          "expr": "avg(reth_storage_providers_database_edge_preprocessing{$instance_label=\"$instance\", quantile=\"$quantile\"})",
           "legendFormat": "Preprocessing",
           "range": true,
           "refId": "C"
@@ -346,7 +346,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_edge_write_plain_accounts_last{$instance_label=\"$instance\"}",
+          "expr": "avg(reth_storage_providers_database_edge_write_plain_accounts{$instance_label=\"$instance\", quantile=\"$quantile\"})",
           "legendFormat": "Duration",
           "range": true,
           "refId": "A"
@@ -438,7 +438,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_edge_write_bytecodes_last{$instance_label=\"$instance\"}",
+          "expr": "avg(reth_storage_providers_database_edge_write_bytecodes{$instance_label=\"$instance\", quantile=\"$quantile\"})",
           "legendFormat": "Duration",
           "range": true,
           "refId": "A"
@@ -530,7 +530,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_edge_write_plain_storage_last{$instance_label=\"$instance\"}",
+          "expr": "avg(reth_storage_providers_database_edge_write_plain_storage{$instance_label=\"$instance\", quantile=\"$quantile\"})",
           "legendFormat": "Duration",
           "range": true,
           "refId": "A"
@@ -635,7 +635,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_edge_write_hashed_accounts_last{$instance_label=\"$instance\"}",
+          "expr": "avg(reth_storage_providers_database_edge_write_hashed_accounts{$instance_label=\"$instance\", quantile=\"$quantile\"})",
           "legendFormat": "Duration",
           "range": true,
           "refId": "A"
@@ -727,7 +727,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_edge_write_hashed_storages_last{$instance_label=\"$instance\"}",
+          "expr": "avg(reth_storage_providers_database_edge_write_hashed_storages{$instance_label=\"$instance\", quantile=\"$quantile\"})",
           "legendFormat": "Duration",
           "range": true,
           "refId": "A"
@@ -832,7 +832,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_edge_write_account_trie_last{$instance_label=\"$instance\"}",
+          "expr": "avg(reth_storage_providers_database_edge_write_account_trie{$instance_label=\"$instance\", quantile=\"$quantile\"})",
           "legendFormat": "Duration",
           "range": true,
           "refId": "A"
@@ -924,7 +924,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_edge_write_storage_trie_last{$instance_label=\"$instance\"}",
+          "expr": "avg(reth_storage_providers_database_edge_write_storage_trie{$instance_label=\"$instance\", quantile=\"$quantile\"})",
           "legendFormat": "Duration",
           "range": true,
           "refId": "A"
@@ -1288,6 +1288,28 @@
         "regex": "",
         "skipUrlSync": false,
         "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "0.5",
+          "value": "0.5"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(reth_storage_providers_database_edge_parallel_writes_total,quantile)",
+        "name": "quantile",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(reth_storage_providers_database_edge_parallel_writes_total,quantile)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
         "type": "query"
       },
       {
