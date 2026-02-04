@@ -283,7 +283,7 @@ fn run_case(
             &output.receipts,
             &output.requests,
             None,
-            None,
+            Some(output.gas_used),
         )
         .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
