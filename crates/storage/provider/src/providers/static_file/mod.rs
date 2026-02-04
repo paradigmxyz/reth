@@ -11,6 +11,10 @@ mod writer;
 pub use writer::{StaticFileProviderRW, StaticFileProviderRWRefMut};
 
 mod metrics;
+
+#[cfg(test)]
+mod writer_tests;
+
 use reth_nippy_jar::NippyJar;
 use reth_static_file_types::{SegmentHeader, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};

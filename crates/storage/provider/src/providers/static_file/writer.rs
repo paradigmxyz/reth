@@ -354,71 +354,139 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.prune_on_commit.is_some()
     }
 
-    /// Heals the changeset offset sidecar after NippyJar healing.
+    /// Heals the changeset offset sidecar after `NippyJar` healing.
     ///
     /// This must be called AFTER `ensure_end_range_consistency()` which may reduce rows.
-    /// If offsets point past the current row count, we truncate the sidecar to match.
+    /// Performs three-way consistency check between header, `NippyJar` rows, and sidecar file:
+    /// - Validates sidecar offsets don't point past actual `NippyJar` rows
+    /// - Heals header if sidecar was truncated during interrupted prune
+    /// - Truncates sidecar if offsets point past healed `NippyJar` data
     fn heal_changeset_sidecar(&mut self) -> ProviderResult<()> {
         let csoff_path = self.data_path.with_extension("csoff");
-        let committed_len = self.writer.user_header().changeset_offsets_len();
-        let actual_rows = self.writer.rows() as u64;
 
-        // Open the sidecar writer (this handles partial records and uncommitted tail)
-        let mut csoff_writer =
-            ChangesetOffsetWriter::new(&csoff_path, committed_len).map_err(ProviderError::other)?;
+        // Step 1: Read all three sources of truth
+        let header_claims_blocks = self.writer.user_header().changeset_offsets_len();
+        let actual_nippy_rows = self.writer.rows() as u64;
 
-        // If we have offsets, validate the last one doesn't exceed actual rows
-        if committed_len > 0 && actual_rows > 0 {
+        // Get actual sidecar file size (may differ from header after crash)
+        let actual_sidecar_blocks = if csoff_path.exists() {
+            let file_len = reth_fs_util::metadata(&csoff_path).map_err(ProviderError::other)?.len();
+            // Remove partial records from crash mid-write
+            let aligned_len = file_len - (file_len % 16);
+            aligned_len / 16
+        } else {
+            0
+        };
+
+        // Fresh segment or no sidecar data - nothing to heal
+        if header_claims_blocks == 0 && actual_sidecar_blocks == 0 {
+            self.changeset_offsets =
+                Some(ChangesetOffsetWriter::new(&csoff_path, 0).map_err(ProviderError::other)?);
+            return Ok(());
+        }
+
+        // Step 2: Validate sidecar offsets against actual NippyJar state
+        let valid_blocks = if actual_sidecar_blocks > 0 && actual_nippy_rows > 0 {
             let mut reader =
                 ChangesetOffsetReader::new(&csoff_path).map_err(ProviderError::other)?;
 
-            if let Some(last_offset) =
-                reader.get(committed_len - 1).map_err(ProviderError::other)?
-            {
-                let end_row = last_offset.offset() + last_offset.num_changes();
-
-                if end_row > actual_rows {
-                    // Sidecar has offsets pointing past EOF - need to truncate blocks
-                    // Find the last valid block (where offset + num_changes <= actual_rows)
-                    let mut valid_blocks = 0u64;
-                    for i in 0..committed_len {
-                        if let Some(offset) = reader.get(i).map_err(ProviderError::other)? {
-                            if offset.offset() + offset.num_changes() <= actual_rows {
-                                valid_blocks = i + 1;
-                            } else {
-                                break;
-                            }
-                        }
+            // Find last block where offset + num_changes <= actual_nippy_rows
+            let mut valid = 0u64;
+            for i in 0..actual_sidecar_blocks {
+                if let Some(offset) = reader.get(i).map_err(ProviderError::other)? {
+                    if offset.offset() + offset.num_changes() <= actual_nippy_rows {
+                        valid = i + 1;
+                    } else {
+                        // This block points past EOF - stop here
+                        break;
                     }
-
-                    tracing::warn!(
-                        target: "reth::static_file",
-                        path = %csoff_path.display(),
-                        committed_len,
-                        actual_rows,
-                        valid_blocks,
-                        "Truncating changeset offsets that point past healed data"
-                    );
-
-                    // Truncate sidecar to valid blocks
-                    csoff_writer.truncate(valid_blocks).map_err(ProviderError::other)?;
-
-                    // Update header to match
-                    self.writer.user_header_mut().set_changeset_offsets_len(valid_blocks);
-
-                    // Also need to update block range if we removed blocks
-                    if valid_blocks < committed_len {
-                        let blocks_removed = committed_len - valid_blocks;
-                        self.writer.user_header_mut().prune(blocks_removed);
-                    }
-
-                    // Commit the healed state
-                    self.writer.commit().map_err(ProviderError::other)?;
                 }
             }
+            valid
+        } else {
+            0
+        };
+
+        // Step 3: Determine correct state from synced files (source of truth)
+        // Header is the commit marker - never enlarge, only shrink
+        let correct_blocks = valid_blocks.min(header_claims_blocks);
+
+        // Step 4: Heal if header doesn't match validated truth
+        let mut needs_header_commit = false;
+
+        if correct_blocks != header_claims_blocks || actual_sidecar_blocks != correct_blocks {
+            tracing::warn!(
+                target: "reth::static_file",
+                path = %csoff_path.display(),
+                header_claims = header_claims_blocks,
+                sidecar_has = actual_sidecar_blocks,
+                valid_blocks = correct_blocks,
+                actual_rows = actual_nippy_rows,
+                "Three-way healing: syncing header, sidecar, and NippyJar state"
+            );
+
+            // Truncate sidecar file if it has invalid blocks
+            if actual_sidecar_blocks > correct_blocks {
+                use std::fs::OpenOptions;
+                let file = OpenOptions::new()
+                    .write(true)
+                    .open(&csoff_path)
+                    .map_err(ProviderError::other)?;
+                file.set_len(correct_blocks * 16).map_err(ProviderError::other)?;
+                file.sync_all().map_err(ProviderError::other)?;
+
+                tracing::debug!(
+                    target: "reth::static_file",
+                    "Truncated sidecar from {} to {} blocks",
+                    actual_sidecar_blocks,
+                    correct_blocks
+                );
+            }
+
+            // Update header to match validated truth (can only shrink, never enlarge)
+            if correct_blocks < header_claims_blocks {
+                // Blocks were removed - use prune() to update both block_range and
+                // changeset_offsets_len atomically
+                let blocks_removed = header_claims_blocks - correct_blocks;
+                self.writer.user_header_mut().prune(blocks_removed);
+
+                tracing::debug!(
+                    target: "reth::static_file",
+                    "Updated header: removed {} blocks (changeset_offsets_len: {} -> {})",
+                    blocks_removed,
+                    header_claims_blocks,
+                    correct_blocks
+                );
+
+                needs_header_commit = true;
+            }
+        } else {
+            tracing::debug!(
+                target: "reth::static_file",
+                path = %csoff_path.display(),
+                blocks = correct_blocks,
+                "Changeset sidecar consistent, no healing needed"
+            );
         }
 
+        // Open sidecar writer with corrected count (won't error now that sizes match)
+        let csoff_writer = ChangesetOffsetWriter::new(&csoff_path, correct_blocks)
+            .map_err(ProviderError::other)?;
+
         self.changeset_offsets = Some(csoff_writer);
+
+        // Commit healed header if needed (after sidecar writer is set up)
+        if needs_header_commit {
+            self.writer.commit().map_err(ProviderError::other)?;
+
+            tracing::info!(
+                target: "reth::static_file",
+                path = %csoff_path.display(),
+                blocks = correct_blocks,
+                "Committed healed changeset offset header"
+            );
+        }
+
         Ok(())
     }
 
@@ -680,8 +748,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 if segment.is_change_based() {
                     let csoff_path = data_path.with_extension("csoff");
                     self.changeset_offsets = Some(
-                        ChangesetOffsetWriter::new(&csoff_path, 0)
-                            .map_err(ProviderError::other)?,
+                        ChangesetOffsetWriter::new(&csoff_path, 0).map_err(ProviderError::other)?,
                     );
                 }
 
@@ -791,15 +858,20 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let csoff_path = self.data_path.with_extension("csoff");
         let changeset_offsets_len = self.writer.user_header().changeset_offsets_len();
 
+        // Flush any pending changeset offset before reading the sidecar
+        self.flush_current_changeset_offset()?;
+
         let rows_to_keep = if blocks_to_keep == 0 {
             0
         } else if blocks_to_keep >= changeset_offsets_len {
             // Keep all rows in this file
             self.writer.rows() as u64
         } else {
-            // Read offset for the block after last_block from sidecar
-            let mut reader =
-                ChangesetOffsetReader::new(&csoff_path).map_err(ProviderError::other)?;
+            // Read offset for the block after last_block from sidecar.
+            // Use with_len() to respect the committed length from header, ignoring any
+            // uncommitted records that may exist in the file after a crash.
+            let mut reader = ChangesetOffsetReader::with_len(&csoff_path, changeset_offsets_len)
+                .map_err(ProviderError::other)?;
             if let Some(next_offset) = reader.get(blocks_to_keep).map_err(ProviderError::other)? {
                 next_offset.offset()
             } else {

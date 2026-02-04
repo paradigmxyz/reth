@@ -26,11 +26,11 @@ impl ChangesetOffsetWriter {
     ///
     /// The file is healed to match `committed_len` (from the segment header):
     /// - Partial records (from crash mid-write) are truncated to record boundary
-    /// - Extra complete records (from crash after sidecar sync but before header commit)
-    ///   are truncated to match the committed length
+    /// - Extra complete records (from crash after sidecar sync but before header commit) are
+    ///   truncated to match the committed length
     /// - If the file has fewer records than committed, returns an error (data corruption)
     ///
-    /// This mirrors NippyJar's healing behavior where config/header is the commit boundary.
+    /// This mirrors `NippyJar`'s healing behavior where config/header is the commit boundary.
     pub fn new(path: impl AsRef<Path>, committed_len: u64) -> io::Result<Self> {
         let file = OpenOptions::new()
             .create(true)
@@ -79,12 +79,22 @@ impl ChangesetOffsetWriter {
                 file.sync_all()?; // Sync required for crash safety
             }
             std::cmp::Ordering::Less => {
-                // Unlikely: sidecar is shorter than header claims - data corruption or
-                // incomplete prune
+                // INVARIANT VIOLATION: This should be impossible if healing ran correctly.
+                //
+                // All code paths call `heal_changeset_sidecar()` before this function, which
+                // validates the sidecar against NippyJar state and corrects the header to match
+                // the actual file size. Therefore, `committed_len` should always equal or exceed
+                // `records_in_file` when this function is called.
+                //
+                // If we reach this error, it indicates:
+                // - A bug in the healing logic (header not corrected properly)
+                // - This function was called directly without going through healing
+                // - External corruption occurred between healing and opening (extremely unlikely)
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
-                        "Changeset offset sidecar has {} records but header expects {}: {}",
+                        "INVARIANT VIOLATION: Changeset offset sidecar has {} records but header expects {} \
+                         (healing should have prevented this - possible bug in healing logic): {}",
                         records_in_file,
                         committed_len,
                         path.as_ref().display()
