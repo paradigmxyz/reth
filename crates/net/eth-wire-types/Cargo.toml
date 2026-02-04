@@ -56,6 +56,7 @@ std = [
     "alloy-consensus/std",
     "alloy-eips/std",
     "alloy-genesis/std",
+    "alloy-hardforks/std",
     "alloy-primitives/std",
     "alloy-rlp/std",
     "bytes/std",
