@@ -74,7 +74,11 @@ impl PrunerBuilder {
     }
 
     /// Builds a [Pruner] from the current configuration with the given provider factory.
-    pub fn build_with_provider_factory<PF>(self, provider_factory: PF) -> Pruner<PF::ProviderRW, PF>
+    #[allow(unused_mut)]
+    pub fn build_with_provider_factory<PF>(
+        mut self,
+        provider_factory: PF,
+    ) -> Pruner<PF::ProviderRW, PF>
     where
         PF: DatabaseProviderFactory<
                 ProviderRW: PruneCheckpointWriter
@@ -91,8 +95,19 @@ impl PrunerBuilder {
                 >,
             > + StaticFileProviderFactory<
                 Primitives = <PF::ProviderRW as NodePrimitivesProvider>::Primitives,
-            >,
+            > + StorageSettingsCache,
     {
+        // Auto-enable transaction_lookup pruning when transaction hash numbers are stored in
+        // RocksDB. This ensures the pruner cleans up RocksDB data without requiring explicit
+        // configuration.
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider_factory.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
+            self.segments.transaction_lookup.is_none()
+        {
+            tracing::info!(target: "reth::prune", "Auto-enabling transaction_lookup pruning for RocksDB storage");
+            self.segments.transaction_lookup = Some(reth_prune_types::PruneMode::Full);
+        }
+
         let segments =
             SegmentSet::from_components(provider_factory.static_file_provider(), self.segments);
 
