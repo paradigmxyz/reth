@@ -1040,18 +1040,19 @@ where
     #[cfg(feature = "std")]
     #[instrument(target = "trie::sparse", skip_all, fields(max_depth, max_storage_tries))]
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        // Prune state and storage tries in parallel
-        rayon::join(
-            || {
-                if let Some(trie) = self.state.as_revealed_mut() {
-                    trie.prune(max_depth);
-                }
-                self.revealed_account_paths.clear();
-            },
-            || {
-                self.storage.prune(max_depth, max_storage_tries);
-            },
-        );
+        self.storage.clear()
+        // // Prune state and storage tries in parallel
+        // rayon::join(
+        //     || {
+        //         if let Some(trie) = self.state.as_revealed_mut() {
+        //             trie.prune(max_depth);
+        //         }
+        //         self.revealed_account_paths.clear();
+        //     },
+        //     || {
+        //         self.storage.clear()
+        //     },
+        // );
     }
 }
 
