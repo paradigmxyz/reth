@@ -113,6 +113,13 @@ impl reth_storage_api::AccountReader for StateProviderTraitObjWrapper {
     ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Account>> {
         self.0.basic_account(address)
     }
+
+    fn hashed_basic_account(
+        &self,
+        hashed_address: B256,
+    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Account>> {
+        self.0.hashed_basic_account(hashed_address)
+    }
 }
 
 impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper {

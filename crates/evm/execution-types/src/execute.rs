@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use reth_primitives_traits::{Account, Bytecode};
 use revm::database::BundleState;
 
@@ -35,6 +35,17 @@ impl<T> BlockExecutionOutput<T> {
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
         self.state.account(address).map(|a| a.info.as_ref().map(Into::into))
+    }
+
+    /// Get account by hashed address if account is known.
+    /// This iterates through all accounts and checks if the hashed address matches.
+    pub fn hashed_account(&self, hashed_address: &B256) -> Option<Option<Account>> {
+        for (address, bundle_account) in self.state.state().iter() {
+            if keccak256(address) == *hashed_address {
+                return Some(bundle_account.info.as_ref().map(Into::into));
+            }
+        }
+        None
     }
 
     /// Get storage if value is known.

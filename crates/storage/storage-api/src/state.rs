@@ -80,6 +80,13 @@ pub trait StateProvider:
         self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.balance)))
     }
 
+    /// Get account balance by its hashed address.
+    ///
+    /// Returns `None` if the account doesn't exist
+    fn hashed_account_balance(&self, hashed_address: B256) -> ProviderResult<Option<U256>> {
+        self.hashed_basic_account(hashed_address)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.balance)))
+    }
+
     /// Get account nonce by its address.
     ///
     /// Returns `None` if the account doesn't exist

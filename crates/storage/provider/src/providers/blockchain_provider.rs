@@ -20,7 +20,7 @@ use reth_chain_state::{
     MemoryOverlayStateProvider, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
-use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
+use reth_db_api::models::{AccountBeforeTx, BlockNumberHash, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader, StorageEntry};
@@ -713,23 +713,24 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberHash, StorageEntry)>> {
         self.consistent_provider()?.storage_changeset(block_number)
     }
 
     fn get_storage_before_block(
         &self,
         block_number: BlockNumber,
-        address: Address,
+        hashed_address: B256,
         storage_key: B256,
     ) -> ProviderResult<Option<StorageEntry>> {
-        self.consistent_provider()?.get_storage_before_block(block_number, address, storage_key)
+        self.consistent_provider()?
+            .get_storage_before_block(block_number, hashed_address, storage_key)
     }
 
     fn storage_changesets_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberHash, StorageEntry)>> {
         self.consistent_provider()?.storage_changesets_range(range)
     }
 
@@ -749,9 +750,9 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
     fn get_account_before_block(
         &self,
         block_number: BlockNumber,
-        address: Address,
+        hashed_address: B256,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
-        self.consistent_provider()?.get_account_before_block(block_number, address)
+        self.consistent_provider()?.get_account_before_block(block_number, hashed_address)
     }
 
     fn account_changesets_range(
@@ -770,6 +771,10 @@ impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         self.consistent_provider()?.basic_account(address)
+    }
+
+    fn hashed_basic_account(&self, hashed_address: B256) -> ProviderResult<Option<Account>> {
+        self.consistent_provider()?.hashed_basic_account(hashed_address)
     }
 }
 
@@ -804,7 +809,7 @@ mod tests {
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
-    use alloy_primitives::{BlockNumber, TxNumber, B256};
+    use alloy_primitives::{keccak256, BlockNumber, TxNumber, B256};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -1754,22 +1759,38 @@ mod tests {
         provider.canonical_in_memory_state.update_chain(chain);
 
         assert_eq!(
-            provider.account_block_changeset(last_database_block).unwrap(),
+            provider
+                .account_block_changeset(last_database_block)
+                .unwrap()
+                .into_iter()
+                .sorted_by_key(|entry| entry.hashed_address)
+                .collect::<Vec<_>>(),
             database_changesets
                 .into_iter()
                 .next_back()
                 .unwrap()
                 .into_iter()
-                .sorted_by_key(|(address, _, _)| *address)
-                .map(|(address, account, _)| AccountBeforeTx { address, info: Some(account) })
+                .map(|(address, account, _)| AccountBeforeTx {
+                    hashed_address: keccak256(address),
+                    info: Some(account),
+                })
+                .sorted_by_key(|entry| entry.hashed_address)
                 .collect::<Vec<_>>()
         );
         assert_eq!(
-            provider.account_block_changeset(first_in_memory_block).unwrap(),
+            provider
+                .account_block_changeset(first_in_memory_block)
+                .unwrap()
+                .into_iter()
+                .sorted_by_key(|entry| entry.hashed_address)
+                .collect::<Vec<_>>(),
             in_memory_changesets
                 .into_iter()
-                .sorted_by_key(|(address, _, _)| *address)
-                .map(|(address, account, _)| AccountBeforeTx { address, info: Some(account) })
+                .map(|(address, account, _)| AccountBeforeTx {
+                    hashed_address: keccak256(address),
+                    info: Some(account),
+                })
+                .sorted_by_key(|entry| entry.hashed_address)
                 .collect::<Vec<_>>()
         );
 

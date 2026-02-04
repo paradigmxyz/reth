@@ -209,8 +209,9 @@ impl Account {
     ///
     /// In case of a mismatch, `Err(Error::Assertion)` is returned.
     pub fn assert_db(&self, address: Address, tx: &impl DbTx) -> Result<(), Error> {
+        let hashed_address = keccak256(address);
         let account =
-            tx.get_by_encoded_key::<tables::PlainAccountState>(&address)?.ok_or_else(|| {
+            tx.get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?.ok_or_else(|| {
                 Error::Assertion(format!(
                     "Expected account ({address}) is missing from DB: {self:?}"
                 ))
@@ -229,10 +230,10 @@ impl Account {
             )?;
         }
 
-        let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+        let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
         for (slot, value) in &self.storage {
             if let Some(entry) =
-                storage_cursor.seek_by_key_subkey(address, B256::new(slot.to_be_bytes()))?
+                storage_cursor.seek_by_key_subkey(hashed_address, B256::new(slot.to_be_bytes()))?
             {
                 if U256::from_be_bytes(entry.key.0) == *slot {
                     assert_equal(

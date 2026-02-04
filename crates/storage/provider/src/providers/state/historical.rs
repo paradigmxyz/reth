@@ -3,7 +3,7 @@ use crate::{
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     table::Table,
@@ -132,6 +132,15 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     where
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
+        let hashed_address = keccak256(address);
+        self.hashed_address_history_lookup(hashed_address)
+    }
+
+    /// Lookup an account in the `AccountsHistory` table by hashed address using `EitherReader`.
+    pub fn hashed_address_history_lookup(&self, hashed_address: B256) -> ProviderResult<HistoryInfo>
+    where
+        Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
+    {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
@@ -139,7 +148,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         self.provider.with_rocksdb_tx(|rocks_tx_ref| {
             let mut reader = EitherReader::new_accounts_history(self.provider, rocks_tx_ref)?;
             reader.account_history_info(
-                address,
+                hashed_address,
                 self.block_number,
                 self.lowest_available_blocks.account_history_block_number,
             )
@@ -159,11 +168,13 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
+        let hashed_address = keccak256(address);
+        let hashed_storage_key = keccak256(storage_key);
         self.provider.with_rocksdb_tx(|rocks_tx_ref| {
             let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
             reader.storage_history_info(
-                address,
-                storage_key,
+                hashed_address,
+                hashed_storage_key,
                 self.block_number,
                 self.lowest_available_blocks.storage_history_block_number,
             )
@@ -193,7 +204,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             );
         }
 
-        HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(self.provider, self.block_number..)
+        HashedPostStateSorted::from_reverts(self.provider, self.block_number..)
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.
@@ -250,20 +261,25 @@ impl<
 {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        match self.account_history_lookup(*address)? {
+        let hashed_address = keccak256(address);
+        self.hashed_basic_account(hashed_address)
+    }
+
+    fn hashed_basic_account(&self, hashed_address: B256) -> ProviderResult<Option<Account>> {
+        match self.hashed_address_history_lookup(hashed_address)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => {
                 // Use ChangeSetReader trait method to get the account from changesets
                 self.provider
-                    .get_account_before_block(changeset_block_number, *address)?
+                    .get_account_before_block(changeset_block_number, hashed_address)?
                     .ok_or(ProviderError::AccountChangesetNotFound {
                         block_number: changeset_block_number,
-                        address: *address,
+                        hashed_address,
                     })
                     .map(|account_before| account_before.info)
             }
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
+                Ok(self.tx().get::<tables::HashedAccounts>(hashed_address)?)
             }
         }
     }
@@ -418,11 +434,13 @@ impl<
         address: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
+        let hashed_address = keccak256(address);
+        let hashed_storage_key = keccak256(storage_key);
         match self.storage_history_lookup(address, storage_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => self
                 .provider
-                .get_storage_before_block(changeset_block_number, address, storage_key)?
+                .get_storage_before_block(changeset_block_number, hashed_address, hashed_storage_key)?
                 .ok_or_else(|| ProviderError::StorageChangesetNotFound {
                     block_number: changeset_block_number,
                     address,
@@ -430,13 +448,15 @@ impl<
                 })
                 .map(|entry| entry.value)
                 .map(Some),
-            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
-                .tx()
-                .cursor_dup_read::<tables::PlainStorageState>()?
-                .seek_by_key_subkey(address, storage_key)?
-                .filter(|entry| entry.key == storage_key)
-                .map(|entry| entry.value)
-                .or(Some(StorageValue::ZERO))),
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                Ok(self
+                    .tx()
+                    .cursor_dup_read::<tables::HashedStorages>()?
+                    .seek_by_key_subkey(hashed_address, hashed_storage_key)?
+                    .filter(|entry| entry.key == hashed_storage_key)
+                    .map(|entry| entry.value)
+                    .or(Some(StorageValue::ZERO)))
+            }
         }
     }
 }
@@ -623,7 +643,7 @@ mod tests {
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, RocksDBProviderFactory,
         StateProvider,
     };
-    use alloy_primitives::{address, b256, Address, B256, U256};
+    use alloy_primitives::{address, b256, keccak256, Address, B256, U256};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
         tables,
@@ -662,18 +682,21 @@ mod tests {
         let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap().into_tx();
 
+        let hashed_address = keccak256(ADDRESS);
+        let higher_hashed_address = keccak256(HIGHER_ADDRESS);
+
         tx.put::<tables::AccountsHistory>(
-            ShardedKey { key: ADDRESS, highest_block_number: 7 },
+            ShardedKey { key: hashed_address, highest_block_number: 7 },
             BlockNumberList::new([1, 3, 7]).unwrap(),
         )
         .unwrap();
         tx.put::<tables::AccountsHistory>(
-            ShardedKey { key: ADDRESS, highest_block_number: u64::MAX },
+            ShardedKey { key: hashed_address, highest_block_number: u64::MAX },
             BlockNumberList::new([10, 15]).unwrap(),
         )
         .unwrap();
         tx.put::<tables::AccountsHistory>(
-            ShardedKey { key: HIGHER_ADDRESS, highest_block_number: u64::MAX },
+            ShardedKey { key: higher_hashed_address, highest_block_number: u64::MAX },
             BlockNumberList::new([4]).unwrap(),
         )
         .unwrap();
@@ -687,37 +710,40 @@ mod tests {
         let higher_acc_plain = Account { nonce: 4, balance: U256::ZERO, bytecode_hash: None };
 
         // setup
-        tx.put::<tables::AccountChangeSets>(1, AccountBeforeTx { address: ADDRESS, info: None })
-            .unwrap();
+        tx.put::<tables::AccountChangeSets>(
+            1,
+            AccountBeforeTx { hashed_address, info: None },
+        )
+        .unwrap();
         tx.put::<tables::AccountChangeSets>(
             3,
-            AccountBeforeTx { address: ADDRESS, info: Some(acc_at3) },
+            AccountBeforeTx { hashed_address, info: Some(acc_at3) },
         )
         .unwrap();
         tx.put::<tables::AccountChangeSets>(
             4,
-            AccountBeforeTx { address: HIGHER_ADDRESS, info: None },
+            AccountBeforeTx { hashed_address: higher_hashed_address, info: None },
         )
         .unwrap();
         tx.put::<tables::AccountChangeSets>(
             7,
-            AccountBeforeTx { address: ADDRESS, info: Some(acc_at7) },
+            AccountBeforeTx { hashed_address, info: Some(acc_at7) },
         )
         .unwrap();
         tx.put::<tables::AccountChangeSets>(
             10,
-            AccountBeforeTx { address: ADDRESS, info: Some(acc_at10) },
+            AccountBeforeTx { hashed_address, info: Some(acc_at10) },
         )
         .unwrap();
         tx.put::<tables::AccountChangeSets>(
             15,
-            AccountBeforeTx { address: ADDRESS, info: Some(acc_at15) },
+            AccountBeforeTx { hashed_address, info: Some(acc_at15) },
         )
         .unwrap();
 
-        // setup plain state
-        tx.put::<tables::PlainAccountState>(ADDRESS, acc_plain).unwrap();
-        tx.put::<tables::PlainAccountState>(HIGHER_ADDRESS, higher_acc_plain).unwrap();
+        // setup hashed state
+        tx.put::<tables::HashedAccounts>(hashed_address, acc_plain).unwrap();
+        tx.put::<tables::HashedAccounts>(higher_hashed_address, higher_acc_plain).unwrap();
         tx.commit().unwrap();
 
         let db = factory.provider().unwrap();
@@ -775,49 +801,54 @@ mod tests {
         let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap().into_tx();
 
+        let hashed_address = keccak256(ADDRESS);
+        let higher_hashed_address = keccak256(HIGHER_ADDRESS);
+        let hashed_storage = keccak256(STORAGE);
+
         tx.put::<tables::StoragesHistory>(
             StorageShardedKey {
-                address: ADDRESS,
-                sharded_key: ShardedKey { key: STORAGE, highest_block_number: 7 },
+                hashed_address,
+                sharded_key: ShardedKey { key: hashed_storage, highest_block_number: 7 },
             },
             BlockNumberList::new([3, 7]).unwrap(),
         )
         .unwrap();
         tx.put::<tables::StoragesHistory>(
             StorageShardedKey {
-                address: ADDRESS,
-                sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },
+                hashed_address,
+                sharded_key: ShardedKey { key: hashed_storage, highest_block_number: u64::MAX },
             },
             BlockNumberList::new([10, 15]).unwrap(),
         )
         .unwrap();
         tx.put::<tables::StoragesHistory>(
             StorageShardedKey {
-                address: HIGHER_ADDRESS,
-                sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },
+                hashed_address: higher_hashed_address,
+                sharded_key: ShardedKey { key: hashed_storage, highest_block_number: u64::MAX },
             },
             BlockNumberList::new([4]).unwrap(),
         )
         .unwrap();
 
-        let higher_entry_plain = StorageEntry { key: STORAGE, value: U256::from(1000) };
-        let higher_entry_at4 = StorageEntry { key: STORAGE, value: U256::from(0) };
-        let entry_plain = StorageEntry { key: STORAGE, value: U256::from(100) };
-        let entry_at15 = StorageEntry { key: STORAGE, value: U256::from(15) };
-        let entry_at10 = StorageEntry { key: STORAGE, value: U256::from(10) };
-        let entry_at7 = StorageEntry { key: STORAGE, value: U256::from(7) };
-        let entry_at3 = StorageEntry { key: STORAGE, value: U256::from(0) };
+        let higher_entry_plain = StorageEntry { key: hashed_storage, value: U256::from(1000) };
+        let higher_entry_at4 = StorageEntry { key: hashed_storage, value: U256::from(0) };
+        let entry_plain = StorageEntry { key: hashed_storage, value: U256::from(100) };
+        let entry_at15 = StorageEntry { key: hashed_storage, value: U256::from(15) };
+        let entry_at10 = StorageEntry { key: hashed_storage, value: U256::from(10) };
+        let entry_at7 = StorageEntry { key: hashed_storage, value: U256::from(7) };
+        let entry_at3 = StorageEntry { key: hashed_storage, value: U256::from(0) };
 
         // setup
-        tx.put::<tables::StorageChangeSets>((3, ADDRESS).into(), entry_at3).unwrap();
-        tx.put::<tables::StorageChangeSets>((4, HIGHER_ADDRESS).into(), higher_entry_at4).unwrap();
-        tx.put::<tables::StorageChangeSets>((7, ADDRESS).into(), entry_at7).unwrap();
-        tx.put::<tables::StorageChangeSets>((10, ADDRESS).into(), entry_at10).unwrap();
-        tx.put::<tables::StorageChangeSets>((15, ADDRESS).into(), entry_at15).unwrap();
+        tx.put::<tables::StorageChangeSets>((3, hashed_address).into(), entry_at3).unwrap();
+        tx.put::<tables::StorageChangeSets>((4, higher_hashed_address).into(), higher_entry_at4)
+            .unwrap();
+        tx.put::<tables::StorageChangeSets>((7, hashed_address).into(), entry_at7).unwrap();
+        tx.put::<tables::StorageChangeSets>((10, hashed_address).into(), entry_at10).unwrap();
+        tx.put::<tables::StorageChangeSets>((15, hashed_address).into(), entry_at15).unwrap();
 
-        // setup plain state
-        tx.put::<tables::PlainStorageState>(ADDRESS, entry_plain).unwrap();
-        tx.put::<tables::PlainStorageState>(HIGHER_ADDRESS, higher_entry_plain).unwrap();
+        // setup hashed state
+        tx.put::<tables::HashedStorages>(hashed_address, entry_plain).unwrap();
+        tx.put::<tables::HashedStorages>(higher_hashed_address, higher_entry_plain).unwrap();
         tx.commit().unwrap();
 
         let db = factory.provider().unwrap();

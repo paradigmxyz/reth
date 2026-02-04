@@ -624,9 +624,7 @@ impl Deref for DatabaseEnv {
 mod tests {
     use super::*;
     use crate::{
-        tables::{
-            AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
-        },
+        tables::{AccountsHistory, CanonicalHeaders, HashedAccounts, HashedStorages, Headers},
         test_utils::*,
         AccountChangeSets,
     };
@@ -739,34 +737,34 @@ mod tests {
         let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
-        let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
+        let mut dup_cursor = tx.cursor_dup_write::<HashedStorages>().unwrap();
 
         let entry_0 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(0) };
         let entry_1 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
 
-        dup_cursor.upsert(Address::with_last_byte(1), &entry_0).expect(ERROR_UPSERT);
-        dup_cursor.upsert(Address::with_last_byte(1), &entry_1).expect(ERROR_UPSERT);
+        dup_cursor.upsert(B256::with_last_byte(1), &entry_0).expect(ERROR_UPSERT);
+        dup_cursor.upsert(B256::with_last_byte(1), &entry_1).expect(ERROR_UPSERT);
 
         assert_eq!(
             dup_cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>().unwrap(),
-            vec![(Address::with_last_byte(1), entry_0), (Address::with_last_byte(1), entry_1),]
+            vec![(B256::with_last_byte(1), entry_0), (B256::with_last_byte(1), entry_1),]
         );
 
         let mut walker = dup_cursor.walk(None).unwrap();
         walker.delete_current().expect(ERROR_DEL);
 
-        assert_eq!(walker.next().unwrap().unwrap(), (Address::with_last_byte(1), entry_1));
+        assert_eq!(walker.next().unwrap().unwrap(), (B256::with_last_byte(1), entry_1));
 
         // Check the tx view - it correctly holds entry_1
         assert_eq!(
-            tx.cursor_dup_read::<PlainStorageState>()
+            tx.cursor_dup_read::<HashedStorages>()
                 .unwrap()
                 .walk(None)
                 .unwrap()
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap(),
             vec![
-                (Address::with_last_byte(1), entry_1), // This is ok - we removed entry_0
+                (B256::with_last_byte(1), entry_1), // This is ok - we removed entry_0
             ]
         );
 
@@ -867,24 +865,24 @@ mod tests {
     fn db_cursor_walk_range_on_dup_table() {
         let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
-        let address0 = Address::ZERO;
-        let address1 = Address::with_last_byte(1);
-        let address2 = Address::with_last_byte(2);
+        let hash0 = B256::ZERO;
+        let hash1 = B256::with_last_byte(1);
+        let hash2 = B256::with_last_byte(2);
 
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        tx.put::<AccountChangeSets>(0, AccountBeforeTx { address: address0, info: None })
+        tx.put::<AccountChangeSets>(0, AccountBeforeTx { hashed_address: hash0, info: None })
             .expect(ERROR_PUT);
-        tx.put::<AccountChangeSets>(0, AccountBeforeTx { address: address1, info: None })
+        tx.put::<AccountChangeSets>(0, AccountBeforeTx { hashed_address: hash1, info: None })
             .expect(ERROR_PUT);
-        tx.put::<AccountChangeSets>(0, AccountBeforeTx { address: address2, info: None })
+        tx.put::<AccountChangeSets>(0, AccountBeforeTx { hashed_address: hash2, info: None })
             .expect(ERROR_PUT);
-        tx.put::<AccountChangeSets>(1, AccountBeforeTx { address: address0, info: None })
+        tx.put::<AccountChangeSets>(1, AccountBeforeTx { hashed_address: hash0, info: None })
             .expect(ERROR_PUT);
-        tx.put::<AccountChangeSets>(1, AccountBeforeTx { address: address1, info: None })
+        tx.put::<AccountChangeSets>(1, AccountBeforeTx { hashed_address: hash1, info: None })
             .expect(ERROR_PUT);
-        tx.put::<AccountChangeSets>(1, AccountBeforeTx { address: address2, info: None })
+        tx.put::<AccountChangeSets>(1, AccountBeforeTx { hashed_address: hash2, info: None })
             .expect(ERROR_PUT);
-        tx.put::<AccountChangeSets>(2, AccountBeforeTx { address: address0, info: None }) // <- should not be returned by the walker
+        tx.put::<AccountChangeSets>(2, AccountBeforeTx { hashed_address: hash0, info: None }) // <- should not be returned by the walker
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
@@ -897,27 +895,27 @@ mod tests {
         let mut walker = cursor.walk_range(0..=1).unwrap();
         assert_eq!(
             walker.next().unwrap().unwrap(),
-            (0, AccountBeforeTx { address: address0, info: None })
+            (0, AccountBeforeTx { hashed_address: hash0, info: None })
         );
         assert_eq!(
             walker.next().unwrap().unwrap(),
-            (0, AccountBeforeTx { address: address1, info: None })
+            (0, AccountBeforeTx { hashed_address: hash1, info: None })
         );
         assert_eq!(
             walker.next().unwrap().unwrap(),
-            (0, AccountBeforeTx { address: address2, info: None })
+            (0, AccountBeforeTx { hashed_address: hash2, info: None })
         );
         assert_eq!(
             walker.next().unwrap().unwrap(),
-            (1, AccountBeforeTx { address: address0, info: None })
+            (1, AccountBeforeTx { hashed_address: hash0, info: None })
         );
         assert_eq!(
             walker.next().unwrap().unwrap(),
-            (1, AccountBeforeTx { address: address1, info: None })
+            (1, AccountBeforeTx { hashed_address: hash1, info: None })
         );
         assert_eq!(
             walker.next().unwrap().unwrap(),
-            (1, AccountBeforeTx { address: address2, info: None })
+            (1, AccountBeforeTx { hashed_address: hash2, info: None })
         );
         assert!(walker.next().is_none());
     }
@@ -1119,8 +1117,8 @@ mod tests {
         let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
-        let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
-        let key = Address::random();
+        let mut dup_cursor = tx.cursor_dup_write::<HashedStorages>().unwrap();
+        let key = B256::random();
         let subkey1 = B256::random();
         let subkey2 = B256::random();
 
@@ -1137,10 +1135,10 @@ mod tests {
         let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
-        let key1 = Address::with_last_byte(1);
-        let key2 = Address::with_last_byte(2);
-        let key3 = Address::with_last_byte(3);
-        let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
+        let key1 = B256::with_last_byte(1);
+        let key2 = B256::with_last_byte(2);
+        let key3 = B256::with_last_byte(3);
+        let mut cursor = tx.cursor_write::<HashedAccounts>().unwrap();
 
         assert!(cursor.insert(key1, &Account::default()).is_ok());
         assert!(cursor.insert(key2, &Account::default()).is_ok());
@@ -1262,8 +1260,8 @@ mod tests {
         let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
-        let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
-        let key = Address::random();
+        let mut cursor = tx.cursor_write::<HashedAccounts>().unwrap();
+        let key = B256::random();
 
         let account = Account::default();
         cursor.upsert(key, &account).expect(ERROR_UPSERT);
@@ -1277,7 +1275,7 @@ mod tests {
         cursor.upsert(key, &account).expect(ERROR_UPSERT);
         assert_eq!(cursor.seek_exact(key).unwrap(), Some((key, account)));
 
-        let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
+        let mut dup_cursor = tx.cursor_dup_write::<HashedStorages>().unwrap();
         let subkey = B256::random();
 
         let value = U256::from(1);
@@ -1305,7 +1303,7 @@ mod tests {
             .try_for_each(|val| {
                 cursor.append(
                     transition_id,
-                    &AccountBeforeTx { address: Address::with_last_byte(val), info: None },
+                    &AccountBeforeTx { hashed_address: B256::with_last_byte(val), info: None },
                 )
             })
             .expect(ERROR_APPEND);
@@ -1320,7 +1318,7 @@ mod tests {
             .append_dup(
                 transition_id,
                 AccountBeforeTx {
-                    address: Address::with_last_byte(subkey_to_append),
+                    hashed_address: B256::with_last_byte(subkey_to_append),
                     info: None
                 }
             )
@@ -1336,7 +1334,7 @@ mod tests {
                 .append(
                     transition_id - 1,
                     &AccountBeforeTx {
-                        address: Address::with_last_byte(subkey_to_append),
+                        hashed_address: B256::with_last_byte(subkey_to_append),
                         info: None
                     }
                 )
@@ -1351,13 +1349,14 @@ mod tests {
         assert!(cursor
             .append(
                 transition_id,
-                &AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
+                &AccountBeforeTx { hashed_address: B256::with_last_byte(subkey_to_append), info: None }
             )
             .is_ok());
     }
 
     #[test]
     fn db_closure_put_get() {
+        use alloy_primitives::keccak256;
         let tempdir = TempDir::new().expect(ERROR_TEMPDIR);
         let path = tempdir.path();
 
@@ -1366,15 +1365,16 @@ mod tests {
             bytecode_hash: Some(B256::random()),
             balance: U256::MAX,
         };
-        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
+        let address = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
             .expect(ERROR_ETH_ADDRESS);
+        let key = keccak256(address);
 
         {
             let env = create_test_db_with_path(DatabaseEnvKind::RW, path);
 
             // PUT
             let result = env.update(|tx| {
-                tx.put::<PlainAccountState>(key, value).expect(ERROR_PUT);
+                tx.put::<HashedAccounts>(key, value).expect(ERROR_PUT);
                 200
             });
             assert_eq!(result.expect(ERROR_RETURN_VALUE), 200);
@@ -1389,7 +1389,7 @@ mod tests {
 
         // GET
         let result =
-            env.view(|tx| tx.get::<PlainAccountState>(key).expect(ERROR_GET)).expect(ERROR_GET);
+            env.view(|tx| tx.get::<HashedAccounts>(key).expect(ERROR_GET)).expect(ERROR_GET);
 
         assert_eq!(result, Some(value))
     }
@@ -1397,25 +1397,24 @@ mod tests {
     #[test]
     fn db_dup_sort() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
-            .expect(ERROR_ETH_ADDRESS);
+        let key = B256::with_last_byte(0xa2);
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
-        env.update(|tx| tx.put::<PlainStorageState>(key, value00).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<HashedStorages>(key, value00).expect(ERROR_PUT)).unwrap();
 
         // PUT (2,2)
         let value22 = StorageEntry { key: B256::with_last_byte(2), value: U256::from(2) };
-        env.update(|tx| tx.put::<PlainStorageState>(key, value22).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<HashedStorages>(key, value22).expect(ERROR_PUT)).unwrap();
 
         // PUT (1,1)
         let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
-        env.update(|tx| tx.put::<PlainStorageState>(key, value11).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<HashedStorages>(key, value11).expect(ERROR_PUT)).unwrap();
 
         // Iterate with cursor
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<HashedStorages>().unwrap();
 
             // Notice that value11 and value22 have been ordered in the DB.
             assert_eq!(Some(value00), cursor.next_dup_val().unwrap());
@@ -1426,7 +1425,7 @@ mod tests {
         // Seek value with exact subkey
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<HashedStorages>().unwrap();
             let mut walker = cursor.walk_dup(Some(key), Some(B256::with_last_byte(1))).unwrap();
             assert_eq!(
                 (key, value11),
@@ -1441,26 +1440,25 @@ mod tests {
     #[test]
     fn db_walk_dup_with_not_existing_key() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
-            .expect(ERROR_ETH_ADDRESS);
+        let key = B256::with_last_byte(0xa2);
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
-        env.update(|tx| tx.put::<PlainStorageState>(key, value00).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<HashedStorages>(key, value00).expect(ERROR_PUT)).unwrap();
 
         // PUT (2,2)
         let value22 = StorageEntry { key: B256::with_last_byte(2), value: U256::from(2) };
-        env.update(|tx| tx.put::<PlainStorageState>(key, value22).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<HashedStorages>(key, value22).expect(ERROR_PUT)).unwrap();
 
         // PUT (1,1)
         let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
-        env.update(|tx| tx.put::<PlainStorageState>(key, value11).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<HashedStorages>(key, value11).expect(ERROR_PUT)).unwrap();
 
         // Try to walk_dup with not existing key should immediately return None
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
-            let not_existing_key = Address::ZERO;
+            let mut cursor = tx.cursor_dup_read::<HashedStorages>().unwrap();
+            let not_existing_key = B256::ZERO;
             let mut walker = cursor.walk_dup(Some(not_existing_key), None).unwrap();
             assert!(walker.next().is_none());
         }
@@ -1469,27 +1467,25 @@ mod tests {
     #[test]
     fn db_iterate_over_all_dup_values() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key1 = Address::from_str("0x1111111111111111111111111111111111111111")
-            .expect(ERROR_ETH_ADDRESS);
-        let key2 = Address::from_str("0x2222222222222222222222222222222222222222")
-            .expect(ERROR_ETH_ADDRESS);
+        let key1 = B256::new([0x11; 32]);
+        let key2 = B256::new([0x22; 32]);
 
         // PUT key1 (0,0)
         let value00 = StorageEntry::default();
-        env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<HashedStorages>(key1, value00).expect(ERROR_PUT)).unwrap();
 
         // PUT key1 (1,1)
         let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
-        env.update(|tx| tx.put::<PlainStorageState>(key1, value11).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<HashedStorages>(key1, value11).expect(ERROR_PUT)).unwrap();
 
         // PUT key2 (2,2)
         let value22 = StorageEntry { key: B256::with_last_byte(2), value: U256::from(2) };
-        env.update(|tx| tx.put::<PlainStorageState>(key2, value22).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<HashedStorages>(key2, value22).expect(ERROR_PUT)).unwrap();
 
         // Iterate with walk_dup
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<HashedStorages>().unwrap();
             let mut walker = cursor.walk_dup(None, None).unwrap();
 
             // Notice that value11 and value22 have been ordered in the DB.
@@ -1503,7 +1499,7 @@ mod tests {
         // Iterate by using `walk`
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<HashedStorages>().unwrap();
             let first = cursor.first().unwrap().unwrap();
             let mut walker = cursor.walk(Some(first.0)).unwrap();
             assert_eq!((key1, value00), walker.next().unwrap().unwrap());
@@ -1515,25 +1511,25 @@ mod tests {
     #[test]
     fn dup_value_with_same_subkey() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key1 = Address::new([0x11; 20]);
-        let key2 = Address::new([0x22; 20]);
+        let key1 = B256::new([0x11; 32]);
+        let key2 = B256::new([0x22; 32]);
 
         // PUT key1 (0,1)
         let value01 = StorageEntry { key: B256::with_last_byte(0), value: U256::from(1) };
-        env.update(|tx| tx.put::<PlainStorageState>(key1, value01).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<HashedStorages>(key1, value01).expect(ERROR_PUT)).unwrap();
 
         // PUT key1 (0,0)
         let value00 = StorageEntry::default();
-        env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<HashedStorages>(key1, value00).expect(ERROR_PUT)).unwrap();
 
         // PUT key2 (2,2)
         let value22 = StorageEntry { key: B256::with_last_byte(2), value: U256::from(2) };
-        env.update(|tx| tx.put::<PlainStorageState>(key2, value22).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<HashedStorages>(key2, value22).expect(ERROR_PUT)).unwrap();
 
         // Iterate with walk
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<HashedStorages>().unwrap();
             let first = cursor.first().unwrap().unwrap();
             let mut walker = cursor.walk(Some(first.0)).unwrap();
 
@@ -1546,7 +1542,7 @@ mod tests {
         // seek_by_key_subkey
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
-            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+            let mut cursor = tx.cursor_dup_read::<HashedStorages>().unwrap();
 
             // NOTE: There are two values with same SubKey but only first one is shown
             assert_eq!(value00, cursor.seek_by_key_subkey(key1, value00.key).unwrap().unwrap());
@@ -1558,7 +1554,7 @@ mod tests {
     #[test]
     fn db_sharded_key() {
         let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
-        let real_key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
+        let real_key = B256::with_last_byte(0xa2);
 
         let shards = 5;
         for i in 1..=shards {
@@ -1574,9 +1570,9 @@ mod tests {
             let tx = db.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_read::<AccountsHistory>().unwrap();
 
-            // It will seek the one greater or equal to the query. Since we have `Address | 100`,
-            // `Address | 200` in the database and we're querying `Address | 150` it will return us
-            // `Address | 200`.
+            // It will seek the one greater or equal to the query. Since we have `Hash | 100`,
+            // `Hash | 200` in the database and we're querying `Hash | 150` it will return us
+            // `Hash | 200`.
             let mut walker = cursor.walk(Some(ShardedKey::new(real_key, 150))).unwrap();
             let (key, list) = walker
                 .next()

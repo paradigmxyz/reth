@@ -894,14 +894,14 @@ mod tests {
         let balance = U256::from(0x3635c9adc5dea00000u128);
         let code_hash = keccak256(code);
         db_tx
-            .put::<tables::PlainAccountState>(
-                acc1,
+            .put::<tables::HashedAccounts>(
+                keccak256(acc1),
                 Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
             )
             .unwrap();
         db_tx
-            .put::<tables::PlainAccountState>(
-                acc2,
+            .put::<tables::HashedAccounts>(
+                keccak256(acc2),
                 Account { nonce: 0, balance, bytecode_hash: None },
             )
             .unwrap();
@@ -982,7 +982,7 @@ mod tests {
             // assert storage
             // Get on dupsort would return only first value. This is good enough for this test.
             assert!(matches!(
-                provider.tx_ref().get::<tables::PlainStorageState>(account1),
+                provider.tx_ref().get::<tables::HashedStorages>(keccak256(account1)),
                 Ok(Some(entry)) if entry.key == B256::with_last_byte(1) && entry.value == U256::from(2)
             ));
 
@@ -1039,8 +1039,8 @@ mod tests {
         let acc2 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
         let acc2_info = Account { nonce: 0, balance, bytecode_hash: None };
 
-        db_tx.put::<tables::PlainAccountState>(acc1, acc1_info).unwrap();
-        db_tx.put::<tables::PlainAccountState>(acc2, acc2_info).unwrap();
+        db_tx.put::<tables::HashedAccounts>(keccak256(acc1), acc1_info).unwrap();
+        db_tx.put::<tables::HashedAccounts>(keccak256(acc2), acc2_info).unwrap();
         db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
         provider.commit().unwrap();
 
@@ -1152,10 +1152,13 @@ mod tests {
 
         // set account
         let provider = test_db.factory.provider_rw().unwrap();
-        provider.tx_ref().put::<tables::PlainAccountState>(caller_address, caller_info).unwrap();
         provider
             .tx_ref()
-            .put::<tables::PlainAccountState>(destroyed_address, destroyed_info)
+            .put::<tables::HashedAccounts>(keccak256(caller_address), caller_info)
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::HashedAccounts>(keccak256(destroyed_address), destroyed_info)
             .unwrap();
         provider
             .tx_ref()
@@ -1164,15 +1167,15 @@ mod tests {
         // set storage to check when account gets destroyed.
         provider
             .tx_ref()
-            .put::<tables::PlainStorageState>(
-                destroyed_address,
+            .put::<tables::HashedStorages>(
+                keccak256(destroyed_address),
                 StorageEntry { key: B256::ZERO, value: U256::ZERO },
             )
             .unwrap();
         provider
             .tx_ref()
-            .put::<tables::PlainStorageState>(
-                destroyed_address,
+            .put::<tables::HashedStorages>(
+                keccak256(destroyed_address),
                 StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) },
             )
             .unwrap();
@@ -1190,19 +1193,19 @@ mod tests {
         assert!(matches!(provider.basic_account(&destroyed_address), Ok(None)));
 
         assert!(matches!(
-            provider.tx_ref().get::<tables::PlainStorageState>(destroyed_address),
+            provider.tx_ref().get::<tables::HashedStorages>(keccak256(destroyed_address)),
             Ok(None)
         ));
         // drops tx so that it returns write privilege to test_tx
         drop(provider);
-        let plain_accounts = test_db.table::<tables::PlainAccountState>().unwrap();
-        let plain_storage = test_db.table::<tables::PlainStorageState>().unwrap();
+        let hashed_accounts = test_db.table::<tables::HashedAccounts>().unwrap();
+        let hashed_storage = test_db.table::<tables::HashedStorages>().unwrap();
 
         assert_eq!(
-            plain_accounts,
+            hashed_accounts,
             vec![
                 (
-                    beneficiary_address,
+                    keccak256(beneficiary_address),
                     Account {
                         nonce: 0,
                         balance: U256::from(0x1bc16d674eca30a0u64),
@@ -1210,7 +1213,7 @@ mod tests {
                     }
                 ),
                 (
-                    caller_address,
+                    keccak256(caller_address),
                     Account {
                         nonce: 1,
                         balance: U256::from(0xde0b6b3a761cf60u64),
@@ -1219,7 +1222,7 @@ mod tests {
                 )
             ]
         );
-        assert!(plain_storage.is_empty());
+        assert!(hashed_storage.is_empty());
 
         let account_changesets = test_db.table::<tables::AccountChangeSets>().unwrap();
         let storage_changesets = test_db.table::<tables::StorageChangeSets>().unwrap();
@@ -1229,12 +1232,21 @@ mod tests {
             vec![
                 (
                     block.number,
-                    AccountBeforeTx { address: destroyed_address, info: Some(destroyed_info) },
+                    AccountBeforeTx {
+                        hashed_address: keccak256(destroyed_address),
+                        info: Some(destroyed_info),
+                    },
                 ),
-                (block.number, AccountBeforeTx { address: beneficiary_address, info: None }),
                 (
                     block.number,
-                    AccountBeforeTx { address: caller_address, info: Some(caller_info) }
+                    AccountBeforeTx { hashed_address: keccak256(beneficiary_address), info: None },
+                ),
+                (
+                    block.number,
+                    AccountBeforeTx {
+                        hashed_address: keccak256(caller_address),
+                        info: Some(caller_info),
+                    },
                 ),
             ]
         );
@@ -1243,11 +1255,11 @@ mod tests {
             storage_changesets,
             vec![
                 (
-                    (block.number, destroyed_address).into(),
+                    (block.number, keccak256(destroyed_address)).into(),
                     StorageEntry { key: B256::ZERO, value: U256::ZERO }
                 ),
                 (
-                    (block.number, destroyed_address).into(),
+                    (block.number, keccak256(destroyed_address)).into(),
                     StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) }
                 )
             ]

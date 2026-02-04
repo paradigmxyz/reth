@@ -24,7 +24,7 @@ use reth_db::{
 };
 use reth_db_api::{
     cursor::DbCursorRW,
-    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress, ShardedKey},
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberHash, ShardedKey},
     tables,
     tables::BlockNumberList,
 };
@@ -578,13 +578,13 @@ where
         }
     }
 
-    /// Gets the last shard for an address and storage key (keyed with `u64::MAX`).
+    /// Gets the last shard for a hashed address and storage key (keyed with `u64::MAX`).
     pub fn get_last_storage_history_shard(
         &mut self,
-        address: Address,
+        hashed_address: B256,
         storage_key: B256,
     ) -> ProviderResult<Option<BlockNumberList>> {
-        let key = StorageShardedKey::last(address, storage_key);
+        let key = StorageShardedKey::last(hashed_address, storage_key);
         match self {
             Self::Database(cursor) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
@@ -601,7 +601,7 @@ where
     /// Appends an account history entry (for first sync - more efficient).
     pub fn append_account_history(
         &mut self,
-        key: ShardedKey<Address>,
+        key: ShardedKey<B256>,
         value: &BlockNumberList,
     ) -> ProviderResult<()> {
         match self {
@@ -615,7 +615,7 @@ where
     /// Upserts an account history entry (for incremental sync).
     pub fn upsert_account_history(
         &mut self,
-        key: ShardedKey<Address>,
+        key: ShardedKey<B256>,
         value: &BlockNumberList,
     ) -> ProviderResult<()> {
         match self {
@@ -626,23 +626,25 @@ where
         }
     }
 
-    /// Gets the last shard for an address (keyed with `u64::MAX`).
+    /// Gets the last shard for a hashed address (keyed with `u64::MAX`).
     pub fn get_last_account_history_shard(
         &mut self,
-        address: Address,
+        hashed_address: B256,
     ) -> ProviderResult<Option<BlockNumberList>> {
         match self {
             Self::Database(cursor) => {
-                Ok(cursor.seek_exact(ShardedKey::last(address))?.map(|(_, v)| v))
+                Ok(cursor.seek_exact(ShardedKey::last(hashed_address))?.map(|(_, v)| v))
             }
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(batch) => batch.get::<tables::AccountsHistory>(ShardedKey::last(address)),
+            Self::RocksDB(batch) => {
+                batch.get::<tables::AccountsHistory>(ShardedKey::last(hashed_address))
+            }
         }
     }
 
     /// Deletes an account history entry.
-    pub fn delete_account_history(&mut self, key: ShardedKey<Address>) -> ProviderResult<()> {
+    pub fn delete_account_history(&mut self, key: ShardedKey<B256>) -> ProviderResult<()> {
         match self {
             Self::Database(cursor) => {
                 if cursor.seek_exact(key)?.is_some() {
@@ -670,7 +672,7 @@ where
         mut changeset: Vec<AccountBeforeTx>,
     ) -> ProviderResult<()> {
         // First sort the changesets
-        changeset.par_sort_by_key(|a| a.address);
+        changeset.par_sort_by_key(|a| a.hashed_address);
         match self {
             Self::Database(cursor) => {
                 for change in changeset {
@@ -700,12 +702,12 @@ where
         block_number: BlockNumber,
         mut changeset: Vec<StorageBeforeTx>,
     ) -> ProviderResult<()> {
-        changeset.par_sort_by_key(|change| (change.address, change.key));
+        changeset.par_sort_by_key(|change| (change.hashed_address, change.key));
 
         match self {
             Self::Database(cursor) => {
                 for change in changeset {
-                    let storage_id = BlockNumberAddress((block_number, change.address));
+                    let storage_id = BlockNumberHash((block_number, change.hashed_address));
                     cursor.append_dup(
                         storage_id,
                         StorageEntry { key: change.key, value: change.value },
@@ -909,26 +911,26 @@ where
     /// Lookup storage history and return [`HistoryInfo`].
     pub fn storage_history_info(
         &mut self,
-        address: Address,
+        hashed_address: B256,
         storage_key: alloy_primitives::B256,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         match self {
             Self::Database(cursor, _) => {
-                let key = StorageShardedKey::new(address, storage_key, block_number);
+                let key = StorageShardedKey::new(hashed_address, storage_key, block_number);
                 history_info::<tables::StoragesHistory, _, _>(
                     cursor,
                     key,
                     block_number,
-                    |k| k.address == address && k.sharded_key.key == storage_key,
+                    |k| k.hashed_address == hashed_address && k.sharded_key.key == storage_key,
                     lowest_available_block_number,
                 )
             }
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.storage_history_info(
-                address,
+                hashed_address,
                 storage_key,
                 block_number,
                 lowest_available_block_number,
@@ -944,7 +946,7 @@ where
     /// Gets an account history shard entry for the given [`ShardedKey`], if present.
     pub fn get_account_history(
         &mut self,
-        key: ShardedKey<Address>,
+        key: ShardedKey<B256>,
     ) -> ProviderResult<Option<BlockNumberList>> {
         match self {
             Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
@@ -957,25 +959,25 @@ where
     /// Lookup account history and return [`HistoryInfo`].
     pub fn account_history_info(
         &mut self,
-        address: Address,
+        hashed_address: B256,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         match self {
             Self::Database(cursor, _) => {
-                let key = ShardedKey::new(address, block_number);
+                let key = ShardedKey::new(hashed_address, block_number);
                 history_info::<tables::AccountsHistory, _, _>(
                     cursor,
                     key,
                     block_number,
-                    |k| k.key == address,
+                    |k| k.key == hashed_address,
                     lowest_available_block_number,
                 )
             }
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => {
-                tx.account_history_info(address, block_number, lowest_available_block_number)
+                tx.account_history_info(hashed_address, block_number, lowest_available_block_number)
             }
         }
     }
@@ -985,11 +987,11 @@ impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::AccountChangeSets>,
 {
-    /// Iterate over account changesets and return all account address that were changed.
+    /// Iterate over account changesets and return all hashed addresses that were changed.
     pub fn changed_accounts_with_range(
         &mut self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<BTreeSet<Address>> {
+    ) -> ProviderResult<BTreeSet<B256>> {
         match self {
             Self::StaticFile(provider, _) => {
                 let highest_static_block =
@@ -1009,7 +1011,7 @@ where
                     for block in start..=static_end {
                         let block_changesets = provider.account_block_changeset(block)?;
                         for changeset in block_changesets {
-                            changed_accounts.insert(changeset.address);
+                            changed_accounts.insert(changeset.hashed_address);
                         }
                     }
                 }
@@ -1019,7 +1021,9 @@ where
             Self::Database(provider, _) => provider
                 .walk_range(range)?
                 .map(|entry| {
-                    entry.map(|(_, account_before)| account_before.address).map_err(Into::into)
+                    entry
+                        .map(|(_, account_before)| account_before.hashed_address)
+                        .map_err(Into::into)
                 })
                 .collect(),
             #[cfg(all(unix, feature = "rocksdb"))]
@@ -1144,7 +1148,7 @@ mod rocksdb_tests {
         test_utils::create_test_provider_factory,
         RocksDBProviderFactory,
     };
-    use alloy_primitives::{Address, B256};
+    use alloy_primitives::B256;
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
         tables,
@@ -1276,9 +1280,9 @@ mod rocksdb_tests {
     fn test_rocksdb_batch_storage_history() {
         let (_temp_dir, provider) = create_rocksdb_provider();
 
-        let address = Address::random();
+        let hashed_address = B256::random();
         let storage_key = B256::from([1u8; 32]);
-        let key = StorageShardedKey::new(address, storage_key, 1000);
+        let key = StorageShardedKey::new(hashed_address, storage_key, 1000);
         let value = IntegerList::new([1, 5, 10, 50]).unwrap();
 
         // Write via RocksDBBatch
@@ -1292,7 +1296,7 @@ mod rocksdb_tests {
         assert_eq!(result, Some(value));
 
         // Test missing key
-        let missing_key = StorageShardedKey::new(Address::random(), B256::ZERO, 0);
+        let missing_key = StorageShardedKey::new(B256::random(), B256::ZERO, 0);
         assert_eq!(tx.get::<tables::StoragesHistory>(missing_key).unwrap(), None);
     }
 
@@ -1300,8 +1304,8 @@ mod rocksdb_tests {
     fn test_rocksdb_batch_account_history() {
         let (_temp_dir, provider) = create_rocksdb_provider();
 
-        let address = Address::random();
-        let key = ShardedKey::new(address, 1000);
+        let hashed_address = B256::random();
+        let key = ShardedKey::new(hashed_address, 1000);
         let value = IntegerList::new([1, 10, 100, 500]).unwrap();
 
         // Write via RocksDBBatch
@@ -1315,7 +1319,7 @@ mod rocksdb_tests {
         assert_eq!(result, Some(value));
 
         // Test missing key
-        let missing_key = ShardedKey::new(Address::random(), 0);
+        let missing_key = ShardedKey::new(B256::random(), 0);
         assert_eq!(tx.get::<tables::AccountsHistory>(missing_key).unwrap(), None);
     }
 
@@ -1343,9 +1347,9 @@ mod rocksdb_tests {
     fn test_rocksdb_batch_delete_storage_history() {
         let (_temp_dir, provider) = create_rocksdb_provider();
 
-        let address = Address::random();
+        let hashed_address = B256::random();
         let storage_key = B256::from([1u8; 32]);
-        let key = StorageShardedKey::new(address, storage_key, 1000);
+        let key = StorageShardedKey::new(hashed_address, storage_key, 1000);
         let value = IntegerList::new([1, 5, 10]).unwrap();
 
         // First write
@@ -1365,8 +1369,8 @@ mod rocksdb_tests {
     fn test_rocksdb_batch_delete_account_history() {
         let (_temp_dir, provider) = create_rocksdb_provider();
 
-        let address = Address::random();
-        let key = ShardedKey::new(address, 1000);
+        let hashed_address = B256::random();
+        let key = ShardedKey::new(hashed_address, 1000);
         let value = IntegerList::new([1, 10, 100]).unwrap();
 
         // First write
@@ -1408,7 +1412,7 @@ mod rocksdb_tests {
     /// asserting they produce identical results.
     fn run_account_history_scenario(
         scenario_name: &str,
-        address: Address,
+        hashed_address: B256,
         shards: &[(BlockNumber, Vec<BlockNumber>)], // (shard_highest_block, blocks_in_shard)
         queries: &[HistoryQuery],
     ) {
@@ -1427,7 +1431,7 @@ mod rocksdb_tests {
 
         // Write identical data to both backends in a single loop
         for (highest_block, blocks) in shards {
-            let key = ShardedKey::new(address, *highest_block);
+            let key = ShardedKey::new(hashed_address, *highest_block);
             let value = IntegerList::new(blocks.clone()).unwrap();
             mdbx_writer.upsert_account_history(key.clone(), &value).unwrap();
             rocks_writer.upsert_account_history(key, &value).unwrap();
@@ -1452,14 +1456,14 @@ mod rocksdb_tests {
                     PhantomData,
                 );
             let mdbx_result = mdbx_reader
-                .account_history_info(address, query.block_number, query.lowest_available)
+                .account_history_info(hashed_address, query.block_number, query.lowest_available)
                 .unwrap();
 
             // RocksDB query via EitherReader
             let mut rocks_reader: EitherReader<'_, AccountsHistoryReadCursor, EthPrimitives> =
                 EitherReader::RocksDB(&rocks_tx);
             let rocks_result = rocks_reader
-                .account_history_info(address, query.block_number, query.lowest_available)
+                .account_history_info(hashed_address, query.block_number, query.lowest_available)
                 .unwrap();
 
             // Assert both backends produce identical results
@@ -1499,7 +1503,7 @@ mod rocksdb_tests {
     /// asserting they produce identical results.
     fn run_storage_history_scenario(
         scenario_name: &str,
-        address: Address,
+        hashed_address: B256,
         storage_key: B256,
         shards: &[(BlockNumber, Vec<BlockNumber>)], // (shard_highest_block, blocks_in_shard)
         queries: &[HistoryQuery],
@@ -1519,7 +1523,7 @@ mod rocksdb_tests {
 
         // Write identical data to both backends in a single loop
         for (highest_block, blocks) in shards {
-            let key = StorageShardedKey::new(address, storage_key, *highest_block);
+            let key = StorageShardedKey::new(hashed_address, storage_key, *highest_block);
             let value = IntegerList::new(blocks.clone()).unwrap();
             mdbx_writer.put_storage_history(key.clone(), &value).unwrap();
             rocks_writer.put_storage_history(key, &value).unwrap();
@@ -1545,7 +1549,7 @@ mod rocksdb_tests {
                 );
             let mdbx_result = mdbx_reader
                 .storage_history_info(
-                    address,
+                    hashed_address,
                     storage_key,
                     query.block_number,
                     query.lowest_available,
@@ -1557,7 +1561,7 @@ mod rocksdb_tests {
                 EitherReader::RocksDB(&rocks_tx);
             let rocks_result = rocks_reader
                 .storage_history_info(
-                    address,
+                    hashed_address,
                     storage_key,
                     query.block_number,
                     query.lowest_available,
@@ -1606,12 +1610,12 @@ mod rocksdb_tests {
     /// 4. Pruning boundary - `lowest_available` boundary behavior (block at/after boundary)
     #[test]
     fn test_account_history_info_both_backends() {
-        let address = Address::from([0x42; 20]);
+        let hashed_address = B256::repeat_byte(0x42);
 
         // Scenario 1: Single shard with blocks [100, 200, 300]
         run_account_history_scenario(
             "single_shard",
-            address,
+            hashed_address,
             &[(u64::MAX, vec![100, 200, 300])],
             &[
                 // Before first entry -> NotYetWritten
@@ -1644,7 +1648,7 @@ mod rocksdb_tests {
         // Scenario 2: Multiple shards - tests prev() shard detection
         run_account_history_scenario(
             "multiple_shards",
-            address,
+            hashed_address,
             &[
                 (500, vec![100, 200, 300, 400, 500]), // First shard ends at 500
                 (u64::MAX, vec![600, 700, 800]),      // Last shard
@@ -1678,10 +1682,10 @@ mod rocksdb_tests {
         );
 
         // Scenario 3: No history for address
-        let address_without_history = Address::from([0x43; 20]);
+        let hashed_address_without_history = B256::repeat_byte(0x43);
         run_account_history_scenario(
             "no_history",
-            address_without_history,
+            hashed_address_without_history,
             &[], // No shards for this address
             &[HistoryQuery {
                 block_number: 150,
@@ -1697,7 +1701,7 @@ mod rocksdb_tests {
         // This tests that when pruning IS available, both backends agree.
         run_account_history_scenario(
             "with_pruning_boundary",
-            address,
+            hashed_address,
             &[(u64::MAX, vec![100, 200, 300])],
             &[
                 // At pruning boundary -> InChangeset(first entry after block)
@@ -1719,14 +1723,14 @@ mod rocksdb_tests {
     /// Tests storage history lookups across both MDBX and `RocksDB` backends.
     #[test]
     fn test_storage_history_info_both_backends() {
-        let address = Address::from([0x42; 20]);
+        let hashed_address = B256::repeat_byte(0x42);
         let storage_key = B256::from([0x01; 32]);
         let other_storage_key = B256::from([0x02; 32]);
 
         // Single shard with blocks [100, 200, 300]
         run_storage_history_scenario(
             "storage_single_shard",
-            address,
+            hashed_address,
             storage_key,
             &[(u64::MAX, vec![100, 200, 300])],
             &[
@@ -1754,7 +1758,7 @@ mod rocksdb_tests {
         // No history for different storage key
         run_storage_history_scenario(
             "storage_no_history",
-            address,
+            hashed_address,
             other_storage_key,
             &[], // No shards for this storage key
             &[HistoryQuery {

@@ -2,7 +2,7 @@ use alloc::{
     collections::{BTreeMap, BTreeSet},
     vec::Vec,
 };
-use alloy_primitives::{Address, BlockNumber};
+use alloy_primitives::{Address, BlockNumber, B256};
 use auto_impl::auto_impl;
 use core::ops::{RangeBounds, RangeInclusive};
 use reth_db_models::AccountBeforeTx;
@@ -16,16 +16,21 @@ pub trait AccountReader {
     ///
     /// Returns `None` if the account doesn't exist.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>>;
+
+    /// Get basic account information by hashed address.
+    ///
+    /// Returns `None` if the account doesn't exist.
+    fn hashed_basic_account(&self, hashed_address: B256) -> ProviderResult<Option<Account>>;
 }
 
 /// Account reader
 #[auto_impl(&, Arc, Box)]
 pub trait AccountExtReader {
-    /// Iterate over account changesets and return all account address that were changed.
+    /// Iterate over account changesets and return all hashed addresses that were changed.
     fn changed_accounts_with_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<BTreeSet<Address>>;
+    ) -> ProviderResult<BTreeSet<B256>>;
 
     /// Get basic account information for multiple accounts. A more efficient version than calling
     /// [`AccountReader::basic_account`] repeatedly.
@@ -36,14 +41,14 @@ pub trait AccountExtReader {
         _iter: impl IntoIterator<Item = Address>,
     ) -> ProviderResult<Vec<(Address, Option<Account>)>>;
 
-    /// Iterate over account changesets and return all account addresses that were changed alongside
+    /// Iterate over account changesets and return all hashed addresses that were changed alongside
     /// each specific set of blocks.
     ///
     /// NOTE: Get inclusive range of blocks.
     fn changed_accounts_and_blocks_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<BTreeMap<Address, Vec<BlockNumber>>>;
+    ) -> ProviderResult<BTreeMap<B256, Vec<BlockNumber>>>;
 }
 
 /// `AccountChange` reader
@@ -55,13 +60,13 @@ pub trait ChangeSetReader {
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>>;
 
-    /// Search the block's changesets for the given address, and return the result.
+    /// Search the block's changesets for the given hashed address, and return the result.
     ///
     /// Returns `None` if the account was not changed in this block.
     fn get_account_before_block(
         &self,
         block_number: BlockNumber,
-        address: Address,
+        hashed_address: B256,
     ) -> ProviderResult<Option<AccountBeforeTx>>;
 
     /// Get all account changesets in a range of blocks.

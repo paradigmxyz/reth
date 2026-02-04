@@ -4,7 +4,7 @@ use reth_config::config::{EtlConfig, IndexHistoryConfig};
 #[cfg(all(unix, feature = "rocksdb"))]
 use reth_db_api::Tables;
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberHash},
     tables,
     transaction::DbTxMut,
 };
@@ -130,11 +130,11 @@ where
         } else {
             collect_history_indices::<_, tables::StorageChangeSets, tables::StoragesHistory, _>(
                 provider,
-                BlockNumberAddress::range(range.clone()),
-                |AddressStorageKey((address, storage_key)), highest_block_number| {
-                    StorageShardedKey::new(address, storage_key, highest_block_number)
+                BlockNumberHash::range(range.clone()),
+                |(hashed_address, storage_key), highest_block_number| {
+                    StorageShardedKey::new(hashed_address, storage_key, highest_block_number)
                 },
-                |(key, value)| (key.block_number(), AddressStorageKey((key.address(), value.key))),
+                |(key, value)| (key.block_number(), (key.hashed_address(), value.key)),
                 &self.etl_config,
             )?
         };
@@ -179,12 +179,12 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+    use alloy_primitives::{address, b256, keccak256, Address, BlockNumber, B256, U256};
     use itertools::Itertools;
     use reth_db_api::{
         cursor::DbCursorRO,
         models::{
-            sharded_key, storage_sharded_key::NUM_OF_INDICES_IN_SHARD, ShardedKey,
+            sharded_key, storage_sharded_key::NUM_OF_INDICES_IN_SHARD, BlockNumberHash, ShardedKey,
             StoredBlockBodyIndices,
         },
         transaction::DbTx,
@@ -210,14 +210,14 @@ mod tests {
         StorageEntry { key, value: U256::ZERO }
     }
 
-    const fn block_number_address(block_number: u64) -> BlockNumberAddress {
-        BlockNumberAddress((block_number, ADDRESS))
+    fn block_number_hash(block_number: u64) -> BlockNumberHash {
+        BlockNumberHash((block_number, keccak256(ADDRESS)))
     }
 
     /// Shard for account
-    const fn shard(shard_index: u64) -> StorageShardedKey {
+    fn shard(shard_index: u64) -> StorageShardedKey {
         StorageShardedKey {
-            address: ADDRESS,
+            hashed_address: keccak256(ADDRESS),
             sharded_key: ShardedKey { key: STORAGE_KEY, highest_block_number: shard_index },
         }
     }
@@ -248,7 +248,7 @@ mod tests {
                 )?;
                 // setup changeset that is going to be applied to history index
                 tx.put::<tables::StorageChangeSets>(
-                    block_number_address(block),
+                    block_number_hash(block),
                     storage(STORAGE_KEY),
                 )?;
             }
@@ -511,11 +511,11 @@ mod tests {
             .unwrap();
 
             // setup changeset that are going to be applied to history index
-            tx.put::<tables::StorageChangeSets>(block_number_address(20), storage(STORAGE_KEY))
+            tx.put::<tables::StorageChangeSets>(block_number_hash(20), storage(STORAGE_KEY))
                 .unwrap();
-            tx.put::<tables::StorageChangeSets>(block_number_address(36), storage(STORAGE_KEY))
+            tx.put::<tables::StorageChangeSets>(block_number_hash(36), storage(STORAGE_KEY))
                 .unwrap();
-            tx.put::<tables::StorageChangeSets>(block_number_address(100), storage(STORAGE_KEY))
+            tx.put::<tables::StorageChangeSets>(block_number_hash(100), storage(STORAGE_KEY))
                 .unwrap();
             Ok(())
         })
@@ -630,15 +630,15 @@ mod tests {
                     provider.tx_ref().cursor_read::<tables::StorageChangeSets>()?;
 
                 let storage_transitions = changeset_cursor
-                    .walk_range(BlockNumberAddress::range(start_block..=end_block))?
+                    .walk_range(BlockNumberHash::range(start_block..=end_block))?
                     .try_fold(
                         BTreeMap::new(),
-                        |mut storages: BTreeMap<(Address, B256), Vec<u64>>,
+                        |mut storages: BTreeMap<(B256, B256), Vec<u64>>,
                          entry|
                          -> Result<_, TestRunnerError> {
                             let (index, storage) = entry?;
                             storages
-                                .entry((index.address(), storage.key))
+                                .entry((index.hashed_address(), storage.key))
                                 .or_default()
                                 .push(index.block_number());
                             Ok(storages)
@@ -714,7 +714,7 @@ mod tests {
                         StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
                     )?;
                     tx.put::<tables::StorageChangeSets>(
-                        block_number_address(block),
+                        block_number_hash(block),
                         storage(STORAGE_KEY),
                     )?;
                 }
@@ -760,7 +760,7 @@ mod tests {
                         StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
                     )?;
                     tx.put::<tables::StorageChangeSets>(
-                        block_number_address(block),
+                        block_number_hash(block),
                         storage(STORAGE_KEY),
                     )?;
                 }
@@ -815,7 +815,7 @@ mod tests {
                         StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
                     )?;
                     tx.put::<tables::StorageChangeSets>(
-                        block_number_address(block),
+                        block_number_hash(block),
                         storage(STORAGE_KEY),
                     )?;
                 }
@@ -864,7 +864,7 @@ mod tests {
                         StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
                     )?;
                     tx.put::<tables::StorageChangeSets>(
-                        block_number_address(block),
+                        block_number_hash(block),
                         storage(STORAGE_KEY),
                     )?;
                 }
@@ -892,7 +892,7 @@ mod tests {
                         StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
                     )?;
                     tx.put::<tables::StorageChangeSets>(
-                        block_number_address(block),
+                        block_number_hash(block),
                         storage(STORAGE_KEY),
                     )?;
                 }
@@ -933,7 +933,7 @@ mod tests {
                         StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
                     )?;
                     tx.put::<tables::StorageChangeSets>(
-                        block_number_address(block),
+                        block_number_hash(block),
                         storage(STORAGE_KEY),
                     )?;
                 }
@@ -952,7 +952,8 @@ mod tests {
             provider.commit().unwrap();
 
             let rocksdb = db.factory.rocksdb_provider();
-            let shards = rocksdb.storage_history_shards(ADDRESS, STORAGE_KEY).unwrap();
+            let shards =
+                rocksdb.storage_history_shards(keccak256(ADDRESS), STORAGE_KEY).unwrap();
             assert!(shards.len() >= 2, "Should have at least 2 shards for {} blocks", num_blocks);
 
             let unwind_to = NUM_OF_INDICES_IN_SHARD as u64 + 50;
@@ -967,7 +968,8 @@ mod tests {
             provider.commit().unwrap();
 
             let rocksdb = db.factory.rocksdb_provider();
-            let shards_after = rocksdb.storage_history_shards(ADDRESS, STORAGE_KEY).unwrap();
+            let shards_after =
+                rocksdb.storage_history_shards(keccak256(ADDRESS), STORAGE_KEY).unwrap();
             assert!(!shards_after.is_empty(), "Should still have shards after unwind");
 
             let all_blocks: Vec<u64> =

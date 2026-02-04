@@ -18,7 +18,7 @@ pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 
 use crate::{
     models::{
-        accounts::BlockNumberAddress,
+        accounts::BlockNumberHash,
         blocks::{HeaderHash, StoredBlockOmmers},
         storage_sharded_key::StorageShardedKey,
         AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
@@ -383,55 +383,42 @@ tables! {
         type Value = Bytecode;
     }
 
-    /// Stores the current state of an [`Account`].
-    table PlainAccountState {
-        type Key = Address;
-        type Value = Account;
-    }
-
-    /// Stores the current value of a storage key.
-    table PlainStorageState {
-        type Key = Address;
-        type Value = StorageEntry;
-        type SubKey = B256;
-    }
-
-    /// Stores pointers to block changeset with changes for each account key.
+    /// Stores pointers to block changeset with changes for each hashed account key.
     ///
     /// Last shard key of the storage will contain `u64::MAX` `BlockNumber`,
-    /// this would allows us small optimization on db access when change is in plain state.
+    /// this would allows us small optimization on db access when change is in hashed state.
     ///
     /// Imagine having shards as:
-    /// * `Address | 100`
-    /// * `Address | u64::MAX`
+    /// * `HashedAddress | 100`
+    /// * `HashedAddress | u64::MAX`
     ///
     /// What we need to find is number that is one greater than N. Db `seek` function allows us to fetch
     /// the shard that equal or more than asked. For example:
     /// * For N=50 we would get first shard.
     /// * for N=150 we would get second shard.
-    /// * If max block number is 200 and we ask for N=250 we would fetch last shard and know that needed entry is in `AccountPlainState`.
+    /// * If max block number is 200 and we ask for N=250 we would fetch last shard and know that needed entry is in `HashedAccounts`.
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
     table AccountsHistory {
-        type Key = ShardedKey<Address>;
+        type Key = ShardedKey<B256>;
         type Value = BlockNumberList;
     }
 
     /// Stores pointers to block number changeset with changes for each storage key.
     ///
     /// Last shard key of the storage will contain `u64::MAX` `BlockNumber`,
-    /// this would allows us small optimization on db access when change is in plain state.
+    /// this would allows us small optimization on db access when change is in hashed state.
     ///
     /// Imagine having shards as:
-    /// * `Address | StorageKey | 100`
-    /// * `Address | StorageKey | u64::MAX`
+    /// * `HashedAddress | StorageKey | 100`
+    /// * `HashedAddress | StorageKey | u64::MAX`
     ///
     /// What we need to find is number that is one greater than N. Db `seek` function allows us to fetch
     /// the shard that equal or more than asked. For example:
     /// * For N=50 we would get first shard.
     /// * for N=150 we would get second shard.
-    /// * If max block number is 200 and we ask for N=250 we would fetch last shard and know that needed entry is in `StoragePlainState`.
+    /// * If max block number is 200 and we ask for N=250 we would fetch last shard and know that needed entry is in `HashedStorages`.
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
@@ -446,14 +433,14 @@ tables! {
     table AccountChangeSets {
         type Key = BlockNumber;
         type Value = AccountBeforeTx;
-        type SubKey = Address;
+        type SubKey = B256;
     }
 
     /// Stores the state of a storage key before a certain transaction changed it.
     /// If [`StorageEntry::value`] is zero, this means storage was not existing
     /// and needs to be removed.
     table StorageChangeSets {
-        type Key = BlockNumberAddress;
+        type Key = BlockNumberHash;
         type Value = StorageEntry;
         type SubKey = B256;
     }

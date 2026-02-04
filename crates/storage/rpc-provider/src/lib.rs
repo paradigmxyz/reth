@@ -1145,6 +1145,10 @@ where
     fn basic_account(&self, address: &Address) -> Result<Option<Account>, ProviderError> {
         self.get_account(*address)
     }
+
+    fn hashed_basic_account(&self, _hashed_address: B256) -> Result<Option<Account>, ProviderError> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl<P, Node, N> StateRootProvider for RpcBlockchainStateProvider<P, Node, N>
@@ -1218,14 +1222,14 @@ where
     fn changed_storages_with_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> Result<BTreeMap<Address, std::collections::BTreeSet<StorageKey>>, ProviderError> {
+    ) -> Result<BTreeMap<B256, std::collections::BTreeSet<StorageKey>>, ProviderError> {
         Ok(BTreeMap::new())
     }
 
     fn changed_storages_and_blocks_with_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> Result<BTreeMap<(Address, StorageKey), Vec<u64>>, ProviderError> {
+    ) -> Result<BTreeMap<(B256, StorageKey), Vec<u64>>, ProviderError> {
         Ok(BTreeMap::new())
     }
 }
@@ -1736,7 +1740,7 @@ where
     fn get_account_before_block(
         &self,
         _block_number: BlockNumber,
-        _address: Address,
+        _hashed_address: B256,
     ) -> ProviderResult<Option<reth_db_api::models::AccountBeforeTx>> {
         Err(ProviderError::UnsupportedProvider)
     }

@@ -366,10 +366,10 @@ mod tests {
         tables::StorageChangeSets,
         Database,
     };
-    use alloy_primitives::{address, Address, B256, U256};
+    use alloy_primitives::{address, keccak256, Address, B256, U256};
     use reth_db_api::{
         cursor::{DbCursorRO, DbDupCursorRW},
-        models::{BlockNumberAddress, ClientVersion},
+        models::{BlockNumberHash, ClientVersion},
         table::TableImporter,
         transaction::{DbTx, DbTxMut},
     };
@@ -393,35 +393,38 @@ mod tests {
         let addr1 = address!("0000000000000000000000000000000000000001");
         let addr2 = address!("0000000000000000000000000000000000000002");
         let addr3 = address!("0000000000000000000000000000000000000003");
+        let hash1 = keccak256(addr1);
+        let hash2 = keccak256(addr2);
+        let hash3 = keccak256(addr3);
         let source_db = create_test_db();
         let target_db = create_test_db();
         let test_data = vec![
             (
-                BlockNumberAddress((100, addr1)),
+                BlockNumberHash((100, hash1)),
                 StorageEntry { key: B256::with_last_byte(1), value: U256::from(100) },
             ),
             (
-                BlockNumberAddress((100, addr1)),
+                BlockNumberHash((100, hash1)),
                 StorageEntry { key: B256::with_last_byte(2), value: U256::from(200) },
             ),
             (
-                BlockNumberAddress((100, addr1)),
+                BlockNumberHash((100, hash1)),
                 StorageEntry { key: B256::with_last_byte(3), value: U256::from(300) },
             ),
             (
-                BlockNumberAddress((101, addr1)),
+                BlockNumberHash((101, hash1)),
                 StorageEntry { key: B256::with_last_byte(1), value: U256::from(400) },
             ),
             (
-                BlockNumberAddress((101, addr2)),
+                BlockNumberHash((101, hash2)),
                 StorageEntry { key: B256::with_last_byte(1), value: U256::from(500) },
             ),
             (
-                BlockNumberAddress((101, addr2)),
+                BlockNumberHash((101, hash2)),
                 StorageEntry { key: B256::with_last_byte(2), value: U256::from(600) },
             ),
             (
-                BlockNumberAddress((102, addr3)),
+                BlockNumberHash((102, hash3)),
                 StorageEntry { key: B256::with_last_byte(1), value: U256::from(700) },
             ),
         ];
@@ -443,8 +446,8 @@ mod tests {
         target_tx
             .import_table_with_range::<StorageChangeSets, _>(
                 &source_tx,
-                Some(BlockNumberAddress((100, Address::ZERO))),
-                BlockNumberAddress((102, Address::repeat_byte(0xff))),
+                Some(BlockNumberHash((100, B256::ZERO))),
+                BlockNumberHash((102, B256::repeat_byte(0xff))),
             )
             .unwrap();
         target_tx.commit().unwrap();

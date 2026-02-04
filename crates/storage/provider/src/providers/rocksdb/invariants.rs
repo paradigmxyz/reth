@@ -317,7 +317,7 @@ impl RocksDBProvider {
 
             let unique_keys: HashSet<_> = changesets
                 .into_iter()
-                .map(|(block_addr, entry)| (block_addr.address(), entry.key, checkpoint + 1))
+                .map(|(block_addr, entry)| (block_addr.hashed_address(), entry.key, checkpoint + 1))
                 .collect();
             let indices: Vec<_> = unique_keys.into_iter().collect();
 
@@ -410,7 +410,7 @@ impl RocksDBProvider {
             let changesets = provider.account_changesets_range(batch_start..=batch_end)?;
 
             let mut addresses = HashSet::with_capacity(changesets.len());
-            addresses.extend(changesets.iter().map(|(_, cs)| cs.address));
+            addresses.extend(changesets.iter().map(|(_, cs)| cs.hashed_address));
             let unwind_from = checkpoint + 1;
             let indices: Vec<_> = addresses.into_iter().map(|addr| (addr, unwind_from)).collect();
 
@@ -444,7 +444,7 @@ mod tests {
         test_utils::create_test_provider_factory,
         BlockWriter, DatabaseProviderFactory, StageCheckpointWriter, TransactionsProvider,
     };
-    use alloy_primitives::{Address, B256};
+    use alloy_primitives::B256;
     use reth_db::cursor::{DbCursorRO, DbCursorRW};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, StorageSettings},
@@ -655,7 +655,7 @@ mod tests {
             .unwrap();
 
         // Insert data into RocksDB
-        let key = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);
+        let key = StorageShardedKey::new(B256::ZERO, B256::ZERO, 50);
         let block_list = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
         rocksdb.put::<tables::StoragesHistory>(key, &block_list).unwrap();
 
@@ -847,8 +847,8 @@ mod tests {
 
         // Insert ONLY sentinel entries (highest_block_number = u64::MAX)
         // This simulates a scenario where history tracking started but no shards were completed
-        let key_sentinel_1 = StorageShardedKey::new(Address::ZERO, B256::ZERO, u64::MAX);
-        let key_sentinel_2 = StorageShardedKey::new(Address::random(), B256::random(), u64::MAX);
+        let key_sentinel_1 = StorageShardedKey::new(B256::ZERO, B256::ZERO, u64::MAX);
+        let key_sentinel_2 = StorageShardedKey::new(B256::random(), B256::random(), u64::MAX);
         let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
         rocksdb.put::<tables::StoragesHistory>(key_sentinel_1, &block_list).unwrap();
         rocksdb.put::<tables::StoragesHistory>(key_sentinel_2, &block_list).unwrap();
@@ -891,8 +891,8 @@ mod tests {
             .unwrap();
 
         // Insert ONLY sentinel entries (highest_block_number = u64::MAX)
-        let key_sentinel_1 = ShardedKey::new(Address::ZERO, u64::MAX);
-        let key_sentinel_2 = ShardedKey::new(Address::random(), u64::MAX);
+        let key_sentinel_1 = ShardedKey::new(B256::ZERO, u64::MAX);
+        let key_sentinel_2 = ShardedKey::new(B256::random(), u64::MAX);
         let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
         rocksdb.put::<tables::AccountsHistory>(key_sentinel_1, &block_list).unwrap();
         rocksdb.put::<tables::AccountsHistory>(key_sentinel_2, &block_list).unwrap();
@@ -1083,7 +1083,7 @@ mod tests {
             .unwrap();
 
         // Insert data into RocksDB
-        let key = ShardedKey::new(Address::ZERO, 50);
+        let key = ShardedKey::new(B256::ZERO, 50);
         let block_list = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
         rocksdb.put::<tables::AccountsHistory>(key, &block_list).unwrap();
 
@@ -1123,9 +1123,9 @@ mod tests {
             .unwrap();
 
         // Insert some AccountsHistory entries with various highest_block_numbers
-        let key1 = ShardedKey::new(Address::ZERO, 50);
-        let key2 = ShardedKey::new(Address::random(), 75);
-        let key3 = ShardedKey::new(Address::random(), u64::MAX); // sentinel
+        let key1 = ShardedKey::new(B256::ZERO, 50);
+        let key2 = ShardedKey::new(B256::random(), 75);
+        let key3 = ShardedKey::new(B256::random(), u64::MAX); // sentinel
         let block_list1 = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
         let block_list2 = BlockNumberList::new_pre_sorted([40, 60, 75]);
         let block_list3 = BlockNumberList::new_pre_sorted([80, 90, 100]);
@@ -1151,7 +1151,7 @@ mod tests {
                 sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
 
             for block_num in 0..=100 {
-                let changeset = vec![AccountBeforeTx { address: Address::random(), info: None }];
+                let changeset = vec![AccountBeforeTx { hashed_address: B256::random(), info: None }];
                 writer.append_account_changeset(changeset, block_num).unwrap();
             }
 
@@ -1233,12 +1233,12 @@ mod tests {
                 .with_storage_changesets_in_static_files(true),
         );
 
-        // Helper to generate address from block number (reuses stack arrays)
+        // Helper to generate hashed address from block number (reuses stack arrays)
         #[inline]
-        fn make_address(block_num: u64) -> Address {
-            let mut addr_bytes = [0u8; 20];
-            addr_bytes[0..8].copy_from_slice(&block_num.to_le_bytes());
-            Address::from(addr_bytes)
+        fn make_hashed_address(block_num: u64) -> B256 {
+            let mut bytes = [0u8; 32];
+            bytes[0..8].copy_from_slice(&block_num.to_le_bytes());
+            B256::from(bytes)
         }
 
         // Helper to generate slot from block number (reuses stack arrays)
@@ -1262,7 +1262,7 @@ mod tests {
             for block_num in 0..TOTAL_BLOCKS {
                 changeset.clear();
                 changeset.push(StorageBeforeTx {
-                    address: make_address(block_num),
+                    hashed_address: make_hashed_address(block_num),
                     key: make_slot(block_num),
                     value: U256::from(block_num),
                 });
@@ -1298,7 +1298,7 @@ mod tests {
         // These are (address, slot) pairs that changed after the checkpoint
         for block_num in (CHECKPOINT_BLOCK + 1)..TOTAL_BLOCKS {
             let key =
-                StorageShardedKey::new(make_address(block_num), make_slot(block_num), block_num);
+                StorageShardedKey::new(make_hashed_address(block_num), make_slot(block_num), block_num);
             let block_list = BlockNumberList::new_pre_sorted([block_num]);
             rocksdb.put::<tables::StoragesHistory>(key, &block_list).unwrap();
         }
@@ -1357,9 +1357,9 @@ mod tests {
                 .with_storage_changesets_in_static_files(true),
         );
 
-        let checkpoint_addr = Address::repeat_byte(0xAA);
+        let checkpoint_hashed_addr = B256::repeat_byte(0xAA);
         let checkpoint_slot = B256::repeat_byte(0xBB);
-        let stale_addr = Address::repeat_byte(0xCC);
+        let stale_hashed_addr = B256::repeat_byte(0xCC);
         let stale_slot = B256::repeat_byte(0xDD);
 
         // Write storage changesets to static files
@@ -1371,19 +1371,19 @@ mod tests {
             for block_num in 0..=SF_TIP {
                 let changeset = if block_num == CHECKPOINT_BLOCK {
                     vec![StorageBeforeTx {
-                        address: checkpoint_addr,
+                        hashed_address: checkpoint_hashed_addr,
                         key: checkpoint_slot,
                         value: U256::from(block_num),
                     }]
                 } else if block_num > CHECKPOINT_BLOCK {
                     vec![StorageBeforeTx {
-                        address: stale_addr,
+                        hashed_address: stale_hashed_addr,
                         key: stale_slot,
                         value: U256::from(block_num),
                     }]
                 } else {
                     vec![StorageBeforeTx {
-                        address: Address::ZERO,
+                        hashed_address: B256::ZERO,
                         key: B256::ZERO,
                         value: U256::ZERO,
                     }]
@@ -1407,12 +1407,12 @@ mod tests {
 
         // Insert entry AT the checkpoint block (should be preserved)
         let checkpoint_key =
-            StorageShardedKey::new(checkpoint_addr, checkpoint_slot, CHECKPOINT_BLOCK);
+            StorageShardedKey::new(checkpoint_hashed_addr, checkpoint_slot, CHECKPOINT_BLOCK);
         let checkpoint_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK]);
         rocksdb.put::<tables::StoragesHistory>(checkpoint_key.clone(), &checkpoint_list).unwrap();
 
         // Insert stale entry AFTER the checkpoint (should be removed)
-        let stale_key = StorageShardedKey::new(stale_addr, stale_slot, SF_TIP);
+        let stale_key = StorageShardedKey::new(stale_hashed_addr, stale_slot, SF_TIP);
         let stale_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK + 1, SF_TIP]);
         rocksdb.put::<tables::StoragesHistory>(stale_key.clone(), &stale_list).unwrap();
 
@@ -1466,12 +1466,12 @@ mod tests {
         const TOTAL_BLOCKS: u64 = 15_000;
         const CHECKPOINT_BLOCK: u64 = 5_000;
 
-        // Helper to generate address from block number (avoids pre-allocating 15k addresses)
+        // Helper to generate hashed address from block number (avoids pre-allocating 15k addresses)
         #[inline]
-        fn make_address(block_num: u64) -> Address {
-            let mut addr = Address::ZERO;
-            addr.0[0..8].copy_from_slice(&block_num.to_le_bytes());
-            addr
+        fn make_hashed_address(block_num: u64) -> B256 {
+            let mut bytes = [0u8; 32];
+            bytes[0..8].copy_from_slice(&block_num.to_le_bytes());
+            B256::from(bytes)
         }
 
         // Write account changesets to static files for all 15k blocks
@@ -1485,7 +1485,7 @@ mod tests {
 
             for block_num in 0..TOTAL_BLOCKS {
                 changeset.clear();
-                changeset.push(AccountBeforeTx { address: make_address(block_num), info: None });
+                changeset.push(AccountBeforeTx { hashed_address: make_hashed_address(block_num), info: None });
                 writer.append_account_changeset(changeset.clone(), block_num).unwrap();
             }
 
@@ -1496,14 +1496,14 @@ mod tests {
         // in blocks 5001-15000 (i.e., blocks after the checkpoint)
         // These should be pruned by check_consistency
         for block_num in (CHECKPOINT_BLOCK + 1)..TOTAL_BLOCKS {
-            let key = ShardedKey::new(make_address(block_num), block_num);
+            let key = ShardedKey::new(make_hashed_address(block_num), block_num);
             let block_list = BlockNumberList::new_pre_sorted([block_num]);
             rocksdb.put::<tables::AccountsHistory>(key, &block_list).unwrap();
         }
 
         // Also insert some valid entries for blocks <= 5000 that should NOT be pruned
         for block_num in [100u64, 500, 1000, 2500, 5000] {
-            let key = ShardedKey::new(make_address(block_num), block_num);
+            let key = ShardedKey::new(make_hashed_address(block_num), block_num);
             let block_list = BlockNumberList::new_pre_sorted([block_num]);
             rocksdb.put::<tables::AccountsHistory>(key, &block_list).unwrap();
         }
@@ -1584,8 +1584,8 @@ mod tests {
                 .with_account_changesets_in_static_files(true),
         );
 
-        let checkpoint_addr = Address::repeat_byte(0xAA);
-        let stale_addr = Address::repeat_byte(0xCC);
+        let checkpoint_hashed_addr = B256::repeat_byte(0xAA);
+        let stale_hashed_addr = B256::repeat_byte(0xCC);
 
         // Write account changesets to static files
         {
@@ -1595,11 +1595,11 @@ mod tests {
 
             for block_num in 0..=SF_TIP {
                 let changeset = if block_num == CHECKPOINT_BLOCK {
-                    vec![AccountBeforeTx { address: checkpoint_addr, info: None }]
+                    vec![AccountBeforeTx { hashed_address: checkpoint_hashed_addr, info: None }]
                 } else if block_num > CHECKPOINT_BLOCK {
-                    vec![AccountBeforeTx { address: stale_addr, info: None }]
+                    vec![AccountBeforeTx { hashed_address: stale_hashed_addr, info: None }]
                 } else {
-                    vec![AccountBeforeTx { address: Address::ZERO, info: None }]
+                    vec![AccountBeforeTx { hashed_address: B256::ZERO, info: None }]
                 };
                 writer.append_account_changeset(changeset, block_num).unwrap();
             }
@@ -1619,12 +1619,12 @@ mod tests {
         }
 
         // Insert entry AT the checkpoint block (should be preserved)
-        let checkpoint_key = ShardedKey::new(checkpoint_addr, CHECKPOINT_BLOCK);
+        let checkpoint_key = ShardedKey::new(checkpoint_hashed_addr, CHECKPOINT_BLOCK);
         let checkpoint_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK]);
         rocksdb.put::<tables::AccountsHistory>(checkpoint_key.clone(), &checkpoint_list).unwrap();
 
         // Insert stale entry AFTER the checkpoint (should be removed)
-        let stale_key = ShardedKey::new(stale_addr, SF_TIP);
+        let stale_key = ShardedKey::new(stale_hashed_addr, SF_TIP);
         let stale_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK + 1, SF_TIP]);
         rocksdb.put::<tables::AccountsHistory>(stale_key.clone(), &stale_list).unwrap();
 
@@ -1655,8 +1655,8 @@ mod tests {
             .unwrap();
 
         // Insert StoragesHistory entries into RocksDB
-        let key1 = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);
-        let key2 = StorageShardedKey::new(Address::random(), B256::random(), 80);
+        let key1 = StorageShardedKey::new(B256::ZERO, B256::ZERO, 50);
+        let key2 = StorageShardedKey::new(B256::random(), B256::random(), 80);
         let block_list1 = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
         let block_list2 = BlockNumberList::new_pre_sorted([40, 60, 80]);
         rocksdb.put::<tables::StoragesHistory>(key1, &block_list1).unwrap();
@@ -1680,7 +1680,7 @@ mod tests {
 
             for block_num in 0..=100u64 {
                 let changeset = vec![StorageBeforeTx {
-                    address: Address::ZERO,
+                    hashed_address: B256::ZERO,
                     key: B256::with_last_byte(block_num as u8),
                     value: U256::from(block_num),
                 }];

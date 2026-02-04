@@ -93,7 +93,7 @@ impl Command {
                     if let Some(storage_key) = storage_key {
                         let entry = provider.get_storage_before_block(
                             key.block_number(),
-                            key.address(),
+                            key.hashed_address(),
                             storage_key,
                         )?;
 
@@ -470,9 +470,12 @@ mod tests {
     #[test]
     fn parse_json_key_args() {
         assert_eq!(
-            table_key::<StoragesHistory>(r#"{ "address": "0x01957911244e546ce519fbac6f798958fafadb41", "sharded_key": { "key": "0x0000000000000000000000000000000000000000000000000000000000000003", "highest_block_number": 18446744073709551615 } }"#).unwrap(),
+            table_key::<StoragesHistory>(r#"{ "hashed_address": "0x0000000000000000000000000000000000000000000000000000000000000001", "sharded_key": { "key": "0x0000000000000000000000000000000000000000000000000000000000000003", "highest_block_number": 18446744073709551615 } }"#).unwrap(),
             StorageShardedKey::new(
-                address!("0x01957911244e546ce519fbac6f798958fafadb41"),
+                B256::from_str(
+                    "0x0000000000000000000000000000000000000000000000000000000000000001"
+                )
+                .unwrap(),
                 B256::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000000003"
                 )
@@ -485,9 +488,12 @@ mod tests {
     #[test]
     fn parse_json_key_for_account_history() {
         assert_eq!(
-            table_key::<AccountsHistory>(r#"{ "key": "0x4448e1273fd5a8bfdb9ed111e96889c960eee145", "highest_block_number": 18446744073709551615 }"#).unwrap(),
+            table_key::<AccountsHistory>(r#"{ "key": "0x0000000000000000000000000000000000000000000000000000000000000001", "highest_block_number": 18446744073709551615 }"#).unwrap(),
             ShardedKey::new(
-                address!("0x4448e1273fd5a8bfdb9ed111e96889c960eee145"),
+                B256::from_str(
+                    "0x0000000000000000000000000000000000000000000000000000000000000001"
+                )
+                .unwrap(),
                 18446744073709551615
             )
         );

@@ -1,6 +1,6 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use alloy_primitives::{keccak256, map::hash_map, Address, BlockNumber, B256};
-use reth_db_api::{models::BlockNumberAddress, transaction::DbTx};
+use reth_db_api::{models::BlockNumberHash, transaction::DbTx};
 use reth_execution_errors::StorageRootError;
 use reth_storage_api::{BlockNumReader, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
@@ -43,12 +43,13 @@ where
         return Ok(storage)
     }
 
-    for (BlockNumberAddress((_, storage_address)), storage_change) in
+    let hashed_address = keccak256(address);
+    for (BlockNumberHash((_, changeset_hashed_address)), storage_change) in
         provider.storage_changesets_range(from..=tip)?
     {
-        if storage_address == address {
-            let hashed_slot = keccak256(storage_change.key);
-            if let hash_map::Entry::Vacant(entry) = storage.storage.entry(hashed_slot) {
+        if changeset_hashed_address == hashed_address {
+            // storage_change.key is already hashed in the changeset
+            if let hash_map::Entry::Vacant(entry) = storage.storage.entry(storage_change.key) {
                 entry.insert(storage_change.value);
             }
         }

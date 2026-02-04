@@ -693,14 +693,11 @@ mod tests {
             .expect("Failed to create static file provider");
 
         // Helper function to generate test changesets
-        fn generate_test_changesets(
-            block_num: u64,
-            addresses: Vec<Address>,
-        ) -> Vec<AccountBeforeTx> {
-            addresses
+        fn generate_test_changesets(block_num: u64, hashes: Vec<B256>) -> Vec<AccountBeforeTx> {
+            hashes
                 .into_iter()
-                .map(|address| AccountBeforeTx {
-                    address,
+                .map(|hashed_address| AccountBeforeTx {
+                    hashed_address,
                     info: Some(Account {
                         nonce: block_num,
                         balance: U256::from(block_num * 1000),
@@ -716,20 +713,20 @@ mod tests {
 
             // Create test data for multiple blocks
             let test_blocks = 10u64;
-            let addresses_per_block = 5;
+            let hashes_per_block = 5;
 
             for block_num in 0..test_blocks {
-                // Generate unique addresses for each block
-                let addresses: Vec<Address> = (0..addresses_per_block)
+                // Generate unique hashed addresses for each block
+                let hashes: Vec<B256> = (0..hashes_per_block)
                     .map(|i| {
-                        let mut addr = Address::ZERO;
-                        addr.0[0] = block_num as u8;
-                        addr.0[1] = i as u8;
-                        addr
+                        let mut hash = B256::ZERO;
+                        hash.0[0] = block_num as u8;
+                        hash.0[1] = i as u8;
+                        hash
                     })
                     .collect();
 
-                let changeset = generate_test_changesets(block_num, addresses.clone());
+                let changeset = generate_test_changesets(block_num, hashes.clone());
 
                 writer.append_account_changeset(changeset, block_num).unwrap();
             }
@@ -763,44 +760,44 @@ mod tests {
             .expect("Failed to create static file provider");
 
         // Setup test data
-        let test_address = Address::from([1u8; 20]);
-        let other_address = Address::from([2u8; 20]);
-        let missing_address = Address::from([3u8; 20]);
+        let test_hash = B256::from([1u8; 32]);
+        let other_hash = B256::from([2u8; 32]);
+        let missing_hash = B256::from([3u8; 32]);
 
         // Write changesets for multiple blocks
         {
             let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
 
-            // Block 0: test_address and other_address change
+            // Block 0: test_hash and other_hash change
             writer
                 .append_account_changeset(
                     vec![
                         AccountBeforeTx {
-                            address: test_address,
+                            hashed_address: test_hash,
                             info: None, // Account created
                         },
-                        AccountBeforeTx { address: other_address, info: None },
+                        AccountBeforeTx { hashed_address: other_hash, info: None },
                     ],
                     0,
                 )
                 .unwrap();
 
-            // Block 1: only other_address changes
+            // Block 1: only other_hash changes
             writer
                 .append_account_changeset(
                     vec![AccountBeforeTx {
-                        address: other_address,
+                        hashed_address: other_hash,
                         info: Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None }),
                     }],
                     1,
                 )
                 .unwrap();
 
-            // Block 2: test_address changes again
+            // Block 2: test_hash changes again
             writer
                 .append_account_changeset(
                     vec![AccountBeforeTx {
-                        address: test_address,
+                        hashed_address: test_hash,
                         info: Some(Account {
                             nonce: 1,
                             balance: U256::from(1000),
@@ -817,35 +814,35 @@ mod tests {
         // Test get_account_before_block
         {
             // Test retrieving account state before block 0
-            let result = sf_rw.get_account_before_block(0, test_address).unwrap();
+            let result = sf_rw.get_account_before_block(0, test_hash).unwrap();
             assert!(result.is_some());
             let account_before = result.unwrap();
-            assert_eq!(account_before.address, test_address);
+            assert_eq!(account_before.hashed_address, test_hash);
             assert!(account_before.info.is_none()); // Was created in block 0
 
             // Test retrieving account state before block 2
-            let result = sf_rw.get_account_before_block(2, test_address).unwrap();
+            let result = sf_rw.get_account_before_block(2, test_hash).unwrap();
             assert!(result.is_some());
             let account_before = result.unwrap();
-            assert_eq!(account_before.address, test_address);
+            assert_eq!(account_before.hashed_address, test_hash);
             assert!(account_before.info.is_some());
             let info = account_before.info.unwrap();
             assert_eq!(info.nonce, 1);
             assert_eq!(info.balance, U256::from(1000));
 
             // Test retrieving account that doesn't exist in changeset for block
-            let result = sf_rw.get_account_before_block(1, test_address).unwrap();
-            assert!(result.is_none()); // test_address didn't change in block 1
+            let result = sf_rw.get_account_before_block(1, test_hash).unwrap();
+            assert!(result.is_none()); // test_hash didn't change in block 1
 
             // Test retrieving account that never existed
-            let result = sf_rw.get_account_before_block(2, missing_address).unwrap();
+            let result = sf_rw.get_account_before_block(2, missing_hash).unwrap();
             assert!(result.is_none());
 
-            // Test other_address changes
-            let result = sf_rw.get_account_before_block(1, other_address).unwrap();
+            // Test other_hash changes
+            let result = sf_rw.get_account_before_block(1, other_hash).unwrap();
             assert!(result.is_some());
             let account_before = result.unwrap();
-            assert_eq!(account_before.address, other_address);
+            assert_eq!(account_before.hashed_address, other_hash);
             assert!(account_before.info.is_some());
         }
     }
@@ -876,12 +873,12 @@ mod tests {
                 let mut changeset = Vec::with_capacity(num_changes);
 
                 for i in 0..num_changes {
-                    let mut address = Address::ZERO;
-                    address.0[0] = block_num as u8;
-                    address.0[1] = i as u8;
+                    let mut hashed_address = B256::ZERO;
+                    hashed_address.0[0] = block_num as u8;
+                    hashed_address.0[1] = i as u8;
 
                     changeset.push(AccountBeforeTx {
-                        address,
+                        hashed_address,
                         info: Some(Account {
                             nonce: block_num,
                             balance: U256::from(block_num * 1000 + i as u64),
@@ -983,22 +980,22 @@ mod tests {
         let block_num = 0u64;
         let num_accounts = 100;
 
-        let mut addresses: Vec<Address> = Vec::with_capacity(num_accounts);
+        let mut hashes: Vec<B256> = Vec::with_capacity(num_accounts);
         for i in 0..num_accounts {
-            let mut addr = Address::ZERO;
-            addr.0[0] = (i / 256) as u8;
-            addr.0[1] = (i % 256) as u8;
-            addresses.push(addr);
+            let mut hash = B256::ZERO;
+            hash.0[0] = (i / 256) as u8;
+            hash.0[1] = (i % 256) as u8;
+            hashes.push(hash);
         }
 
         // Write the changeset
         {
             let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
 
-            let changeset: Vec<AccountBeforeTx> = addresses
+            let changeset: Vec<AccountBeforeTx> = hashes
                 .iter()
-                .map(|addr| AccountBeforeTx {
-                    address: *addr,
+                .map(|hash| AccountBeforeTx {
+                    hashed_address: *hash,
                     info: Some(Account {
                         nonce: 1,
                         balance: U256::from(1000),
@@ -1011,37 +1008,37 @@ mod tests {
             writer.commit().unwrap();
         }
 
-        // Test binary search for various addresses
+        // Test binary search for various hashed addresses
         {
-            // Test finding first address
-            let result = sf_rw.get_account_before_block(block_num, addresses[0]).unwrap();
+            // Test finding first hash
+            let result = sf_rw.get_account_before_block(block_num, hashes[0]).unwrap();
             assert!(result.is_some());
-            assert_eq!(result.unwrap().address, addresses[0]);
+            assert_eq!(result.unwrap().hashed_address, hashes[0]);
 
-            // Test finding last address
+            // Test finding last hash
             let result =
-                sf_rw.get_account_before_block(block_num, addresses[num_accounts - 1]).unwrap();
+                sf_rw.get_account_before_block(block_num, hashes[num_accounts - 1]).unwrap();
             assert!(result.is_some());
-            assert_eq!(result.unwrap().address, addresses[num_accounts - 1]);
+            assert_eq!(result.unwrap().hashed_address, hashes[num_accounts - 1]);
 
-            // Test finding middle addresses
+            // Test finding middle hashes
             let mid = num_accounts / 2;
-            let result = sf_rw.get_account_before_block(block_num, addresses[mid]).unwrap();
+            let result = sf_rw.get_account_before_block(block_num, hashes[mid]).unwrap();
             assert!(result.is_some());
-            assert_eq!(result.unwrap().address, addresses[mid]);
+            assert_eq!(result.unwrap().hashed_address, hashes[mid]);
 
-            // Test not finding address that doesn't exist
-            let mut missing_addr = Address::ZERO;
-            missing_addr.0[0] = 255;
-            missing_addr.0[1] = 255;
-            let result = sf_rw.get_account_before_block(block_num, missing_addr).unwrap();
+            // Test not finding hash that doesn't exist
+            let mut missing_hash = B256::ZERO;
+            missing_hash.0[0] = 255;
+            missing_hash.0[1] = 255;
+            let result = sf_rw.get_account_before_block(block_num, missing_hash).unwrap();
             assert!(result.is_none());
 
             // Test multiple lookups for performance
             for i in (0..num_accounts).step_by(10) {
-                let result = sf_rw.get_account_before_block(block_num, addresses[i]).unwrap();
+                let result = sf_rw.get_account_before_block(block_num, hashes[i]).unwrap();
                 assert!(result.is_some());
-                assert_eq!(result.unwrap().address, addresses[i]);
+                assert_eq!(result.unwrap().hashed_address, hashes[i]);
             }
         }
     }
@@ -1064,11 +1061,11 @@ mod tests {
             for block_num in 0..test_blocks {
                 let changeset = (0..entries_per_block)
                     .map(|i| {
-                        let mut addr = Address::ZERO;
-                        addr.0[0] = block_num as u8;
-                        addr.0[1] = i as u8;
+                        let mut hash = B256::ZERO;
+                        hash.0[0] = block_num as u8;
+                        hash.0[1] = i as u8;
                         StorageBeforeTx {
-                            address: addr,
+                            hashed_address: hash,
                             key: B256::with_last_byte(i as u8),
                             value: U256::from(block_num * 1000 + i as u64),
                         }
@@ -1106,9 +1103,9 @@ mod tests {
         let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
             .expect("Failed to create static file provider");
 
-        let test_address = Address::from([1u8; 20]);
-        let other_address = Address::from([2u8; 20]);
-        let missing_address = Address::from([3u8; 20]);
+        let test_hash = B256::from([1u8; 32]);
+        let other_hash = B256::from([2u8; 32]);
+        let missing_hash = B256::from([3u8; 32]);
         let test_key = B256::with_last_byte(1);
         let other_key = B256::with_last_byte(2);
 
@@ -1116,13 +1113,13 @@ mod tests {
         {
             let mut writer = sf_rw.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
 
-            // Block 0: test_address and other_address change
+            // Block 0: test_hash and other_hash change
             writer
                 .append_storage_changeset(
                     vec![
-                        StorageBeforeTx { address: test_address, key: test_key, value: U256::ZERO },
+                        StorageBeforeTx { hashed_address: test_hash, key: test_key, value: U256::ZERO },
                         StorageBeforeTx {
-                            address: other_address,
+                            hashed_address: other_hash,
                             key: other_key,
                             value: U256::from(5),
                         },
@@ -1131,11 +1128,11 @@ mod tests {
                 )
                 .unwrap();
 
-            // Block 1: only other_address changes
+            // Block 1: only other_hash changes
             writer
                 .append_storage_changeset(
                     vec![StorageBeforeTx {
-                        address: other_address,
+                        hashed_address: other_hash,
                         key: other_key,
                         value: U256::from(7),
                     }],
@@ -1143,11 +1140,11 @@ mod tests {
                 )
                 .unwrap();
 
-            // Block 2: test_address changes again
+            // Block 2: test_hash changes again
             writer
                 .append_storage_changeset(
                     vec![StorageBeforeTx {
-                        address: test_address,
+                        hashed_address: test_hash,
                         key: test_key,
                         value: U256::from(9),
                     }],
@@ -1160,25 +1157,25 @@ mod tests {
 
         // Test get_storage_before_block
         {
-            let result = sf_rw.get_storage_before_block(0, test_address, test_key).unwrap();
+            let result = sf_rw.get_storage_before_block(0, test_hash, test_key).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
             assert_eq!(entry.key, test_key);
             assert_eq!(entry.value, U256::ZERO);
 
-            let result = sf_rw.get_storage_before_block(2, test_address, test_key).unwrap();
+            let result = sf_rw.get_storage_before_block(2, test_hash, test_key).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
             assert_eq!(entry.key, test_key);
             assert_eq!(entry.value, U256::from(9));
 
-            let result = sf_rw.get_storage_before_block(1, test_address, test_key).unwrap();
+            let result = sf_rw.get_storage_before_block(1, test_hash, test_key).unwrap();
             assert!(result.is_none());
 
-            let result = sf_rw.get_storage_before_block(2, missing_address, test_key).unwrap();
+            let result = sf_rw.get_storage_before_block(2, missing_hash, test_key).unwrap();
             assert!(result.is_none());
 
-            let result = sf_rw.get_storage_before_block(1, other_address, other_key).unwrap();
+            let result = sf_rw.get_storage_before_block(1, other_hash, other_key).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
             assert_eq!(entry.key, other_key);
@@ -1210,12 +1207,12 @@ mod tests {
                 let mut changeset = Vec::with_capacity(num_changes);
 
                 for i in 0..num_changes {
-                    let mut address = Address::ZERO;
-                    address.0[0] = block_num as u8;
-                    address.0[1] = i as u8;
+                    let mut hashed_address = B256::ZERO;
+                    hashed_address.0[0] = block_num as u8;
+                    hashed_address.0[1] = i as u8;
 
                     changeset.push(StorageBeforeTx {
-                        address,
+                        hashed_address,
                         key: B256::with_last_byte(i as u8),
                         value: U256::from(block_num * 1000 + i as u64),
                     });
@@ -1303,7 +1300,7 @@ mod tests {
 
         let block_num = 0u64;
         let num_slots = 100;
-        let address = Address::from([4u8; 20]);
+        let hashed_address = B256::from([4u8; 32]);
 
         let mut keys: Vec<B256> = Vec::with_capacity(num_slots);
         for i in 0..num_slots {
@@ -1315,7 +1312,11 @@ mod tests {
             let changeset = keys
                 .iter()
                 .enumerate()
-                .map(|(i, key)| StorageBeforeTx { address, key: *key, value: U256::from(i as u64) })
+                .map(|(i, key)| StorageBeforeTx {
+                    hashed_address,
+                    key: *key,
+                    value: U256::from(i as u64),
+                })
                 .collect::<Vec<_>>();
 
             writer.append_storage_changeset(changeset, block_num).unwrap();
@@ -1323,30 +1324,35 @@ mod tests {
         }
 
         {
-            let result = sf_rw.get_storage_before_block(block_num, address, keys[0]).unwrap();
+            let result =
+                sf_rw.get_storage_before_block(block_num, hashed_address, keys[0]).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
             assert_eq!(entry.key, keys[0]);
             assert_eq!(entry.value, U256::from(0));
 
-            let result =
-                sf_rw.get_storage_before_block(block_num, address, keys[num_slots - 1]).unwrap();
+            let result = sf_rw
+                .get_storage_before_block(block_num, hashed_address, keys[num_slots - 1])
+                .unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
             assert_eq!(entry.key, keys[num_slots - 1]);
 
             let mid = num_slots / 2;
-            let result = sf_rw.get_storage_before_block(block_num, address, keys[mid]).unwrap();
+            let result =
+                sf_rw.get_storage_before_block(block_num, hashed_address, keys[mid]).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
             assert_eq!(entry.key, keys[mid]);
 
             let missing_key = B256::with_last_byte(255);
-            let result = sf_rw.get_storage_before_block(block_num, address, missing_key).unwrap();
+            let result =
+                sf_rw.get_storage_before_block(block_num, hashed_address, missing_key).unwrap();
             assert!(result.is_none());
 
             for i in (0..num_slots).step_by(10) {
-                let result = sf_rw.get_storage_before_block(block_num, address, keys[i]).unwrap();
+                let result =
+                    sf_rw.get_storage_before_block(block_num, hashed_address, keys[i]).unwrap();
                 assert!(result.is_some());
                 assert_eq!(result.unwrap().key, keys[i]);
             }

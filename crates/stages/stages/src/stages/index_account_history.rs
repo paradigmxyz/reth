@@ -130,7 +130,7 @@ where
                 provider,
                 range.clone(),
                 ShardedKey::new,
-                |(index, value)| (index, value.address),
+                |(index, value)| (index, value.hashed_address),
                 &self.etl_config,
             )?
         };
@@ -176,7 +176,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{address, Address, BlockNumber, B256};
+    use alloy_primitives::{address, keccak256, Address, BlockNumber, B256};
     use itertools::Itertools;
     use reth_db_api::{
         cursor::DbCursorRO,
@@ -199,13 +199,17 @@ mod tests {
     const LAST_BLOCK_IN_FULL_SHARD: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber;
     const MAX_BLOCK: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber + 2;
 
-    const fn acc() -> AccountBeforeTx {
-        AccountBeforeTx { address: ADDRESS, info: None }
+    fn hashed_address() -> B256 {
+        keccak256(ADDRESS)
     }
 
-    /// Shard for account
-    const fn shard(shard_index: u64) -> ShardedKey<Address> {
-        ShardedKey { key: ADDRESS, highest_block_number: shard_index }
+    fn acc() -> AccountBeforeTx {
+        AccountBeforeTx { hashed_address: hashed_address(), info: None }
+    }
+
+    /// Shard for account (now uses hashed address)
+    fn shard(shard_index: u64) -> ShardedKey<B256> {
+        ShardedKey { key: hashed_address(), highest_block_number: shard_index }
     }
 
     fn list(list: &[u64]) -> BlockNumberList {
@@ -213,8 +217,8 @@ mod tests {
     }
 
     fn cast(
-        table: Vec<(ShardedKey<Address>, BlockNumberList)>,
-    ) -> BTreeMap<ShardedKey<Address>, Vec<u64>> {
+        table: Vec<(ShardedKey<B256>, BlockNumberList)>,
+    ) -> BTreeMap<ShardedKey<B256>, Vec<u64>> {
         table
             .into_iter()
             .map(|(k, v)| {
@@ -612,11 +616,11 @@ mod tests {
                 let account_transitions =
                     changeset_cursor.walk_range(start_block..=end_block)?.try_fold(
                         BTreeMap::new(),
-                        |mut accounts: BTreeMap<Address, Vec<u64>>,
+                        |mut accounts: BTreeMap<B256, Vec<u64>>,
                          entry|
                          -> Result<_, TestRunnerError> {
                             let (index, account) = entry?;
-                            accounts.entry(account.address).or_default().push(index);
+                            accounts.entry(account.hashed_address).or_default().push(index);
                             Ok(accounts)
                         },
                     )?;

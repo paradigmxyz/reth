@@ -16,7 +16,7 @@ use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
-    HashedPostStateSorted, KeccakKeyHasher,
+    HashedPostStateSorted,
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
@@ -336,10 +336,7 @@ where
                 let _guard = debug_span!(target: "providers::state::overlay", "Retrieving hashed state reverts").entered();
 
                 let start = Instant::now();
-                let res = HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
-                    provider,
-                    from_block + 1..,
-                )?;
+                let res = HashedPostStateSorted::from_reverts(provider, from_block + 1..)?;
                 retrieve_hashed_state_reverts_duration = start.elapsed();
                 res
             };

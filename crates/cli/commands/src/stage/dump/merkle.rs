@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use super::setup;
-use alloy_primitives::{Address, BlockNumber};
+use alloy_primitives::{BlockNumber, B256};
 use eyre::Result;
 use reth_config::config::EtlConfig;
 use reth_consensus::FullConsensus;
 use reth_db::DatabaseEnv;
-use reth_db_api::{database::Database, models::BlockNumberAddress, table::TableImporter, tables};
+use reth_db_api::{database::Database, models::BlockNumberHash, table::TableImporter, tables};
 use reth_db_common::DbTool;
 use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
@@ -139,8 +139,8 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::StorageChangeSets, _>(
             &unwind_inner_tx,
-            Some(BlockNumberAddress((from, Address::ZERO))),
-            BlockNumberAddress((to, Address::repeat_byte(0xff))),
+            Some(BlockNumberHash((from, B256::ZERO))),
+            BlockNumberHash((to, B256::repeat_byte(0xff))),
         )
     })??;
 

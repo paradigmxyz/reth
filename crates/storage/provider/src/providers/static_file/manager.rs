@@ -24,7 +24,7 @@ use reth_db::{
 };
 use reth_db_api::{
     cursor::DbCursorRO,
-    models::{AccountBeforeTx, BlockNumberAddress, StorageBeforeTx, StoredBlockBodyIndices},
+    models::{AccountBeforeTx, BlockNumberHash, StorageBeforeTx, StoredBlockBodyIndices},
     table::{Decompress, Table, Value},
     tables,
     transaction::DbTx,
@@ -620,7 +620,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 .accounts
                 .into_iter()
                 .flatten()
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .map(|(address, info)| AccountBeforeTx {
+                    hashed_address: keccak256(address),
+                    info: info.map(Into::into),
+                })
                 .collect();
             w.append_account_changeset(changeset, block_number)?;
         }
@@ -642,9 +645,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 .into_iter()
                 .flatten()
                 .flat_map(|revert| {
+                    let hashed_address = keccak256(revert.address);
                     revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
                         StorageBeforeTx {
-                            address: revert.address,
+                            hashed_address,
                             key: B256::new(key.to_be_bytes()),
                             value: revert_to_slot.to_previous_value(),
                         }
@@ -2400,7 +2404,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
     fn get_account_before_block(
         &self,
         block_number: BlockNumber,
-        address: Address,
+        hashed_address: B256,
     ) -> ProviderResult<Option<reth_db::models::AccountBeforeTx>> {
         let provider = match self.get_segment_provider_for_block(
             StaticFileSegment::AccountChangeSets,
@@ -2428,7 +2432,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             if let Some(change) =
                 cursor.get_one::<reth_db::static_file::AccountChangesetMask>(mid.into())?
             {
-                if change.address < address {
+                if change.hashed_address < hashed_address {
                     low = mid + 1;
                 } else {
                     high = mid;
@@ -2443,7 +2447,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
                     ?high,
                     ?range,
                     ?block_number,
-                    ?address,
+                    ?hashed_address,
                     "Cannot continue binary search for account changeset fetch"
                 );
                 low = range.end;
@@ -2454,7 +2458,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         if low < range.end &&
             let Some(change) = cursor
                 .get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
-                .filter(|change| change.address == address)
+                .filter(|change| change.hashed_address == hashed_address)
         {
             return Ok(Some(change));
         }
@@ -2493,7 +2497,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberHash, StorageEntry)>> {
         let provider = match self.get_segment_provider_for_block(
             StaticFileSegment::StorageChangeSets,
             block_number,
@@ -2510,7 +2514,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
 
             for i in offset.changeset_range() {
                 if let Some(change) = cursor.get_one::<StorageChangesetMask>(i.into())? {
-                    let block_address = BlockNumberAddress((block_number, change.address));
+                    let block_address = BlockNumberHash((block_number, change.hashed_address));
                     let entry = StorageEntry { key: change.key, value: change.value };
                     changeset.push((block_address, entry));
                 }
@@ -2524,7 +2528,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
     fn get_storage_before_block(
         &self,
         block_number: BlockNumber,
-        address: Address,
+        hashed_address: B256,
         storage_key: B256,
     ) -> ProviderResult<Option<StorageEntry>> {
         let provider = match self.get_segment_provider_for_block(
@@ -2550,7 +2554,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
         while low < high {
             let mid = low + (high - low) / 2;
             if let Some(change) = cursor.get_one::<StorageChangesetMask>(mid.into())? {
-                match (change.address, change.key).cmp(&(address, storage_key)) {
+                match (change.hashed_address, change.key).cmp(&(hashed_address, storage_key)) {
                     std::cmp::Ordering::Less => low = mid + 1,
                     _ => high = mid,
                 }
@@ -2562,7 +2566,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
                     ?high,
                     ?range,
                     ?block_number,
-                    ?address,
+                    ?hashed_address,
                     ?storage_key,
                     "Cannot continue binary search for storage changeset fetch"
                 );
@@ -2574,7 +2578,9 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
         if low < range.end &&
             let Some(change) = cursor
                 .get_one::<StorageChangesetMask>(low.into())?
-                .filter(|change| change.address == address && change.key == storage_key)
+                .filter(|change| {
+                    change.hashed_address == hashed_address && change.key == storage_key
+                })
         {
             return Ok(Some(StorageEntry { key: change.key, value: change.value }));
         }
@@ -2585,7 +2591,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
     fn storage_changesets_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberHash, StorageEntry)>> {
         let range = self.bound_range(range, StaticFileSegment::StorageChangeSets);
         self.walk_storage_changeset_range(range).collect()
     }

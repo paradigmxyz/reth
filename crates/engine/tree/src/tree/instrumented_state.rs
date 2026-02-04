@@ -186,6 +186,13 @@ impl<S: AccountReader> AccountReader for InstrumentedStateProvider<S> {
         self.record_account_fetch(start.elapsed());
         res
     }
+
+    fn hashed_basic_account(&self, hashed_address: B256) -> ProviderResult<Option<Account>> {
+        let start = Instant::now();
+        let res = self.state_provider.hashed_basic_account(hashed_address);
+        self.record_account_fetch(start.elapsed());
+        res
+    }
 }
 
 impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {

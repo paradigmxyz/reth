@@ -1,7 +1,7 @@
 use crate::{
     AccountReader, BlockHashReader, HashedPostStateProvider, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider};
@@ -38,7 +38,12 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
 impl<Provider: DBProvider> AccountReader for LatestStateProviderRef<'_, Provider> {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
+        let hashed_address = keccak256(address);
+        self.tx().get::<tables::HashedAccounts>(hashed_address).map_err(Into::into)
+    }
+
+    fn hashed_basic_account(&self, hashed_address: B256) -> ProviderResult<Option<Account>> {
+        self.tx().get::<tables::HashedAccounts>(hashed_address).map_err(Into::into)
     }
 }
 
@@ -157,9 +162,11 @@ impl<Provider: DBProvider + BlockHashReader> StateProvider
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
-        if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? &&
-            entry.key == storage_key
+        let hashed_address = keccak256(account);
+        let hashed_storage_key = keccak256(storage_key);
+        let mut cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
+        if let Some(entry) = cursor.seek_by_key_subkey(hashed_address, hashed_storage_key)? &&
+            entry.key == hashed_storage_key
         {
             return Ok(Some(entry.value))
         }

@@ -1087,6 +1087,10 @@ mod tests {
         fn basic_account(&self, _address: &Address) -> ProviderResult<Option<Account>> {
             Ok(None)
         }
+
+        fn hashed_basic_account(&self, _hashed_address: B256) -> ProviderResult<Option<Account>> {
+            Ok(None)
+        }
     }
 
     impl StateRootProvider for MockStateProvider {

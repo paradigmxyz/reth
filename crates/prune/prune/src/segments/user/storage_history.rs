@@ -6,9 +6,9 @@ use crate::{
     },
     PrunerError,
 };
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_primitives::{BlockNumber, B256};
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberHash},
     tables,
     transaction::DbTxMut,
 };
@@ -134,8 +134,8 @@ impl StorageHistory {
             }
             let (block_address, entry) = result?;
             let block_number = block_address.block_number();
-            let address = block_address.address();
-            highest_deleted_storages.insert((address, entry.key), block_number);
+            let hashed_address = block_address.hashed_address();
+            highest_deleted_storages.insert((hashed_address, entry.key), block_number);
             last_changeset_pruned_block = Some(block_number);
             pruned_changesets += 1;
             limiter.increment_deleted_entries_count();
@@ -155,15 +155,15 @@ impl StorageHistory {
             pruned_count: pruned_changesets,
             done,
         };
-        finalize_history_prune::<_, tables::StoragesHistory, (Address, B256), _>(
+        finalize_history_prune::<_, tables::StoragesHistory, (B256, B256), _>(
             provider,
             result,
             range_end,
             &limiter,
-            |(address, storage_key), block_number| {
-                StorageShardedKey::new(address, storage_key, block_number)
+            |(hashed_address, storage_key), block_number| {
+                StorageShardedKey::new(hashed_address, storage_key, block_number)
             },
-            |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
+            |a, b| a.hashed_address == b.hashed_address && a.sharded_key.key == b.sharded_key.key,
         )
         .map_err(Into::into)
     }
@@ -203,11 +203,11 @@ impl StorageHistory {
         let mut highest_deleted_storages = FxHashMap::default();
         let (pruned_changesets, done) =
             provider.tx_ref().prune_table_with_range::<tables::StorageChangeSets>(
-                BlockNumberAddress::range(range),
+                BlockNumberHash::range(range),
                 &mut limiter,
                 |_| false,
-                |(BlockNumberAddress((block_number, address)), entry)| {
-                    highest_deleted_storages.insert((address, entry.key), block_number);
+                |(BlockNumberHash((block_number, hashed_address)), entry)| {
+                    highest_deleted_storages.insert((hashed_address, entry.key), block_number);
                     last_changeset_pruned_block = Some(block_number);
                 },
             )?;
@@ -219,15 +219,15 @@ impl StorageHistory {
             pruned_count: pruned_changesets,
             done,
         };
-        finalize_history_prune::<_, tables::StoragesHistory, (Address, B256), _>(
+        finalize_history_prune::<_, tables::StoragesHistory, (B256, B256), _>(
             provider,
             result,
             range_end,
             &limiter,
-            |(address, storage_key), block_number| {
-                StorageShardedKey::new(address, storage_key, block_number)
+            |(hashed_address, storage_key), block_number| {
+                StorageShardedKey::new(hashed_address, storage_key, block_number)
             },
-            |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
+            |a, b| a.hashed_address == b.hashed_address && a.sharded_key.key == b.sharded_key.key,
         )
         .map_err(Into::into)
     }
@@ -262,7 +262,7 @@ impl StorageHistory {
         let mut done = true;
 
         // Walk storage changesets from static files using a streaming iterator.
-        // For each changeset, track the highest block number seen for each (address, storage_key)
+        // For each changeset, track the highest block number seen for each (hashed_address, storage_key)
         // pair to determine which history shard entries need pruning.
         let walker = provider.static_file_provider().walk_storage_changeset_range(range);
         for result in walker {
@@ -272,8 +272,8 @@ impl StorageHistory {
             }
             let (block_address, entry) = result?;
             let block_number = block_address.block_number();
-            let address = block_address.address();
-            highest_deleted_storages.insert((address, entry.key), block_number);
+            let hashed_address = block_address.hashed_address();
+            highest_deleted_storages.insert((hashed_address, entry.key), block_number);
             last_changeset_pruned_block = Some(block_number);
             changesets_processed += 1;
             limiter.increment_deleted_entries_count();
@@ -289,9 +289,9 @@ impl StorageHistory {
         let mut deleted_shards = 0usize;
         let mut updated_shards = 0usize;
 
-        // Sort by (address, storage_key) for better RocksDB cache locality
+        // Sort by (hashed_address, storage_key) for better RocksDB cache locality
         let mut sorted_storages: Vec<_> = highest_deleted_storages.into_iter().collect();
-        sorted_storages.sort_unstable_by_key(|((addr, key), _)| (*addr, *key));
+        sorted_storages.sort_unstable_by_key(|((hashed_addr, key), _)| (*hashed_addr, *key));
 
         provider.with_rocksdb_batch(|mut batch| {
             let targets: Vec<_> = sorted_storages
@@ -380,7 +380,7 @@ mod tests {
         let storage_occurrences = db.table::<tables::StoragesHistory>().unwrap().into_iter().fold(
             BTreeMap::<_, usize>::new(),
             |mut map, (key, _)| {
-                map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
+                map.entry((key.hashed_address, key.sharded_key.key)).or_default().add_assign(1);
                 map
             },
         );
@@ -549,7 +549,7 @@ mod tests {
         let storage_occurrences = db.table::<tables::StoragesHistory>().unwrap().into_iter().fold(
             BTreeMap::<_, usize>::new(),
             |mut map, (key, _)| {
-                map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
+                map.entry((key.hashed_address, key.sharded_key.key)).or_default().add_assign(1);
                 map
             },
         );

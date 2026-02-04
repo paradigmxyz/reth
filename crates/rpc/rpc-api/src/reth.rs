@@ -1,5 +1,5 @@
 use alloy_eips::BlockId;
-use alloy_primitives::{map::AddressMap, U256};
+use alloy_primitives::{map::B256Map, U256};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 // Required for the subscription attribute below
@@ -9,12 +9,12 @@ use reth_chain_state as _;
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "reth"))]
 pub trait RethApi {
-    /// Returns all ETH balance changes in a block
+    /// Returns all ETH balance changes in a block, keyed by hashed address.
     #[method(name = "getBalanceChangesInBlock")]
     async fn reth_get_balance_changes_in_block(
         &self,
         block_id: BlockId,
-    ) -> RpcResult<AddressMap<U256>>;
+    ) -> RpcResult<B256Map<U256>>;
 
     /// Subscribe to json `ChainNotifications`
     #[subscription(

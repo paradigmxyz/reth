@@ -294,8 +294,8 @@ mod tests {
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
     use alloy_primitives::{
-        bytes,
-        map::{AddressMap, B256Map, HashMap},
+        bytes, keccak256,
+        map::{B256Map, HashMap},
         Address, LogData, B256,
     };
     use op_revm::OpSpecId;
@@ -592,13 +592,15 @@ mod tests {
         );
 
         // Create a BundleStateInit object and insert initial data
-        let mut state_init: BundleStateInit = AddressMap::default();
-        state_init
-            .insert(Address::new([2; 20]), (None, Some(Account::default()), B256Map::default()));
+        let mut state_init: BundleStateInit = B256Map::default();
+        state_init.insert(
+            keccak256(Address::new([2; 20])),
+            (None, Some(Account::default()), B256Map::default()),
+        );
 
-        // Create an AddressMap for account reverts and insert initial data
-        let mut revert_inner: AddressMap<AccountRevertInit> = AddressMap::default();
-        revert_inner.insert(Address::new([2; 20]), (None, vec![]));
+        // Create a B256Map for account reverts and insert initial data
+        let mut revert_inner: B256Map<AccountRevertInit> = B256Map::default();
+        revert_inner.insert(keccak256(Address::new([2; 20])), (None, vec![]));
 
         // Create a RevertsInit object and insert the revert_inner data
         let mut revert_init: RevertsInit = HashMap::default();

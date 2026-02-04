@@ -22,14 +22,16 @@ impl Command {
     /// Execute `db account-storage` command
     pub fn execute<N: NodeTypesWithDB>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         let address = self.address;
-        let (slot_count, plain_size) = tool.provider_factory.db_ref().view(|tx| {
-            let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+        let hashed_address = keccak256(address);
+
+        let (slot_count, storage_size) = tool.provider_factory.db_ref().view(|tx| {
+            let mut cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
             let mut count = 0usize;
             let mut total_value_bytes = 0usize;
             let mut last_log = Instant::now();
 
-            // Walk all storage entries for this address
-            let walker = cursor.walk_dup(Some(address), None)?;
+            // Walk all storage entries for this hashed address
+            let walker = cursor.walk_dup(Some(hashed_address), None)?;
             for entry in walker {
                 let (_, storage_entry) = entry?;
                 count += 1;
@@ -42,6 +44,7 @@ impl Command {
                     info!(
                         target: "reth::cli",
                         address = %address,
+                        hashed_address = %hashed_address,
                         slots = count,
                         key = %storage_entry.key,
                         "Processing storage slots"
@@ -50,24 +53,16 @@ impl Command {
                 }
             }
 
-            // Add 20 bytes for the Address key (stored once per account in dupsort)
-            let total_size = if count > 0 { 20 + total_value_bytes } else { 0 };
+            // Add 32 bytes for the B256 key (stored once per account in dupsort)
+            let total_size = if count > 0 { 32 + total_value_bytes } else { 0 };
 
             Ok::<_, eyre::Report>((count, total_size))
         })??;
 
-        // Estimate hashed storage size: 32-byte B256 key instead of 20-byte Address
-        let hashed_size_estimate = if slot_count > 0 { plain_size + 12 } else { 0 };
-        let total_estimate = plain_size + hashed_size_estimate;
-
-        let hashed_address = keccak256(address);
-
         println!("Account: {address}");
         println!("Hashed address: {hashed_address}");
         println!("Storage slots: {slot_count}");
-        println!("Plain storage size: {} (estimated)", human_bytes(plain_size as f64));
-        println!("Hashed storage size: {} (estimated)", human_bytes(hashed_size_estimate as f64));
-        println!("Total estimated size: {}", human_bytes(total_estimate as f64));
+        println!("Storage size: {} (estimated)", human_bytes(storage_size as f64));
 
         Ok(())
     }

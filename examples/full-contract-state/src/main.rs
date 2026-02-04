@@ -5,9 +5,9 @@
 //! 1. Connect to a reth database
 //! 2. Get basic account information (balance, nonce, code hash)
 //! 3. Get contract bytecode
-//! 4. Iterate through all storage slots for the contract
+//! 4. Iterate through all storage slots for the contract (using hashed storage)
 
-use alloy_primitives::map::B256Map;
+use alloy_primitives::{keccak256, map::B256Map};
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     evm::revm::primitives::{Address, U256},
@@ -52,10 +52,12 @@ pub fn extract_contract_state<P: DBProvider>(
 
     let bytecode = state_provider.account_code(&contract_address)?;
 
-    let mut storage_cursor = provider.tx_ref().cursor_dup_read::<tables::PlainStorageState>()?;
+    // Hash the address to look up in HashedStorages table
+    let hashed_address = keccak256(contract_address);
+    let mut storage_cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>()?;
     let mut storage = B256Map::default();
 
-    if let Some((_, first_entry)) = storage_cursor.seek_exact(contract_address)? {
+    if let Some((_, first_entry)) = storage_cursor.seek_exact(hashed_address)? {
         storage.insert(first_entry.key, first_entry.value);
 
         while let Some((_, entry)) = storage_cursor.next_dup()? {

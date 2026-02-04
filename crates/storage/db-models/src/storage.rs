@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{B256, U256};
 use reth_primitives_traits::ValueWithSubKey;
 
 /// Storage entry as it is saved in the static files.
@@ -9,9 +9,9 @@ use reth_primitives_traits::ValueWithSubKey;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct StorageBeforeTx {
-    /// Address for the storage entry. Acts as `DupSort::SubKey` in static files.
-    pub address: Address,
-    /// Storage key.
+    /// Hashed address for the storage entry. Acts as `DupSort::SubKey` in static files.
+    pub hashed_address: B256,
+    /// Storage key (hashed).
     pub key: B256,
     /// Value on storage key.
     pub value: U256,
@@ -34,15 +34,15 @@ impl reth_codecs::Compact for StorageBeforeTx {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        buf.put_slice(self.address.as_slice());
+        buf.put_slice(self.hashed_address.as_slice());
         buf.put_slice(&self.key[..]);
-        self.value.to_compact(buf) + 52
+        self.value.to_compact(buf) + 64
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let address = Address::from_slice(&buf[..20]);
-        let key = B256::from_slice(&buf[20..52]);
-        let (value, out) = U256::from_compact(&buf[52..], len - 52);
-        (Self { address, key, value }, out)
+        let hashed_address = B256::from_slice(&buf[..32]);
+        let key = B256::from_slice(&buf[32..64]);
+        let (value, out) = U256::from_compact(&buf[64..], len - 64);
+        (Self { hashed_address, key, value }, out)
     }
 }

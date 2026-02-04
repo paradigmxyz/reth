@@ -783,9 +783,9 @@ mod tests {
                             break
                         }
 
-                        tree.entry(keccak256(bn_address.address()))
+                        tree.entry(bn_address.hashed_address())
                             .or_default()
-                            .insert(keccak256(entry.key), entry.value);
+                            .insert(entry.key, entry.value);
                     }
                     for (hashed_address, storage) in tree {
                         for (hashed_slot, value) in storage {
@@ -816,13 +816,13 @@ mod tests {
 
                         if let Some(acc) = account_before_tx.info {
                             tx.put::<tables::HashedAccounts>(
-                                keccak256(account_before_tx.address),
+                                account_before_tx.hashed_address,
                                 acc,
                             )
                             .unwrap();
                         } else {
                             tx.delete::<tables::HashedAccounts>(
-                                keccak256(account_before_tx.address),
+                                account_before_tx.hashed_address,
                                 None,
                             )
                             .unwrap();

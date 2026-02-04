@@ -740,6 +740,11 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> AccountReader for MockEthProvide
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         Ok(self.accounts.lock().get(address).cloned().map(|a| a.account))
     }
+
+    fn hashed_basic_account(&self, _hashed_address: B256) -> ProviderResult<Option<Account>> {
+        // Mock provider doesn't store accounts by hashed address
+        Ok(None)
+    }
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader
@@ -988,7 +993,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     fn get_account_before_block(
         &self,
         _block_number: BlockNumber,
-        _address: Address,
+        _hashed_address: B256,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         Ok(None)
     }
@@ -1011,14 +1016,14 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
     fn storage_changeset(
         &self,
         _block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberHash, StorageEntry)>> {
         Ok(Vec::default())
     }
 
     fn get_storage_before_block(
         &self,
         _block_number: BlockNumber,
-        _address: Address,
+        _hashed_address: B256,
         _storage_key: B256,
     ) -> ProviderResult<Option<StorageEntry>> {
         Ok(None)
@@ -1027,7 +1032,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
     fn storage_changesets_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberHash, StorageEntry)>> {
         Ok(Vec::default())
     }
 

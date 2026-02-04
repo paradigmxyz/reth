@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, BlockNumber, B256, U256};
+use alloy_primitives::{keccak256, Address, BlockNumber, B256, U256};
 use clap::Parser;
 use parking_lot::Mutex;
 use reth_db_api::{
@@ -63,16 +63,18 @@ impl Command {
         address: Address,
         limit: usize,
     ) -> eyre::Result<()> {
+        let hashed_address = keccak256(address);
+
         let entries = tool.provider_factory.db_ref().view(|tx| {
             // Get account info
-            let account = tx.get::<tables::PlainAccountState>(address)?;
+            let account = tx.get::<tables::HashedAccounts>(hashed_address)?;
 
             // Get storage entries
-            let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+            let mut cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
             let mut entries = Vec::new();
             let mut last_log = Instant::now();
 
-            let walker = cursor.walk_dup(Some(address), None)?;
+            let walker = cursor.walk_dup(Some(hashed_address), None)?;
             for (idx, entry) in walker.enumerate() {
                 let (_, storage_entry) = entry?;
 
@@ -113,6 +115,7 @@ impl Command {
         limit: usize,
     ) -> eyre::Result<()> {
         let provider = tool.provider_factory.history_by_block_number(block)?;
+        let hashed_address = keccak256(address);
 
         // Get account info at that block
         let account = provider.basic_account(&address)?;
@@ -122,7 +125,7 @@ impl Command {
         let history_in_rocksdb = storage_settings.storages_history_in_rocksdb;
 
         // For historical queries, enumerate keys from history indices only
-        // (not PlainStorageState, which reflects current state)
+        // (not HashedStorages, which reflects current state)
         let mut storage_keys = BTreeSet::new();
 
         if history_in_rocksdb {
@@ -135,7 +138,7 @@ impl Command {
         }
 
         // Collect keys from MDBX StorageChangeSets using parallel scanning
-        self.collect_mdbx_storage_keys_parallel(tool, address, &mut storage_keys)?;
+        self.collect_mdbx_storage_keys_parallel(tool, hashed_address, &mut storage_keys)?;
 
         info!(
             target: "reth::cli",
@@ -185,7 +188,7 @@ impl Command {
     fn collect_mdbx_storage_keys_parallel<N: NodeTypesWithDB + ProviderNodeTypes>(
         &self,
         tool: &DbTool<N>,
-        address: Address,
+        hashed_address: B256,
         keys: &mut BTreeSet<B256>,
     ) -> eyre::Result<()> {
         const CHUNK_SIZE: u64 = 500_000; // 500k blocks per thread
@@ -202,7 +205,7 @@ impl Command {
 
         info!(
             target: "reth::cli",
-            address = %address,
+            hashed_address = %hashed_address,
             tip,
             chunk_size = CHUNK_SIZE,
             num_threads,
@@ -253,17 +256,17 @@ impl Command {
                                 let mut changeset_cursor =
                                     tx.cursor_read::<tables::StorageChangeSets>()?;
                                 let start_key =
-                                    reth_db_api::models::BlockNumberAddress((chunk_start, address));
+                                    reth_db_api::models::BlockNumberHash((chunk_start, hashed_address));
                                 let end_key =
-                                    reth_db_api::models::BlockNumberAddress((chunk_end, address));
+                                    reth_db_api::models::BlockNumberHash((chunk_end, hashed_address));
 
                                 let mut local_keys = BTreeSet::new();
                                 let mut entries_in_chunk = 0usize;
 
                                 if let Ok(walker) = changeset_cursor.walk_range(start_key..=end_key)
                                 {
-                                    for (block_addr, storage_entry) in walker.flatten() {
-                                        if block_addr.address() == address {
+                                    for (block_hash, storage_entry) in walker.flatten() {
+                                        if block_hash.hashed_address() == hashed_address {
                                             local_keys.insert(storage_entry.key);
                                         }
                                         entries_in_chunk += 1;
@@ -302,7 +305,7 @@ impl Command {
 
         info!(
             target: "reth::cli",
-            address = %address,
+            hashed_address = %hashed_address,
             total_entries = total,
             unique_keys = final_keys.len(),
             "Finished parallel MDBX changeset scan"

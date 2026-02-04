@@ -68,7 +68,7 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     )?;
     let unwind_inner_tx = provider.into_tx();
 
-    output_db.update(|tx| tx.import_table::<tables::PlainAccountState, _>(&unwind_inner_tx))??;
+    output_db.update(|tx| tx.import_table::<tables::HashedAccounts, _>(&unwind_inner_tx))??;
 
     Ok(())
 }

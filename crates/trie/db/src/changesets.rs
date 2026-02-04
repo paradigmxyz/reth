@@ -17,7 +17,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     changesets::compute_trie_changesets,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory},
-    HashedPostStateSorted, KeccakKeyHasher, StateRoot, TrieInputSorted,
+    HashedPostStateSorted, StateRoot, TrieInputSorted,
 };
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
@@ -77,14 +77,12 @@ where
     // Step 1: Collect/calculate state reverts
 
     // This is just the changes from this specific block
-    let individual_state_revert = HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
-        provider,
-        block_number..=block_number,
-    )?;
+    let individual_state_revert =
+        HashedPostStateSorted::from_reverts(provider, block_number..=block_number)?;
 
     // This reverts all changes from db tip back to just after block was processed
     let cumulative_state_revert =
-        HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(provider, (block_number + 1)..)?;
+        HashedPostStateSorted::from_reverts(provider, (block_number + 1)..)?;
 
     // This reverts all changes from db tip back to just after block-1 was processed
     let mut cumulative_state_revert_prev = cumulative_state_revert.clone();

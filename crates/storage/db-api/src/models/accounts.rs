@@ -5,24 +5,24 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-use alloy_primitives::{Address, BlockNumber, StorageKey};
+use alloy_primitives::{Address, BlockNumber, StorageKey, B256};
 use serde::{Deserialize, Serialize};
 use std::ops::{Bound, Range, RangeBounds, RangeInclusive};
 
-/// [`BlockNumber`] concatenated with [`Address`].
+/// [`BlockNumber`] concatenated with [`B256`] (hashed address).
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
 #[derive(
     Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd, Hash,
 )]
-pub struct BlockNumberAddress(pub (BlockNumber, Address));
+pub struct BlockNumberHash(pub (BlockNumber, B256));
 
-impl BlockNumberAddress {
+impl BlockNumberHash {
     /// Create a new Range from `start` to `end`
     ///
     /// Note: End is inclusive
     pub fn range(range: RangeInclusive<BlockNumber>) -> Range<Self> {
-        (*range.start(), Address::ZERO).into()..(*range.end() + 1, Address::ZERO).into()
+        (*range.start(), B256::ZERO).into()..(*range.end() + 1, B256::ZERO).into()
     }
 
     /// Return the block number
@@ -30,77 +30,77 @@ impl BlockNumberAddress {
         self.0 .0
     }
 
-    /// Return the address
-    pub const fn address(&self) -> Address {
+    /// Return the hashed address
+    pub const fn hashed_address(&self) -> B256 {
         self.0 .1
     }
 
-    /// Consumes `Self` and returns [`BlockNumber`], [`Address`]
-    pub const fn take(self) -> (BlockNumber, Address) {
+    /// Consumes `Self` and returns [`BlockNumber`], [`B256`]
+    pub const fn take(self) -> (BlockNumber, B256) {
         (self.0 .0, self.0 .1)
     }
 }
 
-impl From<(BlockNumber, Address)> for BlockNumberAddress {
-    fn from(tpl: (u64, Address)) -> Self {
+impl From<(BlockNumber, B256)> for BlockNumberHash {
+    fn from(tpl: (u64, B256)) -> Self {
         Self(tpl)
     }
 }
 
-impl Encode for BlockNumberAddress {
-    type Encoded = [u8; 28];
+impl Encode for BlockNumberHash {
+    type Encoded = [u8; 40];
 
     fn encode(self) -> Self::Encoded {
         let block_number = self.0 .0;
-        let address = self.0 .1;
+        let hashed_address = self.0 .1;
 
-        let mut buf = [0u8; 28];
+        let mut buf = [0u8; 40];
 
         buf[..8].copy_from_slice(&block_number.to_be_bytes());
-        buf[8..].copy_from_slice(address.as_slice());
+        buf[8..].copy_from_slice(hashed_address.as_slice());
         buf
     }
 }
 
-impl Decode for BlockNumberAddress {
+impl Decode for BlockNumberHash {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::Decode)?);
-        let hash = Address::from_slice(&value[8..]);
+        let hash = B256::from_slice(&value[8..]);
         Ok(Self((num, hash)))
     }
 }
 
-/// A [`RangeBounds`] over a range of [`BlockNumberAddress`]s. Used to conveniently convert from a
+/// A [`RangeBounds`] over a range of [`BlockNumberHash`]s. Used to conveniently convert from a
 /// range of [`BlockNumber`]s.
 #[derive(Debug)]
-pub struct BlockNumberAddressRange {
+pub struct BlockNumberHashRange {
     /// Starting bound of the range.
-    pub start: Bound<BlockNumberAddress>,
+    pub start: Bound<BlockNumberHash>,
     /// Ending bound of the range.
-    pub end: Bound<BlockNumberAddress>,
+    pub end: Bound<BlockNumberHash>,
 }
 
-impl RangeBounds<BlockNumberAddress> for BlockNumberAddressRange {
-    fn start_bound(&self) -> Bound<&BlockNumberAddress> {
+impl RangeBounds<BlockNumberHash> for BlockNumberHashRange {
+    fn start_bound(&self) -> Bound<&BlockNumberHash> {
         self.start.as_ref()
     }
 
-    fn end_bound(&self) -> Bound<&BlockNumberAddress> {
+    fn end_bound(&self) -> Bound<&BlockNumberHash> {
         self.end.as_ref()
     }
 }
 
-impl<R: RangeBounds<BlockNumber>> From<R> for BlockNumberAddressRange {
+impl<R: RangeBounds<BlockNumber>> From<R> for BlockNumberHashRange {
     fn from(r: R) -> Self {
         let start = match r.start_bound() {
-            Bound::Included(n) => Bound::Included(BlockNumberAddress((*n, Address::ZERO))),
-            Bound::Excluded(n) => Bound::Included(BlockNumberAddress((n + 1, Address::ZERO))),
+            Bound::Included(n) => Bound::Included(BlockNumberHash((*n, B256::ZERO))),
+            Bound::Excluded(n) => Bound::Included(BlockNumberHash((n + 1, B256::ZERO))),
             Bound::Unbounded => Bound::Unbounded,
         };
 
         let end = match r.end_bound() {
-            Bound::Included(n) => Bound::Excluded(BlockNumberAddress((n + 1, Address::ZERO))),
-            Bound::Excluded(n) => Bound::Excluded(BlockNumberAddress((*n, Address::ZERO))),
+            Bound::Included(n) => Bound::Excluded(BlockNumberHash((n + 1, B256::ZERO))),
+            Bound::Excluded(n) => Bound::Excluded(BlockNumberHash((*n, B256::ZERO))),
             Bound::Unbounded => Bound::Unbounded,
         };
 
@@ -139,36 +139,36 @@ impl Decode for AddressStorageKey {
     }
 }
 
-impl_fixed_arbitrary!((BlockNumberAddress, 28), (AddressStorageKey, 52));
+impl_fixed_arbitrary!((BlockNumberHash, 40), (AddressStorageKey, 52));
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::address;
+    use alloy_primitives::{address, b256};
     use rand::{rng, Rng};
 
     #[test]
-    fn test_block_number_address() {
+    fn test_block_number_hash() {
         let num = 1u64;
-        let hash = address!("0xba5e000000000000000000000000000000000000");
-        let key = BlockNumberAddress((num, hash));
+        let hashed_address = b256!("0xba5e000000000000000000000000000000000000000000000000000000000000");
+        let key = BlockNumberHash((num, hashed_address));
 
-        let mut bytes = [0u8; 28];
+        let mut bytes = [0u8; 40];
         bytes[..8].copy_from_slice(&num.to_be_bytes());
-        bytes[8..].copy_from_slice(hash.as_slice());
+        bytes[8..].copy_from_slice(hashed_address.as_slice());
 
         let encoded = Encode::encode(key);
         assert_eq!(encoded, bytes);
 
-        let decoded: BlockNumberAddress = Decode::decode(&encoded).unwrap();
+        let decoded: BlockNumberHash = Decode::decode(&encoded).unwrap();
         assert_eq!(decoded, key);
     }
 
     #[test]
-    fn test_block_number_address_rand() {
-        let mut bytes = [0u8; 28];
+    fn test_block_number_hash_rand() {
+        let mut bytes = [0u8; 40];
         rng().fill(bytes.as_mut_slice());
-        let key = BlockNumberAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
+        let key = BlockNumberHash::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
         assert_eq!(bytes, Encode::encode(key));
     }
 

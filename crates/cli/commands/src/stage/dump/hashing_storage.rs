@@ -61,7 +61,7 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 
     // TODO optimize we can actually just get the entries we need for both these tables
     output_db
-        .update(|tx| tx.import_dupsort::<tables::PlainStorageState, _>(&unwind_inner_tx))??;
+        .update(|tx| tx.import_dupsort::<tables::HashedStorages, _>(&unwind_inner_tx))??;
     output_db
         .update(|tx| tx.import_dupsort::<tables::StorageChangeSets, _>(&unwind_inner_tx))??;
 

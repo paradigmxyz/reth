@@ -85,5 +85,5 @@ macro_rules! impl_fuzzer_value_with_input {
     };
 }
 
-impl_fuzzer_key!(BlockNumberAddress);
+impl_fuzzer_key!(BlockNumberHash);
 impl_fuzzer_value_with_input!((IntegerList, IntegerListInput));

@@ -50,6 +50,15 @@ impl AccountReader for StateProviderTest {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         Ok(self.accounts.get(address).map(|(_, acc)| *acc))
     }
+
+    fn hashed_basic_account(&self, hashed_address: B256) -> ProviderResult<Option<Account>> {
+        for (addr, (_, acc)) in &self.accounts {
+            if keccak256(addr) == hashed_address {
+                return Ok(Some(*acc));
+            }
+        }
+        Ok(None)
+    }
 }
 
 impl BlockHashReader for StateProviderTest {

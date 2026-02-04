@@ -3,7 +3,7 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-use alloy_primitives::{Address, BlockNumber};
+use alloy_primitives::{Address, BlockNumber, B256};
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 
@@ -73,6 +73,37 @@ impl Decode for ShardedKey<Address> {
         let key = Address::from_slice(&value[..20]);
         let highest_block_number =
             u64::from_be_bytes(value[20..].try_into().map_err(|_| DatabaseError::Decode)?);
+        Ok(Self::new(key, highest_block_number))
+    }
+}
+
+/// Stack-allocated encoded key for `ShardedKey<B256>`.
+///
+/// This avoids heap allocation in hot database paths. The key layout is:
+/// - 32 bytes: `B256` (hashed address)
+/// - 8 bytes: `BlockNumber` (big-endian)
+pub type ShardedKeyB256Encoded = [u8; 32 + BLOCK_NUMBER_SIZE];
+
+impl Encode for ShardedKey<B256> {
+    type Encoded = ShardedKeyB256Encoded;
+
+    #[inline]
+    fn encode(self) -> Self::Encoded {
+        let mut buf = [0u8; 32 + BLOCK_NUMBER_SIZE];
+        buf[..32].copy_from_slice(self.key.as_slice());
+        buf[32..].copy_from_slice(&self.highest_block_number.to_be_bytes());
+        buf
+    }
+}
+
+impl Decode for ShardedKey<B256> {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        if value.len() != 32 + BLOCK_NUMBER_SIZE {
+            return Err(DatabaseError::Decode);
+        }
+        let key = B256::from_slice(&value[..32]);
+        let highest_block_number =
+            u64::from_be_bytes(value[32..].try_into().map_err(|_| DatabaseError::Decode)?);
         Ok(Self::new(key, highest_block_number))
     }
 }

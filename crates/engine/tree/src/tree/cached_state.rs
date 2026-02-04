@@ -323,6 +323,11 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
             self.state_provider.basic_account(address)
         }
     }
+
+    fn hashed_basic_account(&self, hashed_address: B256) -> ProviderResult<Option<Account>> {
+        // Cache is keyed by Address, not hashed address, so delegate to inner provider
+        self.state_provider.hashed_basic_account(hashed_address)
+    }
 }
 
 /// Represents the status of a key in the cache.

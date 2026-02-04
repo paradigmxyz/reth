@@ -378,6 +378,10 @@ impl<C: Send + Sync, N: NodePrimitives> AccountReader for NoopProvider<C, N> {
     fn basic_account(&self, _address: &Address) -> ProviderResult<Option<Account>> {
         Ok(None)
     }
+
+    fn hashed_basic_account(&self, _hashed_address: B256) -> ProviderResult<Option<Account>> {
+        Ok(None)
+    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
@@ -391,7 +395,7 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
     fn get_account_before_block(
         &self,
         _block_number: BlockNumber,
-        _address: Address,
+        _hashed_address: B256,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         Ok(None)
     }
@@ -414,7 +418,7 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
         &self,
         _block_number: BlockNumber,
     ) -> ProviderResult<
-        Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
+        Vec<(reth_db_api::models::BlockNumberHash, reth_primitives_traits::StorageEntry)>,
     > {
         Ok(Vec::default())
     }
@@ -422,7 +426,7 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
     fn get_storage_before_block(
         &self,
         _block_number: BlockNumber,
-        _address: Address,
+        _hashed_address: B256,
         _storage_key: B256,
     ) -> ProviderResult<Option<reth_primitives_traits::StorageEntry>> {
         Ok(None)
@@ -432,7 +436,7 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
         &self,
         _range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<
-        Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
+        Vec<(reth_db_api::models::BlockNumberHash, reth_primitives_traits::StorageEntry)>,
     > {
         Ok(Vec::default())
     }
