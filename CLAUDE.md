@@ -352,7 +352,7 @@ Let's say you want to fix a bug where external IP resolution fails on startup:
    ```bash
    cargo +nightly fmt --all
    cargo clippy --workspace --all-features # Make sure WHOLE WORKSPACE compiles!
-   cargo test -p reth-discv4
+   cargo nextest run -p reth-discv4
    ```
 
 6. **Commit with clear message**:
