@@ -7821,7 +7821,7 @@ __cold static int copy_with_compacting(MDBX_env *env, MDBX_txn *txn, mdbx_fileha
         ERROR("%s/%d: %s %zu", "MDBX_CORRUPTED", MDBX_CORRUPTED, "invalid GC-record length", data.iov_len);
         return MDBX_CORRUPTED;
       }
-      if (unlikely(!pnl_check(pnl, txn->geo.first_unallocated))) {
+      if (unlikely(!pnl_check(pnl, txn_first_unallocated(txn)))) {
         ERROR("%s/%d: %s", "MDBX_CORRUPTED", MDBX_CORRUPTED, "invalid GC-record content");
         return MDBX_CORRUPTED;
       }
@@ -13200,6 +13200,7 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
                                                                                here, only for assertion */
                                                      = parent->geo.first_unallocated) -
                                                         MDBX_ENABLE_REFUND));
+    /* Note: Above uses direct assignment; txn_first_unallocated() would return same value after assignment */
 
     txn->tw.gc.time_acc = parent->tw.gc.time_acc;
     txn->tw.gc.last_reclaimed = parent->tw.gc.last_reclaimed;
@@ -16157,6 +16158,13 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
     for (size_t i = 1; i <= MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl); ++i)
       pnl_append_prereserved(parent->tw.repnl, subtxn->tw.subtxn_repnl[i]);
   }
+
+  /* Re-sort parent's repnl after merging pages from subtxn.
+   * pnl_check/pnl_check_allocated assume the list is sorted (MDBX_PNL_MOST
+   * returns first or last element depending on sort order). Without sorting,
+   * assertions in page_alloc_finalize will fail with false positives. */
+  if (MDBX_PNL_GETSIZE(parent->tw.repnl) > 1)
+    pnl_sort(parent->tw.repnl, parent->geo.first_unallocated);
 
   subtx_unlink_from_parent(subtxn);
   subtx_free_resources(subtxn);
@@ -20244,7 +20252,7 @@ void dpl_sift(MDBX_txn *const txn, pnl_t pl, const bool spilled) {
   tASSERT(txn, (txn->flags & MDBX_TXN_RDONLY) == 0);
   tASSERT(txn, (txn->flags & MDBX_WRITEMAP) == 0 || MDBX_AVOID_MSYNC);
   if (MDBX_PNL_GETSIZE(pl) && txn->tw.dirtylist->length) {
-    tASSERT(txn, pnl_check_allocated(pl, (size_t)txn->geo.first_unallocated << spilled));
+    tASSERT(txn, pnl_check_allocated(pl, (size_t)txn_first_unallocated(txn) << spilled));
     dpl_t *dl = dpl_sort(txn);
 
     /* Scanning in ascend order */
@@ -23080,7 +23088,21 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
 
   ret.err = page_dirty(txn, ret.page, (pgno_t)num);
 bailout:
-  tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+  if (!pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - 1)) {
+    fprintf(stderr, "[page_alloc_finalize] ASSERTION WILL FAIL:\n");
+    fprintf(stderr, "  txn=%p flags=0x%x parallel_subtx=%d\n", 
+            (void*)txn, txn->flags, !!(txn->flags & txn_parallel_subtx));
+    fprintf(stderr, "  txn->geo.first_unallocated=%u\n", txn->geo.first_unallocated);
+    fprintf(stderr, "  txn_first_unallocated(txn)=%u\n", txn_first_unallocated(txn));
+    fprintf(stderr, "  repnl size=%zu\n", MDBX_PNL_GETSIZE(txn->tw.repnl));
+    if (MDBX_PNL_GETSIZE(txn->tw.repnl) > 0) {
+      fprintf(stderr, "  repnl MOST=%u\n", MDBX_PNL_MOST(txn->tw.repnl));
+      fprintf(stderr, "  repnl[1]=%u repnl[last]=%u\n", 
+              txn->tw.repnl[1], txn->tw.repnl[MDBX_PNL_GETSIZE(txn->tw.repnl)]);
+    }
+    fprintf(stderr, "  subtxn_list=%p\n", (void*)txn->tw.subtxn_list);
+  }
+  tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
 #if MDBX_ENABLE_PROFGC
   size_t majflt_after;
   prof->xtime_cpu += osal_cputime(&majflt_after) - cputime_before;
@@ -23125,10 +23147,13 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
       ret.err = lock_rc;
       return ret;
     }
-    /* Allocate num + batch extra pages to reduce future mutex acquisitions */
+    /* Allocate num + batch extra pages to reduce future mutex acquisitions.
+     * When MDBX_ENABLE_REFUND is enabled, allocate one extra "refund boundary" page
+     * that we DON'T put in subtxn_repnl. This ensures the highest page in subtxn_repnl
+     * is < (first_unallocated - 1), satisfying pnl_check_allocated assertions. */
     const pgno_t start = parent->geo.first_unallocated;
     size_t extra = MDBX_SUBTXN_PAGE_BATCH;
-    size_t total = num + extra;
+    size_t total = num + extra + MDBX_ENABLE_REFUND;
     /* Check limits and reduce extra if necessary */
     if (unlikely(start + total > parent->geo.upper)) {
       if (start + num > parent->geo.upper) {
@@ -23138,7 +23163,7 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
         return ret;
       }
       total = parent->geo.upper - start;
-      extra = total - num;
+      extra = (total > num + MDBX_ENABLE_REFUND) ? total - num - MDBX_ENABLE_REFUND : 0;
     }
     const pgno_t new_first = start + (pgno_t)total;
     /* Grow file if needed */
@@ -23157,9 +23182,13 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
      * This is O(1) instead of O(n) sibling sync loop. */
     parent->geo.first_unallocated = new_first;
     osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
-    /* Put extra pages into subtxn_repnl for future use */
+    /* Put extra pages into subtxn_repnl for future use.
+     * Note: We allocated (extra + MDBX_ENABLE_REFUND) extra pages beyond num,
+     * but only put 'extra' pages in subtxn_repnl. The last MDBX_ENABLE_REFUND
+     * page(s) are the "refund boundary" and must not be in any repnl. */
     if (extra > 0) {
       const pgno_t extra_start = start + (pgno_t)num;
+      const pgno_t extra_end = extra_start + (pgno_t)extra;
       if (!txn->tw.subtxn_repnl) {
         txn->tw.subtxn_repnl = pnl_alloc(extra);
         if (unlikely(!txn->tw.subtxn_repnl)) {
@@ -23175,7 +23204,7 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
           return ret;
         }
       }
-      for (pgno_t p = extra_start; p < new_first; ++p) {
+      for (pgno_t p = extra_start; p < extra_end; ++p) {
         pnl_append_prereserved(txn->tw.subtxn_repnl, p);
       }
     }
@@ -23189,7 +23218,7 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
 #endif /* MDBX_ENABLE_PROFGC */
 
   eASSERT(env, num > 0 || (flags & ALLOC_RESERVE));
-  eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+  eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
 
   size_t newnext;
   const uint64_t monotime_begin = (MDBX_ENABLE_PROFGC || (num > 1 && env->options.gc_time_limit)) ? osal_monotime() : 0;
@@ -23331,7 +23360,7 @@ next_gc:;
 
   pgno_t *gc_pnl = (pgno_t *)data.iov_base;
   if (unlikely(data.iov_len % sizeof(pgno_t) || data.iov_len < MDBX_PNL_SIZEOF(gc_pnl) ||
-               !pnl_check(gc_pnl, txn->geo.first_unallocated))) {
+               !pnl_check(gc_pnl, txn_first_unallocated(txn)))) {
     ERROR("%s/%d: %s", "MDBX_CORRUPTED", MDBX_CORRUPTED, "invalid GC value-length");
     ret.err = MDBX_CORRUPTED;
     goto fail;
@@ -23413,23 +23442,23 @@ next_gc:;
 #endif /* MDBX_ENABLE_PROFGC */
   flags |= ALLOC_SHOULD_SCAN;
   if (AUDIT_ENABLED()) {
-    if (unlikely(!pnl_check(txn->tw.repnl, txn->geo.first_unallocated))) {
+    if (unlikely(!pnl_check(txn->tw.repnl, txn_first_unallocated(txn)))) {
       ERROR("%s/%d: %s", "MDBX_CORRUPTED", MDBX_CORRUPTED, "invalid txn retired-list");
       ret.err = MDBX_CORRUPTED;
       goto fail;
     }
   } else {
-    eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated));
+    eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn)));
   }
   eASSERT(env, dpl_check(txn));
 
-  eASSERT(env, MDBX_PNL_GETSIZE(txn->tw.repnl) == 0 || MDBX_PNL_MOST(txn->tw.repnl) < txn->geo.first_unallocated);
+  eASSERT(env, MDBX_PNL_GETSIZE(txn->tw.repnl) == 0 || MDBX_PNL_MOST(txn->tw.repnl) < txn_first_unallocated(txn));
   if (MDBX_ENABLE_REFUND && MDBX_PNL_GETSIZE(txn->tw.repnl) &&
-      unlikely(MDBX_PNL_MOST(txn->tw.repnl) == txn->geo.first_unallocated - 1)) {
+      unlikely(MDBX_PNL_MOST(txn->tw.repnl) == txn_first_unallocated(txn) - 1)) {
     /* Refund suitable pages into "unallocated" space */
     txn_refund(txn);
   }
-  eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+  eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
 
   /* Done for a kick-reclaim mode, actually no page needed */
   if (unlikely(num == 0)) {
@@ -23607,7 +23636,7 @@ done:
   if (likely((flags & ALLOC_RESERVE) == 0)) {
     if (pgno) {
       eASSERT(env, pgno + num <= txn->geo.first_unallocated && pgno >= NUM_METAS);
-      eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+      eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
     } else {
       if (txn->tw.subtxn_list && txn->tw.subtxn_alloc_mutex) {
         osal_fastmutex_acquire(txn->tw.subtxn_alloc_mutex);
@@ -23626,7 +23655,7 @@ done:
     if (unlikely(ret.err != MDBX_SUCCESS)) {
     fail:
       eASSERT(env, ret.err != MDBX_SUCCESS);
-      eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+      eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
       int level;
       const char *what;
       if (flags & ALLOC_RESERVE) {
@@ -23695,9 +23724,12 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
       ret.err = lock_rc;
       return ret;
     }
-    /* Allocate batch from parent's EOF to reduce future mutex acquisitions */
+    /* Allocate batch from parent's EOF to reduce future mutex acquisitions.
+     * When MDBX_ENABLE_REFUND is enabled, allocate one extra "refund boundary" page
+     * that we DON'T put in subtxn_repnl. This ensures the highest page in subtxn_repnl
+     * is < (first_unallocated - 1), satisfying pnl_check_allocated assertions. */
     const pgno_t start = parent->geo.first_unallocated;
-    size_t batch = MDBX_SUBTXN_PAGE_BATCH;
+    size_t batch = MDBX_SUBTXN_PAGE_BATCH + MDBX_ENABLE_REFUND;
     /* Check limits and reduce batch if necessary */
     if (unlikely(start + batch > parent->geo.upper)) {
       if (start >= parent->geo.upper) {
@@ -23709,6 +23741,8 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
       batch = parent->geo.upper - start;
     }
     const pgno_t new_first = start + (pgno_t)batch;
+    /* Calculate how many extra pages go into subtxn_repnl (excluding refund boundary and the one we use) */
+    const size_t extra_for_repnl = (batch > 1 + MDBX_ENABLE_REFUND) ? batch - 1 - MDBX_ENABLE_REFUND : 0;
     /* Grow file if needed */
     if (new_first > parent->geo.now) {
       int rc = dxb_resize(env, parent->geo.first_unallocated, new_first, parent->geo.upper, implicit_grow);
@@ -23725,24 +23759,28 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
      * This is O(1) instead of O(n) sibling sync loop. */
     parent->geo.first_unallocated = new_first;
     osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
-    /* Put batch-1 pages into subtxn_repnl for future use */
-    if (batch > 1) {
+    /* Put extra pages into subtxn_repnl for future use.
+     * Note: We allocated (extra_for_repnl + 1 + MDBX_ENABLE_REFUND) pages total,
+     * but only put 'extra_for_repnl' pages in subtxn_repnl. The last MDBX_ENABLE_REFUND
+     * page(s) are the "refund boundary" and must not be in any repnl. */
+    if (extra_for_repnl > 0) {
+      const pgno_t extra_end = start + 1 + (pgno_t)extra_for_repnl;
       if (!txn->tw.subtxn_repnl) {
-        txn->tw.subtxn_repnl = pnl_alloc(batch);
+        txn->tw.subtxn_repnl = pnl_alloc(extra_for_repnl);
         if (unlikely(!txn->tw.subtxn_repnl)) {
           ret.page = nullptr;
           ret.err = MDBX_ENOMEM;
           return ret;
         }
       } else {
-        int rc = pnl_need(&txn->tw.subtxn_repnl, batch - 1);
+        int rc = pnl_need(&txn->tw.subtxn_repnl, extra_for_repnl);
         if (unlikely(rc != MDBX_SUCCESS)) {
           ret.page = nullptr;
           ret.err = rc;
           return ret;
         }
       }
-      for (pgno_t p = start + 1; p < new_first; ++p) {
+      for (pgno_t p = start + 1; p < extra_end; ++p) {
         pnl_append_prereserved(txn->tw.subtxn_repnl, p);
       }
     }
@@ -24316,7 +24354,7 @@ retry:
   ctx->loop += !(ctx->prev_first_unallocated > txn->geo.first_unallocated);
   TRACE(">> restart, loop %u", ctx->loop);
 
-  tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+  tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
   tASSERT(txn, dpl_check(txn));
   if (unlikely(/* paranoia */ ctx->loop > ((MDBX_DEBUG > 0) ? 12 : 42))) {
     ERROR("txn #%" PRIaTXN " too more loops %u, bailout", txn->txnid, ctx->loop);
@@ -24343,7 +24381,7 @@ retry:
     /* Come back here after each Put() in case retired-list changed */
     TRACE("%s", " >> continue");
 
-    tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+    tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
     MDBX_val key, data;
     if (is_lifo(txn)) {
       if (ctx->cleaned_slot < (txn->tw.gc.retxl ? MDBX_PNL_GETSIZE(txn->tw.gc.retxl) : 0)) {
@@ -24413,7 +24451,7 @@ retry:
       }
     }
 
-    tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+    tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
     tASSERT(txn, dpl_check(txn));
     if (AUDIT_ENABLED()) {
       rc = audit_ex(txn, ctx->retired_stored, false);
@@ -24423,7 +24461,7 @@ retry:
 
     /* return suitable into unallocated space */
     if (txn_refund(txn)) {
-      tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+      tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
       if (AUDIT_ENABLED()) {
         rc = audit_ex(txn, ctx->retired_stored, false);
         if (unlikely(rc != MDBX_SUCCESS))
@@ -24459,7 +24497,7 @@ retry:
       continue;
     }
 
-    tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+    tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
     tASSERT(txn, txn->tw.loose_count == 0);
 
     TRACE("%s", " >> reserving");
@@ -24560,7 +24598,7 @@ retry:
           ctx->reserved + chunk + 1, reservation_gc_id);
     prepare_backlog(txn, ctx);
     rc = cursor_put(&ctx->cursor, &key, &data, MDBX_RESERVE | MDBX_NOOVERWRITE);
-    tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+    tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
     if (unlikely(rc != MDBX_SUCCESS))
       goto bailout;
 
@@ -24578,7 +24616,7 @@ retry:
   size_t excess_slots = 0;
   ctx->fill_idx = txn->tw.gc.retxl ? MDBX_PNL_GETSIZE(txn->tw.gc.retxl) - ctx->reused_slot : ctx->reused_slot;
   rc = MDBX_SUCCESS;
-  tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+  tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
   tASSERT(txn, dpl_check(txn));
   if (ctx->amount) {
     MDBX_val key, data;
@@ -33320,7 +33358,7 @@ status_done:
   reclaim:
     DEBUG("reclaim %zu %s page %" PRIaPGNO, npages, "dirty", pgno);
     rc = pnl_insert_span(&txn->tw.repnl, pgno, npages);
-    tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+    tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
     tASSERT(txn, dpl_check(txn));
     return rc;
   }
@@ -33715,7 +33753,7 @@ static void refund_reclaimed(MDBX_txn *txn) {
   VERBOSE("refunded %" PRIaPGNO " pages: %" PRIaPGNO " -> %" PRIaPGNO, txn->geo.first_unallocated - first_unallocated,
           txn->geo.first_unallocated, first_unallocated);
   txn->geo.first_unallocated = first_unallocated;
-  tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - 1));
+  tASSERT(txn, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - 1));
 }
 
 static void refund_loose(MDBX_txn *txn) {
@@ -33877,7 +33915,7 @@ bool txn_refund(MDBX_txn *txn) {
       break;
     }
     fprintf(stderr, "[txn_refund] loop iteration, repnl size=%zu\n", MDBX_PNL_GETSIZE(txn->tw.repnl));
-    if (MDBX_PNL_GETSIZE(txn->tw.repnl) == 0 || MDBX_PNL_MOST(txn->tw.repnl) != txn->geo.first_unallocated - 1)
+    if (MDBX_PNL_GETSIZE(txn->tw.repnl) == 0 || MDBX_PNL_MOST(txn->tw.repnl) != txn_first_unallocated(txn) - 1)
       break;
 
     refund_reclaimed(txn);
@@ -37787,7 +37825,7 @@ int txn_end(MDBX_txn *txn, unsigned mode) {
       MDBX_txn *const parent = txn->parent;
       eASSERT(env, parent->signature == txn_signature);
       eASSERT(env, parent->nested == txn && (parent->flags & MDBX_TXN_HAS_CHILD) != 0);
-      eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
+      eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn_first_unallocated(txn) - MDBX_ENABLE_REFUND));
       eASSERT(env, memcmp(&txn->tw.troika, &parent->tw.troika, sizeof(troika_t)) == 0);
 
       txn->owner = 0;

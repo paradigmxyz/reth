@@ -4758,4 +4758,167 @@ mod tests {
             total_accounts
         );
     }
+
+    /// 5-minute continuous stress test for parallel subtxn writes.
+    /// Run with: cargo test -p reth-storage-provider --features edge test_save_blocks_edge_mode_stress_5min -- --ignored --nocapture
+    #[test]
+    #[ignore] // Long-running test, run manually
+    #[cfg(feature = "edge")]
+    fn test_save_blocks_edge_mode_stress_5min() {
+        use alloy_primitives::{map::HashMap, U256};
+        use reth_chain_state::ExecutedBlock;
+        use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+        use revm_database::states::BundleState;
+        use revm_state::AccountInfo;
+
+        // Configurable via env vars
+        let duration_secs: u64 = std::env::var("STRESS_DURATION_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(300); // 5 minutes default
+        let accounts_per_iteration: usize = std::env::var("STRESS_ACCOUNTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(200);
+        let storage_slots: usize = std::env::var("STRESS_STORAGE_SLOTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(50);
+        let blocks_per_iteration: usize = std::env::var("STRESS_BLOCKS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(5);
+
+        println!("=== PARALLEL SUBTXN STRESS TEST ===");
+        println!("Duration: {} seconds", duration_secs);
+        println!("Accounts per iteration: {}", accounts_per_iteration);
+        println!("Storage slots per account: {}", storage_slots);
+        println!("Blocks per iteration: {}", blocks_per_iteration);
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::edge());
+        assert!(factory.cached_storage_settings().is_edge_mode());
+
+        let initial_info = factory.db_ref().db().info().unwrap();
+        let initial_last_pgno = initial_info.last_pgno();
+
+        // Insert genesis
+        let data = BlockchainTestData::default();
+        let genesis_executed = ExecutedBlock::new(
+            Arc::new(data.genesis.clone().try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
+            ComputedTrieData::default(),
+        );
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        let start = std::time::Instant::now();
+        let duration = std::time::Duration::from_secs(duration_secs);
+        let mut iteration = 0u64;
+        let mut total_blocks = 0u64;
+        let mut total_accounts = 0u64;
+        let mut total_storage = 0u64;
+
+        while start.elapsed() < duration {
+            let base_account = (iteration * accounts_per_iteration as u64) as usize;
+            let first_block_num = 1 + (iteration * blocks_per_iteration as u64);
+            let iteration_data = BlockchainTestData::default_from_number(first_block_num);
+
+            let mut blocks = Vec::new();
+            for (idx, (block, _)) in
+                iteration_data.blocks.iter().take(blocks_per_iteration).enumerate()
+            {
+                let block_num = first_block_num + idx as u64;
+                let mut bundle = BundleState::builder(block_num..=block_num);
+
+                for i in 0..accounts_per_iteration {
+                    let account_id = base_account + i;
+                    let mut addr_bytes = [0u8; 20];
+                    addr_bytes[12..20].copy_from_slice(&(account_id as u64).to_be_bytes());
+                    let address = Address::from(addr_bytes);
+
+                    bundle = bundle.state_present_account_info(
+                        address,
+                        AccountInfo {
+                            nonce: block_num,
+                            balance: U256::from(account_id + idx),
+                            ..Default::default()
+                        },
+                    );
+
+                    let storage: HashMap<U256, (U256, U256)> = (0..storage_slots)
+                        .map(|s| {
+                            (U256::from(s), (U256::ZERO, U256::from(block_num * 1000 + s as u64)))
+                        })
+                        .collect();
+                    bundle = bundle.state_storage(address, storage);
+                }
+
+                blocks.push(ExecutedBlock::new(
+                    Arc::new(block.clone()),
+                    Arc::new(BlockExecutionOutput {
+                        result: BlockExecutionResult {
+                            receipts: vec![],
+                            requests: Default::default(),
+                            gas_used: 0,
+                            blob_gas_used: 0,
+                        },
+                        state: bundle.build(),
+                    }),
+                    ComputedTrieData::default(),
+                ));
+            }
+
+            let iter_start = std::time::Instant::now();
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw.save_blocks(blocks.clone(), SaveBlocksMode::Full).unwrap();
+            provider_rw.commit().unwrap();
+            let iter_elapsed = iter_start.elapsed();
+
+            total_blocks += blocks.len() as u64;
+            total_accounts += (accounts_per_iteration * blocks.len()) as u64;
+            total_storage += (accounts_per_iteration * storage_slots * blocks.len()) as u64;
+
+            if iteration % 10 == 0 {
+                let elapsed = start.elapsed().as_secs();
+                let remaining = duration_secs.saturating_sub(elapsed);
+                println!(
+                    "[{:3}s] Iteration {:4}: {} blocks, {:?}/iter, {} remaining",
+                    elapsed,
+                    iteration,
+                    blocks.len(),
+                    iter_elapsed,
+                    remaining
+                );
+            }
+
+            iteration += 1;
+        }
+
+        let final_info = factory.db_ref().db().info().unwrap();
+        let final_last_pgno = final_info.last_pgno();
+        let elapsed = start.elapsed();
+
+        println!("\n=== STRESS TEST COMPLETE ===");
+        println!("Duration: {:?}", elapsed);
+        println!("Iterations: {}", iteration);
+        println!("Total blocks: {}", total_blocks);
+        println!("Total accounts: {}", total_accounts);
+        println!("Total storage entries: {}", total_storage);
+        println!("Pages allocated: {} -> {}", initial_last_pgno, final_last_pgno);
+        println!("Iterations/sec: {:.2}", iteration as f64 / elapsed.as_secs_f64());
+        println!("Blocks/sec: {:.2}", total_blocks as f64 / elapsed.as_secs_f64());
+
+        assert!(final_last_pgno > initial_last_pgno, "Should have allocated pages");
+        println!("\n✓ NO CORRUPTION DETECTED");
+    }
 }
