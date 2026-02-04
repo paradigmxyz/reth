@@ -66,10 +66,17 @@ impl DefaultPruningValues {
 
 impl Default for DefaultPruningValues {
     fn default() -> Self {
+        // In edge mode, transaction hash numbers are stored in RocksDB and should be pruned
+        // by default when running with --full, similar to account/storage history.
+        #[cfg(feature = "edge")]
+        let transaction_lookup = Some(PruneMode::Full);
+        #[cfg(not(feature = "edge"))]
+        let transaction_lookup = None;
+
         Self {
             full_prune_modes: PruneModes {
                 sender_recovery: Some(PruneMode::Full),
-                transaction_lookup: None,
+                transaction_lookup,
                 receipts: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
                 account_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
                 storage_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
