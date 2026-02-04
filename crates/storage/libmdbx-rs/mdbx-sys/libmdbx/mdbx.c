@@ -3121,8 +3121,8 @@ typedef const pgno_t *const_pnl_t;
 #define MDBX_PNL_INITIAL (MDBX_PNL_GRANULATE - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(pgno_t))
 
 /* Pages to pre-claim in batch when parallel subtxn's subtxn_repnl is exhausted.
- * 64 pages = 256KB at 4KB page size - balances mutex acquisition cost vs waste. */
-#define MDBX_SUBTXN_PAGE_BATCH 64
+ * 4 pages = 16KB at 4KB page size - minimizes waste while reducing mutex contention. */
+#define MDBX_SUBTXN_PAGE_BATCH 4
 
 #define MDBX_PNL_ALLOCLEN(pl) ((pl)[-1])
 #define MDBX_PNL_GETSIZE(pl) ((size_t)((pl)[0]))
@@ -16121,6 +16121,16 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
     }
     subtxn->tw.loose_pages = nullptr;
     subtxn->tw.loose_count = 0;
+  }
+
+  /* Merge unused pre-allocated pages from subtxn_repnl back to parent.
+   * These pages were batch-allocated but not consumed - return them to avoid leaks. */
+  if (subtxn->tw.subtxn_repnl && MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl) > 0) {
+    int rc = pnl_need(&parent->tw.repnl, MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl));
+    if (unlikely(rc != MDBX_SUCCESS))
+      return LOG_IFERR(rc);
+    for (size_t i = 1; i <= MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl); ++i)
+      pnl_append_prereserved(parent->tw.repnl, subtxn->tw.subtxn_repnl[i]);
   }
 
   subtx_unlink_from_parent(subtxn);
