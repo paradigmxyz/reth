@@ -707,6 +707,7 @@ where
             return Ok(());
         }
 
+        let span = debug_span!("compute_storage_roots").entered();
         let roots = self
             .trie
             .storage_tries_mut()
@@ -715,12 +716,15 @@ where
                 self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty())
             })
             .map(|(address, trie)| {
+                let _guard = span.clone().entered();
+                let _span = debug_span!("compute_storage_root", ?address).entered();
                 let root =
                     trie.root().expect("updates are drained, trie should be revealed by now");
 
                 (address, root)
             })
             .collect::<Vec<_>>();
+        drop(span);
 
         for (addr, storage_root) in roots {
             // If the storage root is known and we have a pending update for this account, encode it
