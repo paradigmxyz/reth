@@ -20,7 +20,7 @@ use reth_trie_common::{
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 #[cfg(feature = "std")]
-use tracing::debug;
+use tracing::{debug, warn};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -67,6 +67,20 @@ impl SparseStateTrie {
     /// Create state trie from state trie.
     pub fn from_state(state: RevealableSparseTrie) -> Self {
         Self { state, ..Default::default() }
+    }
+}
+
+impl<A, S> SparseStateTrie<A, S> {
+    /// Returns a reference to the storage tries.
+    #[doc(hidden)]
+    pub const fn storage(&self) -> &StorageTries<S> {
+        &self.storage
+    }
+
+    /// Returns a mutable reference to the storage tries.
+    #[doc(hidden)]
+    pub const fn storage_mut(&mut self) -> &mut StorageTries<S> {
+        &mut self.storage
     }
 }
 
@@ -1024,33 +1038,152 @@ where
         self.storage.shrink_to(storage_nodes, storage_values);
     }
 
-    /// Prunes the account trie and selected storage tries to reduce memory usage.
+    /// Shrinks the trie to fit within a memory budget.
     ///
-    /// Storage tries not in the top `max_storage_tries` by revealed node count are cleared
-    /// entirely.
+    /// Converts the memory budget to estimated node and value counts based on average sizes:
+    /// - Nodes: ~120 bytes per entry (Nibbles key + `SparseNode` value)
+    /// - Values: ~144 bytes per entry (Nibbles key + `TrieAccount` value)
+    ///
+    /// The budget is split roughly 45% for nodes and 55% for values.
+    pub fn shrink_to_memory(&mut self, max_memory: usize) {
+        // Estimate entry sizes based on documented struct sizes
+        const NODE_ENTRY_SIZE: usize = 120; // Nibbles (40) + SparseNode (80)
+        const VALUE_ENTRY_SIZE: usize = 144; // Nibbles (40) + TrieAccount (104)
+
+        // Split memory budget: ~45% for nodes, ~55% for values
+        let node_budget = max_memory * 45 / 100;
+        let value_budget = max_memory * 55 / 100;
+
+        let max_nodes = node_budget / NODE_ENTRY_SIZE;
+        let max_values = value_budget / VALUE_ENTRY_SIZE;
+
+        self.shrink_to(max_nodes, max_values);
+    }
+
+    /// Prunes the trie while preserving hot accounts.
+    ///
+    /// This method combines depth-based pruning with hot account preservation:
+    /// - Hot accounts (Tier A/B/C) are preserved at full depth
+    /// - Cold accounts are pruned aggressively or evicted entirely
+    /// - Storage tries for hot accounts are preserved
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Configuration for smart pruning with hot account tracking
     ///
     /// # Preconditions
     ///
-    /// Node hashes must be computed via `root()` before calling this method. Otherwise, nodes
-    /// cannot be converted to hash stubs and pruning will have no effect.
-    ///
-    /// # Effects
-    ///
-    /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
+    /// Node hashes must be computed via `root()` before calling this method.
     #[cfg(feature = "std")]
-    #[instrument(target = "trie::sparse", skip_all, fields(max_depth, max_storage_tries))]
-    pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
+    #[instrument(target = "trie::sparse", skip_all)]
+    pub fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>) {
+        use crate::{hot_accounts::TrieKind, PruneTrieOutcome};
+        let fn_start = std::time::Instant::now();
+
         // Prune state and storage tries in parallel
-        rayon::join(
+        let ((account_outcome, state_prune_duration, state_memory), storage_result) = rayon::join(
             || {
-                if let Some(trie) = self.state.as_revealed_mut() {
-                    trie.prune(max_depth);
+                // Prune state trie if over memory budget. Returns (outcome, duration, memory).
+                // Skips pruning if trie not revealed or under budget.
+                let start = std::time::Instant::now();
+
+                let Some(trie) = self.state.as_revealed_mut() else {
+                    return (PruneTrieOutcome::default(), start.elapsed(), 0);
+                };
+
+                let memory = trie.memory_size();
+                let excess = memory.saturating_sub(config.max_memory);
+                if excess == 0 {
+                    return (PruneTrieOutcome::default(), start.elapsed(), memory);
                 }
-                self.revealed_account_paths.clear();
+
+                let outcome =
+                    trie.prune_preserving(config, TrieKind::State { excess_memory: excess });
+
+                // Remove revealed paths that are descendants of pruned roots
+                if outcome.did_prune() {
+                    self.revealed_account_paths.retain(|path| {
+                        !outcome.pruned_roots.iter().any(|root| path.starts_with(root))
+                    });
+
+                    #[cfg(feature = "metrics")]
+                    self.metrics.prune.state_prune_count.increment(1);
+                }
+
+                (outcome, start.elapsed(), memory)
             },
-            || {
-                self.storage.prune(max_depth, max_storage_tries);
-            },
+            || self.storage.prune_preserving(config),
+        );
+
+        let account_stats = account_outcome.stats;
+
+        let StorageTriePruneResult {
+            stats: storage_stats,
+            hot_preserved,
+            cold_evicted,
+            pruned: storage_pruned,
+            prune_duration: storage_prune_duration,
+            duration: storage_duration,
+            total_memory: storage_memory,
+            tries_categorized,
+            update_tracking_duration,
+            categorize_duration,
+            sort_duration,
+            eviction_duration,
+        } = storage_result;
+
+        let mut stats = account_stats;
+        stats += storage_stats;
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.prune.skipped_modified.record(stats.skipped_modified as f64);
+            self.metrics.prune.skipped_hot_accounts.record(stats.skipped_hot_accounts as f64);
+            self.metrics.prune.hot_storage_tries_preserved.record(hot_preserved as f64);
+            self.metrics.prune.cold_storage_tries_evicted.record(cold_evicted as f64);
+            self.metrics.prune.storage_tries_pruned.record(storage_pruned as f64);
+            self.metrics
+                .prune
+                .storage_tries_prune_duration
+                .record(storage_prune_duration.as_micros() as f64);
+            self.metrics.prune.state_prune_duration.record(state_prune_duration.as_micros() as f64);
+            self.metrics
+                .prune
+                .state_subtries_cleared
+                .record(account_outcome.pruned_roots.len() as f64);
+            self.metrics.prune.storage_prune_duration.record(storage_duration.as_micros() as f64);
+            self.metrics.prune.state_memory_bytes.record(state_memory as f64);
+            self.metrics.prune.storage_memory_bytes.record(storage_memory as f64);
+
+            // Granular timing metrics
+            self.metrics
+                .prune
+                .storage_update_tracking_duration
+                .record(update_tracking_duration.as_micros() as f64);
+            self.metrics
+                .prune
+                .storage_categorize_duration
+                .record(categorize_duration.as_micros() as f64);
+            self.metrics.prune.storage_sort_duration.record(sort_duration.as_micros() as f64);
+            self.metrics
+                .prune
+                .storage_eviction_duration
+                .record(eviction_duration.as_micros() as f64);
+            self.metrics.prune.storage_tries_categorized.record(tries_categorized as f64);
+        }
+
+        debug!(
+            target: "trie::sparse",
+            skipped_modified = stats.skipped_modified,
+            skipped_hot_accounts = stats.skipped_hot_accounts,
+            hot_storage_tries_preserved = hot_preserved,
+            cold_storage_tries_evicted = cold_evicted,
+            state_prune_us = state_prune_duration.as_micros(),
+            storage_prune_us = storage_prune_duration.as_micros(),
+            state_memory_bytes = state_memory,
+            storage_memory_bytes = storage_memory,
+            elapsed = ?fn_start.elapsed(),
+            "SparseStateTrie::prune_preserving completed"
         );
     }
 }
@@ -1058,10 +1191,11 @@ where
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] both to help enforce allocation re-use and to allow us to implement
 /// methods like `get_trie_and_revealed_paths` which return multiple mutable borrows.
+#[doc(hidden)]
 #[derive(Debug, Default)]
-struct StorageTries<S = SerialSparseTrie> {
+pub struct StorageTries<S = SerialSparseTrie> {
     /// Sparse storage tries.
-    tries: B256Map<RevealableSparseTrie<S>>,
+    pub tries: B256Map<RevealableSparseTrie<S>>,
     /// Cleared storage tries, kept for re-use.
     cleared_tries: Vec<RevealableSparseTrie<S>>,
     /// Collection of revealed storage trie paths, per account.
@@ -1076,53 +1210,100 @@ struct StorageTries<S = SerialSparseTrie> {
 
 #[cfg(feature = "std")]
 impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
-    /// Prunes and evicts storage tries.
+    /// Prunes storage tries using memory-based eviction.
     ///
-    /// Keeps the top `max_storage_tries` by a score combining size and heat.
-    /// Evicts lower-scored tries entirely, prunes kept tries to `max_depth`.
-    fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
+    /// Eviction strategy:
+    /// 1. Hot accounts (Tier A/B) are never evicted
+    /// 2. Cold accounts are sorted by heat (coldest first)
+    /// 3. Evict coldest tries until total memory is under budget
+    fn prune_preserving(
+        &mut self,
+        config: &crate::hot_accounts::SmartPruneConfig<'_>,
+    ) -> StorageTriePruneResult {
+        use crate::{hot_accounts::TrieKind, PruneTrieOutcome, PruneTrieStats};
+        use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
+
         let fn_start = std::time::Instant::now();
-        let mut stats =
-            StorageTriesPruneStats { total_tries_before: self.tries.len(), ..Default::default() };
 
-        // Update heat for accessed tries
+        // Section 1: Update access tracking
+        let update_tracking_start = std::time::Instant::now();
         self.modifications.update_and_reset();
+        let update_tracking_duration = update_tracking_start.elapsed();
 
-        // Collect (address, size, score) for all tries
-        // Score = size * heat_multiplier
-        // Hot tries (high heat) get boosted weight
-        let mut trie_info: Vec<(B256, usize, usize)> = self
+        // Section 2: Categorize tries by hotness and collect memory sizes (parallel)
+        let categorize_start = std::time::Instant::now();
+        let tries_categorized = self.tries.len();
+
+        // Collect (address, memory, is_hot, heat) tuples in parallel
+        let categorized: Vec<_> = self
             .tries
-            .iter()
+            .par_iter()
             .map(|(address, trie)| {
-                let size = match trie {
-                    RevealableSparseTrie::Blind(_) => return (*address, 0, 0),
-                    RevealableSparseTrie::Revealed(t) => t.size_hint(),
+                let mem = match trie {
+                    RevealableSparseTrie::Blind(_) => 0,
+                    RevealableSparseTrie::Revealed(t) => t.memory_size(),
                 };
-                let heat = self.modifications.heat(address);
-                // Heat multiplier: 1 (cold) to 3 (very hot, heat >= 4)
-                let heat_multiplier = 1 + (heat.min(4) / 2) as usize;
-                (*address, size, size * heat_multiplier)
+                let is_hot = config.hot_accounts.should_preserve_storage(address);
+                // Only compute heat for cold tries
+                let heat = if is_hot { 0 } else { self.modifications.heat(address) };
+                (*address, mem, is_hot, heat)
             })
             .collect();
 
-        // Use O(n) selection to find top max_storage_tries by score
-        if trie_info.len() > max_storage_tries {
-            trie_info
-                .select_nth_unstable_by(max_storage_tries.saturating_sub(1), |a, b| b.2.cmp(&a.2));
-            trie_info.truncate(max_storage_tries);
+        // Partition into hot and cold tries
+        let mut hot_tries: Vec<(B256, usize)> = Vec::new();
+        let mut cold_tries: Vec<(B256, usize, u8)> = Vec::new();
+        for (address, mem, is_hot, heat) in categorized {
+            if is_hot {
+                hot_tries.push((address, mem));
+            } else {
+                cold_tries.push((address, mem, heat));
+            }
         }
-        let tries_to_keep: B256Map<usize> =
-            trie_info.iter().map(|(address, size, _)| (*address, *size)).collect();
-        stats.tries_to_keep = tries_to_keep.len();
 
-        // Collect keys to evict
-        let tries_to_clear: Vec<B256> =
-            self.tries.keys().filter(|addr| !tries_to_keep.contains_key(*addr)).copied().collect();
-        stats.tries_to_evict = tries_to_clear.len();
+        let hot_memory: usize = hot_tries.iter().map(|(_, m)| m).sum();
+        let hot_count = hot_tries.len();
+        let categorize_duration = categorize_start.elapsed();
 
-        // Evict storage tries that exceeded limit, saving cleared allocations for reuse
-        for address in &tries_to_clear {
+        // Section 3: Sort cold tries by heat descending
+        let sort_start = std::time::Instant::now();
+        cold_tries.sort_unstable_by(|(_, _, heat_a), (_, _, heat_b)| heat_b.cmp(heat_a));
+        let sort_duration = sort_start.elapsed();
+
+        // Calculate how much memory we can use for cold tries
+        let max_memory = config.max_memory;
+        let available_for_cold = max_memory.saturating_sub(hot_memory);
+
+        // Warn if hot accounts alone exceed budget - we can't evict them
+        if hot_memory > max_memory {
+            warn!(
+                target: "trie::sparse",
+                hot_memory_bytes = hot_memory,
+                max_memory_bytes = max_memory,
+                hot_count,
+                "Hot storage tries exceed memory budget - consider increasing max_memory"
+            );
+        }
+
+        // Evict coldest tries until we're under budget
+        let mut cold_memory = 0usize;
+        let mut tries_to_evict = Vec::new();
+        let mut tries_to_keep_prunable = Vec::new();
+
+        // Iterate cold tries from hottest to coldest. Keep adding tries until we hit the memory
+        // budget, then evict the rest. This ensures we keep the hottest tries within budget.
+        for (addr, mem, _heat) in cold_tries {
+            if cold_memory + mem <= available_for_cold {
+                cold_memory += mem;
+                tries_to_keep_prunable.push((addr, mem));
+            } else {
+                tries_to_evict.push(addr);
+            }
+        }
+
+        // Section 4: Evict selected tries
+        let eviction_start = std::time::Instant::now();
+        for address in &tries_to_evict {
             if let Some(mut trie) = self.tries.remove(address) {
                 trie.clear();
                 self.cleared_tries.push(trie);
@@ -1133,57 +1314,162 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             }
             self.modifications.remove(address);
         }
+        let eviction_duration = eviction_start.elapsed();
 
-        // Prune storage tries that are kept, but only if:
-        // - They haven't been pruned since last access
-        // - They're large enough to be worth pruning
-        const MIN_SIZE_TO_PRUNE: usize = 1000;
+        // Prune kept cold tries that have accumulated prune backlog.
+        // Only prune storage tries over 1MB - smaller ones don't benefit much from depth pruning.
+        let cold_evicted = tries_to_evict.len();
+        const MIN_SIZE_TO_PRUNE: usize = 1024 * 1024; // 1 MB
+
+        // Collect addresses eligible for pruning
+        let addresses_to_prune: Vec<_> = tries_to_keep_prunable
+            .iter()
+            .filter(|(addr, mem)| {
+                *mem >= MIN_SIZE_TO_PRUNE &&
+                    self.modifications.state.get(addr).is_some_and(|s| s.prune_backlog >= 2)
+            })
+            .map(|(addr, _)| *addr)
+            .collect();
+
+        // Prune storage tries in parallel
         let prune_start = std::time::Instant::now();
-        for (address, size) in &tries_to_keep {
-            if *size < MIN_SIZE_TO_PRUNE {
-                stats.skipped_small += 1;
-                continue; // Small tries aren't worth the DFS cost
-            }
-            let Some(heat_state) = self.modifications.get_mut(address) else {
-                continue; // No heat state = not tracked
-            };
-            // Only prune if backlog >= 2 (skip every other cycle)
-            if heat_state.prune_backlog < 2 {
-                stats.skipped_recently_pruned += 1;
-                continue; // Recently pruned, skip this cycle
-            }
-            if let Some(trie) = self.tries.get_mut(address).and_then(|t| t.as_revealed_mut()) {
-                trie.prune(max_depth);
-                heat_state.prune_backlog = 0; // Reset backlog after prune
-                stats.pruned_count += 1;
+        let pruned_count = addresses_to_prune.len();
+        let outcome: PruneTrieOutcome = self
+            .tries
+            .par_iter_mut()
+            .filter_map(|(addr, trie)| {
+                if !addresses_to_prune.contains(addr) {
+                    return None;
+                }
+                trie.as_revealed_mut().map(|t| t.prune_preserving(config, TrieKind::Storage))
+            })
+            .reduce(PruneTrieOutcome::default, |mut acc, o| {
+                acc += o;
+                acc
+            });
+        let stats = outcome.stats;
+        let prune_duration = prune_start.elapsed();
+
+        // Reset prune_backlog for pruned tries
+        for addr in &addresses_to_prune {
+            if let Some(heat_state) = self.modifications.state.get_mut(addr) {
+                heat_state.prune_backlog = 0;
             }
         }
-        stats.prune_elapsed = prune_start.elapsed();
 
-        // Clear revealed_paths for kept tries
-        for hash in tries_to_keep.keys() {
-            if let Some(paths) = self.revealed_paths.get_mut(hash) {
+        // If all cold tries evicted and hot memory still exceeds budget, prune hot tries too.
+        // We can't evict them but we can depth-prune to reduce memory.
+        let (hot_stats, pruned_hot_addresses) = if tries_to_keep_prunable.is_empty() &&
+            hot_memory > max_memory
+        {
+            let hot_addresses: Vec<_> = hot_tries
+                .iter()
+                .filter(|(_, mem)| *mem >= MIN_SIZE_TO_PRUNE)
+                .map(|(addr, _)| *addr)
+                .collect();
+
+            let hot_outcome: PruneTrieOutcome = self
+                .tries
+                .par_iter_mut()
+                .filter_map(|(addr, trie)| {
+                    if !hot_addresses.contains(addr) {
+                        return None;
+                    }
+                    trie.as_revealed_mut().map(|t| t.prune_preserving(config, TrieKind::Storage))
+                })
+                .reduce(PruneTrieOutcome::default, |mut acc, o| {
+                    acc += o;
+                    acc
+                });
+
+            (hot_outcome.stats, hot_addresses)
+        } else {
+            (PruneTrieStats::default(), Vec::new())
+        };
+
+        let mut stats = stats;
+        stats += hot_stats;
+
+        // Clear revealed_paths for all pruned tries (both cold and hot)
+        for addr in
+            tries_to_keep_prunable.iter().map(|(addr, _)| addr).chain(pruned_hot_addresses.iter())
+        {
+            if let Some(paths) = self.revealed_paths.get_mut(addr) {
                 paths.clear();
             }
         }
 
-        stats.total_tries_after = self.tries.len();
-        stats.total_elapsed = fn_start.elapsed();
+        // Use pre-computed memory from categorization (lags by one block after pruning, but avoids
+        // expensive re-iteration). This is the memory of tries we kept (hot + cold that fit
+        // budget).
+        let total_memory = hot_memory + cold_memory;
+
+        let duration = fn_start.elapsed();
 
         debug!(
             target: "trie::sparse",
-            before = stats.total_tries_before,
-            after = stats.total_tries_after,
-            kept = stats.tries_to_keep,
-            evicted = stats.tries_to_evict,
-            pruned = stats.pruned_count,
-            skipped_small = stats.skipped_small,
-            skipped_recent = stats.skipped_recently_pruned,
-            ?stats.prune_elapsed,
-            ?stats.total_elapsed,
-            "StorageTries::prune completed"
+            hot_storage_tries_preserved = hot_count,
+            hot_memory_bytes = hot_memory,
+            cold_storage_tries_evicted = cold_evicted,
+            cold_memory_bytes = cold_memory,
+            max_memory_bytes = max_memory,
+            kept_prunable = tries_to_keep_prunable.len(),
+            skipped_modified = stats.skipped_modified,
+            skipped_hot_accounts = stats.skipped_hot_accounts,
+            update_tracking_us = update_tracking_duration.as_micros(),
+            categorize_us = categorize_duration.as_micros(),
+            sort_us = sort_duration.as_micros(),
+            eviction_us = eviction_duration.as_micros(),
+            elapsed = ?duration,
+            "StorageTries::prune_preserving completed"
         );
+
+        StorageTriePruneResult {
+            stats,
+            hot_preserved: hot_count,
+            cold_evicted,
+            pruned: pruned_count,
+            prune_duration,
+            duration,
+            total_memory,
+            tries_categorized,
+            update_tracking_duration,
+            categorize_duration,
+            sort_duration,
+            eviction_duration,
+        }
     }
+}
+
+/// Result of storage trie pruning with eviction statistics.
+#[derive(Debug, Default)]
+struct StorageTriePruneResult {
+    /// Pruning statistics (nodes skipped, etc.).
+    stats: crate::PruneTrieStats,
+    /// Number of hot storage tries preserved.
+    hot_preserved: usize,
+    /// Number of cold storage tries evicted.
+    cold_evicted: usize,
+    /// Number of storage tries that were depth-pruned.
+    pruned: usize,
+    /// Duration of depth-pruning.
+    prune_duration: core::time::Duration,
+    /// Duration of the entire pruning operation.
+    duration: core::time::Duration,
+    /// Total memory used by storage tries after pruning.
+    total_memory: usize,
+    /// Number of tries categorized.
+    tries_categorized: usize,
+
+    // Granular timing for different sections
+    /// Time spent updating access tracking.
+    update_tracking_duration: core::time::Duration,
+    /// Time spent categorizing tries by hotness.
+    categorize_duration: core::time::Duration,
+    /// Time spent sorting cold tries by heat.
+    sort_duration: core::time::Duration,
+    /// Time spent evicting cold tries.
+    eviction_duration: core::time::Duration,
 }
 
 impl<S: SparseTrieTrait> StorageTries<S> {
@@ -1229,6 +1515,11 @@ impl<S: SparseTrieTrait> StorageTries<S> {
 }
 
 impl<S: SparseTrieTrait + Clone> StorageTries<S> {
+    /// Returns a mutable reference to the storage trie modifications tracker.
+    pub const fn modifications_mut(&mut self) -> &mut StorageTrieModifications {
+        &mut self.modifications
+    }
+
     /// Returns the set of already revealed trie node paths for an account's storage, creating the
     /// set if it didn't previously exist.
     fn get_revealed_paths_mut(&mut self, account: B256) -> &mut HashSet<Nibbles> {
@@ -1319,8 +1610,9 @@ struct TrieModificationState {
 /// - Access frequency is incremented when a storage proof is revealed (accessed)
 /// - Access frequency decays each prune cycle for tries not accessed that cycle
 /// - Tries with higher access frequency are prioritized for preservation during pruning
+#[doc(hidden)]
 #[derive(Debug, Default)]
-struct StorageTrieModifications {
+pub struct StorageTrieModifications {
     /// Access frequency and prune state per storage trie address.
     state: B256Map<TrieModificationState>,
     /// Tracks which tries were accessed in the current cycle (between prune calls).
@@ -1332,8 +1624,16 @@ impl StorageTrieModifications {
     /// Marks a storage trie as accessed this cycle.
     /// Heat and `prune_backlog` are updated in [`Self::update_and_reset`].
     #[inline]
-    fn mark_accessed(&mut self, address: B256) {
+    pub fn mark_accessed(&mut self, address: B256) {
         self.accessed_this_cycle.insert(address);
+    }
+
+    /// Records that a storage trie was accessed this cycle.
+    /// Multiple calls in the same cycle have no additional effect - heat is incremented
+    /// once per cycle, not per access.
+    #[inline]
+    pub fn record_access(&mut self, address: &B256) {
+        self.accessed_this_cycle.insert(*address);
     }
 
     /// Returns mutable reference to the heat state for a storage trie.
@@ -1348,14 +1648,32 @@ impl StorageTrieModifications {
         self.state.get(address).map_or(0, |s| s.heat)
     }
 
-    /// Updates heat and prune backlog for accessed tries.
+    /// Updates heat and prune backlog for all tracked tries.
     /// Called at the start of each prune cycle.
-    fn update_and_reset(&mut self) {
-        for address in self.accessed_this_cycle.drain() {
-            let entry = self.state.entry(address).or_default();
-            entry.heat = entry.heat.saturating_add(1);
-            entry.prune_backlog = entry.prune_backlog.saturating_add(1);
+    ///
+    /// - Accessed tries: heat increments by 1
+    /// - Non-accessed tries: heat decays by 1
+    /// - All tries: `prune_backlog` increments
+    pub fn update_and_reset(&mut self) {
+        // First, create entries for newly accessed addresses not yet in state
+        for address in &self.accessed_this_cycle {
+            self.state.entry(*address).or_default();
         }
+
+        // Update all tracked tries
+        for (address, state) in &mut self.state {
+            if self.accessed_this_cycle.contains(address) {
+                // Accessed this cycle: increment heat
+                state.heat = state.heat.saturating_add(1);
+            } else {
+                // Not accessed: decay heat
+                state.heat = state.heat.saturating_sub(1);
+            }
+            // All tries accumulate prune backlog (cycles since last prune)
+            state.prune_backlog = state.prune_backlog.saturating_add(1);
+        }
+        // Clear the accessed set for next cycle
+        self.accessed_this_cycle.clear();
     }
 
     /// Removes tracking for a specific address (when trie is evicted).

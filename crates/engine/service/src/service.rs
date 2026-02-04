@@ -201,6 +201,7 @@ mod tests {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
+            reth_engine_tree::tree::HotAccounts::for_mainnet(),
         );
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();

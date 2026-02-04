@@ -1,7 +1,7 @@
 //! Builder support for rpc components.
 
 pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
-pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
+pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator, HotAccounts};
 pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity, Stack};
 pub use reth_trie_db::ChangesetCache;
 
@@ -1343,7 +1343,6 @@ where
         let validator = self.payload_validator_builder.build(ctx).await?;
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
-
         Ok(BasicEngineValidator::new(
             ctx.node.provider().clone(),
             std::sync::Arc::new(ctx.node.consensus().clone()),
@@ -1352,6 +1351,7 @@ where
             tree_config,
             invalid_block_hook,
             changeset_cache,
+            HotAccounts::from_chain_id(ctx.config.chain.chain().id()),
         ))
     }
 }

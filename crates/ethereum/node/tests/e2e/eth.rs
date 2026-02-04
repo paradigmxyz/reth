@@ -276,7 +276,7 @@ async fn test_sparse_trie_reuse_across_blocks() -> eyre::Result<()> {
     let tree_config = TreeConfig::default()
         .with_legacy_state_root(false)
         .with_sparse_trie_prune_depth(2)
-        .with_sparse_trie_max_storage_tries(100);
+        .with_sparse_trie_max_memory(64 * 1024 * 1024); // 64 MB for tests
 
     let (mut nodes, _tasks, _wallet) = setup_engine::<EthereumNode>(
         1,

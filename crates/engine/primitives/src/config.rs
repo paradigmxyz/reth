@@ -53,10 +53,10 @@ pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 /// Depth 4 means we keep roughly 16^4 = 65536 potential branch paths at most.
 pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 
-/// Default maximum number of storage tries to keep after pruning.
+/// Default maximum memory for sparse trie cache in bytes (512 MB).
 ///
-/// Storage tries beyond this limit are cleared (but allocations preserved).
-pub const DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES: usize = 100;
+/// The sparse trie will be pruned and shrunk to stay under this limit.
+pub const DEFAULT_SPARSE_TRIE_MAX_MEMORY: usize = 512 * 1024 * 1024;
 
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
@@ -167,8 +167,8 @@ pub struct TreeConfig {
     enable_sparse_trie_as_cache: bool,
     /// Depth for sparse trie pruning after state root computation.
     sparse_trie_prune_depth: usize,
-    /// Maximum number of storage tries to retain after pruning.
-    sparse_trie_max_storage_tries: usize,
+    /// Maximum memory for sparse trie cache in bytes.
+    sparse_trie_max_memory: usize,
 }
 
 impl Default for TreeConfig {
@@ -200,7 +200,7 @@ impl Default for TreeConfig {
             disable_cache_metrics: false,
             enable_sparse_trie_as_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
-            sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            sparse_trie_max_memory: DEFAULT_SPARSE_TRIE_MAX_MEMORY,
         }
     }
 }
@@ -234,7 +234,7 @@ impl TreeConfig {
         disable_proof_v2: bool,
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
-        sparse_trie_max_storage_tries: usize,
+        sparse_trie_max_memory: usize,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -263,7 +263,7 @@ impl TreeConfig {
             disable_cache_metrics,
             enable_sparse_trie_as_cache: false,
             sparse_trie_prune_depth,
-            sparse_trie_max_storage_tries,
+            sparse_trie_max_memory,
         }
     }
 
@@ -596,14 +596,14 @@ impl TreeConfig {
         self
     }
 
-    /// Returns the maximum number of storage tries to retain after pruning.
-    pub const fn sparse_trie_max_storage_tries(&self) -> usize {
-        self.sparse_trie_max_storage_tries
+    /// Returns the maximum memory for sparse trie cache in bytes.
+    pub const fn sparse_trie_max_memory(&self) -> usize {
+        self.sparse_trie_max_memory
     }
 
-    /// Setter for maximum storage tries to retain.
-    pub const fn with_sparse_trie_max_storage_tries(mut self, max_tries: usize) -> Self {
-        self.sparse_trie_max_storage_tries = max_tries;
+    /// Setter for maximum memory for sparse trie cache.
+    pub const fn with_sparse_trie_max_memory(mut self, max_memory: usize) -> Self {
+        self.sparse_trie_max_memory = max_memory;
         self
     }
 }

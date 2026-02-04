@@ -16,8 +16,15 @@ pub use traits::*;
 
 pub mod provider;
 
+#[cfg(feature = "std")]
+pub mod hot_accounts;
+#[cfg(feature = "std")]
+pub use hot_accounts::{HotAccounts, Hotness, SmartPruneConfig, TrieKind};
+
 #[cfg(feature = "metrics")]
 mod metrics;
+#[cfg(feature = "metrics")]
+pub use metrics::PruneTrieMetrics;
 
 /// Re-export sparse trie error types.
 pub mod errors {

@@ -1,0 +1,495 @@
+//! Hot account tracking for smart trie preservation.
+//!
+//! This module provides data structures for tracking frequently-accessed ("hot") accounts
+//! across blocks. Hot accounts are preserved in the sparse trie between blocks to avoid
+//! redundant proof fetching.
+//!
+//! # Architecture
+//!
+//! The tracking uses a tiered approach:
+//! - **Tier A (Always)**: System contracts and major defi contracts (static, known)
+//! - **Tier B (Likely)**: Builder addresses, fee recipients (semi-static)
+//!
+//! # Example
+//!
+//! ```ignore
+//! let mut tracker = HotAccounts::for_mainnet();
+//!
+//! // Record fee recipient for the block
+//! tracker.record_fee_recipient(hashed_address);
+//!
+//! // Check if account should be preserved
+//! if tracker.should_preserve(&hashed_address) {
+//!     // Keep in trie
+//! }
+//! ```
+
+use alloy_primitives::{address, map::HashSet, B256};
+use reth_trie_common::Nibbles;
+use std::{borrow::Borrow, collections::VecDeque, hash::Hash};
+
+/// Identifies the type of trie being pruned, allowing different strategies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrieKind {
+    /// Account/state trie - uses depth-based pruning with pre-computed excess memory.
+    /// The `excess_memory` field indicates how many bytes over the budget the trie is.
+    /// If 0, pruning can be skipped entirely.
+    State {
+        /// Bytes over the memory budget that need to be freed.
+        excess_memory: usize,
+    },
+    /// Storage trie - uses memory budget to decide eviction.
+    Storage,
+}
+
+impl TrieKind {
+    /// Returns `true` if this is the state (account) trie.
+    pub const fn is_state(self) -> bool {
+        matches!(self, Self::State { .. })
+    }
+
+    /// Returns `true` if this is a storage trie.
+    pub const fn is_storage(self) -> bool {
+        matches!(self, Self::Storage)
+    }
+
+    /// Returns the excess memory for state trie, or `usize::MAX` for storage tries.
+    pub const fn excess_memory(self) -> usize {
+        match self {
+            Self::State { excess_memory } => excess_memory,
+            Self::Storage => usize::MAX,
+        }
+    }
+}
+
+/// A hot account with pre-computed nibbles for efficient prefix matching.
+///
+/// Hash and equality are based solely on `address` to allow O(1) lookups in `HashSet` by `B256`.
+#[derive(Debug, Clone)]
+pub struct HotAccount {
+    /// The hashed address (keccak256 of the original address).
+    pub address: B256,
+    /// Pre-computed nibbles for efficient trie path matching.
+    pub nibbles: Nibbles,
+}
+
+impl HotAccount {
+    /// Creates a new hot account from a hashed address.
+    pub fn new(address: B256) -> Self {
+        Self { nibbles: Nibbles::unpack(address), address }
+    }
+}
+
+impl PartialEq for HotAccount {
+    fn eq(&self, other: &Self) -> bool {
+        self.address == other.address
+    }
+}
+
+impl Eq for HotAccount {}
+
+impl Hash for HotAccount {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.address.hash(state);
+    }
+}
+
+impl Borrow<B256> for HotAccount {
+    fn borrow(&self) -> &B256 {
+        &self.address
+    }
+}
+
+/// Maximum number of recent fee recipients to track (prevents unbounded growth).
+const MAX_RECENT_FEE_RECIPIENTS: usize = 128;
+
+/// Tiered hot account tracking.
+///
+/// Tracks hot accounts using a combination of:
+/// - Static known-hot addresses (system contracts, major defi)
+/// - Semi-static addresses (builders, fee recipients)
+#[derive(Debug, Clone)]
+pub struct HotAccounts {
+    /// System contract addresses with pre-computed nibbles - Tier A.
+    system_contracts: HashSet<HotAccount>,
+    /// Major defi contract addresses with pre-computed nibbles - Tier A.
+    major_contracts: HashSet<HotAccount>,
+    /// Known builder/searcher addresses with pre-computed nibbles - Tier B.
+    known_builders: HashSet<HotAccount>,
+    /// Recent fee recipients with pre-computed nibbles - Tier B.
+    /// Capped at `MAX_RECENT_FEE_RECIPIENTS` to prevent unbounded growth.
+    /// Uses `VecDeque` to maintain insertion order for eviction.
+    recent_fee_recipients: VecDeque<HotAccount>,
+    /// Set for O(1) membership checks of recent fee recipients (by address).
+    recent_fee_recipients_set: HashSet<HotAccount>,
+}
+
+impl Default for HotAccounts {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HotAccounts {
+    /// Creates a new empty hot account tracker.
+    pub fn new() -> Self {
+        Self {
+            system_contracts: HashSet::default(),
+            major_contracts: HashSet::default(),
+            known_builders: HashSet::default(),
+            recent_fee_recipients: VecDeque::with_capacity(MAX_RECENT_FEE_RECIPIENTS),
+            recent_fee_recipients_set: HashSet::default(),
+        }
+    }
+
+    /// Creates a tracker configured for any Ethereum network (mainnet, holesky, sepolia).
+    ///
+    /// Includes system contracts from EIPs that are common across all Ethereum networks.
+    pub fn for_ethereum() -> Self {
+        use alloy_primitives::keccak256;
+
+        let mut tracker = Self::new();
+
+        // Tier A: System contracts (addresses from EIPs - same across all Ethereum networks)
+        // EIP-4788: Beacon roots
+        tracker
+            .add_system_contract(keccak256(address!("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")));
+        // EIP-2935: Block hash history
+        tracker
+            .add_system_contract(keccak256(address!("0x0000F90827F1C53a10cb7A02335B175320002935")));
+        // EIP-7002: Withdrawal requests
+        tracker
+            .add_system_contract(keccak256(address!("0x00000961Ef480Eb55e80D19ad83579A64c007002")));
+        // EIP-7251: Consolidation requests
+        tracker
+            .add_system_contract(keccak256(address!("0x0000BBdDc7CE488642fb579F8B00f3a590007251")));
+
+        tracker
+    }
+
+    /// Creates a tracker configured for Ethereum mainnet.
+    ///
+    /// Includes system contracts and mainnet-specific defi protocols and builders.
+    pub fn for_mainnet() -> Self {
+        use alloy_primitives::keccak256;
+
+        let mut tracker = Self::for_ethereum();
+
+        // Tier A: Major defi contracts
+        // WETH
+        tracker
+            .add_major_contract(keccak256(address!("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")));
+        // USDC
+        tracker
+            .add_major_contract(keccak256(address!("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")));
+        // USDT
+        tracker
+            .add_major_contract(keccak256(address!("0xdAC17F958D2ee523a2206206994597C13D831ec7")));
+        // Uniswap V3 Router
+        tracker
+            .add_major_contract(keccak256(address!("0xE592427A0AEce92De3Edee1F18E0157C05861564")));
+        // Uniswap Universal Router
+        tracker
+            .add_major_contract(keccak256(address!("0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD")));
+
+        // Tier B: Known block builders
+        // Beaverbuild
+        tracker.add_builder(keccak256(address!("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5")));
+        // Titan Builder
+        tracker.add_builder(keccak256(address!("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97")));
+        // Rsync
+        tracker.add_builder(keccak256(address!("0x1f9090aaE28b8a3dCeaDf281B0F12828e676c326")));
+        // Flashbots
+        tracker.add_builder(keccak256(address!("0xDAFEA492D9c6733ae3d56b7Ed1ADb60692c98Bc5")));
+        // Builder0x69
+        tracker.add_builder(keccak256(address!("0x690B9A9E9aa1C9dB991C7721a92d351Db4FaC990")));
+        // BuilderNet
+        tracker.add_builder(keccak256(address!("0xdadb0d80178819f2319190d340ce9a924f783711")));
+        // bloXroute
+        tracker.add_builder(keccak256(address!("0x965Df5Ff6116C395187E288e5C87fb96CfB8141c")));
+        // Lido Execution Layer Rewards Vault
+        tracker.add_builder(keccak256(address!("0x388C818CA8B9251b393131C08a736A67ccB19297")));
+        // Quasar
+        tracker.add_builder(keccak256(address!("0x396343362be2a4da1ce0c1c210945346fb82aa49")));
+
+        tracker
+    }
+
+    /// Creates a tracker configured for Optimism.
+    pub fn for_optimism() -> Self {
+        use alloy_primitives::keccak256;
+
+        let mut tracker = Self::new();
+
+        // L1 Block contract
+        tracker
+            .add_system_contract(keccak256(address!("0x4200000000000000000000000000000000000015")));
+        // L2 Cross Domain Messenger
+        tracker
+            .add_system_contract(keccak256(address!("0x4200000000000000000000000000000000000007")));
+        // Gas Price Oracle
+        tracker
+            .add_system_contract(keccak256(address!("0x420000000000000000000000000000000000000F")));
+
+        tracker
+    }
+
+    /// Creates a tracker configured for Base.
+    pub fn for_base() -> Self {
+        // Base uses the same system contracts as Optimism
+        Self::for_optimism()
+    }
+
+    /// Creates a tracker based on the chain ID.
+    ///
+    /// Returns the appropriate network-specific configuration:
+    /// - Chain ID 1 (Ethereum mainnet): [`Self::for_mainnet`]
+    /// - Chain ID 11155111 (Sepolia), 17000 (Holesky), 560048 (Hoodi): [`Self::for_ethereum`]
+    /// - Chain ID 10 (Optimism): [`Self::for_optimism`]
+    /// - Chain ID 8453 (Base): [`Self::for_base`]
+    /// - Other chains: Empty tracker ([`Self::new`])
+    pub fn from_chain_id(chain_id: u64) -> Self {
+        match chain_id {
+            1 => Self::for_mainnet(),
+            // Sepolia, Holesky, Hoodi
+            11155111 | 17000 | 560048 => Self::for_ethereum(),
+            10 => Self::for_optimism(),
+            8453 => Self::for_base(),
+            _ => Self::new(),
+        }
+    }
+
+    /// Adds a system contract address (Tier A - always hot).
+    pub fn add_system_contract(&mut self, hashed_address: B256) {
+        self.system_contracts.insert(HotAccount::new(hashed_address));
+    }
+
+    /// Adds a major defi contract address (Tier A - always hot).
+    pub fn add_major_contract(&mut self, hashed_address: B256) {
+        self.major_contracts.insert(HotAccount::new(hashed_address));
+    }
+
+    /// Adds a known builder address (Tier B - likely hot).
+    pub fn add_builder(&mut self, hashed_address: B256) {
+        self.known_builders.insert(HotAccount::new(hashed_address));
+    }
+
+    /// Records a fee recipient for the current block.
+    ///
+    /// Fee recipients are automatically promoted to Tier B after being seen.
+    /// The ring buffer maintains a fixed-size history to prevent unbounded growth.
+    pub fn record_fee_recipient(&mut self, hashed_address: B256) {
+        // Skip if already in the set
+        if self.recent_fee_recipients_set.contains(&hashed_address) {
+            return;
+        }
+
+        // Add to ring buffer and set
+        let hot_account = HotAccount::new(hashed_address);
+        self.recent_fee_recipients.push_front(hot_account.clone());
+        self.recent_fee_recipients_set.insert(hot_account);
+
+        // Evict oldest if over capacity
+        if self.recent_fee_recipients.len() > MAX_RECENT_FEE_RECIPIENTS &&
+            let Some(evicted) = self.recent_fee_recipients.pop_back()
+        {
+            self.recent_fee_recipients_set.remove(&evicted.address);
+        }
+    }
+
+    /// Returns the hotness level of an account.
+    pub fn hotness(&self, hashed_address: &B256) -> Hotness {
+        // Tier A: Always hot
+        if self.system_contracts.contains(hashed_address) ||
+            self.major_contracts.contains(hashed_address)
+        {
+            return Hotness::Always;
+        }
+
+        // Tier B: Likely hot
+        if self.known_builders.contains(hashed_address) ||
+            self.recent_fee_recipients_set.contains(hashed_address)
+        {
+            return Hotness::Likely;
+        }
+
+        Hotness::Cold
+    }
+
+    /// Returns true if the account should be preserved in the trie.
+    pub fn should_preserve(&self, hashed_address: &B256) -> bool {
+        self.hotness(hashed_address).should_preserve()
+    }
+
+    /// Returns true if the account's storage trie should be preserved.
+    pub fn should_preserve_storage(&self, hashed_address: &B256) -> bool {
+        self.hotness(hashed_address).should_preserve_storage()
+    }
+
+    /// Clears recent fee recipients.
+    ///
+    /// Static Tier A (system/major contracts) and Tier B (builders) are preserved.
+    pub fn clear_fee_recipients(&mut self) {
+        self.recent_fee_recipients.clear();
+        self.recent_fee_recipients_set.clear();
+    }
+
+    /// Returns approximate memory usage in bytes.
+    pub fn memory_usage(&self) -> usize {
+        // Each HotAccount is B256 (32 bytes) + Nibbles (64 nibbles = 32 bytes + overhead)
+        const HOT_ACCOUNT_SIZE: usize = 32 + 64;
+        self.system_contracts.len() * HOT_ACCOUNT_SIZE +
+            self.major_contracts.len() * HOT_ACCOUNT_SIZE +
+            self.known_builders.len() * HOT_ACCOUNT_SIZE +
+            self.recent_fee_recipients.len() * HOT_ACCOUNT_SIZE +
+            self.recent_fee_recipients_set.len() * 32
+    }
+
+    /// Checks if any hot account's nibbles start with the given prefix path.
+    ///
+    /// Used during trie pruning to determine if a partial path leads to a hot account.
+    pub fn any_starts_with(&self, prefix: &Nibbles) -> bool {
+        // Check Tier A first (system contracts and major contracts)
+        for hot_account in self.system_contracts.iter().chain(self.major_contracts.iter()) {
+            if hot_account.nibbles.starts_with(prefix) {
+                return true;
+            }
+        }
+
+        // Check Tier B (known builders and fee recipients)
+        for hot_account in self.known_builders.iter().chain(self.recent_fee_recipients.iter()) {
+            if hot_account.nibbles.starts_with(prefix) {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
+/// Hotness level for an account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Hotness {
+    /// Cold: not tracked as hot.
+    Cold = 0,
+    /// Likely: known builder/fee recipient.
+    Likely = 1,
+    /// Always: system contract or major defi.
+    Always = 2,
+}
+
+impl Hotness {
+    /// Returns true if this hotness level indicates the account should be preserved.
+    pub const fn should_preserve(self) -> bool {
+        matches!(self, Self::Always | Self::Likely)
+    }
+
+    /// Returns true if this hotness level indicates the storage trie should be preserved.
+    ///
+    /// Only Tier A (system/major contracts) storage is always preserved.
+    /// Tier B (builders/fee recipients) storage can be evicted under memory pressure
+    /// since their storage is typically small or temporary.
+    pub const fn should_preserve_storage(self) -> bool {
+        matches!(self, Self::Always)
+    }
+}
+
+/// Configuration for smart pruning with hot account preservation.
+///
+/// Memory is controlled differently for each component:
+/// - **Account trie**: Controlled by `max_depth`. Depth 4 ≈ 65K paths max, depth 2 ≈ 256 paths.
+/// - **Storage tries**: Controlled by `max_memory`. Cold tries are evicted to stay under budget.
+#[derive(Debug)]
+pub struct SmartPruneConfig<'a> {
+    /// Maximum depth to keep in account trie (for non-hot accounts).
+    /// Depth N means at most 16^N branch paths are preserved.
+    pub max_depth: usize,
+    /// Maximum memory budget in bytes for storage tries.
+    /// Used to estimate how many storage tries to keep.
+    pub max_memory: usize,
+    /// Hot account tracker.
+    pub hot_accounts: &'a HotAccounts,
+}
+
+impl<'a> SmartPruneConfig<'a> {
+    /// Creates a new smart prune configuration.
+    pub const fn new(max_depth: usize, max_memory: usize, hot_accounts: &'a HotAccounts) -> Self {
+        Self { max_depth, max_memory, hot_accounts }
+    }
+
+    /// Estimates the maximum number of storage tries based on memory budget.
+    ///
+    /// Uses a heuristic: average storage trie is ~10KB, so we can estimate
+    /// how many we can afford. Hot accounts are always preserved regardless.
+    pub const fn estimated_max_storage_tries(&self) -> usize {
+        const AVERAGE_STORAGE_TRIE_SIZE: usize = 10 * 1024; // 10 KB estimate
+        self.max_memory / AVERAGE_STORAGE_TRIE_SIZE
+    }
+
+    /// Estimates the maximum number of account trie nodes based on memory budget.
+    ///
+    /// Uses a heuristic: average node is ~120 bytes (Nibbles key + `SparseNode` value).
+    pub const fn estimated_max_account_nodes(&self) -> usize {
+        const AVERAGE_NODE_SIZE: usize = 120; // Nibbles (40) + SparseNode (80)
+        self.max_memory / AVERAGE_NODE_SIZE
+    }
+
+    /// Checks if a trie path leads to a hot account that should be preserved during pruning.
+    ///
+    /// For complete account paths (64 nibbles), checks directly against hot accounts.
+    /// For partial paths, checks if any hot account's hashed address starts with this prefix.
+    pub fn path_leads_to_hot_account(&self, path: &Nibbles) -> bool {
+        // For complete account paths (64 nibbles), check directly
+        if path.len() >= 64 {
+            let hashed = B256::from_slice(&path.pack()[..32]);
+            return self.hot_accounts.should_preserve(&hashed);
+        }
+
+        // For partial paths, check if any known hot account has this prefix
+        self.hot_accounts.any_starts_with(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+
+    #[test]
+    fn tiered_hot_accounts() {
+        let tracker = HotAccounts::for_mainnet();
+
+        // System contract should always be hot
+        let system_addr =
+            alloy_primitives::keccak256(address!("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02"));
+        assert_eq!(tracker.hotness(&system_addr), Hotness::Always);
+
+        // Random address should be cold
+        let random = B256::repeat_byte(0xFF);
+        assert_eq!(tracker.hotness(&random), Hotness::Cold);
+    }
+
+    #[test]
+    fn fee_recipient_tracking() {
+        let mut tracker = HotAccounts::new();
+
+        let fee_recipient = B256::repeat_byte(0xAA);
+        assert_eq!(tracker.hotness(&fee_recipient), Hotness::Cold);
+
+        tracker.record_fee_recipient(fee_recipient);
+        assert_eq!(tracker.hotness(&fee_recipient), Hotness::Likely);
+
+        tracker.clear_fee_recipients();
+        assert_eq!(tracker.hotness(&fee_recipient), Hotness::Cold);
+    }
+
+    #[test]
+    fn builder_tracking() {
+        let tracker = HotAccounts::for_mainnet();
+
+        // Beaverbuild should be Likely
+        let beaverbuild =
+            alloy_primitives::keccak256(address!("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5"));
+        assert_eq!(tracker.hotness(&beaverbuild), Hotness::Likely);
+    }
+}

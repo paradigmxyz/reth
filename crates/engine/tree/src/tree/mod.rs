@@ -73,6 +73,7 @@ pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
+pub use reth_trie_sparse::hot_accounts::HotAccounts;
 
 pub mod state;
 

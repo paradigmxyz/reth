@@ -1,9 +1,9 @@
 //! Metrics for the sparse state trie
 
-use reth_metrics::{metrics::Histogram, Metrics};
+use reth_metrics::{metrics, metrics::Histogram, Metrics};
 
 /// Metrics for the sparse state trie
-#[derive(Default, Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct SparseStateTrieMetrics {
     /// Number of account nodes that were skipped during a multiproof reveal due to being redundant
     /// (i.e. they were already revealed)
@@ -17,6 +17,8 @@ pub(crate) struct SparseStateTrieMetrics {
     pub(crate) multiproof_total_storage_nodes: u64,
     /// The actual metrics we will record into the histogram
     pub(crate) histograms: SparseStateTrieInnerMetrics,
+    /// Metrics for trie pruning
+    pub(crate) prune: PruneTrieMetrics,
 }
 
 impl SparseStateTrieMetrics {
@@ -72,4 +74,46 @@ pub(crate) struct SparseStateTrieInnerMetrics {
     pub(crate) multiproof_skipped_storage_nodes: Histogram,
     /// Histogram of total storage nodes, including those that were skipped.
     pub(crate) multiproof_total_storage_nodes: Histogram,
+}
+
+/// Metrics for trie pruning statistics
+#[derive(Metrics, Clone)]
+#[metrics(scope = "sparse_trie_prune")]
+pub struct PruneTrieMetrics {
+    /// Histogram of subtries skipped during pruning due to recent modifications
+    pub skipped_modified: Histogram,
+    /// Histogram of paths skipped during pruning because they lead to hot accounts
+    pub skipped_hot_accounts: Histogram,
+    /// Histogram of storage tries preserved due to hot account status
+    pub hot_storage_tries_preserved: Histogram,
+    /// Histogram of storage tries evicted (cold accounts)
+    pub cold_storage_tries_evicted: Histogram,
+    /// Histogram of storage tries that were depth-pruned
+    pub storage_tries_pruned: Histogram,
+    /// Histogram of storage tries depth-pruning duration in microseconds
+    pub storage_tries_prune_duration: Histogram,
+    /// Histogram of state trie pruning duration in microseconds
+    pub state_prune_duration: Histogram,
+    /// Histogram of state subtries cleared during pruning
+    pub state_subtries_cleared: Histogram,
+    /// Counter for how many times state trie was actually pruned
+    pub state_prune_count: metrics::Counter,
+    /// Histogram of storage tries pruning duration in microseconds
+    pub storage_prune_duration: Histogram,
+    /// Histogram of state trie memory usage in bytes after pruning
+    pub state_memory_bytes: Histogram,
+    /// Histogram of total storage tries memory usage in bytes after pruning
+    pub storage_memory_bytes: Histogram,
+
+    // Granular timing metrics for StorageTries::prune_preserving sections
+    /// Time spent updating access tracking and resetting per-cycle flags (microseconds)
+    pub storage_update_tracking_duration: Histogram,
+    /// Time spent categorizing tries by hotness and collecting memory sizes (microseconds)
+    pub storage_categorize_duration: Histogram,
+    /// Time spent sorting cold tries by heat (microseconds)
+    pub storage_sort_duration: Histogram,
+    /// Time spent evicting cold tries from `HashMap` (microseconds)
+    pub storage_eviction_duration: Histogram,
+    /// Number of tries iterated during categorization
+    pub storage_tries_categorized: Histogram,
 }

@@ -13,6 +13,46 @@ use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 
 use crate::provider::TrieNodeProvider;
 
+/// Statistics returned by [`SparseTrie`] pruning.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PruneTrieStats {
+    /// Number of subtries skipped because they were recently modified.
+    pub skipped_modified: usize,
+    /// Number of paths skipped because they lead to hot accounts.
+    pub skipped_hot_accounts: usize,
+}
+
+impl core::ops::AddAssign for PruneTrieStats {
+    fn add_assign(&mut self, rhs: Self) {
+        self.skipped_modified += rhs.skipped_modified;
+        self.skipped_hot_accounts += rhs.skipped_hot_accounts;
+    }
+}
+
+/// Outcome of a [`SparseTrie::prune_preserving`] operation.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PruneTrieOutcome {
+    /// Pruning statistics.
+    pub stats: PruneTrieStats,
+    /// Paths where nodes were replaced with hash stubs.
+    /// All descendants of these paths are no longer revealed.
+    pub pruned_roots: Vec<Nibbles>,
+}
+
+impl PruneTrieOutcome {
+    /// Returns `true` if any pruning was performed.
+    pub const fn did_prune(&self) -> bool {
+        !self.pruned_roots.is_empty()
+    }
+}
+
+impl core::ops::AddAssign for PruneTrieOutcome {
+    fn add_assign(&mut self, rhs: Self) {
+        self.stats += rhs.stats;
+        self.pruned_roots.extend(rhs.pruned_roots);
+    }
+}
+
 /// Describes an update to a leaf in the sparse trie.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafUpdate {
@@ -266,17 +306,24 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 /// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
 /// memory usage when caching tries across payload validations.
 pub trait SparseTrieExt: SparseTrie {
-    /// Returns a cheap O(1) size hint for the trie representing the count of revealed
-    /// (non-Hash) nodes.
+    /// Returns an estimate of the memory usage of this trie in bytes.
     ///
-    /// This is used as a heuristic for prioritizing which storage tries to keep
-    /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
-    fn size_hint(&self) -> usize;
+    /// This is used for memory-based eviction decisions during pruning.
+    /// Larger values indicate larger tries that consume more memory.
+    fn memory_size(&self) -> usize;
 
-    /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
+    /// Prunes the trie while preserving hot accounts at full depth.
     ///
     /// Depth counts nodes traversed (not nibbles), so extension nodes count as 1 depth
     /// regardless of key length. `max_depth == 0` prunes all children of the root node.
+    ///
+    /// Hot accounts (Tier A/B) are preserved at full depth, cold accounts are pruned to
+    /// `max_depth`.
+    ///
+    /// The `kind` parameter indicates whether this is a state (account) trie or storage trie,
+    /// allowing different pruning strategies:
+    /// - `State`: Uses depth-based pruning with optional node count limits
+    /// - `Storage`: Uses memory budget to guide eviction decisions
     ///
     /// # Preconditions
     ///
@@ -286,12 +333,13 @@ pub trait SparseTrieExt: SparseTrie {
     /// # Behavior
     ///
     /// - Embedded nodes (RLP < 32 bytes) are preserved since they have no hash
-    /// - Returns 0 if `max_depth` exceeds trie depth or trie is empty
-    ///
-    /// # Returns
-    ///
-    /// The number of nodes converted to hash stubs.
-    fn prune(&mut self, max_depth: usize) -> usize;
+    /// - Hot account paths are never pruned
+    #[cfg(feature = "std")]
+    fn prune_preserving(
+        &mut self,
+        config: &crate::hot_accounts::SmartPruneConfig<'_>,
+        kind: crate::hot_accounts::TrieKind,
+    ) -> PruneTrieOutcome;
 
     /// Applies leaf updates to the sparse trie.
     ///
