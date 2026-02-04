@@ -24,7 +24,7 @@ impl WorkloadExecutor {
         &self.inner.handle
     }
 
-    /// Shorthand for [`Runtime::spawn_blocking`]
+    /// Runs the provided function on an executor dedicated to blocking operations.
     #[track_caller]
     pub fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
     where
