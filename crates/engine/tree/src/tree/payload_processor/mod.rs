@@ -16,7 +16,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use executor::WorkloadExecutor;
-use metrics::Counter;
+use metrics::{Counter, Histogram};
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
@@ -527,8 +527,13 @@ where
             // If this payload's parent state root matches the preserved trie's anchor,
             // we can reuse the pruned trie structure. Otherwise, we clear the trie but
             // keep allocations.
-            let sparse_state_trie = preserved_sparse_trie
-                .take()
+            let start = Instant::now();
+            let preserved = preserved_sparse_trie.take();
+            trie_metrics
+                .sparse_trie_cache_wait_duration_histogram
+                .record(start.elapsed().as_secs_f64());
+
+            let sparse_state_trie = preserved
                 .map(|preserved| preserved.into_trie_for(parent_state_root))
                 .unwrap_or_else(|| {
                     debug!(
@@ -862,6 +867,7 @@ impl PayloadExecutionCache {
         let cache = self.inner.read();
 
         let elapsed = start.elapsed();
+        self.metrics.execution_cache_wait_duration.record(elapsed.as_secs_f64());
         if elapsed.as_millis() > 5 {
             warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
         }
@@ -939,6 +945,8 @@ pub(crate) struct ExecutionCacheMetrics {
     /// Counter for when the execution cache was unavailable because other threads
     /// (e.g., prewarming) are still using it.
     pub(crate) execution_cache_in_use: Counter,
+    /// Time spent waiting for execution cache mutex to become available.
+    pub(crate) execution_cache_wait_duration: Histogram,
 }
 
 /// EVM context required to execute a block.
