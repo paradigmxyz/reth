@@ -386,11 +386,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         // Step 2: Validate sidecar offsets against actual NippyJar state
-        let valid_blocks = if actual_sidecar_blocks > 0 && actual_nippy_rows > 0 {
+        let valid_blocks = if actual_sidecar_blocks > 0 {
             let mut reader = ChangesetOffsetReader::new(&csoff_path, actual_sidecar_blocks)
                 .map_err(ProviderError::other)?;
 
             // Find last block where offset + num_changes <= actual_nippy_rows
+            // This correctly handles rows=0 with offset=0, num_changes=0 (empty blocks)
             let mut valid = 0u64;
             for i in 0..actual_sidecar_blocks {
                 if let Some(offset) = reader.get(i).map_err(ProviderError::other)? {

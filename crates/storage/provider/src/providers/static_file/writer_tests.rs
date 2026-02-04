@@ -557,6 +557,36 @@ mod tests {
     }
 
     #[test]
+    fn test_all_empty_blocks_preserved_on_reopen() {
+        // REGRESSION: When all blocks have empty changesets (0 rows in NippyJar),
+        // healing incorrectly pruned all blocks because the validation was skipped
+        // when actual_nippy_rows == 0. But (offset=0, num_changes=0) is valid when rows=0.
+
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+
+        // Write 5 blocks with 0 changes each => 0 total rows in NippyJar
+        let sidecar_path = write_test_blocks(&provider, 5, 0);
+        assert_eq!(get_sidecar_block_count(&sidecar_path), 5);
+        assert_eq!(get_header_block_count(&provider, 0), 5);
+        assert_eq!(get_nippy_row_count(&provider, 0), 0);
+
+        // Reopen - healing must preserve all 5 blocks
+        drop(provider);
+        let provider = setup_test_provider(&static_dir, 100);
+        let _writer = provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+        // Must still have 5 blocks after healing
+        assert_eq!(
+            get_sidecar_block_count(&sidecar_path),
+            5,
+            "Healing should not prune empty blocks"
+        );
+        assert_eq!(get_header_block_count(&provider, 0), 5);
+        assert_eq!(get_nippy_row_count(&provider, 0), 0);
+    }
+
+    #[test]
     fn test_empty_blocks_zero_changes() {
         // SCENARIO: Some blocks have 0 changes (empty changesets).
 
