@@ -1741,6 +1741,13 @@ impl<'a> RocksDBBatch<'a> {
                 iter.next();
             }
 
+            iter.status().map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+
             if shards.is_empty() {
                 continue;
             }
@@ -1883,6 +1890,13 @@ impl<'a> RocksDBBatch<'a> {
                 shards.push((key, value));
                 iter.next();
             }
+
+            iter.status().map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
 
             if shards.is_empty() {
                 continue;
