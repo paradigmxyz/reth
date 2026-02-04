@@ -22,7 +22,7 @@ impl ReceiptBuilder for RethReceiptBuilder {
             // Success flag was added in `EIP-658: Embedding transaction status code in
             // receipts`.
             success: result.is_success(),
-            cumulative_gas_used: gas_spent.unwrap_or_default(),
+            cumulative_gas_used,
             logs: result.into_logs(),
         }
     }
