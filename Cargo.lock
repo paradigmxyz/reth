@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=devnet2-fixes#ef240168ce24cd2326af9dcdc471a3017d6e0f34"
+source = "git+https://github.com/alloy-rs/evm?branch=bal-devnet2#7abb1f2742b0ade9cec043663b520f22cdab1ead"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -303,7 +303,6 @@ dependencies = [
  "op-revm",
  "revm",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -415,7 +414,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=devnet2-fixes#ef240168ce24cd2326af9dcdc471a3017d6e0f34"
+source = "git+https://github.com/alloy-rs/evm?branch=bal-devnet2#7abb1f2742b0ade9cec043663b520f22cdab1ead"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
