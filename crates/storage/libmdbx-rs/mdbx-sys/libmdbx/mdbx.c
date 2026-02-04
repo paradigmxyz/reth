@@ -4251,6 +4251,9 @@ struct MDBX_txn {
         size_t writemap_dirty_npages;
         size_t writemap_spilled_npages;
       };
+      /* Per-transaction scratch buffer for DUPSORT put() operations.
+       * This enables thread-safe parallel subtransactions on DupSort tables. */
+      void *page_auxbuf;
       /* In write txns, next is located the array of cursors for each DB */
     } tw;
   };
@@ -12978,9 +12981,12 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
       return LOG_IFERR(rc);
     }
 
+    DEBUG("subtxn: begin start");
     if (env->options.spill_parent4child_denominator) {
       /* Spill dirty-pages of parent to provide dirtyroom for child txn */
+      DEBUG("subtxn: spill start");
       rc = txn_spill(parent, nullptr, parent->tw.dirtylist->length / env->options.spill_parent4child_denominator);
+      DEBUG("subtxn: spill done");
       if (unlikely(rc != MDBX_SUCCESS))
         return LOG_IFERR(rc);
     }
@@ -13040,6 +13046,8 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
     }
     if (unlikely(rc != MDBX_SUCCESS)) {
     nested_failed:
+      if (txn->tw.page_auxbuf)
+        osal_free(txn->tw.page_auxbuf);
       pnl_free(txn->tw.repnl);
       dpl_free(txn);
       osal_free(txn);
@@ -13102,6 +13110,14 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
     txn->owner = parent->owner;
     txn->tw.troika = parent->tw.troika;
 
+    /* Allocate per-subtxn page_auxbuf for thread-safe parallel DupSort operations */
+    DEBUG("subtxn: page_auxbuf alloc");
+    txn->tw.page_auxbuf = osal_malloc(env->ps * NUM_METAS);
+    if (unlikely(!txn->tw.page_auxbuf)) {
+      rc = MDBX_ENOMEM;
+      goto nested_failed;
+    }
+
     txn->cursors[FREE_DBI] = nullptr;
     txn->cursors[MAIN_DBI] = nullptr;
     txn->dbi_state[FREE_DBI] = parent->dbi_state[FREE_DBI] & ~(DBI_FRESH | DBI_CREAT | DBI_DIRTY);
@@ -13115,13 +13131,16 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
                      (txn->parent ? txn->parent->tw.dirtyroom : txn->env->options.dp_limit));
     env->txn = txn;
     tASSERT(parent, parent->cursors[FREE_DBI] == nullptr);
+    DEBUG("subtxn: cursor_shadow start");
     rc = parent->cursors[MAIN_DBI] ? cursor_shadow(parent->cursors[MAIN_DBI], txn, MAIN_DBI) : MDBX_SUCCESS;
+    DEBUG("subtxn: cursor_shadow done");
     if (AUDIT_ENABLED() && ASSERT_ENABLED()) {
       txn->signature = txn_signature;
       tASSERT(txn, audit_ex(txn, 0, false) == 0);
     }
     if (unlikely(rc != MDBX_SUCCESS))
       txn_end(txn, TXN_END_FAIL_BEGINCHILD);
+    DEBUG("subtxn: begin done");
   } else { /* MDBX_TXN_RDONLY */
     txn->dbi_seqs = ptr_disp(txn->cursors, env->max_dbi * sizeof(txn->cursors[0]));
 #if MDBX_ENABLE_DBI_SPARSE
@@ -13218,6 +13237,7 @@ int mdbx_txn_commit_ex(MDBX_txn *txn, MDBX_commit_latency *latency) {
   }
 
   if (txn->parent) {
+    DEBUG("subtxn: commit start");
     tASSERT(txn, audit_ex(txn, 0, false) == 0);
     eASSERT(env, txn != env->basal_txn);
     MDBX_txn *const parent = txn->parent;
@@ -13304,7 +13324,9 @@ int mdbx_txn_commit_ex(MDBX_txn *txn, MDBX_commit_latency *latency) {
     parent->tw.loose_pages = txn->tw.loose_pages;
 
     /* Merge our cursors into parent's and close them */
+    DEBUG("subtxn: cursor_eot start");
     txn_done_cursors(txn, true);
+    DEBUG("subtxn: cursor_eot done");
     end_mode |= TXN_END_EOTDONE;
 
     /* Update parent's DBs array */
@@ -13330,7 +13352,9 @@ int mdbx_txn_commit_ex(MDBX_txn *txn, MDBX_commit_latency *latency) {
       ts_4 = /* no write */ ts_3;
       ts_5 = /* no sync */ ts_4;
     }
+    DEBUG("subtxn: dpl_merge start, child_dirty=%zu", txn->tw.dirtylist->length);
     txn_merge(parent, txn, parent_retired_len);
+    DEBUG("subtxn: dpl_merge done");
     env->txn = parent;
     parent->nested = nullptr;
     tASSERT(parent, dpl_check(parent));
@@ -13349,6 +13373,7 @@ int mdbx_txn_commit_ex(MDBX_txn *txn, MDBX_commit_latency *latency) {
         tASSERT(parent, MDBX_PNL_MOST(parent->tw.repnl) + 1 < parent->geo.first_unallocated);
     }
 #endif /* MDBX_ENABLE_REFUND */
+    DEBUG("subtxn: commit done");
 
     txn->signature = 0;
     osal_free(txn);
@@ -16960,7 +16985,7 @@ __hot int cursor_put(MDBX_cursor *mc, const MDBX_val *key, MDBX_val *data, unsig
   page_t *sub_root = nullptr;
   bool insert_key, insert_data;
   uint16_t fp_flags = P_LEAF;
-  page_t *fp = env->page_auxbuf;
+  page_t *fp = mc->txn->tw.page_auxbuf ? mc->txn->tw.page_auxbuf : env->page_auxbuf;
   fp->txnid = mc->txn->front_txnid;
   insert_key = insert_data = (rc != MDBX_SUCCESS);
   old_singledup.iov_base = nullptr;
@@ -17099,7 +17124,7 @@ __hot int cursor_put(MDBX_cursor *mc, const MDBX_val *key, MDBX_val *data, unsig
          * mp: new (sub-)page.
          * xdata: node data with new sub-page or sub-DB. */
         size_t growth = 0; /* growth in page size.*/
-        page_t *mp = fp = xdata.iov_base = env->page_auxbuf;
+        page_t *mp = fp = xdata.iov_base = mc->txn->tw.page_auxbuf ? mc->txn->tw.page_auxbuf : env->page_auxbuf;
         mp->pgno = mc->pg[mc->top]->pgno;
 
         /* Was a single item before, must convert now */
@@ -18543,7 +18568,7 @@ __noinline int dbi_import(MDBX_txn *txn, const size_t dbi) {
       int rc = dbi_check(parent, dbi);
       /* копируем состояние table очищая new-флаги. */
       eASSERT(env, txn->dbi_seqs == parent->dbi_seqs);
-      txn->dbi_state[dbi] = parent->dbi_state[dbi] & ~(DBI_FRESH | DBI_CREAT | DBI_DIRTY);
+      txn->dbi_state[dbi] = parent->dbi_state[dbi] & ~(DBI_FRESH | DBI_CREAT);
       if (likely(rc == MDBX_SUCCESS)) {
         txn->dbs[dbi] = parent->dbs[dbi];
         if (parent->cursors[dbi]) {
@@ -36525,6 +36550,7 @@ int txn_renew(MDBX_txn *txn, unsigned flags) {
     MDBX_PNL_SETSIZE(txn->tw.retired_pages, 0);
     txn->tw.spilled.list = nullptr;
     txn->tw.spilled.least_removed = 0;
+    txn->tw.page_auxbuf = nullptr; /* basal txn uses env->page_auxbuf */
     txn->tw.gc.time_acc = 0;
     txn->tw.gc.last_reclaimed = 0;
     if (txn->tw.gc.retxl)
@@ -36830,6 +36856,12 @@ int txn_end(MDBX_txn *txn, unsigned mode) {
       dpl_release_shadows(txn);
       dpl_free(txn);
       pnl_free(txn->tw.repnl);
+
+      /* Free per-subtxn page_auxbuf allocated for thread-safe parallel DupSort operations */
+      if (txn->tw.page_auxbuf) {
+        osal_free(txn->tw.page_auxbuf);
+        txn->tw.page_auxbuf = nullptr;
+      }
 
       if (parent->geo.upper != txn->geo.upper || parent->geo.now != txn->geo.now) {
         /* undo resize performed by child txn */
