@@ -674,58 +674,128 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                     write_storage_changesets: !sf_ctx.write_storage_changesets,
                 };
 
-                // In edge mode, we can parallelize writes across different table groups:
-                // - Thread 1: PlainAccountState, PlainStorageState, Bytecodes (write_state)
-                // - Thread 2: HashedAccounts, HashedStorages (write_hashed_state)
-                // - Thread 3: AccountsTrie, StoragesTrie (write_trie_updates_sorted)
+                // In edge mode, we parallelize writes with 7 threads (one per DBI):
+                // - Thread 1: PlainAccountState
+                // - Thread 2: Bytecodes
+                // - Thread 3: PlainStorageState
+                // - Thread 4: HashedAccounts
+                // - Thread 5: HashedStorages
+                // - Thread 6: AccountsTrie
+                // - Thread 7: StoragesTrie
                 if use_parallel_writes {
-                    // Parallelize writes across different table groups:
-                    // - Thread 1: PlainAccountState, PlainStorageState, Bytecodes (write_state)
-                    // - Thread 2: HashedAccounts, HashedStorages (write_hashed_state)
-                    // - Thread 3: AccountsTrie, StoragesTrie (write_trie_updates_sorted)
+                    let mut edge_timings = metrics::EdgeWriteTimings::default();
+                    let total_start = Instant::now();
+
+                    // PREPROCESSING: Merge all block states and prepare data for parallel writes
+                    let preprocess_start = Instant::now();
+                    let mut merged_state = StateChangeset::default();
+                    for block in blocks.iter() {
+                        let execution_output = block.execution_outcome();
+                        let (plain_state, reverts) = execution_output
+                            .state
+                            .to_plain_state_and_reverts(OriginalValuesKnown::No);
+
+                        // Write reverts sequentially (they need block-by-block ordering)
+                        self.write_state_reverts(
+                            reverts,
+                            block.recovered_block().number(),
+                            state_write_config,
+                        )?;
+
+                        // Merge plain state changes
+                        merged_state.accounts.extend(plain_state.accounts);
+                        merged_state.storage.extend(plain_state.storage);
+                        merged_state.contracts.extend(plain_state.contracts);
+                    }
+
+                    // Prepare state writes (sorts and converts to final format)
+                    let prepared = self.prepare_state_writes_from_parts(
+                        merged_state.accounts,
+                        merged_state.contracts,
+                        merged_state.storage,
+                    );
+
+                    // Sort hashed storages by hashed address for optimal DB writes
+                    let hashed_storages: Vec<_> = merged_hashed_state
+                        .account_storages()
+                        .iter()
+                        .sorted_by_key(|(addr, _)| *addr)
+                        .map(|(addr, storage)| (*addr, storage))
+                        .collect();
+
+                    // Sort trie storage tries by hashed address for optimal DB writes
+                    let trie_storage_tries: Vec<_> = merged_trie
+                        .storage_tries_ref()
+                        .iter()
+                        .sorted_by_key(|(addr, _)| *addr)
+                        .map(|(addr, trie)| (*addr, trie))
+                        .collect();
+
+                    edge_timings.preprocessing = preprocess_start.elapsed();
+
+                    // SPAWN 7 THREADS: One per DBI for maximum parallelism
+                    let parallel_start = Instant::now();
+
                     std::thread::scope(|s| {
-                        let state_handle = s.spawn(|| {
-                            let start = Instant::now();
-                            for block in blocks.iter() {
-                                let recovered_block = block.recovered_block();
-                                let execution_output = block.execution_outcome();
-                                self.write_state(
-                                    WriteStateInput::Single {
-                                        outcome: execution_output,
-                                        block: recovered_block.number(),
-                                    },
-                                    OriginalValuesKnown::No,
-                                    state_write_config,
-                                )?;
-                            }
-                            Ok::<_, ProviderError>(start.elapsed())
+                        // Thread 1: PlainAccountState
+                        let t1 = s.spawn(|| self.write_plain_accounts_only(&prepared.accounts));
+
+                        // Thread 2: Bytecodes
+                        let t2 = s.spawn(|| self.write_bytecodes_only(&prepared.contracts));
+
+                        // Thread 3: PlainStorageState
+                        let t3 = s.spawn(|| self.write_plain_storage_only(&prepared.storage));
+
+                        // Thread 4: HashedAccounts
+                        let t4 = s.spawn(|| {
+                            self.write_hashed_accounts_only(merged_hashed_state.accounts())
                         });
 
-                        let hashed_handle = s.spawn(|| {
-                            let start = Instant::now();
-                            if !merged_hashed_state.is_empty() {
-                                self.write_hashed_state(&merged_hashed_state)?;
-                            }
-                            Ok::<_, ProviderError>(start.elapsed())
+                        // Thread 5: HashedStorages
+                        let t5 = s.spawn(|| self.write_hashed_storages_only(&hashed_storages));
+
+                        // Thread 6: AccountsTrie
+                        let t6 = s.spawn(|| {
+                            self.write_account_trie_only(merged_trie.account_nodes_ref())
                         });
 
-                        let trie_handle = s.spawn(|| {
-                            let start = Instant::now();
-                            if !merged_trie.is_empty() {
-                                self.write_trie_updates_sorted(&merged_trie)?;
-                            }
-                            Ok::<_, ProviderError>(start.elapsed())
-                        });
+                        // Thread 7: StoragesTrie
+                        let t7 = s.spawn(|| self.write_storage_trie_only(&trie_storage_tries));
 
-                        timings.write_state =
-                            state_handle.join().expect("state thread panicked")?;
-                        timings.write_hashed_state =
-                            hashed_handle.join().expect("hashed thread panicked")?;
-                        timings.write_trie_updates =
-                            trie_handle.join().expect("trie thread panicked")?;
+                        // Collect timings
+                        edge_timings.plain_accounts =
+                            t1.join().expect("plain_accounts thread panicked")?;
+                        edge_timings.bytecodes = t2.join().expect("bytecodes thread panicked")?;
+                        edge_timings.plain_storage =
+                            t3.join().expect("plain_storage thread panicked")?;
+                        edge_timings.hashed_accounts =
+                            t4.join().expect("hashed_accounts thread panicked")?;
+                        edge_timings.hashed_storages =
+                            t5.join().expect("hashed_storages thread panicked")?;
+                        let (_, account_trie_duration) =
+                            t6.join().expect("account_trie thread panicked")?;
+                        edge_timings.account_trie = account_trie_duration;
+                        let (_, storage_trie_duration) =
+                            t7.join().expect("storage_trie thread panicked")?;
+                        edge_timings.storage_trie = storage_trie_duration;
 
                         Ok::<_, ProviderError>(())
                     })?;
+
+                    edge_timings.parallel_wall = parallel_start.elapsed();
+                    edge_timings.total = total_start.elapsed();
+                    edge_timings.subtxn_count = 7;
+                    self.metrics.record_edge_writes(&edge_timings);
+
+                    // Also update the standard timings for backward compatibility
+                    timings.write_state = edge_timings
+                        .plain_accounts
+                        .max(edge_timings.bytecodes)
+                        .max(edge_timings.plain_storage);
+                    timings.write_hashed_state =
+                        edge_timings.hashed_accounts.max(edge_timings.hashed_storages);
+                    timings.write_trie_updates =
+                        edge_timings.account_trie.max(edge_timings.storage_trie);
                 } else {
                     // Sequential path for non-edge mode
                     for block in blocks.iter() {
@@ -4187,15 +4257,13 @@ mod tests {
             let provider = factory.provider().unwrap();
 
             // Verify AccountsTrie
-            let mut cursor =
-                provider.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
+            let mut cursor = provider.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
             let accounts_count = cursor.walk(None).unwrap().count();
             // We started with 2 accounts, deleted 1, added 1 = 2 remaining
             assert_eq!(accounts_count, 2, "AccountsTrie should have 2 entries after commit");
 
             // Verify StoragesTrie
-            let mut cursor =
-                provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap();
+            let mut cursor = provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap();
             let storage_count = cursor.walk(None).unwrap().count();
             // address1 had 2 entries, deleted 1 = 1 remaining; address2 was wiped = 0
             assert_eq!(storage_count, 1, "StoragesTrie should have 1 entry after commit");
@@ -4630,22 +4698,15 @@ mod tests {
 
         // Verify storage values
         let test_addr = Address::with_last_byte(0);
-        let mut storage_cursor = provider_ro
-            .tx_ref()
-            .cursor_dup_read::<tables::PlainStorageState>()
-            .unwrap();
+        let mut storage_cursor =
+            provider_ro.tx_ref().cursor_dup_read::<tables::PlainStorageState>().unwrap();
         for slot in 0..5u64 {
             let storage_key = B256::from(U256::from(slot));
             let entry = storage_cursor.seek_by_key_subkey(test_addr, storage_key).unwrap();
             let value = entry.filter(|e| e.key == storage_key).map(|e| e.value);
             let expected = U256::from(3 * 1000 + slot); // block 3: value = 3*1000 + slot
             assert!(value.is_some(), "Storage slot {} should exist for {}", slot, test_addr);
-            assert_eq!(
-                value.unwrap(),
-                expected,
-                "Storage slot {} should have correct value",
-                slot
-            );
+            assert_eq!(value.unwrap(), expected, "Storage slot {} should have correct value", slot);
         }
 
         println!("✓ Read verification passed: accounts and storage values correct");
@@ -4725,10 +4786,7 @@ mod tests {
 
                     let storage: HashMap<U256, (U256, U256)> = (0..storage_slots_per_account)
                         .map(|s| {
-                            (
-                                U256::from(s),
-                                (U256::ZERO, U256::from(block_num * 1000 + s as u64)),
-                            )
+                            (U256::from(s), (U256::ZERO, U256::from(block_num * 1000 + s as u64)))
                         })
                         .collect();
                     bundle = bundle.state_storage(address, storage);
@@ -4818,17 +4876,11 @@ mod tests {
 
                 // Verify a storage slot
                 let storage_key = B256::from(U256::from(0u64));
-                let mut storage_cursor = provider_ro
-                    .tx_ref()
-                    .cursor_dup_read::<tables::PlainStorageState>()
-                    .unwrap();
+                let mut storage_cursor =
+                    provider_ro.tx_ref().cursor_dup_read::<tables::PlainStorageState>().unwrap();
                 let entry = storage_cursor.seek_by_key_subkey(address, storage_key).unwrap();
                 let value = entry.filter(|e| e.key == storage_key).map(|e| e.value);
-                assert!(
-                    value.is_some(),
-                    "Storage slot 0 should exist for account {}",
-                    address
-                );
+                assert!(value.is_some(), "Storage slot 0 should exist for account {}", address);
             }
         }
 
@@ -4839,7 +4891,8 @@ mod tests {
     }
 
     /// 5-minute continuous stress test for parallel subtxn writes.
-    /// Run with: cargo test -p reth-storage-provider --features edge test_save_blocks_edge_mode_stress_5min -- --ignored --nocapture
+    /// Run with: cargo test -p reth-storage-provider --features edge
+    /// test_save_blocks_edge_mode_stress_5min -- --ignored --nocapture
     #[test]
     #[ignore] // Long-running test, run manually
     #[cfg(feature = "edge")]
@@ -4851,22 +4904,14 @@ mod tests {
         use revm_state::AccountInfo;
 
         // Configurable via env vars
-        let duration_secs: u64 = std::env::var("STRESS_DURATION_SECS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(300); // 5 minutes default
-        let accounts_per_iteration: usize = std::env::var("STRESS_ACCOUNTS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(200);
-        let storage_slots: usize = std::env::var("STRESS_STORAGE_SLOTS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(50);
-        let blocks_per_iteration: usize = std::env::var("STRESS_BLOCKS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(5);
+        let duration_secs: u64 =
+            std::env::var("STRESS_DURATION_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(300); // 5 minutes default
+        let accounts_per_iteration: usize =
+            std::env::var("STRESS_ACCOUNTS").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
+        let storage_slots: usize =
+            std::env::var("STRESS_STORAGE_SLOTS").ok().and_then(|s| s.parse().ok()).unwrap_or(50);
+        let blocks_per_iteration: usize =
+            std::env::var("STRESS_BLOCKS").ok().and_then(|s| s.parse().ok()).unwrap_or(5);
 
         println!("=== PARALLEL SUBTXN STRESS TEST ===");
         println!("Duration: {} seconds", duration_secs);

@@ -55,6 +55,9 @@ pub use builder::{ProviderFactoryBuilder, ReadOnlyConfig};
 
 mod metrics;
 
+mod parallel_writes;
+pub use parallel_writes::{ParallelWriteTimings, PreparedStateWrites, PreparedStorageWrite};
+
 mod chain;
 pub use chain::*;
 

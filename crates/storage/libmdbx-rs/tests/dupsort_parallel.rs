@@ -125,7 +125,8 @@ fn test_dupsort_upsert_stress() {
                 actual_sorted.sort();
 
                 assert_eq!(
-                    actual_sorted, expected_sorted,
+                    actual_sorted,
+                    expected_sorted,
                     "Iteration {}: key {:?} values mismatch",
                     iteration,
                     String::from_utf8_lossy(key)
@@ -134,11 +135,7 @@ fn test_dupsort_upsert_stress() {
 
             let stat = read_txn.db_stat(db.dbi()).unwrap();
             if iteration % 5 == 4 {
-                println!(
-                    "Iteration {}: {} entries verified",
-                    iteration + 1,
-                    stat.entries()
-                );
+                println!("Iteration {}: {} entries verified", iteration + 1, stat.entries());
             }
         }
     }
@@ -187,8 +184,7 @@ fn test_dupsort_subpage_to_subtree_stress() {
 
     {
         let txn = env.begin_rw_txn().unwrap();
-        txn.create_db(Some("test_db"), DatabaseFlags::DUP_SORT)
-            .expect("Failed to create table");
+        txn.create_db(Some("test_db"), DatabaseFlags::DUP_SORT).expect("Failed to create table");
         txn.commit().unwrap();
     }
 
@@ -206,10 +202,7 @@ fn test_dupsort_subpage_to_subtree_stress() {
             nested_txn
                 .put(db.dbi(), key.as_bytes(), value.as_bytes(), WriteFlags::UPSERT)
                 .unwrap_or_else(|e| {
-                    panic!(
-                        "Failed to put: key={}, value_id={}, err={:?}",
-                        key_id, value_id, e
-                    )
+                    panic!("Failed to put: key={}, value_id={}, err={:?}", key_id, value_id, e)
                 });
         }
     }
@@ -341,8 +334,7 @@ fn test_dupsort_multithreaded_serialized() {
 
     {
         let txn = env.begin_rw_txn().unwrap();
-        txn.create_db(Some("test_db"), DatabaseFlags::DUP_SORT)
-            .expect("Failed to create table");
+        txn.create_db(Some("test_db"), DatabaseFlags::DUP_SORT).expect("Failed to create table");
         txn.commit().unwrap();
     }
 
