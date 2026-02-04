@@ -1781,6 +1781,12 @@ impl<'a> RocksDBBatch<'a> {
             return Ok(PrunedIndices::default());
         }
 
+        if !targets.windows(2).all(|w| w[0].0 <= w[1].0) {
+            return Err(ProviderError::other(std::io::Error::other(
+                "prune_account_history_batch: targets must be sorted by address",
+            )));
+        }
+
         // ShardedKey<Address> layout: [address: 20][block: 8] = 28 bytes
         // The first 20 bytes are the "prefix" that identifies the address
         const PREFIX_LEN: usize = 20;
@@ -1901,6 +1907,12 @@ impl<'a> RocksDBBatch<'a> {
     ) -> ProviderResult<PrunedIndices> {
         if targets.is_empty() {
             return Ok(PrunedIndices::default());
+        }
+
+        if !targets.windows(2).all(|w| w[0].0 <= w[1].0) {
+            return Err(ProviderError::other(std::io::Error::other(
+                "prune_storage_history_batch: targets must be sorted by (address, storage_key)",
+            )));
         }
 
         // StorageShardedKey layout: [address: 20][storage_key: 32][block: 8] = 60 bytes
@@ -3864,5 +3876,148 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_prune_account_history_batch_multiple_sorted_targets() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let addr1 = Address::from([0x01; 20]);
+        let addr2 = Address::from([0x02; 20]);
+        let addr3 = Address::from([0x03; 20]);
+
+        // Setup shards for each address
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr1, u64::MAX),
+                &BlockNumberList::new_pre_sorted([10, 20, 30]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr2, u64::MAX),
+                &BlockNumberList::new_pre_sorted([5, 10, 15]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr3, u64::MAX),
+                &BlockNumberList::new_pre_sorted([100, 200]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        // Prune all three (sorted by address)
+        let mut targets = vec![(addr1, 15), (addr2, 10), (addr3, 50)];
+        targets.sort_by_key(|(addr, _)| *addr);
+
+        let mut batch = provider.batch();
+        let outcomes = batch.prune_account_history_batch(&targets).unwrap();
+        batch.commit().unwrap();
+
+        // addr1: prune <=15, keep [20, 30] -> updated
+        // addr2: prune <=10, keep [15] -> updated
+        // addr3: prune <=50, keep [100, 200] -> unchanged
+        assert_eq!(outcomes.updated, 2);
+        assert_eq!(outcomes.unchanged, 1);
+
+        let shards1 = provider.account_history_shards(addr1).unwrap();
+        assert_eq!(shards1[0].1.iter().collect::<Vec<_>>(), vec![20, 30]);
+
+        let shards2 = provider.account_history_shards(addr2).unwrap();
+        assert_eq!(shards2[0].1.iter().collect::<Vec<_>>(), vec![15]);
+
+        let shards3 = provider.account_history_shards(addr3).unwrap();
+        assert_eq!(shards3[0].1.iter().collect::<Vec<_>>(), vec![100, 200]);
+    }
+
+    #[test]
+    fn test_prune_account_history_batch_target_with_no_shards() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let addr1 = Address::from([0x01; 20]);
+        let addr2 = Address::from([0x02; 20]); // No shards for this one
+        let addr3 = Address::from([0x03; 20]);
+
+        // Only setup shards for addr1 and addr3
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr1, u64::MAX),
+                &BlockNumberList::new_pre_sorted([10, 20]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr3, u64::MAX),
+                &BlockNumberList::new_pre_sorted([30, 40]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        // Prune all three (addr2 has no shards - tests p > target_prefix case)
+        let mut targets = vec![(addr1, 15), (addr2, 100), (addr3, 35)];
+        targets.sort_by_key(|(addr, _)| *addr);
+
+        let mut batch = provider.batch();
+        let outcomes = batch.prune_account_history_batch(&targets).unwrap();
+        batch.commit().unwrap();
+
+        // addr1: updated (keep [20])
+        // addr2: unchanged (no shards)
+        // addr3: updated (keep [40])
+        assert_eq!(outcomes.updated, 2);
+        assert_eq!(outcomes.unchanged, 1);
+
+        let shards1 = provider.account_history_shards(addr1).unwrap();
+        assert_eq!(shards1[0].1.iter().collect::<Vec<_>>(), vec![20]);
+
+        let shards3 = provider.account_history_shards(addr3).unwrap();
+        assert_eq!(shards3[0].1.iter().collect::<Vec<_>>(), vec![40]);
+    }
+
+    #[test]
+    fn test_prune_storage_history_batch_multiple_sorted_targets() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let addr = Address::from([0x42; 20]);
+        let slot1 = B256::from([0x01; 32]);
+        let slot2 = B256::from([0x02; 32]);
+
+        // Setup shards
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(addr, slot1, u64::MAX),
+                &BlockNumberList::new_pre_sorted([10, 20, 30]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(addr, slot2, u64::MAX),
+                &BlockNumberList::new_pre_sorted([5, 15, 25]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        // Prune both (sorted)
+        let mut targets = vec![((addr, slot1), 15), ((addr, slot2), 10)];
+        targets.sort_by_key(|((a, s), _)| (*a, *s));
+
+        let mut batch = provider.batch();
+        let outcomes = batch.prune_storage_history_batch(&targets).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(outcomes.updated, 2);
+
+        let shards1 = provider.storage_history_shards(addr, slot1).unwrap();
+        assert_eq!(shards1[0].1.iter().collect::<Vec<_>>(), vec![20, 30]);
+
+        let shards2 = provider.storage_history_shards(addr, slot2).unwrap();
+        assert_eq!(shards2[0].1.iter().collect::<Vec<_>>(), vec![15, 25]);
     }
 }
