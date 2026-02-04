@@ -1043,25 +1043,25 @@ where
         // Prune state and storage tries in parallel
         rayon::join(
             || {
-                let pruned_roots = self
-                    .state
-                    .as_revealed_mut()
-                    .map(|trie| trie.prune(max_depth))
-                    .unwrap_or_default();
-
-                let revealed_before = self.revealed_account_paths.len();
-
-                // Retain revealed paths that don't start with any pruned root
-                self.revealed_account_paths
-                    .retain(|path| !pruned_roots.iter().any(|root| path.starts_with(root)));
-
-                debug!(
-                    target: "trie::sparse",
-                    revealed_before,
-                    pruned_roots = pruned_roots.len(),
-                    retained = self.revealed_account_paths.len(),
-                    "SparseStateTrie::prune account paths"
-                );
+                // let pruned_roots = self
+                //     .state
+                //     .as_revealed_mut()
+                //     .map(|trie| trie.prune(max_depth))
+                //     .unwrap_or_default();
+                //
+                // let revealed_before = self.revealed_account_paths.len();
+                //
+                // // Retain revealed paths that don't start with any pruned root
+                // self.revealed_account_paths
+                //     .retain(|path| !pruned_roots.iter().any(|root| path.starts_with(root)));
+                //
+                // debug!(
+                //     target: "trie::sparse",
+                //     revealed_before,
+                //     pruned_roots = pruned_roots.len(),
+                //     retained = self.revealed_account_paths.len(),
+                //     "SparseStateTrie::prune account paths"
+                // );
 
                 // Log find_leaf stats for state trie only
                 if let Some(trie) = self.state.as_revealed_mut() {
