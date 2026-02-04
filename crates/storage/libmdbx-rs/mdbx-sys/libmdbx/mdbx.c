@@ -13003,12 +13003,12 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
       return LOG_IFERR(rc);
     }
 
-    DEBUG("subtxn: begin start");
+    DEBUG("%s", "subtxn: begin start");
     if (env->options.spill_parent4child_denominator) {
       /* Spill dirty-pages of parent to provide dirtyroom for child txn */
-      DEBUG("subtxn: spill start");
+      DEBUG("%s", "subtxn: spill start");
       rc = txn_spill(parent, nullptr, parent->tw.dirtylist->length / env->options.spill_parent4child_denominator);
-      DEBUG("subtxn: spill done");
+      DEBUG("%s", "subtxn: spill done");
       if (unlikely(rc != MDBX_SUCCESS))
         return LOG_IFERR(rc);
     }
@@ -13133,7 +13133,7 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
     txn->tw.troika = parent->tw.troika;
 
     /* Allocate per-subtxn page_auxbuf for thread-safe parallel DupSort operations */
-    DEBUG("subtxn: page_auxbuf alloc");
+    DEBUG("%s", "subtxn: page_auxbuf alloc");
     txn->tw.page_auxbuf = osal_malloc(env->ps * NUM_METAS);
     if (unlikely(!txn->tw.page_auxbuf)) {
       rc = MDBX_ENOMEM;
@@ -13153,16 +13153,16 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
                      (txn->parent ? txn->parent->tw.dirtyroom : txn->env->options.dp_limit));
     env->txn = txn;
     tASSERT(parent, parent->cursors[FREE_DBI] == nullptr);
-    DEBUG("subtxn: cursor_shadow start");
+    DEBUG("%s", "subtxn: cursor_shadow start");
     rc = parent->cursors[MAIN_DBI] ? cursor_shadow(parent->cursors[MAIN_DBI], txn, MAIN_DBI) : MDBX_SUCCESS;
-    DEBUG("subtxn: cursor_shadow done");
+    DEBUG("%s", "subtxn: cursor_shadow done");
     if (AUDIT_ENABLED() && ASSERT_ENABLED()) {
       txn->signature = txn_signature;
       tASSERT(txn, audit_ex(txn, 0, false) == 0);
     }
     if (unlikely(rc != MDBX_SUCCESS))
       txn_end(txn, TXN_END_FAIL_BEGINCHILD);
-    DEBUG("subtxn: begin done");
+    DEBUG("%s", "subtxn: begin done");
   } else { /* MDBX_TXN_RDONLY */
     txn->dbi_seqs = ptr_disp(txn->cursors, env->max_dbi * sizeof(txn->cursors[0]));
 #if MDBX_ENABLE_DBI_SPARSE
@@ -13259,7 +13259,7 @@ int mdbx_txn_commit_ex(MDBX_txn *txn, MDBX_commit_latency *latency) {
   }
 
   if (txn->parent) {
-    DEBUG("subtxn: commit start");
+    DEBUG("%s", "subtxn: commit start");
     tASSERT(txn, audit_ex(txn, 0, false) == 0);
     eASSERT(env, txn != env->basal_txn);
     MDBX_txn *const parent = txn->parent;
@@ -13346,9 +13346,9 @@ int mdbx_txn_commit_ex(MDBX_txn *txn, MDBX_commit_latency *latency) {
     parent->tw.loose_pages = txn->tw.loose_pages;
 
     /* Merge our cursors into parent's and close them */
-    DEBUG("subtxn: cursor_eot start");
+    DEBUG("%s", "subtxn: cursor_eot start");
     txn_done_cursors(txn, true);
-    DEBUG("subtxn: cursor_eot done");
+    DEBUG("%s", "subtxn: cursor_eot done");
     end_mode |= TXN_END_EOTDONE;
 
     /* Update parent's DBs array */
@@ -13376,7 +13376,7 @@ int mdbx_txn_commit_ex(MDBX_txn *txn, MDBX_commit_latency *latency) {
     }
     DEBUG("subtxn: dpl_merge start, child_dirty=%zu", txn->tw.dirtylist->length);
     txn_merge(parent, txn, parent_retired_len);
-    DEBUG("subtxn: dpl_merge done");
+    DEBUG("%s", "subtxn: dpl_merge done");
     env->txn = parent;
     parent->nested = nullptr;
     tASSERT(parent, dpl_check(parent));
@@ -13395,7 +13395,7 @@ int mdbx_txn_commit_ex(MDBX_txn *txn, MDBX_commit_latency *latency) {
         tASSERT(parent, MDBX_PNL_MOST(parent->tw.repnl) + 1 < parent->geo.first_unallocated);
     }
 #endif /* MDBX_ENABLE_REFUND */
-    DEBUG("subtxn: commit done");
+    DEBUG("%s", "subtxn: commit done");
 
     txn->signature = 0;
     osal_free(txn);
