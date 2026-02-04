@@ -619,27 +619,9 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 );
             }
 
-            // Enable parallel MDBX subtransactions for edge mode
-            // Edge mode writes receipts/changesets to static files, so MDBX writes are isolated
-            // and don't need read-back, making parallel subtxns safe.
-            let use_parallel_writes = self.cached_storage_settings().is_edge_mode();
-            if use_parallel_writes {
-                self.tx.enable_parallel_writes_for_tables(&[
-                    tables::HeaderNumbers::NAME,
-                    tables::BlockBodyIndices::NAME,
-                    tables::TransactionBlocks::NAME,
-                    tables::PlainAccountState::NAME,
-                    tables::PlainStorageState::NAME,
-                    tables::Bytecodes::NAME,
-                    tables::HashedAccounts::NAME,
-                    tables::HashedStorages::NAME,
-                    tables::AccountsTrie::NAME,
-                    tables::StoragesTrie::NAME,
-                    tables::StageCheckpoints::NAME,
-                ])?;
-            }
-
             // Pre-compute merged hashed state and trie updates before write section
+            let use_parallel_writes =
+                save_mode.with_state() && self.cached_storage_settings().is_edge_mode();
             let (merged_hashed_state, merged_trie) = if save_mode.with_state() {
                 let start = Instant::now();
                 let merged_hashed_state: Arc<HashedPostStateSorted> =
@@ -665,6 +647,20 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 let start = Instant::now();
                 self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
                 timings.insert_block += start.elapsed();
+            }
+
+            // Enable parallel MDBX subtransactions for state writes only.
+            // This is placed AFTER insert_block_mdbx_only to avoid conflicts with block index writes.
+            if use_parallel_writes {
+                self.tx.enable_parallel_writes_for_tables(&[
+                    tables::PlainAccountState::NAME,
+                    tables::PlainStorageState::NAME,
+                    tables::Bytecodes::NAME,
+                    tables::HashedAccounts::NAME,
+                    tables::HashedStorages::NAME,
+                    tables::AccountsTrie::NAME,
+                    tables::StoragesTrie::NAME,
+                ])?;
             }
 
             // Write state, hashed state, and trie updates
@@ -4442,6 +4438,100 @@ mod tests {
             .collect();
 
         // Call save_blocks with legacy mode (no parallel writes)
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(blocks.clone(), SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        // Verify blocks were saved correctly
+        let provider = factory.provider().unwrap();
+        for (i, (expected_block, _)) in data.blocks.iter().take(3).enumerate() {
+            let block_number = expected_block.number();
+
+            // Verify block header
+            let header = provider.header_by_number(block_number).unwrap();
+            assert!(header.is_some(), "Block {block_number} header should exist");
+            assert_eq!(
+                header.unwrap(),
+                expected_block.header().clone(),
+                "Block {block_number} header should match"
+            );
+
+            // Verify block body indices exist
+            let body_indices = provider.block_body_indices(block_number).unwrap();
+            assert!(body_indices.is_some(), "Block {block_number} body indices should exist");
+
+            // Verify transactions
+            let tx_count = expected_block.body().transaction_count();
+            let indices = body_indices.unwrap();
+            assert_eq!(
+                indices.tx_count as usize, tx_count,
+                "Block {block_number} tx count should match"
+            );
+
+            // Verify receipts exist
+            let receipts = provider.receipts_by_block(block_number.into()).unwrap();
+            assert!(receipts.is_some(), "Block {block_number} receipts should exist");
+            assert_eq!(
+                receipts.unwrap().len(),
+                data.blocks[i].1.receipts()[0].len(),
+                "Block {block_number} receipt count should match"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "edge")]
+    fn test_save_blocks_edge_mode_parallel() {
+        use reth_chain_state::ExecutedBlock;
+        use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+
+        let factory = create_test_provider_factory();
+
+        // Enable edge mode for parallel writes
+        factory.set_storage_settings_cache(StorageSettings::edge());
+        assert!(
+            factory.cached_storage_settings().is_edge_mode(),
+            "Edge mode should be enabled"
+        );
+
+        let data = BlockchainTestData::default();
+
+        // Insert genesis block first
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                crate::OriginalValuesKnown::No,
+                StateWriteConfig::default(),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        // Prepare executed blocks for save_blocks
+        let blocks: Vec<ExecutedBlock> = data
+            .blocks
+            .iter()
+            .take(3)
+            .map(|(block, outcome)| {
+                let block_receipts = outcome.receipts().first().cloned().unwrap_or_default();
+                ExecutedBlock::new(
+                    Arc::new(block.clone()),
+                    Arc::new(BlockExecutionOutput {
+                        result: BlockExecutionResult {
+                            receipts: block_receipts,
+                            requests: Default::default(),
+                            gas_used: 0,
+                            blob_gas_used: 0,
+                        },
+                        state: outcome.state().clone(),
+                    }),
+                    ComputedTrieData::default(),
+                )
+            })
+            .collect();
+
+        // Call save_blocks with edge mode (parallel writes enabled)
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.save_blocks(blocks.clone(), SaveBlocksMode::Full).unwrap();
         provider_rw.commit().unwrap();
