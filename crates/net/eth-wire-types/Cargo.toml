@@ -38,7 +38,6 @@ alloy-hardforks.workspace = true
 
 [dev-dependencies]
 reth-ethereum-primitives = { workspace = true, features = ["arbitrary"] }
-reth-ethereum-forks.workspace = true
 alloy-primitives = { workspace = true, features = ["arbitrary", "rand"] }
 alloy-consensus = { workspace = true, features = ["arbitrary"] }
 alloy-eips = { workspace = true, features = ["arbitrary"] }
@@ -56,7 +55,6 @@ std = [
     "alloy-consensus/std",
     "alloy-eips/std",
     "alloy-genesis/std",
-    "alloy-hardforks/std",
     "alloy-primitives/std",
     "alloy-rlp/std",
     "bytes/std",
