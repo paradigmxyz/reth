@@ -1417,7 +1417,7 @@ impl ParallelSparseTrie {
         excess_memory: usize,
         hot_accounts: &reth_trie_sparse::hot_accounts::HotAccounts,
     ) -> (usize, usize) {
-        use rayon::iter::{IntoParallelIterator, ParallelIterator};
+        use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
         if excess_memory == 0 {
             return (0, 0);
@@ -1443,18 +1443,33 @@ impl ParallelSparseTrie {
         let mut subtries: Vec<(usize, usize, bool)> = subtrie_info;
         subtries.sort_unstable_by_key(|(_, mem, is_hot)| (*is_hot, std::cmp::Reverse(*mem)));
 
-        // Clear subtries until we've freed enough
-        let mut bytes_freed = 0usize;
-        let mut subtries_cleared = 0usize;
+        // Find the cutoff point: how many subtries to clear
+        let mut cumulative = 0usize;
+        let cutoff = subtries
+            .iter()
+            .position(|(_, size, _)| {
+                if cumulative >= excess_memory {
+                    return true;
+                }
+                cumulative += size;
+                false
+            })
+            .unwrap_or(subtries.len());
 
-        for (idx, size, _) in subtries {
-            if bytes_freed >= excess_memory {
-                break;
+        let to_clear = &subtries[..cutoff];
+        let bytes_freed: usize = to_clear.iter().map(|(_, size, _)| size).sum();
+        let subtries_cleared = to_clear.len();
+
+        // Clear in parallel - dropping nodes can be expensive
+        to_clear.par_iter().for_each(|(idx, _, _)| {
+            // SAFETY: Each index is unique (from 0..NUM_LOWER_SUBTRIES filter_map),
+            // so parallel access to different indices is safe.
+            unsafe {
+                let subtrie_ptr = &self.lower_subtries[*idx] as *const LowerSparseSubtrie
+                    as *mut LowerSparseSubtrie;
+                (*subtrie_ptr).clear();
             }
-            self.lower_subtries[idx].clear();
-            bytes_freed += size;
-            subtries_cleared += 1;
-        }
+        });
 
         (bytes_freed, subtries_cleared)
     }
