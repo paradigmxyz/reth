@@ -480,7 +480,7 @@ revm-primitives = { version = "22.0.0", default-features = false }
 revm-interpreter = { version = "32.0.0", default-features = false }
 revm-database-interface = { version = "9.0.0", default-features = false }
 op-revm = { version = "15.0.0", default-features = false }
-revm-inspectors = "0.34.1"
+revm-inspectors = "0.34.2"
 
 # eth
 alloy-dyn-abi = "1.5.4"
