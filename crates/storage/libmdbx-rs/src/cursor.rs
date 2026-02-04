@@ -55,9 +55,11 @@ where
         txn_ptr: TransactionPtr,
     ) -> Result<Self> {
         let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
-        txn_ptr.txn_execute_fail_on_timeout(|ptr| unsafe {
+        eprintln!("[cursor::new_with_ptr] BEFORE mdbx_cursor_open, dbi={}, txn_ptr={:p}", dbi, txn_ptr.as_ptr());
+        let result = txn_ptr.txn_execute_fail_on_timeout(|ptr| unsafe {
             mdbx_result(ffi::mdbx_cursor_open(ptr, dbi, &mut cursor))
         })??;
+        eprintln!("[cursor::new_with_ptr] AFTER mdbx_cursor_open, cursor={:p}, result={:?}", cursor, result);
         Ok(Self { txn, cursor, owned_txn_ptr: Some(txn_ptr) })
     }
 
@@ -141,17 +143,26 @@ where
             // For normal cursors, use transaction locking.
             if let Some(ref txn_ptr) = self.owned_txn_ptr {
                 // Parallel cursor path - no locking needed, subtxns are independent
+                eprintln!("[cursor::get PARALLEL] BEFORE mdbx_cursor_get, cursor={:p}, op={:?}", self.cursor, op);
                 let rc = ffi::mdbx_cursor_get(self.cursor, &mut key_val, &mut data_val, op);
+                eprintln!("[cursor::get PARALLEL] AFTER mdbx_cursor_get, rc={}, key_len={}, data_len={}", 
+                    rc, key_val.iov_len, data_val.iov_len);
                 let v = mdbx_result(rc)?;
                 assert_ne!(data_ptr, data_val.iov_base);
+                eprintln!("[cursor::get PARALLEL] BEFORE decode_val, key_base={:p}, data_base={:p}", 
+                    key_val.iov_base, data_val.iov_base);
                 let key_out = {
                     if ptr::eq(key_ptr, key_val.iov_base) {
+                        eprintln!("[cursor::get PARALLEL] key unchanged (None)");
                         None
                     } else {
+                        eprintln!("[cursor::get PARALLEL] decoding key...");
                         Some(Key::decode_val::<K>(txn_ptr.as_ptr(), key_val)?)
                     }
                 };
+                eprintln!("[cursor::get PARALLEL] decoding data...");
                 let data_out = Value::decode_val::<K>(txn_ptr.as_ptr(), data_val)?;
+                eprintln!("[cursor::get PARALLEL] decode complete");
                 Ok((key_out, data_out, v))
             } else {
                 // Normal cursor path - use transaction locking
@@ -507,8 +518,12 @@ impl Cursor<RW> {
         unsafe {
             if self.owned_txn_ptr.is_some() {
                 // Bypass locking entirely for parallel cursors - they have independent subtxns
+                eprintln!("[cursor::put PARALLEL] BEFORE mdbx_cursor_put, cursor={:p}, key_len={}, data_len={}, flags=0x{:x}", 
+                    self.cursor, key.len(), data.len(), flags.bits());
                 let ret = ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits());
+                eprintln!("[cursor::put PARALLEL] AFTER mdbx_cursor_put, ret={}", ret);
                 mdbx_result(ret)?;
+                eprintln!("[cursor::put PARALLEL] put succeeded");
             } else {
                 // Use normal path with locking for non-parallel cursors
                 let ret = self.txn.txn_execute(|_| {
@@ -528,9 +543,16 @@ impl Cursor<RW> {
     /// [`WriteFlags::NO_DUP_DATA`] may be used to delete all data items for the
     /// current key, if the database was opened with [`DatabaseFlags::DUP_SORT`].
     pub fn del(&mut self, flags: WriteFlags) -> Result<()> {
-        mdbx_result(unsafe {
+        if self.owned_txn_ptr.is_some() {
+            eprintln!("[cursor::del PARALLEL] BEFORE mdbx_cursor_del, cursor={:p}, flags=0x{:x}", self.cursor, flags.bits());
+        }
+        let result = mdbx_result(unsafe {
             self.execute_on_txn(|_txn_ptr| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
-        })?;
+        });
+        if self.owned_txn_ptr.is_some() {
+            eprintln!("[cursor::del PARALLEL] AFTER mdbx_cursor_del, result={:?}", result);
+        }
+        result?;
 
         Ok(())
     }
