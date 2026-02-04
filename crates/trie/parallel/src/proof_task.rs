@@ -42,6 +42,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use parking_lot::RwLock;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofError};
 use reth_primitives_traits::dashmap::{self, DashMap};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
