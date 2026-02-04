@@ -587,8 +587,7 @@ where
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
         // Process all storage updates in parallel, skipping tries with no pending updates.
-        let storage_results = self
-            .storage_updates
+        let storage_results = storage_updates
             .iter_mut()
             .filter(|(_, updates)| !updates.is_empty())
             .map(|(address, updates)| {
