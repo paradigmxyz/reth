@@ -954,8 +954,7 @@ where
                 .pool
                 .get_all(hashes)
                 .into_iter()
-                .map(PropagateTransaction::pool_tx)
-                .collect::<Vec<_>>();
+                .map(PropagateTransaction::pool_tx);
 
             let mut propagated = PropagatedTransactions::default();
 
