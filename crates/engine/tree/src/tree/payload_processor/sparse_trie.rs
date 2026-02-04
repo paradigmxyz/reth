@@ -10,7 +10,7 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::{IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use reth_primitives_traits::{Account, ParallelBridgeBuffered};
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -600,8 +600,7 @@ where
 
         let par_start = Instant::now();
         let storage_results = prepared
-            .into_iter()
-            .par_bridge()
+            .into_par_iter()
             .map(|(address, updates, mut fetched, mut trie)| {
                 let mut targets = Vec::new();
 
