@@ -9,10 +9,7 @@ fn test_parallel_subtx_dupsort_storage_pattern() {
     let dir = tempdir().unwrap();
     let env = Environment::builder()
         .set_max_dbs(10)
-        .set_geometry(Geometry {
-            size: Some(0..(1024 * 1024 * 10)),
-            ..Default::default()
-        })
+        .set_geometry(Geometry { size: Some(0..(1024 * 1024 * 10)), ..Default::default() })
         .write_map()
         .open(dir.path())
         .unwrap();
@@ -53,8 +50,7 @@ fn test_parallel_subtx_dupsort_storage_pattern() {
             let key_part = &entry[..4]; // first 4 bytes as "key"
 
             // Step 1: seek_by_key_subkey pattern using get_both_range
-            let seek_result: Result<Option<Cow<'_, [u8]>>> =
-                cursor.get_both_range(addr, key_part);
+            let seek_result: Result<Option<Cow<'_, [u8]>>> = cursor.get_both_range(addr, key_part);
 
             if let Ok(Some(found_val)) = seek_result {
                 // Check if the found key matches (like db_entry.key == entry.key)
@@ -82,11 +78,7 @@ fn test_parallel_subtx_dupsort_storage_pattern() {
         cursor.iter_slices().collect::<Result<Vec<_>>>().unwrap();
     println!("Final entries: {} items", entries.len());
     for (k, v) in &entries {
-        println!(
-            "  {:?} -> {:?}",
-            String::from_utf8_lossy(k),
-            String::from_utf8_lossy(v)
-        );
+        println!("  {:?} -> {:?}", String::from_utf8_lossy(k), String::from_utf8_lossy(v));
     }
     // Expected: addr1+key1 updated, addr1+key2 unchanged, addr1+key3 new, addr2+key1 deleted
     assert_eq!(entries.len(), 3);
@@ -98,7 +90,7 @@ fn test_parallel_subtx_dupsort_realistic_data() {
     let env = Environment::builder()
         .set_max_dbs(10)
         .set_geometry(Geometry {
-            size: Some(0..(1024 * 1024 * 100)),  // 100MB
+            size: Some(0..(1024 * 1024 * 100)), // 100MB
             ..Default::default()
         })
         .write_map()
@@ -112,7 +104,7 @@ fn test_parallel_subtx_dupsort_realistic_data() {
     // Create realistic data - 20 byte address as key, 64 byte storage entries as values
     let addr1: [u8; 20] = [0x11; 20];
     let addr2: [u8; 20] = [0x22; 20];
-    
+
     // Storage entry: 32 byte key + 32 byte value
     let make_entry = |k: u8, v: u8| -> [u8; 64] {
         let mut entry = [0u8; 64];
@@ -138,7 +130,7 @@ fn test_parallel_subtx_dupsort_realistic_data() {
 
     {
         let mut cursor = txn.cursor_with_dbi_parallel(dbi).unwrap();
-        
+
         // Update addr1's first entry - use get_both_range for DUPSORT seek
         let target = &make_entry(0x01, 0x00)[..32];
         let seek_result: Result<Option<Cow<'_, [u8]>>> = cursor.get_both_range(&addr1, target);

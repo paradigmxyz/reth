@@ -135,12 +135,12 @@ impl StorageSettings {
     /// Edge mode is when all data that doesn't need immediate read-back is written
     /// to static files, enabling parallel MDBX subtransaction writes.
     pub const fn is_edge_mode(&self) -> bool {
-        self.receipts_in_static_files
-            && self.transaction_senders_in_static_files
-            && self.account_changesets_in_static_files
-            && self.storage_changesets_in_static_files
-            && self.storages_history_in_rocksdb
-            && self.transaction_hash_numbers_in_rocksdb
-            && self.account_history_in_rocksdb
+        self.receipts_in_static_files &&
+            self.transaction_senders_in_static_files &&
+            self.account_changesets_in_static_files &&
+            self.storage_changesets_in_static_files &&
+            self.storages_history_in_rocksdb &&
+            self.transaction_hash_numbers_in_rocksdb &&
+            self.account_history_in_rocksdb
     }
 }

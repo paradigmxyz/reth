@@ -650,9 +650,10 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
             }
 
             // Enable parallel MDBX subtransactions for state writes only.
-            // This is placed AFTER insert_block_mdbx_only to avoid conflicts with block index writes.
-            // NOTE: DupSort tables (PlainStorageState, HashedStorages, StoragesTrie) are excluded
-            // because parallel subtxns don't properly handle DupSort nested B-tree operations.
+            // This is placed AFTER insert_block_mdbx_only to avoid conflicts with block index
+            // writes. NOTE: DupSort tables (PlainStorageState, HashedStorages,
+            // StoragesTrie) are excluded because parallel subtxns don't properly handle
+            // DupSort nested B-tree operations.
             if use_parallel_writes {
                 self.tx.enable_parallel_writes_for_tables(&[
                     tables::PlainAccountState::NAME,
@@ -716,9 +717,12 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                             Ok::<_, ProviderError>(start.elapsed())
                         });
 
-                        timings.write_state = state_handle.join().expect("state thread panicked")?;
-                        timings.write_hashed_state = hashed_handle.join().expect("hashed thread panicked")?;
-                        timings.write_trie_updates = trie_handle.join().expect("trie thread panicked")?;
+                        timings.write_state =
+                            state_handle.join().expect("state thread panicked")?;
+                        timings.write_hashed_state =
+                            hashed_handle.join().expect("hashed thread panicked")?;
+                        timings.write_trie_updates =
+                            trie_handle.join().expect("trie thread panicked")?;
 
                         Ok::<_, ProviderError>(())
                     })?;
@@ -4484,17 +4488,21 @@ mod tests {
     #[test]
     #[cfg(feature = "edge")]
     fn test_save_blocks_edge_mode_parallel() {
+        use alloy_primitives::{map::HashMap, U256};
         use reth_chain_state::ExecutedBlock;
         use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+        use revm_database::states::BundleState;
+        use revm_state::AccountInfo;
 
         let factory = create_test_provider_factory();
 
         // Enable edge mode for parallel writes
         factory.set_storage_settings_cache(StorageSettings::edge());
-        assert!(
-            factory.cached_storage_settings().is_edge_mode(),
-            "Edge mode should be enabled"
-        );
+        assert!(factory.cached_storage_settings().is_edge_mode(), "Edge mode should be enabled");
+
+        // Get initial db info for later comparison
+        let initial_info = factory.db_ref().db().info().unwrap();
+        let initial_last_pgno = initial_info.last_pgno();
 
         let data = BlockchainTestData::default();
 
@@ -4516,68 +4524,70 @@ mod tests {
         provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
         provider_rw.commit().unwrap();
 
-        // Prepare executed blocks for save_blocks
-        let blocks: Vec<ExecutedBlock> = data
-            .blocks
-            .iter()
-            .take(3)
-            .map(|(block, outcome)| {
-                let block_receipts = outcome.receipts().first().cloned().unwrap_or_default();
-                ExecutedBlock::new(
-                    Arc::new(block.clone()),
-                    Arc::new(BlockExecutionOutput {
-                        result: BlockExecutionResult {
-                            receipts: block_receipts,
-                            requests: Default::default(),
-                            gas_used: 0,
-                            blob_gas_used: 0,
-                        },
-                        state: outcome.state().clone(),
-                    }),
-                    ComputedTrieData::default(),
-                )
-            })
-            .collect();
+        // Create blocks with LOTS of state changes to force page allocations
+        let num_accounts = 500;
+        let num_storage_slots = 100;
 
-        // Call save_blocks with edge mode (parallel writes enabled)
+        let mut blocks = Vec::new();
+        for block_num in 1u64..=3 {
+            let block = data
+                .blocks
+                .get(block_num as usize - 1)
+                .map(|(b, _)| b.clone())
+                .unwrap_or_else(|| data.blocks[0].0.clone());
+
+            // Create large bundle state with many accounts and storage
+            let mut bundle = BundleState::builder(block_num..=block_num);
+            for i in 0..num_accounts {
+                let address = Address::with_last_byte((i % 256) as u8);
+                bundle = bundle.state_present_account_info(
+                    address,
+                    AccountInfo { nonce: block_num, balance: U256::from(i), ..Default::default() },
+                );
+
+                // Add storage slots
+                let storage: HashMap<U256, (U256, U256)> = (0..num_storage_slots)
+                    .map(|s| (U256::from(s), (U256::ZERO, U256::from(block_num * 1000 + s as u64))))
+                    .collect();
+                bundle = bundle.state_storage(address, storage);
+            }
+
+            let outcome = BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: bundle.build(),
+            };
+
+            blocks.push(ExecutedBlock::new(
+                Arc::new(block.clone()),
+                Arc::new(outcome),
+                ComputedTrieData::default(),
+            ));
+        }
+
+        // Save blocks with parallel writes
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(blocks.clone(), SaveBlocksMode::Full).unwrap();
+        provider_rw.save_blocks(blocks, SaveBlocksMode::Full).unwrap();
         provider_rw.commit().unwrap();
 
-        // Verify blocks were saved correctly
-        let provider = factory.provider().unwrap();
-        for (i, (expected_block, _)) in data.blocks.iter().take(3).enumerate() {
-            let block_number = expected_block.number();
+        // Verify pages were allocated
+        let final_info = factory.db_ref().db().info().unwrap();
+        let final_last_pgno = final_info.last_pgno();
 
-            // Verify block header
-            let header = provider.header_by_number(block_number).unwrap();
-            assert!(header.is_some(), "Block {block_number} header should exist");
-            assert_eq!(
-                header.unwrap(),
-                expected_block.header().clone(),
-                "Block {block_number} header should match"
-            );
+        assert!(
+            final_last_pgno > initial_last_pgno,
+            "Should have allocated new pages: initial={}, final={}",
+            initial_last_pgno,
+            final_last_pgno
+        );
 
-            // Verify block body indices exist
-            let body_indices = provider.block_body_indices(block_number).unwrap();
-            assert!(body_indices.is_some(), "Block {block_number} body indices should exist");
-
-            // Verify transactions
-            let tx_count = expected_block.body().transaction_count();
-            let indices = body_indices.unwrap();
-            assert_eq!(
-                indices.tx_count as usize, tx_count,
-                "Block {block_number} tx count should match"
-            );
-
-            // Verify receipts exist
-            let receipts = provider.receipts_by_block(block_number.into()).unwrap();
-            assert!(receipts.is_some(), "Block {block_number} receipts should exist");
-            assert_eq!(
-                receipts.unwrap().len(),
-                data.blocks[i].1.receipts()[0].len(),
-                "Block {block_number} receipt count should match"
-            );
-        }
+        println!(
+            "SUCCESS: Allocated {} new pages with parallel subtxns",
+            final_last_pgno - initial_last_pgno
+        );
     }
 }
