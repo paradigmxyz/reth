@@ -1368,33 +1368,32 @@ impl StorageTrieModifications {
     }
 }
 
-/// Metric values for proof nodes.
 #[derive(Debug, PartialEq, Eq, Default)]
-pub struct ProofNodesMetricValues {
+struct ProofNodesMetricValues {
     /// Number of nodes in the proof.
-    pub total_nodes: usize,
+    total_nodes: usize,
     /// Number of nodes that were skipped because they were already revealed.
-    pub skipped_nodes: usize,
+    skipped_nodes: usize,
 }
 
 /// Result of [`filter_map_revealed_nodes`].
 #[derive(Debug, PartialEq, Eq)]
-pub struct FilterMappedProofNodes {
+struct FilterMappedProofNodes {
     /// Root node which was pulled out of the original node set to be handled specially.
-    pub root_node: Option<ProofTrieNode>,
+    root_node: Option<ProofTrieNode>,
     /// Filtered, decoded and unsorted proof nodes. Root node is removed.
-    pub nodes: Vec<ProofTrieNode>,
+    nodes: Vec<ProofTrieNode>,
     /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
     /// if they are not in the proof.
-    pub new_nodes: usize,
+    new_nodes: usize,
     /// Values which are being returned so they can be incremented into metrics.
-    pub metric_values: ProofNodesMetricValues,
+    metric_values: ProofNodesMetricValues,
 }
 
 /// Filters the decoded nodes that are already revealed, maps them to `SparseTrieNode`s,
 /// separates the root node if present, and returns additional information about the number of
 /// total, skipped, and new nodes.
-pub fn filter_map_revealed_nodes(
+fn filter_map_revealed_nodes(
     proof_nodes: DecodedProofNodes,
     revealed_nodes: &mut HashSet<Nibbles>,
     branch_node_masks: &BranchNodeMasksMap,
@@ -1554,15 +1553,16 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNode, LeafNode, StorageMultiProof, TrieAccount, TrieMask,
+        BranchNode, BranchNodeMasks, BranchNodeMasksMap, LeafNode, StorageMultiProof, TrieAccount,
+        TrieMask,
     };
 
-    type TestSparseStateTrie = SparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>;
+    type TestStateTrie = SparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>;
 
     #[test]
     fn reveal_account_path_twice() {
         let provider_factory = DefaultTrieNodeProviderFactory;
-        let mut sparse = TestSparseStateTrie::default();
+        let mut sparse = TestStateTrie::default();
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_1 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
@@ -1614,7 +1614,7 @@ mod tests {
     #[test]
     fn reveal_storage_path_twice() {
         let provider_factory = DefaultTrieNodeProviderFactory;
-        let mut sparse = TestSparseStateTrie::default();
+        let mut sparse = TestStateTrie::default();
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_1 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
@@ -1678,7 +1678,7 @@ mod tests {
     #[test]
     fn reveal_v2_proof_nodes() {
         let provider_factory = DefaultTrieNodeProviderFactory;
-        let mut sparse = TestSparseStateTrie::default();
+        let mut sparse = TestStateTrie::default();
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_1_node = TrieNode::Leaf(LeafNode::new(Nibbles::default(), leaf_value.clone()));
@@ -1730,7 +1730,7 @@ mod tests {
     #[test]
     fn reveal_storage_v2_proof_nodes() {
         let provider_factory = DefaultTrieNodeProviderFactory;
-        let mut sparse = TestSparseStateTrie::default();
+        let mut sparse = TestStateTrie::default();
 
         let storage_value: Vec<u8> = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
         let leaf_1_node = TrieNode::Leaf(LeafNode::new(Nibbles::default(), storage_value.clone()));
@@ -1832,7 +1832,7 @@ mod tests {
         let proof_nodes = hash_builder.take_proof_nodes();
 
         let provider_factory = DefaultTrieNodeProviderFactory;
-        let mut sparse = TestSparseStateTrie::default().with_updates(true);
+        let mut sparse = TestStateTrie::default().with_updates(true);
         sparse
             .reveal_decoded_multiproof(
                 MultiProof {
