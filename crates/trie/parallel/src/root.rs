@@ -18,7 +18,7 @@ use reth_trie::{
 };
 use std::{
     collections::HashMap,
-    sync::{atomic::AtomicUsize, mpsc, OnceLock},
+    sync::{mpsc, OnceLock},
     time::Duration,
 };
 use thiserror::Error;
