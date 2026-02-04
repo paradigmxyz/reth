@@ -21,6 +21,7 @@ mod repair_trie;
 mod settings;
 mod state;
 mod static_file_header;
+mod static_files;
 mod stats;
 /// DB List TUI
 mod tui;
@@ -62,6 +63,8 @@ pub enum Subcommands {
     RepairTrie(repair_trie::Command),
     /// Reads and displays the static file segment header
     StaticFileHeader(static_file_header::Command),
+    /// Static file operations (split, etc.)
+    StaticFiles(static_files::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -182,6 +185,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             Subcommands::StaticFileHeader(command) => {
                 db_exec!(self.env, tool, N, AccessRights::RoInconsistent, {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::StaticFiles(command) => {
+                db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
                 });
             }
