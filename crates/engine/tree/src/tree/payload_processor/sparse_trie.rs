@@ -10,7 +10,7 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{Account, ParallelBridgeBuffered};
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -713,22 +713,30 @@ where
         }
 
         let span = debug_span!("compute_storage_roots").entered();
-        let roots = self
+        let tries = self
             .trie
             .storage_tries_mut()
-            .par_iter_mut()
+            .iter_mut()
             .filter(|(address, _)| {
                 self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty())
             })
-            .map(|(address, trie)| {
-                let _guard = span.clone().entered();
-                let _span = debug_span!("compute_storage_root", ?address).entered();
-                let root =
-                    trie.root().expect("updates are drained, trie should be revealed by now");
-
-                (address, root)
-            })
             .collect::<Vec<_>>();
+
+        let roots = if tries.is_empty() {
+            Vec::new()
+        } else {
+            tries
+                .into_par_iter()
+                .map(|(address, trie)| {
+                    let _guard = span.clone().entered();
+                    let _span = debug_span!("compute_storage_root", ?address).entered();
+                    let root =
+                        trie.root().expect("updates are drained, trie should be revealed by now");
+
+                    (address, root)
+                })
+                .collect()
+        };
         drop(span);
 
         for (addr, storage_root) in roots {
