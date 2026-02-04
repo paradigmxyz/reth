@@ -61,10 +61,10 @@ struct Args {
 }
 
 // ============================================================================
-// Old format types (for reading existing files with inline Vec<ChangesetOffset>)
+// Old format types (for reading existing files with inline `Vec<ChangesetOffset>`)
 // ============================================================================
 
-/// Old format SegmentHeader with inline Vec<ChangesetOffset>
+/// Old format SegmentHeader with inline `Vec<ChangesetOffset>`
 #[derive(Debug, Clone)]
 struct OldSegmentHeader {
     expected_block_range: SegmentRangeInclusive,

@@ -80,13 +80,6 @@ mod tests {
         provider.directory().join(filename).with_extension("csoff")
     }
 
-    /// Gets the data path (`NippyJar`) for a given block.
-    fn get_data_path(provider: &StaticFileProvider<EthPrimitives>, block: u64) -> PathBuf {
-        let range = provider.find_fixed_range(StaticFileSegment::AccountChangeSets, block);
-        let filename = StaticFileSegment::AccountChangeSets.filename(&range);
-        provider.directory().join(filename)
-    }
-
     /// Reads the block count from a sidecar file (file size / 16).
     fn get_sidecar_block_count(path: &PathBuf) -> u64 {
         if !path.exists() {
