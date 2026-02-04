@@ -15766,12 +15766,20 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   return MDBX_SUCCESS;
 }
 
-/* Create multiple sibling subtransactions for parallel writes (reth extension).
+/* mdbx_txn_create_subtxns - Create parallel sibling subtransactions.
  *
- * Purpose: Enables concurrent writes to different DBIs within a single parent txn.
- * Invariant: 1 DBI = 1 SUBTXN - each subtxn is assigned exactly one DBI from specs.
- * Constraints: Subtxns share parent's geometry but have isolated dirty page tracking.
- *              Requires WRITEMAP mode. DBIs in specs must be unique. */
+ * INVARIANTS:
+ * - 1 DBI = 1 SUBTXN: Each subtxn operates on exactly one assigned DBI
+ * - NO READ-THROUGH: Subtxns cannot read parent's uncommitted changes
+ * - NO CROSS-DBI: Subtxn can only access its assigned_dbi
+ * - SERIAL COMMIT: All subtxns must commit before parent commits
+ * - DISJOINT PAGES: Each DBI has separate B-tree, no shared pages
+ *
+ * THREAD SAFETY:
+ * - Subtxns can run on different threads concurrently
+ * - Page allocation is mutex-protected via subtxn_alloc_mutex
+ * - Each subtxn has its own page_auxbuf for DupSort operations
+ */
 LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
                                          const MDBX_subtxn_spec_t *specs,
                                          size_t count,
