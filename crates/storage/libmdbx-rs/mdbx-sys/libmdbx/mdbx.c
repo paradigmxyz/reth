@@ -15685,8 +15685,17 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
 
   txn->tw.dirtyroom = env->options.dp_limit;
   txn->tw.dirtylru = parent->tw.dirtylru;
-  txn->tw.retired_pages = nullptr;
-  txn->tw.repnl = nullptr;
+  txn->tw.retired_pages = pnl_alloc(MDBX_PNL_INITIAL);
+  if (unlikely(!txn->tw.retired_pages)) {
+    osal_free(txn);
+    return LOG_IFERR(MDBX_ENOMEM);
+  }
+  txn->tw.repnl = pnl_alloc(MDBX_PNL_INITIAL);
+  if (unlikely(!txn->tw.repnl)) {
+    pnl_free(txn->tw.retired_pages);
+    osal_free(txn);
+    return LOG_IFERR(MDBX_ENOMEM);
+  }
   txn->tw.loose_pages = nullptr;
   txn->tw.loose_count = 0;
   txn->tw.gc.retxl = nullptr;
@@ -15925,6 +15934,24 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
 
   /* Update parent's canary if subtxn modified it */
   parent->canary = subtxn->canary;
+
+  /* Merge retired_pages from subtxn into parent */
+  if (subtxn->tw.retired_pages && MDBX_PNL_GETSIZE(subtxn->tw.retired_pages) > 0) {
+    int rc = pnl_need(&parent->tw.retired_pages, MDBX_PNL_GETSIZE(subtxn->tw.retired_pages));
+    if (unlikely(rc != MDBX_SUCCESS))
+      return LOG_IFERR(rc);
+    for (size_t i = 1; i <= MDBX_PNL_GETSIZE(subtxn->tw.retired_pages); ++i)
+      pnl_append_prereserved(parent->tw.retired_pages, subtxn->tw.retired_pages[i]);
+  }
+
+  /* Merge repnl from subtxn into parent */
+  if (subtxn->tw.repnl && MDBX_PNL_GETSIZE(subtxn->tw.repnl) > 0) {
+    int rc = pnl_need(&parent->tw.repnl, MDBX_PNL_GETSIZE(subtxn->tw.repnl));
+    if (unlikely(rc != MDBX_SUCCESS))
+      return LOG_IFERR(rc);
+    for (size_t i = 1; i <= MDBX_PNL_GETSIZE(subtxn->tw.repnl); ++i)
+      pnl_append_prereserved(parent->tw.repnl, subtxn->tw.repnl[i]);
+  }
 
   subtx_unlink_from_parent(subtxn);
   subtx_free_resources(subtxn);
