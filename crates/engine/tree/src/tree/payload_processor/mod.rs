@@ -518,6 +518,7 @@ where
         let max_storage_tries = self.sparse_trie_max_storage_tries;
         let chunk_size =
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
+        let executor = self.executor.clone();
 
         self.executor.spawn_blocking(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor", "sparse_trie_task")
@@ -560,6 +561,7 @@ where
                 ))
             } else {
                 SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_trie(
+                    &executor,
                     from_multi_proof,
                     proof_worker_handle,
                     trie_metrics.clone(),
