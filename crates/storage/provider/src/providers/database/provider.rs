@@ -2322,11 +2322,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         first_block: BlockNumber,
         config: StateWriteConfig,
     ) -> ProviderResult<()> {
-        // Write storage changes using hashed tables
+        // Write storage changes
         if config.write_storage_changesets {
             tracing::trace!("Writing storage changes");
             let mut storages_cursor =
-                self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+                self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
             for (block_index, mut storage_changes) in reverts.storage.into_iter().enumerate() {
                 let block_number = first_block + block_index as BlockNumber;
 
@@ -2337,8 +2337,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     storage_changes.iter().map(|change| change.storage_revert.len()).sum();
                 let mut changeset = Vec::with_capacity(total_changes);
                 for PlainStorageRevert { address, wiped, storage_revert } in storage_changes {
-                    let hashed_address = alloy_primitives::keccak256(address);
-
                     let mut storage = storage_revert
                         .into_iter()
                         .map(|(k, v)| (B256::new(k.to_be_bytes()), v))
@@ -2346,7 +2344,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     // sort storage slots by key.
                     storage.par_sort_unstable_by_key(|a| a.0);
 
-                    // If we are writing the primary storage wipe transition, the pre-existing hashed
+                    // If we are writing the primary storage wipe transition, the pre-existing plain
                     // storage state has to be taken from the database and written to storage
                     // history. See [StorageWipe::Primary] for more details.
                     //
@@ -2356,7 +2354,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     let mut wiped_storage = Vec::new();
                     if wiped {
                         tracing::trace!(?address, "Wiping storage");
-                        if let Some((_, entry)) = storages_cursor.seek_exact(hashed_address)? {
+                        if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                             wiped_storage.push((entry.key, entry.value));
                             while let Some(entry) = storages_cursor.next_dup_val()? {
                                 wiped_storage.push((entry.key, entry.value))
