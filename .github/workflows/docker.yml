@@ -102,3 +102,13 @@ jobs:
           set: |
             ethereum.tags=${{ steps.params.outputs.ethereum_tags }}
             optimism.tags=${{ steps.params.outputs.optimism_tags }}
+
+      - name: Verify image architectures
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          ./.github/scripts/verify_image_arch.sh \
+            "${{ steps.params.outputs.targets }}" \
+            "ghcr.io/${{ github.repository_owner }}" \
+            "${{ steps.params.outputs.ethereum_tags }}" \
+            "${{ steps.params.outputs.optimism_tags }}"
