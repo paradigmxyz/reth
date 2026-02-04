@@ -22912,6 +22912,12 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
     }
     parent->geo.first_unallocated = new_first;
     txn->geo.first_unallocated = new_first;
+    // Sync all sibling subtxns to prevent stale geo.first_unallocated
+    for (MDBX_txn *sibling = parent->tw.subtxn_list; sibling; sibling = sibling->tw.subtxn_next) {
+      sibling->geo.first_unallocated = new_first;
+      if (new_first > sibling->geo.now)
+        sibling->geo.now = new_first;
+    }
     osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
     return page_alloc_finalize(env, txn, mc, pgno, num);
   }
