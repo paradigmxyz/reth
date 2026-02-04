@@ -360,12 +360,12 @@ pub(crate) struct BalMetrics {
 /// Converts a gas limit to a bucket label for metrics.
 ///
 /// Buckets are designed to cover historical and current Ethereum mainnet gas limits:
-/// - "30M": gas_limit < 33M (covers the 30M era, 2021-2024)
-/// - "36M": 33M <= gas_limit < 40M (covers the 36M era, early 2025)
-/// - "45M": 40M <= gas_limit < 52M (covers the 45M era, mid 2025)
-/// - "60M": 52M <= gas_limit < 75M (covers the 60M era, late 2025+)
-/// - "90M+": gas_limit >= 75M (future growth)
-fn gas_limit_bucket(gas_limit: u64) -> &'static str {
+/// - "30M": `gas_limit` < 33M (covers the 30M era, 2021-2024)
+/// - "36M": 33M <= `gas_limit` < 40M (covers the 36M era, early 2025)
+/// - "45M": 40M <= `gas_limit` < 52M (covers the 45M era, mid 2025)
+/// - "60M": 52M <= `gas_limit` < 75M (covers the 60M era, late 2025+)
+/// - "90M+": `gas_limit` >= 75M (future growth)
+const fn gas_limit_bucket(gas_limit: u64) -> &'static str {
     match gas_limit {
         0..33_000_000 => "30M",
         33_000_000..40_000_000 => "36M",
