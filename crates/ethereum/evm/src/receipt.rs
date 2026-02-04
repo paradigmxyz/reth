@@ -1,7 +1,7 @@
 use alloy_consensus::TxType;
 use alloy_evm::eth::receipt_builder::{ReceiptBuilder, ReceiptBuilderCtx};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_evm::{Evm, tracing};
+use reth_evm::Evm;
 
 /// A builder that operates on Reth primitive types, specifically [`TransactionSigned`] and
 /// [`Receipt`].
