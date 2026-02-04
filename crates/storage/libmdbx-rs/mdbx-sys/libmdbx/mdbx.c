@@ -23597,8 +23597,15 @@ done:
       eASSERT(env, pgno + num <= txn->geo.first_unallocated && pgno >= NUM_METAS);
       eASSERT(env, pnl_check_allocated(txn->tw.repnl, txn->geo.first_unallocated - MDBX_ENABLE_REFUND));
     } else {
-      pgno = txn->geo.first_unallocated;
-      txn->geo.first_unallocated += (pgno_t)num;
+      if (txn->tw.subtxn_list && txn->tw.subtxn_alloc_mutex) {
+        osal_fastmutex_acquire(txn->tw.subtxn_alloc_mutex);
+        pgno = txn->geo.first_unallocated;
+        txn->geo.first_unallocated += (pgno_t)num;
+        osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+      } else {
+        pgno = txn->geo.first_unallocated;
+        txn->geo.first_unallocated += (pgno_t)num;
+      }
       eASSERT(env, txn->geo.first_unallocated <= txn->geo.end_pgno);
       eASSERT(env, pgno >= NUM_METAS && pgno + num <= txn->geo.first_unallocated);
     }
