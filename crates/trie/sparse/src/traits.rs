@@ -295,8 +295,8 @@ pub trait SparseTrieExt: SparseTrie {
     ///
     /// # Returns
     ///
-    /// A vector of pruned root paths (paths that were converted to hash stubs).
-    fn prune(&mut self, max_depth: usize) -> Vec<Nibbles>;
+    /// The number of nodes converted to hash stubs.
+    fn prune(&mut self, max_depth: usize) -> usize;
 
     /// Applies leaf updates to the sparse trie.
     ///

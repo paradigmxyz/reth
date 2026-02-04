@@ -196,14 +196,15 @@ where
     /// Use this when the payload was invalid or cancelled - we don't want to preserve
     /// potentially invalid trie state, but we keep the allocations for reuse.
     pub(super) fn into_cleared_trie(
-        mut self,
+        self,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
-        self.trie.clear();
-        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        let deferred = self.trie.take_deferred_drops();
-        (self.trie, deferred)
+        let Self { mut trie, .. } = self;
+        trie.clear();
+        trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        let deferred = trie.take_deferred_drops();
+        (trie, deferred)
     }
 }
 
@@ -308,16 +309,17 @@ where
     ///
     /// Should be called after the state root result has been sent.
     pub(super) fn into_trie_for_reuse(
-        mut self,
+        self,
         prune_depth: usize,
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
-        self.trie.prune(prune_depth, max_storage_tries);
-        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        let deferred = self.trie.take_deferred_drops();
-        (self.trie, deferred)
+        let Self { mut trie, .. } = self;
+        trie.prune(prune_depth, max_storage_tries);
+        trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        let deferred = trie.take_deferred_drops();
+        (trie, deferred)
     }
 
     /// Clears and shrinks the trie, discarding all state.
@@ -325,14 +327,15 @@ where
     /// Use this when the payload was invalid or cancelled - we don't want to preserve
     /// potentially invalid trie state, but we keep the allocations for reuse.
     pub(super) fn into_cleared_trie(
-        mut self,
+        self,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
-        self.trie.clear();
-        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        let deferred = self.trie.take_deferred_drops();
-        (self.trie, deferred)
+        let Self { mut trie, .. } = self;
+        trie.clear();
+        trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        let deferred = trie.take_deferred_drops();
+        (trie, deferred)
     }
 
     /// Runs the sparse trie task to completion.
