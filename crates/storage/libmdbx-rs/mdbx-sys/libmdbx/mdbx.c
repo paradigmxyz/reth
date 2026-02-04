@@ -36353,6 +36353,11 @@ __hot int tree_search(MDBX_cursor *mc, const MDBX_val *key, int flags) {
       }
       goto bailout;
     }
+    if (mc->txn->flags & txn_parallel_subtx) {
+      fprintf(stderr, "[tree_search] page_get OK: root=%u page=%p pgno=%u flags=0x%x txnid=%llu\n",
+              root, (void*)mc->pg[0], mc->pg[0]->pgno, mc->pg[0]->flags, (unsigned long long)mc->pg[0]->txnid);
+      fflush(stderr);
+    }
   }
 
   mc->top = 0;
@@ -36383,7 +36388,17 @@ __hot __noinline int tree_search_finalize(MDBX_cursor *mc, const MDBX_val *key, 
     DEBUG("found index 0 to page %" PRIaPGNO, node_pgno(page_node(mp, 0)));
 
     if ((flags & (Z_FIRST | Z_LAST)) == 0) {
+      if (mc->txn->flags & txn_parallel_subtx) {
+        fprintf(stderr, "[tree_search_finalize] BEFORE node_search: page=%u numkeys=%zu top=%d\n",
+                mp->pgno, page_numkeys(mp), mc->top);
+        fflush(stderr);
+      }
       const struct node_search_result nsr = node_search(mc, key);
+      if (mc->txn->flags & txn_parallel_subtx) {
+        fprintf(stderr, "[tree_search_finalize] AFTER node_search: node=%p exact=%d ki=%zu\n",
+                (void*)nsr.node, nsr.exact, (size_t)mc->ki[mc->top]);
+        fflush(stderr);
+      }
       if (likely(nsr.node))
         ki = mc->ki[mc->top] + (intptr_t)nsr.exact - 1;
       DEBUG("following index %zu for key [%s]", ki, DKEY_DEBUG(key));
@@ -36392,6 +36407,11 @@ __hot __noinline int tree_search_finalize(MDBX_cursor *mc, const MDBX_val *key, 
     err = page_get(mc, node_pgno(page_node(mp, ki)), &mp, mp->txnid);
     if (unlikely(err != MDBX_SUCCESS))
       goto bailout;
+    if (mc->txn->flags & txn_parallel_subtx) {
+      fprintf(stderr, "[tree_search_finalize] page_get OK: pgno=%u flags=0x%x txnid=%llu\n",
+              mp->pgno, mp->flags, (unsigned long long)mp->txnid);
+      fflush(stderr);
+    }
 
     mc->ki[mc->top] = (indx_t)ki;
     ki = (flags & Z_FIRST) ? 0 : page_numkeys(mp) - 1;
@@ -36416,6 +36436,11 @@ __hot __noinline int tree_search_finalize(MDBX_cursor *mc, const MDBX_val *key, 
   }
 
   DEBUG("found leaf page %" PRIaPGNO " for key [%s]", mp->pgno, DKEY_DEBUG(key));
+  if (mc->txn->flags & txn_parallel_subtx) {
+    fprintf(stderr, "[tree_search_finalize] SUCCESS: leaf page=%u flags=0x%x top=%d\n",
+            mp->pgno, mp->flags, mc->top);
+    fflush(stderr);
+  }
   /* Логически верно, но (в текущем понимании) нет необходимости.
      Однако, стоит ещё по-проверять/по-тестировать.
      Возможно есть сценарий, в котором очистка флагов всё-таки требуется.
