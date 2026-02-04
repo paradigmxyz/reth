@@ -1314,7 +1314,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// WARNING: No static file writer should be held before calling this function, otherwise it
     /// will deadlock.
-    #[instrument(skip(self), fields(read_only = self.is_read_only()))]
+    #[instrument(skip(self, provider), fields(read_only = self.is_read_only()))]
     pub fn check_consistency<Provider>(
         &self,
         provider: &Provider,
