@@ -186,10 +186,12 @@ impl BenchmarkRunner {
             &output_dir.to_string_lossy(),
         ]);
 
-        // Configure wait mode: wait-time takes precedence over persistence-based flow
+        // Configure wait mode: both can be used together
+        // When both are set: wait at least wait_time, and also wait for persistence if needed
         if let Some(ref wait_time) = self.wait_time {
             cmd.args(["--wait-time", wait_time]);
-        } else if self.wait_for_persistence {
+        }
+        if self.wait_for_persistence {
             cmd.arg("--wait-for-persistence");
 
             // Add persistence threshold if specified
