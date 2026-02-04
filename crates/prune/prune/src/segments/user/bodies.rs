@@ -9,7 +9,7 @@ use reth_prune_types::{
     SegmentOutputCheckpoint,
 };
 use reth_static_file_types::StaticFileSegment;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 /// Segment responsible for pruning transactions in static files.
 ///
@@ -103,6 +103,12 @@ where
         PrunePurpose::User
     }
 
+    #[instrument(
+        name = "Bodies::prune",
+        target = "pruner",
+        skip(self, provider),
+        ret(level = "trace")
+    )]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         let Some(to_block) = self.next_bodies_prune_target(provider, &input)? else {
             debug!(

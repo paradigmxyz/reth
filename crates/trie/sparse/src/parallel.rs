@@ -175,7 +175,7 @@ impl SparseTrie for ParallelSparseTrie {
         self.updates = retain_updates.then(Default::default);
     }
 
-    fn reveal_nodes(&mut self, mut nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()> {
+    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()> {
         if nodes.is_empty() {
             return Ok(())
         }
@@ -192,7 +192,7 @@ impl SparseTrie for ParallelSparseTrie {
 
         // Update the top-level branch node masks. This is simple and can't be done in parallel.
         self.branch_node_masks.reserve(nodes.len());
-        for ProofTrieNode { path, masks, .. } in &nodes {
+        for ProofTrieNode { path, masks, .. } in nodes.iter() {
             if let Some(branch_masks) = masks {
                 self.branch_node_masks.insert(*path, *branch_masks);
             }
@@ -4093,7 +4093,7 @@ mod tests {
             let node = create_leaf_node([0x2, 0x3], 42);
             let masks = None;
 
-            trie.reveal_nodes(vec![ProofTrieNode { path, node, masks }]).unwrap();
+            trie.reveal_nodes(&mut [ProofTrieNode { path, node, masks }]).unwrap();
 
             assert_matches!(
                 trie.upper_subtrie.nodes.get(&path),
@@ -4114,7 +4114,7 @@ mod tests {
             let node = create_leaf_node([0x3, 0x4], 42);
             let masks = None;
 
-            trie.reveal_nodes(vec![ProofTrieNode { path, node, masks }]).unwrap();
+            trie.reveal_nodes(&mut [ProofTrieNode { path, node, masks }]).unwrap();
 
             // Check that the lower subtrie was created
             let idx = path_subtrie_index_unchecked(&path);
@@ -4138,7 +4138,7 @@ mod tests {
             let node = create_leaf_node([0x4, 0x5], 42);
             let masks = None;
 
-            trie.reveal_nodes(vec![ProofTrieNode { path, node, masks }]).unwrap();
+            trie.reveal_nodes(&mut [ProofTrieNode { path, node, masks }]).unwrap();
 
             // Check that the lower subtrie's path hasn't changed
             let idx = path_subtrie_index_unchecked(&path);
@@ -4199,7 +4199,7 @@ mod tests {
         let node = create_extension_node([0x2], child_hash);
         let masks = None;
 
-        trie.reveal_nodes(vec![ProofTrieNode { path, node, masks }]).unwrap();
+        trie.reveal_nodes(&mut [ProofTrieNode { path, node, masks }]).unwrap();
 
         // Extension node should be in upper trie
         assert_matches!(
@@ -4261,7 +4261,7 @@ mod tests {
         let node = create_branch_node_with_children(&[0x0, 0x7, 0xf], child_hashes.clone());
         let masks = None;
 
-        trie.reveal_nodes(vec![ProofTrieNode { path, node, masks }]).unwrap();
+        trie.reveal_nodes(&mut [ProofTrieNode { path, node, masks }]).unwrap();
 
         // Branch node should be in upper trie
         assert_matches!(
@@ -4317,7 +4317,7 @@ mod tests {
         let branch_node = create_branch_node_with_children(&[0x0, 0x1, 0x2], child_hashes);
 
         // Reveal nodes using reveal_nodes
-        trie.reveal_nodes(vec![
+        trie.reveal_nodes(&mut [
             ProofTrieNode { path: branch_path, node: branch_node, masks: None },
             ProofTrieNode { path: leaf_1_path, node: leaf_1, masks: None },
             ProofTrieNode { path: leaf_2_path, node: leaf_2, masks: None },
@@ -5020,7 +5020,7 @@ mod tests {
         let removed_branch_path = Nibbles::from_nibbles([0x4, 0xf, 0x8, 0x8, 0x0, 0x7, 0x2]);
 
         // Convert the logs into reveal_nodes call on a fresh ParallelSparseTrie
-        let nodes = vec![
+        let mut nodes = vec![
             // Branch at 0x4f8807
             ProofTrieNode {
                 path: branch_path,
@@ -5151,7 +5151,7 @@ mod tests {
         .unwrap();
 
         // Call reveal_nodes
-        trie.reveal_nodes(nodes).unwrap();
+        trie.reveal_nodes(&mut nodes).unwrap();
 
         // Remove the leaf at "0x4f88072c077f86613088dfcae648abe831fadca55ad43ab165d1680dd567b5d6"
         let leaf_key = Nibbles::from_nibbles([
@@ -5237,7 +5237,7 @@ mod tests {
 
         // Step 2: Reveal nodes in the trie
         let mut trie = ParallelSparseTrie::from_root(extension, None, true).unwrap();
-        trie.reveal_nodes(vec![
+        trie.reveal_nodes(&mut [
             ProofTrieNode { path: branch_path, node: branch, masks: None },
             ProofTrieNode { path: leaf_1_path, node: leaf_1, masks: None },
             ProofTrieNode { path: leaf_2_path, node: leaf_2, masks: None },
@@ -5777,7 +5777,7 @@ mod tests {
         // ├── 0 -> Hash (Path = 0)
         // └── 1 -> Leaf (Path = 1)
         sparse
-            .reveal_nodes(vec![
+            .reveal_nodes(&mut [
                 ProofTrieNode {
                     path: Nibbles::default(),
                     node: branch,
@@ -5832,7 +5832,7 @@ mod tests {
         // ├── 0 -> Hash (Path = 0)
         // └── 1 -> Leaf (Path = 1)
         sparse
-            .reveal_nodes(vec![
+            .reveal_nodes(&mut [
                 ProofTrieNode {
                     path: Nibbles::default(),
                     node: branch,
@@ -6096,7 +6096,7 @@ mod tests {
                 Default::default(),
                 [key1()],
             );
-        let revealed_nodes: Vec<ProofTrieNode> = hash_builder_proof_nodes
+        let mut revealed_nodes: Vec<ProofTrieNode> = hash_builder_proof_nodes
             .nodes_sorted()
             .into_iter()
             .map(|(path, node)| {
@@ -6106,7 +6106,7 @@ mod tests {
                 ProofTrieNode { path, node: TrieNode::decode(&mut &node[..]).unwrap(), masks }
             })
             .collect();
-        sparse.reveal_nodes(revealed_nodes).unwrap();
+        sparse.reveal_nodes(&mut revealed_nodes).unwrap();
 
         // Check that the branch node exists with only two nibbles set
         assert_eq!(
@@ -6131,7 +6131,7 @@ mod tests {
                 Default::default(),
                 [key3()],
             );
-        let revealed_nodes: Vec<ProofTrieNode> = hash_builder_proof_nodes
+        let mut revealed_nodes: Vec<ProofTrieNode> = hash_builder_proof_nodes
             .nodes_sorted()
             .into_iter()
             .map(|(path, node)| {
@@ -6141,7 +6141,7 @@ mod tests {
                 ProofTrieNode { path, node: TrieNode::decode(&mut &node[..]).unwrap(), masks }
             })
             .collect();
-        sparse.reveal_nodes(revealed_nodes).unwrap();
+        sparse.reveal_nodes(&mut revealed_nodes).unwrap();
 
         // Check that nothing changed in the branch node
         assert_eq!(
@@ -6217,7 +6217,7 @@ mod tests {
                 Default::default(),
                 [key1(), Nibbles::from_nibbles_unchecked([0x01])],
             );
-        let revealed_nodes: Vec<ProofTrieNode> = hash_builder_proof_nodes
+        let mut revealed_nodes: Vec<ProofTrieNode> = hash_builder_proof_nodes
             .nodes_sorted()
             .into_iter()
             .map(|(path, node)| {
@@ -6227,7 +6227,7 @@ mod tests {
                 ProofTrieNode { path, node: TrieNode::decode(&mut &node[..]).unwrap(), masks }
             })
             .collect();
-        sparse.reveal_nodes(revealed_nodes).unwrap();
+        sparse.reveal_nodes(&mut revealed_nodes).unwrap();
 
         // Check that the branch node exists
         assert_eq!(
@@ -6252,7 +6252,7 @@ mod tests {
                 Default::default(),
                 [key2()],
             );
-        let revealed_nodes: Vec<ProofTrieNode> = hash_builder_proof_nodes
+        let mut revealed_nodes: Vec<ProofTrieNode> = hash_builder_proof_nodes
             .nodes_sorted()
             .into_iter()
             .map(|(path, node)| {
@@ -6262,7 +6262,7 @@ mod tests {
                 ProofTrieNode { path, node: TrieNode::decode(&mut &node[..]).unwrap(), masks }
             })
             .collect();
-        sparse.reveal_nodes(revealed_nodes).unwrap();
+        sparse.reveal_nodes(&mut revealed_nodes).unwrap();
 
         // Check that nothing changed in the extension node
         assert_eq!(
@@ -6344,7 +6344,7 @@ mod tests {
                 Default::default(),
                 [key1()],
             );
-        let revealed_nodes: Vec<ProofTrieNode> = hash_builder_proof_nodes
+        let mut revealed_nodes: Vec<ProofTrieNode> = hash_builder_proof_nodes
             .nodes_sorted()
             .into_iter()
             .map(|(path, node)| {
@@ -6354,7 +6354,7 @@ mod tests {
                 ProofTrieNode { path, node: TrieNode::decode(&mut &node[..]).unwrap(), masks }
             })
             .collect();
-        sparse.reveal_nodes(revealed_nodes).unwrap();
+        sparse.reveal_nodes(&mut revealed_nodes).unwrap();
 
         // Check that the branch node wasn't overwritten by the extension node in the proof
         assert_matches!(
@@ -7318,7 +7318,7 @@ mod tests {
         let leaf_node = LeafNode::new(leaf_key, leaf_value);
         let leaf_masks = None;
 
-        trie.reveal_nodes(vec![
+        trie.reveal_nodes(&mut [
             ProofTrieNode {
                 path: Nibbles::from_nibbles([0x3]),
                 node: TrieNode::Branch(branch_0x3_node),
@@ -7628,7 +7628,7 @@ mod tests {
         );
 
         // Reveal the trie structure using ProofTrieNode
-        let proof_nodes = vec![
+        let mut proof_nodes = vec![
             ProofTrieNode {
                 path: Nibbles::from_nibbles([0x3]),
                 node: branch_0x3_node,
@@ -7659,7 +7659,7 @@ mod tests {
             )
             .expect("root revealed");
 
-        trie.reveal_nodes(proof_nodes).unwrap();
+        trie.reveal_nodes(&mut proof_nodes).unwrap();
 
         // Update the leaf in order to reveal it in the trie
         trie.update_leaf(leaf_nibbles, leaf_value, &provider).unwrap();
@@ -7707,7 +7707,7 @@ mod tests {
         let leaf_node = create_leaf_node(leaf_key.to_vec(), 42);
 
         // Reveal the leaf node
-        trie.reveal_nodes(vec![ProofTrieNode { path: leaf_path, node: leaf_node, masks: None }])
+        trie.reveal_nodes(&mut [ProofTrieNode { path: leaf_path, node: leaf_node, masks: None }])
             .unwrap();
 
         // The full path is leaf_path + leaf_key
@@ -8895,7 +8895,7 @@ mod tests {
 
         // Create a trie with some data
         let mut trie = ParallelSparseTrie::default();
-        let nodes = vec![
+        let mut nodes = vec![
             ProofTrieNode {
                 path: Nibbles::from_nibbles_unchecked([0x1, 0x2]),
                 node: TrieNode::Leaf(LeafNode {
@@ -8913,7 +8913,7 @@ mod tests {
                 masks: None,
             },
         ];
-        trie.reveal_nodes(nodes).unwrap();
+        trie.reveal_nodes(&mut nodes).unwrap();
 
         let populated_size = trie.memory_size();
 

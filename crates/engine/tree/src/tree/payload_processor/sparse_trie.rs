@@ -28,7 +28,7 @@ use reth_trie_parallel::{
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    LeafUpdate, ParallelSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt,
+    DeferredDrops, LeafUpdate, ParallelSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
@@ -72,7 +72,7 @@ where
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
-    ) -> SparseStateTrie<A, S> {
+    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         match self {
             Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
             Self::Cached(task) => task.into_trie_for_reuse(
@@ -88,7 +88,7 @@ where
         self,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
-    ) -> SparseStateTrie<A, S> {
+    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         match self {
             Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
             Self::Cached(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
@@ -135,6 +135,7 @@ where
     /// Receives [`SparseTrieUpdate`]s until the channel is closed, applying each update
     /// to the trie. Once all updates are processed, computes and returns the final state root.
     #[instrument(
+        name = "SparseTrieTask::run",
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
@@ -198,10 +199,11 @@ where
         mut self,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
-    ) -> SparseStateTrie<A, S> {
+    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         self.trie.clear();
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        self.trie
+        let deferred = self.trie.take_deferred_drops();
+        (self.trie, deferred)
     }
 }
 
@@ -311,10 +313,11 @@ where
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
-    ) -> SparseStateTrie<A, S> {
+    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         self.trie.prune(prune_depth, max_storage_tries);
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        self.trie
+        let deferred = self.trie.take_deferred_drops();
+        (self.trie, deferred)
     }
 
     /// Clears and shrinks the trie, discarding all state.
@@ -325,10 +328,11 @@ where
         mut self,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
-    ) -> SparseStateTrie<A, S> {
+    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         self.trie.clear();
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        self.trie
+        let deferred = self.trie.take_deferred_drops();
+        (self.trie, deferred)
     }
 
     /// Runs the sparse trie task to completion.
@@ -338,6 +342,7 @@ where
     ///
     /// This concludes once the last state update has been received and processed.
     #[instrument(
+        name = "SparseTrieCacheTask::run",
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
