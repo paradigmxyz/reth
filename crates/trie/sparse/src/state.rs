@@ -187,6 +187,11 @@ where
         &mut self.storage.tries
     }
 
+    /// Returns mutable references to both the account trie and storage tries.
+    pub const fn tries_mut(&mut self) -> (&mut RevealableSparseTrie<A>, &mut StorageTries<S>) {
+        (&mut self.state, &mut self.storage)
+    }
+
     /// Takes the storage trie for the provided address.
     pub fn take_storage_trie(&mut self, address: &B256) -> Option<RevealableSparseTrie<S>> {
         self.storage.tries.remove(address)
@@ -1059,7 +1064,7 @@ where
 /// of [`SparseStateTrie`] both to help enforce allocation re-use and to allow us to implement
 /// methods like `get_trie_and_revealed_paths` which return multiple mutable borrows.
 #[derive(Debug, Default)]
-struct StorageTries<S = SerialSparseTrie> {
+pub struct StorageTries<S = SerialSparseTrie> {
     /// Sparse storage tries.
     tries: B256Map<RevealableSparseTrie<S>>,
     /// Cleared storage tries, kept for re-use.
@@ -1264,11 +1269,15 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
 
     /// Takes the storage trie for the account from the internal `HashMap`, creating it if it
     /// doesn't already exist.
-    #[cfg(feature = "std")]
-    fn take_or_create_trie(&mut self, account: &B256) -> RevealableSparseTrie<S> {
+    pub fn take_or_create_trie(&mut self, account: &B256) -> RevealableSparseTrie<S> {
         self.tries.remove(account).unwrap_or_else(|| {
             self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
         })
+    }
+
+    /// Inserts a storage trie for the provided address.
+    pub fn insert_trie(&mut self, address: B256, trie: RevealableSparseTrie<S>) {
+        self.tries.insert(address, trie);
     }
 
     /// Takes the revealed paths set from the account from the internal `HashMap`, creating one if
