@@ -944,14 +944,9 @@ impl RocksDBProvider {
         Ok(())
     }
 
-    /// Flushes and compacts all tables in `RocksDB`.
+    /// Flushes and compacts all tables to reclaim disk space.
     ///
-    /// This:
-    /// 1. Flushes all column family memtables to SST files
-    /// 2. Flushes the Write-Ahead Log (WAL) with sync
-    /// 3. Triggers manual compaction on all column families to reclaim disk space
-    ///
-    /// Use this after large delete operations (like pruning) to reclaim disk space.
+    /// Use after large delete operations like pruning.
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
@@ -1682,12 +1677,7 @@ impl<'a> RocksDBBatch<'a> {
 
     /// Unwinds account history for multiple addresses in a single iterator pass.
     ///
-    /// This is more efficient than calling [`Self::unwind_account_history_to`] repeatedly
-    /// because it reuses a single raw iterator and skips seeks when the iterator is already
-    /// positioned correctly (which happens when targets are sorted and adjacent in key order).
-    ///
-    /// `targets` MUST be sorted by address for correctness and optimal performance
-    /// (matches on-disk key order). Each target is `(address, Option<keep_to>)` where
+    /// `targets` MUST be sorted by address for correctness.
     /// `None` means clear all history for that address.
     pub fn unwind_account_history_batch(
         &mut self,
@@ -1722,7 +1712,7 @@ impl<'a> RocksDBBatch<'a> {
             };
 
             if needs_seek {
-                iter.seek(&start_key);
+                iter.seek(start_key);
                 iter.status().map_err(|e| {
                     ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
                         message: e.to_string().into(),
@@ -1770,7 +1760,7 @@ impl<'a> RocksDBBatch<'a> {
         Ok(())
     }
 
-    /// Internal helper to unwind account history shards given pre-fetched shards.
+    /// Processes pre-fetched account history shards for unwind.
     fn unwind_account_history_shards(
         &mut self,
         address: Address,
@@ -1828,15 +1818,10 @@ impl<'a> RocksDBBatch<'a> {
         Ok(())
     }
 
-    /// Unwinds storage history for multiple (address, storage_key) pairs in a single iterator pass.
+    /// Unwinds storage history for multiple (address, `storage_key`) pairs in a single pass.
     ///
-    /// This is more efficient than calling [`Self::unwind_storage_history_to`] repeatedly
-    /// because it reuses a single raw iterator and skips seeks when the iterator is already
-    /// positioned correctly.
-    ///
-    /// `targets` MUST be sorted by (address, storage_key) for correctness and optimal performance.
-    /// Each target is `((address, storage_key), Option<keep_to>)` where `None` means clear all
-    /// history.
+    /// `targets` MUST be sorted by (address, `storage_key`) for correctness.
+    /// `None` means clear all history for that slot.
     pub fn unwind_storage_history_batch(
         &mut self,
         targets: &[((Address, B256), Option<BlockNumber>)],
@@ -1870,7 +1855,7 @@ impl<'a> RocksDBBatch<'a> {
             };
 
             if needs_seek {
-                iter.seek(&start_key);
+                iter.seek(start_key);
                 iter.status().map_err(|e| {
                     ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
                         message: e.to_string().into(),
@@ -1918,7 +1903,7 @@ impl<'a> RocksDBBatch<'a> {
         Ok(())
     }
 
-    /// Internal helper to unwind storage history shards given pre-fetched shards.
+    /// Processes pre-fetched storage history shards for unwind.
     fn unwind_storage_history_shards(
         &mut self,
         address: Address,
@@ -2690,19 +2675,13 @@ impl Iterator for RocksDBIterEnum<'_> {
     }
 }
 
-/// Wrapper enum for raw `RocksDB` iterators that works in both read-write and read-only modes.
-///
-/// Unlike [`RocksDBIterEnum`], raw iterators expose `seek()` for efficient repositioning
-/// without reinitializing the iterator.
+/// Raw iterator wrapper supporting seek operations across DB modes.
 enum RocksDBRawIterEnum<'db> {
-    /// Raw iterator from read-write `OptimisticTransactionDB`.
     ReadWrite(DBRawIteratorWithThreadMode<'db, OptimisticTransactionDB>),
-    /// Raw iterator from read-only `DB`.
     ReadOnly(DBRawIteratorWithThreadMode<'db, DB>),
 }
 
 impl RocksDBRawIterEnum<'_> {
-    /// Positions the iterator at the first key >= `key`.
     fn seek(&mut self, key: impl AsRef<[u8]>) {
         match self {
             Self::ReadWrite(iter) => iter.seek(key),
@@ -2710,7 +2689,6 @@ impl RocksDBRawIterEnum<'_> {
         }
     }
 
-    /// Returns true if the iterator is positioned at a valid key-value pair.
     fn valid(&self) -> bool {
         match self {
             Self::ReadWrite(iter) => iter.valid(),
@@ -2718,7 +2696,6 @@ impl RocksDBRawIterEnum<'_> {
         }
     }
 
-    /// Returns the current key, if valid.
     fn key(&self) -> Option<&[u8]> {
         match self {
             Self::ReadWrite(iter) => iter.key(),
@@ -2726,7 +2703,6 @@ impl RocksDBRawIterEnum<'_> {
         }
     }
 
-    /// Returns the current value, if valid.
     fn value(&self) -> Option<&[u8]> {
         match self {
             Self::ReadWrite(iter) => iter.value(),
@@ -2734,7 +2710,6 @@ impl RocksDBRawIterEnum<'_> {
         }
     }
 
-    /// Advances the iterator to the next key.
     fn next(&mut self) {
         match self {
             Self::ReadWrite(iter) => iter.next(),
@@ -2742,7 +2717,6 @@ impl RocksDBRawIterEnum<'_> {
         }
     }
 
-    /// Returns the status of the iterator.
     fn status(&self) -> Result<(), rocksdb::Error> {
         match self {
             Self::ReadWrite(iter) => iter.status(),
@@ -2822,10 +2796,7 @@ impl<T: Table> Iterator for RocksTxIter<'_, T> {
     }
 }
 
-/// Decodes a raw key-value pair from a `RocksDB` iterator into typed table entries.
-///
-/// Handles both error propagation from the underlying iterator and
-/// decoding/decompression of the key and value bytes.
+/// Decodes a raw key-value pair into typed table entries.
 fn decode_iter_item<T: Table>(result: RawKVResult) -> ProviderResult<(T::Key, T::Value)> {
     let (key_bytes, value_bytes) = result.map_err(|e| {
         ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
