@@ -652,6 +652,24 @@ impl Transaction<RW> {
             return Err(Error::Incompatible);
         }
 
+        // Debug: verify parent can read BEFORE subtxn creation
+        for &dbi in dbis {
+            self.txn_execute(|txn| unsafe {
+                let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
+                let rc = ffi::mdbx_cursor_open(txn, dbi, &mut cursor);
+                if rc == 0 {
+                    let mut key = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+                    let mut data = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+                    let last_rc = ffi::mdbx_cursor_get(cursor, &mut key, &mut data, ffi::MDBX_LAST);
+                    println!(
+                        "[enable_parallel_writes] Parent last() on DBI {} BEFORE pre-touch: rc={}",
+                        dbi, last_rc
+                    );
+                    ffi::mdbx_cursor_close(cursor);
+                }
+            })?;
+        }
+
         // Pre-touch each DBI to ensure MAIN_DBI is dirty in parent.
         // This prevents races in subtxns when they try to modify the B-tree.
         // We do this by performing a reserve operation which triggers cursor_touch/touch_dbi,
@@ -664,8 +682,9 @@ impl Transaction<RW> {
                     return;
                 }
 
-                // Use a temporary key that won't conflict - we'll delete it after
-                let temp_key: [u8; 8] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE];
+                // Use a max key to touch the DBI - this won't conflict with real data
+                // since it's well beyond any reasonable tx_num
+                let temp_key: [u8; 8] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
                 let temp_data: [u8; 1] = [0];
                 let mut key = ffi::MDBX_val {
                     iov_len: temp_key.len(),
@@ -708,7 +727,69 @@ impl Transaction<RW> {
         {
             let mut subtxns = self.subtxns.write();
             for (i, &dbi) in dbis.iter().enumerate() {
+                println!(
+                    "[enable_parallel_writes] Created subtxn for DBI {} -> ptr {:?}",
+                    dbi, subtxn_ptrs[i]
+                );
                 subtxns.insert(dbi, SubTransaction::new(subtxn_ptrs[i], dbi));
+            }
+        }
+
+        println!("[enable_parallel_writes] Successfully created {} subtransactions", dbis.len());
+
+        // Debug: verify we can read from the subtransactions using direct FFI
+        for (i, &dbi) in dbis.iter().enumerate() {
+            unsafe {
+                let subtxn = subtxn_ptrs[i];
+
+                // Read flags BEFORE any operation (offset 4 in MDBX_txn struct)
+                let flags_before =
+                    std::ptr::read_volatile((subtxn as *const u8).add(4) as *const u32);
+                eprintln!("[FFI_TEST] DBI {} BEFORE cursor_open: flags=0x{:x}", dbi, flags_before);
+
+                let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
+                let rc = ffi::mdbx_cursor_open(subtxn, dbi, &mut cursor);
+
+                let flags_after_open =
+                    std::ptr::read_volatile((subtxn as *const u8).add(4) as *const u32);
+                eprintln!(
+                    "[FFI_TEST] DBI {} AFTER cursor_open (rc={}): flags=0x{:x}",
+                    dbi, rc, flags_after_open
+                );
+
+                if rc == 0 {
+                    let mut key = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+                    let mut data = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+                    let last_rc = ffi::mdbx_cursor_get(cursor, &mut key, &mut data, ffi::MDBX_LAST);
+
+                    let flags_after_get =
+                        std::ptr::read_volatile((subtxn as *const u8).add(4) as *const u32);
+                    eprintln!(
+                        "[FFI_TEST] DBI {} AFTER cursor_get (rc={}): flags=0x{:x}",
+                        dbi, last_rc, flags_after_get
+                    );
+
+                    ffi::mdbx_cursor_close(cursor);
+
+                    let flags_after_close =
+                        std::ptr::read_volatile((subtxn as *const u8).add(4) as *const u32);
+                    eprintln!(
+                        "[FFI_TEST] DBI {} AFTER cursor_close: flags=0x{:x}",
+                        dbi, flags_after_close
+                    );
+                }
+            }
+        }
+
+        // Check all subtxns at the end
+        for (i, &dbi) in dbis.iter().enumerate() {
+            unsafe {
+                let subtxn = subtxn_ptrs[i];
+                let flags = std::ptr::read_volatile((subtxn as *const u8).add(4) as *const u32);
+                eprintln!(
+                    "[FFI_TEST] FINAL CHECK: DBI {} subtxn {:?} flags=0x{:x}",
+                    dbi, subtxn, flags
+                );
             }
         }
 
@@ -721,11 +802,22 @@ impl Transaction<RW> {
     /// Returns the subtransaction pointer if one exists for this DBI, otherwise returns
     /// a clone of the parent transaction pointer.
     pub(crate) fn get_txn_ptr_for_dbi(&self, dbi: ffi::MDBX_dbi) -> TransactionPtr {
-        if self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst) {
+        let parallel_enabled =
+            self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst);
+        if parallel_enabled {
             let subtxns = self.subtxns.read();
+            println!(
+                "[get_txn_ptr_for_dbi] DBI {}, parallel={}, subtxns_count={}",
+                dbi,
+                parallel_enabled,
+                subtxns.len()
+            );
             if let Some(subtxn) = subtxns.get(&dbi) {
-                return subtxn.txn_ptr();
+                let ptr = subtxn.txn_ptr();
+                println!("[get_txn_ptr_for_dbi] Found subtxn for DBI {} -> {:?}", dbi, ptr.txn);
+                return ptr;
             }
+            println!("[get_txn_ptr_for_dbi] NO subtxn for DBI {}, falling back to parent", dbi);
         }
         self.inner.txn.clone()
     }
@@ -745,11 +837,74 @@ impl Transaction<RW> {
         Ok(())
     }
 
+    /// Stores an item into a database, using the subtransaction if parallel writes is enabled.
+    ///
+    /// This is the parallel-writes-aware version of `put`.
+    pub fn put_parallel(
+        &self,
+        dbi: ffi::MDBX_dbi,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+        flags: WriteFlags,
+    ) -> Result<()> {
+        let key = key.as_ref();
+        let data = data.as_ref();
+        let key_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let mut data_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
+
+        let txn_ptr = self.get_txn_ptr_for_dbi(dbi);
+        mdbx_result(txn_ptr.txn_execute_fail_on_timeout(|txn| unsafe {
+            ffi::mdbx_put(txn, dbi, &key_val, &mut data_val, flags.bits())
+        })?)?;
+
+        Ok(())
+    }
+
+    /// Deletes an item from a database, using the subtransaction if parallel writes is enabled.
+    ///
+    /// This is the parallel-writes-aware version of `del`.
+    pub fn del_parallel(
+        &self,
+        dbi: ffi::MDBX_dbi,
+        key: impl AsRef<[u8]>,
+        data: Option<&[u8]>,
+    ) -> Result<bool> {
+        let key = key.as_ref();
+        let key_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let data_val: Option<ffi::MDBX_val> = data.map(|data| ffi::MDBX_val {
+            iov_len: data.len(),
+            iov_base: data.as_ptr() as *mut c_void,
+        });
+
+        let txn_ptr = self.get_txn_ptr_for_dbi(dbi);
+        mdbx_result(txn_ptr.txn_execute_fail_on_timeout(|txn| {
+            if let Some(d) = data_val {
+                unsafe { ffi::mdbx_del(txn, dbi, &key_val, &d) }
+            } else {
+                unsafe { ffi::mdbx_del(txn, dbi, &key_val, ptr::null()) }
+            }
+        })?)
+        .map(|_| true)
+        .or_else(|e| match e {
+            Error::NotFound => Ok(false),
+            other => Err(other),
+        })
+    }
+
     /// Opens a cursor on the given DBI, using the subtransaction if parallel writes is enabled.
     ///
     /// This is the parallel-writes-aware version of `cursor_with_dbi`.
     pub fn cursor_with_dbi_parallel(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<RW>> {
         let txn_ptr = self.get_txn_ptr_for_dbi(dbi);
+        println!(
+            "[cursor_with_dbi_parallel] DBI {} -> txn_ptr {:?}, parallel_enabled={}",
+            dbi,
+            txn_ptr.txn,
+            self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst)
+        );
         Cursor::new_with_ptr(self.clone(), dbi, txn_ptr)
     }
 }
@@ -771,6 +926,11 @@ impl TransactionPtr {
             timed_out: Arc::new(AtomicBool::new(false)),
             lock: Arc::new(Mutex::new(())),
         }
+    }
+
+    /// Returns the raw transaction pointer.
+    pub(crate) fn as_ptr(&self) -> *mut ffi::MDBX_txn {
+        self.txn
     }
 
     /// Returns `true` if the transaction is timed out.

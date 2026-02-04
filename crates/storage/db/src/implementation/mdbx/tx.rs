@@ -394,17 +394,41 @@ impl Tx<RW> {
         let key = key.encode();
         let value = value.compress();
         let (operation, write_operation, flags) = kind.into_operation_and_flags();
-        self.execute_with_operation_metric::<T, _>(operation, Some(value.as_ref().len()), |tx| {
-            tx.put(self.get_dbi::<T>()?, key.as_ref(), value, flags).map_err(|e| {
-                DatabaseWriteError {
-                    info: e.into(),
-                    operation: write_operation,
-                    table_name: T::NAME,
-                    key: key.into_vec(),
-                }
-                .into()
-            })
-        })
+        let dbi = self.get_dbi::<T>()?;
+
+        if self.is_parallel_writes_enabled() {
+            self.execute_with_operation_metric::<T, _>(
+                operation,
+                Some(value.as_ref().len()),
+                |tx| {
+                    tx.put_parallel(dbi, key.as_ref(), value, flags).map_err(|e| {
+                        DatabaseWriteError {
+                            info: e.into(),
+                            operation: write_operation,
+                            table_name: T::NAME,
+                            key: key.into_vec(),
+                        }
+                        .into()
+                    })
+                },
+            )
+        } else {
+            self.execute_with_operation_metric::<T, _>(
+                operation,
+                Some(value.as_ref().len()),
+                |tx| {
+                    tx.put(dbi, key.as_ref(), value, flags).map_err(|e| {
+                        DatabaseWriteError {
+                            info: e.into(),
+                            operation: write_operation,
+                            table_name: T::NAME,
+                            key: key.into_vec(),
+                        }
+                        .into()
+                    })
+                },
+            )
+        }
     }
 
     /// Enables parallel writes mode by creating subtransactions for ALL known DBIs.
@@ -464,10 +488,21 @@ impl Tx<RW> {
     /// # Returns
     /// Ok(()) on success, or an error if subtransaction creation fails.
     pub fn enable_parallel_writes_for_tables(&self, tables: &[&str]) -> Result<(), DatabaseError> {
-        let dbis: Vec<MDBX_dbi> = tables
-            .iter()
-            .filter_map(|name| self.dbis.get(*name).copied())
-            .collect();
+        let dbis: Vec<MDBX_dbi> =
+            tables.iter().filter_map(|name| self.dbis.get(*name).copied()).collect();
+
+        println!(
+            "[enable_parallel_writes_for_tables] Requested {} tables, found {} DBIs",
+            tables.len(),
+            dbis.len()
+        );
+        for name in tables {
+            if let Some(dbi) = self.dbis.get(*name) {
+                println!("  Table '{}' -> DBI {}", name, dbi);
+            } else {
+                println!("  Table '{}' -> NOT FOUND", name);
+            }
+        }
 
         if dbis.is_empty() {
             return Ok(());
@@ -501,10 +536,18 @@ impl DbTxMut for Tx<RW> {
             data = Some(value.as_ref());
         };
 
-        self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
-            tx.del(self.get_dbi::<T>()?, key.encode(), data)
-                .map_err(|e| DatabaseError::Delete(e.into()))
-        })
+        let dbi = self.get_dbi::<T>()?;
+        let encoded_key = key.encode();
+
+        if self.is_parallel_writes_enabled() {
+            self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
+                tx.del_parallel(dbi, encoded_key, data).map_err(|e| DatabaseError::Delete(e.into()))
+            })
+        } else {
+            self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
+                tx.del(dbi, encoded_key, data).map_err(|e| DatabaseError::Delete(e.into()))
+            })
+        }
     }
 
     fn clear<T: Table>(&self) -> Result<(), DatabaseError> {

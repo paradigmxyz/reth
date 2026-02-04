@@ -76,6 +76,11 @@ where
         }
     }
 
+    /// Returns whether this cursor has an owned transaction pointer (for parallel writes).
+    pub fn has_owned_txn_ptr(&self) -> bool {
+        self.owned_txn_ptr.is_some()
+    }
+
     fn new_at_position(other: &Self) -> Result<Self> {
         unsafe {
             let cursor = ffi::mdbx_cursor_create(ptr::null_mut());
@@ -131,25 +136,48 @@ where
             let mut data_val = slice_to_val(data);
             let key_ptr = key_val.iov_base;
             let data_ptr = data_val.iov_base;
-            self.txn.txn_execute(|txn| {
-                let v = mdbx_result(ffi::mdbx_cursor_get(
-                    self.cursor,
-                    &mut key_val,
-                    &mut data_val,
-                    op,
-                ))?;
+
+            // For parallel cursors (with owned_txn_ptr), bypass locking entirely.
+            // For normal cursors, use transaction locking.
+            if let Some(ref txn_ptr) = self.owned_txn_ptr {
+                // Parallel cursor path - no locking needed, subtxns are independent
+                let rc = ffi::mdbx_cursor_get(self.cursor, &mut key_val, &mut data_val, op);
+                println!(
+                    "[cursor::get] Parallel path: cursor={:?}, op={}, rc={}",
+                    self.cursor, op, rc
+                );
+                let v = mdbx_result(rc)?;
                 assert_ne!(data_ptr, data_val.iov_base);
                 let key_out = {
-                    // MDBX wrote in new key
                     if ptr::eq(key_ptr, key_val.iov_base) {
                         None
                     } else {
-                        Some(Key::decode_val::<K>(txn, key_val)?)
+                        Some(Key::decode_val::<K>(txn_ptr.as_ptr(), key_val)?)
                     }
                 };
-                let data_out = Value::decode_val::<K>(txn, data_val)?;
+                let data_out = Value::decode_val::<K>(txn_ptr.as_ptr(), data_val)?;
                 Ok((key_out, data_out, v))
-            })?
+            } else {
+                // Normal cursor path - use transaction locking
+                self.txn.txn_execute(|txn| {
+                    let v = mdbx_result(ffi::mdbx_cursor_get(
+                        self.cursor,
+                        &mut key_val,
+                        &mut data_val,
+                        op,
+                    ))?;
+                    assert_ne!(data_ptr, data_val.iov_base);
+                    let key_out = {
+                        if ptr::eq(key_ptr, key_val.iov_base) {
+                            None
+                        } else {
+                            Some(Key::decode_val::<K>(txn, key_val)?)
+                        }
+                    };
+                    let data_out = Value::decode_val::<K>(txn, data_val)?;
+                    Ok((key_out, data_out, v))
+                })?
+            }
         }
     }
 

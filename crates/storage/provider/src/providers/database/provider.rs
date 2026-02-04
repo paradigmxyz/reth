@@ -430,7 +430,7 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Executes a closure with a `RocksDB` batch, automatically registering it for commit.
     ///
     /// This helper encapsulates all the cfg-gated `RocksDB` batch handling.
@@ -619,37 +619,25 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 );
             }
 
-            // Enable parallel writes only for tables written in save_blocks.
-            // This creates subtransactions for these specific tables, enabling safe
-            // parallel writes from multiple threads.
-            const SAVE_BLOCKS_TABLES: &[&str] = &[
-                // From insert_block_mdbx_only:
-                "TransactionSenders",
-                "HeaderNumbers",
-                "BlockBodyIndices",
-                "TransactionBlocks",
-                "BlockOmmers",
-                "BlockWithdrawals",
-                // From write_state:
-                "PlainAccountState",
-                "Bytecodes",
-                "PlainStorageState",
-                "StorageChangeSets",
-                "AccountChangeSets",
-                "Receipts",
-                // From write_hashed_state:
-                "HashedAccounts",
-                "HashedStorages",
-                // From write_trie_updates_sorted:
-                "AccountsTrie",
-                "StoragesTrie",
-                // From update_history_indices:
-                "AccountsHistory",
-                "StoragesHistory",
-                // From update_pipeline_stages:
-                "StageCheckpoints",
-            ];
-            let _ = self.tx.enable_parallel_writes_for_tables(SAVE_BLOCKS_TABLES);
+            // Enable parallel MDBX subtransactions for edge mode
+            // Edge mode writes receipts/changesets to static files, so MDBX writes are isolated
+            // and don't need read-back, making parallel subtxns safe.
+            let use_parallel_writes = self.cached_storage_settings().is_edge_mode();
+            if use_parallel_writes {
+                self.tx.enable_parallel_writes_for_tables(&[
+                    tables::HeaderNumbers::NAME,
+                    tables::BlockBodyIndices::NAME,
+                    tables::TransactionBlocks::NAME,
+                    tables::PlainAccountState::NAME,
+                    tables::PlainStorageState::NAME,
+                    tables::Bytecodes::NAME,
+                    tables::HashedAccounts::NAME,
+                    tables::HashedStorages::NAME,
+                    tables::AccountsTrie::NAME,
+                    tables::StoragesTrie::NAME,
+                    tables::StageCheckpoints::NAME,
+                ])?;
+            }
 
             // Pre-compute merged hashed state and trie updates before write section
             let (merged_hashed_state, merged_trie) = if save_mode.with_state() {
@@ -670,114 +658,43 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 (Arc::new(HashedPostStateSorted::default()), Arc::new(TrieUpdatesSorted::default()))
             };
 
-            // Determine if we can use parallel threads (edge mode where SF handles receipts/changesets)
-            let use_parallel_threads = save_mode.with_state() && sf_ctx.write_receipts;
+            // Sequential MDBX writes
+            for (i, block) in blocks.iter().enumerate() {
+                let recovered_block = block.recovered_block();
 
-            if use_parallel_threads {
-                // Parallel MDBX writes - each thread writes to different tables via subtransactions
-                std::thread::scope(|scope| {
-                    // Thread 1: Block metadata (HeaderNumbers, BlockBodyIndices, etc.)
-                    let block_handle = scope.spawn(|| -> ProviderResult<Duration> {
-                        let mut total = Duration::ZERO;
-                        for (i, block) in blocks.iter().enumerate() {
-                            let start = Instant::now();
-                            self.insert_block_mdbx_only(block.recovered_block(), tx_nums[i])?;
-                            total += start.elapsed();
-                        }
-                        Ok(total)
-                    });
+                let start = Instant::now();
+                self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
+                timings.insert_block += start.elapsed();
 
-                    // Thread 2: Plain state writes (SF handles receipts/changesets)
-                    let state_handle = scope.spawn(|| -> ProviderResult<Duration> {
-                        let mut total = Duration::ZERO;
-                        for block in blocks.iter() {
-                            let start = Instant::now();
-                            self.write_state(
-                                WriteStateInput::Single {
-                                    outcome: block.execution_outcome(),
-                                    block: block.recovered_block().number(),
-                                },
-                                OriginalValuesKnown::No,
-                                StateWriteConfig {
-                                    write_receipts: false,
-                                    write_account_changesets: false,
-                                    write_storage_changesets: false,
-                                },
-                            )?;
-                            total += start.elapsed();
-                        }
-                        Ok(total)
-                    });
-
-                    // Thread 3: Hashed state
-                    let hashed_handle = if !merged_hashed_state.is_empty() {
-                        Some(scope.spawn(|| -> ProviderResult<()> {
-                            self.write_hashed_state(&merged_hashed_state)
-                        }))
-                    } else {
-                        None
-                    };
-
-                    // Thread 4: Trie updates
-                    let trie_handle = if !merged_trie.is_empty() {
-                        Some(scope.spawn(|| -> ProviderResult<usize> {
-                            self.write_trie_updates_sorted(&merged_trie)
-                        }))
-                    } else {
-                        None
-                    };
-
-                    // Wait and collect results
-                    timings.insert_block = block_handle.join().expect("thread panic")?;
-                    timings.write_state = state_handle.join().expect("thread panic")?;
-                    if let Some(h) = hashed_handle {
-                        h.join().expect("thread panic")?;
-                    }
-                    if let Some(h) = trie_handle {
-                        h.join().expect("thread panic")?;
-                    }
-
-                    Ok::<_, ProviderError>(())
-                })?;
-            } else {
-                // Sequential MDBX writes (still uses subtransactions, just single-threaded)
-                for (i, block) in blocks.iter().enumerate() {
-                    let recovered_block = block.recovered_block();
-
-                    let start = Instant::now();
-                    self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
-                    timings.insert_block += start.elapsed();
-
-                    if save_mode.with_state() {
-                        let execution_output = block.execution_outcome();
-
-                        // Write state and changesets to the database.
-                        // Must be written after blocks because of the receipt lookup.
-                        let start = Instant::now();
-                        self.write_state(
-                            WriteStateInput::Single {
-                                outcome: execution_output,
-                                block: recovered_block.number(),
-                            },
-                            OriginalValuesKnown::No,
-                            StateWriteConfig {
-                                write_receipts: !sf_ctx.write_receipts,
-                                write_account_changesets: !sf_ctx.write_account_changesets,
-                                write_storage_changesets: !sf_ctx.write_storage_changesets,
-                            },
-                        )?;
-                        timings.write_state += start.elapsed();
-                    }
-                }
-
-                // Write hashed state and trie updates
                 if save_mode.with_state() {
-                    if !merged_hashed_state.is_empty() {
-                        self.write_hashed_state(&merged_hashed_state)?;
-                    }
-                    if !merged_trie.is_empty() {
-                        self.write_trie_updates_sorted(&merged_trie)?;
-                    }
+                    let execution_output = block.execution_outcome();
+
+                    // Write state and changesets to the database.
+                    // Must be written after blocks because of the receipt lookup.
+                    let start = Instant::now();
+                    self.write_state(
+                        WriteStateInput::Single {
+                            outcome: execution_output,
+                            block: recovered_block.number(),
+                        },
+                        OriginalValuesKnown::No,
+                        StateWriteConfig {
+                            write_receipts: !sf_ctx.write_receipts,
+                            write_account_changesets: !sf_ctx.write_account_changesets,
+                            write_storage_changesets: !sf_ctx.write_storage_changesets,
+                        },
+                    )?;
+                    timings.write_state += start.elapsed();
+                }
+            }
+
+            // Write hashed state and trie updates
+            if save_mode.with_state() {
+                if !merged_hashed_state.is_empty() {
+                    self.write_hashed_state(&merged_hashed_state)?;
+                }
+                if !merged_trie.is_empty() {
+                    self.write_trie_updates_sorted(&merged_trie)?;
                 }
             }
 
@@ -792,6 +709,11 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
             let start = Instant::now();
             self.update_pipeline_stages(last_block_number, false)?;
             timings.update_pipeline_stages = start.elapsed();
+
+            // Commit parallel subtransactions if enabled
+            if use_parallel_writes {
+                self.tx.commit_subtxns()?;
+            }
 
             timings.mdbx = mdbx_start.elapsed();
 
@@ -2318,7 +2240,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
     }
 }
 
-impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> StateWriter
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     for DatabaseProvider<TX, N>
 {
     type Receipt = ReceiptTy<N>;
@@ -3239,7 +3161,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     }
 }
 
-impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> BlockExecutionWriter
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {
     fn take_block_and_execution_above(
@@ -3282,7 +3204,7 @@ impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> BlockExecutio
     }
 }
 
-impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> BlockWriter
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
     for DatabaseProvider<TX, N>
 {
     type Block = BlockTy<N>;
@@ -4381,6 +4303,130 @@ mod tests {
             Err(ProviderError::BlockNotExecuted { requested: 100, .. }) => {}
             Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
             Ok(_) => panic!("Expected error, got Ok"),
+        }
+    }
+
+    #[cfg(feature = "edge")]
+    #[test]
+    fn test_save_blocks_edge_mode_settings() {
+        use reth_db_api::models::StorageSettings;
+        use reth_storage_api::StorageSettingsCache;
+
+        let factory = create_test_provider_factory();
+
+        // Test 1: Verify edge mode detection
+        factory.set_storage_settings_cache(StorageSettings::edge());
+        assert!(
+            factory.cached_storage_settings().is_edge_mode(),
+            "Edge mode should be detected with all edge settings enabled"
+        );
+
+        // Test 2: Verify legacy mode is not edge mode
+        factory.set_storage_settings_cache(StorageSettings::legacy());
+        assert!(
+            !factory.cached_storage_settings().is_edge_mode(),
+            "Legacy mode should NOT be detected as edge mode"
+        );
+
+        // Test 3: Verify partial edge settings are not edge mode
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_receipts_in_static_files(true),
+        );
+        assert!(
+            !factory.cached_storage_settings().is_edge_mode(),
+            "Partial edge settings should NOT be detected as edge mode"
+        );
+
+        // Test 4: Verify all conditions for edge mode (must use StorageSettings::edge())
+        factory.set_storage_settings_cache(StorageSettings::edge());
+        assert!(
+            factory.cached_storage_settings().is_edge_mode(),
+            "StorageSettings::edge() should enable edge mode"
+        );
+    }
+
+    #[test]
+    fn test_save_blocks_legacy_mode() {
+        use reth_chain_state::ExecutedBlock;
+        use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+
+        // Insert genesis block first
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                crate::OriginalValuesKnown::No,
+                StateWriteConfig::default(),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        // Prepare executed blocks for save_blocks
+        let blocks: Vec<ExecutedBlock> = data
+            .blocks
+            .iter()
+            .take(3)
+            .map(|(block, outcome)| {
+                let block_receipts = outcome.receipts().first().cloned().unwrap_or_default();
+                ExecutedBlock::new(
+                    Arc::new(block.clone()),
+                    Arc::new(BlockExecutionOutput {
+                        result: BlockExecutionResult {
+                            receipts: block_receipts,
+                            requests: Default::default(),
+                            gas_used: 0,
+                            blob_gas_used: 0,
+                        },
+                        state: outcome.state().clone(),
+                    }),
+                    ComputedTrieData::default(),
+                )
+            })
+            .collect();
+
+        // Call save_blocks with legacy mode (no parallel writes)
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(blocks.clone(), SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        // Verify blocks were saved correctly
+        let provider = factory.provider().unwrap();
+        for (i, (expected_block, _)) in data.blocks.iter().take(3).enumerate() {
+            let block_number = expected_block.number();
+
+            // Verify block header
+            let header = provider.header_by_number(block_number).unwrap();
+            assert!(header.is_some(), "Block {block_number} header should exist");
+            assert_eq!(
+                header.unwrap(),
+                expected_block.header().clone(),
+                "Block {block_number} header should match"
+            );
+
+            // Verify block body indices exist
+            let body_indices = provider.block_body_indices(block_number).unwrap();
+            assert!(body_indices.is_some(), "Block {block_number} body indices should exist");
+
+            // Verify transactions
+            let tx_count = expected_block.body().transaction_count();
+            let indices = body_indices.unwrap();
+            assert_eq!(
+                indices.tx_count as usize, tx_count,
+                "Block {block_number} tx count should match"
+            );
+
+            // Verify receipts exist
+            let receipts = provider.receipts_by_block(block_number.into()).unwrap();
+            assert!(receipts.is_some(), "Block {block_number} receipts should exist");
+            assert_eq!(
+                receipts.unwrap().len(),
+                data.blocks[i].1.receipts()[0].len(),
+                "Block {block_number} receipt count should match"
+            );
         }
     }
 }
