@@ -1316,18 +1316,8 @@ impl SparseTrieExt for ParallelSparseTrie {
         }
 
         let total_elapsed = total_start.elapsed();
-        debug!(
-            target: "trie::sparse",
-            ?total_elapsed,
-            ?remove_leaf_time,
-            ?update_leaf_time,
-            ?find_leaf_time,
-            num_keys,
-            remove_count,
-            update_count,
-            touched_count,
-            retry_count,
-            "update_leaves completed"
+        println!(
+            "update_leaves completed total={total_elapsed:?} remove={remove_leaf_time:?} update={update_leaf_time:?} find={find_leaf_time:?} keys={num_keys} removes={remove_count} updates={update_count} touched={touched_count} retries={retry_count}"
         );
 
         Ok(())
