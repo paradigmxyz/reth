@@ -21,6 +21,7 @@ pub fn validate_block_post_execution<B, R, ChainSpec>(
     receipts: &[R],
     requests: &Requests,
     receipt_root_bloom: Option<(B256, Bloom)>,
+    gas_spent: Option<u64>,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -29,7 +30,11 @@ where
 {
     // Check if gas used matches the value set in header.
     let cumulative_gas_used =
-        receipts.last().map(|receipt| receipt.cumulative_gas_used()).unwrap_or(0);
+        if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+            gas_spent.unwrap_or_default()
+        } else {
+            receipts.last().map(|receipt| receipt.cumulative_gas_used()).unwrap_or(0)
+        };
     if block.header().gas_used() != cumulative_gas_used {
         return Err(ConsensusError::BlockGasUsed {
             gas: GotExpected { got: cumulative_gas_used, expected: block.header().gas_used() },
