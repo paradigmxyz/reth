@@ -981,9 +981,11 @@ mod tests {
             );
             // assert storage
             // Get on dupsort would return only first value. This is good enough for this test.
+            // Storage keys are now hashed with keccak256
+            let expected_hashed_slot = keccak256(B256::with_last_byte(1));
             assert!(matches!(
                 provider.tx_ref().get::<tables::HashedStorages>(keccak256(account1)),
-                Ok(Some(entry)) if entry.key == B256::with_last_byte(1) && entry.value == U256::from(2)
+                Ok(Some(entry)) if entry.key == expected_hashed_slot && entry.value == U256::from(2)
             ));
 
             let mut provider = factory.database_provider_rw().unwrap();
@@ -1198,58 +1200,58 @@ mod tests {
         ));
         // drops tx so that it returns write privilege to test_tx
         drop(provider);
-        let hashed_accounts = test_db.table::<tables::HashedAccounts>().unwrap();
+        let mut hashed_accounts = test_db.table::<tables::HashedAccounts>().unwrap();
         let hashed_storage = test_db.table::<tables::HashedStorages>().unwrap();
 
-        assert_eq!(
-            hashed_accounts,
-            vec![
-                (
-                    keccak256(beneficiary_address),
-                    Account {
-                        nonce: 0,
-                        balance: U256::from(0x1bc16d674eca30a0u64),
-                        bytecode_hash: None
-                    }
-                ),
-                (
-                    keccak256(caller_address),
-                    Account {
-                        nonce: 1,
-                        balance: U256::from(0xde0b6b3a761cf60u64),
-                        bytecode_hash: None
-                    }
-                )
-            ]
-        );
+        hashed_accounts.sort_by_key(|(addr, _)| *addr);
+        let mut expected_hashed_accounts = vec![
+            (
+                keccak256(beneficiary_address),
+                Account {
+                    nonce: 0,
+                    balance: U256::from(0x1bc16d674eca30a0u64),
+                    bytecode_hash: None,
+                },
+            ),
+            (
+                keccak256(caller_address),
+                Account {
+                    nonce: 1,
+                    balance: U256::from(0xde0b6b3a761cf60u64),
+                    bytecode_hash: None,
+                },
+            ),
+        ];
+        expected_hashed_accounts.sort_by_key(|(addr, _)| *addr);
+        assert_eq!(hashed_accounts, expected_hashed_accounts);
         assert!(hashed_storage.is_empty());
 
-        let account_changesets = test_db.table::<tables::AccountChangeSets>().unwrap();
+        let mut account_changesets = test_db.table::<tables::AccountChangeSets>().unwrap();
         let storage_changesets = test_db.table::<tables::StorageChangeSets>().unwrap();
 
-        assert_eq!(
-            account_changesets,
-            vec![
-                (
-                    block.number,
-                    AccountBeforeTx {
-                        hashed_address: keccak256(destroyed_address),
-                        info: Some(destroyed_info),
-                    },
-                ),
-                (
-                    block.number,
-                    AccountBeforeTx { hashed_address: keccak256(beneficiary_address), info: None },
-                ),
-                (
-                    block.number,
-                    AccountBeforeTx {
-                        hashed_address: keccak256(caller_address),
-                        info: Some(caller_info),
-                    },
-                ),
-            ]
-        );
+        account_changesets.sort_by_key(|(_, changeset)| changeset.hashed_address);
+        let mut expected_account_changesets = vec![
+            (
+                block.number,
+                AccountBeforeTx {
+                    hashed_address: keccak256(destroyed_address),
+                    info: Some(destroyed_info),
+                },
+            ),
+            (
+                block.number,
+                AccountBeforeTx { hashed_address: keccak256(beneficiary_address), info: None },
+            ),
+            (
+                block.number,
+                AccountBeforeTx {
+                    hashed_address: keccak256(caller_address),
+                    info: Some(caller_info),
+                },
+            ),
+        ];
+        expected_account_changesets.sort_by_key(|(_, changeset)| changeset.hashed_address);
+        assert_eq!(account_changesets, expected_account_changesets);
 
         assert_eq!(
             storage_changesets,

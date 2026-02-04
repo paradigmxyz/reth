@@ -447,7 +447,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{keccak256, U256};
+    use alloy_primitives::U256;
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
     use reth_primitives_traits::{SealedBlock, StorageEntry};

@@ -460,7 +460,9 @@ impl TestStageDB {
 
                     // Insert into storage changeset.
                     old_storage.into_iter().try_for_each(|entry| {
-                        Ok(tx.put::<tables::StorageChangeSets>(block_hash, entry)?)
+                        let hashed_entry =
+                            StorageEntry { key: keccak256(entry.key), value: entry.value };
+                        Ok(tx.put::<tables::StorageChangeSets>(block_hash, hashed_entry)?)
                     })
                 })
             })
@@ -497,7 +499,7 @@ impl TestStageDB {
                 for entry in old_storage {
                     storage_changesets.push(StorageBeforeTx {
                         hashed_address,
-                        key: entry.key,
+                        key: keccak256(entry.key),
                         value: entry.value,
                     });
                 }
@@ -525,7 +527,7 @@ impl TestStageDB {
                 let hashed_address = keccak256(address);
                 accounts.entry(hashed_address).or_default().push(block as u64);
                 for storage_entry in storage_entries {
-                    storages.entry((hashed_address, storage_entry.key)).or_default().push(block as u64);
+                    storages.entry((hashed_address, keccak256(storage_entry.key))).or_default().push(block as u64);
                 }
             }
         }
