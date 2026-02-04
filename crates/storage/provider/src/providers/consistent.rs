@@ -154,7 +154,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         let end_block_number = *range.end();
 
         // We are not removing block meta as it is used to get block changesets.
-        let mut block_bodies = Vec::new();
+        let mut block_bodies =
+            Vec::with_capacity((end_block_number - start_block_number + 1) as usize);
         for block_num in range.clone() {
             let block_body = self
                 .block_body_indices(block_num)?
