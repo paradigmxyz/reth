@@ -15728,6 +15728,19 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
 
   MDBX_env *const env = parent->env;
 
+  /* CRITICAL: Ensure the assigned DBI is not stale BEFORE creating the subtxn.
+   * If DBI_STALE is set, tbl_fetch() would traverse MAIN_DBI to refresh it.
+   * For parallel subtxns, MAIN_DBI access is forbidden because sibling subtxns
+   * may have modified pages in their trees. We must resolve staleness on the
+   * parent transaction where MAIN_DBI access is safe. */
+  if (parent->dbi_state[dbi] & DBI_STALE) {
+    int rc = tbl_fetch(parent, dbi);
+    if (unlikely(rc != MDBX_SUCCESS)) {
+      DEBUG("failed to refresh stale dbi %u before creating subtxn: %d", dbi, rc);
+      return LOG_IFERR(rc);
+    }
+  }
+
   /* Allocate txn structure with embedded arrays for dbs, cursors, dbi_seqs, dbi_state, dbi_sparse */
 #if MDBX_ENABLE_DBI_SPARSE
   MDBX_txn *tmp = nullptr;
@@ -32051,9 +32064,9 @@ __cold int page_check(const MDBX_cursor *const mc, const page_t *const mp) {
     const pgno_t npages = mp->pages;
     if (unlikely(npages < 1 || npages >= MAX_PAGENO / 2))
       rc = bad_page(mp, "invalid n-pages (%u) for large-page\n", npages);
-    if (unlikely(mp->pgno + npages > mc->txn->geo.first_unallocated))
+    if (unlikely(mp->pgno + npages > txn_first_unallocated(mc->txn)))
       rc = bad_page(mp, "end of large-page beyond (%u) allocated space (%u next-pgno)\n", mp->pgno + npages,
-                    mc->txn->geo.first_unallocated);
+                    txn_first_unallocated(mc->txn));
     return rc; //-------------------------- end of large/overflow page handling
   case P_LEAF | P_SUBP:
     if (unlikely(mc->tree->height != 1))
@@ -32160,8 +32173,8 @@ __cold int page_check(const MDBX_cursor *const mc, const page_t *const mp) {
         if ((mc->checking & z_updating) == 0 && i == 0 && unlikely(ksize != 0))
           rc = bad_page(mp, "branch-node[%zu] wrong 0-node key-length (%zu)\n", i, ksize);
         const pgno_t ref = node_pgno(node);
-        if (unlikely(ref < MIN_PAGENO) || (unlikely(ref >= mc->txn->geo.first_unallocated) &&
-                                           (unlikely(ref >= mc->txn->geo.now) || !(mc->checking & z_retiring))))
+        if (unlikely(ref < MIN_PAGENO) || (unlikely(ref >= txn_first_unallocated(mc->txn)) &&
+                                           (unlikely(ref >= txn_geo_now(mc->txn)) || !(mc->checking & z_retiring))))
           rc = bad_page(mp, "branch-node[%zu] wrong pgno (%u)\n", i, ref);
         if (unlikely(node_flags(node)))
           rc = bad_page(mp, "branch-node[%zu] wrong flags (%u)\n", i, node_flags(node));
@@ -32371,9 +32384,9 @@ static __always_inline int check_page_header(const uint16_t ILL, const page_t *p
     const pgno_t npages = page->pages;
     if (unlikely(npages < 1) || unlikely(npages >= MAX_PAGENO / 2))
       return bad_page(page, "invalid n-pages (%u) for large-page\n", npages);
-    if (unlikely(page->pgno + npages > txn->geo.first_unallocated))
+    if (unlikely(page->pgno + npages > txn_first_unallocated(txn)))
       return bad_page(page, "end of large-page beyond (%u) allocated space (%u next-pgno)\n", page->pgno + npages,
-                      txn->geo.first_unallocated);
+                      txn_first_unallocated(txn));
   } else {
     assert(false);
   }
@@ -32396,11 +32409,14 @@ static __always_inline pgr_t page_get_inline(const uint16_t ILL, const MDBX_curs
   tASSERT(txn, front <= txn->front_txnid);
 
   pgr_t r;
-  if (unlikely(pgno >= txn->geo.first_unallocated)) {
+  /* For parallel subtxns, siblings may have allocated pages that updated
+   * the parent's first_unallocated but not ours. Read from parent to see
+   * the current allocation frontier. */
+  const pgno_t first_unallocated = (txn->flags & txn_parallel_subtx) 
+      ? txn->tw.subparent->geo.first_unallocated 
+      : txn->geo.first_unallocated;
+  if (unlikely(pgno >= first_unallocated)) {
     ERROR("page #%" PRIaPGNO " beyond next-pgno", pgno);
-    if (txn->flags & txn_parallel_subtx)
-      fprintf(stderr, "[page_get_inline] FAIL: pgno=%u first_unallocated=%u txn=%p parallel_subtx=1\n", 
-              pgno, txn->geo.first_unallocated, (void*)txn);
     r.page = nullptr;
     r.err = MDBX_PAGE_NOTFOUND;
   bailout:
@@ -34341,6 +34357,15 @@ int tbl_setup(const MDBX_env *env, volatile kvx_t *const kvx, const tree_t *cons
 }
 
 int tbl_fetch(MDBX_txn *txn, size_t dbi) {
+  /* Parallel subtxns must NOT call tbl_fetch - it traverses MAIN_DBI which
+   * violates DBI isolation. The caller should have ensured DBIs were fresh
+   * before the subtxn was created. */
+  if (txn->flags & txn_parallel_subtx) {
+    ERROR("parallel subtxn %p attempted tbl_fetch for dbi %zu - caller must touch DBIs before subtxn creation",
+          (void *)txn, dbi);
+    return MDBX_EINVAL;
+  }
+
   cursor_couple_t couple;
   int rc = cursor_init(&couple.outer, txn, MAIN_DBI);
   if (unlikely(rc != MDBX_SUCCESS))
@@ -36599,7 +36624,7 @@ __hot int tree_search(MDBX_cursor *mc, const MDBX_val *key, int flags) {
     return MDBX_NOTFOUND;
   }
 
-  cASSERT(mc, root >= NUM_METAS && root < mc->txn->geo.first_unallocated);
+  cASSERT(mc, root >= NUM_METAS && root < txn_first_unallocated(mc->txn));
   if (mc->top < 0 || mc->pg[0]->pgno != root) {
     txnid_t pp_txnid = mc->tree->mod_txnid;
     pp_txnid = /* tree->mod_txnid maybe zero in a legacy DB */ pp_txnid ? pp_txnid : mc->txn->txnid;
