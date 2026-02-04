@@ -628,35 +628,122 @@ where
             },
             || {
                 let _guard = parent_span.clone().entered();
-                let _updates_span =
+                let updates_span =
                     debug_span!("process_storage_leaf_updates", num_updates = num_storage_updates)
                         .entered();
 
-                for (address, updates) in storage_updates {
-                    if updates.is_empty() {
-                        continue;
+                if num_storage_updates > 100 {
+                    const CHUNK_SIZE_TARGET: usize = 50;
+                    let num_chunks = num_storage_updates.div_ceil(CHUNK_SIZE_TARGET);
+
+                    for (address, updates) in storage_updates.iter() {
+                        if !updates.is_empty() {
+                            storage_tries.get_or_create_trie_mut(*address);
+                        }
                     }
 
-                    let _span =
-                        debug_span!("process_storage_leaf_updates", num_updates = updates.len())
-                            .entered();
+                    let mut work_items: Vec<_> = storage_tries
+                        .tries_mut()
+                        .iter_mut()
+                        .filter_map(|(address, trie)| {
+                            let updates = match storage_updates.entry(*address) {
+                                Entry::Occupied(entry) => {
+                                    if entry.get().is_empty() {
+                                        return None;
+                                    }
+                                    entry.remove()
+                                }
+                                Entry::Vacant(_) => {
+                                    return None;
+                                }
+                            };
 
-                    let trie = storage_tries.get_or_create_trie_mut(*address);
-                    let fetched = fetched_storage_targets.entry(*address).or_default();
-                    let targets = pending_storage_targets.entry(*address).or_default();
+                            Some((*address, updates, trie, Vec::new()))
+                        })
+                        .collect();
 
-                    trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                        Entry::Occupied(mut entry) => {
-                            if min_len < *entry.get() {
+                    work_items.sort_by_key(|(_, updates, _, _)| updates.len());
+
+                    let mut chunks: Vec<(usize, Vec<_>)> =
+                        (0..num_chunks).map(|_| (0, Vec::new())).collect();
+
+                    for item in work_items {
+                        let chunk =
+                            chunks.iter_mut().min_by_key(|(size, _)| *size).expect("non-empty");
+                        chunk.0 += item.1.len();
+                        chunk.1.push(item);
+                    }
+
+                    let results: Vec<_> = chunks
+                        .into_par_iter()
+                        .map(|(_, mut items)| {
+                            for (_, updates, trie, targets) in &mut items {
+                                let _guard = updates_span.clone().entered();
+                                let _span = debug_span!(
+                                    "process_storage_leaf_updates",
+                                    num_updates = updates.len()
+                                )
+                                .entered();
+                                trie.update_leaves(updates, |path, min_len| {
+                                    targets.push((path, min_len));
+                                })?;
+                            }
+                            SparseTrieResult::Ok(items)
+                        })
+                        .collect();
+
+                    for result in results {
+                        for (address, updates, _, address_targets) in result? {
+                            storage_updates.insert(address, updates);
+
+                            let fetched = fetched_storage_targets.entry(address).or_default();
+                            let targets = pending_storage_targets.entry(address).or_default();
+
+                            for (path, min_len) in address_targets {
+                                match fetched.entry(path) {
+                                    Entry::Occupied(mut entry) => {
+                                        if min_len < *entry.get() {
+                                            entry.insert(min_len);
+                                            targets.push(Target::new(path).with_min_len(min_len));
+                                        }
+                                    }
+                                    Entry::Vacant(entry) => {
+                                        entry.insert(min_len);
+                                        targets.push(Target::new(path).with_min_len(min_len));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    for (address, updates) in storage_updates {
+                        if updates.is_empty() {
+                            continue;
+                        }
+
+                        let _span = debug_span!(
+                            "process_storage_leaf_updates",
+                            num_updates = updates.len()
+                        )
+                        .entered();
+
+                        let trie = storage_tries.get_or_create_trie_mut(*address);
+                        let fetched = fetched_storage_targets.entry(*address).or_default();
+                        let targets = pending_storage_targets.entry(*address).or_default();
+
+                        trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+                            Entry::Occupied(mut entry) => {
+                                if min_len < *entry.get() {
+                                    entry.insert(min_len);
+                                    targets.push(Target::new(path).with_min_len(min_len));
+                                }
+                            }
+                            Entry::Vacant(entry) => {
                                 entry.insert(min_len);
                                 targets.push(Target::new(path).with_min_len(min_len));
                             }
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(min_len);
-                            targets.push(Target::new(path).with_min_len(min_len));
-                        }
-                    })?;
+                        })?;
+                    }
                 }
 
                 SparseTrieResult::Ok(())
