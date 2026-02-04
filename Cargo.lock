@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=devnet2-fixes#2f0d9fcf2a9fff0d2c3d4a40e1ed723157a00e71"
+source = "git+https://github.com/Soubhik-10/evm?branch=devnet2-fixes#a640cc3dfd8b89a22fdf6792dbba078d032242ae"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -415,7 +415,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=devnet2-fixes#2f0d9fcf2a9fff0d2c3d4a40e1ed723157a00e71"
+source = "git+https://github.com/Soubhik-10/evm?branch=devnet2-fixes#a640cc3dfd8b89a22fdf6792dbba078d032242ae"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
