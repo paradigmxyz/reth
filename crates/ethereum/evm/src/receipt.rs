@@ -12,11 +12,17 @@ impl ReceiptBuilder for RethReceiptBuilder {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
 
+<<<<<<< HEAD
     fn build_receipt<E: Evm>(
         &self,
         ctx: ReceiptBuilderCtx<'_, Self::Transaction, E>,
     ) -> Self::Receipt {
         let ReceiptBuilderCtx { tx, result, cumulative_gas_used, .. } = ctx;
+=======
+    fn build_receipt<E: Evm>(&self, ctx: ReceiptBuilderCtx<'_, TxType, E>) -> Self::Receipt {
+        let ReceiptBuilderCtx { tx_type, result, cumulative_gas_used, .. } = ctx;
+        tracing::debug!("Building receipt with result: {:?}", result);
+>>>>>>> b1c038cf98f84e9b7ddaafa43db66c9d7a16ea75
         Receipt {
             tx_type: tx.tx_type(),
             // Success flag was added in `EIP-658: Embedding transaction status code in
