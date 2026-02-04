@@ -12,8 +12,11 @@ impl ReceiptBuilder for RethReceiptBuilder {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
 
-    fn build_receipt<E: Evm>(&self, ctx: ReceiptBuilderCtx<'_, TxType, E>) -> Self::Receipt {
-        let ReceiptBuilderCtx { tx_type, result, cumulative_gas_used, .. } = ctx;
+    fn build_receipt<E: Evm>(
+        &self,
+        ctx: ReceiptBuilderCtx<'_, Self::Transaction, E>,
+    ) -> Self::Receipt {
+        let ReceiptBuilderCtx { tx, result, cumulative_gas_used, .. } = ctx;
         tracing::debug!("Building receipt with result: {:?}", result);
         Receipt {
             tx_type: tx.tx_type(),
