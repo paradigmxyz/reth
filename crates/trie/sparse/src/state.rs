@@ -23,6 +23,16 @@ use reth_trie_common::{
 use tracing::debug;
 use tracing::{instrument, trace};
 
+/// Holds data that should be dropped after any locks are released.
+///
+/// This is used to defer expensive deallocations (like proof node buffers) until after final state
+/// root is calculated
+#[derive(Debug, Default)]
+pub struct DeferredDrops {
+    /// Each nodes reveal operation creates a new buffer, uses it, and pushes it here.
+    pub proof_nodes_bufs: Vec<Vec<ProofTrieNode>>,
+}
+
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<
@@ -39,6 +49,8 @@ pub struct SparseStateTrie<
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
     account_rlp_buf: Vec<u8>,
+    /// Holds data that should be dropped after final state root is calculated.
+    deferred_drops: DeferredDrops,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -56,6 +68,7 @@ where
             storage: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            deferred_drops: DeferredDrops::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -104,6 +117,14 @@ impl<A, S> SparseStateTrie<A, S> {
     pub fn with_default_storage_trie(mut self, trie: RevealableSparseTrie<S>) -> Self {
         self.set_default_storage_trie(trie);
         self
+    }
+
+    /// Takes the data structures for deferred dropping.
+    ///
+    /// This allows the caller to drop the buffers later, avoiding expensive deallocations while
+    /// calculating the state root.
+    pub fn take_deferred_drops(&mut self) -> DeferredDrops {
+        core::mem::take(&mut self.deferred_drops)
     }
 }
 
@@ -273,22 +294,24 @@ where
                 })
                 .par_bridge_buffered()
                 .map(|(account, storage_subtree, mut revealed_nodes, mut trie)| {
+                    let mut bufs = Vec::new();
                     let result = Self::reveal_decoded_storage_multiproof_inner(
                         account,
                         storage_subtree,
                         &mut revealed_nodes,
                         &mut trie,
+                        &mut bufs,
                         retain_updates,
                     );
 
-                    (account, revealed_nodes, trie, result)
+                    (account, revealed_nodes, trie, result, bufs)
                 })
                 .collect();
 
             // Return `revealed_nodes` and `RevealableSparseTrie` for each account, incrementing
             // metrics and returning the last error seen if any.
             let mut any_err = Ok(());
-            for (account, revealed_nodes, trie, result) in results {
+            for (account, revealed_nodes, trie, result, bufs) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
                 // Mark this storage trie as hot (accessed this tick)
@@ -304,6 +327,9 @@ where
                 } else {
                     any_err = result.map(|_| ());
                 }
+
+                // Keep buffers for deferred dropping
+                self.deferred_drops.proof_nodes_bufs.extend(bufs);
             }
 
             any_err
@@ -369,19 +395,21 @@ where
                 })
                 .par_bridge_buffered()
                 .map(|(account, storage_proofs, mut revealed_nodes, mut trie)| {
+                    let mut bufs = Vec::new();
                     let result = Self::reveal_storage_v2_proof_nodes_inner(
                         account,
                         storage_proofs,
                         &mut revealed_nodes,
                         &mut trie,
+                        &mut bufs,
                         retain_updates,
                     );
-                    (account, result, revealed_nodes, trie)
+                    (account, result, revealed_nodes, trie, bufs)
                 })
                 .collect();
 
             let mut any_err = Ok(());
-            for (account, result, revealed_nodes, trie) in results {
+            for (account, result, revealed_nodes, trie, bufs) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
                 // Mark this storage trie as hot (accessed this tick)
@@ -397,6 +425,9 @@ where
                 } else {
                     any_err = result.map(|_| ());
                 }
+
+                // Keep buffers for deferred dropping
+                self.deferred_drops.proof_nodes_bufs.extend(bufs);
             }
 
             any_err
@@ -420,12 +451,16 @@ where
         account_subtree: DecodedProofNodes,
         branch_node_masks: BranchNodeMasksMap,
     ) -> SparseStateTrieResult<()> {
-        let FilterMappedProofNodes { root_node, nodes, new_nodes, metric_values: _metric_values } =
-            filter_map_revealed_nodes(
-                account_subtree,
-                &mut self.revealed_account_paths,
-                &branch_node_masks,
-            )?;
+        let FilterMappedProofNodes {
+            root_node,
+            mut nodes,
+            new_nodes,
+            metric_values: _metric_values,
+        } = filter_map_revealed_nodes(
+            account_subtree,
+            &mut self.revealed_account_paths,
+            &branch_node_masks,
+        )?;
         #[cfg(feature = "metrics")]
         {
             self.metrics.increment_total_account_nodes(_metric_values.total_nodes as u64);
@@ -443,8 +478,11 @@ where
             trie.reserve_nodes(new_nodes);
 
             trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes");
-            trie.reveal_nodes(nodes)?;
+            trie.reveal_nodes(&mut nodes)?;
         }
+
+        // Keep buffer for deferred dropping
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
 
         Ok(())
     }
@@ -457,7 +495,7 @@ where
         &mut self,
         nodes: Vec<ProofTrieNode>,
     ) -> SparseStateTrieResult<()> {
-        let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values: _metric_values } =
+        let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values: _metric_values } =
             filter_revealed_v2_proof_nodes(nodes, &mut self.revealed_account_paths)?;
 
         #[cfg(feature = "metrics")]
@@ -476,7 +514,10 @@ where
         trie.reserve_nodes(new_nodes);
 
         trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
-        trie.reveal_nodes(nodes)?;
+        trie.reveal_nodes(&mut nodes)?;
+
+        // Keep buffer for deferred dropping
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
 
         Ok(())
     }
@@ -496,6 +537,7 @@ where
             nodes,
             revealed_paths,
             trie,
+            &mut self.deferred_drops.proof_nodes_bufs,
             self.retain_updates,
         )?;
 
@@ -515,9 +557,10 @@ where
         nodes: Vec<ProofTrieNode>,
         revealed_nodes: &mut HashSet<Nibbles>,
         trie: &mut RevealableSparseTrie<S>,
+        bufs: &mut Vec<Vec<ProofTrieNode>>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
-        let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values } =
+        let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values } =
             filter_revealed_v2_proof_nodes(nodes, revealed_nodes)?;
 
         let trie = if let Some(root_node) = root_node {
@@ -530,7 +573,10 @@ where
         trie.reserve_nodes(new_nodes);
 
         trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof");
-        trie.reveal_nodes(nodes)?;
+        trie.reveal_nodes(&mut nodes)?;
+
+        // Keep buffer for deferred dropping
+        bufs.push(nodes);
 
         Ok(metric_values)
     }
@@ -558,6 +604,7 @@ where
             storage_subtree,
             revealed_paths,
             trie,
+            &mut self.deferred_drops.proof_nodes_bufs,
             self.retain_updates,
         )?;
 
@@ -577,9 +624,10 @@ where
         storage_subtree: DecodedStorageMultiProof,
         revealed_nodes: &mut HashSet<Nibbles>,
         trie: &mut RevealableSparseTrie<S>,
+        bufs: &mut Vec<Vec<ProofTrieNode>>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
-        let FilterMappedProofNodes { root_node, nodes, new_nodes, metric_values } =
+        let FilterMappedProofNodes { root_node, mut nodes, new_nodes, metric_values } =
             filter_map_revealed_nodes(
                 storage_subtree.subtree,
                 revealed_nodes,
@@ -596,8 +644,11 @@ where
             trie.reserve_nodes(new_nodes);
 
             trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes");
-            trie.reveal_nodes(nodes)?;
+            trie.reveal_nodes(&mut nodes)?;
         }
+
+        // Keep buffer for deferred dropping
+        bufs.push(nodes);
 
         Ok(metric_values)
     }
