@@ -610,6 +610,14 @@ where
         self.pool.pending_transactions()
     }
 
+    fn get_pending_transaction_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_pending_transaction_by_sender_and_nonce(sender, nonce)
+    }
+
     fn pending_transactions_max(
         &self,
         max: usize,

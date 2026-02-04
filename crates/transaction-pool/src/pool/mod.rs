@@ -1092,6 +1092,16 @@ where
         self.get_pool_data().get_transactions_by_sender(sender_id)
     }
 
+    /// Returns a pending transaction sent by the given sender with the given nonce.
+    pub fn get_pending_transaction_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        self.get_pool_data().get_pending_transaction_by_sender_and_nonce(sender_id, nonce)
+    }
+
     /// Returns all queued transactions of the address by sender
     pub fn get_queued_transactions_by_sender(
         &self,
