@@ -1781,11 +1781,10 @@ impl<'a> RocksDBBatch<'a> {
             return Ok(PrunedIndices::default());
         }
 
-        if !targets.windows(2).all(|w| w[0].0 <= w[1].0) {
-            return Err(ProviderError::other(std::io::Error::other(
-                "prune_account_history_batch: targets must be sorted by address",
-            )));
-        }
+        debug_assert!(
+            targets.windows(2).all(|w| w[0].0 <= w[1].0),
+            "prune_account_history_batch: targets must be sorted by address"
+        );
 
         // ShardedKey<Address> layout: [address: 20][block: 8] = 28 bytes
         // The first 20 bytes are the "prefix" that identifies the address
@@ -1909,11 +1908,10 @@ impl<'a> RocksDBBatch<'a> {
             return Ok(PrunedIndices::default());
         }
 
-        if !targets.windows(2).all(|w| w[0].0 <= w[1].0) {
-            return Err(ProviderError::other(std::io::Error::other(
-                "prune_storage_history_batch: targets must be sorted by (address, storage_key)",
-            )));
-        }
+        debug_assert!(
+            targets.windows(2).all(|w| w[0].0 <= w[1].0),
+            "prune_storage_history_batch: targets must be sorted by (address, storage_key)"
+        );
 
         // StorageShardedKey layout: [address: 20][storage_key: 32][block: 8] = 60 bytes
         // The first 52 bytes are the "prefix" that identifies (address, storage_key)
