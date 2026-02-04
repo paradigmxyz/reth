@@ -2231,6 +2231,58 @@ typedef union {
 /* Number of meta pages - also hardcoded elsewhere */
 #define NUM_METAS 3
 
+/*----------------------------------------------------------------------------*/
+/* Thread-local page_auxbuf cache to avoid malloc/free per subtxn.
+ * Each thread caches one buffer; parallel subtxns reuse it across lifetimes. */
+
+#if defined(_MSC_VER) || defined(__DMC__)
+static __declspec(thread) void *tls_page_auxbuf = NULL;
+static __declspec(thread) size_t tls_page_auxbuf_size = 0;
+#else
+static __thread void *tls_page_auxbuf = NULL;
+static __thread size_t tls_page_auxbuf_size = 0;
+#endif
+
+/* Acquire a page_auxbuf from TLS cache or allocate a new one.
+ * Returns NULL on allocation failure. */
+static void *page_auxbuf_acquire(size_t needed) {
+  if (tls_page_auxbuf && tls_page_auxbuf_size >= needed) {
+    void *buf = tls_page_auxbuf;
+    tls_page_auxbuf = NULL; /* Mark as in-use */
+    return buf;
+  }
+  /* Size mismatch or no cached buffer - need fresh allocation */
+  if (tls_page_auxbuf) {
+    osal_free(tls_page_auxbuf);
+    tls_page_auxbuf = NULL;
+    tls_page_auxbuf_size = 0;
+  }
+  void *buf = osal_malloc(needed);
+  if (buf)
+    tls_page_auxbuf_size = needed; /* Remember size for next release */
+  return buf;
+}
+
+/* Release a page_auxbuf back to TLS cache for reuse.
+ * If cache already has a buffer, the smaller one is freed. */
+static void page_auxbuf_release(void *buf, size_t size) {
+  if (!buf)
+    return;
+  if (tls_page_auxbuf) {
+    /* Prefer to keep the larger buffer */
+    if (size > tls_page_auxbuf_size) {
+      osal_free(tls_page_auxbuf);
+      tls_page_auxbuf = buf;
+      tls_page_auxbuf_size = size;
+    } else {
+      osal_free(buf);
+    }
+  } else {
+    tls_page_auxbuf = buf;
+    tls_page_auxbuf_size = size;
+  }
+}
+
 /* A page number in the database.
  *
  * MDBX uses 32 bit for page numbers. This limits database
@@ -3067,6 +3119,10 @@ typedef const pgno_t *const_pnl_t;
 #define MDBX_PNL_GRANULATE_LOG2 10
 #define MDBX_PNL_GRANULATE (1 << MDBX_PNL_GRANULATE_LOG2)
 #define MDBX_PNL_INITIAL (MDBX_PNL_GRANULATE - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(pgno_t))
+
+/* Pages to pre-claim in batch when parallel subtxn's subtxn_repnl is exhausted.
+ * 64 pages = 256KB at 4KB page size - balances mutex acquisition cost vs waste. */
+#define MDBX_SUBTXN_PAGE_BATCH 64
 
 #define MDBX_PNL_ALLOCLEN(pl) ((pl)[-1])
 #define MDBX_PNL_GETSIZE(pl) ((size_t)((pl)[0]))
@@ -4265,15 +4321,29 @@ struct MDBX_txn {
       osal_ioring_t *txn_ioring;    /* Per-txn I/O ring (NULL = use env->ioring) */
       void *txn_page_auxbuf;        /* Per-txn scratch buffer (NULL = use env) */
       MDBX_txn *subparent;          /* Parent txn if this is a parallel subtxn */
-      /* Sibling linked list: parent->subtxn_list is head, each subtxn links via subtxn_next */
+      /* Doubly-linked sibling list: parent->subtxn_list is head, O(1) unlink */
       MDBX_txn *subtxn_list;        /* Head of child parallel subtxns list */
       MDBX_txn *subtxn_next;        /* Next sibling in parent's subtxn_list */
+      MDBX_txn *subtxn_prev;        /* Prev sibling for O(1) unlink */
       MDBX_dbi assigned_dbi;        /* DBI this subtxn is bound to (0 = unbound) */
       pnl_t subtxn_repnl;           /* Pre-claimed reclaimed pages for this subtxn */
       osal_fastmutex_t *subtxn_alloc_mutex; /* Mutex for synchronized parent allocation */
     } tw;
   };
 };
+
+/* For parallel subtxns, read first_unallocated from parent (single source of truth).
+ * This eliminates O(n) sibling sync loops - siblings always read parent's authoritative value.
+ * For regular txns, return the local geo value. */
+MDBX_NOTHROW_PURE_FUNCTION static inline pgno_t txn_first_unallocated(const MDBX_txn *txn) {
+  return (txn->flags & txn_parallel_subtx) ? txn->tw.subparent->geo.first_unallocated
+                                           : txn->geo.first_unallocated;
+}
+
+/* For parallel subtxns, read geo.now from parent (single source of truth). */
+MDBX_NOTHROW_PURE_FUNCTION static inline pgno_t txn_geo_now(const MDBX_txn *txn) {
+  return (txn->flags & txn_parallel_subtx) ? txn->tw.subparent->geo.now : txn->geo.now;
+}
 
 #define CURSOR_STACK_SIZE (16 + MDBX_WORDBITS / 4)
 
@@ -13076,9 +13146,9 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
     }
     if (unlikely(rc != MDBX_SUCCESS)) {
     nested_failed:
-      /* Cleanup per-subtxn page_auxbuf on failure */
+      /* Return per-subtxn page_auxbuf to TLS cache on failure */
       if (txn->tw.page_auxbuf)
-        osal_free(txn->tw.page_auxbuf);
+        page_auxbuf_release(txn->tw.page_auxbuf, env->ps * NUM_METAS);
       pnl_free(txn->tw.repnl);
       dpl_free(txn);
       osal_free(txn);
@@ -13142,9 +13212,10 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
     txn->tw.troika = parent->tw.troika;
 
     /* Nested subtxns need their own page_auxbuf for thread-safe DupSort operations.
-     * Without this, cursor_put() would use env->page_auxbuf shared with parent. */
+     * Without this, cursor_put() would use env->page_auxbuf shared with parent.
+     * Use TLS cache to avoid malloc/free churn across subtxn lifetimes. */
     DEBUG("%s", "subtxn: page_auxbuf alloc");
-    txn->tw.page_auxbuf = osal_malloc(env->ps * NUM_METAS);
+    txn->tw.page_auxbuf = page_auxbuf_acquire(env->ps * NUM_METAS);
     if (unlikely(!txn->tw.page_auxbuf)) {
       rc = MDBX_ENOMEM;
       goto nested_failed;
@@ -15713,6 +15784,7 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   txn->tw.subparent = parent;
   txn->tw.subtxn_list = nullptr;
   txn->tw.subtxn_next = nullptr;
+  txn->tw.subtxn_prev = nullptr;
 
   /* WRITEMAP mode: pages modified in-place in the mmap, no dirtylist needed */
   txn->tw.dirtylist = nullptr;
@@ -15743,8 +15815,9 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   txn->tw.txn_page_auxbuf = nullptr;
 
   /* Parallel subtxns MUST have their own page_auxbuf because siblings run concurrently.
-   * Without this, concurrent cursor_put() DupSort operations would corrupt each other's data. */
-  txn->tw.page_auxbuf = osal_malloc(env->ps * NUM_METAS);
+   * Without this, concurrent cursor_put() DupSort operations would corrupt each other's data.
+   * Use TLS cache to avoid malloc/free churn across subtxn lifetimes. */
+  txn->tw.page_auxbuf = page_auxbuf_acquire(env->ps * NUM_METAS);
   if (unlikely(!txn->tw.page_auxbuf)) {
     pnl_free(txn->tw.repnl);
     pnl_free(txn->tw.retired_pages);
@@ -15754,7 +15827,11 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   txn->tw.subtxn_repnl = nullptr; /* Will be set by mdbx_txn_create_subtxns */
   txn->tw.subtxn_alloc_mutex = parent->tw.subtxn_alloc_mutex; /* Share parent's mutex */
 
+  /* Insert at head of doubly-linked sibling list */
   txn->tw.subtxn_next = parent->tw.subtxn_list;
+  txn->tw.subtxn_prev = nullptr;
+  if (parent->tw.subtxn_list)
+    parent->tw.subtxn_list->tw.subtxn_prev = txn;
   parent->tw.subtxn_list = txn;
   txn->tw.assigned_dbi = dbi;
 
@@ -15925,9 +16002,9 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
 /* Release resources allocated for parallel subtxn. Called on commit/abort. */
 static void subtx_free_resources(MDBX_txn *subtxn) {
   /* WRITEMAP mode: no ioring, txn_page_auxbuf, or dirtylist to free */
-  /* Free per-subtxn page_auxbuf allocated for thread-safe DupSort operations */
+  /* Return per-subtxn page_auxbuf to TLS cache for reuse by next subtxn */
   if (subtxn->tw.page_auxbuf)
-    osal_free(subtxn->tw.page_auxbuf);
+    page_auxbuf_release(subtxn->tw.page_auxbuf, subtxn->env->ps * NUM_METAS);
   if (subtxn->tw.retired_pages)
     pnl_free(subtxn->tw.retired_pages);
   if (subtxn->tw.repnl)
@@ -15948,11 +16025,16 @@ static void subtx_unlink_from_parent(MDBX_txn *subtxn) {
   if (!parent)
     return;
 
-  MDBX_txn **prev = &parent->tw.subtxn_list;
-  while (*prev && *prev != subtxn)
-    prev = &(*prev)->tw.subtxn_next;
-  if (*prev == subtxn)
-    *prev = subtxn->tw.subtxn_next;
+  /* O(1) doubly-linked list unlink */
+  if (subtxn->tw.subtxn_prev)
+    subtxn->tw.subtxn_prev->tw.subtxn_next = subtxn->tw.subtxn_next;
+  else
+    parent->tw.subtxn_list = subtxn->tw.subtxn_next;
+  if (subtxn->tw.subtxn_next)
+    subtxn->tw.subtxn_next->tw.subtxn_prev = subtxn->tw.subtxn_prev;
+
+  subtxn->tw.subtxn_next = nullptr;
+  subtxn->tw.subtxn_prev = nullptr;
   subtxn->tw.subparent = nullptr;
 
   /* If this was the last subtxn, cleanup the allocation mutex */
@@ -22991,8 +23073,8 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
       MDBX_PNL_SETSIZE(txn->tw.subtxn_repnl, idx - 1);
       return page_alloc_finalize(env, txn, mc, pgno, 1);
     }
-    /* Fallback to synchronized parent allocation (EOF extension) */
-    DEBUG("subtxn %p: exhausted subtxn_repnl (need %zu pages), falling back to parent", (void*)txn, num);
+    /* Fallback to synchronized parent allocation (EOF extension) with batch pre-claim */
+    DEBUG("subtxn %p: exhausted subtxn_repnl (need %zu pages), falling back to parent with batch", (void*)txn, num);
     MDBX_txn *parent = txn->tw.subparent;
     if (unlikely(!parent || !txn->tw.subtxn_alloc_mutex)) {
       ret.page = nullptr;
@@ -23008,15 +23090,22 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
       ret.err = lock_rc;
       return ret;
     }
-    /* Allocate from parent's EOF */
-    const pgno_t pgno = parent->geo.first_unallocated;
-    const pgno_t new_first = pgno + (pgno_t)num;
-    if (unlikely(new_first > parent->geo.upper)) {
-      osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
-      ret.page = nullptr;
-      ret.err = MDBX_MAP_FULL;
-      return ret;
+    /* Allocate num + batch extra pages to reduce future mutex acquisitions */
+    const pgno_t start = parent->geo.first_unallocated;
+    size_t extra = MDBX_SUBTXN_PAGE_BATCH;
+    size_t total = num + extra;
+    /* Check limits and reduce extra if necessary */
+    if (unlikely(start + total > parent->geo.upper)) {
+      if (start + num > parent->geo.upper) {
+        osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+        ret.page = nullptr;
+        ret.err = MDBX_MAP_FULL;
+        return ret;
+      }
+      total = parent->geo.upper - start;
+      extra = total - num;
     }
+    const pgno_t new_first = start + (pgno_t)total;
     /* Grow file if needed */
     if (new_first > parent->geo.now) {
       int rc = dxb_resize(env, parent->geo.first_unallocated, new_first, parent->geo.upper, implicit_grow);
@@ -23027,20 +23116,35 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
         return ret;
       }
       parent->geo.now = new_first;
-      txn->geo.now = new_first;
       parent->flags |= MDBX_TXN_DIRTY;
     }
+    /* Only update parent's first_unallocated - siblings read from parent via txn_first_unallocated().
+     * This is O(1) instead of O(n) sibling sync loop. */
     parent->geo.first_unallocated = new_first;
-    txn->geo.first_unallocated = new_first;
-    /* After allocating pages, propagate new first_unallocated to all siblings.
-     * Without this, a sibling could see stale geo and allocate the same pages. */
-    for (MDBX_txn *sibling = parent->tw.subtxn_list; sibling; sibling = sibling->tw.subtxn_next) {
-      sibling->geo.first_unallocated = new_first;
-      if (new_first > sibling->geo.now)
-        sibling->geo.now = new_first;
-    }
     osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
-    return page_alloc_finalize(env, txn, mc, pgno, num);
+    /* Put extra pages into subtxn_repnl for future use */
+    if (extra > 0) {
+      const pgno_t extra_start = start + (pgno_t)num;
+      if (!txn->tw.subtxn_repnl) {
+        txn->tw.subtxn_repnl = pnl_alloc(extra);
+        if (unlikely(!txn->tw.subtxn_repnl)) {
+          ret.page = nullptr;
+          ret.err = MDBX_ENOMEM;
+          return ret;
+        }
+      } else {
+        int rc = pnl_need(&txn->tw.subtxn_repnl, extra);
+        if (unlikely(rc != MDBX_SUCCESS)) {
+          ret.page = nullptr;
+          ret.err = rc;
+          return ret;
+        }
+      }
+      for (pgno_t p = extra_start; p < new_first; ++p) {
+        pnl_append_prereserved(txn->tw.subtxn_repnl, p);
+      }
+    }
+    return page_alloc_finalize(env, txn, mc, start, num);
   }
 
 #if MDBX_ENABLE_PROFGC
@@ -23530,8 +23634,8 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
       MDBX_PNL_SETSIZE(txn->tw.subtxn_repnl, idx - 1);
       return page_alloc_finalize(txn->env, txn, mc, pgno, 1);
     }
-    /* Fallback to synchronized parent allocation (EOF extension) */
-    DEBUG("subtxn %p: exhausted subtxn_repnl, falling back to parent", (void*)txn);
+    /* Fallback to synchronized parent allocation (EOF extension) with batch pre-claim */
+    DEBUG("subtxn %p: exhausted subtxn_repnl, falling back to parent with batch", (void*)txn);
     MDBX_txn *parent = txn->tw.subparent;
     MDBX_env *env = txn->env;
     pgr_t ret;
@@ -23549,15 +23653,20 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
       ret.err = lock_rc;
       return ret;
     }
-    /* Allocate from parent's EOF */
-    const pgno_t pgno = parent->geo.first_unallocated;
-    const pgno_t new_first = pgno + 1;
-    if (unlikely(new_first > parent->geo.upper)) {
-      osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
-      ret.page = nullptr;
-      ret.err = MDBX_MAP_FULL;
-      return ret;
+    /* Allocate batch from parent's EOF to reduce future mutex acquisitions */
+    const pgno_t start = parent->geo.first_unallocated;
+    size_t batch = MDBX_SUBTXN_PAGE_BATCH;
+    /* Check limits and reduce batch if necessary */
+    if (unlikely(start + batch > parent->geo.upper)) {
+      if (start >= parent->geo.upper) {
+        osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+        ret.page = nullptr;
+        ret.err = MDBX_MAP_FULL;
+        return ret;
+      }
+      batch = parent->geo.upper - start;
     }
+    const pgno_t new_first = start + (pgno_t)batch;
     /* Grow file if needed */
     if (new_first > parent->geo.now) {
       int rc = dxb_resize(env, parent->geo.first_unallocated, new_first, parent->geo.upper, implicit_grow);
@@ -23568,18 +23677,34 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
         return ret;
       }
       parent->geo.now = new_first;
-      txn->geo.now = new_first;
       parent->flags |= MDBX_TXN_DIRTY;
     }
+    /* Only update parent's first_unallocated - siblings read from parent via txn_first_unallocated().
+     * This is O(1) instead of O(n) sibling sync loop. */
     parent->geo.first_unallocated = new_first;
-    txn->geo.first_unallocated = new_first;
-    /* After allocating pages, propagate new first_unallocated to all siblings.
-     * Without this, a sibling could see stale geo and allocate the same pages. */
-    for (MDBX_txn *sibling = parent->tw.subtxn_list; sibling; sibling = sibling->tw.subtxn_next) {
-      sibling->geo.first_unallocated = new_first;
-    }
     osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
-    return page_alloc_finalize(env, txn, mc, pgno, 1);
+    /* Put batch-1 pages into subtxn_repnl for future use */
+    if (batch > 1) {
+      if (!txn->tw.subtxn_repnl) {
+        txn->tw.subtxn_repnl = pnl_alloc(batch);
+        if (unlikely(!txn->tw.subtxn_repnl)) {
+          ret.page = nullptr;
+          ret.err = MDBX_ENOMEM;
+          return ret;
+        }
+      } else {
+        int rc = pnl_need(&txn->tw.subtxn_repnl, batch - 1);
+        if (unlikely(rc != MDBX_SUCCESS)) {
+          ret.page = nullptr;
+          ret.err = rc;
+          return ret;
+        }
+      }
+      for (pgno_t p = start + 1; p < new_first; ++p) {
+        pnl_append_prereserved(txn->tw.subtxn_repnl, p);
+      }
+    }
+    return page_alloc_finalize(env, txn, mc, start, 1);
   }
 
   /* If there are any loose pages, just use them */
@@ -37633,9 +37758,9 @@ int txn_end(MDBX_txn *txn, unsigned mode) {
       dpl_free(txn);
       pnl_free(txn->tw.repnl);
 
-      /* Free per-subtxn page_auxbuf allocated for thread-safe parallel DupSort operations */
+      /* Return per-subtxn page_auxbuf to TLS cache for reuse */
       if (txn->tw.page_auxbuf) {
-        osal_free(txn->tw.page_auxbuf);
+        page_auxbuf_release(txn->tw.page_auxbuf, env->ps * NUM_METAS);
         txn->tw.page_auxbuf = nullptr;
       }
 
