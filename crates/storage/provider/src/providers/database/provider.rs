@@ -4525,8 +4525,10 @@ mod tests {
         provider_rw.commit().unwrap();
 
         // Create blocks with LOTS of state changes to force page allocations
-        let num_accounts = 500;
-        let num_storage_slots = 100;
+        // 2000 accounts × 200 slots = 400,000 storage entries per block
+        // 3 blocks = 1.2 million total entries
+        let num_accounts = 2000;
+        let num_storage_slots = 200;
 
         let mut blocks = Vec::new();
         for block_num in 1u64..=3 {
@@ -4588,6 +4590,148 @@ mod tests {
         println!(
             "SUCCESS: Allocated {} new pages with parallel subtxns",
             final_last_pgno - initial_last_pgno
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "edge")]
+    fn test_save_blocks_edge_mode_stress_unique() {
+        use alloy_primitives::{map::HashMap, U256};
+        use reth_chain_state::ExecutedBlock;
+        use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+        use revm_database::states::BundleState;
+        use revm_state::AccountInfo;
+
+        let factory = create_test_provider_factory();
+
+        factory.set_storage_settings_cache(StorageSettings::edge());
+        assert!(factory.cached_storage_settings().is_edge_mode(), "Edge mode should be enabled");
+
+        let initial_info = factory.db_ref().db().info().unwrap();
+        let initial_last_pgno = initial_info.last_pgno();
+
+        let data = BlockchainTestData::default();
+
+        // Insert genesis block
+        let genesis_executed = ExecutedBlock::new(
+            Arc::new(data.genesis.clone().try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
+            ComputedTrieData::default(),
+        );
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        // 20 iterations with UNIQUE accounts per iteration
+        // Each iteration uses addresses in range [iteration*500, iteration*500+500)
+        // This tests pure inserts (no overwrites) forcing tree growth
+        // Each iteration saves all 5 blocks from test data with unique account state
+        let num_iterations = 20;
+        let accounts_per_iteration = 500;
+        let storage_slots_per_account = 50;
+
+        for iteration in 0..num_iterations {
+            let base_account = iteration * accounts_per_iteration;
+
+            // Generate test data starting at the right block number
+            let first_block_num = 1 + (iteration * 5) as u64;
+            let iteration_data = BlockchainTestData::default_from_number(first_block_num);
+
+            let mut blocks = Vec::new();
+            for (idx, (block, _)) in iteration_data.blocks.iter().enumerate() {
+                let block_num = first_block_num + idx as u64;
+                let mut bundle = BundleState::builder(block_num..=block_num);
+
+                for i in 0..accounts_per_iteration {
+                    let account_id = base_account + i;
+                    let mut addr_bytes = [0u8; 20];
+                    addr_bytes[16..20].copy_from_slice(&(account_id as u32).to_be_bytes());
+                    let address = Address::from(addr_bytes);
+
+                    bundle = bundle.state_present_account_info(
+                        address,
+                        AccountInfo {
+                            nonce: block_num,
+                            balance: U256::from(account_id + idx),
+                            ..Default::default()
+                        },
+                    );
+
+                    let storage: HashMap<U256, (U256, U256)> = (0..storage_slots_per_account)
+                        .map(|s| {
+                            (
+                                U256::from(s),
+                                (U256::ZERO, U256::from(block_num * 1000 + s as u64)),
+                            )
+                        })
+                        .collect();
+                    bundle = bundle.state_storage(address, storage);
+                }
+
+                let outcome = BlockExecutionOutput {
+                    result: BlockExecutionResult {
+                        receipts: vec![],
+                        requests: Default::default(),
+                        gas_used: 0,
+                        blob_gas_used: 0,
+                    },
+                    state: bundle.build(),
+                };
+
+                blocks.push(ExecutedBlock::new(
+                    Arc::new(block.clone()),
+                    Arc::new(outcome),
+                    ComputedTrieData::default(),
+                ));
+            }
+
+            let start = std::time::Instant::now();
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw.save_blocks(blocks, SaveBlocksMode::Full).unwrap();
+            provider_rw.commit().unwrap();
+            let elapsed = start.elapsed();
+
+            println!(
+                "Iteration {}: {} unique accounts (base={}), {} storage slots each, 5 blocks, took {:?}",
+                iteration,
+                accounts_per_iteration,
+                base_account,
+                storage_slots_per_account,
+                elapsed
+            );
+        }
+
+        let final_info = factory.db_ref().db().info().unwrap();
+        let final_last_pgno = final_info.last_pgno();
+
+        let total_accounts = num_iterations * accounts_per_iteration;
+        let total_storage = total_accounts * storage_slots_per_account;
+        let total_blocks = num_iterations * 5;
+
+        println!("\n=== STRESS TEST UNIQUE ACCOUNTS COMPLETE ===");
+        println!("Total iterations: {}", num_iterations);
+        println!("Total blocks: {}", total_blocks);
+        println!("Total unique accounts: {}", total_accounts);
+        println!("Total storage entries: {}", total_storage);
+        println!(
+            "Pages allocated: {} (initial={}, final={})",
+            final_last_pgno - initial_last_pgno,
+            initial_last_pgno,
+            final_last_pgno
+        );
+
+        assert!(
+            final_last_pgno > initial_last_pgno,
+            "Should have allocated pages for {} unique accounts",
+            total_accounts
         );
     }
 }
