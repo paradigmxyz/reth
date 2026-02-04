@@ -144,7 +144,7 @@ where
         Box::pin(async move {
             // Check if request should be forwarded to historical endpoint
             if let Some(response) = historical.maybe_forward_request(&req).await {
-                return response
+                return response;
             }
 
             // Handle the request with the inner service
@@ -249,7 +249,7 @@ where
     /// the response if it was forwarded.
     async fn maybe_forward_request(&self, req: &Request<'_>) -> Option<MethodResponse> {
         if self.should_forward_request(req) {
-            return self.forward_to_historical(req).await
+            return self.forward_to_historical(req).await;
         }
         None
     }

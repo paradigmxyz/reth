@@ -705,7 +705,7 @@ where
             // We need to keep iterating if any updates are being drained because that might
             // indicate that more pending account updates can be promoted.
             if !self.process_account_leaf_updates()? {
-                break
+                break;
             }
         }
 

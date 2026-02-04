@@ -61,14 +61,14 @@ where
                     provider,
                     input,
                     StaticFileSegment::TransactionSenders,
-                )
+                );
             }
 
             return segments::prune_static_files(
                 provider,
                 input,
                 StaticFileSegment::TransactionSenders,
-            )
+            );
         }
         debug!(target: "pruner", "Pruning transaction senders from database.");
 
@@ -76,7 +76,7 @@ where
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transaction senders to prune");
-                return Ok(SegmentOutput::done())
+                return Ok(SegmentOutput::done());
             }
         };
         let tx_range_end = *tx_range.end();

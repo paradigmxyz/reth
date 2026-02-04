@@ -171,7 +171,7 @@ where
         if let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) {
             self.increment_by_one_precompile_cache_hits();
             if input.gas >= entry.gas_used() {
-                return entry.to_precompile_result()
+                return entry.to_precompile_result();
             }
         }
 

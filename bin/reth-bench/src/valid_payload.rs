@@ -76,7 +76,7 @@ where
             if status.is_syncing() {
                 return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
                     "invalid range: no canonical state found for parent of requested block",
-                ))
+                ));
             }
             status =
                 self.fork_choice_updated_v1(fork_choice_state, payload_attributes.clone()).await?;
@@ -113,7 +113,7 @@ where
             if status.is_syncing() {
                 return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
                     "invalid range: no canonical state found for parent of requested block",
-                ))
+                ));
             }
             status =
                 self.fork_choice_updated_v2(fork_choice_state, payload_attributes.clone()).await?;
@@ -262,12 +262,12 @@ pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
             error!(?status, ?params, "Invalid {method}",);
             return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(std::io::Error::other(
                 format!("Invalid {method}: {status:?}"),
-            ))))
+            ))));
         }
         if status.is_syncing() {
             return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
                 "invalid range: no canonical state found for parent of requested block",
-            ))
+            ));
         }
         status = provider.client().request(method, &params).await?;
     }

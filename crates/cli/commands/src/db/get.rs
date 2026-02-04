@@ -155,7 +155,7 @@ impl Command {
                             .account_block_changeset(key)?;
 
                         println!("{}", serde_json::to_string_pretty(&changesets)?);
-                        return Ok(())
+                        return Ok(());
                     };
 
                     let account = tool
@@ -169,7 +169,7 @@ impl Command {
                         error!(target: "reth::cli", "No content for the given table key.");
                     }
 
-                    return Ok(())
+                    return Ok(());
                 }
 
                 let content = tool.provider_factory.static_file_provider().find_static_file(

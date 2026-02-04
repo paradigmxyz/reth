@@ -154,7 +154,7 @@ where
             code_hash.is_none() &&
             account_changes.storage_changes.is_empty()
         {
-            continue
+            continue;
         }
 
         // Build the final account state

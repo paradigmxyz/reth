@@ -1433,7 +1433,7 @@ fn get_proof_targets(
             // If the storage is wiped, we still need to fetch the account proof.
             if storage.wiped && fetched.is_none() {
                 targets.account_targets.push(Into::<proof_v2::Target>::into(*hashed_address));
-                continue
+                continue;
             }
 
             let changed_slots = storage

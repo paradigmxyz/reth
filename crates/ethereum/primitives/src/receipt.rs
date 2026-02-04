@@ -194,7 +194,7 @@ impl<T: TxTy> RlpDecodableReceipt for Receipt<T> {
 
         // Legacy receipt, reuse initial buffer without advancing
         if header.list {
-            return Self::rlp_decode_inner(buf, T::try_from(0)?)
+            return Self::rlp_decode_inner(buf, T::try_from(0)?);
         }
 
         // Otherwise, advance the buffer and try decoding type flag followed by receipt

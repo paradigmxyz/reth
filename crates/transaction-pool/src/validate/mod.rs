@@ -462,7 +462,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
 
         // Check if the max fee per gas is underpriced.
         if maybe_replacement.max_fee_per_gas() < self.max_fee_per_gas() * (100 + price_bump) / 100 {
-            return true
+            return true;
         }
 
         let existing_max_priority_fee_per_gas =
@@ -476,7 +476,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
             replacement_max_priority_fee_per_gas <
                 existing_max_priority_fee_per_gas * (100 + price_bump) / 100
         {
-            return true
+            return true;
         }
 
         // Check max blob fee per gas
@@ -487,7 +487,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
             if replacement_max_blob_fee_per_gas <
                 existing_max_blob_fee_per_gas * (100 + price_bump) / 100
             {
-                return true
+                return true;
             }
         }
 

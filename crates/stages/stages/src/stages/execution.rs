@@ -195,7 +195,7 @@ where
         // On old nodes, if there's any receipts pruning configured, receipts are written directly
         // to database and inconsistencies are expected.
         if EitherWriter::receipts_destination(provider).is_database() {
-            return Ok(())
+            return Ok(());
         }
 
         // Get next expected receipt number
@@ -237,7 +237,7 @@ where
                 if let Some(unwind_to) = unwind_to &&
                     unwind_to <= static_file_block_num
                 {
-                    return Ok(())
+                    return Ok(());
                 }
 
                 // Otherwise, this is a real inconsistency - database has more blocks than static
@@ -247,7 +247,7 @@ where
                     &static_file_provider,
                     provider,
                     StaticFileSegment::Receipts,
-                )?)
+                )?);
             }
         }
 
@@ -287,7 +287,7 @@ where
     /// Execute the stage
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let start_block = input.next_block();
@@ -355,7 +355,7 @@ where
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),
-                })
+                });
             }
             results.push(result);
 
@@ -392,7 +392,7 @@ where
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
-                break
+                break;
             }
         }
 
@@ -430,7 +430,7 @@ where
                 // means that we didn't send the notification to ExExes
                 return Err(StageError::PostExecuteCommit(
                     "Previous post execute commit input wasn't processed",
-                ))
+                ));
             }
         }
 
@@ -444,7 +444,7 @@ where
                 let Some(reverts) =
                     state.bundle.reverts.get_mut((block_number - start_block) as usize)
                 else {
-                    break
+                    break;
                 };
 
                 // If both account history and storage history pruning is configured, clear reverts
@@ -506,7 +506,7 @@ where
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
-            })
+            });
         }
 
         self.ensure_consistency(provider, input.checkpoint.block_number, Some(unwind_to))?;

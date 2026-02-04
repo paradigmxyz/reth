@@ -998,7 +998,7 @@ where
                 let Some(highest) = highest_static_block else {
                     return Err(ProviderError::MissingHighestStaticFileBlock(
                         StaticFileSegment::AccountChangeSets,
-                    ))
+                    ));
                 };
 
                 let start = *range.start();

@@ -161,7 +161,7 @@ impl<Provider: DBProvider + BlockHashReader> StateProvider
         if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? &&
             entry.key == storage_key
         {
-            return Ok(Some(entry.value))
+            return Ok(Some(entry.value));
         }
         Ok(None)
     }

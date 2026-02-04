@@ -241,7 +241,7 @@ impl MultiProof {
                     balance: account.balance,
                     nonce: account.nonce,
                     bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
-                })
+                });
             }
             None
         };
@@ -370,7 +370,7 @@ impl DecodedMultiProof {
                     balance: account.balance,
                     nonce: account.nonce,
                     bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
-                })
+                });
             }
             None
         };
@@ -521,7 +521,7 @@ impl StorageMultiProof {
                 let TrieNode::Leaf(leaf) = TrieNode::decode(&mut &last[..])? &&
                 nibbles.ends_with(&leaf.key)
             {
-                break 'value U256::decode(&mut &leaf.value[..])?
+                break 'value U256::decode(&mut &leaf.value[..])?;
             }
             U256::ZERO
         };
@@ -570,7 +570,7 @@ impl DecodedStorageMultiProof {
             if let Some(TrieNode::Leaf(leaf)) = proof.last() &&
                 nibbles.ends_with(&leaf.key)
             {
-                break 'value U256::decode(&mut &leaf.value[..])?
+                break 'value U256::decode(&mut &leaf.value[..])?;
             }
             U256::ZERO
         };

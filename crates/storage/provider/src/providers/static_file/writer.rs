@@ -146,7 +146,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             if let Some(writer) = writer.as_ref() &&
                 writer.will_prune_on_commit()
             {
-                return true
+                return true;
             }
         }
         false
@@ -599,7 +599,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 self.writer.user_header().segment(),
                 expected_block_number,
                 next_static_file_block,
-            ))
+            ));
         }
         Ok(())
     }
@@ -622,7 +622,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         // If we're already at or before the target block, nothing to do
         if current_block_end <= last_block {
-            return Ok(())
+            return Ok(());
         }
 
         // Navigate to the correct file if the target block is in a previous file
@@ -726,7 +726,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                     // Update `SegmentHeader`
                     self.writer.user_header_mut().prune(len);
                     self.writer.prune_rows(len as usize).map_err(ProviderError::other)?;
-                    break
+                    break;
                 }
 
                 remaining_rows -= len;
@@ -804,7 +804,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                     self.writer.user_header().segment(),
                     tx_num,
                     next_tx,
-                ))
+                ));
             }
             self.writer.user_header_mut().increment_tx();
         } else {

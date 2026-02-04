@@ -176,7 +176,7 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
             "MerkleExecute stage checkpoint ({}) != AccountHashing stage checkpoint ({}), you must first complete the pipeline sync by running `reth node`",
             merkle_checkpoint.block_number,
             account_hashing_checkpoint.block_number,
-        ))
+        ));
     }
 
     if storage_hashing_checkpoint.block_number != merkle_checkpoint.block_number {
@@ -184,7 +184,7 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
             "MerkleExecute stage checkpoint ({}) != StorageHashing stage checkpoint ({}), you must first complete the pipeline sync by running `reth node`",
             merkle_checkpoint.block_number,
             storage_hashing_checkpoint.block_number,
-        ))
+        ));
     }
 
     let merkle_checkpoint_progress =
@@ -192,7 +192,7 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
     if merkle_checkpoint_progress.is_some_and(|progress| !progress.is_empty()) {
         return Err(eyre::eyre!(
             "MerkleExecute sync stage in-progress, you must first complete the pipeline sync by running `reth node`",
-        ))
+        ));
     }
 
     Ok(())

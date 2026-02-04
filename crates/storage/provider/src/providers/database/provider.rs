@@ -252,7 +252,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProviderRef::new(self)))
+            return Ok(Box::new(LatestStateProviderRef::new(self)));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -511,7 +511,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to write empty block range");
-            return Ok(())
+            return Ok(());
         }
 
         let total_start = Instant::now();
@@ -918,7 +918,7 @@ where
     while let Some((sharded_key, list)) = item {
         // If the shard does not belong to the key, break.
         if !shard_belongs_to_key(&sharded_key) {
-            break
+            break;
         }
 
         // Always delete the current shard from the database first
@@ -933,18 +933,18 @@ where
         // Keep it deleted (don't return anything for reinsertion)
         if first >= block_number {
             item = cursor.prev()?;
-            continue
+            continue;
         }
         // Case 2: This is a boundary shard (spans across the unwinding point)
         // The shard contains some blocks below and some at/above the unwinding point
         else if block_number <= sharded_key.as_ref().highest_block_number {
             // Return only the block numbers that are below the unwinding point
             // These will be reinserted to preserve the historical data
-            return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>())
+            return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>());
         }
         // Case 3: Entire shard is below the unwinding point
         // Return all block numbers for reinsertion (preserve entire shard)
-        return Ok(list.iter().collect::<Vec<_>>())
+        return Ok(list.iter().collect::<Vec<_>>());
     }
 
     // No shards found or all processed
@@ -1064,7 +1064,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         F: FnMut(H, BodyTy<N>, Range<TxNumber>) -> ProviderResult<R>,
     {
         if range.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         let len = range.end().saturating_sub(*range.start()) as usize;
@@ -1521,7 +1521,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.
-                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()))
+                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()));
             }
             Ordering::Equal => {}
         }
@@ -1637,7 +1637,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         if let Some(number) = self.convert_hash_or_number(id)? {
             let earliest_available = self.static_file_provider.earliest_history_height();
             if number < earliest_available {
-                return Err(ProviderError::BlockExpired { requested: number, earliest_available })
+                return Err(ProviderError::BlockExpired { requested: number, earliest_available });
             }
 
             let Some(header) = self.header_by_number(number)? else { return Ok(None) };
@@ -1647,7 +1647,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             // If they exist but are not indexed, we don't have enough
             // information to return the block anyways, so we return `None`.
             let Some(transactions) = self.transactions_by_block(number.into())? else {
-                return Ok(None)
+                return Ok(None);
             };
 
             let body = self
@@ -1657,7 +1657,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
                 .pop()
                 .ok_or(ProviderError::InvalidStorageOutput)?;
 
-            return Ok(Some(Self::Block::new(header, body)))
+            return Ok(Some(Self::Block::new(header, body)));
         }
 
         Ok(None)
@@ -1840,7 +1840,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
                     timestamp: header.timestamp(),
                 };
 
-                return Ok(Some((transaction, meta)))
+                return Ok(Some((transaction, meta)));
             }
         }
 
@@ -1859,7 +1859,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
                 Ok(Some(Vec::new()))
             } else {
                 self.transactions_by_tx_range(tx_range).map(Some)
-            }
+            };
         }
         Ok(None)
     }
@@ -1942,7 +1942,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
                 Ok(Some(Vec::new()))
             } else {
                 self.receipts_by_tx_range(tx_range).map(Some)
-            }
+            };
         }
         Ok(None)
     }
@@ -2273,7 +2273,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     .receipts
                     .is_some_and(|mode| mode.should_prune(block_number, tip))
             {
-                continue
+                continue;
             }
 
             // If there are new addresses to retain after this block number, track them
@@ -2289,7 +2289,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     has_contract_log_filter &&
                     !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
                 {
-                    continue
+                    continue;
                 }
 
                 receipts_writer.append_receipt(receipt_idx, receipt)?;
@@ -2614,7 +2614,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
-            return Ok(ExecutionOutcome::default())
+            return Ok(ExecutionOutcome::default());
         }
         let start_block_number = *range.start();
 
@@ -2764,7 +2764,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize> {
         if trie_updates.is_empty() {
-            return Ok(0)
+            return Ok(0);
         }
 
         // Track the number of inserted entries.
@@ -3343,7 +3343,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to append empty block range");
-            return Ok(())
+            return Ok(());
         }
 
         // Blocks are not empty, so no need to handle the case of `blocks.first()` being

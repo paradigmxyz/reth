@@ -594,7 +594,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 ctx.receipts_prune_mode
                     .is_some_and(|mode| mode.should_prune(block_number, ctx.tip))
             {
-                continue
+                continue;
             }
 
             for (i, receipt) in block.execution_outcome().receipts.iter().enumerate() {
@@ -1570,7 +1570,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             StaticFileSegment::StorageChangeSets => {
                 if EitherWriter::storage_changesets_destination(provider).is_database() {
                     debug!(target: "reth::providers::static_file", ?segment, "Skipping storage changesets segment: changesets stored in database");
-                    return false
+                    return false;
                 }
                 true
             }
@@ -1829,7 +1829,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     ?segment,
                     "Setting unwind target."
                 );
-                return Ok(Some(highest_block))
+                return Ok(Some(highest_block));
             }
 
             if let Some((db_last_key, _)) = db_cursor.last()? &&
@@ -1841,7 +1841,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     ?segment,
                     "Database has entries beyond static files, no unwind needed"
                 );
-                return Ok(None)
+                return Ok(None);
             }
         } else {
             debug!(target: "reth::providers::static_file", ?segment, "No database entries found");
@@ -1861,7 +1861,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 ?segment,
                 "Setting unwind target."
             );
-            return Ok(Some(highest_static_file_block))
+            return Ok(Some(highest_static_file_block));
         }
 
         if checkpoint_block_number < highest_static_file_block {

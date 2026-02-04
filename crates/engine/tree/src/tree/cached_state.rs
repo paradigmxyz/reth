@@ -681,7 +681,7 @@ impl ExecutionCache {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
-                continue
+                continue;
             }
 
             // If the original account had code (was a contract), we must clear the entire cache
@@ -704,12 +704,12 @@ impl ExecutionCache {
                         );
                     });
                     self.clear();
-                    return Ok(())
+                    return Ok(());
                 }
 
                 self.account_cache.remove(addr);
                 self.account_stats.decrement_size();
-                continue
+                continue;
             }
 
             // If we have an account that was modified, but it has a `None` account info, some wild
@@ -717,7 +717,7 @@ impl ExecutionCache {
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
                 trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
+                return Err(());
             };
 
             // Now we iterate over all storage and make updates to the cached storage values
@@ -834,7 +834,7 @@ impl SavedCache {
     /// `with_disable_cache_metrics(true)` to skip.
     pub(crate) fn update_metrics(&self) {
         if self.disable_cache_metrics {
-            return
+            return;
         }
         self.caches.update_metrics(&self.metrics);
     }

@@ -118,7 +118,7 @@ where
         StaticFileSegment::TransactionSenders,
     ] {
         if sf_provider.get_highest_static_file_block(segment).is_none() {
-            continue
+            continue;
         }
         let tx_clone = tx.clone();
         let provider = sf_provider.clone();
@@ -153,7 +153,7 @@ where
     while let Ok(append_result) = rx.recv() {
         if let Err(err) = append_result {
             tracing::error!(target: "reth::cli", "Error appending dummy chain: {err}");
-            return Err(err)
+            return Err(err);
         }
     }
 
@@ -166,7 +166,7 @@ where
         StaticFileSegment::TransactionSenders,
     ] {
         if sf_provider.get_highest_static_file_block(segment).is_none() {
-            continue
+            continue;
         }
         assert_eq!(
             sf_provider.latest_writer(segment)?.user_header().block_end(),

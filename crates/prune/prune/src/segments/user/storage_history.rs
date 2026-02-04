@@ -69,7 +69,7 @@ where
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No storage history to prune");
-                return Ok(SegmentOutput::done())
+                return Ok(SegmentOutput::done());
             }
         };
         let range_end = *range.end();
@@ -113,7 +113,7 @@ impl StorageHistory {
             return Ok(SegmentOutput::not_done(
                 limiter.interrupt_reason(),
                 input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            ))
+            ));
         }
 
         // The size of this map is limited by `prune_delete_limit * blocks_since_last_run /
@@ -188,7 +188,7 @@ impl StorageHistory {
             return Ok(SegmentOutput::not_done(
                 limiter.interrupt_reason(),
                 input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            ))
+            ));
         }
 
         // Deleted storage changeset keys (account addresses and storage slots) with the highest
@@ -253,7 +253,7 @@ impl StorageHistory {
             return Ok(SegmentOutput::not_done(
                 limiter.interrupt_reason(),
                 input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            ))
+            ));
         }
 
         let mut highest_deleted_storages: FxHashMap<_, _> = FxHashMap::default();

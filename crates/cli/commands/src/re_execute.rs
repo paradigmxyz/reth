@@ -132,7 +132,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 'blocks: for block in start_block..end_block {
                     if cancellation.is_cancelled() {
                         // exit if the program is being terminated
-                        break
+                        break;
                     }
 
                     let block = provider_factory
@@ -145,9 +145,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             if skip_invalid_blocks {
                                 executor = evm_config.batch_executor(db_at(block.number()));
                                 let _ = info_tx.send((block, eyre::Report::new(err)));
-                                continue
+                                continue;
                             }
-                            return Err(err.into())
+                            return Err(err.into());
                         }
                     };
 

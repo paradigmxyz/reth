@@ -899,7 +899,7 @@ impl PayloadExecutionCache {
                 if !hash_matches {
                     c.clear();
                 }
-                return Some(c.clone())
+                return Some(c.clone());
             } else if hash_matches {
                 self.metrics.execution_cache_in_use.increment(1);
             }

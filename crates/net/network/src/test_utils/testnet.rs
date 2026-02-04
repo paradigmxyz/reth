@@ -370,7 +370,7 @@ impl<C, Pool> TestnetHandle<C, Pool> {
     /// Returns once all sessions are established.
     pub async fn connect_peers(&self) {
         if self.peers.len() < 2 {
-            return
+            return;
         }
 
         // add an event stream for _each_ peer
@@ -747,7 +747,7 @@ impl NetworkEventStream {
     pub async fn next_session_closed(&mut self) -> Option<(PeerId, Option<DisconnectReason>)> {
         while let Some(ev) = self.inner.next().await {
             if let NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) = ev {
-                return Some((peer_id, reason))
+                return Some((peer_id, reason));
             }
         }
         None

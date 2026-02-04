@@ -289,7 +289,7 @@ where
                     return Err(TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip2930Disabled.into(),
-                    ))
+                    ));
                 }
             }
             EIP1559_TX_TYPE_ID => {
@@ -298,7 +298,7 @@ where
                     return Err(TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip1559Disabled.into(),
-                    ))
+                    ));
                 }
             }
             EIP4844_TX_TYPE_ID => {
@@ -307,7 +307,7 @@ where
                     return Err(TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip4844Disabled.into(),
-                    ))
+                    ));
                 }
             }
             EIP7702_TX_TYPE_ID => {
@@ -316,7 +316,7 @@ where
                     return Err(TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip7702Disabled.into(),
-                    ))
+                    ));
                 }
             }
 
@@ -336,7 +336,7 @@ where
             return Err(TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::Eip2681,
-            ))
+            ));
         }
 
         // Reject transactions over defined size to prevent DOS attacks
@@ -353,7 +353,7 @@ where
                         size: tx_input_len,
                         limit: self.max_tx_input_bytes,
                     },
-                ))
+                ));
             }
         } else {
             // ensure the size of the non-blob transaction
@@ -365,7 +365,7 @@ where
                         size: tx_size,
                         limit: self.max_tx_input_bytes,
                     },
-                ))
+                ));
             }
         }
 
@@ -374,7 +374,7 @@ where
             let max_initcode_size =
                 self.fork_tracker.max_initcode_size.load(std::sync::atomic::Ordering::Relaxed);
             if let Err(err) = transaction.ensure_max_init_code_size(max_initcode_size) {
-                return Err(TransactionValidationOutcome::Invalid(transaction, err))
+                return Err(TransactionValidationOutcome::Invalid(transaction, err));
             }
         }
 
@@ -388,7 +388,7 @@ where
                     transaction_gas_limit,
                     block_gas_limit,
                 ),
-            ))
+            ));
         }
 
         // Check individual transaction gas limit if configured
@@ -401,7 +401,7 @@ where
                     transaction_gas_limit,
                     max_tx_gas_limit,
                 ),
-            ))
+            ));
         }
 
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
@@ -409,7 +409,7 @@ where
             return Err(TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TipAboveFeeCap.into(),
-            ))
+            ));
         }
 
         // determine whether the transaction should be treated as local
@@ -429,7 +429,7 @@ where
                                 max_tx_fee_wei: max_tx_fee_wei.saturating_to(),
                                 tx_fee_cap_wei,
                             },
-                        ))
+                        ));
                     }
                 }
             }
@@ -448,7 +448,7 @@ where
                         .minimum_priority_fee
                         .expect("minimum priority fee is expected inside if statement"),
                 },
-            ))
+            ));
         }
 
         // Checks for chainid
@@ -458,7 +458,7 @@ where
             return Err(TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::ChainIdMismatch.into(),
-            ))
+            ));
         }
 
         if transaction.is_eip7702() {
@@ -467,19 +467,19 @@ where
                 return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
-                ))
+                ));
             }
 
             if transaction.authorization_list().is_none_or(|l| l.is_empty()) {
                 return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     Eip7702PoolTransactionError::MissingEip7702AuthorizationList.into(),
-                ))
+                ));
             }
         }
 
         if let Err(err) = ensure_intrinsic_gas(&transaction, &self.fork_tracker) {
-            return Err(TransactionValidationOutcome::Invalid(transaction, err))
+            return Err(TransactionValidationOutcome::Invalid(transaction, err));
         }
 
         // light blob tx pre-checks
@@ -489,7 +489,7 @@ where
                 return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
-                ))
+                ));
             }
 
             let blob_count = transaction.blob_count().unwrap_or(0);
@@ -500,7 +500,7 @@ where
                     InvalidPoolTransactionError::Eip4844(
                         Eip4844PoolTransactionError::NoEip4844Blobs,
                     ),
-                ))
+                ));
             }
 
             let max_blob_count = self.fork_tracker.max_blob_count();
@@ -513,7 +513,7 @@ where
                             permitted: max_blob_count,
                         },
                     ),
-                ))
+                ));
             }
         }
 
@@ -524,7 +524,7 @@ where
             return Err(TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::GasLimitTooHigh.into(),
-            ))
+            ));
         }
 
         Ok(transaction)
@@ -559,12 +559,12 @@ where
         if transaction.requires_nonce_check() &&
             let Err(err) = self.validate_sender_nonce(&transaction, &account)
         {
-            return TransactionValidationOutcome::Invalid(transaction, err)
+            return TransactionValidationOutcome::Invalid(transaction, err);
         }
 
         // checks for max cost not exceedng account_balance
         if let Err(err) = self.validate_sender_balance(&transaction, &account) {
-            return TransactionValidationOutcome::Invalid(transaction, err)
+            return TransactionValidationOutcome::Invalid(transaction, err);
         }
 
         // heavy blob tx validation
@@ -621,7 +621,7 @@ where
             };
 
             if !is_eip7702 {
-                return Ok(Err(InvalidTransactionError::SignerAccountHasBytecode.into()))
+                return Ok(Err(InvalidTransactionError::SignerAccountHasBytecode.into()));
             }
         }
         Ok(Ok(()))
@@ -640,7 +640,7 @@ where
                 tx: tx_nonce,
                 state: sender.nonce,
             }
-            .into())
+            .into());
         }
         Ok(())
     }
@@ -658,7 +658,7 @@ where
             return Err(InvalidTransactionError::InsufficientFunds(
                 GotExpected { got: sender.balance, expected }.into(),
             )
-            .into())
+            .into());
         }
         Ok(())
     }
@@ -676,7 +676,7 @@ where
             match transaction.take_blob() {
                 EthBlobTransactionSidecar::None => {
                     // this should not happen
-                    return Err(InvalidTransactionError::TxTypeNotSupported.into())
+                    return Err(InvalidTransactionError::TxTypeNotSupported.into());
                 }
                 EthBlobTransactionSidecar::Missing => {
                     // This can happen for re-injected blob transactions (on re-org), since the blob
@@ -688,7 +688,7 @@ where
                     } else {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
-                        ))
+                        ));
                     }
                 }
                 EthBlobTransactionSidecar::Present(sidecar) => {
@@ -701,19 +701,19 @@ where
                             if sidecar.is_eip4844() {
                                 return Err(InvalidPoolTransactionError::Eip4844(
                                     Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
-                                ))
+                                ));
                             }
                         } else if sidecar.is_eip7594() && !self.allow_7594_sidecars() {
                             return Err(InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
-                            ))
+                            ));
                         }
                     } else {
                         // EIP-7594 disabled: always reject v1 sidecars, accept v0
                         if sidecar.is_eip7594() {
                             return Err(InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::Eip7594SidecarDisallowed,
-                            ))
+                            ));
                         }
                     }
 
@@ -721,7 +721,7 @@ where
                     if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::InvalidEip4844Blob(err),
-                        ))
+                        ));
                     }
                     // Record the duration of successful blob validation as histogram
                     self.validation_metrics.blob_validation_duration.record(now.elapsed());

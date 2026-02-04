@@ -5,7 +5,10 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_rlp::{Decodable, Encodable};
-use rayon::{iter::{IntoParallelIterator, ParallelIterator}, ThreadPoolBuilder};
+use rayon::{
+    iter::{IntoParallelIterator, ParallelIterator},
+    ThreadPoolBuilder,
+};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};

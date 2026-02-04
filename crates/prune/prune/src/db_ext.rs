@@ -45,7 +45,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
                     "Pruning limit reached"
                 );
                 done = false;
-                break
+                break;
             }
 
             let key = keys.next().expect("peek() said Some");
@@ -88,7 +88,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
                     table = %T::NAME,
                     "Pruning limit reached"
                 );
-                break false
+                break false;
             }
 
             let done = self.prune_table_with_range_step(
@@ -99,7 +99,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
             )?;
 
             if done {
-                break true
+                break true;
             }
             deleted_entries += 1;
         };
@@ -158,7 +158,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
                     table = %T::NAME,
                     "Pruning limit reached"
                 );
-                break false
+                break false;
             }
 
             let Some(res) = walker.next() else { break true };

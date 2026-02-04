@@ -327,7 +327,7 @@ where
                 stats: self.stats.clone(),
                 storage_calculator: self.storage_calculator.clone(),
                 cached_storage_roots: self.cached_storage_roots.clone(),
-            }
+            };
         }
 
         // If the address didn't have a job dispatched for it then we can assume it has no targets,
@@ -336,7 +336,7 @@ where
         // If the root is already calculated then just use it directly
         if let Some(root) = self.cached_storage_roots.get(&hashed_address) {
             self.stats.borrow_mut().from_cache_count += 1;
-            return AsyncAccountDeferredValueEncoder::FromCache { account, root: *root }
+            return AsyncAccountDeferredValueEncoder::FromCache { account, root: *root };
         }
 
         // Compute storage root synchronously using the shared calculator

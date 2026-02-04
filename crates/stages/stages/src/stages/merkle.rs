@@ -126,7 +126,7 @@ impl MerkleStage {
             provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
 
         if buf.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
 
         let (checkpoint, _) = MerkleCheckpoint::from_compact(&buf, buf.len());
@@ -178,7 +178,7 @@ where
         let (threshold, incremental_threshold) = match self {
             Self::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-                return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
+                return Ok(ExecOutput::done(StageCheckpoint::new(input.target())));
             }
             Self::Execution { rebuild_threshold, incremental_threshold } => {
                 (*rebuild_threshold, *incremental_threshold)
@@ -289,7 +289,7 @@ where
                             .checkpoint()
                             .with_entities_stage_checkpoint(entities_checkpoint),
                         done: false,
-                    })
+                    });
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
                     provider.write_trie_updates(updates)?;
@@ -365,7 +365,7 @@ where
         let range = input.unwind_block_range();
         if matches!(self, Self::Execution { .. }) {
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) });
         }
 
         let mut entities_checkpoint =
@@ -384,7 +384,7 @@ where
             return Ok(UnwindOutput {
                 checkpoint: StageCheckpoint::new(input.unwind_to)
                     .with_entities_stage_checkpoint(entities_checkpoint),
-            })
+            });
         }
 
         // Unwind trie only if there are transitions
@@ -780,7 +780,7 @@ mod tests {
                         rev_changeset_walker.next().transpose().unwrap()
                     {
                         if bn_address.block_number() < target_block {
-                            break
+                            break;
                         }
 
                         tree.entry(keccak256(bn_address.address()))
@@ -811,7 +811,7 @@ mod tests {
                         rev_changeset_walker.next().transpose().unwrap()
                     {
                         if block_number < target_block {
-                            break
+                            break;
                         }
 
                         if let Some(acc) = account_before_tx.info {
