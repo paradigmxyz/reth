@@ -1102,8 +1102,9 @@ impl SparseTrieExt for ParallelSparseTrie {
         // For state trie with finite excess memory, use fast subtrie-based pruning.
         // This is O(256) instead of O(millions) - clears entire subtries rather than DFS.
         if let reth_trie_sparse::hot_accounts::TrieKind::State { excess_memory } = kind {
-            self.prune_by_subtrie(excess_memory, config.hot_accounts);
-            return PruneTrieOutcome::default();
+            let (_bytes_freed, _subtries_cleared, pruned_roots) =
+                self.prune_by_subtrie(excess_memory, config.hot_accounts);
+            return PruneTrieOutcome { stats, pruned_roots };
         }
 
         // Track bytes freed during pruning - stop once we've freed enough (state trie only)
@@ -1416,38 +1417,38 @@ impl ParallelSparseTrie {
         &mut self,
         excess_memory: usize,
         hot_accounts: &reth_trie_sparse::hot_accounts::HotAccounts,
-    ) -> (usize, usize) {
+    ) -> (usize, usize, Vec<Nibbles>) {
         use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
         if excess_memory == 0 {
-            return (0, 0);
+            return (0, 0, Vec::new());
         }
 
         // Decay heat for subtries not modified this cycle
         self.subtrie_modifications.decay_and_reset();
 
-        // Collect (index, memory_size, is_hot) for each revealed subtrie in parallel
-        let subtrie_info: Vec<(usize, usize, bool)> = (0..NUM_LOWER_SUBTRIES)
+        // Collect (index, memory_size, is_hot, path) for each revealed subtrie in parallel
+        let subtrie_info: Vec<(usize, usize, bool, Nibbles)> = (0..NUM_LOWER_SUBTRIES)
             .into_par_iter()
             .filter_map(|idx| {
                 self.lower_subtries[idx].as_revealed_ref().map(|subtrie| {
                     let mem = subtrie.memory_size();
                     // Check if this subtrie's path prefix leads to a hot account
                     let is_hot = hot_accounts.any_starts_with(&subtrie.path);
-                    (idx, mem, is_hot)
+                    (idx, mem, is_hot, subtrie.path)
                 })
             })
             .collect();
 
         // Sort by: cold first (is_hot=false < is_hot=true), then by size descending
-        let mut subtries: Vec<(usize, usize, bool)> = subtrie_info;
-        subtries.sort_unstable_by_key(|(_, mem, is_hot)| (*is_hot, std::cmp::Reverse(*mem)));
+        let mut subtries = subtrie_info;
+        subtries.sort_unstable_by_key(|(_, mem, is_hot, _)| (*is_hot, std::cmp::Reverse(*mem)));
 
         // Find the cutoff point: how many subtries to clear
         let mut cumulative = 0usize;
         let cutoff = subtries
             .iter()
-            .position(|(_, size, _)| {
+            .position(|(_, size, _, _)| {
                 if cumulative >= excess_memory {
                     return true;
                 }
@@ -1457,11 +1458,14 @@ impl ParallelSparseTrie {
             .unwrap_or(subtries.len());
 
         let to_clear = &subtries[..cutoff];
-        let bytes_freed: usize = to_clear.iter().map(|(_, size, _)| size).sum();
+        let bytes_freed: usize = to_clear.iter().map(|(_, size, _, _)| size).sum();
         let subtries_cleared = to_clear.len();
 
+        // Collect paths before clearing
+        let pruned_roots: Vec<Nibbles> = to_clear.iter().map(|(_, _, _, path)| *path).collect();
+
         // Clear in parallel - dropping nodes can be expensive
-        to_clear.par_iter().for_each(|(idx, _, _)| {
+        to_clear.par_iter().for_each(|(idx, _, _, _)| {
             // SAFETY: Each index is unique (from 0..NUM_LOWER_SUBTRIES filter_map),
             // so parallel access to different indices is safe.
             unsafe {
@@ -1471,7 +1475,7 @@ impl ParallelSparseTrie {
             }
         });
 
-        (bytes_freed, subtries_cleared)
+        (bytes_freed, subtries_cleared, pruned_roots)
     }
 
     /// Returns true if retaining updates is enabled for the overall trie.
