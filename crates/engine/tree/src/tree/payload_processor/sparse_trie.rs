@@ -10,7 +10,7 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::{IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
+use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use reth_primitives_traits::{Account, ParallelBridgeBuffered};
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -533,7 +533,7 @@ where
     fn process_leaf_updates(&mut self) -> SparseTrieResult<()> {
         self.pending_updates = 0;
 
-        // Start with processing all storage updates in parallel.
+        // Process all storage updates in parallel.
         let storage_results = self
             .storage_updates
             .iter_mut()
@@ -543,7 +543,7 @@ where
 
                 (address, updates, fetched, trie)
             })
-            .par_bridge()
+            .par_bridge_buffered()
             .map(|(address, updates, mut fetched, mut trie)| {
                 let mut targets = Vec::new();
 
