@@ -4181,6 +4181,30 @@ mod tests {
         assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
 
         provider_rw.commit().unwrap();
+
+        // Verify data persisted correctly by reading in a new transaction
+        {
+            let provider = factory.provider().unwrap();
+
+            // Verify AccountsTrie
+            let mut cursor =
+                provider.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
+            let accounts_count = cursor.walk(None).unwrap().count();
+            // We started with 2 accounts, deleted 1, added 1 = 2 remaining
+            assert_eq!(accounts_count, 2, "AccountsTrie should have 2 entries after commit");
+
+            // Verify StoragesTrie
+            let mut cursor =
+                provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap();
+            let storage_count = cursor.walk(None).unwrap().count();
+            // address1 had 2 entries, deleted 1 = 1 remaining; address2 was wiped = 0
+            assert_eq!(storage_count, 1, "StoragesTrie should have 1 entry after commit");
+
+            println!(
+                "Post-commit verification: AccountsTrie={}, StoragesTrie={}",
+                accounts_count, storage_count
+            );
+        }
     }
 
     #[test]
