@@ -82,6 +82,7 @@ where
             &result.receipts,
             &result.requests,
             receipt_root_bloom,
+            Some(result.gas_used),
         )
     }
 }
