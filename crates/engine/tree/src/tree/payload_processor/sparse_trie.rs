@@ -604,11 +604,9 @@ where
             num_account_updates > 100 || num_storage_updates > 100,
             || {
                 let _guard = parent_span.clone().entered();
-                let _span = debug_span!(
-                    "process_account_leaf_updates",
-                    num_updates = account_updates.len()
-                )
-                .entered();
+                let _span =
+                    debug_span!("process_account_leaf_updates", num_updates = num_account_updates)
+                        .entered();
 
                 account_trie.update_leaves(account_updates, |target, min_len| {
                     match fetched_account_targets.entry(target) {
@@ -630,7 +628,9 @@ where
             },
             || {
                 let _guard = parent_span.clone().entered();
-                let _updates_span = debug_span!("process_storage_leaf_updates").entered();
+                let _updates_span =
+                    debug_span!("process_storage_leaf_updates", num_updates = num_storage_updates)
+                        .entered();
 
                 for (address, updates) in storage_updates {
                     if updates.is_empty() {
