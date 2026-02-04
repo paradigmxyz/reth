@@ -55,7 +55,9 @@ pub use builder::{ProviderFactoryBuilder, ReadOnlyConfig};
 
 mod metrics;
 
+#[cfg(feature = "edge")]
 mod parallel_writes;
+#[cfg(feature = "edge")]
 pub use parallel_writes::{ParallelWriteTimings, PreparedStateWrites, PreparedStorageWrite};
 
 mod chain;

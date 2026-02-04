@@ -42,12 +42,19 @@ pub(crate) enum Action {
     InsertTransactionBlocks,
     InsertTransactionSenders,
     InsertTransactionHashNumbers,
+    #[cfg(feature = "edge")]
     EdgeWritePlainAccounts,
+    #[cfg(feature = "edge")]
     EdgeWriteBytecodes,
+    #[cfg(feature = "edge")]
     EdgeWritePlainStorage,
+    #[cfg(feature = "edge")]
     EdgeWriteHashedAccounts,
+    #[cfg(feature = "edge")]
     EdgeWriteHashedStorages,
+    #[cfg(feature = "edge")]
     EdgeWriteAccountTrie,
+    #[cfg(feature = "edge")]
     EdgeWriteStorageTrie,
 }
 
@@ -203,6 +210,7 @@ pub(crate) struct CommitTimings {
 }
 
 /// Timings collected during edge mode parallel writes.
+#[cfg(feature = "edge")]
 #[derive(Debug, Default)]
 pub(crate) struct EdgeWriteTimings {
     /// Duration of preprocessing (merging states, sorting, converting)
@@ -237,12 +245,19 @@ impl DatabaseProviderMetrics {
             Action::InsertTransactionHashNumbers => {
                 self.insert_transaction_hash_numbers.record(duration)
             }
+            #[cfg(feature = "edge")]
             Action::EdgeWritePlainAccounts => self.edge_write_plain_accounts.record(duration),
+            #[cfg(feature = "edge")]
             Action::EdgeWriteBytecodes => self.edge_write_bytecodes.record(duration),
+            #[cfg(feature = "edge")]
             Action::EdgeWritePlainStorage => self.edge_write_plain_storage.record(duration),
+            #[cfg(feature = "edge")]
             Action::EdgeWriteHashedAccounts => self.edge_write_hashed_accounts.record(duration),
+            #[cfg(feature = "edge")]
             Action::EdgeWriteHashedStorages => self.edge_write_hashed_storages.record(duration),
+            #[cfg(feature = "edge")]
             Action::EdgeWriteAccountTrie => self.edge_write_account_trie.record(duration),
+            #[cfg(feature = "edge")]
             Action::EdgeWriteStorageTrie => self.edge_write_storage_trie.record(duration),
         }
     }
@@ -288,6 +303,7 @@ impl DatabaseProviderMetrics {
     }
 
     /// Records all edge mode parallel write timings.
+    #[cfg(feature = "edge")]
     pub(crate) fn record_edge_writes(&self, timings: &EdgeWriteTimings) {
         self.edge_write_plain_accounts.record(timings.plain_accounts);
         self.edge_write_plain_accounts_last.set(timings.plain_accounts.as_secs_f64());

@@ -620,8 +620,11 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
             }
 
             // Pre-compute merged hashed state and trie updates before write section
+            #[cfg(feature = "edge")]
             let use_parallel_writes =
                 save_mode.with_state() && self.cached_storage_settings().is_edge_mode();
+            #[cfg(not(feature = "edge"))]
+            let use_parallel_writes = false;
             let (merged_hashed_state, merged_trie) = if save_mode.with_state() {
                 let start = Instant::now();
                 let merged_hashed_state: Arc<HashedPostStateSorted> =
@@ -682,6 +685,7 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 // - Thread 5: HashedStorages
                 // - Thread 6: AccountsTrie
                 // - Thread 7: StoragesTrie
+                #[cfg(feature = "edge")]
                 if use_parallel_writes {
                     let mut edge_timings = metrics::EdgeWriteTimings::default();
                     let total_start = Instant::now();
@@ -796,7 +800,9 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                         edge_timings.hashed_accounts.max(edge_timings.hashed_storages);
                     timings.write_trie_updates =
                         edge_timings.account_trie.max(edge_timings.storage_trie);
-                } else {
+                }
+
+                if !use_parallel_writes {
                     // Sequential path for non-edge mode
                     for block in blocks.iter() {
                         let recovered_block = block.recovered_block();
