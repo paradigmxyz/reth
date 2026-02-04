@@ -32,12 +32,15 @@ use std::{
     task::{ready, Context, Poll},
     thread,
 };
+use thread_priority::{
+    RealtimeThreadSchedulePolicy, ThreadBuilder, ThreadPriority, ThreadSchedulePolicy,
+};
 use tokio::{
     runtime::Handle,
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use tracing_futures::Instrument;
 
 pub mod metrics;
@@ -92,6 +95,35 @@ where
             f()
         })
         .unwrap_or_else(|e| panic!("failed to spawn scoped thread {name:?}: {e}"))
+}
+
+/// Spawns an OS thread with realtime round-robin scheduling policy and max priority.
+///
+/// This function is similar to [`spawn_os_thread`] but additionally sets the thread to use
+/// realtime round-robin scheduling with maximum priority. This is useful for latency-critical
+/// tasks like EVM execution where the thread should have priority over other tasks.
+///
+/// If setting the thread priority fails, a warning is logged but the thread continues to run.
+#[track_caller]
+pub fn spawn_os_thread_with_priority<F, T>(name: &str, f: F) -> thread::JoinHandle<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let handle = Handle::try_current().ok();
+    let thread_name = name.to_string();
+    ThreadBuilder::default()
+        .name(&thread_name)
+        .policy(ThreadSchedulePolicy::Realtime(RealtimeThreadSchedulePolicy::RoundRobin))
+        .priority(ThreadPriority::Max)
+        .spawn(move |result| {
+            if let Err(err) = result {
+                warn!(target: "reth::tasks", ?err, "Failed to set thread priority for {}", thread_name);
+            }
+            let _guard = handle.as_ref().map(Handle::enter);
+            f()
+        })
+        .unwrap_or_else(|e| panic!("failed to spawn thread {name:?}: {e}"))
 }
 
 /// A type that can spawn tasks.
