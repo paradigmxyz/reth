@@ -128,16 +128,18 @@ impl<A, S> SparseStateTrie<A, S> {
     }
 }
 
+impl SparseStateTrie {
+    /// Create new [`SparseStateTrie`] with the default trie implementation.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 impl<A, S> SparseStateTrie<A, S>
 where
     A: SparseTrieTrait + Default,
     S: SparseTrieTrait + Default + Clone,
 {
-    /// Create new [`SparseStateTrie`]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Returns mutable reference to account trie.
     pub const fn trie_mut(&mut self) -> &mut RevealableSparseTrie<A> {
         &mut self.state

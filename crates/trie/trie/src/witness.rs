@@ -22,7 +22,7 @@ use reth_execution_errors::{
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
-    ParallelSparseTrie, SparseStateTrie,
+    SparseStateTrie,
 };
 use std::sync::mpsc;
 
@@ -151,7 +151,7 @@ where
             ProofTrieNodeProviderFactory::new(self.trie_cursor_factory, self.hashed_cursor_factory),
             tx,
         );
-        let mut sparse_trie: SparseStateTrie = SparseStateTrie::new();
+        let mut sparse_trie = SparseStateTrie::new();
         sparse_trie.reveal_multiproof(multiproof)?;
 
         // Attempt to update state trie to gather additional information for the witness.
@@ -161,12 +161,12 @@ where
             // Update storage trie first.
             let provider = blinded_provider_factory.storage_node_provider(hashed_address);
             let storage = state.storages.get(&hashed_address);
-            let storage_trie: &mut ParallelSparseTrie = sparse_trie
-                .storage_trie_mut(&hashed_address)
-                .ok_or(SparseStateTrieErrorKind::SparseStorageTrie(
+            let storage_trie = sparse_trie.storage_trie_mut(&hashed_address).ok_or(
+                SparseStateTrieErrorKind::SparseStorageTrie(
                     hashed_address,
                     SparseTrieErrorKind::Blind,
-                ))?;
+                ),
+            )?;
             for hashed_slot in hashed_slots.into_iter().sorted_unstable() {
                 let storage_nibbles = Nibbles::unpack(hashed_slot);
                 let maybe_leaf_value = storage
@@ -175,23 +175,13 @@ where
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
 
                 if let Some(value) = maybe_leaf_value {
-                    storage_trie.update_leaf(storage_nibbles, value, &provider).map_err(
-                        |err: reth_execution_errors::SparseTrieError| {
-                            SparseStateTrieErrorKind::SparseStorageTrie(
-                                hashed_address,
-                                err.into_kind(),
-                            )
-                        },
-                    )?;
+                    storage_trie.update_leaf(storage_nibbles, value, &provider).map_err(|err| {
+                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
+                    })?;
                 } else {
-                    storage_trie.remove_leaf(&storage_nibbles, &provider).map_err(
-                        |err: reth_execution_errors::SparseTrieError| {
-                            SparseStateTrieErrorKind::SparseStorageTrie(
-                                hashed_address,
-                                err.into_kind(),
-                            )
-                        },
-                    )?;
+                    storage_trie.remove_leaf(&storage_nibbles, &provider).map_err(|err| {
+                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
+                    })?;
                 }
             }
 
