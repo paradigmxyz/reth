@@ -148,9 +148,20 @@ impl Command {
             );
         }
 
-        // Set up waiter based on configured options (duration takes precedence)
+        // Set up waiter based on configured options
+        // When both are set: wait at least wait_time, and also wait for persistence if needed
         let mut waiter = match (self.wait_time, self.wait_for_persistence) {
-            (Some(duration), _) => Some(PersistenceWaiter::with_duration(duration)),
+            (Some(duration), true) => {
+                let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
+                let sub = setup_persistence_subscription(ws_url).await?;
+                Some(PersistenceWaiter::with_duration_and_subscription(
+                    duration,
+                    sub,
+                    self.persistence_threshold,
+                    PERSISTENCE_CHECKPOINT_TIMEOUT,
+                ))
+            }
+            (Some(duration), false) => Some(PersistenceWaiter::with_duration(duration)),
             (None, true) => {
                 let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
                 let sub = setup_persistence_subscription(ws_url).await?;

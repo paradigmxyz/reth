@@ -2,7 +2,11 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
+use alloy_primitives::{
+    keccak256,
+    map::{AddressMap, B256Map, HashMap},
+    Address, B256, U256,
+};
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
@@ -308,10 +312,11 @@ where
 {
     let capacity = alloc.size_hint().1.unwrap_or(0);
     let mut state_init: BundleStateInit =
-        HashMap::with_capacity_and_hasher(capacity, Default::default());
-    let mut reverts_init = HashMap::with_capacity_and_hasher(capacity, Default::default());
-    let mut contracts: HashMap<B256, Bytecode> =
-        HashMap::with_capacity_and_hasher(capacity, Default::default());
+        AddressMap::with_capacity_and_hasher(capacity, Default::default());
+    let mut reverts_init: AddressMap<_> =
+        AddressMap::with_capacity_and_hasher(capacity, Default::default());
+    let mut contracts: B256Map<Bytecode> =
+        B256Map::with_capacity_and_hasher(capacity, Default::default());
 
     for (address, account) in alloc {
         let bytecode_hash = if let Some(code) = &account.code {
@@ -340,7 +345,7 @@ where
                         let value = U256::from_be_bytes(value.0);
                         (*key, (U256::ZERO, value))
                     })
-                    .collect::<HashMap<_, _>>()
+                    .collect::<B256Map<_>>()
             })
             .unwrap_or_default();
 
@@ -960,8 +965,8 @@ mod tests {
             let provider = factory.provider().unwrap();
             let tx = provider.tx_ref();
             (
-                collect_table_entries::<Arc<DatabaseEnv>, tables::AccountsHistory>(tx).unwrap(),
-                collect_table_entries::<Arc<DatabaseEnv>, tables::StoragesHistory>(tx).unwrap(),
+                collect_table_entries::<DatabaseEnv, tables::AccountsHistory>(tx).unwrap(),
+                collect_table_entries::<DatabaseEnv, tables::StoragesHistory>(tx).unwrap(),
             )
         };
 

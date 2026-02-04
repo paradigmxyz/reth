@@ -2,7 +2,7 @@
 
 use core::fmt::Debug;
 
-use alloc::{borrow::Cow, vec, vec::Vec};
+use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     map::{B256Map, HashMap, HashSet},
     B256,
@@ -40,17 +40,30 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// # Returns
     ///
-    /// Self if successful, or an error if revealing fails.
+    /// `Ok(())` if successful, or an error if revealing fails.
     ///
     /// # Panics
     ///
     /// May panic if the trie is not new/cleared, and has already revealed nodes.
-    fn with_root(
-        self,
+    fn set_root(
+        &mut self,
         root: TrieNode,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
-    ) -> SparseTrieResult<Self>;
+    ) -> SparseTrieResult<()>;
+
+    /// Configures the trie to have the given root node revealed.
+    ///
+    /// See [`Self::set_root`] for more details.
+    fn with_root(
+        mut self,
+        root: TrieNode,
+        masks: Option<BranchNodeMasks>,
+        retain_updates: bool,
+    ) -> SparseTrieResult<Self> {
+        self.set_root(root, masks, retain_updates)?;
+        Ok(self)
+    }
 
     /// Configures the trie to retain information about updates.
     ///
@@ -61,11 +74,15 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// # Arguments
     ///
     /// * `retain_updates` - Whether to track updates
+    fn set_updates(&mut self, retain_updates: bool);
+
+    /// Configures the trie to retain information about updates.
     ///
-    /// # Returns
-    ///
-    /// Self for method chaining.
-    fn with_updates(self, retain_updates: bool) -> Self;
+    /// See [`Self::set_updates`] for more details.
+    fn with_updates(mut self, retain_updates: bool) -> Self {
+        self.set_updates(retain_updates);
+        self
+    }
 
     /// Reserves capacity for additional trie nodes.
     ///
@@ -85,7 +102,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         node: TrieNode,
         masks: Option<BranchNodeMasks>,
     ) -> SparseTrieResult<()> {
-        self.reveal_nodes(vec![ProofTrieNode { path, node, masks }])
+        self.reveal_nodes(&mut [ProofTrieNode { path, node, masks }])
     }
 
     /// Reveals one or more trie nodes if they have not been revealed before.
@@ -102,7 +119,12 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// # Returns
     ///
     /// `Ok(())` if successful, or an error if any of the nodes was not revealed.
-    fn reveal_nodes(&mut self, nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()>;
+    ///
+    /// # Note
+    ///
+    /// The implementation may modify the input nodes. A common thing to do is [`std::mem::replace`]
+    /// each node with [`TrieNode::EmptyRoot`] to avoid cloning.
+    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()>;
 
     /// Updates the value of a leaf node at the specified path.
     ///

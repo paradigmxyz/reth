@@ -45,10 +45,25 @@ where
         PrunePurpose::User
     }
 
-    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
+    #[instrument(
+        name = "SenderRecovery::prune",
+        target = "pruner",
+        skip(self, provider),
+        ret(level = "trace")
+    )]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         if EitherWriterDestination::senders(provider).is_static_file() {
             debug!(target: "pruner", "Pruning transaction senders from static files.");
+
+            if self.mode.is_full() {
+                debug!(target: "pruner", "PruneMode::Full: deleting all transaction senders static files.");
+                return segments::delete_static_files_segment(
+                    provider,
+                    input,
+                    StaticFileSegment::TransactionSenders,
+                )
+            }
+
             return segments::prune_static_files(
                 provider,
                 input,

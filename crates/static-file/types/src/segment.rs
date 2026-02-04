@@ -5,6 +5,7 @@ use core::{
     ops::{Range, RangeInclusive},
     str::FromStr,
 };
+use reth_stages_types::StageId;
 use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 use strum::{EnumIs, EnumString};
 
@@ -77,6 +78,20 @@ impl StaticFileSegment {
             Self::TransactionSenders => "transaction-senders",
             Self::AccountChangeSets => "account-change-sets",
             Self::StorageChangeSets => "storage-change-sets",
+        }
+    }
+
+    /// Returns a short string representation of the segment.
+    ///
+    /// Linux threads have a length limit of 15 characters: <https://man7.org/linux/man-pages/man3/pthread_setname_np.3.html#DESCRIPTION>.
+    pub const fn as_short_str(&self) -> &'static str {
+        match self {
+            Self::Headers => "headers",
+            Self::Transactions => "transactions",
+            Self::Receipts => "receipts",
+            Self::TransactionSenders => "tx-senders",
+            Self::AccountChangeSets => "account-changes",
+            Self::StorageChangeSets => "storage-changes",
         }
     }
 
@@ -197,6 +212,18 @@ impl StaticFileSegment {
     /// that the user header contains a block range or a max block
     pub const fn is_block_or_change_based(&self) -> bool {
         self.is_block_based() || self.is_change_based()
+    }
+
+    /// Maps this segment to the [`StageId`] responsible for it.
+    pub const fn to_stage_id(&self) -> StageId {
+        match self {
+            Self::Headers => StageId::Headers,
+            Self::Transactions => StageId::Bodies,
+            Self::Receipts | Self::AccountChangeSets | Self::StorageChangeSets => {
+                StageId::Execution
+            }
+            Self::TransactionSenders => StageId::SenderRecovery,
+        }
     }
 }
 
@@ -831,6 +858,17 @@ mod tests {
                 StaticFileSegment::StorageChangeSets => "StorageChangeSets",
             };
             assert_eq!(ser, format!("\"{expected_str}\""));
+        }
+    }
+
+    #[test]
+    fn test_static_file_segment_as_short_str() {
+        for segment in StaticFileSegment::iter() {
+            assert!(
+                segment.as_short_str().len() <= 15,
+                "{segment} segment name is too long: {}",
+                segment.as_short_str()
+            );
         }
     }
 }

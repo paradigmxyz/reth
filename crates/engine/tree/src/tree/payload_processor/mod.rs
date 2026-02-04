@@ -16,7 +16,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use executor::WorkloadExecutor;
-use metrics::Counter;
+use metrics::{Counter, Histogram};
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
@@ -39,7 +39,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie};
+use reth_trie_sparse::{RevealableSparseTrie, SparseStateTrie};
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
     collections::BTreeMap,
@@ -235,8 +235,7 @@ where
             + 'static,
     {
         // start preparing transactions immediately
-        let (prewarm_rx, execution_rx, transaction_count_hint) =
-            self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
 
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
@@ -260,7 +259,6 @@ where
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
-                transaction_count_hint,
                 provider_builder.clone(),
                 None, // Don't send proof targets when BAL is present
                 Some(bal),
@@ -271,7 +269,6 @@ where
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
-                transaction_count_hint,
                 provider_builder.clone(),
                 Some(to_multi_proof.clone()),
                 None,
@@ -355,10 +352,10 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
         // This path doesn't use multiproof, so V2 proofs flag doesn't matter
         let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None, bal, false);
+            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal, false);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
@@ -376,19 +373,15 @@ where
     ) -> (
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
-        usize,
     ) {
-        let (transactions, convert) = transactions.into();
-        let transactions = transactions.into_par_iter();
-        let transaction_count_hint = transactions.len();
-
         let (ooo_tx, ooo_rx) = mpsc::channel();
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
 
         // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
-        self.executor.spawn_blocking(move || {
-            transactions.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
+        rayon::spawn(move || {
+            let (transactions, convert) = transactions.into();
+            transactions.into_par_iter().enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
                 let tx = convert(tx);
                 let tx = tx.map(|tx| {
                     let (tx_env, tx) = tx.into_parts();
@@ -424,16 +417,14 @@ where
             }
         });
 
-        (prewarm_rx, execute_rx, transaction_count_hint)
+        (prewarm_rx, execute_rx)
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
-    #[expect(clippy::too_many_arguments)]
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
         mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
-        transaction_count_hint: usize,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
@@ -468,7 +459,6 @@ where
             self.execution_cache.clone(),
             prewarm_ctx,
             to_multi_proof,
-            transaction_count_hint,
             self.prewarm_max_concurrency,
         );
 
@@ -523,20 +513,27 @@ where
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
-        let span = Span::current();
         let disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
+        let chunk_size =
+            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
 
         self.executor.spawn_blocking(move || {
-            let _enter = span.entered();
+            let _enter = debug_span!(target: "engine::tree::payload_processor", "sparse_trie_task")
+                .entered();
 
             // Reuse a stored SparseStateTrie if available, applying continuation logic.
             // If this payload's parent state root matches the preserved trie's anchor,
             // we can reuse the pruned trie structure. Otherwise, we clear the trie but
             // keep allocations.
-            let sparse_state_trie = preserved_sparse_trie
-                .take()
+            let start = Instant::now();
+            let preserved = preserved_sparse_trie.take();
+            trie_metrics
+                .sparse_trie_cache_wait_duration_histogram
+                .record(start.elapsed().as_secs_f64());
+
+            let sparse_state_trie = preserved
                 .map(|preserved| preserved.into_trie_for(parent_state_root))
                 .unwrap_or_else(|| {
                     debug!(
@@ -562,11 +559,12 @@ where
                     sparse_state_trie,
                 ))
             } else {
-                SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_cleared_trie(
+                SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_trie(
                     from_multi_proof,
                     proof_worker_handle,
                     trie_metrics.clone(),
-                    ClearedSparseStateTrie::from_state_trie(sparse_state_trie),
+                    sparse_state_trie,
+                    chunk_size,
                 ))
             };
 
@@ -589,11 +587,14 @@ where
                     target: "engine::tree::payload_processor",
                     "State root receiver dropped, clearing trie"
                 );
-                let trie = task.into_cleared_trie(
+                let (trie, deferred) = task.into_cleared_trie(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
                 guard.store(PreservedSparseTrie::cleared(trie));
+                // Drop guard before deferred to release lock before expensive deallocations
+                drop(guard);
+                drop(deferred);
                 return;
             }
 
@@ -601,9 +602,9 @@ where
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            if let Some(state_root) = computed_state_root {
+            let deferred = if let Some(state_root) = computed_state_root {
                 let start = std::time::Instant::now();
-                let trie = task.into_trie_for_reuse(
+                let (trie, deferred) = task.into_trie_for_reuse(
                     prune_depth,
                     max_storage_tries,
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
@@ -613,17 +614,22 @@ where
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
                 guard.store(PreservedSparseTrie::anchored(trie, state_root));
+                deferred
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
                     "State root computation failed, clearing trie"
                 );
-                let trie = task.into_cleared_trie(
+                let (trie, deferred) = task.into_cleared_trie(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
                 guard.store(PreservedSparseTrie::cleared(trie));
-            }
+                deferred
+            };
+            // Drop guard before deferred to release lock before expensive deallocations
+            drop(guard);
+            drop(deferred);
         });
     }
 
@@ -869,6 +875,7 @@ impl PayloadExecutionCache {
         let cache = self.inner.read();
 
         let elapsed = start.elapsed();
+        self.metrics.execution_cache_wait_duration.record(elapsed.as_secs_f64());
         if elapsed.as_millis() > 5 {
             warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
         }
@@ -946,6 +953,8 @@ pub(crate) struct ExecutionCacheMetrics {
     /// Counter for when the execution cache was unavailable because other threads
     /// (e.g., prewarming) are still using it.
     pub(crate) execution_cache_in_use: Counter,
+    /// Time spent waiting for execution cache mutex to become available.
+    pub(crate) execution_cache_wait_duration: Histogram,
 }
 
 /// EVM context required to execute a block.
@@ -961,6 +970,10 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used for sparse trie continuation: if the preserved trie's anchor matches this,
     /// the trie can be reused directly.
     pub parent_state_root: B256,
+    /// Number of transactions in the block.
+    /// Used to determine parallel worker count for prewarming.
+    /// A value of 0 indicates the count is unknown.
+    pub transaction_count: usize,
 }
 
 impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
@@ -973,6 +986,7 @@ where
             hash: Default::default(),
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
+            transaction_count: 0,
         }
     }
 }

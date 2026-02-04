@@ -86,7 +86,7 @@ where
         mut self,
         components: impl CliComponentsBuilder<N>,
         launcher: impl AsyncFnOnce(
-            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>,
             Ext,
         ) -> Result<()>,
     ) -> Result<()>
@@ -132,7 +132,7 @@ pub(crate) fn run_commands_with<C, Ext, Rpc, N, SubCmd>(
     runner: CliRunner,
     components: impl CliComponentsBuilder<N>,
     launcher: impl AsyncFnOnce(
-        WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+        WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>,
         Ext,
     ) -> Result<()>,
 ) -> Result<()>

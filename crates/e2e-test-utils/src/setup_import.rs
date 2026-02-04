@@ -114,22 +114,22 @@ pub async fn setup_engine_with_chain_import(
 
         // Initialize the database using init_db (same as CLI import command)
         let db_args = reth_node_core::args::DatabaseArgs::default().database_args();
-        let db_env = reth_db::init_db(&db_path, db_args)?;
-        let db = Arc::new(db_env);
+        let db = reth_db::init_db(&db_path, db_args)?;
 
         // Create a provider factory with the initialized database (use regular DB, not
         // TempDatabase) We need to specify the node types properly for the adapter
-        let provider_factory = ProviderFactory::<
-            NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
-        >::new(
-            db.clone(),
-            chain_spec.clone(),
-            reth_provider::providers::StaticFileProvider::read_write(static_files_path.clone())?,
-            reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path)
-                .with_default_tables()
-                .build()
-                .unwrap(),
-        )?;
+        let provider_factory =
+            ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, DatabaseEnv>>::new(
+                db.clone(),
+                chain_spec.clone(),
+                reth_provider::providers::StaticFileProvider::read_write(
+                    static_files_path.clone(),
+                )?,
+                reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path)
+                    .with_default_tables()
+                    .build()
+                    .unwrap(),
+            )?;
 
         // Initialize genesis if needed
         reth_db_common::init::init_genesis(&provider_factory)?;
@@ -320,11 +320,10 @@ mod tests {
         // Import the chain
         {
             let db_args = reth_node_core::args::DatabaseArgs::default().database_args();
-            let db_env = reth_db::init_db(&db_path, db_args).unwrap();
-            let db = Arc::new(db_env);
+            let db = reth_db::init_db(&db_path, db_args).unwrap();
 
             let provider_factory: ProviderFactory<
-                NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, Arc<DatabaseEnv>>,
+                NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, DatabaseEnv>,
             > = ProviderFactory::new(
                 db.clone(),
                 chain_spec.clone(),
@@ -385,11 +384,10 @@ mod tests {
 
         // Now reopen the database and verify checkpoints are still there
         {
-            let db_env = reth_db::init_db(&db_path, DatabaseArguments::default()).unwrap();
-            let db = Arc::new(db_env);
+            let db = reth_db::init_db(&db_path, DatabaseArguments::default()).unwrap();
 
             let provider_factory: ProviderFactory<
-                NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, Arc<DatabaseEnv>>,
+                NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, DatabaseEnv>,
             > = ProviderFactory::new(
                 db,
                 chain_spec.clone(),

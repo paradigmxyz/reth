@@ -84,8 +84,6 @@ where
     ctx: PrewarmContext<N, P, Evm>,
     /// How many transactions should be executed in parallel
     max_concurrency: usize,
-    /// The number of transactions to be processed
-    transaction_count_hint: usize,
     /// Sender to emit evm state outcome messages, if any.
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
@@ -106,7 +104,6 @@ where
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-        transaction_count_hint: usize,
         max_concurrency: usize,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
@@ -114,7 +111,7 @@ where
         trace!(
             target: "engine::tree::payload_processor::prewarm",
             max_concurrency,
-            transaction_count_hint,
+            transaction_count = ctx.env.transaction_count,
             "Initialized prewarm task"
         );
 
@@ -124,7 +121,6 @@ where
                 execution_cache,
                 ctx,
                 max_concurrency,
-                transaction_count_hint,
                 to_multi_proof,
                 actions_rx,
                 parent_span: Span::current(),
@@ -148,7 +144,6 @@ where
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
-        let transaction_count_hint = self.transaction_count_hint;
         let span = Span::current();
 
         self.executor.spawn_blocking(move || {
@@ -156,13 +151,14 @@ where
 
             let (done_tx, done_rx) = mpsc::channel();
 
-            // When transaction_count_hint is 0, it means the count is unknown. In this case, spawn
+            // When transaction_count is 0, it means the count is unknown. In this case, spawn
             // max workers to handle potentially many transactions in parallel rather
             // than bottlenecking on a single worker.
-            let workers_needed = if transaction_count_hint == 0 {
+            let transaction_count = ctx.env.transaction_count;
+            let workers_needed = if transaction_count == 0 {
                 max_concurrency
             } else {
-                transaction_count_hint.min(max_concurrency)
+                transaction_count.min(max_concurrency)
             };
 
             // Spawn workers

@@ -44,8 +44,17 @@ pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2: usize = DEFAULT_MULTIPROOF_TASK
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 
-/// Default maximum concurrency for prewarm task.
-pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
+/// Returns the default maximum concurrency for prewarm task based on available parallelism.
+fn default_prewarm_max_concurrency() -> usize {
+    #[cfg(feature = "std")]
+    {
+        std::thread::available_parallelism().map_or(16, |n| n.get())
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        16
+    }
+}
 
 /// Default depth for sparse trie pruning.
 ///
@@ -192,7 +201,7 @@ impl Default for TreeConfig {
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
-            prewarm_max_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
+            prewarm_max_concurrency: default_prewarm_max_concurrency(),
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
@@ -528,8 +537,12 @@ impl TreeConfig {
     }
 
     /// Setter for the number of storage proof worker threads.
-    pub fn with_storage_worker_count(mut self, storage_worker_count: usize) -> Self {
-        self.storage_worker_count = storage_worker_count.max(MIN_WORKER_COUNT);
+    ///
+    /// No-op if it's [`None`].
+    pub fn with_storage_worker_count_opt(mut self, storage_worker_count: Option<usize>) -> Self {
+        if let Some(count) = storage_worker_count {
+            self.storage_worker_count = count.max(MIN_WORKER_COUNT);
+        }
         self
     }
 
@@ -539,8 +552,12 @@ impl TreeConfig {
     }
 
     /// Setter for the number of account proof worker threads.
-    pub fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
-        self.account_worker_count = account_worker_count.max(MIN_WORKER_COUNT);
+    ///
+    /// No-op if it's [`None`].
+    pub fn with_account_worker_count_opt(mut self, account_worker_count: Option<usize>) -> Self {
+        if let Some(count) = account_worker_count {
+            self.account_worker_count = count.max(MIN_WORKER_COUNT);
+        }
         self
     }
 
