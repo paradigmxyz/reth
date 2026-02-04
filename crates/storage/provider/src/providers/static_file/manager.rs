@@ -276,7 +276,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// receive `update_index` notifications from a node that appends/truncates data.
     pub fn watch_directory(&self) {
         let provider = self.clone();
-        std::thread::spawn(move || {
+        reth_tasks::spawn_os_thread("sf-watch", move || {
             let (tx, rx) = std::sync::mpsc::channel();
             let mut watcher = RecommendedWatcher::new(
                 move |res| tx.send(res).unwrap(),

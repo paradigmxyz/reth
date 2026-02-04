@@ -295,7 +295,7 @@ where
     //
     // However, using `std::thread::spawn` allows us to utilize the timeout grace
     // period to complete some work without throwing errors during the shutdown.
-    std::thread::spawn(move || {
+    reth_tasks::spawn_os_thread("sender-recovery", move || {
         while let Ok(chunks) = tx_receiver.recv() {
             for (chunk_range, recovered_senders_tx) in chunks {
                 // Read the raw value, and let the rayon worker to decompress & decode.
