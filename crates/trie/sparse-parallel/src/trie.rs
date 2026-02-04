@@ -834,6 +834,10 @@ impl SparseTrie for ParallelSparseTrie {
         root_rlp.as_hash().unwrap_or(EMPTY_ROOT_HASH)
     }
 
+    fn is_root_cached(&self) -> bool {
+        self.prefix_set.is_empty()
+    }
+
     #[instrument(level = "trace", target = "trie::sparse::parallel", skip(self))]
     fn update_subtrie_hashes(&mut self) {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");

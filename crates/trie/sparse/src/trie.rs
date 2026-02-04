@@ -185,6 +185,13 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         Ok(())
     }
 
+    /// Returns `true` if the root hash is already cached and calling `root()` will be cheap.
+    ///
+    /// Returns `false` if the trie is blind (no nodes revealed).
+    pub fn is_root_cached(&self) -> bool {
+        self.as_revealed_ref().is_some_and(|t| t.is_root_cached())
+    }
+
     /// Calculates the root hash of the trie.
     ///
     /// This will update any remaining dirty nodes before computing the root hash.
@@ -963,6 +970,10 @@ impl SparseTrieTrait for SerialSparseTrie {
         } else {
             keccak256(rlp_node)
         }
+    }
+
+    fn is_root_cached(&self) -> bool {
+        self.prefix_set.is_empty()
     }
 
     fn update_subtrie_hashes(&mut self) {

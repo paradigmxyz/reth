@@ -808,29 +808,43 @@ where
         }
 
         let span = debug_span!("compute_storage_roots").entered();
-        let tries = self
+        let (cached, uncached): (Vec<_>, Vec<_>) = self
             .trie
             .storage_tries_mut()
             .iter_mut()
             .filter(|(address, _)| {
                 self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty())
             })
-            .collect::<Vec<_>>();
+            .partition(|(_, trie)| trie.is_root_cached());
 
-        let roots = if tries.is_empty() {
+        let roots: Vec<_> = if cached.is_empty() && uncached.is_empty() {
             Vec::new()
         } else {
-            tries
-                .into_par_iter()
-                .map(|(address, trie)| {
-                    let _guard = span.clone().entered();
-                    let _span = debug_span!("compute_storage_root", ?address).entered();
-                    let root =
-                        trie.root().expect("updates are drained, trie should be revealed by now");
+            // Process cached tries serially - they're cheap O(1) lookups
+            let cached_roots = cached.into_iter().map(|(address, trie)| {
+                let root =
+                    trie.root().expect("updates are drained, trie should be revealed by now");
+                (address, root)
+            });
 
-                    (address, root)
-                })
-                .collect()
+            // Process uncached tries in parallel - they need actual computation
+            let uncached_roots: Vec<_> = if uncached.is_empty() {
+                Vec::new()
+            } else {
+                uncached
+                    .into_par_iter()
+                    .map(|(address, trie)| {
+                        let _guard = span.clone().entered();
+                        let _span = debug_span!("compute_storage_root", ?address).entered();
+                        let root = trie
+                            .root()
+                            .expect("updates are drained, trie should be revealed by now");
+                        (address, root)
+                    })
+                    .collect()
+            };
+
+            cached_roots.chain(uncached_roots).collect()
         };
         drop(span);
 
