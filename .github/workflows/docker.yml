@@ -100,7 +100,5 @@ jobs:
           targets: ${{ steps.params.outputs.targets }}
           push: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
           set: |
-            ethereum-amd64.tags=${{ steps.params.outputs.ethereum_tags }}
-            ethereum-arm64.tags=${{ steps.params.outputs.ethereum_tags }}
-            optimism-amd64.tags=${{ steps.params.outputs.optimism_tags }}
-            optimism-arm64.tags=${{ steps.params.outputs.optimism_tags }}
+            ethereum.tags=${{ steps.params.outputs.ethereum_tags }}
+            optimism.tags=${{ steps.params.outputs.optimism_tags }}

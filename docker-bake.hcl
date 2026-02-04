@@ -32,22 +32,31 @@ variable "VERGEN_GIT_DIRTY" {
 // Common settings for all targets
 group "default" {
   targets = [
-    "ethereum-amd64",
-    "ethereum-arm64",
-    "optimism-amd64",
-    "optimism-arm64"
+    "ethereum",
+    "optimism"
+  ]
+}
+
+group "ethereum" {
+  targets = [
+    "ethereum"
+  ]
+}
+
+group "optimism" {
+  targets = [
+    "optimism"
   ]
 }
 
 group "nightly" {
   targets = [
-    "ethereum-amd64",
-    "ethereum-arm64",
+    "ethereum",
     "ethereum-profiling",
     "ethereum-edge-profiling",
-    "optimism-amd64",
-    "optimism-arm64",
-    "optimism-profiling"
+    "optimism",
+    "optimism-profiling",
+    "optimism-edge-profiling"
   ]
 }
 
@@ -90,20 +99,13 @@ target "_base_arm64" {
 
 target "_base_profiling" {
   inherits  = ["_base_amd64"]
+  platforms = ["linux/amd64"]
 }
 
-// Ethereum (reth)
-target "ethereum-amd64" {
-  inherits = ["_base_amd64"]
-  args = {
-    BINARY        = "reth"
-    MANIFEST_PATH = "bin/reth"
-  }
-  tags = ["${REGISTRY}/reth:${TAG}"]
-}
-
-target "ethereum-arm64" {
-  inherits = ["_base_arm64"]
+// Ethereum (reth) - multi-platform
+target "ethereum" {
+  inherits  = ["_base"]
+  platforms = ["linux/amd64", "linux/arm64"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
@@ -112,7 +114,8 @@ target "ethereum-arm64" {
 }
 
 target "ethereum-profiling" {
-  inherits = ["_base_profiling"]
+  inherits  = ["_base_profiling"]
+  platforms = ["linux/amd64"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
@@ -123,7 +126,8 @@ target "ethereum-profiling" {
 }
 
 target "ethereum-edge-profiling" {
-  inherits = ["_base_profiling"]
+  inherits  = ["_base_profiling"]
+  platforms = ["linux/amd64"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
@@ -133,18 +137,10 @@ target "ethereum-edge-profiling" {
   tags = ["${REGISTRY}/reth:nightly-edge-profiling"]
 }
 
-// Optimism (op-reth)
-target "optimism-amd64" {
-  inherits = ["_base_amd64"]
-  args = {
-    BINARY        = "op-reth"
-    MANIFEST_PATH = "crates/optimism/bin"
-  }
-  tags = ["${REGISTRY}/op-reth:${TAG}"]
-}
-
-target "optimism-arm64" {
-  inherits = ["_base_arm64"]
+// Optimism (op-reth) - multi-platform
+target "optimism" {
+  inherits  = ["_base"]
+  platforms = ["linux/amd64", "linux/arm64"]
   args = {
     BINARY        = "op-reth"
     MANIFEST_PATH = "crates/optimism/bin"
@@ -153,7 +149,8 @@ target "optimism-arm64" {
 }
 
 target "optimism-profiling" {
-  inherits = ["_base_profiling"]
+  inherits  = ["_base_profiling"]
+  platforms = ["linux/amd64"]
   args = {
     BINARY        = "op-reth"
     MANIFEST_PATH = "crates/optimism/bin"
@@ -164,7 +161,8 @@ target "optimism-profiling" {
 }
 
 target "optimism-edge-profiling" {
-  inherits = ["_base_profiling"]
+  inherits  = ["_base_profiling"]
+  platforms = ["linux/amd64"]
   args = {
     BINARY        = "op-reth"
     MANIFEST_PATH = "crates/optimism/bin"
