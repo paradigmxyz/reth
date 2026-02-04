@@ -5325,7 +5325,13 @@ static __always_inline int check_txn(const MDBX_txn *txn, int bad_bits) {
 }
 
 static inline int check_txn_rw(const MDBX_txn *txn, int bad_bits) {
-  return check_txn(txn, (bad_bits | MDBX_TXN_RDONLY) & ~MDBX_TXN_PARKED);
+  int rc = check_txn(txn, (bad_bits | MDBX_TXN_RDONLY) & ~MDBX_TXN_PARKED);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return rc;
+  // Block writes while parallel subtxns are active
+  if (unlikely(txn->tw.subtxn_list != NULL))
+    return MDBX_BUSY;
+  return MDBX_SUCCESS;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -5681,7 +5687,13 @@ static inline int cursor_check_ro(const MDBX_cursor *mc) { return cursor_check(m
 
 /* для записи данных. */
 static inline int cursor_check_rw(const MDBX_cursor *mc) {
-  return cursor_check(mc, (MDBX_TXN_BLOCKED - MDBX_TXN_PARKED) | MDBX_TXN_RDONLY);
+  int rc = cursor_check(mc, (MDBX_TXN_BLOCKED - MDBX_TXN_PARKED) | MDBX_TXN_RDONLY);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return rc;
+  // Block writes while parallel subtxns are active
+  if (unlikely(mc->txn->tw.subtxn_list != NULL))
+    return MDBX_BUSY;
+  return MDBX_SUCCESS;
 }
 
 MDBX_INTERNAL MDBX_cursor *cursor_eot(MDBX_cursor *mc, MDBX_txn *txn, const bool merge);
