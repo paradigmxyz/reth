@@ -30,7 +30,9 @@ use alloy_eips::{
     eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
     Typed2718,
 };
-use alloy_primitives::{Address, TxHash, B256};
+#[cfg(test)]
+use alloy_primitives::Address;
+use alloy_primitives::{map::AddressSet, TxHash, B256};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
@@ -184,7 +186,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Returns all senders in the pool
-    pub(crate) fn unique_senders(&self) -> HashSet<Address> {
+    pub(crate) fn unique_senders(&self) -> AddressSet {
         self.all_transactions.txs.values().map(|tx| tx.transaction.sender()).collect()
     }
 

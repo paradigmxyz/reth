@@ -3800,6 +3800,7 @@ dependencies = [
 name = "example-full-contract-state"
 version = "1.10.2"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "reth-ethereum",
 ]
