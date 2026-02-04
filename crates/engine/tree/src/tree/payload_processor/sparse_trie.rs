@@ -593,10 +593,15 @@ where
         // Capture current span for proper parent-child relationship in parallel tasks
         let parent_span = tracing::Span::current();
 
+        let num_account_updates = account_updates.len();
+        let num_storage_updates =
+            storage_updates.values().map(|updates| updates.len()).sum::<usize>();
+
         // Process both account and storage updates in parallel using rayon::join
         // First closure runs on calling thread, second is queued for a worker.
         // Account goes first since it's lighter and we want it to start immediately.
-        let (account_result, storage_result) = rayon::join(
+        let (account_result, storage_result) = maybe_join(
+            num_account_updates > 100 || num_storage_updates > 100,
             || {
                 let _guard = parent_span.clone().entered();
                 let _span = debug_span!(
@@ -1004,4 +1009,18 @@ where
     );
 
     Ok(elapsed)
+}
+
+fn maybe_join<A, B, RA, RB>(should_parallelize: bool, a: A, b: B) -> (RA, RB)
+where
+    A: FnOnce() -> RA + Send,
+    B: FnOnce() -> RB + Send,
+    RA: Send,
+    RB: Send,
+{
+    if should_parallelize {
+        rayon::join(a, b)
+    } else {
+        (a(), b())
+    }
 }
