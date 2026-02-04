@@ -911,8 +911,8 @@ mod tests {
     #[test]
     fn decode_status_success() {
         use crate::{Status, StatusMessage};
+        use alloy_hardforks::{ForkHash, ForkId};
         use alloy_primitives::{B256, U256};
-        use reth_ethereum_forks::{ForkHash, ForkId};
 
         let status = Status {
             version: EthVersion::Eth68,
@@ -924,7 +924,7 @@ mod tests {
         };
 
         let protocol_message = ProtocolMessage::<EthNetworkPrimitives>::from(EthMessage::Status(
-            StatusMessage::Legacy(status.clone()),
+            StatusMessage::Legacy(status),
         ));
         let encoded = encode(protocol_message);
 
