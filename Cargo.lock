@@ -8678,7 +8678,6 @@ dependencies = [
  "rand 0.9.2",
  "reth-chainspec",
  "reth-codecs-derive",
- "reth-ethereum-forks",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "serde",
