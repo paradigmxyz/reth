@@ -1234,6 +1234,18 @@ impl SparseTrieExt for ParallelSparseTrie {
         mut proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()> {
         use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
+        use std::time::Instant;
+
+        let total_start = Instant::now();
+        let num_keys = updates.len();
+
+        let mut remove_leaf_time = std::time::Duration::ZERO;
+        let mut update_leaf_time = std::time::Duration::ZERO;
+        let mut find_leaf_time = std::time::Duration::ZERO;
+        let mut remove_count = 0usize;
+        let mut update_count = 0usize;
+        let mut touched_count = 0usize;
+        let mut retry_count = 0usize;
 
         // Collect keys upfront since we mutate `updates` during iteration.
         // On success, entries are removed; on blinded node failure, they're re-inserted.
@@ -1247,26 +1259,34 @@ impl SparseTrieExt for ParallelSparseTrie {
             match update {
                 LeafUpdate::Changed(value) => {
                     if value.is_empty() {
+                        remove_count += 1;
                         // Removal: remove_leaf with NoRevealProvider is atomic - returns a
                         // retriable error before any mutations (via pre_validate_reveal_chain).
-                        match self.remove_leaf(&full_path, NoRevealProvider) {
-                            Ok(()) => {}
-                            Err(e) => {
-                                if let Some(path) = Self::get_retriable_path(&e) {
-                                    let (target_key, min_len) =
-                                        Self::proof_target_for_path(key, &full_path, &path);
-                                    proof_required_fn(target_key, min_len);
-                                    updates.insert(key, LeafUpdate::Changed(value));
-                                } else {
-                                    return Err(e);
-                                }
+                        let op_start = Instant::now();
+                        let result = self.remove_leaf(&full_path, NoRevealProvider);
+                        remove_leaf_time += op_start.elapsed();
+
+                        if let Err(e) = result {
+                            if let Some(path) = Self::get_retriable_path(&e) {
+                                retry_count += 1;
+                                let (target_key, min_len) =
+                                    Self::proof_target_for_path(key, &full_path, &path);
+                                proof_required_fn(target_key, min_len);
+                                updates.insert(key, LeafUpdate::Changed(value));
+                            } else {
+                                return Err(e);
                             }
                         }
                     } else {
+                        update_count += 1;
                         // Update/insert: update_leaf is atomic - cleans up on error.
-                        if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider)
-                        {
+                        let op_start = Instant::now();
+                        let result = self.update_leaf(full_path, value.clone(), NoRevealProvider);
+                        update_leaf_time += op_start.elapsed();
+
+                        if let Err(e) = result {
                             if let Some(path) = Self::get_retriable_path(&e) {
+                                retry_count += 1;
                                 let (target_key, min_len) =
                                     Self::proof_target_for_path(key, &full_path, &path);
                                 proof_required_fn(target_key, min_len);
@@ -1278,20 +1298,37 @@ impl SparseTrieExt for ParallelSparseTrie {
                     }
                 }
                 LeafUpdate::Touched => {
+                    touched_count += 1;
                     // Touched is read-only: check if path is accessible, request proof if blinded.
-                    match self.find_leaf(&full_path, None) {
-                        Err(LeafLookupError::BlindedNode { path, .. }) => {
-                            let (target_key, min_len) =
-                                Self::proof_target_for_path(key, &full_path, &path);
-                            proof_required_fn(target_key, min_len);
-                            updates.insert(key, LeafUpdate::Touched);
-                        }
-                        // Path is fully revealed (exists or proven non-existent), no action needed.
-                        Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {}
+                    let op_start = Instant::now();
+                    let result = self.find_leaf(&full_path, None);
+                    find_leaf_time += op_start.elapsed();
+
+                    if let Err(LeafLookupError::BlindedNode { path, .. }) = result {
+                        retry_count += 1;
+                        let (target_key, min_len) =
+                            Self::proof_target_for_path(key, &full_path, &path);
+                        proof_required_fn(target_key, min_len);
+                        updates.insert(key, LeafUpdate::Touched);
                     }
                 }
             }
         }
+
+        let total_elapsed = total_start.elapsed();
+        debug!(
+            target: "trie::sparse::parallel",
+            ?total_elapsed,
+            ?remove_leaf_time,
+            ?update_leaf_time,
+            ?find_leaf_time,
+            num_keys,
+            remove_count,
+            update_count,
+            touched_count,
+            retry_count,
+            "update_leaves completed"
+        );
 
         Ok(())
     }
