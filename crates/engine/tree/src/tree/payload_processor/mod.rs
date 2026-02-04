@@ -63,6 +63,26 @@ pub mod sparse_trie;
 
 use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 
+/// Result of waiting for caches to become available.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CacheWaitDurations {
+    /// Time spent waiting for the execution cache lock.
+    pub execution_cache: std::time::Duration,
+    /// Time spent waiting for the sparse trie lock.
+    pub sparse_trie: std::time::Duration,
+}
+
+/// Trait for types that can wait for execution cache and sparse trie locks to become available.
+///
+/// This is used by `reth_newPayload*` endpoints to ensure that payload processing
+/// waits for any ongoing operations to complete before starting.
+pub trait WaitForCaches {
+    /// Waits for both the execution cache and preserved sparse trie locks to become available.
+    ///
+    /// Returns the time spent waiting for each cache separately.
+    fn wait_for_caches(&self) -> CacheWaitDurations;
+}
+
 /// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
 ///
 /// These values were determined by performing benchmarks using gradually increasing values to judge
@@ -177,6 +197,39 @@ where
             sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             disable_cache_metrics: config.disable_cache_metrics(),
+        }
+    }
+}
+
+impl<Evm> WaitForCaches for PayloadProcessor<Evm>
+where
+    Evm: ConfigureEvm,
+{
+    fn wait_for_caches(&self) -> CacheWaitDurations {
+        debug!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
+
+        // Wait for both caches in parallel using std threads
+        let execution_cache = self.execution_cache.clone();
+        let sparse_trie = self.sparse_state_trie.clone();
+
+        let execution_cache_handle =
+            std::thread::spawn(move || execution_cache.wait_for_availability());
+        let sparse_trie_handle = std::thread::spawn(move || sparse_trie.wait_for_availability());
+
+        let execution_cache_duration =
+            execution_cache_handle.join().expect("execution cache wait thread panicked");
+        let sparse_trie_duration =
+            sparse_trie_handle.join().expect("sparse trie wait thread panicked");
+
+        debug!(
+            target: "engine::tree::payload_processor",
+            ?execution_cache_duration,
+            ?sparse_trie_duration,
+            "Execution cache and sparse trie locks acquired"
+        );
+        CacheWaitDurations {
+            execution_cache: execution_cache_duration,
+            sparse_trie: sparse_trie_duration,
         }
     }
 }
@@ -976,6 +1029,27 @@ impl PayloadExecutionCache {
     #[expect(unused)]
     pub(crate) fn clear(&self) {
         self.inner.write().take();
+    }
+
+    /// Waits until the execution cache becomes available for use.
+    ///
+    /// This acquires a write lock to ensure exclusive access, then immediately releases it.
+    /// This is useful for synchronization before starting payload processing.
+    ///
+    /// Returns the time spent waiting for the lock.
+    pub fn wait_for_availability(&self) -> std::time::Duration {
+        let start = Instant::now();
+        // Acquire write lock to wait for any current holders to finish
+        let _guard = self.inner.write();
+        let elapsed = start.elapsed();
+        if elapsed.as_millis() > 5 {
+            debug!(
+                target: "engine::tree::payload_processor",
+                blocked_for=?elapsed,
+                "Waited for execution cache to become available"
+            );
+        }
+        elapsed
     }
 
     /// Updates the cache with a closure that has exclusive access to the guard.

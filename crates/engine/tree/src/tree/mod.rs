@@ -316,7 +316,7 @@ where
         + StorageChangeSetReader,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineValidator<T>,
+    V: EngineValidator<T> + WaitForCaches,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[expect(clippy::too_many_arguments)]
@@ -1535,6 +1535,47 @@ where
                                     }))
                                 {
                                     warn!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to deliver newPayload response, receiver dropped (request cancelled): {err:?}");
+                                    self.metrics
+                                        .engine
+                                        .failed_new_payload_response_deliveries
+                                        .increment(1);
+                                }
+
+                                // handle the event if any
+                                self.on_maybe_tree_event(maybe_event)?;
+                            }
+                            BeaconEngineMessage::NewPayloadWaitForCaches { payload, tx } => {
+                                // Wait for execution cache and sparse trie locks before processing
+                                debug!(target: "engine::tree", "Waiting for caches before processing reth_newPayload");
+                                let cache_wait = self.payload_validator.wait_for_caches();
+                                debug!(
+                                    target: "engine::tree",
+                                    execution_cache_wait = ?cache_wait.execution_cache,
+                                    sparse_trie_wait = ?cache_wait.sparse_trie,
+                                    "Cache locks acquired for reth_newPayload"
+                                );
+
+                                let start = Instant::now();
+                                let gas_used = payload.gas_used();
+                                let num_hash = payload.num_hash();
+                                let mut output = self.on_new_payload(payload);
+                                self.metrics.engine.new_payload.update_response_metrics(
+                                    start,
+                                    &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
+                                    &output,
+                                    gas_used,
+                                );
+
+                                let maybe_event =
+                                    output.as_mut().ok().and_then(|out| out.event.take());
+
+                                // emit response
+                                if let Err(err) =
+                                    tx.send(output.map(|o| o.outcome).map_err(|e| {
+                                        BeaconOnNewPayloadError::Internal(Box::new(e))
+                                    }))
+                                {
+                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
                                     self.metrics
                                         .engine
                                         .failed_new_payload_response_deliveries

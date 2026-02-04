@@ -23,7 +23,7 @@ use crate::{
             derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
         },
     },
-    valid_payload::{call_forkchoice_updated, call_new_payload},
+    valid_payload::{call_forkchoice_updated, call_new_payload_with_reth},
 };
 use alloy_primitives::B256;
 use alloy_provider::{ext::EngineApi, network::AnyNetwork, Provider, RootProvider};
@@ -124,6 +124,14 @@ pub struct Command {
     /// If not provided, derives from engine RPC URL by changing scheme to ws and port to 8546.
     #[arg(long, value_name = "WS_RPC_URL", verbatim_doc_comment)]
     ws_rpc_url: Option<String>,
+
+    /// Use `reth_newPayload*` endpoints instead of `engine_newPayload*`.
+    ///
+    /// The `reth_newPayload*` endpoints are reth-specific extensions that wait for
+    /// execution cache and preserved sparse trie locks to become available before
+    /// processing, ensuring optimal cache utilization during benchmarking.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    reth_new_payload: bool,
 }
 
 /// A loaded payload ready for execution.
@@ -162,6 +170,9 @@ impl Command {
                 self.persistence_threshold + 1,
                 self.persistence_threshold
             );
+        }
+        if self.reth_new_payload {
+            info!("Using reth_newPayload* endpoints (waits for execution cache locks)");
         }
 
         // Set up waiter based on configured options
@@ -248,7 +259,13 @@ impl Command {
                 "Executing gas ramp payload (newPayload + FCU)"
             );
 
-            call_new_payload(&auth_provider, payload.version, payload.file.params.clone()).await?;
+            call_new_payload_with_reth(
+                &auth_provider,
+                payload.version,
+                payload.file.params.clone(),
+                self.reth_new_payload,
+            )
+            .await?;
 
             let fcu_state = ForkchoiceState {
                 head_block_hash: payload.file.block_hash,
@@ -303,20 +320,22 @@ impl Command {
                 "Sending newPayload"
             );
 
-            let status = auth_provider
-                .new_payload_v4(
-                    execution_payload.clone(),
-                    vec![],
-                    B256::ZERO,
-                    envelope.execution_requests.to_vec(),
-                )
-                .await?;
+            let params = serde_json::to_value((
+                execution_payload.clone(),
+                Vec::<B256>::new(),
+                B256::ZERO,
+                envelope.execution_requests.to_vec(),
+            ))?;
+
+            call_new_payload_with_reth(
+                &auth_provider,
+                EngineApiMessageVersion::V4,
+                params,
+                self.reth_new_payload,
+            )
+            .await?;
 
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
-
-            if !status.is_valid() {
-                return Err(eyre::eyre!("Payload rejected: {:?}", status));
-            }
 
             let fcu_state = ForkchoiceState {
                 head_block_hash: block_hash,
@@ -352,7 +371,7 @@ impl Command {
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
 
-            debug!(target: "reth-bench", ?status, ?fcu_result, "Payload executed successfully");
+            debug!(target: "reth-bench", ?fcu_result, "Payload executed successfully");
             parent_hash = block_hash;
         }
 
