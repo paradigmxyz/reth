@@ -11,27 +11,12 @@ const DEFAULT_STORAGE_POOL_THREADS: usize = 8;
 
 /// Returns the number of threads for the storage pool.
 ///
-/// Respects `RAYON_NUM_THREADS` environment variable if set, otherwise uses the default.
-/// When `test-utils` feature is enabled, uses a single thread to prevent MDBX memory
-/// exhaustion when many tests run in parallel.
+/// Uses `RETH_STORAGE_POOL_THREADS` environment variable if set, otherwise uses the default.
 fn storage_pool_threads() -> usize {
-    // Check RAYON_NUM_THREADS first (allows CI to control parallelism)
-    if let Some(n) = std::env::var("RAYON_NUM_THREADS")
+    std::env::var("RETH_STORAGE_POOL_THREADS")
         .ok()
         .and_then(|s| s.parse().ok())
-    {
-        return n;
-    }
-
-    // In test mode, use single thread to prevent MDBX memory exhaustion
-    // when many tests run in parallel, each creating their own databases
-    #[cfg(feature = "test-utils")]
-    {
-        return 1;
-    }
-
-    #[cfg(not(feature = "test-utils"))]
-    DEFAULT_STORAGE_POOL_THREADS
+        .unwrap_or(DEFAULT_STORAGE_POOL_THREADS)
 }
 
 /// Static thread pool for storage I/O operations.

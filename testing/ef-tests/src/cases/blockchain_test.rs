@@ -5,7 +5,7 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_rlp::{Decodable, Encodable};
-use rayon::iter::ParallelIterator;
+use rayon::{iter::{IntoParallelIterator, ParallelIterator}, ThreadPoolBuilder};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
@@ -13,9 +13,7 @@ use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus}
 use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{
-    Block as BlockTrait, ParallelBridgeBuffered, RecoveredBlock, SealedBlock,
-};
+use reth_primitives_traits::{Block as BlockTrait, RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown, StateProofProvider,
@@ -32,8 +30,23 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
+
+/// Thread pool for ef-tests with limited parallelism.
+///
+/// MDBX databases use mmap, and running too many tests in parallel can exhaust
+/// the `vm.max_map_count` limit. We limit to 2 threads to prevent this while
+/// still getting some parallelism benefit.
+static EF_TEST_POOL: LazyLock<rayon::ThreadPool> = LazyLock::new(|| {
+    let num_threads =
+        std::env::var("EF_TESTS_THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
+    ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .thread_name(|idx| format!("ef-test-{idx}"))
+        .build()
+        .expect("failed to create ef-test thread pool")
+});
 
 /// A handler for the blockchain test suite.
 #[derive(Debug)]
@@ -179,11 +192,15 @@ impl Case for BlockchainTestCase {
         }
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
-        self.tests
-            .iter()
-            .filter(|(_, case)| !Self::excluded_fork(case.network))
-            .par_bridge_buffered()
-            .try_for_each(|(name, case)| Self::run_single_case(name, case).map(|_| ()))?;
+        // Use a dedicated thread pool with limited parallelism to prevent MDBX memory exhaustion.
+        let cases: Vec<_> =
+            self.tests.iter().filter(|(_, case)| !Self::excluded_fork(case.network)).collect();
+
+        EF_TEST_POOL.install(|| {
+            cases
+                .into_par_iter()
+                .try_for_each(|(name, case)| Self::run_single_case(name, case).map(|_| ()))
+        })?;
 
         Ok(())
     }
