@@ -1038,7 +1038,12 @@ where
     ///
     /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
     #[cfg(feature = "std")]
-    #[instrument(target = "trie::sparse", skip_all, fields(max_depth, max_storage_tries))]
+    #[instrument(
+        name = "SparseStateTrie::prune",
+        target = "trie::sparse",
+        skip_all,
+        fields(max_depth, max_storage_tries)
+    )]
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
         // Prune state and storage tries in parallel
         rayon::join(
