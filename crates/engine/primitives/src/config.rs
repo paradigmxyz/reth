@@ -45,7 +45,7 @@ pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2: usize = DEFAULT_MULTIPROOF_TASK
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 
 /// Default maximum concurrency for prewarm task.
-pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
+pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 28;
 
 /// Default depth for sparse trie pruning.
 ///
