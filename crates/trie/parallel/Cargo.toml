@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits.workspace = true
+reth-primitives-traits = { workspace = true, features = ["dashmap"] }
 reth-execution-errors.workspace = true
 reth-provider.workspace = true
 reth-storage-errors.workspace = true
@@ -29,7 +29,6 @@ alloy-primitives.workspace = true
 tracing.workspace = true
 
 # misc
-dashmap.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 rayon.workspace = true

@@ -578,47 +578,95 @@ where
         let storage_updates =
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
-        // Start with processing all storage updates in parallel.
-        let storage_results = storage_updates
-            .iter_mut()
-            .map(|(address, updates)| {
-                let trie = self.trie.take_or_create_storage_trie(address);
-                let fetched = self.fetched_storage_targets.remove(address).unwrap_or_default();
+        let account_updates =
+            if new { &mut self.new_account_updates } else { &mut self.account_updates };
 
-                (address, updates, fetched, trie)
-            })
-            .par_bridge()
-            .map(|(address, updates, mut fetched, mut trie)| {
-                let mut targets = Vec::new();
+        // Extract mutable references to allow parallel processing
+        let (account_trie, storage_tries) = self.trie.tries_mut();
 
-                trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                    Entry::Occupied(mut entry) => {
-                        if min_len < *entry.get() {
-                            entry.insert(min_len);
-                            targets.push(Target::new(path).with_min_len(min_len));
+        // Prepare references for parallel processing
+        let fetched_storage_targets = &mut self.fetched_storage_targets;
+        let fetched_account_targets = &mut self.fetched_account_targets;
+
+        // Capture current span for proper parent-child relationship in parallel tasks
+        let parent_span = tracing::Span::current();
+
+        // Process both account and storage updates in parallel using rayon::join
+        // First closure runs on calling thread, second is queued for a worker.
+        // Account goes first since it's lighter and we want it to start immediately.
+        let (account_result, storage_results) = rayon::join(
+            || {
+                let _guard = parent_span.clone().entered();
+                let _span = debug_span!("process_account_leaf_updates").entered();
+
+                // Process account updates - runs immediately on calling thread
+                let mut account_targets = Vec::new();
+
+                account_trie.update_leaves(account_updates, |target, min_len| {
+                    match fetched_account_targets.entry(target) {
+                        Entry::Occupied(mut entry) => {
+                            if min_len < *entry.get() {
+                                entry.insert(min_len);
+                                account_targets.push(Target::new(target).with_min_len(min_len));
+                            }
                         }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(min_len);
-                        targets.push(Target::new(path).with_min_len(min_len));
+                        Entry::Vacant(entry) => {
+                            entry.insert(min_len);
+                            account_targets.push(Target::new(target).with_min_len(min_len));
+                        }
                     }
                 })?;
 
-                SparseTrieResult::Ok((address, targets, fetched, trie))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                SparseTrieResult::Ok(account_targets)
+            },
+            || {
+                let _guard = parent_span.clone().entered();
+                let _span = debug_span!("process_storage_leaf_updates").entered();
 
-        for (address, targets, fetched, trie) in storage_results {
+                // Prepare and process storage updates - prep streams into parallel processing
+                storage_updates
+                    .iter_mut()
+                    .map(|(address, updates)| {
+                        let trie = storage_tries.take_or_create_trie(address);
+                        let fetched = fetched_storage_targets.remove(address).unwrap_or_default();
+                        (address, updates, fetched, trie)
+                    })
+                    .par_bridge()
+                    .map(|(address, updates, mut fetched, mut trie)| {
+                        let mut targets = Vec::new();
+
+                        trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+                            Entry::Occupied(mut entry) => {
+                                if min_len < *entry.get() {
+                                    entry.insert(min_len);
+                                    targets.push(Target::new(path).with_min_len(min_len));
+                                }
+                            }
+                            Entry::Vacant(entry) => {
+                                entry.insert(min_len);
+                                targets.push(Target::new(path).with_min_len(min_len));
+                            }
+                        })?;
+
+                        SparseTrieResult::Ok((address, targets, fetched, trie))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            },
+        );
+
+        // Handle storage results
+        for (address, targets, fetched, trie) in storage_results? {
             self.fetched_storage_targets.insert(*address, fetched);
-            self.trie.insert_storage_trie(*address, trie);
+            storage_tries.insert_trie(*address, trie);
 
             if !targets.is_empty() {
                 self.pending_targets.storage_targets.entry(*address).or_default().extend(targets);
             }
         }
 
-        // Process account trie updates and fill the account targets.
-        self.process_account_leaf_updates(new)?;
+        // Handle account results
+        let account_targets = account_result?;
+        self.pending_targets.account_targets.extend(account_targets);
 
         Ok(())
     }

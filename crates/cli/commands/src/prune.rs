@@ -4,6 +4,7 @@ use clap::Parser;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
+use reth_cli_util::cancellation::CancellationToken;
 use reth_node_builder::common::metrics_hooks;
 use reth_node_core::{args::MetricArgs, version::version_metadata};
 use reth_node_metrics::{
@@ -50,7 +51,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
                 ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
-                ctx.task_executor,
+                ctx.task_executor.clone(),
                 metrics_hooks(&provider_factory),
                 data_dir.pprof_dumps(),
             );
@@ -70,14 +71,29 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         if let Some(prune_tip) = lowest_static_file_height {
             info!(target: "reth::cli", ?prune_tip, ?config, "Pruning data from database...");
 
+            // Set up cancellation token for graceful shutdown on Ctrl+C
+            let cancellation = CancellationToken::new();
+            let cancellation_clone = cancellation.clone();
+            ctx.task_executor.spawn_critical("prune-ctrl-c", async move {
+                tokio::signal::ctrl_c().await.expect("failed to listen for ctrl-c");
+                cancellation_clone.cancel();
+            });
+
             // Use batched pruning with a limit to bound memory, running in a loop until complete.
-            const DELETE_LIMIT: usize = 200_000;
+            //
+            // A limit of 20_000_000 results in a max memory usage of ~5G.
+            const DELETE_LIMIT: usize = 20_000_000;
             let mut pruner = PrunerBuilder::new(config)
                 .delete_limit(DELETE_LIMIT)
                 .build_with_provider_factory(provider_factory);
 
             let mut total_pruned = 0usize;
             loop {
+                if cancellation.is_cancelled() {
+                    info!(target: "reth::cli", total_pruned, "Pruning interrupted by user");
+                    break;
+                }
+
                 let output = pruner.run(prune_tip)?;
                 let batch_pruned: usize = output.segments.iter().map(|(_, seg)| seg.pruned).sum();
                 total_pruned = total_pruned.saturating_add(batch_pruned);
@@ -88,6 +104,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                     output.segments.iter().all(|(_, seg)| seg.progress.is_finished());
 
                 if all_segments_finished {
+                    info!(target: "reth::cli", total_pruned, "Pruned data from database");
                     break;
                 }
 
@@ -105,7 +122,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                     "Pruning batch complete, continuing..."
                 );
             }
-            info!(target: "reth::cli", total_pruned, "Pruned data from database");
         }
 
         Ok(())

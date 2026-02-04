@@ -245,3 +245,12 @@ pub mod test_utils {
     #[cfg(any(test, feature = "test-utils"))]
     pub use crate::{block::TestBlock, header::test_utils::TestHeader};
 }
+
+/// Re-exports of `dashmap` types with [`alloy_primitives::map::DefaultHashBuilder`] as the hasher.
+#[cfg(feature = "dashmap")]
+pub mod dashmap {
+    pub use ::dashmap::{mapref, DashSet, Entry};
+    /// Re-export of `DashMap` with [`alloy_primitives::map::DefaultHashBuilder`] as the hasher.
+    pub type DashMap<K, V, S = alloy_primitives::map::DefaultHashBuilder> =
+        ::dashmap::DashMap<K, V, S>;
+}

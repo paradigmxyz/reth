@@ -11,7 +11,6 @@ use crate::{
 use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
@@ -34,8 +33,8 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{
-    AlloyBlockHeader as _, BlockBody as _, RecoveredBlock, SealedHeader, SignedTransaction,
-    StorageEntry,
+    dashmap::DashMap, AlloyBlockHeader as _, BlockBody as _, RecoveredBlock, SealedHeader,
+    SignedTransaction, StorageEntry,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_types::PipelineTarget;
@@ -48,6 +47,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
+use reth_tasks::spawn_scoped_os_thread;
 use std::{
     collections::BTreeMap,
     fmt::Debug,
@@ -670,7 +670,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     where
         F: FnOnce(&mut StaticFileProviderRWRefMut<'_, N>) -> ProviderResult<()> + Send + 'env,
     {
-        scope.spawn(move || {
+        spawn_scoped_os_thread(scope, segment.as_short_str(), move || {
             let mut w = self.get_writer(first_block_number, segment)?;
             f(&mut w)?;
             w.sync_all()
