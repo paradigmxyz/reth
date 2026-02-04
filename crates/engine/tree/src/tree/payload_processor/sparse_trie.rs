@@ -75,12 +75,15 @@ where
     ) -> SparseStateTrie<A, S> {
         match self {
             Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
-            Self::Cached(task) => task.into_trie_for_reuse(
-                prune_depth,
-                max_storage_tries,
-                max_nodes_capacity,
-                max_values_capacity,
-            ),
+            Self::Cached(task) => {
+                task.into_cleared_trie(max_nodes_capacity, max_values_capacity)
+                // task.into_trie_for_reuse(
+                //     prune_depth,
+                //     max_storage_tries,
+                //     max_nodes_capacity,
+                //     max_values_capacity,
+                // )
+            },
         }
     }
 
