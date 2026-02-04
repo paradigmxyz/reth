@@ -142,10 +142,6 @@ where
             if let Some(ref txn_ptr) = self.owned_txn_ptr {
                 // Parallel cursor path - no locking needed, subtxns are independent
                 let rc = ffi::mdbx_cursor_get(self.cursor, &mut key_val, &mut data_val, op);
-                println!(
-                    "[cursor::get] Parallel path: cursor={:?}, op={}, rc={}",
-                    self.cursor, op, rc
-                );
                 let v = mdbx_result(rc)?;
                 assert_ne!(data_ptr, data_val.iov_base);
                 let key_out = {
@@ -515,9 +511,10 @@ impl Cursor<RW> {
                 mdbx_result(ret)?;
             } else {
                 // Use normal path with locking for non-parallel cursors
-                mdbx_result(self.txn.txn_execute(|_| {
+                let ret = self.txn.txn_execute(|_| {
                     ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits())
-                })?)?;
+                })?;
+                mdbx_result(ret)?;
             }
         }
 
@@ -532,7 +529,7 @@ impl Cursor<RW> {
     /// current key, if the database was opened with [`DatabaseFlags::DUP_SORT`].
     pub fn del(&mut self, flags: WriteFlags) -> Result<()> {
         mdbx_result(unsafe {
-            self.execute_on_txn(|_| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
+            self.execute_on_txn(|_txn_ptr| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
         })?;
 
         Ok(())
@@ -562,11 +559,16 @@ where
     K: TransactionKind,
 {
     fn drop(&mut self) {
-        // To be able to close a cursor of a timed out transaction, we need to renew it first.
-        // Hence the usage of `txn_execute_renew_on_timeout` here.
-        let _ = self
-            .txn
-            .txn_execute_renew_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
+        if let Some(ref txn_ptr) = self.owned_txn_ptr {
+            // Cursor was opened on a subtransaction - close on that transaction
+            let _ = txn_ptr
+                .txn_execute_fail_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
+        } else {
+            // Standard cursor - use parent transaction with renew-on-timeout
+            let _ = self
+                .txn
+                .txn_execute_renew_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
+        }
     }
 }
 

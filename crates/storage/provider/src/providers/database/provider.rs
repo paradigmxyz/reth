@@ -651,6 +651,8 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
 
             // Enable parallel MDBX subtransactions for state writes only.
             // This is placed AFTER insert_block_mdbx_only to avoid conflicts with block index writes.
+            // NOTE: DupSort tables (PlainStorageState, HashedStorages, StoragesTrie) are excluded
+            // because parallel subtxns don't properly handle DupSort nested B-tree operations.
             if use_parallel_writes {
                 self.tx.enable_parallel_writes_for_tables(&[
                     tables::PlainAccountState::NAME,
@@ -676,8 +678,11 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 // - Thread 2: HashedAccounts, HashedStorages (write_hashed_state)
                 // - Thread 3: AccountsTrie, StoragesTrie (write_trie_updates_sorted)
                 if use_parallel_writes {
+                    // Parallelize writes across different table groups:
+                    // - Thread 1: PlainAccountState, PlainStorageState, Bytecodes (write_state)
+                    // - Thread 2: HashedAccounts, HashedStorages (write_hashed_state)
+                    // - Thread 3: AccountsTrie, StoragesTrie (write_trie_updates_sorted)
                     std::thread::scope(|s| {
-                        // Thread 1: write_state for all blocks
                         let state_handle = s.spawn(|| {
                             let start = Instant::now();
                             for block in blocks.iter() {
@@ -695,7 +700,6 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                             Ok::<_, ProviderError>(start.elapsed())
                         });
 
-                        // Thread 2: write_hashed_state (merged batch)
                         let hashed_handle = s.spawn(|| {
                             let start = Instant::now();
                             if !merged_hashed_state.is_empty() {
@@ -704,7 +708,6 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                             Ok::<_, ProviderError>(start.elapsed())
                         });
 
-                        // Thread 3: write_trie_updates_sorted (merged batch)
                         let trie_handle = s.spawn(|| {
                             let start = Instant::now();
                             if !merged_trie.is_empty() {
@@ -713,10 +716,9 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                             Ok::<_, ProviderError>(start.elapsed())
                         });
 
-                        // Collect results
                         timings.write_state = state_handle.join().expect("state thread panicked")?;
-                        timings.write_hashed_state += hashed_handle.join().expect("hashed thread panicked")?;
-                        timings.write_trie_updates += trie_handle.join().expect("trie thread panicked")?;
+                        timings.write_hashed_state = hashed_handle.join().expect("hashed thread panicked")?;
+                        timings.write_trie_updates = trie_handle.join().expect("trie thread panicked")?;
 
                         Ok::<_, ProviderError>(())
                     })?;
@@ -4496,16 +4498,22 @@ mod tests {
 
         let data = BlockchainTestData::default();
 
-        // Insert genesis block first
+        // Insert genesis block using save_blocks to properly initialize static files
+        let genesis_executed = ExecutedBlock::new(
+            Arc::new(data.genesis.clone().try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
+            ComputedTrieData::default(),
+        );
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
-        provider_rw
-            .write_state(
-                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
-                crate::OriginalValuesKnown::No,
-                StateWriteConfig::default(),
-            )
-            .unwrap();
+        provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
         provider_rw.commit().unwrap();
 
         // Prepare executed blocks for save_blocks

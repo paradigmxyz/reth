@@ -4768,9 +4768,6 @@ static inline bool dbi_changed(const MDBX_txn *txn, const size_t dbi) {
 
 static inline int dbi_check(const MDBX_txn *txn, const size_t dbi) {
   const uint8_t state = dbi_state(txn, dbi);
-  if (txn->flags & txn_parallel_subtx)
-    fprintf(stderr, "[dbi_check] Parallel subtxn %p dbi=%zu state=0x%x LINDO=%d VALID=%d changed=%d\n",
-            (void*)txn, dbi, state, (state & DBI_LINDO) != 0, (state & DBI_VALID) != 0, dbi_changed(txn, dbi));
   if (likely((state & DBI_LINDO) != 0 && !dbi_changed(txn, dbi)))
     return (state & DBI_VALID) ? MDBX_SUCCESS : MDBX_BAD_DBI;
 
@@ -5227,8 +5224,6 @@ static __always_inline int check_txn(const MDBX_txn *txn, int bad_bits) {
       return MDBX_EPERM;
 
     if (unlikely(txn->flags & bad_bits)) {
-      fprintf(stderr, "[check_txn] FAIL: txn=%p flags=0x%x bad_bits=0x%x intersection=0x%x\n",
-              (void*)txn, txn->flags, bad_bits, txn->flags & bad_bits);
       if ((bad_bits & MDBX_TXN_RDONLY) && unlikely(txn->flags & MDBX_TXN_RDONLY))
         return MDBX_EACCESS;
       if ((bad_bits & MDBX_TXN_PARKED) == 0)
@@ -5244,8 +5239,6 @@ static __always_inline int check_txn(const MDBX_txn *txn, int bad_bits) {
       !(bad_bits /* abort/reset/txn-break */ == 0 &&
         ((txn->flags & (MDBX_TXN_RDONLY | MDBX_TXN_FINISHED)) == (MDBX_TXN_RDONLY | MDBX_TXN_FINISHED))) &&
       unlikely(txn->owner != osal_thread_self())) {
-    fprintf(stderr, "[check_txn] OWNER MISMATCH: txn=%p owner=%llu self=%llu\n",
-            (void*)txn, (unsigned long long)txn->owner, (unsigned long long)osal_thread_self());
     return txn->owner ? MDBX_THREAD_MISMATCH : MDBX_BAD_TXN;
   }
 #endif /* MDBX_TXN_CHECKOWNER */
@@ -17980,24 +17973,41 @@ __hot int cursor_put_checklen(MDBX_cursor *mc, const MDBX_val *key, MDBX_val *da
 }
 
 __hot int cursor_del(MDBX_cursor *mc, unsigned flags) {
-  if (unlikely(!is_filled(mc)))
+  fprintf(stderr, "[cursor_del] ENTRY mc=%p dbi=%u top=%d flags=0x%x\n", 
+          (void*)mc, cursor_dbi(mc), mc->top, mc->flags);
+  fprintf(stderr, "[cursor_del] txn=%p txnid=%lu\n", (void*)mc->txn, (unsigned long)mc->txn->txnid);
+  
+  if (unlikely(!is_filled(mc))) {
+    fprintf(stderr, "[cursor_del] ENODATA - not filled\n");
     return MDBX_ENODATA;
+  }
 
+  fprintf(stderr, "[cursor_del] BEFORE cursor_touch\n");
   int rc = cursor_touch(mc, nullptr, nullptr);
+  fprintf(stderr, "[cursor_del] AFTER cursor_touch rc=%d\n", rc);
   if (unlikely(rc != MDBX_SUCCESS))
     return rc;
 
+  fprintf(stderr, "[cursor_del] Getting page, top=%d\n", mc->top);
   page_t *mp = mc->pg[mc->top];
+  fprintf(stderr, "[cursor_del] Got page mp=%p pgno=%u flags=0x%x\n", (void*)mp, mp->pgno, mp->flags);
+  fprintf(stderr, "[cursor_del] Checking is_modifable\n");
   cASSERT(mc, is_modifable(mc->txn, mp));
+  fprintf(stderr, "[cursor_del] Checking leaf type\n");
   if (!MDBX_DISABLE_VALIDATION && unlikely(!check_leaf_type(mc, mp))) {
     ERROR("unexpected leaf-page #%" PRIaPGNO " type 0x%x seen by cursor", mp->pgno, mp->flags);
     return MDBX_CORRUPTED;
   }
+  fprintf(stderr, "[cursor_del] Checking is_dupfix_leaf\n");
   if (is_dupfix_leaf(mp))
     goto del_key;
 
+  fprintf(stderr, "[cursor_del] Getting node at ki=%d\n", mc->ki[mc->top]);
   node_t *node = page_node(mp, mc->ki[mc->top]);
+  fprintf(stderr, "[cursor_del] Got node=%p flags=0x%x\n", (void*)node, node_flags(node));
+  fprintf(stderr, "[cursor_del] Checking N_DUP (node_flags & N_DUP = %d)\n", node_flags(node) & N_DUP);
   if (node_flags(node) & N_DUP) {
+    fprintf(stderr, "[cursor_del] N_DUP path\n");
     if (flags & (MDBX_ALLDUPS | /* for compatibility */ MDBX_NODUPDATA)) {
       /* will subtract the final entry later */
       mc->tree->items -= mc->subcur->nested_tree.items - 1;
@@ -18055,46 +18065,66 @@ __hot int cursor_del(MDBX_cursor *mc, unsigned flags) {
     }
     inner_gone(mc);
   } else {
+    fprintf(stderr, "[cursor_del] NOT N_DUP path, checking inner_pointed\n");
     cASSERT(mc, !inner_pointed(mc));
+    fprintf(stderr, "[cursor_del] Checking N_TREE compatibility\n");
     /* MDBX passes N_TREE in 'flags' to delete a DB record */
     if (unlikely((node_flags(node) ^ flags) & N_TREE))
       return MDBX_INCOMPATIBLE;
+    fprintf(stderr, "[cursor_del] N_TREE check passed\n");
   }
 
+  fprintf(stderr, "[cursor_del] Checking N_BIG\n");
   /* add large/overflow pages to free list */
   if (node_flags(node) & N_BIG) {
+    fprintf(stderr, "[cursor_del] N_BIG path\n");
     pgr_t lp = page_get_large(mc, node_largedata_pgno(node), mp->txnid);
     if (unlikely((rc = lp.err) || (rc = page_retire(mc, lp.page))))
       goto fail;
   }
 
 del_key:
+  fprintf(stderr, "[cursor_del] del_key: decrementing items\n");
   mc->tree->items -= 1;
   const MDBX_dbi dbi = cursor_dbi(mc);
   indx_t ki = mc->ki[mc->top];
   mp = mc->pg[mc->top];
+  fprintf(stderr, "[cursor_del] del_key: calling node_del, mc=%p mp=%p dbi=%u\n", (void*)mc, (void*)mp, dbi);
   cASSERT(mc, is_leaf(mp));
   node_del(mc, mc->tree->dupfix_size);
+  fprintf(stderr, "[cursor_del] del_key: node_del done\n");
 
+  fprintf(stderr, "[cursor_del] del_key: adjusting cursors, txn->cursors[%u]=%p\n", dbi, (void*)mc->txn->cursors[dbi]);
   /* Adjust other cursors pointing to mp */
   for (MDBX_cursor *m2 = mc->txn->cursors[dbi]; m2; m2 = m2->next) {
+    fprintf(stderr, "[cursor_del] del_key: loop m2=%p m2->next=%p\n", (void*)m2, (void*)m2->next);
     MDBX_cursor *m3 = (mc->flags & z_inner) ? &m2->subcur->cursor : m2;
-    if (!is_related(mc, m3) || m3->pg[mc->top] != mp)
+    fprintf(stderr, "[cursor_del] del_key: m3=%p, checking is_related\n", (void*)m3);
+    if (!is_related(mc, m3) || m3->pg[mc->top] != mp) {
+      fprintf(stderr, "[cursor_del] del_key: skipping m3=%p\n", (void*)m3);
       continue;
+    }
+    fprintf(stderr, "[cursor_del] del_key: checking m3->ki[%d]=%d vs ki=%d\n", mc->top, m3->ki[mc->top], ki);
     if (m3->ki[mc->top] == ki) {
+      fprintf(stderr, "[cursor_del] del_key: setting z_after_delete\n");
       m3->flags |= z_after_delete;
       inner_gone(m3);
     } else {
+      fprintf(stderr, "[cursor_del] del_key: adjusting ki\n");
       m3->ki[mc->top] -= m3->ki[mc->top] > ki;
       if (inner_pointed(m3))
         cursor_inner_refresh(m3, m3->pg[mc->top], m3->ki[mc->top]);
     }
   }
+  fprintf(stderr, "[cursor_del] del_key: cursor loop done\n");
 
+  fprintf(stderr, "[cursor_del] del_key: calling tree_rebalance\n");
   rc = tree_rebalance(mc);
+  fprintf(stderr, "[cursor_del] del_key: tree_rebalance returned %d\n", rc);
   if (unlikely(rc != MDBX_SUCCESS))
     goto fail;
 
+  fprintf(stderr, "[cursor_del] del_key: setting z_after_delete\n");
   mc->flags |= z_after_delete;
   inner_gone(mc);
   if (unlikely(mc->top < 0)) {
@@ -32808,7 +32838,10 @@ int page_retire_ex(MDBX_cursor *mc, const pgno_t pgno, page_t *mp /* maybe null 
     pageflags = mp->flags;
   }
 
+  fprintf(stderr, "[page_retire_ex] checking status: is_frozen=%d is_modifable=%d is_shadowed=%d is_spilled=%d\n",
+          is_frozen(txn, mp), is_modifable(txn, mp), is_shadowed(txn, mp), is_spilled(txn, mp));
   if (is_frozen(txn, mp)) {
+    fprintf(stderr, "[page_retire_ex] status=frozen\n");
     status = frozen;
     tASSERT(txn, !is_modifable(txn, mp));
     tASSERT(txn, !is_spilled(txn, mp));
@@ -32816,64 +32849,81 @@ int page_retire_ex(MDBX_cursor *mc, const pgno_t pgno, page_t *mp /* maybe null 
     tASSERT(txn, !debug_dpl_find(txn, pgno));
     tASSERT(txn, !txn->tw.spilled.list || !spill_search(txn, pgno));
   } else if (is_modifable(txn, mp)) {
+    fprintf(stderr, "[page_retire_ex] status=modifable\n");
     status = modifable;
     if (txn->tw.dirtylist)
       di = dpl_exist(txn, pgno);
     tASSERT(txn, (txn->flags & MDBX_WRITEMAP) || !is_spilled(txn, mp));
     tASSERT(txn, !txn->tw.spilled.list || !spill_search(txn, pgno));
   } else if (is_shadowed(txn, mp)) {
+    fprintf(stderr, "[page_retire_ex] status=shadowed\n");
     status = shadowed;
     tASSERT(txn, !txn->tw.spilled.list || !spill_search(txn, pgno));
     tASSERT(txn, !debug_dpl_find(txn, pgno));
   } else {
+    fprintf(stderr, "[page_retire_ex] status=spilled\n");
     tASSERT(txn, is_spilled(txn, mp));
     status = spilled;
     si = spill_search(txn, pgno);
     tASSERT(txn, !debug_dpl_find(txn, pgno));
   }
+  fprintf(stderr, "[page_retire_ex] status determination done, status=%d\n", (int)status);
 
 status_done:
+  fprintf(stderr, "[page_retire_ex] status_done: pageflags=0x%x P_LARGE=0x%x\n", pageflags, P_LARGE);
   if (likely((pageflags & P_LARGE) == 0)) {
     STATIC_ASSERT(P_BRANCH == 1);
     const bool is_branch = pageflags & P_BRANCH;
+    fprintf(stderr, "[page_retire_ex] is_branch=%d mc->flags=0x%x z_inner=0x%x\n", is_branch, mc->flags, z_inner);
     cASSERT(mc, ((pageflags & P_LEAF) == 0) == is_branch);
     if (unlikely(mc->flags & z_inner)) {
+      fprintf(stderr, "[page_retire_ex] z_inner path\n");
       tree_t *outer = outer_tree(mc);
       cASSERT(mc, !is_branch || outer->branch_pages > 0);
       outer->branch_pages -= is_branch;
       cASSERT(mc, is_branch || outer->leaf_pages > 0);
       outer->leaf_pages -= 1 - is_branch;
     }
+    fprintf(stderr, "[page_retire_ex] updating branch_pages/leaf_pages\n");
     cASSERT(mc, !is_branch || mc->tree->branch_pages > 0);
     mc->tree->branch_pages -= is_branch;
     cASSERT(mc, is_branch || mc->tree->leaf_pages > 0);
     mc->tree->leaf_pages -= 1 - is_branch;
+    fprintf(stderr, "[page_retire_ex] page counts updated\n");
   } else {
+    fprintf(stderr, "[page_retire_ex] P_LARGE path\n");
     npages = mp->pages;
     cASSERT(mc, mc->tree->large_pages >= npages);
     mc->tree->large_pages -= (pgno_t)npages;
   }
 
+  fprintf(stderr, "[page_retire_ex] checking status==frozen (%d)\n", status == frozen);
   if (status == frozen) {
   retire:
+    fprintf(stderr, "[page_retire_ex] retire path\n");
     DEBUG("retire %zu page %" PRIaPGNO, npages, pgno);
     rc = pnl_append_span(&txn->tw.retired_pages, pgno, npages);
     tASSERT(txn, dpl_check(txn));
     return rc;
   }
 
+  fprintf(stderr, "[page_retire_ex] checking MDBX_ENABLE_REFUND path, first_unallocated=%u pgno+npages=%zu\n", 
+          txn->geo.first_unallocated, (size_t)(pgno + npages));
   /* Возврат страниц в нераспределенный "хвост" БД.
    * Содержимое страниц не уничтожается, а для вложенных транзакций граница
    * нераспределенного "хвоста" БД сдвигается только при их коммите. */
   if (MDBX_ENABLE_REFUND && unlikely(pgno + npages == txn->geo.first_unallocated)) {
+    fprintf(stderr, "[page_retire_ex] REFUND path entered\n");
     const char *kind = nullptr;
     if (status == modifable) {
+      fprintf(stderr, "[page_retire_ex] REFUND: status==modifable, calling page_wash di=%zu mp=%p npages=%zu\n", di, (void*)mp, npages);
       /* Страница испачкана в этой транзакции, но до этого могла быть
        * аллоцирована, испачкана и пролита в одной из родительских транзакций.
        * Её МОЖНО вытолкнуть в нераспределенный хвост. */
       kind = "dirty";
       /* Remove from dirty list */
       page_wash(txn, di, mp, npages);
+      fprintf(stderr, "[page_retire_ex] REFUND: page_wash done\n");
     } else if (si) {
       /* Страница пролита в этой транзакции, т.е. она аллоцирована
        * и запачкана в этой или одной из родительских транзакций.
@@ -32905,8 +32955,11 @@ status_done:
       tASSERT(txn, status == spilled || status == shadowed);
     }
     DEBUG("refunded %zu %s page %" PRIaPGNO, npages, kind, pgno);
+    fprintf(stderr, "[page_retire_ex] REFUND: about to set first_unallocated=%u and call txn_refund\n", pgno);
     txn->geo.first_unallocated = pgno;
+    fprintf(stderr, "[page_retire_ex] REFUND: calling txn_refund\n");
     txn_refund(txn);
+    fprintf(stderr, "[page_retire_ex] REFUND: done, returning success\n");
     return MDBX_SUCCESS;
   }
 
@@ -33501,12 +33554,24 @@ static void refund_loose(MDBX_txn *txn) {
 }
 
 bool txn_refund(MDBX_txn *txn) {
+  fprintf(stderr, "[txn_refund] ENTRY txn=%p first_unallocated=%u\n", (void*)txn, txn->geo.first_unallocated);
   const pgno_t before = txn->geo.first_unallocated;
 
-  if (txn->tw.loose_pages && txn->tw.loose_refund_wl > txn->geo.first_unallocated)
+  fprintf(stderr, "[txn_refund] loose_pages=%p loose_refund_wl=%u\n", (void*)txn->tw.loose_pages, txn->tw.loose_refund_wl);
+  if (txn->tw.loose_pages && txn->tw.loose_refund_wl > txn->geo.first_unallocated) {
+    fprintf(stderr, "[txn_refund] calling refund_loose\n");
     refund_loose(txn);
+    fprintf(stderr, "[txn_refund] refund_loose done\n");
+  }
 
+  fprintf(stderr, "[txn_refund] starting while loop, repnl=%p\n", (void*)txn->tw.repnl);
   while (true) {
+    /* Handle NULL repnl (parallel subtxns have no repnl) */
+    if (!txn->tw.repnl) {
+      fprintf(stderr, "[txn_refund] repnl is NULL, breaking\n");
+      break;
+    }
+    fprintf(stderr, "[txn_refund] loop iteration, repnl size=%zu\n", MDBX_PNL_GETSIZE(txn->tw.repnl));
     if (MDBX_PNL_GETSIZE(txn->tw.repnl) == 0 || MDBX_PNL_MOST(txn->tw.repnl) != txn->geo.first_unallocated - 1)
       break;
 
@@ -35292,59 +35357,93 @@ bailout:
 }
 
 int tree_rebalance(MDBX_cursor *mc) {
+  fprintf(stderr, "[tree_rebalance] ENTRY mc=%p dbi=%u top=%d\n", (void*)mc, cursor_dbi(mc), mc->top);
   cASSERT(mc, cursor_is_tracked(mc));
+  fprintf(stderr, "[tree_rebalance] cursor_is_tracked passed\n");
   cASSERT(mc, mc->top >= 0);
+  fprintf(stderr, "[tree_rebalance] top>=0 passed, checking height assertion\n");
+  fprintf(stderr, "[tree_rebalance] top=%d height=%u pg[top]=%p\n", mc->top, mc->tree->height, (void*)mc->pg[mc->top]);
   cASSERT(mc, mc->top + 1 < mc->tree->height || is_leaf(mc->pg[mc->tree->height - 1]));
+  fprintf(stderr, "[tree_rebalance] height assertion passed, getting tp\n");
   const page_t *const tp = mc->pg[mc->top];
+  fprintf(stderr, "[tree_rebalance] tp=%p, getting pagetype\n", (void*)tp);
   const uint8_t pagetype = page_type(tp);
+  fprintf(stderr, "[tree_rebalance] pagetype=0x%x\n", pagetype);
 
   STATIC_ASSERT(P_BRANCH == 1);
   const size_t minkeys = (pagetype & P_BRANCH) + (size_t)1;
+  fprintf(stderr, "[tree_rebalance] minkeys=%zu\n", minkeys);
 
   /* Pages emptier than this are candidates for merging. */
+  fprintf(stderr, "[tree_rebalance] checking room_threshold, mc->tree=%p txn=%p\n", (void*)mc->tree, (void*)mc->txn);
+  fprintf(stderr, "[tree_rebalance] txn->dbs=%p FREE_DBI=%d\n", (void*)mc->txn->dbs, FREE_DBI);
   size_t room_threshold =
       likely(mc->tree != &mc->txn->dbs[FREE_DBI]) ? mc->txn->env->merge_threshold : mc->txn->env->merge_threshold_gc;
+  fprintf(stderr, "[tree_rebalance] room_threshold=%zu\n", room_threshold);
 
+  fprintf(stderr, "[tree_rebalance] calling page_numkeys\n");
   const size_t numkeys = page_numkeys(tp);
+  fprintf(stderr, "[tree_rebalance] numkeys=%zu, calling page_room\n", numkeys);
   const size_t room = page_room(tp);
+  fprintf(stderr, "[tree_rebalance] room=%zu\n", room);
   DEBUG("rebalancing %s page %" PRIaPGNO " (has %zu keys, fill %u.%u%%, used %zu, room %zu bytes)",
         is_leaf(tp) ? "leaf" : "branch", tp->pgno, numkeys, page_fill_percentum_x10(mc->txn->env, tp) / 10,
         page_fill_percentum_x10(mc->txn->env, tp) % 10, page_used(mc->txn->env, tp), room);
   cASSERT(mc, is_modifable(mc->txn, tp));
 
+  fprintf(stderr, "[tree_rebalance] checking merge conditions: numkeys=%zu minkeys=%zu room=%zu threshold=%zu\n", numkeys, minkeys, room, room_threshold);
   if (unlikely(numkeys < minkeys)) {
+    fprintf(stderr, "[tree_rebalance] MERGE: numkeys < minkeys\n");
     DEBUG("page %" PRIaPGNO " must be merged due keys < %zu threshold", tp->pgno, minkeys);
   } else if (unlikely(room > room_threshold)) {
+    fprintf(stderr, "[tree_rebalance] MERGE: room > threshold\n");
     DEBUG("page %" PRIaPGNO " should be merged due room %zu > %zu threshold", tp->pgno, room, room_threshold);
   } else {
+    fprintf(stderr, "[tree_rebalance] NO MERGE needed, returning success\n");
     DEBUG("no need to rebalance page %" PRIaPGNO ", room %zu < %zu threshold", tp->pgno, room, room_threshold);
     cASSERT(mc, mc->tree->items > 0);
     return MDBX_SUCCESS;
   }
 
   int rc;
+  fprintf(stderr, "[tree_rebalance] mc->top=%d\n", mc->top);
   if (mc->top == 0) {
+    fprintf(stderr, "[tree_rebalance] top==0 path\n");
     page_t *const mp = mc->pg[0];
     const size_t nkeys = page_numkeys(mp);
+    fprintf(stderr, "[tree_rebalance] mp=%p nkeys=%zu tree->items=%zu\n", (void*)mp, nkeys, (size_t)mc->tree->items);
     cASSERT(mc, (mc->tree->items == 0) == (nkeys == 0));
     if (nkeys == 0) {
+      fprintf(stderr, "[tree_rebalance] tree is empty, retiring page\n");
       DEBUG("%s", "tree is completely empty");
       cASSERT(mc, is_leaf(mp));
+      fprintf(stderr, "[tree_rebalance] checking DBI_DIRTY\n");
       cASSERT(mc, (*cursor_dbi_state(mc) & DBI_DIRTY) != 0);
+      fprintf(stderr, "[tree_rebalance] checking page counts\n");
       cASSERT(mc, mc->tree->branch_pages == 0 && mc->tree->large_pages == 0 && mc->tree->leaf_pages == 1);
+      fprintf(stderr, "[tree_rebalance] adjusting cursors for empty tree\n");
+      MDBX_dbi dbi_local = cursor_dbi(mc);
+      fprintf(stderr, "[tree_rebalance] dbi=%u, txn->cursors[dbi]=%p\n", dbi_local, (void*)mc->txn->cursors[dbi_local]);
       /* Adjust cursors pointing to mp */
-      for (MDBX_cursor *m2 = mc->txn->cursors[cursor_dbi(mc)]; m2; m2 = m2->next) {
+      for (MDBX_cursor *m2 = mc->txn->cursors[dbi_local]; m2; m2 = m2->next) {
+        fprintf(stderr, "[tree_rebalance] loop m2=%p m2->next=%p\n", (void*)m2, (void*)m2->next);
         MDBX_cursor *m3 = (mc->flags & z_inner) ? &m2->subcur->cursor : m2;
+        fprintf(stderr, "[tree_rebalance] m3=%p, checking is_poor and pg match\n", (void*)m3);
         if (!is_poor(m3) && m3->pg[0] == mp) {
+          fprintf(stderr, "[tree_rebalance] marking m3 as poor\n");
           be_poor(m3);
           m3->flags |= z_after_delete;
         }
       }
+      fprintf(stderr, "[tree_rebalance] cursor loop done, checking is_subpage\n");
       if (is_subpage(mp)) {
+        fprintf(stderr, "[tree_rebalance] is subpage, returning success\n");
         return MDBX_SUCCESS;
       } else {
+        fprintf(stderr, "[tree_rebalance] not subpage, retiring page\n");
         mc->tree->root = P_INVALID;
         mc->tree->height = 0;
+        fprintf(stderr, "[tree_rebalance] calling page_retire\n");
         return page_retire(mc, mp);
       }
     }
