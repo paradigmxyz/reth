@@ -633,6 +633,12 @@ where
             let _ = valid_block_tx.send(());
         }
 
+        // Build timing information for the executed block
+        let validation_timing = reth_chain_state::BlockValidationTiming {
+            execution_elapsed: execution_duration,
+            state_root_elapsed: root_elapsed,
+        };
+
         Ok(self.spawn_deferred_trie_task(
             block,
             output,
@@ -640,6 +646,7 @@ where
             hashed_state,
             trie_output,
             overlay_factory,
+            validation_timing,
         ))
     }
 
@@ -1257,6 +1264,7 @@ where
         hashed_state: HashedPostState,
         trie_output: TrieUpdates,
         overlay_factory: OverlayStateProviderFactory<P>,
+        validation_timing: reth_chain_state::BlockValidationTiming,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
         let (anchor_hash, overlay_blocks) = ctx
@@ -1364,10 +1372,11 @@ where
         // Spawn task that computes trie data asynchronously.
         self.payload_processor.executor().spawn_blocking(compute_trie_input_task);
 
-        ExecutedBlock::with_deferred_trie_data(
+        ExecutedBlock::with_deferred_trie_data_and_timing(
             Arc::new(block),
             execution_outcome,
             deferred_trie_data,
+            validation_timing,
         )
     }
 }

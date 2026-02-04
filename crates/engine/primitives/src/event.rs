@@ -9,6 +9,7 @@ use core::{
     fmt::{Display, Formatter, Result},
     time::Duration,
 };
+pub use reth_chain_state::BlockValidationTiming;
 use reth_chain_state::ExecutedBlock;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
@@ -26,8 +27,8 @@ pub enum ConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     ForkBlockAdded(ExecutedBlock<N>, Duration),
     /// A new block was received from the consensus engine
     BlockReceived(BlockNumHash),
-    /// A block was added to the canonical chain, and the elapsed time validating the block
-    CanonicalBlockAdded(ExecutedBlock<N>, Duration),
+    /// A block was added to the canonical chain, with timing information for validation.
+    CanonicalBlockAdded(ExecutedBlock<N>, BlockValidationTiming),
     /// A canonical chain was committed, and the elapsed time committing the data
     CanonicalChainCommitted(Box<SealedHeader<N::BlockHeader>>, Duration),
     /// The consensus engine processed an invalid block.
@@ -57,11 +58,13 @@ where
             Self::ForkBlockAdded(block, duration) => {
                 write!(f, "ForkBlockAdded({:?}, {duration:?})", block.recovered_block.num_hash())
             }
-            Self::CanonicalBlockAdded(block, duration) => {
+            Self::CanonicalBlockAdded(block, timing) => {
                 write!(
                     f,
-                    "CanonicalBlockAdded({:?}, {duration:?})",
-                    block.recovered_block.num_hash()
+                    "CanonicalBlockAdded({:?}, exec={:?}, state_root={:?})",
+                    block.recovered_block.num_hash(),
+                    timing.execution_elapsed,
+                    timing.state_root_elapsed,
                 )
             }
             Self::CanonicalChainCommitted(block, duration) => {

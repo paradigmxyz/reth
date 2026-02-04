@@ -1131,12 +1131,25 @@ where
             while let Some(event) = engine_events.next().await {
                 use reth_engine_primitives::ConsensusEngineEvent;
                 match event {
-                    ConsensusEngineEvent::ForkBlockAdded(executed, duration) |
-                    ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {
+                    ConsensusEngineEvent::ForkBlockAdded(executed, duration) => {
                         let block_hash = executed.recovered_block.num_hash().hash;
                         let block_number = executed.recovered_block.num_hash().number;
                         if let Err(e) = ethstats_for_events
                             .report_new_payload(block_hash, block_number, duration)
+                            .await
+                        {
+                            debug!(
+                                target: "ethstats",
+                                "Failed to report new payload: {}", e
+                            );
+                        }
+                    }
+                    ConsensusEngineEvent::CanonicalBlockAdded(executed, timing) => {
+                        let block_hash = executed.recovered_block.num_hash().hash;
+                        let block_number = executed.recovered_block.num_hash().number;
+                        // Use execution_elapsed for ethstats reporting
+                        if let Err(e) = ethstats_for_events
+                            .report_new_payload(block_hash, block_number, timing.execution_elapsed)
                             .await
                         {
                             debug!(

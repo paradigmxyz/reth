@@ -1481,8 +1481,14 @@ where
                         self.state.tree_state.insert_executed(block.clone());
                         self.payload_validator.on_inserted_executed_block(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
+                        // Use timing from the already-executed block
+                        let mut timing = block.validation_timing;
+                        if timing.execution_elapsed.is_zero() && timing.state_root_elapsed.is_zero()
+                        {
+                            timing.execution_elapsed = now.elapsed();
+                        }
                         self.emit_event(EngineApiEvent::BeaconConsensus(
-                            ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
+                            ConsensusEngineEvent::CanonicalBlockAdded(block, timing),
                         ));
                     }
                     EngineApiRequest::Beacon(request) => {
@@ -2685,11 +2691,17 @@ where
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event
-        let elapsed = start.elapsed();
+        let total_elapsed = start.elapsed();
         let engine_event = if is_fork {
-            ConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
+            ConsensusEngineEvent::ForkBlockAdded(executed, total_elapsed)
         } else {
-            ConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
+            // Use timing from the executed block (set during validation)
+            let mut timing = executed.validation_timing;
+            // If timing wasn't set during validation, use total elapsed as fallback
+            if timing.execution_elapsed.is_zero() && timing.state_root_elapsed.is_zero() {
+                timing.execution_elapsed = total_elapsed;
+            }
+            ConsensusEngineEvent::CanonicalBlockAdded(executed, timing)
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
