@@ -29,6 +29,7 @@ reth-evm.workspace = true
 reth-revm.workspace = true
 reth-trie-common.workspace = true
 reth-trie-sparse.workspace = true
+reth-trie-sparse-parallel.workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
 

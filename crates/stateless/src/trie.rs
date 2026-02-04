@@ -13,6 +13,10 @@ use reth_trie_sparse::{
     provider::{DefaultTrieNodeProvider, DefaultTrieNodeProviderFactory},
     RevealableSparseTrie, SparseStateTrie, SparseTrie,
 };
+use reth_trie_sparse_parallel::ParallelSparseTrie;
+
+/// Type alias for the sparse state trie using parallel implementation.
+type SparseTrieImpl = SparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>;
 
 /// Trait for stateless trie implementations that can be used for stateless validation.
 pub trait StatelessTrie: core::fmt::Debug {
@@ -46,7 +50,7 @@ pub trait StatelessTrie: core::fmt::Debug {
 /// `StatelessSparseTrie` structure for usage during stateless validation
 #[derive(Debug)]
 pub struct StatelessSparseTrie {
-    inner: SparseStateTrie,
+    inner: SparseTrieImpl,
 }
 
 impl StatelessSparseTrie {
@@ -174,9 +178,9 @@ impl StatelessTrie for StatelessSparseTrie {
 fn verify_execution_witness(
     witness: &ExecutionWitness,
     pre_state_root: B256,
-) -> Result<(SparseStateTrie, B256Map<Bytecode>), StatelessValidationError> {
+) -> Result<(SparseTrieImpl, B256Map<Bytecode>), StatelessValidationError> {
     let provider_factory = DefaultTrieNodeProviderFactory;
-    let mut trie = SparseStateTrie::new();
+    let mut trie = SparseTrieImpl::new();
     let mut state_witness = B256Map::default();
     let mut bytecode = B256Map::default();
 
@@ -218,13 +222,13 @@ fn verify_execution_witness(
 // Copied and modified from ress: https://github.com/paradigmxyz/ress/blob/06bf2c4788e45b8fcbd640e38b6243e6f87c4d0e/crates/engine/src/tree/root.rs
 /// Calculates the post-execution state root by applying state changes to a sparse trie.
 ///
-/// This function takes a [`SparseStateTrie`] with the pre-state and a [`HashedPostState`]
+/// This function takes a [`SparseTrieImpl`] with the pre-state and a [`HashedPostState`]
 /// containing account and storage changes resulting from block execution (state diff).
 ///
 /// It modifies the input `trie` in place to reflect these changes and then calculates the
 /// final post-execution state root.
 fn calculate_state_root(
-    trie: &mut SparseStateTrie,
+    trie: &mut SparseTrieImpl,
     state: HashedPostState,
 ) -> SparseStateTrieResult<B256> {
     // 1. Apply storage‑slot updates and compute each contract’s storage root

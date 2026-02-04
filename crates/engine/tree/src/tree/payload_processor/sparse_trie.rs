@@ -28,8 +28,9 @@ use reth_trie_parallel::{
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt,
+    LeafUpdate, SparseStateTrie, SparseTrie, SparseTrieExt,
 };
+use reth_trie_sparse_parallel::ParallelSparseTrie;
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
 use std::{
@@ -97,7 +98,7 @@ where
 }
 
 /// A task responsible for populating the sparse trie.
-pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
+pub(super) struct SparseTrieTask<BPF, A = ParallelSparseTrie, S = ParallelSparseTrie>
 where
     BPF: TrieNodeProviderFactory + Send + Sync,
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
@@ -209,7 +210,7 @@ where
 const MAX_PENDING_UPDATES: usize = 100;
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
-pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie> {
+pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparseTrie> {
     /// Sender for proof results.
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Receiver for proof results directly from workers.

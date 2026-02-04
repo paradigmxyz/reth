@@ -12,3 +12,6 @@ use lower::*;
 
 #[cfg(feature = "metrics")]
 mod metrics;
+
+#[cfg(test)]
+mod state_tests;

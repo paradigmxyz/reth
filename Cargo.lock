@@ -10907,6 +10907,7 @@ dependencies = [
  "reth-revm",
  "reth-trie-common",
  "reth-trie-sparse",
+ "reth-trie-sparse-parallel",
  "secp256k1 0.30.0",
  "serde",
  "serde_with",
@@ -11176,6 +11177,7 @@ dependencies = [
  "reth-tracing",
  "reth-trie-common",
  "reth-trie-sparse",
+ "reth-trie-sparse-parallel",
  "revm-database",
  "revm-state",
  "tracing",
@@ -11304,6 +11306,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "reth-trie-db",
+ "reth-trie-sparse-parallel",
  "tracing",
 ]
 

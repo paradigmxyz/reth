@@ -3501,8 +3501,7 @@ mod tests {
     use reth_trie_db::DatabaseTrieCursorFactory;
     use reth_trie_sparse::{
         provider::{DefaultTrieNodeProvider, RevealedNode, TrieNodeProvider},
-        LeafLookup, LeafLookupError, SerialSparseTrie, SparseNode, SparseTrie, SparseTrieExt,
-        SparseTrieUpdates,
+        LeafLookup, LeafLookupError, SparseNode, SparseTrie, SparseTrieExt, SparseTrieUpdates,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -5967,108 +5966,6 @@ mod tests {
                         hash_builder_proof_nodes,
                     );
                 }
-            }
-        }
-
-        fn transform_updates(
-            updates: Vec<BTreeMap<Nibbles, Account>>,
-            mut rng: impl rand::Rng,
-        ) -> Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)> {
-            let mut keys = BTreeSet::new();
-            updates
-                .into_iter()
-                .map(|update| {
-                    keys.extend(update.keys().copied());
-
-                    let keys_to_delete_len = update.len() / 2;
-                    let keys_to_delete = (0..keys_to_delete_len)
-                        .map(|_| {
-                            let key =
-                                *rand::seq::IteratorRandom::choose(keys.iter(), &mut rng).unwrap();
-                            keys.take(&key).unwrap()
-                        })
-                        .collect();
-
-                    (update, keys_to_delete)
-                })
-                .collect::<Vec<_>>()
-        }
-
-        proptest!(ProptestConfig::with_cases(10), |(
-            updates in proptest::collection::vec(
-                proptest::collection::btree_map(
-                    any_with::<Nibbles>(SizeRange::new(KEY_NIBBLES_LEN..=KEY_NIBBLES_LEN)).prop_map(pad_nibbles_right),
-                    arb::<Account>(),
-                    1..50,
-                ),
-                1..50,
-            ).prop_perturb(transform_updates)
-        )| {
-            test(updates)
-        });
-    }
-
-    #[test]
-    fn sparse_trie_fuzz_vs_serial() {
-        // Having only the first 3 nibbles set, we narrow down the range of keys
-        // to 4096 different hashes. It allows us to generate collisions more likely
-        // to test the sparse trie updates.
-        const KEY_NIBBLES_LEN: usize = 3;
-
-        fn test(updates: Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)>) {
-            let default_provider = DefaultTrieNodeProvider;
-            let mut serial = SerialSparseTrie::default().with_updates(true);
-            let mut parallel = ParallelSparseTrie::default().with_updates(true);
-
-            for (update, keys_to_delete) in updates {
-                // Perform leaf updates on both tries
-                for (key, account) in update.clone() {
-                    let account = account.into_trie_account(EMPTY_ROOT_HASH);
-                    let mut account_rlp = Vec::new();
-                    account.encode(&mut account_rlp);
-                    serial.update_leaf(key, account_rlp.clone(), &default_provider).unwrap();
-                    parallel.update_leaf(key, account_rlp, &default_provider).unwrap();
-                }
-
-                // Calculate roots and assert their equality
-                let serial_root = serial.root();
-                let parallel_root = parallel.root();
-                assert_eq!(parallel_root, serial_root);
-
-                // Assert that both tries produce the same updates
-                let serial_updates = serial.take_updates();
-                let parallel_updates = parallel.take_updates();
-                pretty_assertions::assert_eq!(
-                    BTreeMap::from_iter(parallel_updates.updated_nodes),
-                    BTreeMap::from_iter(serial_updates.updated_nodes),
-                );
-                pretty_assertions::assert_eq!(
-                    BTreeSet::from_iter(parallel_updates.removed_nodes),
-                    BTreeSet::from_iter(serial_updates.removed_nodes),
-                );
-
-                // Perform leaf removals on both tries
-                for key in &keys_to_delete {
-                    parallel.remove_leaf(key, &default_provider).unwrap();
-                    serial.remove_leaf(key, &default_provider).unwrap();
-                }
-
-                // Calculate roots and assert their equality
-                let serial_root = serial.root();
-                let parallel_root = parallel.root();
-                assert_eq!(parallel_root, serial_root);
-
-                // Assert that both tries produce the same updates
-                let serial_updates = serial.take_updates();
-                let parallel_updates = parallel.take_updates();
-                pretty_assertions::assert_eq!(
-                    BTreeMap::from_iter(parallel_updates.updated_nodes),
-                    BTreeMap::from_iter(serial_updates.updated_nodes),
-                );
-                pretty_assertions::assert_eq!(
-                    BTreeSet::from_iter(parallel_updates.removed_nodes),
-                    BTreeSet::from_iter(serial_updates.removed_nodes),
-                );
             }
         }
 
