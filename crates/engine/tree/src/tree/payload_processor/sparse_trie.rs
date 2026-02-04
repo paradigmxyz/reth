@@ -621,7 +621,7 @@ where
             },
             || {
                 let _guard = parent_span.clone().entered();
-                let _span = debug_span!("process_storage_leaf_updates").entered();
+                let storage_span = debug_span!("process_storage_leaf_updates").entered();
 
                 // Prepare and process storage updates - prep streams into parallel processing
                 storage_updates
@@ -633,7 +633,12 @@ where
                     })
                     .par_bridge()
                     .map(|(address, updates, mut fetched, mut trie)| {
+                        let _guard = storage_span.clone().entered();
                         let mut targets = Vec::new();
+
+                        let num_updates = updates.len();
+                        let _span =
+                            debug_span!("process_storage_leaf_updates", num_updates = num_updates).entered();
 
                         trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
                             Entry::Occupied(mut entry) => {
