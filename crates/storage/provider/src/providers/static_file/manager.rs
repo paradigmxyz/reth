@@ -6,7 +6,7 @@ use crate::{
     changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
     EitherWriterDestination, HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader,
-    TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, STORAGE_POOL,
 };
 use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
@@ -47,14 +47,12 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
-use reth_tasks::spawn_scoped_os_thread;
 use std::{
     collections::BTreeMap,
     fmt::Debug,
     ops::{Bound, Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::{atomic::AtomicU64, mpsc, Arc},
-    thread,
 };
 use tracing::{debug, info, info_span, instrument, trace, warn};
 
@@ -656,31 +654,28 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(())
     }
 
-    /// Spawns a scoped thread that writes to a static file segment using the provided closure.
+    /// Writes to a static file segment using the provided closure.
     ///
     /// The closure receives a mutable reference to the segment writer. After the closure completes,
     /// `sync_all()` is called to flush writes to disk.
-    fn spawn_segment_writer<'scope, 'env, F>(
-        &'env self,
-        scope: &'scope thread::Scope<'scope, 'env>,
+    fn write_segment<F>(
+        &self,
         segment: StaticFileSegment,
         first_block_number: BlockNumber,
         f: F,
-    ) -> thread::ScopedJoinHandle<'scope, ProviderResult<()>>
+    ) -> ProviderResult<()>
     where
-        F: FnOnce(&mut StaticFileProviderRWRefMut<'_, N>) -> ProviderResult<()> + Send + 'env,
+        F: FnOnce(&mut StaticFileProviderRWRefMut<'_, N>) -> ProviderResult<()>,
     {
-        spawn_scoped_os_thread(scope, segment.as_short_str(), move || {
-            let mut w = self.get_writer(first_block_number, segment)?;
-            f(&mut w)?;
-            w.sync_all()
-        })
+        let mut w = self.get_writer(first_block_number, segment)?;
+        f(&mut w)?;
+        w.sync_all()
     }
 
     /// Writes all static file data for multiple blocks in parallel per-segment.
     ///
-    /// This spawns separate threads for each segment type and each thread calls `sync_all()` on its
-    /// writer when done.
+    /// This spawns tasks on the storage thread pool for each segment type and each task calls
+    /// `sync_all()` on its writer when done.
     #[instrument(level = "debug", target = "providers::static_file", skip_all)]
     pub fn write_blocks_data(
         &self,
@@ -694,70 +689,87 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         let first_block_number = blocks[0].recovered_block().number();
 
-        thread::scope(|s| {
-            let h_headers =
-                self.spawn_segment_writer(s, StaticFileSegment::Headers, first_block_number, |w| {
-                    Self::write_headers(w, blocks)
+        let mut r_headers = None;
+        let mut r_txs = None;
+        let mut r_senders = None;
+        let mut r_receipts = None;
+        let mut r_account_changesets = None;
+        let mut r_storage_changesets = None;
+
+        STORAGE_POOL.in_place_scope(|s| {
+            s.spawn(|_| {
+                r_headers =
+                    Some(self.write_segment(StaticFileSegment::Headers, first_block_number, |w| {
+                        Self::write_headers(w, blocks)
+                    }));
+            });
+
+            s.spawn(|_| {
+                r_txs = Some(self.write_segment(
+                    StaticFileSegment::Transactions,
+                    first_block_number,
+                    |w| Self::write_transactions(w, blocks, tx_nums),
+                ));
+            });
+
+            if ctx.write_senders {
+                s.spawn(|_| {
+                    r_senders = Some(self.write_segment(
+                        StaticFileSegment::TransactionSenders,
+                        first_block_number,
+                        |w| Self::write_transaction_senders(w, blocks, tx_nums),
+                    ));
                 });
-
-            let h_txs = self.spawn_segment_writer(
-                s,
-                StaticFileSegment::Transactions,
-                first_block_number,
-                |w| Self::write_transactions(w, blocks, tx_nums),
-            );
-
-            let h_senders = ctx.write_senders.then(|| {
-                self.spawn_segment_writer(
-                    s,
-                    StaticFileSegment::TransactionSenders,
-                    first_block_number,
-                    |w| Self::write_transaction_senders(w, blocks, tx_nums),
-                )
-            });
-
-            let h_receipts = ctx.write_receipts.then(|| {
-                self.spawn_segment_writer(s, StaticFileSegment::Receipts, first_block_number, |w| {
-                    Self::write_receipts(w, blocks, tx_nums, &ctx)
-                })
-            });
-
-            let h_account_changesets = ctx.write_account_changesets.then(|| {
-                self.spawn_segment_writer(
-                    s,
-                    StaticFileSegment::AccountChangeSets,
-                    first_block_number,
-                    |w| Self::write_account_changesets(w, blocks),
-                )
-            });
-
-            let h_storage_changesets = ctx.write_storage_changesets.then(|| {
-                self.spawn_segment_writer(
-                    s,
-                    StaticFileSegment::StorageChangeSets,
-                    first_block_number,
-                    |w| Self::write_storage_changesets(w, blocks),
-                )
-            });
-
-            h_headers.join().map_err(|_| StaticFileWriterError::ThreadPanic("headers"))??;
-            h_txs.join().map_err(|_| StaticFileWriterError::ThreadPanic("transactions"))??;
-            if let Some(h) = h_senders {
-                h.join().map_err(|_| StaticFileWriterError::ThreadPanic("senders"))??;
             }
-            if let Some(h) = h_receipts {
-                h.join().map_err(|_| StaticFileWriterError::ThreadPanic("receipts"))??;
+
+            if ctx.write_receipts {
+                s.spawn(|_| {
+                    r_receipts = Some(self.write_segment(
+                        StaticFileSegment::Receipts,
+                        first_block_number,
+                        |w| Self::write_receipts(w, blocks, tx_nums, &ctx),
+                    ));
+                });
             }
-            if let Some(h) = h_account_changesets {
-                h.join()
-                    .map_err(|_| StaticFileWriterError::ThreadPanic("account_changesets"))??;
+
+            if ctx.write_account_changesets {
+                s.spawn(|_| {
+                    r_account_changesets = Some(self.write_segment(
+                        StaticFileSegment::AccountChangeSets,
+                        first_block_number,
+                        |w| Self::write_account_changesets(w, blocks),
+                    ));
+                });
             }
-            if let Some(h) = h_storage_changesets {
-                h.join()
-                    .map_err(|_| StaticFileWriterError::ThreadPanic("storage_changesets"))??;
+
+            if ctx.write_storage_changesets {
+                s.spawn(|_| {
+                    r_storage_changesets = Some(self.write_segment(
+                        StaticFileSegment::StorageChangeSets,
+                        first_block_number,
+                        |w| Self::write_storage_changesets(w, blocks),
+                    ));
+                });
             }
-            Ok(())
-        })
+        });
+
+        r_headers.ok_or(StaticFileWriterError::ThreadPanic("headers"))??;
+        r_txs.ok_or(StaticFileWriterError::ThreadPanic("transactions"))??;
+        if ctx.write_senders {
+            r_senders.ok_or(StaticFileWriterError::ThreadPanic("senders"))??;
+        }
+        if ctx.write_receipts {
+            r_receipts.ok_or(StaticFileWriterError::ThreadPanic("receipts"))??;
+        }
+        if ctx.write_account_changesets {
+            r_account_changesets
+                .ok_or(StaticFileWriterError::ThreadPanic("account_changesets"))??;
+        }
+        if ctx.write_storage_changesets {
+            r_storage_changesets
+                .ok_or(StaticFileWriterError::ThreadPanic("storage_changesets"))??;
+        }
+        Ok(())
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and start index that can be
