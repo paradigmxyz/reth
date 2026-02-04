@@ -43,7 +43,6 @@ reth-tracing.workspace = true
 
 arbitrary.workspace = true
 assert_matches.workspace = true
-criterion.workspace = true
 itertools.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
