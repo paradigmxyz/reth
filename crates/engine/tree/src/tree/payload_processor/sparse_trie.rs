@@ -599,7 +599,11 @@ where
         let (account_result, storage_result) = rayon::join(
             || {
                 let _guard = parent_span.clone().entered();
-                let _span = debug_span!("process_account_leaf_updates").entered();
+                let _span = debug_span!(
+                    "process_account_leaf_updates",
+                    num_updates = account_updates.len()
+                )
+                .entered();
 
                 account_trie.update_leaves(account_updates, |target, min_len| {
                     match fetched_account_targets.entry(target) {
