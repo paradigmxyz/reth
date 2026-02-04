@@ -1440,9 +1440,9 @@ impl ParallelSparseTrie {
             })
             .collect();
 
-        // Sort by: cold first (is_hot=false < is_hot=true), then by size descending
+        // Sort by: cold first (is_hot=false < is_hot=true), then by size ascending (smallest first)
         let mut subtries = subtrie_info;
-        subtries.sort_unstable_by_key(|(_, mem, is_hot, _)| (*is_hot, std::cmp::Reverse(*mem)));
+        subtries.sort_unstable_by_key(|(_, mem, is_hot, _)| (*is_hot, *mem));
 
         // Find the cutoff point: how many subtries to clear
         let mut cumulative = 0usize;
