@@ -15936,6 +15936,10 @@ static void subtx_free_resources(MDBX_txn *subtxn) {
     pnl_free(subtxn->tw.spilled.list);
   if (subtxn->tw.subtxn_repnl)
     pnl_free(subtxn->tw.subtxn_repnl);
+  /* Clear loose pages on abort - they're in WRITEMAP so no memory to free,
+   * but parent must not see stale pointers */
+  subtxn->tw.loose_pages = nullptr;
+  subtxn->tw.loose_count = 0;
   subtxn->signature = 0;
 }
 
@@ -16019,6 +16023,22 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
       return LOG_IFERR(rc);
     for (size_t i = 1; i <= MDBX_PNL_GETSIZE(subtxn->tw.repnl); ++i)
       pnl_append_prereserved(parent->tw.repnl, subtxn->tw.repnl[i]);
+  }
+
+  /* Merge loose pages to parent's repnl so they can be reused */
+  if (subtxn->tw.loose_count > 0) {
+    int rc = pnl_need(&parent->tw.repnl, subtxn->tw.loose_count);
+    if (unlikely(rc != MDBX_SUCCESS))
+      return LOG_IFERR(rc);
+    for (page_t *lp = subtxn->tw.loose_pages; lp; ) {
+      MDBX_ASAN_UNPOISON_MEMORY_REGION(&page_next(lp), sizeof(page_t *));
+      VALGRIND_MAKE_MEM_DEFINED(&page_next(lp), sizeof(page_t *));
+      page_t *next = page_next(lp);
+      pnl_append_prereserved(parent->tw.repnl, lp->pgno);
+      lp = next;
+    }
+    subtxn->tw.loose_pages = nullptr;
+    subtxn->tw.loose_count = 0;
   }
 
   subtx_unlink_from_parent(subtxn);
