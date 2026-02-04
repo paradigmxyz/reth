@@ -753,7 +753,12 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 }
             }
 
-            // Full mode: update history indices
+            // Commit parallel subtransactions if enabled (MUST happen before parent writes)
+            if use_parallel_writes {
+                self.tx.commit_subtxns()?;
+            }
+
+            // Full mode: update history indices (parent can safely write now)
             if save_mode.with_state() {
                 let start = Instant::now();
                 self.update_history_indices(first_number..=last_block_number)?;
@@ -764,11 +769,6 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
             let start = Instant::now();
             self.update_pipeline_stages(last_block_number, false)?;
             timings.update_pipeline_stages = start.elapsed();
-
-            // Commit parallel subtransactions if enabled
-            if use_parallel_writes {
-                self.tx.commit_subtxns()?;
-            }
 
             timings.mdbx = mdbx_start.elapsed();
 
