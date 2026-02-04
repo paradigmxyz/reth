@@ -687,6 +687,7 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 // - Thread 7: StoragesTrie
                 #[cfg(feature = "edge")]
                 if use_parallel_writes {
+                    eprintln!(">>> PARALLEL WRITES PATH ENTERED <<<");
                     let mut edge_timings = metrics::EdgeWriteTimings::default();
                     let total_start = Instant::now();
 
@@ -789,6 +790,8 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                     edge_timings.parallel_wall = parallel_start.elapsed();
                     edge_timings.total = total_start.elapsed();
                     edge_timings.subtxn_count = 7;
+                    eprintln!(">>> EDGE TIMINGS: preprocessing={:?} parallel_wall={:?} total={:?} subtxn_count={}", 
+                        edge_timings.preprocessing, edge_timings.parallel_wall, edge_timings.total, edge_timings.subtxn_count);
                     self.metrics.record_edge_writes(&edge_timings);
 
                     // Also update the standard timings for backward compatibility

@@ -134,4 +134,4 @@ arbitrary = [
 ]
 
 rocksdb = ["reth-db-common/rocksdb", "reth-stages/rocksdb", "reth-provider/rocksdb", "reth-prune/rocksdb"]
-edge = ["rocksdb"]
+edge = ["rocksdb", "reth-db-common/edge", "reth-provider/edge"]
