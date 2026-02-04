@@ -950,11 +950,8 @@ where
                 return
             };
 
-            let to_propagate = self
-                .pool
-                .get_all(hashes)
-                .into_iter()
-                .map(PropagateTransaction::pool_tx);
+            let to_propagate =
+                self.pool.get_all(hashes).into_iter().map(PropagateTransaction::pool_tx);
 
             let mut propagated = PropagatedTransactions::default();
 
