@@ -533,10 +533,11 @@ where
     fn process_leaf_updates(&mut self) -> SparseTrieResult<()> {
         self.pending_updates = 0;
 
-        // Process all storage updates in parallel.
+        // Process all storage updates in parallel, skipping tries with no pending updates.
         let storage_results = self
             .storage_updates
             .iter_mut()
+            .filter(|(_, updates)| !updates.is_empty())
             .map(|(address, updates)| {
                 let trie = self.trie.take_or_create_storage_trie(address);
                 let fetched = self.fetched_storage_targets.remove(address).unwrap_or_default();
