@@ -87,7 +87,7 @@ where
         changeset_cache: ChangesetCache,
     ) -> Self
     where
-        V: EngineValidator<N::Payload>,
+        V: EngineValidator<N::Payload> + reth_engine_tree::tree::WaitForCaches,
         C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let engine_kind =

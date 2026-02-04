@@ -6,7 +6,7 @@ use crate::{
         helpers::{build_payload, parse_gas_limit, prepare_payload_request, rpc_block_to_header},
         output::GasRampPayloadFile,
     },
-    valid_payload::{call_forkchoice_updated, call_new_payload, payload_to_new_payload},
+    valid_payload::{call_forkchoice_updated, call_new_payload_with_reth, payload_to_new_payload},
 };
 use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
@@ -47,6 +47,14 @@ pub struct Command {
     /// Output directory for benchmark results and generated payloads.
     #[arg(long, value_name = "OUTPUT")]
     output: PathBuf,
+
+    /// Use `reth_newPayload*` endpoints instead of `engine_newPayload*`.
+    ///
+    /// The `reth_newPayload*` endpoints are reth-specific extensions that wait for
+    /// execution cache and preserved sparse trie locks to become available before
+    /// processing, ensuring optimal cache utilization during benchmarking.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    reth_new_payload: bool,
 }
 
 /// Mode for determining when to stop ramping.
@@ -138,6 +146,9 @@ impl Command {
                 );
             }
         }
+        if self.reth_new_payload {
+            info!("Using reth_newPayload* endpoints (waits for execution cache locks)");
+        }
 
         let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
@@ -180,7 +191,7 @@ impl Command {
             std::fs::write(&payload_path, &payload_json)?;
             info!(target: "reth-bench", block_number = block.header.number, path = %payload_path.display(), "Saved payload");
 
-            call_new_payload(&provider, version, params).await?;
+            call_new_payload_with_reth(&provider, version, params, self.reth_new_payload).await?;
 
             let forkchoice_state = ForkchoiceState {
                 head_block_hash: block_hash,

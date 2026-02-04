@@ -8,7 +8,7 @@ use crate::{
             NEW_PAYLOAD_OUTPUT_SUFFIX,
         },
     },
-    valid_payload::{block_to_new_payload, call_new_payload},
+    valid_payload::{block_to_new_payload, call_new_payload_with_reth},
 };
 use alloy_provider::Provider;
 use clap::Parser;
@@ -49,8 +49,12 @@ impl Command {
             auth_provider,
             mut next_block,
             is_optimism,
-            ..
+            use_reth_namespace,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
+
+        if use_reth_namespace {
+            info!("Using reth_newPayload* endpoints (waits for execution cache locks)");
+        }
 
         let buffer_size = self.rpc_block_buffer_size;
 
@@ -102,7 +106,7 @@ impl Command {
             let (version, params) = block_to_new_payload(block, is_optimism)?;
 
             let start = Instant::now();
-            call_new_payload(&auth_provider, version, params).await?;
+            call_new_payload_with_reth(&auth_provider, version, params, use_reth_namespace).await?;
 
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
             info!(target: "reth-bench", %new_payload_result);

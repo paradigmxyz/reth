@@ -252,12 +252,28 @@ pub(crate) fn payload_to_new_payload(
 ///
 /// # Panics
 /// If the given payload is a V3 payload, but a parent beacon block root is provided as `None`.
+#[allow(dead_code)]
 pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
     provider: P,
     version: EngineApiMessageVersion,
     params: serde_json::Value,
 ) -> TransportResult<()> {
-    let method = version.method_name();
+    call_new_payload_with_reth(provider, version, params, false).await
+}
+
+/// Calls either `engine_newPayload*` or `reth_newPayload*` depending on the `use_reth_namespace`
+/// flag.
+///
+/// When `use_reth_namespace` is true, uses the `reth_newPayload*` endpoints which wait for
+/// execution cache and preserved sparse trie locks to become available before processing.
+pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
+    provider: P,
+    version: EngineApiMessageVersion,
+    params: serde_json::Value,
+    use_reth_namespace: bool,
+) -> TransportResult<()> {
+    let method =
+        if use_reth_namespace { version.reth_method_name() } else { version.method_name() };
 
     debug!(target: "reth-bench", method, "Sending newPayload");
 
