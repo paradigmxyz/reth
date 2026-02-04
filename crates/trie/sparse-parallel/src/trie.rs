@@ -1256,6 +1256,17 @@ impl SparseTrieExt for ParallelSparseTrie {
             "ParallelSparseTrie::prune cleared accessible paths"
         );
 
+        // Print and reset find_leaf stats for this block
+        let stats = std::mem::take(&mut self.find_leaf_stats);
+        println!(
+            "[BLOCK STATS] find_leaf: total={} cache_hits={} found={} blinded={} accessible_paths={}",
+            stats.total_calls,
+            stats.cache_hits,
+            stats.found,
+            stats.blinded,
+            self.known_accessible_paths.len()
+        );
+
         effective_pruned_roots.into_iter().map(|(path, _)| path).collect()
     }
 
@@ -1334,19 +1345,6 @@ impl SparseTrieExt for ParallelSparseTrie {
                     }
                 }
             }
-        }
-
-        // Debug print for instrumentation
-        let stats = &self.find_leaf_stats;
-        if stats.total_calls > 0 {
-            println!(
-                "[FIND_LEAF DEBUG] total={} cache_hits={} found={} blinded={} accessible_paths={}",
-                stats.total_calls,
-                stats.cache_hits,
-                stats.found,
-                stats.blinded,
-                self.known_accessible_paths.len()
-            );
         }
 
         Ok(())
