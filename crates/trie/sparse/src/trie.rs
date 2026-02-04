@@ -6,6 +6,7 @@ use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNode};
+use tracing::instrument;
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
 /// unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
@@ -85,6 +86,17 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
 
 impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// Creates a new blind sparse trie.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, RevealableSparseTrie};
+    ///
+    /// let trie = <RevealableSparseTrie>::blind();
+    /// assert!(trie.is_blind());
+    /// let trie = <RevealableSparseTrie>::default();
+    /// assert!(trie.is_blind());
+    /// ```
     pub const fn blind() -> Self {
         Self::Blind(None)
     }
@@ -190,6 +202,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// # Errors
     ///
     /// Returns an error if the trie is still blind, or if the update fails.
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
     pub fn update_leaf(
         &mut self,
         path: Nibbles,
@@ -206,6 +219,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// # Errors
     ///
     /// Returns an error if the trie is still blind, or if the leaf cannot be removed
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
     pub fn remove_leaf(
         &mut self,
         path: &Nibbles,
