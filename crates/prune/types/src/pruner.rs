@@ -165,4 +165,16 @@ impl PruneProgress {
     pub const fn is_finished(&self) -> bool {
         matches!(self, Self::Finished)
     }
+
+    /// Combines two progress values, keeping `HasMoreData` if either has it.
+    ///
+    /// This implements "worst wins" semantics: once any segment reports `HasMoreData`,
+    /// the combined progress remains `HasMoreData`. Only returns `Finished` if both
+    /// are `Finished`.
+    pub const fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::HasMoreData(reason), _) => Self::HasMoreData(reason),
+            (Self::Finished, other) => other,
+        }
+    }
 }
