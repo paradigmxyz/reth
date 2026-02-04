@@ -150,14 +150,14 @@ where
     /// Execute the stage.
     ///
     /// When `use_hashed_state` is enabled, this stage is a no-op because the execution stage
-    /// writes directly to HashedAccounts. Otherwise, it hashes plain state to populate hashed
+    /// writes directly to `HashedAccounts`. Otherwise, it hashes plain state to populate hashed
     /// tables.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        // If using hashed state as canonical, execution already writes to HashedAccounts,
+        // If using hashed state as canonical, execution already writes to `HashedAccounts`,
         // so this stage becomes a no-op.
         if provider.cached_storage_settings().use_hashed_state {
             return Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())));
