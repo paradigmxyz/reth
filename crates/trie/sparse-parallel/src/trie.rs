@@ -1317,7 +1317,7 @@ impl SparseTrieExt for ParallelSparseTrie {
 
         let total_elapsed = total_start.elapsed();
         debug!(
-            target: "trie::sparse::parallel",
+            target: "trie::sparse",
             ?total_elapsed,
             ?remove_leaf_time,
             ?update_leaf_time,
