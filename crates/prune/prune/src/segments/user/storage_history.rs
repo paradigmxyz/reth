@@ -242,8 +242,6 @@ impl StorageHistory {
     where
         Provider: DBProvider + StaticFileProviderFactory + RocksDBProviderFactory,
     {
-        use reth_provider::PruneShardOutcome;
-
         let mut limiter = input.limiter;
 
         if limiter.is_limit_reached() {
@@ -291,14 +289,17 @@ impl StorageHistory {
         sorted_storages.sort_unstable_by_key(|((addr, key), _)| (*addr, *key));
 
         provider.with_rocksdb_batch(|mut batch| {
-            for ((address, storage_key), highest_block) in &sorted_storages {
-                let prune_to = (*highest_block).min(last_changeset_pruned_block);
-                match batch.prune_storage_history_to(*address, *storage_key, prune_to)? {
-                    PruneShardOutcome::Deleted => deleted_shards += 1,
-                    PruneShardOutcome::Updated => updated_shards += 1,
-                    PruneShardOutcome::Unchanged => {}
-                }
-            }
+            let targets: Vec<_> = sorted_storages
+                .iter()
+                .map(|((addr, key), highest)| {
+                    ((*addr, *key), (*highest).min(last_changeset_pruned_block))
+                })
+                .collect();
+
+            let outcomes = batch.prune_storage_history_batch(&targets)?;
+            deleted_shards = outcomes.deleted;
+            updated_shards = outcomes.updated;
+
             Ok(((), Some(batch.into_inner())))
         })?;
 
