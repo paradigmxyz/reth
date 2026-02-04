@@ -199,8 +199,8 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
 }
 
 fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
-    // Get a read-write database provider
-    let mut provider_rw = tool.provider_factory.provider_rw()?;
+    // Get a read-write database provider for checkpoints and committing
+    let provider_rw = tool.provider_factory.provider_rw()?;
 
     // Log the database block tip from Finish stage checkpoint
     let finish_checkpoint = provider_rw.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
@@ -209,17 +209,21 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     // Check that a pipeline sync isn't in progress.
     verify_checkpoints(provider_rw.as_ref())?;
 
-    // Create cursors for making modifications with
-    let tx = provider_rw.tx_mut();
-    tx.disable_long_read_transaction_safety();
-    let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
-    let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+    // Get the database reference for creating transactions
+    let db = tool.provider_factory.db_ref();
 
-    // Create the cursor factories. These cannot accept the `&mut` tx above because they require it
-    // to be AsRef.
-    let tx = provider_rw.tx_ref();
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
+    // Create a read-only transaction for the Verifier
+    let mut read_tx = db.tx()?;
+    read_tx.disable_long_read_transaction_safety();
+
+    // Create a read-write transaction for the write cursors
+    let write_tx = db.tx_mut()?;
+    let mut account_trie_cursor = write_tx.cursor_write::<tables::AccountsTrie>()?;
+    let mut storage_trie_cursor = write_tx.cursor_dup_write::<tables::StoragesTrie>()?;
+
+    // Create the cursor factories using the read-only transaction
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&read_tx);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&read_tx);
 
     // Create the verifier
     let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
@@ -304,10 +308,15 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
         }
     }
 
+    // Drop read transaction and cursors before committing
+    drop(account_trie_cursor);
+    drop(storage_trie_cursor);
+    drop(read_tx);
+
     if inconsistent_nodes == 0 {
         info!("No inconsistencies found");
     } else {
-        provider_rw.commit()?;
+        write_tx.commit()?;
         info!("Repaired {} inconsistencies and committed changes", inconsistent_nodes);
     }
 

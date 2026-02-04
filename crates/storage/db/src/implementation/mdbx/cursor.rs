@@ -1,6 +1,6 @@
 //! Cursor wrapper for libmdbx-sys.
 
-use super::utils::*;
+use super::{cursor_cache::CursorCache, utils::*};
 use crate::{
     metrics::{DatabaseEnvMetrics, Operation},
     DatabaseError,
@@ -13,34 +13,56 @@ use reth_db_api::{
     },
     table::{Compress, Decode, Decompress, DupSort, Encode, IntoVec, Table},
 };
-use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
+use reth_libmdbx::{ffi, Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds, sync::Arc};
 
 /// Read only Cursor.
-pub type CursorRO<T> = Cursor<RO, T>;
+pub type CursorRO<'tx, T> = Cursor<'tx, RO, T>;
 /// Read write cursor.
-pub type CursorRW<T> = Cursor<RW, T>;
+pub type CursorRW<'tx, T> = Cursor<'tx, RW, T>;
 
 /// Cursor wrapper to access KV items.
+///
+/// When dropped, the cursor is returned to the transaction's cursor cache for reuse,
+/// rather than being closed. This reduces the overhead of cursor creation in
+/// cursor-heavy workloads.
 #[derive(Debug)]
-pub struct Cursor<K: TransactionKind, T: Table> {
-    /// Inner `libmdbx` cursor.
-    pub(crate) inner: reth_libmdbx::Cursor<K>,
+pub struct Cursor<'tx, K: TransactionKind, T: Table> {
+    /// Inner `libmdbx` cursor. Wrapped in Option so we can take it in Drop.
+    pub(crate) inner: Option<reth_libmdbx::Cursor<'tx, K>>,
     /// Cache buffer that receives compressed values.
     buf: Vec<u8>,
     /// Reference to metric handles in the DB environment. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Reference to the cursor cache where this cursor should be returned on drop.
+    /// If `None`, the cursor is closed normally on drop.
+    cache: Option<&'tx CursorCache>,
     /// Phantom data to enforce encoding/decoding.
     _dbi: PhantomData<T>,
 }
 
-impl<K: TransactionKind, T: Table> Cursor<K, T> {
-    pub(crate) const fn new_with_metrics(
-        inner: reth_libmdbx::Cursor<K>,
+#[expect(clippy::missing_const_for_fn)]
+impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
+    pub(crate) fn new_with_metrics(
+        inner: reth_libmdbx::Cursor<'tx, K>,
         metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> Self {
-        Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData }
+        Self { inner: Some(inner), buf: Vec::new(), metrics, cache: None, _dbi: PhantomData }
+    }
+
+    pub(crate) fn new_with_cache(
+        inner: reth_libmdbx::Cursor<'tx, K>,
+        metrics: Option<Arc<DatabaseEnvMetrics>>,
+        cache: &'tx CursorCache,
+    ) -> Self {
+        Self { inner: Some(inner), buf: Vec::new(), metrics, cache: Some(cache), _dbi: PhantomData }
+    }
+
+    /// Returns a mutable reference to the inner cursor.
+    #[inline]
+    fn inner_mut(&mut self) -> &mut reth_libmdbx::Cursor<'tx, K> {
+        self.inner.as_mut().expect("cursor already taken")
     }
 
     /// If `self.metrics` is `Some(...)`, record a metric with the provided operation and value
@@ -58,6 +80,25 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         } else {
             f(self)
         }
+    }
+}
+
+impl<K: TransactionKind, T: Table> Drop for Cursor<'_, K, T> {
+    fn drop(&mut self) {
+        if let Some(inner) = self.inner.take() &&
+            let Some(cache) = self.cache
+        {
+            // Return cursor to cache for reuse
+            let raw = inner.into_raw();
+            let old = cache.put(T::INDEX, raw);
+            // If there was already a cursor in the slot (shouldn't happen), close it
+            if let Some(old_cursor) = old {
+                unsafe {
+                    ffi::mdbx_cursor_close(old_cursor);
+                }
+            }
+        }
+        // If no cache or no inner, the cursor drops normally and closes itself
     }
 }
 
@@ -88,38 +129,38 @@ macro_rules! compress_to_buf_or_ref {
     };
 }
 
-impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
+impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<'_, K, T> {
     fn first(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.first())
+        decode::<T>(self.inner_mut().first())
     }
 
     fn seek_exact(&mut self, key: <T as Table>::Key) -> PairResult<T> {
-        decode::<T>(self.inner.set_key(key.encode().as_ref()))
+        decode::<T>(self.inner_mut().set_key(key.encode().as_ref()))
     }
 
     fn seek(&mut self, key: <T as Table>::Key) -> PairResult<T> {
-        decode::<T>(self.inner.set_range(key.encode().as_ref()))
+        decode::<T>(self.inner_mut().set_range(key.encode().as_ref()))
     }
 
     fn next(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next())
+        decode::<T>(self.inner_mut().next())
     }
 
     fn prev(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.prev())
+        decode::<T>(self.inner_mut().prev())
     }
 
     fn last(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.last())
+        decode::<T>(self.inner_mut().last())
     }
 
     fn current(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.get_current())
+        decode::<T>(self.inner_mut().get_current())
     }
 
     fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError> {
         let start = if let Some(start_key) = start_key {
-            decode::<T>(self.inner.set_range(start_key.encode().as_ref())).transpose()
+            decode::<T>(self.inner_mut().set_range(start_key.encode().as_ref())).transpose()
         } else {
             self.first().transpose()
         };
@@ -132,11 +173,11 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
         range: impl RangeBounds<T::Key>,
     ) -> Result<RangeWalker<'_, T, Self>, DatabaseError> {
         let start = match range.start_bound().cloned() {
-            Bound::Included(key) => self.inner.set_range(key.encode().as_ref()),
+            Bound::Included(key) => self.inner_mut().set_range(key.encode().as_ref()),
             Bound::Excluded(_key) => {
                 unreachable!("Rust doesn't allow for Bound::Excluded in starting bounds");
             }
-            Bound::Unbounded => self.inner.first(),
+            Bound::Unbounded => self.inner_mut().first(),
         };
         let start = decode::<T>(start).transpose();
         Ok(RangeWalker::new(self, start, range.end_bound().cloned()))
@@ -147,7 +188,7 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
         start_key: Option<T::Key>,
     ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError> {
         let start = if let Some(start_key) = start_key {
-            decode::<T>(self.inner.set_range(start_key.encode().as_ref()))
+            decode::<T>(self.inner_mut().set_range(start_key.encode().as_ref()))
         } else {
             self.last()
         }
@@ -157,20 +198,20 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     }
 }
 
-impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
+impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<'_, K, T> {
     /// Returns the previous `(key, value)` pair of a DUPSORT table.
     fn prev_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.prev_dup())
+        decode::<T>(self.inner_mut().prev_dup())
     }
 
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next_dup())
+        decode::<T>(self.inner_mut().next_dup())
     }
 
     /// Returns the last `value` of the current duplicate `key`.
     fn last_dup(&mut self) -> ValueOnlyResult<T> {
-        self.inner
+        self.inner_mut()
             .last_dup()
             .map_err(|e| DatabaseError::Read(e.into()))?
             .map(decode_one::<T>)
@@ -179,12 +220,12 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
 
     /// Returns the next `(key, value)` pair skipping the duplicates.
     fn next_no_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next_nodup())
+        decode::<T>(self.inner_mut().next_nodup())
     }
 
     /// Returns the next `value` of a duplicate `key`.
     fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
-        self.inner
+        self.inner_mut()
             .next_dup()
             .map_err(|e| DatabaseError::Read(e.into()))?
             .map(decode_value::<T>)
@@ -196,7 +237,7 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         key: <T as Table>::Key,
         subkey: <T as DupSort>::SubKey,
     ) -> ValueOnlyResult<T> {
-        self.inner
+        self.inner_mut()
             .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
             .map_err(|e| DatabaseError::Read(e.into()))?
             .map(decode_one::<T>)
@@ -216,14 +257,14 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         let start = match (key, subkey) {
             (Some(key), Some(subkey)) => {
                 let encoded_key = key.encode();
-                self.inner
+                self.inner_mut()
                     .get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
                     .map_err(|e| DatabaseError::Read(e.into()))?
                     .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
             }
             (Some(key), None) => {
                 let encoded_key = key.encode();
-                self.inner
+                self.inner_mut()
                     .set(encoded_key.as_ref())
                     .map_err(|e| DatabaseError::Read(e.into()))?
                     .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
@@ -231,7 +272,7 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
             (None, Some(subkey)) => {
                 if let Some((key, _)) = self.first()? {
                     let encoded_key = key.encode();
-                    self.inner
+                    self.inner_mut()
                         .get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
                         .map_err(|e| DatabaseError::Read(e.into()))?
                         .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
@@ -246,7 +287,7 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     }
 }
 
-impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
+impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     ///
@@ -261,17 +302,20 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
             Operation::CursorUpsert,
             Some(value.unwrap_or(&self.buf).len()),
             |this| {
-                this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::UPSERT)
-                    .map_err(|e| {
-                        DatabaseWriteError {
-                            info: e.into(),
-                            operation: DatabaseWriteOperation::CursorUpsert,
-                            table_name: T::NAME,
-                            key: key.into_vec(),
-                        }
-                        .into()
-                    })
+                let value_bytes: &[u8] = match value {
+                    Some(v) => v,
+                    None => &this.buf,
+                };
+                let inner = this.inner.as_mut().expect("cursor already taken");
+                inner.put(key.as_ref(), value_bytes, WriteFlags::UPSERT).map_err(|e| {
+                    DatabaseWriteError {
+                        info: e.into(),
+                        operation: DatabaseWriteOperation::CursorUpsert,
+                        table_name: T::NAME,
+                        key: key.into_vec(),
+                    }
+                    .into()
+                })
             },
         )
     }
@@ -283,17 +327,20 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
             Operation::CursorInsert,
             Some(value.unwrap_or(&self.buf).len()),
             |this| {
-                this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::NO_OVERWRITE)
-                    .map_err(|e| {
-                        DatabaseWriteError {
-                            info: e.into(),
-                            operation: DatabaseWriteOperation::CursorInsert,
-                            table_name: T::NAME,
-                            key: key.into_vec(),
-                        }
-                        .into()
-                    })
+                let value_bytes: &[u8] = match value {
+                    Some(v) => v,
+                    None => &this.buf,
+                };
+                let inner = this.inner.as_mut().expect("cursor already taken");
+                inner.put(key.as_ref(), value_bytes, WriteFlags::NO_OVERWRITE).map_err(|e| {
+                    DatabaseWriteError {
+                        info: e.into(),
+                        operation: DatabaseWriteOperation::CursorInsert,
+                        table_name: T::NAME,
+                        key: key.into_vec(),
+                    }
+                    .into()
+                })
             },
         )
     }
@@ -307,32 +354,37 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
             Operation::CursorAppend,
             Some(value.unwrap_or(&self.buf).len()),
             |this| {
-                this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND)
-                    .map_err(|e| {
-                        DatabaseWriteError {
-                            info: e.into(),
-                            operation: DatabaseWriteOperation::CursorAppend,
-                            table_name: T::NAME,
-                            key: key.into_vec(),
-                        }
-                        .into()
-                    })
+                let value_bytes: &[u8] = match value {
+                    Some(v) => v,
+                    None => &this.buf,
+                };
+                let inner = this.inner.as_mut().expect("cursor already taken");
+                inner.put(key.as_ref(), value_bytes, WriteFlags::APPEND).map_err(|e| {
+                    DatabaseWriteError {
+                        info: e.into(),
+                        operation: DatabaseWriteOperation::CursorAppend,
+                        table_name: T::NAME,
+                        key: key.into_vec(),
+                    }
+                    .into()
+                })
             },
         )
     }
 
     fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.execute_with_operation_metric(Operation::CursorDeleteCurrent, None, |this| {
-            this.inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
+            this.inner_mut().del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
         })
     }
 }
 
-impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
+impl<T: DupSort> DbDupCursorRW<T> for Cursor<'_, RW, T> {
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
         self.execute_with_operation_metric(Operation::CursorDeleteCurrentDuplicates, None, |this| {
-            this.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
+            this.inner_mut()
+                .del(WriteFlags::NO_DUP_DATA)
+                .map_err(|e| DatabaseError::Delete(e.into()))
         })
     }
 
@@ -343,17 +395,20 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
             Operation::CursorAppendDup,
             Some(value.unwrap_or(&self.buf).len()),
             |this| {
-                this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND_DUP)
-                    .map_err(|e| {
-                        DatabaseWriteError {
-                            info: e.into(),
-                            operation: DatabaseWriteOperation::CursorAppendDup,
-                            table_name: T::NAME,
-                            key: key.into_vec(),
-                        }
-                        .into()
-                    })
+                let value_bytes: &[u8] = match value {
+                    Some(v) => v,
+                    None => &this.buf,
+                };
+                let inner = this.inner.as_mut().expect("cursor already taken");
+                inner.put(key.as_ref(), value_bytes, WriteFlags::APPEND_DUP).map_err(|e| {
+                    DatabaseWriteError {
+                        info: e.into(),
+                        operation: DatabaseWriteOperation::CursorAppendDup,
+                        table_name: T::NAME,
+                        key: key.into_vec(),
+                    }
+                    .into()
+                })
             },
         )
     }
