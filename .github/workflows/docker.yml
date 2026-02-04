@@ -104,44 +104,11 @@ jobs:
             optimism.tags=${{ steps.params.outputs.optimism_tags }}
 
       - name: Verify image architectures
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: |
-          verify_image() {
-            local image="$1"
-            shift
-            local expected_archs=("$@")
-
-            echo "Checking $image..."
-            manifest=$(docker manifest inspect "$image" 2>/dev/null) || {
-              echo "::error::Failed to inspect manifest for $image"
-              return 1
-            }
-
-            for arch in "${expected_archs[@]}"; do
-              if ! echo "$manifest" | jq -e ".manifests[] | select(.platform.architecture == \"$arch\" and .platform.os == \"linux\")" > /dev/null; then
-                echo "::error::Missing architecture $arch for $image"
-                return 1
-              fi
-              echo "  ✓ linux/$arch"
-            done
-          }
-
-          REGISTRY="ghcr.io/${{ github.repository_owner }}"
-          TARGETS="${{ steps.params.outputs.targets }}"
-
-          if [[ "$TARGETS" == *"nightly"* ]]; then
-            verify_image "${REGISTRY}/reth:nightly" amd64 arm64
-            verify_image "${REGISTRY}/op-reth:nightly" amd64 arm64
-            verify_image "${REGISTRY}/reth:nightly-profiling" amd64
-            verify_image "${REGISTRY}/reth:nightly-edge-profiling" amd64
-            verify_image "${REGISTRY}/op-reth:nightly-profiling" amd64
-            verify_image "${REGISTRY}/op-reth:nightly-edge-profiling" amd64
-          else
-            for tag in $(echo "${{ steps.params.outputs.ethereum_tags }}" | tr ',' ' '); do
-              verify_image "$tag" amd64 arm64
-            done
-            for tag in $(echo "${{ steps.params.outputs.optimism_tags }}" | tr ',' ' '); do
-              verify_image "$tag" amd64 arm64
-            done
-          fi
-
-          echo "All image architectures verified successfully"
+          ./.github/scripts/verify_image_arch.sh \
+            "${{ steps.params.outputs.targets }}" \
+            "ghcr.io/${{ github.repository_owner }}" \
+            "${{ steps.params.outputs.ethereum_tags }}" \
+            "${{ steps.params.outputs.optimism_tags }}"
