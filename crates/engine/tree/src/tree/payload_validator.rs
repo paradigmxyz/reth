@@ -50,7 +50,7 @@ use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
@@ -465,7 +465,7 @@ where
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
-        let (output, senders, receipt_root_rx) =
+        let (output, senders, receipt_root_rx, execution_duration) =
             match self.execute_block(state_provider, env, &input, &mut handle) {
                 Ok(output) => output,
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
@@ -484,6 +484,14 @@ where
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
         let block = self.convert_to_block(input)?.with_senders(senders);
+
+        // Record gas-limit-grouped execution metrics now that we have access to the block header
+        let gas_limit = block.header().gas_limit();
+        let execution_secs = execution_duration.as_secs_f64();
+        let gas_used = output.result.gas_used;
+        let gas_per_second = gas_used as f64 / execution_secs;
+        self.metrics.execution_timing.record_execution_by_gas_limit(execution_secs, gas_limit);
+        self.metrics.execution_timing.record_gas_per_second_by_gas_limit(gas_per_second, gas_limit);
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = receipt_root_rx
@@ -595,6 +603,9 @@ where
         };
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
+        self.metrics
+            .block_validation
+            .record_state_root_by_gas_limit(root_elapsed.as_secs_f64(), block.header().gas_limit());
         debug!(target: "engine::tree::payload_validator", ?root_elapsed, "Calculated state root");
 
         // ensure state root matches
@@ -685,6 +696,7 @@ where
             BlockExecutionOutput<N::Receipt>,
             Vec<Address>,
             tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>,
+            Duration,
         ),
         InsertBlockErrorKind,
     >
@@ -770,7 +782,7 @@ where
         self.metrics.record_block_execution(&output, execution_duration);
 
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
-        Ok((output, senders, result_rx))
+        Ok((output, senders, result_rx, execution_duration))
     }
 
     /// Executes transactions and collects senders, streaming receipts to a background task.
@@ -1557,6 +1569,20 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.transaction_count(),
             Self::Block(block) => block.transaction_count(),
+        }
+    }
+
+    /// Returns the gas limit of the payload or block.
+    pub fn gas_limit(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+        <T::BuiltPayload as BuiltPayload>::Primitives: NodePrimitives,
+        <<T::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::BlockHeader:
+            AlloyBlockHeader,
+    {
+        match self {
+            Self::Payload(payload) => payload.gas_limit(),
+            Self::Block(block) => block.header().gas_limit(),
         }
     }
 }

@@ -5,7 +5,7 @@ use reth_errors::ProviderError;
 use reth_evm::metrics::ExecutorMetrics;
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
-    metrics::{Counter, Gauge, Histogram},
+    metrics::{self, Counter, Gauge, Histogram},
     Metrics,
 };
 use reth_trie::updates::TrieUpdates;
@@ -25,6 +25,8 @@ pub struct EngineApiMetrics {
     /// Metrics for EIP-7928 Block-Level Access Lists (BAL).
     #[allow(dead_code)]
     pub(crate) bal: BalMetrics,
+    /// Execution timing metrics grouped by gas limit.
+    pub execution_timing: ExecutionTimingMetrics,
 }
 
 impl EngineApiMetrics {
@@ -56,6 +58,28 @@ impl EngineApiMetrics {
         self.executor.accounts_updated_histogram.record(accounts as f64);
         self.executor.storage_slots_updated_histogram.record(storage_slots as f64);
         self.executor.bytecodes_updated_histogram.record(bytecodes as f64);
+    }
+
+    /// Records metrics for block execution with gas limit grouping.
+    ///
+    /// This method updates standard execution metrics plus gas-limit-grouped histograms
+    /// that allow analyzing performance across different gas limit eras.
+    pub fn record_block_execution_with_gas_limit<R>(
+        &self,
+        output: &BlockExecutionOutput<R>,
+        execution_duration: Duration,
+        gas_limit: u64,
+    ) {
+        // Record standard metrics
+        self.record_block_execution(output, execution_duration);
+
+        // Record gas-limit-grouped metrics
+        let execution_secs = execution_duration.as_secs_f64();
+        let gas_used = output.result.gas_used;
+        let gas_per_second = gas_used as f64 / execution_secs;
+
+        self.execution_timing.record_execution_by_gas_limit(execution_secs, gas_limit);
+        self.execution_timing.record_gas_per_second_by_gas_limit(gas_per_second, gas_limit);
     }
 
     /// Returns a reference to the executor metrics for use in state hooks.
@@ -333,6 +357,24 @@ pub(crate) struct BalMetrics {
     pub(crate) code_changes: Gauge,
 }
 
+/// Converts a gas limit to a bucket label for metrics.
+///
+/// Buckets are designed to cover historical and current Ethereum mainnet gas limits:
+/// - "30M": gas_limit < 33M (covers the 30M era, 2021-2024)
+/// - "36M": 33M <= gas_limit < 40M (covers the 36M era, early 2025)
+/// - "45M": 40M <= gas_limit < 52M (covers the 45M era, mid 2025)
+/// - "60M": 52M <= gas_limit < 75M (covers the 60M era, late 2025+)
+/// - "90M+": gas_limit >= 75M (future growth)
+fn gas_limit_bucket(gas_limit: u64) -> &'static str {
+    match gas_limit {
+        0..33_000_000 => "30M",
+        33_000_000..40_000_000 => "36M",
+        40_000_000..52_000_000 => "45M",
+        52_000_000..75_000_000 => "60M",
+        _ => "90M+",
+    }
+}
+
 /// Metrics for non-execution related block validation.
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.block_validation")]
@@ -378,11 +420,53 @@ impl BlockValidationMetrics {
         self.state_root_histogram.record(elapsed_as_secs);
     }
 
+    /// Records state root duration with gas limit label for grouping.
+    ///
+    /// This allows analyzing state root calculation performance across different
+    /// gas limit eras (30M, 36M, 45M, 60M, etc.).
+    pub fn record_state_root_by_gas_limit(&self, elapsed_as_secs: f64, gas_limit: u64) {
+        let bucket = gas_limit_bucket(gas_limit);
+        metrics::histogram!(
+            "sync.block_validation.state_root_duration_by_gas_limit",
+            "gas_limit" => bucket
+        )
+        .record(elapsed_as_secs);
+    }
+
     /// Records a new payload validation time, updating both the histogram and the payload
     /// validation gauge
     pub fn record_payload_validation(&self, elapsed_as_secs: f64) {
         self.payload_validation_duration.set(elapsed_as_secs);
         self.payload_validation_histogram.record(elapsed_as_secs);
+    }
+}
+
+/// Metrics for block execution timing, grouped by gas limit.
+///
+/// These metrics allow analyzing execution performance across different
+/// gas limit eras to understand how execution time scales with block capacity.
+#[derive(Clone, Debug, Default)]
+pub struct ExecutionTimingMetrics;
+
+impl ExecutionTimingMetrics {
+    /// Records execution duration with gas limit label for grouping.
+    pub fn record_execution_by_gas_limit(&self, elapsed_as_secs: f64, gas_limit: u64) {
+        let bucket = gas_limit_bucket(gas_limit);
+        metrics::histogram!(
+            "sync.execution.duration_by_gas_limit",
+            "gas_limit" => bucket
+        )
+        .record(elapsed_as_secs);
+    }
+
+    /// Records gas per second with gas limit label for grouping.
+    pub fn record_gas_per_second_by_gas_limit(&self, gas_per_second: f64, gas_limit: u64) {
+        let bucket = gas_limit_bucket(gas_limit);
+        metrics::histogram!(
+            "sync.execution.gas_per_second_by_gas_limit",
+            "gas_limit" => bucket
+        )
+        .record(gas_per_second);
     }
 }
 
