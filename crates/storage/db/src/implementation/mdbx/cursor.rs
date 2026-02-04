@@ -303,6 +303,15 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
+
+        // Debug: check what the last key in the cursor is
+        if T::NAME == "TransactionSenders" {
+            let has_owned = self.inner.has_owned_txn_ptr();
+            let last = self.inner.last::<Vec<u8>, Vec<u8>>();
+            println!("[cursor::append] TransactionSenders - inserting key {:?}, has_owned_ptr={}, last in db: {:?}", 
+                     key.as_ref(), has_owned, last.map(|r| r.map(|(k, _)| k)));
+        }
+
         self.execute_with_operation_metric(
             Operation::CursorAppend,
             Some(value.unwrap_or(&self.buf).len()),

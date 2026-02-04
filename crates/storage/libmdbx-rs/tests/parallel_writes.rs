@@ -553,3 +553,191 @@ fn test_parallel_subtx_writemap() {
         ffi::mdbx_env_close_ex(env, false);
     }
 }
+
+/// Test that subtransactions can read pre-existing committed data
+#[test]
+fn test_parallel_subtx_with_preexisting_data() {
+    let dir = tempdir().unwrap();
+    let path = std::ffi::CString::new(dir.path().to_str().unwrap()).unwrap();
+
+    unsafe {
+        // Create environment with WRITEMAP
+        let mut env: *mut ffi::MDBX_env = ptr::null_mut();
+        let rc = ffi::mdbx_env_create(&mut env);
+        assert_eq!(rc, 0, "mdbx_env_create failed");
+
+        ffi::mdbx_env_set_option(env, ffi::MDBX_opt_max_db, 4);
+        let rc = ffi::mdbx_env_open(env, path.as_ptr(), ffi::MDBX_WRITEMAP, 0o644);
+        assert_eq!(rc, 0, "mdbx_env_open failed");
+
+        // === PHASE 1: Pre-populate database ===
+        let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
+        let rc = ffi::mdbx_txn_begin_ex(
+            env,
+            ptr::null_mut(),
+            ffi::MDBX_TXN_READWRITE,
+            &mut txn,
+            ptr::null_mut(),
+        );
+        assert_eq!(rc, 0, "phase1 txn_begin failed");
+
+        let db_name = std::ffi::CString::new("testdb").unwrap();
+        let mut dbi: ffi::MDBX_dbi = 0;
+        let rc = ffi::mdbx_dbi_open(txn, db_name.as_ptr(), ffi::MDBX_CREATE, &mut dbi);
+        assert_eq!(rc, 0, "mdbx_dbi_open failed");
+
+        // Insert 10 keys
+        for i in 0u64..10 {
+            let key = i.to_be_bytes();
+            let val = format!("preexisting_value_{i}");
+            let mut k = to_val(&key);
+            let mut v = to_val(val.as_bytes());
+            let rc = ffi::mdbx_put(txn, dbi, &mut k, &mut v, ffi::MDBX_put_flags_t::default());
+            assert_eq!(rc, 0, "phase1 put {i} failed: {rc}");
+        }
+
+        let rc = ffi::mdbx_txn_commit_ex(txn, ptr::null_mut());
+        assert_eq!(rc, 0, "phase1 commit failed");
+        println!("Phase 1: Pre-populated 10 keys and committed");
+
+        // === PHASE 2: Create subtransaction and try to read + append ===
+        let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
+        let rc = ffi::mdbx_txn_begin_ex(
+            env,
+            ptr::null_mut(),
+            ffi::MDBX_TXN_READWRITE,
+            &mut txn,
+            ptr::null_mut(),
+        );
+        assert_eq!(rc, 0, "phase2 txn_begin failed");
+
+        // Verify parent can read existing data
+        {
+            let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
+            let rc = ffi::mdbx_cursor_open(txn, dbi, &mut cursor);
+            assert_eq!(rc, 0, "parent cursor_open failed");
+
+            let mut k = ffi::MDBX_val { iov_base: ptr::null_mut(), iov_len: 0 };
+            let mut v = ffi::MDBX_val { iov_base: ptr::null_mut(), iov_len: 0 };
+            let rc = ffi::mdbx_cursor_get(cursor, &mut k, &mut v, ffi::MDBX_LAST);
+            assert_eq!(rc, 0, "parent last() failed: {rc}");
+            println!("Parent can read last key (len={})", k.iov_len);
+            ffi::mdbx_cursor_close(cursor);
+        }
+
+        // Create subtransaction
+        let specs = [ffi::MDBX_subtxn_spec_t { dbi }];
+        let mut subtxns: [*mut ffi::MDBX_txn; 1] = [ptr::null_mut()];
+        let rc = ffi::mdbx_txn_create_subtxns(txn, specs.as_ptr(), 1, subtxns.as_mut_ptr());
+        assert_eq!(rc, 0, "mdbx_txn_create_subtxns failed: {rc}");
+        let subtx = subtxns[0];
+        println!("Created subtransaction");
+
+        // Try to read existing data from subtransaction
+        {
+            let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
+            let rc = ffi::mdbx_cursor_open(subtx, dbi, &mut cursor);
+            assert_eq!(rc, 0, "subtx cursor_open failed: {rc}");
+
+            let mut k = ffi::MDBX_val { iov_base: ptr::null_mut(), iov_len: 0 };
+            let mut v = ffi::MDBX_val { iov_base: ptr::null_mut(), iov_len: 0 };
+            let rc = ffi::mdbx_cursor_get(cursor, &mut k, &mut v, ffi::MDBX_LAST);
+            println!("Subtx last() returned: {rc}");
+            assert_eq!(rc, 0, "subtx last() failed: {rc}");
+            ffi::mdbx_cursor_close(cursor);
+        }
+
+        // Commit subtransaction
+        let rc = ffi::mdbx_subtx_commit(subtx);
+        assert_eq!(rc, 0, "mdbx_subtx_commit failed: {rc}");
+
+        // Commit parent
+        let rc = ffi::mdbx_txn_commit_ex(txn, ptr::null_mut());
+        assert_eq!(rc, 0, "parent commit failed");
+
+        ffi::mdbx_env_close_ex(env, false);
+    }
+}
+
+use reth_libmdbx::{DatabaseFlags, Environment, Geometry, WriteFlags};
+
+/// Test parallel subtransactions with append operations and preexisting data.
+/// This mirrors the real usage pattern in save_blocks which uses 18+ tables
+/// with cursor.append() operations across multiple commit rounds.
+#[test]
+fn test_parallel_subtx_append_with_preexisting_data() {
+    let dir = tempdir().unwrap();
+    let env = Environment::builder()
+        .set_max_dbs(20)
+        .set_geometry(Geometry { size: Some(0..=(1024 * 1024 * 100)), ..Default::default() })
+        .write_map()
+        .open(dir.path())
+        .unwrap();
+
+    // Create multiple databases
+    let dbis: Vec<_> = {
+        let txn = env.begin_rw_txn().unwrap();
+        let dbis: Vec<_> = (0..5)
+            .map(|i| {
+                let name = format!("table_{}", i);
+                let db = txn.create_db(Some(&name), DatabaseFlags::empty()).unwrap();
+                db.dbi()
+            })
+            .collect();
+        txn.commit().unwrap();
+        dbis
+    };
+
+    // First transaction: populate each table
+    {
+        let txn = env.begin_rw_txn().unwrap();
+        for (i, &dbi) in dbis.iter().enumerate() {
+            for j in 0..10u64 {
+                let key = j.to_be_bytes();
+                let val = format!("value_{}_{}", i, j);
+                txn.put(dbi, &key, val.as_bytes(), WriteFlags::empty()).unwrap();
+            }
+        }
+        txn.commit().unwrap();
+    }
+
+    // Second transaction: use subtransactions to append more data
+    {
+        let txn = env.begin_rw_txn().unwrap();
+
+        // Enable parallel writes for all DBIs
+        txn.enable_parallel_writes(&dbis).unwrap();
+
+        // Try to append to each table using parallel cursors
+        for (i, &dbi) in dbis.iter().enumerate() {
+            let mut cursor = txn.cursor_with_dbi_parallel(dbi).unwrap();
+
+            // First, find the last key
+            let last = cursor.last::<Vec<u8>, Vec<u8>>().unwrap();
+            println!("Table {}: last key = {:?}", i, last.map(|(k, _)| k));
+
+            // Now try to append
+            for j in 10..15u64 {
+                let key = j.to_be_bytes();
+                let val = format!("appended_{}_{}", i, j);
+                // Use cursor put with APPEND flag
+                cursor.put(&key, val.as_bytes(), WriteFlags::APPEND).unwrap();
+            }
+        }
+
+        // Commit subtxns then parent
+        txn.commit_subtxns().unwrap();
+        txn.commit().unwrap();
+    }
+
+    // Verify all data
+    {
+        let txn = env.begin_ro_txn().unwrap();
+        for (i, &dbi) in dbis.iter().enumerate() {
+            let mut cursor = txn.cursor(dbi).unwrap();
+            let count = cursor.iter::<Vec<u8>, Vec<u8>>().count();
+            assert_eq!(count, 15, "Table {} should have 15 entries", i);
+        }
+        txn.commit().unwrap();
+    }
+}
