@@ -1581,9 +1581,9 @@ mod tests {
     where
         F: DatabaseProviderFactory<
                 Provider: BlockReader
-                             + StageCheckpointReader
-                             + PruneCheckpointReader
-                             + reth_provider::StorageSettingsCache,
+                              + StageCheckpointReader
+                              + PruneCheckpointReader
+                              + reth_provider::StorageSettingsCache,
             > + Clone
             + Send
             + 'static,
