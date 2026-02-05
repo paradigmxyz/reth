@@ -37,6 +37,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
 use revm::state::EvmState;
 use state::TreeState;
@@ -230,9 +231,14 @@ struct MeteredStateHook {
 impl OnStateHook for MeteredStateHook {
     fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
         // Update the metrics for the number of accounts, storage slots and bytecodes loaded
-        let accounts = state.keys().len();
-        let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = state.values().filter(|account| !account.info.is_empty_code_hash()).count();
+        let accounts = state.len();
+        let (storage_slots, bytecodes) =
+            state.values().fold((0, 0), |(storage_slots, bytecodes), account| {
+                (
+                    storage_slots + account.storage.len(),
+                    bytecodes + usize::from(!account.info.is_empty_code_hash()),
+                )
+            });
 
         self.metrics.accounts_loaded_histogram.record(accounts as f64);
         self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
@@ -431,7 +437,7 @@ where
             changeset_cache,
         );
         let incoming = task.incoming_tx.clone();
-        std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
+        spawn_os_thread("engine", || task.run());
         (incoming, outgoing)
     }
 
@@ -968,14 +974,13 @@ where
         &self,
         canonical_header: &SealedHeader<N::BlockHeader>,
     ) -> ProviderResult<()> {
-        let new_head_number = canonical_header.number();
-        let new_head_hash = canonical_header.hash();
+        // Load the block into memory if it's not already present
+        self.ensure_block_in_memory(canonical_header.number(), canonical_header.hash())?;
 
         // Update the canonical head header
         self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
 
-        // Load the block into memory if it's not already present
-        self.ensure_block_in_memory(new_head_number, new_head_hash)
+        Ok(())
     }
 
     /// Ensures a block is loaded into memory if not already present.

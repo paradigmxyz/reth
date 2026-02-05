@@ -11,6 +11,7 @@ use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_storage_api::{BlockNumReader, StateProvider, StorageSettingsCache};
+use reth_tasks::spawn_scoped_os_thread;
 use std::{
     collections::BTreeSet,
     thread,
@@ -230,7 +231,7 @@ impl Command {
         thread::scope(|s| {
             let handles: Vec<_> = (0..num_threads)
                 .map(|thread_id| {
-                    s.spawn(move || {
+                    spawn_scoped_os_thread(s, "db-state-worker", move || {
                         loop {
                             // Get next chunk to process
                             let chunk_idx = {

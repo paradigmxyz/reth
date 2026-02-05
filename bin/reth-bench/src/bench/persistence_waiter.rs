@@ -4,6 +4,8 @@
 //! - **Fixed duration waits**: Sleep for a fixed time between blocks
 //! - **Persistence-based waits**: Wait for blocks to be persisted using
 //!   `reth_subscribePersistedBlock` subscription
+//! - **Combined mode**: Wait at least the fixed duration, and also wait for persistence if the
+//!   block hasn't been persisted yet (whichever takes longer)
 
 use alloy_eips::BlockNumHash;
 use alloy_network::Ethereum;
@@ -219,14 +221,39 @@ impl PersistenceWaiter {
         }
     }
 
+    /// Creates a waiter that combines both duration and persistence waiting.
+    ///
+    /// Waits at least `wait_time` between blocks, and also waits for persistence
+    /// if the block hasn't been persisted yet (whichever takes longer).
+    pub(crate) const fn with_duration_and_subscription(
+        wait_time: Duration,
+        subscription: PersistenceSubscription,
+        threshold: u64,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            wait_time: Some(wait_time),
+            subscription: Some(subscription),
+            blocks_sent: 0,
+            last_persisted: 0,
+            threshold,
+            timeout,
+        }
+    }
+
     /// Called once per block. Waits based on the configured mode.
+    ///
+    /// When both `wait_time` and `subscription` are set (combined mode):
+    /// - Always waits at least `wait_time`
+    /// - Additionally waits for persistence if we're at a persistence checkpoint
     #[allow(clippy::manual_is_multiple_of)]
     pub(crate) async fn on_block(&mut self, block_number: u64) -> eyre::Result<()> {
+        // Always wait for the fixed duration if configured
         if let Some(wait_time) = self.wait_time {
             tokio::time::sleep(wait_time).await;
-            return Ok(());
         }
 
+        // Check persistence if subscription is configured
         let Some(ref mut subscription) = self.subscription else {
             return Ok(());
         };
