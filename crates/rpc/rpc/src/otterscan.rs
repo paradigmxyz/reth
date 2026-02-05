@@ -242,7 +242,8 @@ where
         let page_start = page_end.saturating_sub(page_size);
 
         // Crop transactions
-        *transactions = transactions.drain(page_start..page_end).collect::<Vec<_>>();
+        transactions.drain(..page_start);
+        receipts.truncate(page_end - page_start);
 
         // Crop receipts and transform them into OtsTransactionReceipt
         let timestamp = Some(block.header.timestamp());
