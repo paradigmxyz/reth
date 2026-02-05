@@ -807,7 +807,7 @@ where
         }
 
         let span = debug_span!("compute_storage_roots").entered();
-        let (cached, mut uncached): (Vec<_>, Vec<_>) = self
+        let (cached, uncached): (Vec<_>, Vec<_>) = self
             .trie
             .storage_tries_mut()
             .iter_mut()
@@ -830,9 +830,6 @@ where
             let uncached_roots: Vec<_> = if uncached.is_empty() {
                 Vec::new()
             } else {
-                // Sort uncached tries by the number of changes descending for more optimal
-                // parallelization.
-                uncached.sort_by_key(|(_, trie)| std::cmp::Reverse(trie.num_changes()));
                 uncached
                     .into_par_iter()
                     .map(|(address, trie)| {

@@ -192,11 +192,6 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         self.as_revealed_ref().is_some_and(|t| t.is_root_cached())
     }
 
-    /// Returns the number of changes to the trie that will be applied when `root()` is called.
-    pub fn num_changes(&self) -> usize {
-        self.as_revealed_ref().map_or(0, |t| t.num_changes())
-    }
-
     /// Calculates the root hash of the trie.
     ///
     /// This will update any remaining dirty nodes before computing the root hash.
@@ -979,10 +974,6 @@ impl SparseTrieTrait for SerialSparseTrie {
 
     fn is_root_cached(&self) -> bool {
         self.prefix_set.is_empty()
-    }
-
-    fn num_changes(&self) -> usize {
-        self.prefix_set.len()
     }
 
     fn update_subtrie_hashes(&mut self) {

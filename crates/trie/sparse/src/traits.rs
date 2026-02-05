@@ -195,9 +195,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// any hash computation.
     fn is_root_cached(&self) -> bool;
 
-    /// Number of changes to the trie that will be applied when `root()` is called.
-    fn num_changes(&self) -> usize;
-
     /// Recalculates and updates the RLP hashes of subtries deeper than a certain level. The level
     /// is defined in the implementation.
     ///
