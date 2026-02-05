@@ -652,6 +652,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ) -> ProviderResult<Duration> {
         let start = Instant::now();
 
+        self.tx_ref().prefault_arena_for_table::<tables::PlainAccountState>()?;
         let mut cursor = self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
         for (address, account) in accounts {
             if let Some(account) = account {
@@ -671,6 +672,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     pub fn write_bytecodes_only(&self, contracts: &[(B256, Bytecode)]) -> ProviderResult<Duration> {
         let start = Instant::now();
 
+        self.tx_ref().prefault_arena_for_table::<tables::Bytecodes>()?;
         let mut cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in contracts {
             cursor.upsert(*hash, bytecode)?;
@@ -689,6 +691,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ) -> ProviderResult<Duration> {
         let start = Instant::now();
 
+        self.tx_ref().prefault_arena_for_table::<tables::PlainStorageState>()?;
         let mut cursor = self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
         for PreparedStorageWrite { address, wipe_storage, storage } in storage {
             // Wipe storage if flagged
@@ -723,6 +726,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ) -> ProviderResult<Duration> {
         let start = Instant::now();
 
+        self.tx_ref().prefault_arena_for_table::<tables::HashedAccounts>()?;
         let mut cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
         for (hashed_address, account) in accounts {
             if let Some(account) = account {
@@ -746,6 +750,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ) -> ProviderResult<Duration> {
         let start = Instant::now();
 
+        self.tx_ref().prefault_arena_for_table::<tables::HashedStorages>()?;
         let mut cursor = self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, storage) in storages {
             // Wipe storage if flagged
@@ -783,6 +788,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let start = Instant::now();
         let mut num_entries = 0;
 
+        self.tx_ref().prefault_arena_for_table::<tables::AccountsTrie>()?;
         let mut cursor = self.tx_ref().cursor_write::<tables::AccountsTrie>()?;
         for (key, updated_node) in nodes {
             let nibbles = StoredNibbles(*key);
@@ -818,6 +824,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut num_entries = 0;
         let mut total_op_counts = StorageTrieOpCounts::default();
 
+        self.tx_ref().prefault_arena_for_table::<tables::StoragesTrie>()?;
         let mut cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
         for (hashed_address, storage_trie_updates) in tries {
             let mut db_storage_trie_cursor =

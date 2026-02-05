@@ -15896,86 +15896,81 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   return MDBX_SUCCESS;
 }
 
-/* Batch prefault arena pages for all subtxns using io_uring.
- * Submits writes for all pages in all subtxns' repnl lists in one batch.
- * Requires io_uring - will abort if not available. */
-static void subtxn_batch_prefault_arena(MDBX_env *env, MDBX_txn **subtxns, size_t count) {
-#if !MDBX_HAVE_IO_URING
-  (void)env; (void)subtxns; (void)count;
-  FATAL("%s", "io_uring required for parallel subtxn prefault");
-  abort();
-#else
-  /* Count total pages across all subtxns */
-  size_t total_pages = 0;
-  for (size_t i = 0; i < count; ++i) {
-    MDBX_txn *txn = subtxns[i];
-    if (txn && txn->tw.subtxn_repnl)
-      total_pages += MDBX_PNL_GETSIZE(txn->tw.subtxn_repnl);
-  }
-
-  if (total_pages == 0)
+/* Prefault this subtxn's arena pages using io_uring.
+ * Called by each subtxn thread at the start of its work.
+ * Each thread has its own io_uring ring - true parallel I/O. */
+static void subtxn_prefault_own_arena(MDBX_txn *subtxn) {
+  if (!(subtxn->flags & txn_parallel_subtx))
+    return;
+  if (!subtxn->tw.subtxn_repnl)
     return;
 
-  DEBUG("io_uring batch prefault: %zu pages across %zu subtxns", total_pages, count);
+  MDBX_env *env = subtxn->env;
+  if (!subtxn->tw.prefault_write_activated)
+    return;
 
-  /* Get dirty pattern buffer (offset by ps*2 from page_auxbuf) */
+  const size_t npages = MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl);
+  if (npages == 0)
+    return;
+
+#if !MDBX_HAVE_IO_URING
+  return; /* Silently skip on non-Linux */
+#else
+  DEBUG("io_uring per-subtxn prefault: %zu pages for subtxn %p", npages, (void *)subtxn);
+
   void *const pattern = ptr_disp(env->page_auxbuf, env->ps * 2);
 
-  /* Cap ring size - kernel has limits, we'll submit in batches if needed */
-  const size_t ring_size = total_pages < 32768 ? total_pages : 32768;
-  
+  const size_t ring_size = npages < 32768 ? npages : 32768;
   struct io_uring ring;
   int ret = io_uring_queue_init(ring_size, &ring, 0);
-  if (ret < 0) {
-    FATAL("io_uring_queue_init(%zu) failed: %s (total_pages=%zu)", 
-          ring_size, strerror(-ret), total_pages);
-    abort();
-  }
+  if (ret < 0)
+    return; /* Soft fail - prefetch is optimization */
 
-  /* Submit write operations for all scattered pages */
-  for (size_t i = 0; i < count; ++i) {
-    MDBX_txn *txn = subtxns[i];
-    if (!txn || !txn->tw.subtxn_repnl)
-      continue;
-
-    const size_t npages = MDBX_PNL_GETSIZE(txn->tw.subtxn_repnl);
-    for (size_t j = 0; j < npages; ++j) {
-      pgno_t pgno = txn->tw.subtxn_repnl[j + 1]; /* PNL is 1-indexed */
-      struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
-      if (unlikely(!sqe)) {
-        /* SQ full, submit and continue */
-        io_uring_submit(&ring);
-        sqe = io_uring_get_sqe(&ring);
-        if (!sqe)
-          continue; /* Skip this page on failure */
-      }
-      io_uring_prep_write(sqe, env->lazy_fd, pattern, env->ps,
-                          pgno2bytes(env, pgno));
+  for (size_t i = 0; i < npages; ++i) {
+    pgno_t pgno = subtxn->tw.subtxn_repnl[i + 1];
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+    if (unlikely(!sqe)) {
+      io_uring_submit(&ring);
+      sqe = io_uring_get_sqe(&ring);
+      if (!sqe)
+        continue;
     }
+    io_uring_prep_write(sqe, env->lazy_fd, pattern, env->ps,
+                        pgno2bytes(env, pgno));
   }
 
-  /* Submit all pending operations */
   io_uring_submit(&ring);
 
-  /* Wait for all completions */
   struct io_uring_cqe *cqe;
-  for (size_t i = 0; i < total_pages; ++i) {
+  for (size_t i = 0; i < npages; ++i) {
     if (io_uring_wait_cqe(&ring, &cqe) < 0)
       break;
     io_uring_cqe_seen(&ring, cqe);
   }
 
   io_uring_queue_exit(&ring);
-
-  for (size_t i = 0; i < count; ++i) {
-    if (subtxns[i])
-      subtxns[i]->tw.subtxn_arena_prefaulted = true;
-  }
+  subtxn->tw.subtxn_arena_prefaulted = true;
 
 #if MDBX_ENABLE_PGOP_STAT
-  env->lck->pgops.prefault.weak += total_pages;
-#endif /* MDBX_ENABLE_PGOP_STAT */
+  env->lck->pgops.prefault.weak += npages;
+#endif
 #endif /* MDBX_HAVE_IO_URING */
+}
+
+/* Public API for Rust to trigger per-subtxn arena prefault.
+ * Call this at the start of each subtxn thread's work. */
+LIBMDBX_API int mdbx_subtxn_prefault_arena(MDBX_txn *txn) {
+  if (unlikely(!txn))
+    return MDBX_EINVAL;
+  if (unlikely(txn->signature != txn_signature))
+    return MDBX_EBADSIGN;
+  if (!(txn->flags & txn_parallel_subtx))
+    return MDBX_EINVAL;
+  if (txn->tw.subtxn_arena_prefaulted)
+    return MDBX_SUCCESS; /* Already done */
+
+  subtxn_prefault_own_arena(txn);
+  return MDBX_SUCCESS;
 }
 
 /* mdbx_txn_create_subtxns - Create parallel sibling subtransactions.
@@ -16282,11 +16277,9 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
 
   osal_free(gc_alloc);
 
-  /* Batch prefault all arena pages before subtxns start writing.
-   * This front-loads page residency, eliminating per-page mincore checks
-   * during gc_alloc_single. Only prefault if activated for this txn. */
-  if (parent->tw.prefault_write_activated)
-    subtxn_batch_prefault_arena(parent->env, subtxns, count);
+  /* Arena prefault is now per-subtxn via mdbx_subtxn_prefault_arena().
+   * Rust calls this at the start of each subtxn thread's work,
+   * enabling true parallel I/O with per-thread io_uring rings. */
 
   return MDBX_SUCCESS;
 }
