@@ -516,7 +516,7 @@ where
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
-        skip_all,
+        skip_all
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (address, storage) in hashed_state_update.storages {
