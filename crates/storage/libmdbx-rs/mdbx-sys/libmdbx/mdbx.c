@@ -15953,6 +15953,44 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
   for (size_t i = 0; i < count; ++i)
     total_hints += specs[i].arena_hint;
 
+  /* Pre-warm GC: if arena hints exceed available pages, try to reclaim more
+   * from the freelist BEFORE distributing to subtxns. This avoids the scenario
+   * where subtxns exhaust their pools and all contend on parent allocation. */
+  if (total_hints > gc_available && parent->dbs[FREE_DBI].items > 0) {
+    DEBUG("parallel subtxns: pre-warming GC (need %zu, have %zu)", total_hints, gc_available);
+    cursor_couple_t gc_couple;
+    rc = cursor_init(&gc_couple.outer, parent, FREE_DBI);
+    if (rc == MDBX_SUCCESS) {
+      /* Loop calling gc_alloc_ex with ALLOC_RESERVE to populate repnl from GC
+       * without actually consuming pages. Each call reads one GC record. */
+      size_t prewarm_attempts = 0;
+      const size_t max_attempts = 64; /* reasonable limit to avoid spinning */
+      while (prewarm_attempts++ < max_attempts) {
+        size_t current_repnl = parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0;
+        if (current_repnl + parent->tw.loose_count >= total_hints)
+          break; /* have enough pages now */
+        pgr_t r = gc_alloc_ex(&gc_couple.outer, 0, ALLOC_RESERVE | ALLOC_UNIMPORTANT);
+        if (r.err == MDBX_NOTFOUND) {
+          /* GC depleted, nothing more to reclaim */
+          break;
+        }
+        if (r.err != MDBX_SUCCESS) {
+          DEBUG("parallel subtxns: gc_alloc_ex prewarm failed with %d", r.err);
+          break;
+        }
+      }
+      /* Re-count available pages after pre-warming */
+      gc_available = 0;
+      if (parent->tw.repnl)
+        gc_available += MDBX_PNL_GETSIZE(parent->tw.repnl);
+      gc_available += parent->tw.loose_count;
+      DEBUG("parallel subtxns: after pre-warming, %zu GC pages available (repnl=%zu, loose=%zu)",
+            gc_available,
+            parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0,
+            parent->tw.loose_count);
+    }
+  }
+
   /* Pre-compute GC allocation per subtxn based on hints or equal distribution */
   size_t *gc_alloc = osal_malloc(count * sizeof(size_t));
   if (unlikely(!gc_alloc)) {
