@@ -501,7 +501,6 @@ where
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
@@ -513,15 +512,16 @@ where
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
-        let span = Span::current();
         let disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
         let chunk_size =
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
 
+        let parent_span = Span::current();
         self.executor.spawn_blocking(move || {
-            let _enter = span.entered();
+            let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
+                .entered();
 
             // Reuse a stored SparseStateTrie if available, applying continuation logic.
             // If this payload's parent state root matches the preserved trie's anchor,
@@ -587,11 +587,14 @@ where
                     target: "engine::tree::payload_processor",
                     "State root receiver dropped, clearing trie"
                 );
-                let trie = task.into_cleared_trie(
+                let (trie, deferred) = task.into_cleared_trie(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
                 guard.store(PreservedSparseTrie::cleared(trie));
+                // Drop guard before deferred to release lock before expensive deallocations
+                drop(guard);
+                drop(deferred);
                 return;
             }
 
@@ -599,9 +602,9 @@ where
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            if let Some(state_root) = computed_state_root {
+            let deferred = if let Some(state_root) = computed_state_root {
                 let start = std::time::Instant::now();
-                let trie = task.into_trie_for_reuse(
+                let (trie, deferred) = task.into_trie_for_reuse(
                     prune_depth,
                     max_storage_tries,
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
@@ -611,17 +614,22 @@ where
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
                 guard.store(PreservedSparseTrie::anchored(trie, state_root));
+                deferred
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
                     "State root computation failed, clearing trie"
                 );
-                let trie = task.into_cleared_trie(
+                let (trie, deferred) = task.into_cleared_trie(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
                 guard.store(PreservedSparseTrie::cleared(trie));
-            }
+                deferred
+            };
+            // Drop guard before deferred to release lock before expensive deallocations
+            drop(guard);
+            drop(deferred);
         });
     }
 
