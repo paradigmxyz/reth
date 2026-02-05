@@ -41,10 +41,15 @@ use tracing::{debug, error};
 use tracing_futures::Instrument;
 
 pub mod metrics;
+pub mod runtime;
 pub mod shutdown;
 
 #[cfg(feature = "rayon")]
 pub mod pool;
+
+#[cfg(feature = "rayon")]
+pub use runtime::RayonConfig;
+pub use runtime::{GlobalRuntime, RuntimeConfig, RuntimeInitError, TokioConfig, RUNTIME};
 
 /// Global [`TaskExecutor`] instance that can be accessed from anywhere.
 static GLOBAL_EXECUTOR: OnceLock<TaskExecutor> = OnceLock::new();

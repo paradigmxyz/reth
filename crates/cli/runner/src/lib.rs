@@ -10,7 +10,7 @@
 
 //! Entrypoint for running commands.
 
-use reth_tasks::{TaskExecutor, TaskManager};
+use reth_tasks::{RuntimeConfig, TaskExecutor, TaskManager, TokioConfig, RUNTIME};
 use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
 use tracing::{debug, error, trace};
 
@@ -170,8 +170,17 @@ struct AsyncCliRunner {
 impl AsyncCliRunner {
     /// Given a tokio [`Runtime`](tokio::runtime::Runtime), creates additional context required to
     /// execute commands asynchronously.
+    ///
+    /// Initializes the global [`RUNTIME`] with the provided tokio runtime.
     fn new(tokio_runtime: tokio::runtime::Runtime) -> Self {
-        let task_manager = TaskManager::new(tokio_runtime.handle().clone());
+        // Initialize the global RUNTIME with the tokio handle.
+        // This sets up the global TaskExecutor and makes RUNTIME accessible everywhere.
+        let config = RuntimeConfig::default()
+            .with_tokio(TokioConfig::existing_handle(tokio_runtime.handle().clone()));
+        let task_manager = RUNTIME
+            .init(config)
+            .expect("RUNTIME already initialized - this indicates a bug in initialization order");
+
         let task_executor = task_manager.executor();
         Self { context: CliContext { task_executor }, task_manager, tokio_runtime }
     }
