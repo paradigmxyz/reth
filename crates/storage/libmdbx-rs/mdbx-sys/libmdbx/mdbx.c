@@ -4327,6 +4327,8 @@ struct MDBX_txn {
       MDBX_txn *subtxn_prev;        /* Prev sibling for O(1) unlink */
       MDBX_dbi assigned_dbi;        /* DBI this subtxn is bound to (0 = unbound) */
       pnl_t subtxn_repnl;           /* Pre-claimed reclaimed pages for this subtxn */
+      size_t subtxn_repnl_distributed; /* Initial pages distributed (for accounting) */
+      size_t subtxn_repnl_acquired;    /* Pages acquired from parent during fallback */
       osal_fastmutex_t *subtxn_alloc_mutex; /* Mutex for synchronized parent allocation */
     } tw;
   };
@@ -15848,6 +15850,8 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
     return LOG_IFERR(MDBX_ENOMEM);
   }
   txn->tw.subtxn_repnl = nullptr; /* Will be set by mdbx_txn_create_subtxns */
+  txn->tw.subtxn_repnl_distributed = 0;
+  txn->tw.subtxn_repnl_acquired = 0;
   txn->tw.subtxn_alloc_mutex = parent->tw.subtxn_alloc_mutex; /* Share parent's mutex */
 
   /* Insert at head of doubly-linked sibling list */
@@ -15953,9 +15957,51 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
   for (size_t i = 0; i < count; ++i)
     total_hints += specs[i].arena_hint;
 
+  /* === ADVANCE STEADY-POINT FOR GC RECLAIM ===
+   * With NOMETASYNC mode, the prefer_steady meta stays stale, which means
+   * oldest = prefer_steady.txnid and detent = oldest + 1. This blocks GC from
+   * reclaiming pages from recent transactions. If there's a significant gap
+   * between current txnid and prefer_steady, force a sync to advance the
+   * steady-point and unlock GC reclaim of recent pages.
+   *
+   * This is modeled after the "self-healing" mechanism in gc_alloc_ex that
+   * forces steady checkpoints when GC is blocked by stale steady-points. */
+  MDBX_env *env = parent->env;
+  const meta_ptr_t recent = meta_recent(env, &parent->tw.troika);
+  const meta_ptr_t prefer_steady = meta_prefer_steady(env, &parent->tw.troika);
+  const txnid_t steady_gap = parent->txnid - prefer_steady.txnid;
+
+  /* Threshold: if we're more than 100 txnids ahead of steady-point and
+   * steady differs from recent, force a sync to advance steady-point */
+  const txnid_t STEADY_GAP_THRESHOLD = 100;
+  if (recent.ptr_c != prefer_steady.ptr_c && prefer_steady.is_steady &&
+      steady_gap > STEADY_GAP_THRESHOLD) {
+    DEBUG("parallel subtxns: steady-point stale (gap=%" PRIaTXN ", steady=%" PRIaTXN
+          ", txnid=%" PRIaTXN "), forcing sync",
+          steady_gap, prefer_steady.txnid, parent->txnid);
+
+    /* Force a steady checkpoint by syncing the recent meta */
+    meta_t meta = *recent.ptr_c;
+    rc = dxb_sync_locked(env, env->flags & MDBX_WRITEMAP, &meta, &parent->tw.troika);
+    if (rc == MDBX_SUCCESS) {
+      /* Refresh oldest after sync - the steady-point has advanced */
+      txn_snapshot_oldest(parent);
+      DEBUG("parallel subtxns: steady-point advanced, new oldest computed%s", "");
+    } else {
+      DEBUG("parallel subtxns: dxb_sync_locked failed with %d (non-fatal)", rc);
+      /* Non-fatal: we can still proceed, just with reduced GC reclaim */
+      rc = MDBX_SUCCESS;
+    }
+  }
+
   /* Pre-warm GC: if arena hints exceed available pages, try to reclaim more
    * from the freelist BEFORE distributing to subtxns. This avoids the scenario
    * where subtxns exhaust their pools and all contend on parent allocation. */
+  {
+    txnid_t oldest = mvcc_shapshot_oldest(parent->env, parent->tw.troika.txnid[parent->tw.troika.prefer_steady]);
+    DEBUG("PARALLEL SUBTXNS: txnid=%" PRIaTXN ", oldest=%" PRIaTXN ", detent=%" PRIaTXN ", gap=%" PRIaTXN,
+          parent->txnid, oldest, oldest + 1, parent->txnid - oldest);
+  }
   DEBUG("parallel subtxns: checking pre-warm (need %zu, have %zu, gc_items=%zu, last_reclaimed=%" PRIaTXN ", retxl=%zu)",
         total_hints, gc_available, (size_t)parent->dbs[FREE_DBI].items,
         parent->tw.gc.last_reclaimed,
@@ -16046,6 +16092,10 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
   /* Create subtxns with NO EOF range - they'll fall back to parent if needed */
   size_t gc_offset = 0;
 
+  DEBUG("BEFORE distribution: parent repnl=%zu, retired=%zu",
+        parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0,
+        parent->tw.retired_pages ? MDBX_PNL_GETSIZE(parent->tw.retired_pages) : 0);
+
   for (size_t i = 0; i < count; ++i) {
     rc = create_subtxn_with_dbi(parent, specs[i].dbi, &subtxns[i]);
     if (unlikely(rc != MDBX_SUCCESS)) {
@@ -16094,7 +16144,10 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
       }
 
       subtxns[i]->tw.subtxn_repnl = subtxn_pnl;
-      DEBUG("subtxn %zu: assigned %zu GC pages", i, MDBX_PNL_GETSIZE(subtxn_pnl));
+      subtxns[i]->tw.subtxn_repnl_distributed = MDBX_PNL_GETSIZE(subtxn_pnl);
+      subtxns[i]->tw.subtxn_repnl_acquired = 0;
+      DEBUG("subtxn %zu: assigned %zu GC pages (distributed=%zu)",
+            i, MDBX_PNL_GETSIZE(subtxn_pnl), subtxns[i]->tw.subtxn_repnl_distributed);
     }
   }
 
@@ -16210,6 +16263,90 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
   /* Update parent's canary if subtxn modified it */
   parent->canary = subtxn->canary;
 
+  /* ===== DIAGNOSTIC: Log sizes and check for cross-list duplicates BEFORE merge ===== */
+#if MDBX_DEBUG
+  {
+    const size_t retired_sz = subtxn->tw.retired_pages ? MDBX_PNL_GETSIZE(subtxn->tw.retired_pages) : 0;
+    const size_t repnl_sz = subtxn->tw.repnl ? MDBX_PNL_GETSIZE(subtxn->tw.repnl) : 0;
+    const size_t subtxn_repnl_sz = subtxn->tw.subtxn_repnl ? MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl) : 0;
+    const size_t parent_retired_sz = parent->tw.retired_pages ? MDBX_PNL_GETSIZE(parent->tw.retired_pages) : 0;
+    const size_t parent_repnl_sz = parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0;
+
+    DEBUG("subtxn %p PRE-MERGE: subtxn retired=%zu repnl=%zu subtxn_repnl=%zu loose=%zu | parent retired=%zu repnl=%zu",
+          (void*)subtxn, retired_sz, repnl_sz, subtxn_repnl_sz, (size_t)subtxn->tw.loose_count,
+          parent_retired_sz, parent_repnl_sz);
+
+    /* Check if any page in subtxn retired_pages also appears in subtxn repnl */
+    if (retired_sz > 0 && repnl_sz > 0) {
+      for (size_t i = 1; i <= retired_sz; ++i) {
+        pgno_t pg = subtxn->tw.retired_pages[i];
+        for (size_t j = 1; j <= repnl_sz; ++j) {
+          if (subtxn->tw.repnl[j] == pg) {
+            ERROR("DUPLICATE detected: page %" PRIaPGNO " in BOTH subtxn retired_pages AND subtxn repnl!", pg);
+          }
+        }
+      }
+    }
+
+    /* Check if any page in subtxn retired_pages also appears in subtxn_repnl */
+    if (retired_sz > 0 && subtxn_repnl_sz > 0) {
+      for (size_t i = 1; i <= retired_sz; ++i) {
+        pgno_t pg = subtxn->tw.retired_pages[i];
+        for (size_t j = 1; j <= subtxn_repnl_sz; ++j) {
+          if (subtxn->tw.subtxn_repnl[j] == pg) {
+            ERROR("DUPLICATE detected: page %" PRIaPGNO " in BOTH subtxn retired_pages AND subtxn_repnl!", pg);
+          }
+        }
+      }
+    }
+
+    /* Check if any page in subtxn repnl also appears in subtxn_repnl */
+    if (repnl_sz > 0 && subtxn_repnl_sz > 0) {
+      for (size_t i = 1; i <= repnl_sz; ++i) {
+        pgno_t pg = subtxn->tw.repnl[i];
+        for (size_t j = 1; j <= subtxn_repnl_sz; ++j) {
+          if (subtxn->tw.subtxn_repnl[j] == pg) {
+            ERROR("DUPLICATE detected: page %" PRIaPGNO " in BOTH subtxn repnl AND subtxn_repnl!", pg);
+          }
+        }
+      }
+    }
+
+    /* Check loose pages against other lists */
+    for (page_t *lp = subtxn->tw.loose_pages; lp; ) {
+      MDBX_ASAN_UNPOISON_MEMORY_REGION(&page_next(lp), sizeof(page_t *));
+      VALGRIND_MAKE_MEM_DEFINED(&page_next(lp), sizeof(page_t *));
+      pgno_t pg = lp->pgno;
+      for (size_t i = 1; i <= retired_sz; ++i) {
+        if (subtxn->tw.retired_pages[i] == pg)
+          ERROR("DUPLICATE detected: loose page %" PRIaPGNO " also in subtxn retired_pages!", pg);
+      }
+      for (size_t i = 1; i <= repnl_sz; ++i) {
+        if (subtxn->tw.repnl[i] == pg)
+          ERROR("DUPLICATE detected: loose page %" PRIaPGNO " also in subtxn repnl!", pg);
+      }
+      for (size_t i = 1; i <= subtxn_repnl_sz; ++i) {
+        if (subtxn->tw.subtxn_repnl[i] == pg)
+          ERROR("DUPLICATE detected: loose page %" PRIaPGNO " also in subtxn_repnl!", pg);
+      }
+      lp = page_next(lp);
+    }
+
+    /* Check subtxn lists against parent lists for pages that would be double-added */
+    if (retired_sz > 0 && parent_retired_sz > 0) {
+      for (size_t i = 1; i <= retired_sz; ++i) {
+        pgno_t pg = subtxn->tw.retired_pages[i];
+        for (size_t j = 1; j <= parent_retired_sz; ++j) {
+          if (parent->tw.retired_pages[j] == pg) {
+            ERROR("DUPLICATE detected: page %" PRIaPGNO " already in parent retired_pages, subtxn would add again!", pg);
+          }
+        }
+      }
+    }
+  }
+#endif
+  /* ===== END DIAGNOSTIC ===== */
+
   /* Merge retired_pages from subtxn into parent */
   if (subtxn->tw.retired_pages && MDBX_PNL_GETSIZE(subtxn->tw.retired_pages) > 0) {
     int rc = pnl_need(&parent->tw.retired_pages, MDBX_PNL_GETSIZE(subtxn->tw.retired_pages));
@@ -16266,6 +16403,24 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
       pnl_append_prereserved(parent->tw.repnl, subtxn->tw.subtxn_repnl[i]);
   }
 
+  /* Page accounting summary:
+   * - distributed: pages given at subtxn creation from parent repnl
+   * - acquired: pages obtained during runtime from parent (fallback)
+   * - remaining: pages left in subtxn_repnl (not consumed)
+   * - consumed = (distributed + acquired) - remaining */
+  {
+    const size_t distributed = subtxn->tw.subtxn_repnl_distributed;
+    const size_t acquired = subtxn->tw.subtxn_repnl_acquired;
+    const size_t remaining = subtxn->tw.subtxn_repnl ? MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl) : 0;
+    const size_t total_given = distributed + acquired;
+    const size_t consumed = (total_given >= remaining) ? total_given - remaining : 0;
+    DEBUG("subtxn %p PAGE ACCOUNTING: distributed=%zu acquired=%zu total=%zu consumed=%zu returning=%zu",
+          (void*)subtxn, distributed, acquired, total_given, consumed, remaining);
+    if (total_given < remaining) {
+      ERROR("subtxn %p PAGE LEAK: returning more pages (%zu) than were given (%zu)!",
+            (void*)subtxn, remaining, total_given);
+    }
+  }
   DEBUG("subtxn %p commit: merged retired=%zu, repnl=%zu, loose=%zu, subtxn_repnl=%zu to parent (parent repnl now %zu, retired now %zu)",
         (void*)subtxn,
         subtxn->tw.retired_pages ? MDBX_PNL_GETSIZE(subtxn->tw.retired_pages) : 0,
@@ -16281,6 +16436,45 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
    * assertions in page_alloc_finalize will fail with false positives. */
   if (MDBX_PNL_GETSIZE(parent->tw.repnl) > 1)
     pnl_sort(parent->tw.repnl, parent->geo.first_unallocated);
+
+  /* ===== DIAGNOSTIC: Check for duplicates in parent repnl AFTER merge and sort ===== */
+#if MDBX_DEBUG
+  {
+    const size_t repnl_sz = MDBX_PNL_GETSIZE(parent->tw.repnl);
+    if (repnl_sz > 1) {
+      for (size_t i = 2; i <= repnl_sz; ++i) {
+        if (parent->tw.repnl[i] == parent->tw.repnl[i-1])
+          ERROR("DUPLICATE page %" PRIaPGNO " in parent repnl after subtxn commit! (pos %zu and %zu)",
+                parent->tw.repnl[i], i-1, i);
+      }
+    }
+    /* Also check parent retired_pages for duplicates */
+    const size_t retired_sz = parent->tw.retired_pages ? MDBX_PNL_GETSIZE(parent->tw.retired_pages) : 0;
+    if (retired_sz > 1) {
+      /* Sort temporarily to check for dups (retired_pages may not be sorted) */
+      for (size_t i = 1; i <= retired_sz; ++i) {
+        for (size_t j = i + 1; j <= retired_sz; ++j) {
+          if (parent->tw.retired_pages[i] == parent->tw.retired_pages[j])
+            ERROR("DUPLICATE page %" PRIaPGNO " in parent retired_pages after subtxn commit! (pos %zu and %zu)",
+                  parent->tw.retired_pages[i], i, j);
+        }
+      }
+    }
+    /* Check if any page appears in BOTH parent repnl AND parent retired_pages */
+    if (repnl_sz > 0 && retired_sz > 0) {
+      for (size_t i = 1; i <= repnl_sz; ++i) {
+        for (size_t j = 1; j <= retired_sz; ++j) {
+          if (parent->tw.repnl[i] == parent->tw.retired_pages[j])
+            ERROR("CRITICAL: page %" PRIaPGNO " in BOTH parent repnl AND retired_pages after subtxn commit!",
+                  parent->tw.repnl[i]);
+        }
+      }
+    }
+    DEBUG("subtxn %p POST-MERGE: parent repnl=%zu retired=%zu (duplicate check complete)",
+          (void*)subtxn, repnl_sz, retired_sz);
+  }
+#endif
+  /* ===== END DIAGNOSTIC ===== */
 
   if (subtxn->tw.subtxn_alloc_mutex)
     osal_fastmutex_release(subtxn->tw.subtxn_alloc_mutex);
@@ -16345,6 +16539,16 @@ LIBMDBX_API int mdbx_subtx_abort(MDBX_txn *subtxn) {
     /* Sort parent's repnl after merging */
     if (MDBX_PNL_GETSIZE(parent->tw.repnl) > 1)
       pnl_sort(parent->tw.repnl, parent->geo.first_unallocated);
+
+    /* Page accounting for abort (all pages should be returned since work is discarded) */
+    {
+      const size_t distributed = subtxn->tw.subtxn_repnl_distributed;
+      const size_t acquired = subtxn->tw.subtxn_repnl_acquired;
+      const size_t remaining = subtxn->tw.subtxn_repnl ? MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl) : 0;
+      const size_t total_given = distributed + acquired;
+      DEBUG("subtxn %p ABORT ACCOUNTING: distributed=%zu acquired=%zu total=%zu returning=%zu (expected all)",
+            (void*)subtxn, distributed, acquired, total_given, remaining);
+    }
   }
 
   subtx_unlink_from_parent(subtxn);
@@ -23299,9 +23503,11 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
           pnl_append_prereserved(txn->tw.subtxn_repnl, parent->tw.repnl[parent_len]);
         }
         MDBX_PNL_SETSIZE(parent->tw.repnl, parent_len);
+        txn->tw.subtxn_repnl_acquired += take;
       }
 
-      DEBUG("subtxn %p: got %zu pages from parent repnl, allocated_pgno=%u", (void*)txn, got_from_gc + (allocated_pgno ? 1 : 0), allocated_pgno);
+      DEBUG("subtxn %p: got %zu pages from parent repnl (acquired now %zu), allocated_pgno=%u",
+            (void*)txn, got_from_gc + (allocated_pgno ? 1 : 0), txn->tw.subtxn_repnl_acquired, allocated_pgno);
     }
 
     /* Step 2: If we got our page from GC, we're done */
@@ -23576,12 +23782,17 @@ next_gc:;
   id = unaligned_peek_u64(4, key.iov_base);
   if (flags & ALLOC_LIFO) {
     op = MDBX_PREV;
-    if (id >= detent || is_already_reclaimed(txn, id))
+    if (id >= detent || is_already_reclaimed(txn, id)) {
+      if (id >= detent)
+        DEBUG("gc_alloc_ex: SKIPPING gc record id=%" PRIaTXN " (>= detent %" PRIaTXN ")", id, detent);
       goto next_gc;
+    }
   } else {
     op = MDBX_NEXT;
-    if (unlikely(id >= detent))
+    if (unlikely(id >= detent)) {
+      DEBUG("gc_alloc_ex: SKIPPING gc record id=%" PRIaTXN " (>= detent %" PRIaTXN ")", id, detent);
       goto depleted_gc;
+    }
   }
   txn->flags &= ~txn_gc_drained;
 
@@ -24016,6 +24227,9 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
       for (pgno_t p = start + 1; p < extra_end; ++p) {
         pnl_append_prereserved(txn->tw.subtxn_repnl, p);
       }
+      txn->tw.subtxn_repnl_acquired += extra_for_repnl;
+      DEBUG("subtxn %p: acquired %zu pages from EOF (total acquired=%zu)",
+            (void*)txn, extra_for_repnl, txn->tw.subtxn_repnl_acquired);
     }
     return page_alloc_finalize(env, txn, mc, start, 1);
   }
@@ -24573,13 +24787,10 @@ return_error:
  * avoid your madness. */
 int gc_update(MDBX_txn *txn, gcu_t *ctx) {
   TRACE("\n>>> @%" PRIaTXN, txn->txnid);
-  DEBUG("gc_update: repnl=%zu, retired=%zu, loose=%zu, last_reclaimed=%" PRIaTXN ", retxl=%zu, gc_items=%zu",
+  DEBUG("gc_update ENTRY: repnl=%zu, retired=%zu, loose=%zu, first_unallocated=%" PRIaPGNO,
         txn->tw.repnl ? MDBX_PNL_GETSIZE(txn->tw.repnl) : 0,
         txn->tw.retired_pages ? MDBX_PNL_GETSIZE(txn->tw.retired_pages) : 0,
-        txn->tw.loose_count,
-        txn->tw.gc.last_reclaimed,
-        txn->tw.gc.retxl ? MDBX_PNL_GETSIZE(txn->tw.gc.retxl) : 0,
-        (size_t)txn->dbs[FREE_DBI].items);
+        txn->tw.loose_count, txn->geo.first_unallocated);
   MDBX_env *const env = txn->env;
   ctx->cursor.next = txn->cursors[FREE_DBI];
   txn->cursors[FREE_DBI] = &ctx->cursor;
@@ -24734,6 +24945,7 @@ retry:
       rc = gcu_retired(txn, ctx);
       if (unlikely(rc != MDBX_SUCCESS))
         goto bailout;
+      DEBUG("gc_update after gcu_retired: stored %zu pages to GC", ctx->retired_stored);
       continue;
     }
 
