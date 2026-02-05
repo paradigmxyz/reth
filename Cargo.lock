@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=swao-fix#b97212b590e14162737b4901eef7cdeec7ca8727"
+source = "git+https://github.com/Soubhik-10/evm?branch=swao-fix#f37eda9d98b7e7394709b00b4b0cf93079cadd9a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -415,7 +415,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=swao-fix#b97212b590e14162737b4901eef7cdeec7ca8727"
+source = "git+https://github.com/Soubhik-10/evm?branch=swao-fix#f37eda9d98b7e7394709b00b4b0cf93079cadd9a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
