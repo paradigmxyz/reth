@@ -15916,12 +15916,19 @@ static void subtxn_batch_prefault_arena(MDBX_env *env, MDBX_txn **subtxns, size_
   if (total_pages == 0)
     return;
 
+  DEBUG("io_uring batch prefault: %zu pages across %zu subtxns", total_pages, count);
+
   /* Get dirty pattern buffer (offset by ps*2 from page_auxbuf) */
   void *const pattern = ptr_disp(env->page_auxbuf, env->ps * 2);
 
+  /* Cap ring size - kernel has limits, we'll submit in batches if needed */
+  const size_t ring_size = total_pages < 32768 ? total_pages : 32768;
+  
   struct io_uring ring;
-  if (io_uring_queue_init(total_pages, &ring, 0) < 0) {
-    FATAL("io_uring_queue_init failed: %s", strerror(errno));
+  int ret = io_uring_queue_init(ring_size, &ring, 0);
+  if (ret < 0) {
+    FATAL("io_uring_queue_init(%zu) failed: %s (total_pages=%zu)", 
+          ring_size, strerror(-ret), total_pages);
     abort();
   }
 
