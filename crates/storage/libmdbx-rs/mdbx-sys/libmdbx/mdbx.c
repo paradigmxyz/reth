@@ -3121,8 +3121,8 @@ typedef const pgno_t *const_pnl_t;
 #define MDBX_PNL_INITIAL (MDBX_PNL_GRANULATE - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(pgno_t))
 
 /* Pages to pre-claim in batch when parallel subtxn's subtxn_repnl is exhausted.
- * 4 pages = 16KB at 4KB page size - minimizes waste while reducing mutex contention. */
-#define MDBX_SUBTXN_PAGE_BATCH 4
+ * 32 pages = 128KB at 4KB page size - reduces mutex contention significantly. */
+#define MDBX_SUBTXN_PAGE_BATCH 32
 
 #define MDBX_PNL_ALLOCLEN(pl) ((pl)[-1])
 #define MDBX_PNL_GETSIZE(pl) ((size_t)((pl)[0]))
@@ -23156,27 +23156,109 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
       MDBX_PNL_SETSIZE(txn->tw.subtxn_repnl, idx - 1);
       return page_alloc_finalize(env, txn, mc, pgno, 1);
     }
-    /* Fallback to synchronized parent allocation (EOF extension) with batch pre-claim */
-    DEBUG("subtxn %p: exhausted subtxn_repnl (need %zu pages), falling back to parent with batch", (void*)txn, num);
+    /* Fallback to synchronized parent allocation: try GC first, then EOF */
+    DEBUG("subtxn %p: exhausted subtxn_repnl (need %zu pages), falling back to parent", (void*)txn, num);
     MDBX_txn *parent = txn->tw.subparent;
     if (unlikely(!parent || !txn->tw.subtxn_alloc_mutex)) {
       ret.page = nullptr;
       ret.err = MDBX_MAP_FULL;
       return ret;
     }
-    /* Mutex protects page allocation across parallel sibling subtxns.
-     * Without this, siblings could read the same first_unallocated and
-     * allocate duplicate pages. */
+    /* Mutex protects page allocation across parallel sibling subtxns. */
     int lock_rc = osal_fastmutex_acquire(txn->tw.subtxn_alloc_mutex);
     if (unlikely(lock_rc != MDBX_SUCCESS)) {
       ret.page = nullptr;
       ret.err = lock_rc;
       return ret;
     }
-    /* Allocate num + batch extra pages to reduce future mutex acquisitions.
-     * When MDBX_ENABLE_REFUND is enabled, allocate one extra "refund boundary" page
-     * that we DON'T put in subtxn_repnl. This ensures the highest page in subtxn_repnl
-     * is < (first_unallocated - 1), satisfying pnl_check_allocated assertions. */
+
+    /* How many pages to request: num + batch for future use */
+    const size_t batch = MDBX_SUBTXN_PAGE_BATCH;
+    const size_t want = num + batch;
+    pgno_t allocated_pgno = 0;
+    size_t got_from_gc = 0;
+
+    /* Step 1: Try to get pages from parent's repnl (already reclaimed GC pages) */
+    if (parent->tw.repnl && MDBX_PNL_GETSIZE(parent->tw.repnl) > 0) {
+      size_t avail = MDBX_PNL_GETSIZE(parent->tw.repnl);
+      size_t take = (avail >= want) ? want : avail;
+
+      /* For multi-page alloc (num > 1), we need a contiguous sequence - not supported from repnl */
+      if (num > 1) {
+        /* Can't get contiguous from repnl, will need EOF. But still grab singles for subtxn_repnl */
+        take = (avail >= batch) ? batch : avail;
+        got_from_gc = take;
+      } else {
+        /* Single page request: take one for immediate use, rest for subtxn_repnl */
+        allocated_pgno = parent->tw.repnl[avail];
+        MDBX_PNL_SETSIZE(parent->tw.repnl, avail - 1);
+        avail--;
+        take = (avail >= batch) ? batch : avail;
+        got_from_gc = take;
+      }
+
+      /* Transfer pages to subtxn_repnl for future allocations */
+      if (take > 0) {
+        if (!txn->tw.subtxn_repnl) {
+          txn->tw.subtxn_repnl = pnl_alloc(take);
+          if (unlikely(!txn->tw.subtxn_repnl)) {
+            osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+            ret.page = nullptr;
+            ret.err = MDBX_ENOMEM;
+            return ret;
+          }
+        } else {
+          int rc = pnl_need(&txn->tw.subtxn_repnl, take);
+          if (unlikely(rc != MDBX_SUCCESS)) {
+            osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+            ret.page = nullptr;
+            ret.err = rc;
+            return ret;
+          }
+        }
+        size_t parent_len = MDBX_PNL_GETSIZE(parent->tw.repnl);
+        for (size_t i = 0; i < take && parent_len > 0; ++i, --parent_len) {
+          pnl_append_prereserved(txn->tw.subtxn_repnl, parent->tw.repnl[parent_len]);
+        }
+        MDBX_PNL_SETSIZE(parent->tw.repnl, parent_len);
+      }
+
+      DEBUG("subtxn %p: got %zu pages from parent repnl, allocated_pgno=%u", (void*)txn, got_from_gc + (allocated_pgno ? 1 : 0), allocated_pgno);
+    }
+
+    /* Step 2: If we got our page from GC, we're done */
+    if (num == 1 && allocated_pgno != 0) {
+      osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+      return page_alloc_finalize(env, txn, mc, allocated_pgno, 1);
+    }
+
+    /* Step 3: Try to reclaim more from GC if parent's repnl was insufficient */
+    if ((num == 1 && allocated_pgno == 0) || (num > 1)) {
+      /* Try GC reclaim on parent - this populates parent->tw.repnl */
+      if (parent->dbs[FREE_DBI].items > 0 && !(parent->flags & txn_gc_drained)) {
+        cursor_couple_t gc_couple;
+        int rc = cursor_init(&gc_couple.outer, parent, FREE_DBI);
+        if (rc == MDBX_SUCCESS) {
+          /* Call gc_alloc_ex on parent with ALLOC_RESERVE to trigger GC reclaim */
+          pgr_t gc_ret = gc_alloc_ex(&gc_couple.outer, 0, ALLOC_RESERVE | ALLOC_UNIMPORTANT);
+          if (gc_ret.err == MDBX_SUCCESS && parent->tw.repnl && MDBX_PNL_GETSIZE(parent->tw.repnl) > 0) {
+            /* Got more pages from GC, now try again */
+            size_t avail = MDBX_PNL_GETSIZE(parent->tw.repnl);
+            if (num == 1) {
+              allocated_pgno = parent->tw.repnl[avail];
+              MDBX_PNL_SETSIZE(parent->tw.repnl, avail - 1);
+              DEBUG("subtxn %p: got page %u from GC reclaim", (void*)txn, allocated_pgno);
+              osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+              return page_alloc_finalize(env, txn, mc, allocated_pgno, 1);
+            }
+            /* For multi-page: still need contiguous, fall through to EOF */
+          }
+        }
+      }
+    }
+
+    /* Step 4: EOF extension as last resort */
+    DEBUG("subtxn %p: GC exhausted, falling back to EOF extension", (void*)txn);
     const pgno_t start = parent->geo.first_unallocated;
     size_t extra = MDBX_SUBTXN_PAGE_BATCH;
     size_t total = num + extra + MDBX_ENABLE_REFUND;
@@ -23204,14 +23286,9 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
       parent->geo.now = new_first;
       parent->flags |= MDBX_TXN_DIRTY;
     }
-    /* Only update parent's first_unallocated - siblings read from parent via txn_first_unallocated().
-     * This is O(1) instead of O(n) sibling sync loop. */
     parent->geo.first_unallocated = new_first;
     osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
-    /* Put extra pages into subtxn_repnl for future use.
-     * Note: We allocated (extra + MDBX_ENABLE_REFUND) extra pages beyond num,
-     * but only put 'extra' pages in subtxn_repnl. The last MDBX_ENABLE_REFUND
-     * page(s) are the "refund boundary" and must not be in any repnl. */
+    /* Put extra pages into subtxn_repnl for future use */
     if (extra > 0) {
       const pgno_t extra_start = start + (pgno_t)num;
       const pgno_t extra_end = extra_start + (pgno_t)extra;

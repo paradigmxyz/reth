@@ -145,3 +145,108 @@ fn test_parallel_subtx_dupsort_realistic_data() {
 
     println!("Realistic data test passed!");
 }
+
+/// Test that freelist pages are reused by parallel subtxns, not just EOF extension
+#[test]
+fn test_parallel_subtxn_freelist_reuse() {
+    let dir = tempdir().unwrap();
+    let env = Environment::builder()
+        .set_max_dbs(10)
+        .set_geometry(Geometry {
+            size: Some(0..(1024 * 1024 * 100)), // 100MB
+            ..Default::default()
+        })
+        .write_map()
+        .open(dir.path())
+        .unwrap();
+
+    // Create multiple DBs like we have in reth
+    let txn = env.begin_rw_txn().unwrap();
+    let db1 = txn.create_db(Some("accounts"), DatabaseFlags::empty()).unwrap();
+    let db2 = txn.create_db(Some("storage"), DatabaseFlags::DUP_SORT).unwrap();
+    let db3 = txn.create_db(Some("trie"), DatabaseFlags::empty()).unwrap();
+    let dbi1 = db1.dbi();
+    let dbi2 = db2.dbi();
+    let dbi3 = db3.dbi();
+    txn.commit().unwrap();
+
+    // Insert initial data to create pages that will be retired on update
+    let txn = env.begin_rw_txn().unwrap();
+    for i in 0..1000u32 {
+        let key = i.to_be_bytes();
+        let val = [0xAA; 100]; // ~100 bytes per entry
+        txn.put(dbi1, &key, &val, WriteFlags::empty()).unwrap();
+        txn.put(dbi3, &key, &val, WriteFlags::empty()).unwrap();
+    }
+    txn.commit().unwrap();
+
+    // Get initial stat
+    let stat_before = env.stat().unwrap();
+    let freelist_before = env.freelist().unwrap();
+    println!("Before updates: pages={}, freelist={}", stat_before.leaf_pages(), freelist_before);
+
+    // Run multiple transactions with parallel subtxns
+    // This should cause pages to be retired and then reused from freelist
+    for round in 0..5 {
+        let txn = env.begin_rw_txn().unwrap();
+        
+        // Enable parallel writes with arena hints
+        txn.enable_parallel_writes_with_hints(&[
+            (dbi1, 50),  // accounts - expect ~50 pages
+            (dbi2, 20),  // storage - expect ~20 pages
+            (dbi3, 30),  // trie - expect ~30 pages
+        ]).unwrap();
+
+        // Thread 1: Update accounts
+        {
+            let mut cursor = txn.cursor_with_dbi_parallel(dbi1).unwrap();
+            for i in 0..200u32 {
+                let key = i.to_be_bytes();
+                let val = [round as u8; 100];
+                cursor.put(&key, &val, WriteFlags::UPSERT).unwrap();
+            }
+        }
+
+        // Thread 2: Update storage (simulated - same thread for simplicity)
+        {
+            let mut cursor = txn.cursor_with_dbi_parallel(dbi2).unwrap();
+            for i in 0..100u32 {
+                let key = i.to_be_bytes();
+                let val = [round as u8; 64];
+                cursor.put(&key, &val, WriteFlags::UPSERT).unwrap();
+            }
+        }
+
+        // Thread 3: Update trie
+        {
+            let mut cursor = txn.cursor_with_dbi_parallel(dbi3).unwrap();
+            for i in 0..150u32 {
+                let key = i.to_be_bytes();
+                let val = [round as u8; 80];
+                cursor.put(&key, &val, WriteFlags::UPSERT).unwrap();
+            }
+        }
+
+        txn.commit_subtxns().unwrap();
+        txn.commit().unwrap();
+
+        let freelist_after_round = env.freelist().unwrap();
+        println!("After round {}: freelist={}", round, freelist_after_round);
+    }
+
+    let stat_after = env.stat().unwrap();
+    let freelist_after = env.freelist().unwrap();
+    println!("After all updates: pages={}, freelist={}", stat_after.leaf_pages(), freelist_after);
+
+    // The freelist should NOT grow unboundedly
+    // It may grow a bit due to B-tree rebalancing, but should stabilize
+    // Allow 2x growth maximum - if it's more, pages aren't being reused
+    let max_allowed_growth = freelist_before.saturating_mul(2).max(100);
+    assert!(
+        freelist_after <= max_allowed_growth,
+        "Freelist grew too much: {} -> {} (max allowed: {}). Pages not being reused from GC!",
+        freelist_before, freelist_after, max_allowed_growth
+    );
+
+    println!("Freelist reuse test passed! {} -> {}", freelist_before, freelist_after);
+}
