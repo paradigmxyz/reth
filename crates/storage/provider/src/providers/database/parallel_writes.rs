@@ -230,17 +230,17 @@ impl ArenaHints {
 
     /// Estimate arena sizes from state data.
     ///
-    /// Uses pages-per-entry ratios derived from production metrics (dev-joshie, 2026-02-05).
-    /// Each ratio is rounded up from observed data to provide ~10% headroom.
+    /// Uses pages-per-entry ratios derived from production metrics.
+    /// Ratios target ~20% headroom over observed actual usage.
     ///
-    /// # Observed Ratios (pages per entry)
-    /// - PlainAccountState: 2.63 → use 3
-    /// - PlainStorageState: 3.03 → use 3
-    /// - HashedAccounts: 2.87 → use 3
-    /// - HashedStorages: 3.31 → use 4
-    /// - AccountsTrie: 1.59 pages/node → use 2
-    /// - StoragesTrie: 2.87 pages/node → use 3
-    /// - Bytecodes: 1.67 → use 2
+    /// # Actual Ratios × 1.2 (20% headroom)
+    /// - PlainAccountState: 1.93 × 1.2 = 2.32
+    /// - PlainStorageState: 2.00 × 1.2 = 2.40
+    /// - HashedAccounts: 2.03 × 1.2 = 2.44
+    /// - HashedStorages: 2.31 × 1.2 = 2.77
+    /// - AccountsTrie: 1.23 × 1.2 = 1.48
+    /// - StoragesTrie: 1.96 × 1.2 = 2.35
+    /// - Bytecodes: 1.67 × 1.2 = 2.00
     ///
     /// # Arguments
     /// * `num_accounts` - Number of account changes
@@ -257,29 +257,29 @@ impl ArenaHints {
     ) -> Self {
         let default = Self::default_hints();
 
-        // Observed: 2.63 pages/account → use 3
+        // Actual: 1.93 * 1.2 = 2.32 pages/account
         let plain_accounts_detail =
-            Self::calc_linear_with_floor(num_accounts, 3, default.plain_accounts);
-        // Observed: 1.67 pages/contract → use 2
+            Self::calc_with_ratio(num_accounts, 2.32, default.plain_accounts);
+        // Actual: 1.67 * 1.2 = 2.0 pages/contract
         let bytecodes_detail =
-            Self::calc_linear_with_floor(num_contracts, 2, Self::DEFAULT_BYTECODES_PAGES);
-        // Observed: 3.03 pages/slot → use 3
+            Self::calc_with_ratio(num_contracts, 2.0, Self::DEFAULT_BYTECODES_PAGES);
+        // Actual: 2.00 * 1.2 = 2.4 pages/slot
         let plain_storage_detail =
-            Self::calc_linear_with_floor(num_storage, 3, default.plain_storage);
-        // Observed: 2.87 pages/account → use 3
+            Self::calc_with_ratio(num_storage, 2.4, default.plain_storage);
+        // Actual: 2.03 * 1.2 = 2.44 pages/account
         let hashed_accounts_detail =
-            Self::calc_linear_with_floor(num_accounts, 3, default.hashed_accounts);
-        // Observed: 3.31 pages/slot → use 4
+            Self::calc_with_ratio(num_accounts, 2.44, default.hashed_accounts);
+        // Actual: 2.31 * 1.2 = 2.77 pages/slot
         let hashed_storages_detail =
-            Self::calc_linear_with_floor(num_storage, 4, default.hashed_storages);
+            Self::calc_with_ratio(num_storage, 2.77, default.hashed_storages);
 
-        // Trie tables: observed pages per node
-        // AccountsTrie: 1.59 pages/node → use 2
+        // Trie tables
+        // Actual: 1.23 * 1.2 = 1.48 pages/node
         let account_trie_detail =
-            Self::calc_linear_with_floor(num_account_trie_nodes, 2, default.account_trie);
-        // StoragesTrie: 2.87 pages/node → use 3
+            Self::calc_with_ratio(num_account_trie_nodes, 1.48, default.account_trie);
+        // Actual: 1.96 * 1.2 = 2.35 pages/node
         let storage_trie_detail =
-            Self::calc_linear_with_floor(num_storage_trie_nodes, 3, default.storage_trie);
+            Self::calc_with_ratio(num_storage_trie_nodes, 2.35, default.storage_trie);
 
         Self {
             plain_accounts: plain_accounts_detail.used,
@@ -301,20 +301,18 @@ impl ArenaHints {
         }
     }
 
-    /// Calculate arena hint using linear pages-per-entry ratio.
+    /// Calculate arena hint using floating-point pages-per-entry ratio.
     ///
-    /// Formula: `entries * pages_per_entry + MIN_ARENA_PAGES`
-    /// - Direct multiplication based on observed production ratios
+    /// Formula: `ceil(entries * ratio) + MIN_ARENA_PAGES`
+    /// - Floating point allows precise 20% headroom targeting
+    /// - Ceiling ensures we never underestimate
     /// - +MIN_ARENA_PAGES for minimum working set
-    fn calc_linear_with_floor(
-        entries: usize,
-        pages_per_entry: usize,
-        floor: usize,
-    ) -> ArenaHintDetail {
+    fn calc_with_ratio(entries: usize, ratio: f64, floor: usize) -> ArenaHintDetail {
         let raw_estimate = if entries == 0 {
             Self::MIN_ARENA_PAGES
         } else {
-            entries.saturating_mul(pages_per_entry).saturating_add(Self::MIN_ARENA_PAGES)
+            let pages = (entries as f64 * ratio).ceil() as usize;
+            pages.saturating_add(Self::MIN_ARENA_PAGES)
         };
 
         Self::apply_bounds(raw_estimate, floor)
@@ -636,54 +634,53 @@ mod tests {
 
     #[test]
     fn test_arena_hints_estimate_trie_scaling() {
-        // StoragesTrie: 3 pages/node (observed 2.87)
-        // With 3000 nodes: 3000*3+8 = 9008 > floor(8800), so Estimated
-        let hints = ArenaHints::estimate(0, 0, 0, 0, 3000);
-        assert_eq!(hints.details.storage_trie.estimated, 9008);
-        assert_eq!(hints.storage_trie, 9008);
+        // StoragesTrie: ratio 2.35 (actual 1.96 * 1.2)
+        // With 5000 nodes: ceil(5000*2.35)+8 = 11758 > floor(8800), so Estimated
+        let hints = ArenaHints::estimate(0, 0, 0, 0, 5000);
+        assert_eq!(hints.details.storage_trie.estimated, 11758);
+        assert_eq!(hints.storage_trie, 11758);
         assert_eq!(hints.details.storage_trie.source, ArenaHintSource::Estimated);
 
-        // With 10000 nodes: 10000*3+8 = 30008 - grows unbounded
+        // With 10000 nodes: ceil(10000*2.35)+8 = 23508
         let hints = ArenaHints::estimate(0, 0, 0, 0, 10000);
-        assert_eq!(hints.details.storage_trie.estimated, 30008);
-        assert_eq!(hints.storage_trie, 30008);
+        assert_eq!(hints.details.storage_trie.estimated, 23508);
+        assert_eq!(hints.storage_trie, 23508);
         assert_eq!(hints.details.storage_trie.source, ArenaHintSource::Estimated);
 
-        // With 2000 nodes: 2000*3+8 = 6008 < floor(8800), so floored
-        let hints = ArenaHints::estimate(0, 0, 0, 0, 2000);
-        assert_eq!(hints.details.storage_trie.estimated, 6008);
+        // With 3000 nodes: ceil(3000*2.35)+8 = 7058 < floor(8800), so floored
+        let hints = ArenaHints::estimate(0, 0, 0, 0, 3000);
+        assert_eq!(hints.details.storage_trie.estimated, 7058);
         assert_eq!(hints.storage_trie, 8800);
         assert_eq!(hints.details.storage_trie.source, ArenaHintSource::Floored);
 
-        // AccountsTrie: 2 pages/node (observed 1.59)
-        // With 4000 nodes: 4000*2+8 = 8008 > floor(7300), so Estimated
-        let hints = ArenaHints::estimate(0, 0, 0, 4000, 0);
-        assert_eq!(hints.details.account_trie.estimated, 8008);
-        assert_eq!(hints.account_trie, 8008);
+        // AccountsTrie: ratio 1.48 (actual 1.23 * 1.2)
+        // With 5000 nodes: ceil(5000*1.48)+8 = 7408 > floor(7300), so Estimated
+        let hints = ArenaHints::estimate(0, 0, 0, 5000, 0);
+        assert_eq!(hints.details.account_trie.estimated, 7408);
+        assert_eq!(hints.account_trie, 7408);
         assert_eq!(hints.details.account_trie.source, ArenaHintSource::Estimated);
     }
 
     #[test]
     fn test_arena_hints_estimate_data_tables() {
-        // New formula: entries * pages_per_entry + MIN_ARENA_PAGES
-        // HashedStorages: 4 pages/slot (observed 3.31)
-        // 1000 storage * 4 + 8 = 4008 > floor(4000), so Estimated
-        let hints = ArenaHints::estimate(0, 1000, 0, 0, 0);
-        assert_eq!(hints.details.hashed_storages.estimated, 4008);
-        assert_eq!(hints.hashed_storages, 4008);
+        // HashedStorages: ratio 2.77 (actual 2.31 * 1.2)
+        // 2000 storage: ceil(2000*2.77)+8 = 5548 > floor(4000), so Estimated
+        let hints = ArenaHints::estimate(0, 2000, 0, 0, 0);
+        assert_eq!(hints.details.hashed_storages.estimated, 5548);
+        assert_eq!(hints.hashed_storages, 5548);
         assert_eq!(hints.details.hashed_storages.source, ArenaHintSource::Estimated);
 
-        // 500 storage * 4 + 8 = 2008 < floor(4000), so floored
+        // 500 storage: ceil(500*2.77)+8 = 1393 < floor(4000), so floored
         let hints = ArenaHints::estimate(0, 500, 0, 0, 0);
-        assert_eq!(hints.details.hashed_storages.estimated, 2008);
+        assert_eq!(hints.details.hashed_storages.estimated, 1393);
         assert_eq!(hints.hashed_storages, 4000);
         assert_eq!(hints.details.hashed_storages.source, ArenaHintSource::Floored);
 
-        // PlainAccountState: 3 pages/account (observed 2.63)
-        // 2000 accounts * 3 + 8 = 6008 > floor(3000), so Estimated
+        // PlainAccountState: ratio 2.32 (actual 1.93 * 1.2)
+        // 2000 accounts: ceil(2000*2.32)+8 = 4648 > floor(3000), so Estimated
         let hints = ArenaHints::estimate(2000, 0, 0, 0, 0);
-        assert_eq!(hints.details.plain_accounts.estimated, 6008);
-        assert_eq!(hints.plain_accounts, 6008);
+        assert_eq!(hints.details.plain_accounts.estimated, 4648);
+        assert_eq!(hints.plain_accounts, 4648);
         assert_eq!(hints.details.plain_accounts.source, ArenaHintSource::Estimated);
     }
 
