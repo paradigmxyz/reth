@@ -569,18 +569,6 @@ impl Tx<RW> {
             handler.env_metrics.record_arena_estimation(table, stats);
         }
     }
-
-    /// Prefaults the arena for the subtransaction bound to the given table using `io_uring`.
-    ///
-    /// Call this at the start of subtxn work to overlap I/O with sibling subtxns.
-    /// Each subtxn thread should call this - they prefault in parallel.
-    ///
-    /// Returns `Ok(true)` if prefault was performed, `Ok(false)` if no subtxn exists for
-    /// this table (e.g., parallel writes not enabled or table not found).
-    pub fn prefault_arena_for_table<T: Table>(&self) -> Result<bool, DatabaseError> {
-        let dbi = self.get_dbi::<T>()?;
-        self.inner.prefault_arena_for_dbi(dbi).map_err(|e| DatabaseError::InitCursor(e.into()))
-    }
 }
 
 impl DbTxMut for Tx<RW> {
@@ -676,10 +664,6 @@ impl DbTxMut for Tx<RW> {
         stats: &reth_db_api::transaction::ArenaHintEstimationStats,
     ) {
         Tx::record_arena_estimation(self, table, stats)
-    }
-
-    fn prefault_arena_for_table<T: Table>(&self) -> Result<bool, DatabaseError> {
-        Tx::prefault_arena_for_table::<T>(self)
     }
 }
 

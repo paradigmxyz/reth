@@ -162,17 +162,6 @@ impl SubTransaction {
             })
         })?
     }
-
-    /// Prefault this subtxn's arena pages using `io_uring`.
-    ///
-    /// Call this at the start of subtxn work to overlap I/O with sibling subtxns.
-    /// Each subtxn thread should call this - they prefault in parallel.
-    pub fn prefault_arena(&self) -> Result<()> {
-        self.txn_ptr.txn_execute_fail_on_timeout(|ptr| {
-            mdbx_result(unsafe { ffi::mdbx_subtxn_prefault_arena(ptr) })
-        })??;
-        Ok(())
-    }
 }
 
 impl<K> Transaction<K>
@@ -886,27 +875,6 @@ impl Transaction<RW> {
             }
         }
         self.inner.txn.clone()
-    }
-
-    /// Prefaults the arena for the subtransaction bound to the given DBI using `io_uring`.
-    ///
-    /// Call this at the start of subtxn work to overlap I/O with sibling subtxns.
-    /// Each subtxn thread should call this - they prefault in parallel.
-    ///
-    /// Returns `Ok(true)` if prefault was performed, `Ok(false)` if no subtxn exists for
-    /// this DBI (e.g., parallel writes not enabled).
-    pub fn prefault_arena_for_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<bool> {
-        if !self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst) {
-            return Ok(false);
-        }
-
-        let subtxns = self.subtxns.read();
-        if let Some(subtxn) = subtxns.get(&dbi) {
-            subtxn.prefault_arena()?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
     }
 
     /// Aborts all subtransactions.
