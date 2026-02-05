@@ -45,7 +45,6 @@ impl ChangesetOffsetWriter {
         // First, truncate any partial record from crash mid-write
         let aligned_len = if remainder != 0 {
             let truncated_len = file_len - remainder;
-            #[cfg(feature = "std")]
             tracing::warn!(
                 target: "reth::static_file",
                 path = %path.as_ref().display(),
@@ -67,7 +66,6 @@ impl ChangesetOffsetWriter {
             std::cmp::Ordering::Greater => {
                 // Sidecar has uncommitted records from a crash - truncate them
                 let target_len = committed_len * Self::RECORD_SIZE as u64;
-                #[cfg(feature = "std")]
                 tracing::warn!(
                     target: "reth::static_file",
                     path = %path.as_ref().display(),
