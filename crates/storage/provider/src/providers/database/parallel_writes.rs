@@ -67,16 +67,14 @@ pub struct ParallelWriteTimings {
 }
 
 /// Hints for per-DBI arena allocation during parallel writes.
-/// Source of the arena hint value after applying floor/cap.
+/// Source of the arena hint value after applying floor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ArenaHintSource {
-    /// Raw estimate was used (no floor/cap applied)
+    /// Raw estimate was used (no floor applied)
     #[default]
     Estimated,
     /// Floor was applied (estimate was below minimum)
     Floored,
-    /// Cap was applied (estimate exceeded maximum)
-    Capped,
 }
 
 impl ArenaHintSource {
@@ -85,16 +83,14 @@ impl ArenaHintSource {
         match self {
             Self::Estimated => "estimated",
             Self::Floored => "floored",
-            Self::Capped => "capped",
         }
     }
 
-    /// Returns numeric representation for gauge (0=estimated, 1=floored, 2=capped)
+    /// Returns numeric representation for gauge (0=estimated, 1=floored)
     pub const fn as_f64(&self) -> f64 {
         match self {
             Self::Estimated => 0.0,
             Self::Floored => 1.0,
-            Self::Capped => 2.0,
         }
     }
 }
@@ -120,7 +116,6 @@ impl ArenaHintDetail {
             source: match self.source {
                 ArenaHintSource::Estimated => DbApiSource::Estimated,
                 ArenaHintSource::Floored => DbApiSource::Floored,
-                ArenaHintSource::Capped => DbApiSource::Capped,
             },
         }
     }
@@ -168,19 +163,6 @@ pub struct ArenaHintDetails {
 }
 
 impl ArenaHints {
-    /// Maximum pages per arena to prevent memory bloat.
-    ///
-    /// Updated based on actual usage metrics (dev-joshie, 33 batches):
-    /// - StoragesTrie: ~6,843 pages/batch
-    /// - AccountsTrie: ~6,155 pages/batch
-    /// - HashedStorages: ~3,166 pages/batch
-    /// - PlainStorageState: ~2,925 pages/batch
-    /// - HashedAccounts: ~2,718 pages/batch
-    /// - PlainAccountState: ~2,502 pages/batch
-    ///
-    /// We set max to 7000 to accommodate the heaviest tables (trie tables)
-    /// while still preventing unbounded memory growth.
-    pub const MAX_ARENA_PAGES: usize = 7000;
     /// Minimum arena size
     pub const MIN_ARENA_PAGES: usize = 8;
     /// Default minimum for bytecodes (low usage, typically 0)
@@ -188,29 +170,28 @@ impl ArenaHints {
 
     /// Default hints based on observed production usage patterns.
     ///
-    /// These values target ~80% of average batch demand to balance between
-    /// over-allocation and fallback frequency. Derived from metrics showing
-    /// (dev-joshie, 5 min window, ~33 batches):
-    /// - StoragesTrie: ~6,843 pages/batch → 5500 (80%)
-    /// - AccountsTrie: ~6,155 pages/batch → 5000 (81%)
-    /// - HashedStorages: ~3,166 pages/batch → 2600 (82%)
-    /// - PlainStorageState: ~2,925 pages/batch → 2400 (82%)
-    /// - HashedAccounts: ~2,718 pages/batch → 2200 (81%)
-    /// - PlainAccountState: ~2,502 pages/batch → 2000 (80%)
+    /// These values target ~95% of observed batch demand to minimize
+    /// fallback frequency. Derived from metrics:
+    /// - StoragesTrie: 9,244 pages/batch → 8,800 (95%)
+    /// - AccountsTrie: 7,656 pages/batch → 7,300 (95%)
+    /// - HashedStorages: 4,200 pages/batch → 4,000 (95%)
+    /// - PlainStorageState: 3,776 pages/batch → 3,600 (95%)
+    /// - HashedAccounts: 3,544 pages/batch → 3,400 (95%)
+    /// - PlainAccountState: 3,120 pages/batch → 3,000 (95%)
     /// - Bytecodes: 0 pages (fine as-is)
     pub const fn default_hints() -> Self {
         Self {
-            plain_accounts: 2000,
+            plain_accounts: 3000,
             bytecodes: Self::DEFAULT_BYTECODES_PAGES,
-            plain_storage: 2400,
-            hashed_accounts: 2200,
-            hashed_storages: 2600,
-            account_trie: 5000,
-            storage_trie: 5500,
+            plain_storage: 3600,
+            hashed_accounts: 3400,
+            hashed_storages: 4000,
+            account_trie: 7300,
+            storage_trie: 8800,
             details: ArenaHintDetails {
                 plain_accounts: ArenaHintDetail {
-                    estimated: 2000,
-                    used: 2000,
+                    estimated: 3000,
+                    used: 3000,
                     source: ArenaHintSource::Estimated,
                 },
                 bytecodes: ArenaHintDetail {
@@ -219,28 +200,28 @@ impl ArenaHints {
                     source: ArenaHintSource::Estimated,
                 },
                 plain_storage: ArenaHintDetail {
-                    estimated: 2400,
-                    used: 2400,
+                    estimated: 3600,
+                    used: 3600,
                     source: ArenaHintSource::Estimated,
                 },
                 hashed_accounts: ArenaHintDetail {
-                    estimated: 2200,
-                    used: 2200,
+                    estimated: 3400,
+                    used: 3400,
                     source: ArenaHintSource::Estimated,
                 },
                 hashed_storages: ArenaHintDetail {
-                    estimated: 2600,
-                    used: 2600,
+                    estimated: 4000,
+                    used: 4000,
                     source: ArenaHintSource::Estimated,
                 },
                 account_trie: ArenaHintDetail {
-                    estimated: 5000,
-                    used: 5000,
+                    estimated: 7300,
+                    used: 7300,
                     source: ArenaHintSource::Estimated,
                 },
                 storage_trie: ArenaHintDetail {
-                    estimated: 5500,
-                    used: 5500,
+                    estimated: 8800,
+                    used: 8800,
                     source: ArenaHintSource::Estimated,
                 },
             },
@@ -356,12 +337,10 @@ impl ArenaHints {
         Self::apply_bounds(raw_estimate, floor)
     }
 
-    /// Apply floor and cap bounds to a raw estimate.
+    /// Apply floor bound to a raw estimate.
     fn apply_bounds(raw_estimate: usize, floor: usize) -> ArenaHintDetail {
         let (used, source) = if raw_estimate < floor {
             (floor, ArenaHintSource::Floored)
-        } else if raw_estimate > Self::MAX_ARENA_PAGES {
-            (Self::MAX_ARENA_PAGES, ArenaHintSource::Capped)
         } else {
             (raw_estimate, ArenaHintSource::Estimated)
         };
@@ -662,23 +641,29 @@ mod tests {
     #[test]
     fn test_arena_hints_estimate_trie_scaling() {
         // Trie tables should scale with multiplication, not division
-        // With 1400 storage trie nodes at 4 pages/node, expect 1400*4+8 = 5608 pages
-        // This exceeds floor(5500) and is under MAX(6000), so we get Estimated
-        let hints = ArenaHints::estimate(0, 0, 0, 0, 1400);
-        assert_eq!(hints.details.storage_trie.estimated, 5608);
-        assert_eq!(hints.storage_trie, 5608);
+        // With 2200 storage trie nodes at 4 pages/node, expect 2200*4+8 = 8808 pages
+        // This exceeds floor(8800), so we get Estimated
+        let hints = ArenaHints::estimate(0, 0, 0, 0, 2200);
+        assert_eq!(hints.details.storage_trie.estimated, 8808);
+        assert_eq!(hints.storage_trie, 8808);
         assert_eq!(hints.details.storage_trie.source, ArenaHintSource::Estimated);
 
-        // With 2000 nodes, expect ~8008 pages, but capped at MAX
+        // With 3000 nodes, expect ~12008 pages - no cap, grows unbounded
+        let hints = ArenaHints::estimate(0, 0, 0, 0, 3000);
+        assert_eq!(hints.details.storage_trie.estimated, 12008);
+        assert_eq!(hints.storage_trie, 12008);
+        assert_eq!(hints.details.storage_trie.source, ArenaHintSource::Estimated);
+
+        // With 10000 nodes: 10000*4+8 = 40008 - grows unbounded based on workload
+        let hints = ArenaHints::estimate(0, 0, 0, 0, 10000);
+        assert_eq!(hints.details.storage_trie.estimated, 40008);
+        assert_eq!(hints.storage_trie, 40008);
+        assert_eq!(hints.details.storage_trie.source, ArenaHintSource::Estimated);
+
+        // With 2000 nodes: 2000*4+8 = 8008 < floor(8800), so floored
         let hints = ArenaHints::estimate(0, 0, 0, 0, 2000);
         assert_eq!(hints.details.storage_trie.estimated, 8008);
-        assert_eq!(hints.storage_trie, ArenaHints::MAX_ARENA_PAGES);
-        assert_eq!(hints.details.storage_trie.source, ArenaHintSource::Capped);
-
-        // With 1000 nodes: 1000*4+8 = 4008 < floor(5500), so floored
-        let hints = ArenaHints::estimate(0, 0, 0, 0, 1000);
-        assert_eq!(hints.details.storage_trie.estimated, 4008);
-        assert_eq!(hints.storage_trie, 5500);
+        assert_eq!(hints.storage_trie, 8800);
         assert_eq!(hints.details.storage_trie.source, ArenaHintSource::Floored);
     }
 
@@ -687,14 +672,14 @@ mod tests {
         // Data tables use division: 1000 storage / 30 entries_per_page = 34, * 2 + 8 = 76
         let hints = ArenaHints::estimate(0, 1000, 0, 0, 0);
         assert_eq!(hints.details.hashed_storages.estimated, 76);
-        // But 76 < floor(2600), so floored
-        assert_eq!(hints.hashed_storages, 2600);
+        // But 76 < floor(4000), so floored
+        assert_eq!(hints.hashed_storages, 4000);
         assert_eq!(hints.details.hashed_storages.source, ArenaHintSource::Floored);
 
-        // Large storage count: 50000 / 30 = 1667, * 2 + 8 = 3342
-        let hints = ArenaHints::estimate(0, 50000, 0, 0, 0);
-        assert_eq!(hints.details.hashed_storages.estimated, 3342);
-        assert_eq!(hints.hashed_storages, 3342);
+        // Large storage count: 70000 / 30 = 2334, * 2 + 8 = 4676
+        let hints = ArenaHints::estimate(0, 70000, 0, 0, 0);
+        assert_eq!(hints.details.hashed_storages.estimated, 4676);
+        assert_eq!(hints.hashed_storages, 4676);
         assert_eq!(hints.details.hashed_storages.source, ArenaHintSource::Estimated);
     }
 
@@ -703,6 +688,6 @@ mod tests {
         let hints = ArenaHints::estimate(0, 0, 0, 0, 0);
         // Zero entries should use MIN_ARENA_PAGES for estimate, but floor applies
         assert_eq!(hints.details.storage_trie.estimated, ArenaHints::MIN_ARENA_PAGES);
-        assert_eq!(hints.storage_trie, 5500); // floor from default_hints
+        assert_eq!(hints.storage_trie, 8800); // floor from default_hints
     }
 }

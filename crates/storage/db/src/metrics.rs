@@ -419,10 +419,14 @@ pub(crate) struct EdgeArenaMetrics {
     arena_page_allocations: Counter,
     /// Times fallback to parent was needed (arena refill events)
     arena_refill_events: Counter,
+    /// Distribution of refill events per subtxn commit (per-batch granularity)
+    arena_refills_per_batch: Histogram,
     /// Pages initially distributed to subtxn
     arena_initial_pages: Counter,
     /// Pages returned to parent on commit (not consumed)
     pages_unused: Counter,
+    /// Distribution of unused pages per subtxn commit (detects over-allocation)
+    pages_unused_per_batch: Histogram,
     /// Pages acquired from parent during fallback (arena refill)
     arena_refill_pages: Counter,
     /// Configured arena size hint for this table (pages)
@@ -431,15 +435,13 @@ pub(crate) struct EdgeArenaMetrics {
     pages_from_gc: Counter,
     /// Pages allocated from end-of-file (extending the database)
     pages_from_eof: Counter,
-    /// Raw calculated estimate before floor/cap was applied
+    /// Raw calculated estimate before floor was applied
     arena_hint_estimated: Gauge,
-    /// Final hint value used after floor/cap
+    /// Final hint value used after floor
     arena_hint_actual: Gauge,
     /// Times the estimate was below floor and floored value was used
     arena_hint_floored_total: Counter,
-    /// Times the estimate was above cap and capped value was used
-    arena_hint_capped_total: Counter,
-    /// Current source of hint: 0=estimated, 1=floored, 2=capped
+    /// Current source of hint: 0=estimated, 1=floored
     arena_hint_source: Gauge,
 }
 
@@ -461,8 +463,10 @@ impl EdgeArenaMetrics {
         );
         self.arena_page_allocations.increment(stats.arena_page_allocations as u64);
         self.arena_refill_events.increment(stats.arena_refill_events as u64);
+        self.arena_refills_per_batch.record(stats.arena_refill_events as f64);
         self.arena_initial_pages.increment(stats.arena_initial_pages as u64);
         self.pages_unused.increment(stats.pages_unused as u64);
+        self.pages_unused_per_batch.record(stats.pages_unused as f64);
         self.arena_refill_pages.increment(stats.arena_refill_pages as u64);
         self.arena_hint.set(stats.arena_hint as f64);
         self.pages_from_gc.increment(stats.pages_from_gc as u64);
@@ -477,7 +481,6 @@ impl EdgeArenaMetrics {
 
         match stats.source {
             ArenaHintSource::Floored => self.arena_hint_floored_total.increment(1),
-            ArenaHintSource::Capped => self.arena_hint_capped_total.increment(1),
             ArenaHintSource::Estimated => {}
         }
     }
