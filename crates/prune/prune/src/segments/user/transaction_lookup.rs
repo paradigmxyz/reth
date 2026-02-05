@@ -205,6 +205,10 @@ impl TransactionLookup {
     /// This is called when MDBX has no `BlockBodyIndices` for `to_block` (e.g., data only
     /// exists in static files) but `RocksDB` still contains transaction hash mappings that
     /// need to be cleared. The checkpoint is derived from static files.
+    ///
+    /// Note: There's a similar MDBX `clear_table` call in the main `prune()` function (line ~115),
+    /// but that path is unreachable when using `RocksDB` storage because `get_next_tx_num_range()`
+    /// returns `None` and we return early. This method handles that case for `RocksDB`.
     #[cfg(all(unix, feature = "rocksdb"))]
     fn prune_rocksdb_full<Provider>(
         &self,
