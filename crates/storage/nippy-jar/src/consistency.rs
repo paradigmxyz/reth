@@ -67,7 +67,10 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
         if mode.should_err() &&
             expected_offsets_file_size.cmp(&actual_offsets_file_size) != Ordering::Equal
         {
-            return Err(NippyJarError::InconsistentState)
+            return Err(NippyJarError::OffsetFileSizeMismatch {
+                expected: expected_offsets_file_size,
+                actual: actual_offsets_file_size,
+            })
         }
 
         // Offsets configuration wasn't properly committed
@@ -103,7 +106,10 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
         let data_file_len = self.data_file().get_ref().metadata()?.len();
 
         if mode.should_err() && last_offset.cmp(&data_file_len) != Ordering::Equal {
-            return Err(NippyJarError::InconsistentState)
+            return Err(NippyJarError::DataFileSizeMismatch {
+                expected: last_offset,
+                actual: data_file_len,
+            })
         }
 
         // Offset list wasn't properly committed
