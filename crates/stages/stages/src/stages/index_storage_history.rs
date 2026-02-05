@@ -1,4 +1,9 @@
-use super::{collect_history_indices, collect_storage_history_indices};
+#[cfg(all(unix, feature = "rocksdb"))]
+use super::index_history_common::flush_rocksdb_if_needed;
+use super::{
+    collect_history_indices, collect_storage_history_indices,
+    index_history_common::{clear_table_on_first_sync, maybe_advance_checkpoint_for_prune},
+};
 use crate::{stages::utils::load_storage_history, StageCheckpoint, StageId};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 #[cfg(all(unix, feature = "rocksdb"))]
@@ -13,7 +18,7 @@ use reth_provider::{
     RocksDBProviderFactory, StaticFileProviderFactory, StorageChangeSetReader,
     StorageSettingsCache,
 };
-use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
+use reth_prune_types::{PruneMode, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::fmt::Debug;
 use tracing::info;
@@ -72,34 +77,12 @@ where
         provider: &Provider,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if let Some((target_prunable_block, prune_mode)) = self
-            .prune_mode
-            .map(|mode| {
-                mode.prune_target_block(
-                    input.target(),
-                    PruneSegment::StorageHistory,
-                    PrunePurpose::User,
-                )
-            })
-            .transpose()?
-            .flatten() &&
-            target_prunable_block > input.checkpoint().block_number
-        {
-            input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
-
-            // Save prune checkpoint only if we don't have one already.
-            // Otherwise, pruner may skip the unpruned range of blocks.
-            if provider.get_prune_checkpoint(PruneSegment::StorageHistory)?.is_none() {
-                provider.save_prune_checkpoint(
-                    PruneSegment::StorageHistory,
-                    PruneCheckpoint {
-                        block_number: Some(target_prunable_block),
-                        tx_number: None,
-                        prune_mode,
-                    },
-                )?;
-            }
-        }
+        input = maybe_advance_checkpoint_for_prune(
+            provider,
+            input,
+            self.prune_mode,
+            PruneSegment::StorageHistory,
+        )?;
 
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
@@ -109,18 +92,8 @@ where
         let first_sync = input.checkpoint().block_number == 0;
         let use_rocksdb = provider.cached_storage_settings().storages_history_in_rocksdb;
 
-        // On first sync we might have history coming from genesis. We clear the table since it's
-        // faster to rebuild from scratch.
         if first_sync {
-            if use_rocksdb {
-                // Note: RocksDB clear() executes immediately (not deferred to commit like MDBX),
-                // but this is safe for first_sync because if we crash before commit, the
-                // checkpoint stays at 0 and we'll just clear and rebuild again on restart. The
-                // source data (changesets) is intact.
-                provider.rocksdb_provider().clear::<tables::StoragesHistory>()?;
-            } else {
-                provider.tx_ref().clear::<tables::StoragesHistory>()?;
-            }
+            clear_table_on_first_sync::<_, tables::StoragesHistory>(provider, use_rocksdb)?;
             range = 0..=*input.next_block_range().end();
         }
 
@@ -149,10 +122,7 @@ where
         })?;
 
         #[cfg(all(unix, feature = "rocksdb"))]
-        if use_rocksdb {
-            provider.commit_pending_rocksdb_batches()?;
-            provider.rocksdb_provider().flush(&[Tables::StoragesHistory.name()])?;
-        }
+        flush_rocksdb_if_needed(provider, use_rocksdb, Tables::StoragesHistory.name())?;
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }

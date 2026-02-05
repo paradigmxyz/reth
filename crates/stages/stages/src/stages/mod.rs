@@ -13,6 +13,8 @@ mod hashing_storage;
 mod headers;
 /// Index history of account changes
 mod index_account_history;
+/// Common helpers for index history stages
+mod index_history_common;
 /// Index history of storage changes
 mod index_storage_history;
 /// Stage for computing state root.
