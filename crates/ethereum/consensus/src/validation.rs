@@ -36,6 +36,7 @@ where
     // EIP-7778: When Amsterdam is active, block header gas_used tracks gas before refunds,
     // but receipt cumulative_gas_used still tracks gas after refunds. Use the execution
     // result's gas_used which always matches the header semantics.
+    tracing::debug!("Gas spent in validation: {:?}", gas_spent);
     let cumulative_gas_used =
         if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
             gas_spent.unwrap_or_default()

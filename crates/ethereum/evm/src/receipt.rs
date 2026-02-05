@@ -19,6 +19,7 @@ impl ReceiptBuilder for RethReceiptBuilder {
         // accounting), but receipts must use gas after refunds (unchanged). `gas_spent` holds the
         // after-refund cumulative gas when EIP-7778 is active.
         let receipt_gas = gas_spent.unwrap_or(cumulative_gas_used);
+        tracing::debug!("receipt gas in reth : {:?}", receipt_gas);
         Receipt {
             tx_type,
             // Success flag was added in `EIP-658: Embedding transaction status code in
