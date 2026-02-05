@@ -16166,6 +16166,41 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
       subtxns[i]->tw.subtxn_pages_from_eof = 0;
       subtxns[i]->tw.subtxn_arena_page_allocations = 0;
       subtxns[i]->tw.subtxn_arena_refill_events = 0;
+
+      /* Prefault arena pages with batched madvise for async readahead.
+       * PNL is descending (high to low), so we find contiguous runs
+       * and issue one madvise per run for better I/O scheduling.
+       * This gives kernel a head start fetching pages before write threads need them. */
+#if !defined(_WIN32) && !defined(_WIN64)
+      {
+        const size_t pnl_count = MDBX_PNL_GETSIZE(subtxn_pnl);
+        if (pnl_count > 0) {
+          const pgno_t *pages = MDBX_PNL_BEGIN(subtxn_pnl);
+          pgno_t run_start = pages[0];
+          size_t run_len = 1;
+
+          for (size_t j = 1; j < pnl_count; j++) {
+            /* Descending order: contiguous if current == prev - 1 */
+            if (pages[j] == pages[j - 1] - 1) {
+              run_len++;
+            } else {
+              /* Emit madvise for completed run */
+              pgno_t lowest_pgno = run_start - (pgno_t)(run_len - 1);
+              void *ptr = pgno2page(env, lowest_pgno);
+              madvise(ptr, run_len * env->ps, MADV_WILLNEED);
+              /* Start new run */
+              run_start = pages[j];
+              run_len = 1;
+            }
+          }
+          /* Final run */
+          pgno_t lowest_pgno = run_start - (pgno_t)(run_len - 1);
+          void *ptr = pgno2page(env, lowest_pgno);
+          madvise(ptr, run_len * env->ps, MADV_WILLNEED);
+        }
+      }
+#endif
+
       DEBUG("subtxn %zu: assigned %zu GC pages (initial_pages=%zu)",
             i, MDBX_PNL_GETSIZE(subtxn_pnl), subtxns[i]->tw.subtxn_arena_initial_pages);
     }
