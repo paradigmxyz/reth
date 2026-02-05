@@ -10,7 +10,7 @@ use reth_db_api::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
         StorageSettings,
     },
-    table::Table,
+    table::{Decode, Encode, Table},
     tables, BlockNumberList,
 };
 use reth_prune_types::PruneSegment;
@@ -20,7 +20,7 @@ use reth_static_file_types::StaticFileSegment;
 /// Trait unifying `RocksDB` history shard behavior for `AccountsHistory` and `StoragesHistory`.
 pub trait HistoryTable: 'static + Send + Sync {
     /// The `RocksDB` table (column family).
-    type Table: Table<Value = BlockNumberList>;
+    type Table: Table<Key = Self::ShardKey, Value = BlockNumberList>;
 
     /// The logical entity whose history we store.
     /// - Accounts: `Address`
@@ -30,10 +30,15 @@ pub trait HistoryTable: 'static + Send + Sync {
     /// Concrete shard key type used by the table.
     /// - `AccountsHistory`: `ShardedKey<Address>`
     /// - `StoragesHistory`: `StorageShardedKey`
-    type ShardKey: Clone + core::fmt::Debug + Ord + Send + Sync;
+    type ShardKey: Clone + core::fmt::Debug + Ord + Send + Sync + Encode + Decode;
+
+    /// Byte length of the encoded partial key prefix.
+    /// - `AccountsHistory`: 20 (address)
+    /// - `StoragesHistory`: 52 (address + storage key)
+    const PREFIX_LEN: usize;
 
     /// How many block indices fit in a shard for this history type.
-    const INDICES_PER_SHARD: u64;
+    const INDICES_PER_SHARD: usize;
 
     /// Sentinel used for the "last shard" key (current code uses `u64::MAX`).
     const LAST_SHARD_SENTINEL: BlockNumber = u64::MAX;
@@ -47,6 +52,11 @@ pub trait HistoryTable: 'static + Send + Sync {
     /// Extract highest block boundary from shard key.
     fn highest_from_shard_key(key: &Self::ShardKey) -> BlockNumber;
 
+    /// Create the sentinel (last) shard key for a partial key.
+    fn last_shard_key(partial: Self::PartialKey) -> Self::ShardKey {
+        Self::make_shard_key(partial, Self::LAST_SHARD_SENTINEL)
+    }
+
     /// Return the smallest key for iterating all shards for `partial`.
     fn first_shard_key(partial: Self::PartialKey) -> Self::ShardKey {
         Self::make_shard_key(partial, 0)
@@ -55,6 +65,11 @@ pub trait HistoryTable: 'static + Send + Sync {
     /// Whether `key` belongs to the same partial key.
     fn is_same_partial(key: &Self::ShardKey, partial: &Self::PartialKey) -> bool {
         Self::partial_from_shard_key(key) == *partial
+    }
+
+    /// Check if this is the sentinel (last) shard key.
+    fn is_sentinel(key: &Self::ShardKey) -> bool {
+        Self::highest_from_shard_key(key) == Self::LAST_SHARD_SENTINEL
     }
 }
 
@@ -71,7 +86,8 @@ impl HistoryTable for AccountsHistoryTable {
     type PartialKey = Address;
     type ShardKey = ShardedKey<Address>;
 
-    const INDICES_PER_SHARD: u64 = NUM_OF_INDICES_IN_SHARD as u64;
+    const PREFIX_LEN: usize = 20;
+    const INDICES_PER_SHARD: usize = NUM_OF_INDICES_IN_SHARD;
 
     fn make_shard_key(partial: Self::PartialKey, highest: BlockNumber) -> Self::ShardKey {
         ShardedKey::new(partial, highest)
@@ -91,7 +107,8 @@ impl HistoryTable for StoragesHistoryTable {
     type PartialKey = (Address, B256);
     type ShardKey = StorageShardedKey;
 
-    const INDICES_PER_SHARD: u64 = NUM_OF_INDICES_IN_SHARD as u64;
+    const PREFIX_LEN: usize = 52;
+    const INDICES_PER_SHARD: usize = NUM_OF_INDICES_IN_SHARD;
 
     fn make_shard_key(partial: Self::PartialKey, highest: BlockNumber) -> Self::ShardKey {
         StorageShardedKey::new(partial.0, partial.1, highest)
@@ -259,8 +276,30 @@ mod tests {
 
     #[test]
     fn indices_per_shard_matches_constant() {
-        assert_eq!(AccountsHistoryTable::INDICES_PER_SHARD, NUM_OF_INDICES_IN_SHARD as u64);
-        assert_eq!(StoragesHistoryTable::INDICES_PER_SHARD, NUM_OF_INDICES_IN_SHARD as u64);
+        assert_eq!(AccountsHistoryTable::INDICES_PER_SHARD, NUM_OF_INDICES_IN_SHARD);
+        assert_eq!(StoragesHistoryTable::INDICES_PER_SHARD, NUM_OF_INDICES_IN_SHARD);
+    }
+
+    #[test]
+    fn prefix_len_correct() {
+        assert_eq!(AccountsHistoryTable::PREFIX_LEN, 20);
+        assert_eq!(StoragesHistoryTable::PREFIX_LEN, 52);
+    }
+
+    #[test]
+    fn is_sentinel_works() {
+        let addr = address!("0102030405060708091011121314151617181920");
+        let slot = b256!("0001020304050607080910111213141516171819202122232425262728293031");
+
+        let account_sentinel = AccountsHistoryTable::last_shard_key(addr);
+        let account_normal = AccountsHistoryTable::make_shard_key(addr, 100);
+        assert!(AccountsHistoryTable::is_sentinel(&account_sentinel));
+        assert!(!AccountsHistoryTable::is_sentinel(&account_normal));
+
+        let storage_sentinel = StoragesHistoryTable::last_shard_key((addr, slot));
+        let storage_normal = StoragesHistoryTable::make_shard_key((addr, slot), 100);
+        assert!(StoragesHistoryTable::is_sentinel(&storage_sentinel));
+        assert!(!StoragesHistoryTable::is_sentinel(&storage_normal));
     }
 
     #[test]
