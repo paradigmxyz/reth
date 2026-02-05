@@ -1539,15 +1539,12 @@ struct FilteredV2ProofNodes {
 /// Unlike [`filter_map_revealed_nodes`], V2 proof nodes already have masks included in the
 /// `ProofTrieNode` structure, so no separate masks map is needed.
 fn filter_revealed_v2_proof_nodes(
-    proof_nodes: Vec<ProofTrieNode>,
+    mut proof_nodes: Vec<ProofTrieNode>,
     revealed_nodes: &mut HashSet<Nibbles>,
 ) -> SparseStateTrieResult<FilteredV2ProofNodes> {
-    let mut result = FilteredV2ProofNodes {
-        root_node: None,
-        nodes: Vec::with_capacity(proof_nodes.len()),
-        new_nodes: 0,
-        metric_values: Default::default(),
-    };
+    let mut root_node = None;
+    let mut new_nodes = 0;
+    let mut metric_values = ProofNodesMetricValues::default();
 
     // Count non-EmptyRoot nodes for sanity check. When multiple proofs are extended together,
     // duplicate EmptyRoot nodes may appear (e.g., storage proofs split across chunks for an
@@ -1555,27 +1552,30 @@ fn filter_revealed_v2_proof_nodes(
     let non_empty_root_count =
         proof_nodes.iter().filter(|n| !matches!(n.node, TrieNode::EmptyRoot)).count();
 
-    for node in proof_nodes {
-        result.metric_values.total_nodes += 1;
+    let mut i = 0;
+    while i < proof_nodes.len() {
+        let node = &proof_nodes[i];
+        metric_values.total_nodes += 1;
 
         let is_root = node.path.is_empty();
 
         // If the node is already revealed, skip it. We don't ever skip the root node, nor do we add
         // it to `revealed_nodes`.
         if !is_root && !revealed_nodes.insert(node.path) {
-            result.metric_values.skipped_nodes += 1;
+            metric_values.skipped_nodes += 1;
+            i += 1;
             continue
         }
 
-        result.new_nodes += 1;
+        new_nodes += 1;
 
         // Count children for capacity estimation
         match &node.node {
             TrieNode::Branch(branch) => {
-                result.new_nodes += branch.state_mask.count_ones() as usize;
+                new_nodes += branch.state_mask.count_ones() as usize;
             }
             TrieNode::Extension(_) => {
-                result.new_nodes += 1;
+                new_nodes += 1;
             }
             _ => {}
         };
@@ -1590,14 +1590,14 @@ fn filter_revealed_v2_proof_nodes(
                 .into())
             }
 
-            result.root_node = Some(node);
-            continue
+            root_node = Some(proof_nodes.remove(i));
+            i += 2;
+        } else {
+            i += 1;
         }
-
-        result.nodes.push(node);
     }
 
-    Ok(result)
+    Ok(FilteredV2ProofNodes { root_node, nodes: proof_nodes, new_nodes, metric_values })
 }
 
 #[cfg(test)]
