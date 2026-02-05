@@ -741,7 +741,7 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                             .sum(),
                     );
 
-                    // Record per-table arena hint estimation quality metrics
+                    // Record per-table arena hint estimation quality metrics (provider-level)
                     self.arena_hint_metrics
                         .record(tables::PlainAccountState::NAME, &hints.details.plain_accounts);
                     self.arena_hint_metrics
@@ -756,6 +756,36 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                         .record(tables::AccountsTrie::NAME, &hints.details.account_trie);
                     self.arena_hint_metrics
                         .record(tables::StoragesTrie::NAME, &hints.details.storage_trie);
+
+                    // Record DB-level arena estimation metrics
+                    self.tx.record_arena_estimation(
+                        tables::PlainAccountState::NAME,
+                        &hints.details.plain_accounts.to_estimation_stats(),
+                    );
+                    self.tx.record_arena_estimation(
+                        tables::PlainStorageState::NAME,
+                        &hints.details.plain_storage.to_estimation_stats(),
+                    );
+                    self.tx.record_arena_estimation(
+                        tables::Bytecodes::NAME,
+                        &hints.details.bytecodes.to_estimation_stats(),
+                    );
+                    self.tx.record_arena_estimation(
+                        tables::HashedAccounts::NAME,
+                        &hints.details.hashed_accounts.to_estimation_stats(),
+                    );
+                    self.tx.record_arena_estimation(
+                        tables::HashedStorages::NAME,
+                        &hints.details.hashed_storages.to_estimation_stats(),
+                    );
+                    self.tx.record_arena_estimation(
+                        tables::AccountsTrie::NAME,
+                        &hints.details.account_trie.to_estimation_stats(),
+                    );
+                    self.tx.record_arena_estimation(
+                        tables::StoragesTrie::NAME,
+                        &hints.details.storage_trie.to_estimation_stats(),
+                    );
 
                     self.tx.enable_parallel_writes_for_tables_with_hints(&[
                         (tables::PlainAccountState::NAME, hints.plain_accounts),
