@@ -40,7 +40,7 @@ pub struct DefaultEngineValues {
     account_worker_count: Option<usize>,
     disable_proof_v2: bool,
     cache_metrics_disabled: bool,
-    enable_sparse_trie_as_cache: bool,
+    legacy_trie: bool,
     sparse_trie_prune_depth: usize,
     sparse_trie_max_storage_tries: usize,
 }
@@ -179,9 +179,9 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set whether to enable sparse trie as cache by default
-    pub const fn with_enable_sparse_trie_as_cache(mut self, v: bool) -> Self {
-        self.enable_sparse_trie_as_cache = v;
+    /// Set whether to use legacy trie (disable sparse trie as cache) by default
+    pub const fn with_legacy_trie(mut self, v: bool) -> Self {
+        self.legacy_trie = v;
         self
     }
 
@@ -221,7 +221,7 @@ impl Default for DefaultEngineValues {
             account_worker_count: None,
             disable_proof_v2: false,
             cache_metrics_disabled: false,
-            enable_sparse_trie_as_cache: false,
+            legacy_trie: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
         }
@@ -352,16 +352,16 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
 
-    /// Enable sparse trie as cache.
-    #[arg(long = "engine.enable-sparse-trie-as-cache", default_value_t = DefaultEngineValues::get_global().enable_sparse_trie_as_cache, conflicts_with = "disable_proof_v2")]
-    pub enable_sparse_trie_as_cache: bool,
+    /// Use legacy trie implementation (disable sparse trie as cache).
+    #[arg(long = "engine.legacy-trie", default_value_t = DefaultEngineValues::get_global().legacy_trie, conflicts_with = "disable_proof_v2")]
+    pub legacy_trie: bool,
 
     /// Sparse trie prune depth.
-    #[arg(long = "engine.sparse-trie-prune-depth", default_value_t = DefaultEngineValues::get_global().sparse_trie_prune_depth, requires = "enable_sparse_trie_as_cache")]
+    #[arg(long = "engine.sparse-trie-prune-depth", default_value_t = DefaultEngineValues::get_global().sparse_trie_prune_depth)]
     pub sparse_trie_prune_depth: usize,
 
     /// Maximum number of storage tries to retain after sparse trie pruning.
-    #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries, requires = "enable_sparse_trie_as_cache")]
+    #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries)]
     pub sparse_trie_max_storage_tries: usize,
 }
 
@@ -389,7 +389,7 @@ impl Default for EngineArgs {
             account_worker_count,
             disable_proof_v2,
             cache_metrics_disabled,
-            enable_sparse_trie_as_cache,
+            legacy_trie,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
         } = DefaultEngineValues::get_global().clone();
@@ -418,7 +418,7 @@ impl Default for EngineArgs {
             account_worker_count,
             disable_proof_v2,
             cache_metrics_disabled,
-            enable_sparse_trie_as_cache,
+            legacy_trie,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
         }
@@ -450,7 +450,7 @@ impl EngineArgs {
             .with_account_worker_count_opt(self.account_worker_count)
             .with_disable_proof_v2(self.disable_proof_v2)
             .without_cache_metrics(self.cache_metrics_disabled)
-            .with_enable_sparse_trie_as_cache(self.enable_sparse_trie_as_cache)
+            .with_legacy_trie(self.legacy_trie)
             .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
             .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
     }
