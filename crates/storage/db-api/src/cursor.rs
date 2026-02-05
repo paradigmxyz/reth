@@ -134,6 +134,17 @@ pub trait DbDupCursorRW<T: DupSort> {
     ///
     /// This is efficient for pre-sorted data. If the data is not pre-sorted, use `insert`.
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
+
+    /// Replace the value at the current cursor position.
+    ///
+    /// The cursor must be positioned on a valid duplicate entry (e.g., after `seek_by_key_subkey`).
+    /// Uses `MDBX_CURRENT` flag internally:
+    /// - For same-size values: in-place update (fast path)
+    /// - For different-size values: MDBX internally performs delete + insert
+    ///
+    /// This is more efficient than `delete_current` + `upsert` for updating existing entries
+    /// in DUPSORT tables like `StoragesTrie`.
+    fn replace_current(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
 }
 
 /// Provides an iterator to `Cursor` when handling `Table`.

@@ -358,6 +358,28 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
             },
         )
     }
+
+    fn replace_current(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        let key = key.encode();
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorReplaceCurrent,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::CURRENT)
+                    .map_err(|e| {
+                        DatabaseWriteError {
+                            info: e.into(),
+                            operation: DatabaseWriteOperation::CursorReplaceCurrent,
+                            table_name: T::NAME,
+                            key: key.into_vec(),
+                        }
+                        .into()
+                    })
+            },
+        )
+    }
 }
 
 #[cfg(test)]

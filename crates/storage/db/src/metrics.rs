@@ -261,6 +261,8 @@ pub(crate) enum Operation {
     CursorDeleteCurrent,
     /// Database cursor delete current duplicates operation.
     CursorDeleteCurrentDuplicates,
+    /// Database cursor replace current value operation (DUPSORT tables).
+    CursorReplaceCurrent,
 }
 
 impl Operation {
@@ -277,6 +279,7 @@ impl Operation {
             Self::CursorAppendDup => "cursor-append-dup",
             Self::CursorDeleteCurrent => "cursor-delete-current",
             Self::CursorDeleteCurrentDuplicates => "cursor-delete-current-duplicates",
+            Self::CursorReplaceCurrent => "cursor-replace-current",
         }
     }
 }
