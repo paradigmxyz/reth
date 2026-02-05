@@ -708,7 +708,6 @@ impl ExecutionCache {
                 }
 
                 self.account_cache.remove(addr);
-                self.account_stats.decrement_size();
                 continue
             }
 
@@ -1086,5 +1085,45 @@ mod tests {
         // Verify only addr1 was removed
         assert!(caches.account_cache.get(&addr1).is_none());
         assert!(caches.account_cache.get(&addr2).is_some());
+    }
+
+    #[test]
+    fn test_insert_state_destroyed_account_without_code_updates_account_stats_size() {
+        let caches = ExecutionCache::new(1000);
+
+        // Pre-populate account cache with a single account entry
+        let addr = Address::random();
+        caches.insert_account(addr, Some(Account::default()));
+
+        let size_before = caches.account_stats.size();
+
+        let bundle = BundleState {
+            // BundleState with a destroyed EOA (no code)
+            state: HashMap::from_iter([(
+                addr,
+                BundleAccount::new(
+                    Some(AccountInfo {
+                        balance: U256::from(100),
+                        nonce: 1,
+                        code_hash: alloy_primitives::KECCAK256_EMPTY,
+                        code: None,
+                        account_id: None,
+                    }),
+                    None, // Destroyed
+                    Default::default(),
+                    AccountStatus::Destroyed,
+                ),
+            )]),
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+
+        assert!(caches.insert_state(&bundle).is_ok());
+
+        let size_after = caches.account_stats.size();
+
+        assert_eq!(size_before - 1, size_after);
     }
 }
