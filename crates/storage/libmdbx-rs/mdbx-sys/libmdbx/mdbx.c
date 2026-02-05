@@ -24230,7 +24230,79 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
       ret.err = lock_rc;
       return ret;
     }
-    /* Allocate batch from parent's EOF to reduce future mutex acquisitions.
+
+    /* Step 1: Try parent's repnl (GC pages) first before EOF extension */
+    /* If parent's repnl is empty but GC has items, pull from freeDB first */
+    DEBUG("subtxn fallback: FREE_DBI.items=%zu, parent repnl=%zu",
+          (size_t)parent->dbs[FREE_DBI].items,
+          parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0);
+    if ((!parent->tw.repnl || MDBX_PNL_GETSIZE(parent->tw.repnl) == 0) &&
+        parent->dbs[FREE_DBI].items > 0) {
+      cursor_couple_t gc_couple;
+      int gc_rc = cursor_init(&gc_couple.outer, parent, FREE_DBI);
+      DEBUG("subtxn fallback: cursor_init returned %d", gc_rc);
+      if (gc_rc == MDBX_SUCCESS) {
+        /* Call gc_alloc_ex with ALLOC_RESERVE to populate repnl from GC
+         * without consuming pages. This reads GC records into repnl. */
+        const size_t repnl_before = parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0;
+        pgr_t gc_ret = gc_alloc_ex(&gc_couple.outer, 0, ALLOC_RESERVE | ALLOC_UNIMPORTANT);
+        const size_t repnl_after = parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0;
+        DEBUG("subtxn fallback: gc_alloc_ex returned err=%d, repnl %zu -> %zu",
+              gc_ret.err, repnl_before, repnl_after);
+        if (gc_ret.err == MDBX_SUCCESS || gc_ret.err == MDBX_NOTFOUND) {
+          DEBUG("subtxn fallback: gc_alloc_ex ALLOC_RESERVE populated repnl, now %zu pages",
+                parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0);
+        }
+        /* Ignore errors - we'll fall through to EOF extension if needed */
+      }
+    }
+
+    if (parent->tw.repnl && MDBX_PNL_GETSIZE(parent->tw.repnl) > 0) {
+      const size_t avail = MDBX_PNL_GETSIZE(parent->tw.repnl);
+      const size_t batch = MDBX_SUBTXN_PAGE_BATCH;
+      const size_t take = (avail >= batch) ? batch : avail;
+
+      /* Take first page for immediate use */
+      const pgno_t allocated_pgno = parent->tw.repnl[avail];
+      MDBX_PNL_SETSIZE(parent->tw.repnl, avail - 1);
+      txn->tw.subtxn_pages_from_gc += 1;
+
+      /* Transfer remaining batch pages to subtxn_repnl for future allocations */
+      if (take > 1) {
+        const size_t extra = take - 1;
+        if (!txn->tw.subtxn_repnl) {
+          txn->tw.subtxn_repnl = pnl_alloc(extra);
+          if (unlikely(!txn->tw.subtxn_repnl)) {
+            osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+            ret.page = nullptr;
+            ret.err = MDBX_ENOMEM;
+            return ret;
+          }
+        } else {
+          int rc = pnl_need(&txn->tw.subtxn_repnl, extra);
+          if (unlikely(rc != MDBX_SUCCESS)) {
+            osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+            ret.page = nullptr;
+            ret.err = rc;
+            return ret;
+          }
+        }
+        size_t parent_len = MDBX_PNL_GETSIZE(parent->tw.repnl);
+        for (size_t i = 0; i < extra && parent_len > 0; ++i, --parent_len) {
+          pnl_append_prereserved(txn->tw.subtxn_repnl, parent->tw.repnl[parent_len]);
+        }
+        MDBX_PNL_SETSIZE(parent->tw.repnl, parent_len);
+        txn->tw.subtxn_repnl_acquired += extra;
+        txn->tw.subtxn_pages_from_gc += extra;
+      }
+
+      DEBUG("subtxn %p: fallback got %zu pages from parent repnl (from_gc=%zu)",
+            (void*)txn, take, txn->tw.subtxn_pages_from_gc);
+      osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+      return page_alloc_finalize(env, txn, mc, allocated_pgno, 1);
+    }
+
+    /* Step 2: Allocate batch from parent's EOF to reduce future mutex acquisitions.
      * When MDBX_ENABLE_REFUND is enabled, allocate one extra "refund boundary" page
      * that we DON'T put in subtxn_repnl. This ensures the highest page in subtxn_repnl
      * is < (first_unallocated - 1), satisfying pnl_check_allocated assertions. */
