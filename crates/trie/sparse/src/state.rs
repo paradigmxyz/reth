@@ -1390,10 +1390,15 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
     /// Takes the storage trie for the account from the internal `HashMap`, creating it if it
     /// doesn't already exist.
     #[cfg(feature = "std")]
-    fn take_or_create_trie(&mut self, account: &B256) -> RevealableSparseTrie<S> {
+    pub fn take_or_create_trie(&mut self, account: &B256) -> RevealableSparseTrie<S> {
         self.tries.remove(account).unwrap_or_else(|| {
             self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
         })
+    }
+
+    /// Inserts the storage trie for the account into the internal `HashMap`.
+    pub fn insert_trie(&mut self, account: B256, trie: RevealableSparseTrie<S>) {
+        self.tries.insert(account, trie);
     }
 
     /// Takes the revealed paths set from the account from the internal `HashMap`, creating one if
