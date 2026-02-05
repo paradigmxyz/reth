@@ -15956,6 +15956,10 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
   /* Pre-warm GC: if arena hints exceed available pages, try to reclaim more
    * from the freelist BEFORE distributing to subtxns. This avoids the scenario
    * where subtxns exhaust their pools and all contend on parent allocation. */
+  DEBUG("parallel subtxns: checking pre-warm (need %zu, have %zu, gc_items=%zu, last_reclaimed=%" PRIaTXN ", retxl=%zu)",
+        total_hints, gc_available, (size_t)parent->dbs[FREE_DBI].items,
+        parent->tw.gc.last_reclaimed,
+        parent->tw.gc.retxl ? MDBX_PNL_GETSIZE(parent->tw.gc.retxl) : 0);
   if (total_hints > gc_available && parent->dbs[FREE_DBI].items > 0) {
     DEBUG("parallel subtxns: pre-warming GC (need %zu, have %zu)", total_hints, gc_available);
     cursor_couple_t gc_couple;
@@ -16177,6 +16181,13 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
   if (unlikely(!parent))
     return LOG_IFERR(MDBX_BAD_TXN);
 
+  /* Serialize sibling subtxn commits to avoid races on parent state */
+  if (subtxn->tw.subtxn_alloc_mutex) {
+    int lock_rc = osal_fastmutex_acquire(subtxn->tw.subtxn_alloc_mutex);
+    if (unlikely(lock_rc != MDBX_SUCCESS))
+      return LOG_IFERR(lock_rc);
+  }
+
   DEBUG("committing parallel subtx %p, dirty_npages %zu",
         (void *)subtxn, (size_t)subtxn->tw.writemap_dirty_npages);
 
@@ -16202,8 +16213,11 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
   /* Merge retired_pages from subtxn into parent */
   if (subtxn->tw.retired_pages && MDBX_PNL_GETSIZE(subtxn->tw.retired_pages) > 0) {
     int rc = pnl_need(&parent->tw.retired_pages, MDBX_PNL_GETSIZE(subtxn->tw.retired_pages));
-    if (unlikely(rc != MDBX_SUCCESS))
+    if (unlikely(rc != MDBX_SUCCESS)) {
+      if (subtxn->tw.subtxn_alloc_mutex)
+        osal_fastmutex_release(subtxn->tw.subtxn_alloc_mutex);
       return LOG_IFERR(rc);
+    }
     for (size_t i = 1; i <= MDBX_PNL_GETSIZE(subtxn->tw.retired_pages); ++i)
       pnl_append_prereserved(parent->tw.retired_pages, subtxn->tw.retired_pages[i]);
   }
@@ -16211,8 +16225,11 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
   /* Merge repnl from subtxn into parent */
   if (subtxn->tw.repnl && MDBX_PNL_GETSIZE(subtxn->tw.repnl) > 0) {
     int rc = pnl_need(&parent->tw.repnl, MDBX_PNL_GETSIZE(subtxn->tw.repnl));
-    if (unlikely(rc != MDBX_SUCCESS))
+    if (unlikely(rc != MDBX_SUCCESS)) {
+      if (subtxn->tw.subtxn_alloc_mutex)
+        osal_fastmutex_release(subtxn->tw.subtxn_alloc_mutex);
       return LOG_IFERR(rc);
+    }
     for (size_t i = 1; i <= MDBX_PNL_GETSIZE(subtxn->tw.repnl); ++i)
       pnl_append_prereserved(parent->tw.repnl, subtxn->tw.repnl[i]);
   }
@@ -16220,8 +16237,11 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
   /* Merge loose pages to parent's repnl so they can be reused */
   if (subtxn->tw.loose_count > 0) {
     int rc = pnl_need(&parent->tw.repnl, subtxn->tw.loose_count);
-    if (unlikely(rc != MDBX_SUCCESS))
+    if (unlikely(rc != MDBX_SUCCESS)) {
+      if (subtxn->tw.subtxn_alloc_mutex)
+        osal_fastmutex_release(subtxn->tw.subtxn_alloc_mutex);
       return LOG_IFERR(rc);
+    }
     for (page_t *lp = subtxn->tw.loose_pages; lp; ) {
       MDBX_ASAN_UNPOISON_MEMORY_REGION(&page_next(lp), sizeof(page_t *));
       VALGRIND_MAKE_MEM_DEFINED(&page_next(lp), sizeof(page_t *));
@@ -16237,11 +16257,23 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
    * These pages were batch-allocated but not consumed - return them to avoid leaks. */
   if (subtxn->tw.subtxn_repnl && MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl) > 0) {
     int rc = pnl_need(&parent->tw.repnl, MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl));
-    if (unlikely(rc != MDBX_SUCCESS))
+    if (unlikely(rc != MDBX_SUCCESS)) {
+      if (subtxn->tw.subtxn_alloc_mutex)
+        osal_fastmutex_release(subtxn->tw.subtxn_alloc_mutex);
       return LOG_IFERR(rc);
+    }
     for (size_t i = 1; i <= MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl); ++i)
       pnl_append_prereserved(parent->tw.repnl, subtxn->tw.subtxn_repnl[i]);
   }
+
+  DEBUG("subtxn %p commit: merged retired=%zu, repnl=%zu, loose=%zu, subtxn_repnl=%zu to parent (parent repnl now %zu, retired now %zu)",
+        (void*)subtxn,
+        subtxn->tw.retired_pages ? MDBX_PNL_GETSIZE(subtxn->tw.retired_pages) : 0,
+        subtxn->tw.repnl ? MDBX_PNL_GETSIZE(subtxn->tw.repnl) : 0,
+        subtxn->tw.loose_count,
+        subtxn->tw.subtxn_repnl ? MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl) : 0,
+        parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0,
+        parent->tw.retired_pages ? MDBX_PNL_GETSIZE(parent->tw.retired_pages) : 0);
 
   /* Re-sort parent's repnl after merging pages from subtxn.
    * pnl_check/pnl_check_allocated assume the list is sorted (MDBX_PNL_MOST
@@ -16249,6 +16281,9 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
    * assertions in page_alloc_finalize will fail with false positives. */
   if (MDBX_PNL_GETSIZE(parent->tw.repnl) > 1)
     pnl_sort(parent->tw.repnl, parent->geo.first_unallocated);
+
+  if (subtxn->tw.subtxn_alloc_mutex)
+    osal_fastmutex_release(subtxn->tw.subtxn_alloc_mutex);
 
   subtx_unlink_from_parent(subtxn);
   subtx_free_resources(subtxn);
@@ -16268,6 +16303,49 @@ LIBMDBX_API int mdbx_subtx_abort(MDBX_txn *subtxn) {
     return LOG_IFERR(MDBX_EINVAL);
 
   DEBUG("aborting parallel subtx %p", (void *)subtxn);
+
+  MDBX_txn *const parent = subtxn->tw.subparent;
+
+  /* Return all pages to parent before freeing resources.
+   * On abort, pages from subtxn_repnl, loose_pages, and repnl must be
+   * returned to avoid page leaks that cause unbounded freelist growth. */
+  if (parent) {
+    /* Return subtxn_repnl pages to parent */
+    if (subtxn->tw.subtxn_repnl && MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl) > 0) {
+      int rc = pnl_need(&parent->tw.repnl, MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl));
+      if (likely(rc == MDBX_SUCCESS)) {
+        for (size_t i = 1; i <= MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl); ++i)
+          pnl_append_prereserved(parent->tw.repnl, subtxn->tw.subtxn_repnl[i]);
+      }
+    }
+
+    /* Return loose pages to parent */
+    if (subtxn->tw.loose_count > 0) {
+      int rc = pnl_need(&parent->tw.repnl, subtxn->tw.loose_count);
+      if (likely(rc == MDBX_SUCCESS)) {
+        for (page_t *lp = subtxn->tw.loose_pages; lp; ) {
+          MDBX_ASAN_UNPOISON_MEMORY_REGION(&page_next(lp), sizeof(page_t *));
+          VALGRIND_MAKE_MEM_DEFINED(&page_next(lp), sizeof(page_t *));
+          page_t *next = page_next(lp);
+          pnl_append_prereserved(parent->tw.repnl, lp->pgno);
+          lp = next;
+        }
+      }
+    }
+
+    /* Return repnl pages to parent */
+    if (subtxn->tw.repnl && MDBX_PNL_GETSIZE(subtxn->tw.repnl) > 0) {
+      int rc = pnl_need(&parent->tw.repnl, MDBX_PNL_GETSIZE(subtxn->tw.repnl));
+      if (likely(rc == MDBX_SUCCESS)) {
+        for (size_t i = 1; i <= MDBX_PNL_GETSIZE(subtxn->tw.repnl); ++i)
+          pnl_append_prereserved(parent->tw.repnl, subtxn->tw.repnl[i]);
+      }
+    }
+
+    /* Sort parent's repnl after merging */
+    if (MDBX_PNL_GETSIZE(parent->tw.repnl) > 1)
+      pnl_sort(parent->tw.repnl, parent->geo.first_unallocated);
+  }
 
   subtx_unlink_from_parent(subtxn);
   subtx_free_resources(subtxn);
@@ -23257,7 +23335,9 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
             pgr_t gc_ret = gc_alloc_ex(&gc_couple.outer, 0, ALLOC_RESERVE | ALLOC_UNIMPORTANT);
             if (gc_ret.err == MDBX_NOTFOUND) {
               /* GC truly depleted */
-              DEBUG("subtxn %p: GC depleted after %zu attempts", (void*)txn, attempts);
+              DEBUG("subtxn %p: GC depleted after %zu attempts (last_reclaimed=%" PRIaTXN ", retxl_len=%zu)",
+                (void*)txn, attempts, parent->tw.gc.last_reclaimed,
+                parent->tw.gc.retxl ? MDBX_PNL_GETSIZE(parent->tw.gc.retxl) : 0);
               break;
             }
             if (gc_ret.err != MDBX_SUCCESS) {
@@ -23265,6 +23345,10 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
               break;
             }
           }
+          
+          DEBUG("subtxn %p: after GC reclaim loop, parent repnl=%zu, last_reclaimed=%" PRIaTXN,
+                (void*)txn, parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0,
+                parent->tw.gc.last_reclaimed);
           
           /* Check if we got pages */
           if (parent->tw.repnl && MDBX_PNL_GETSIZE(parent->tw.repnl) > 0) {
@@ -23440,6 +23524,8 @@ retry_gc_have_oldest:
     goto fail;
   }
   const txnid_t detent = oldest + 1;
+  DEBUG("gc_alloc_ex: oldest=%" PRIaTXN ", detent=%" PRIaTXN ", txnid=%" PRIaTXN ", gc_items=%zu, last_reclaimed=%" PRIaTXN,
+        oldest, detent, txn->txnid, (size_t)txn->dbs[FREE_DBI].items, txn->tw.gc.last_reclaimed);
 
   txnid_t id = 0;
   MDBX_cursor_op op = MDBX_FIRST;
@@ -24487,6 +24573,13 @@ return_error:
  * avoid your madness. */
 int gc_update(MDBX_txn *txn, gcu_t *ctx) {
   TRACE("\n>>> @%" PRIaTXN, txn->txnid);
+  DEBUG("gc_update: repnl=%zu, retired=%zu, loose=%zu, last_reclaimed=%" PRIaTXN ", retxl=%zu, gc_items=%zu",
+        txn->tw.repnl ? MDBX_PNL_GETSIZE(txn->tw.repnl) : 0,
+        txn->tw.retired_pages ? MDBX_PNL_GETSIZE(txn->tw.retired_pages) : 0,
+        txn->tw.loose_count,
+        txn->tw.gc.last_reclaimed,
+        txn->tw.gc.retxl ? MDBX_PNL_GETSIZE(txn->tw.gc.retxl) : 0,
+        (size_t)txn->dbs[FREE_DBI].items);
   MDBX_env *const env = txn->env;
   ctx->cursor.next = txn->cursors[FREE_DBI];
   txn->cursors[FREE_DBI] = &ctx->cursor;
@@ -33145,9 +33238,24 @@ fail:
 
 page_t *page_shadow_alloc(MDBX_txn *txn, size_t num) {
   MDBX_env *env = txn->env;
-  page_t *np = env->shadow_reserve;
-  size_t size = env->ps;
-  if (likely(num == 1 && np)) {
+  page_t *np;
+  size_t size;
+
+  /* For parallel subtxns, bypass the shared shadow_reserve pool entirely
+   * to avoid race conditions. Allocate directly and mark with SIZE_MAX
+   * so page_shadow_release knows to free directly. */
+  if (txn->flags & txn_parallel_subtx) {
+    size = pgno2bytes(env, num);
+    void *const ptr = osal_malloc(size + sizeof(size_t));
+    if (unlikely(!ptr)) {
+      txn->flags |= MDBX_TXN_ERROR;
+      return nullptr;
+    }
+    VALGRIND_MEMPOOL_ALLOC(env, ptr, size + sizeof(size_t));
+    *(size_t *)ptr = SIZE_MAX; /* marker for parallel subtxn allocation */
+    np = ptr_disp(ptr, sizeof(size_t));
+  } else if (likely(num == 1 && (np = env->shadow_reserve) != nullptr)) {
+    size = env->ps;
     eASSERT(env, env->shadow_reserve_len > 0);
     MDBX_ASAN_UNPOISON_MEMORY_REGION(np, size);
     VALGRIND_MEMPOOL_ALLOC(env, ptr_disp(np, -(ptrdiff_t)sizeof(size_t)), size + sizeof(size_t));
@@ -33188,16 +33296,25 @@ void page_shadow_release(MDBX_env *env, page_t *dp, size_t npages) {
   MDBX_ASAN_UNPOISON_MEMORY_REGION(dp, pgno2bytes(env, npages));
   if (unlikely(env->flags & MDBX_PAGEPERTURB))
     memset(dp, -1, pgno2bytes(env, npages));
+
+  /* Check if this page was allocated by a parallel subtxn (marked with SIZE_MAX).
+   * Such pages must be freed directly, not returned to the shared pool. */
+  void *const ptr = ptr_disp(dp, -(ptrdiff_t)sizeof(size_t));
+  if (*(size_t *)ptr == SIZE_MAX) {
+    VALGRIND_MEMPOOL_FREE(env, ptr);
+    osal_free(ptr);
+    return;
+  }
+
   if (likely(npages == 1 && env->shadow_reserve_len < env->options.dp_reserve_limit)) {
     MDBX_ASAN_POISON_MEMORY_REGION(dp, env->ps);
     MDBX_ASAN_UNPOISON_MEMORY_REGION(&page_next(dp), sizeof(page_t *));
     page_next(dp) = env->shadow_reserve;
-    VALGRIND_MEMPOOL_FREE(env, ptr_disp(dp, -(ptrdiff_t)sizeof(size_t)));
+    VALGRIND_MEMPOOL_FREE(env, ptr);
     env->shadow_reserve = dp;
     env->shadow_reserve_len += 1;
   } else {
     /* large pages just get freed directly */
-    void *const ptr = ptr_disp(dp, -(ptrdiff_t)sizeof(size_t));
     VALGRIND_MEMPOOL_FREE(env, ptr);
     osal_free(ptr);
   }
