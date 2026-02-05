@@ -15940,14 +15940,10 @@ static void subtxn_prefault_own_arena(MDBX_txn *subtxn) {
   }
 
   io_uring_submit(&ring);
-
-  struct io_uring_cqe *cqe;
-  for (size_t i = 0; i < npages; ++i) {
-    if (io_uring_wait_cqe(&ring, &cqe) < 0)
-      break;
-    io_uring_cqe_seen(&ring, cqe);
-  }
-
+  
+  /* Fire-and-forget: don't wait for completions.
+   * Pages will be resident by time we need them, or soft fault handles it.
+   * This overlaps I/O with actual cursor work. */
   io_uring_queue_exit(&ring);
   subtxn->tw.subtxn_arena_prefaulted = true;
 
