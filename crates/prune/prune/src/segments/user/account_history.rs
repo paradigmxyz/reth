@@ -57,7 +57,12 @@ where
         PrunePurpose::User
     }
 
-    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
+    #[instrument(
+        name = "AccountHistory::prune",
+        target = "pruner",
+        skip(self, provider),
+        ret(level = "trace")
+    )]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         let range = match input.get_next_block_range() {
             Some(range) => range,
@@ -238,8 +243,6 @@ impl AccountHistory {
     where
         Provider: DBProvider + StaticFileProviderFactory + ChangeSetReader + RocksDBProviderFactory,
     {
-        use reth_provider::PruneShardOutcome;
-
         // Unlike MDBX path, we don't divide the limit by 2 because RocksDB path only prunes
         // history shards (no separate changeset table to delete from). The changesets are in
         // static files which are deleted separately.
@@ -287,14 +290,15 @@ impl AccountHistory {
         sorted_accounts.sort_unstable_by_key(|(addr, _)| *addr);
 
         provider.with_rocksdb_batch(|mut batch| {
-            for (address, highest_block) in &sorted_accounts {
-                let prune_to = (*highest_block).min(last_changeset_pruned_block);
-                match batch.prune_account_history_to(*address, prune_to)? {
-                    PruneShardOutcome::Deleted => deleted_shards += 1,
-                    PruneShardOutcome::Updated => updated_shards += 1,
-                    PruneShardOutcome::Unchanged => {}
-                }
-            }
+            let targets: Vec<_> = sorted_accounts
+                .iter()
+                .map(|(addr, highest)| (*addr, (*highest).min(last_changeset_pruned_block)))
+                .collect();
+
+            let outcomes = batch.prune_account_history_batch(&targets)?;
+            deleted_shards = outcomes.deleted;
+            updated_shards = outcomes.updated;
+
             Ok(((), Some(batch.into_inner())))
         })?;
         trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned account history (RocksDB indices)");

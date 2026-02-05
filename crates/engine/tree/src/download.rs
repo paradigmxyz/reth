@@ -2,7 +2,7 @@
 
 use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
 use alloy_consensus::BlockHeader;
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Set, B256};
 use futures::FutureExt;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
@@ -12,7 +12,7 @@ use reth_network_p2p::{
 use reth_primitives_traits::{Block, SealedBlock};
 use std::{
     cmp::{Ordering, Reverse},
-    collections::{binary_heap::PeekMut, BinaryHeap, HashSet, VecDeque},
+    collections::{binary_heap::PeekMut, BinaryHeap, VecDeque},
     fmt::Debug,
     sync::Arc,
     task::{Context, Poll},
@@ -109,7 +109,7 @@ where
     }
 
     /// Processes a block set download request.
-    fn download_block_set(&mut self, hashes: HashSet<B256>) {
+    fn download_block_set(&mut self, hashes: B256Set) {
         for hash in hashes {
             self.download_full_block(hash);
         }
@@ -397,7 +397,7 @@ mod tests {
 
         // send block set download request
         block_downloader.on_action(DownloadAction::Download(DownloadRequest::BlockSet(
-            HashSet::from([tip.hash(), tip.parent_hash]),
+            B256Set::from_iter([tip.hash(), tip.parent_hash]),
         )));
 
         // ensure we have TOTAL_BLOCKS in flight full block request
@@ -440,7 +440,7 @@ mod tests {
         )));
 
         // send block set download request
-        let download_set = HashSet::from([tip.hash(), tip.parent_hash]);
+        let download_set = B256Set::from_iter([tip.hash(), tip.parent_hash]);
         block_downloader
             .on_action(DownloadAction::Download(DownloadRequest::BlockSet(download_set.clone())));
 

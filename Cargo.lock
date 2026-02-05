@@ -3800,6 +3800,7 @@ dependencies = [
 name = "example-full-contract-state"
 version = "1.10.2"
 dependencies = [
+ "alloy-primitives",
  "eyre",
  "reth-ethereum",
 ]
@@ -10825,6 +10826,7 @@ dependencies = [
  "reth-static-file-types",
  "reth-storage-api",
  "reth-storage-errors",
+ "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
  "reth-trie",

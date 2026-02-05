@@ -476,6 +476,7 @@ impl SparseTrieTrait for SerialSparseTrie {
     fn reserve_nodes(&mut self, additional: usize) {
         self.nodes.reserve(additional);
     }
+
     fn reveal_node(
         &mut self,
         path: Nibbles,
@@ -618,10 +619,14 @@ impl SparseTrieTrait for SerialSparseTrie {
         Ok(())
     }
 
-    fn reveal_nodes(&mut self, mut nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()> {
+    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()> {
         nodes.sort_unstable_by_key(|node| node.path);
-        for node in nodes {
-            self.reveal_node(node.path, node.node, node.masks)?;
+        for node in nodes.iter_mut() {
+            self.reveal_node(
+                node.path,
+                core::mem::replace(&mut node.node, TrieNode::EmptyRoot),
+                node.masks.take(),
+            )?;
         }
         Ok(())
     }
@@ -2248,7 +2253,7 @@ mod find_leaf_tests {
         let blinded_hash = B256::repeat_byte(0xBB);
         let leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
-        let mut nodes = alloy_primitives::map::HashMap::default();
+        let mut nodes = HashMap::default();
         // Create path to the blinded node
         nodes.insert(
             Nibbles::default(),

@@ -1,20 +1,22 @@
 name: Changelog
 
 on:
-  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize]
 
 jobs:
   changelog:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.head_ref }}
       - run: npm install -g @anthropic-ai/claude-code
-      - uses: wevm/changelogs-rs/gen@master
+      - uses: wevm/changelogs/check@master
         with:
           ai: 'claude -p'
         env:
