@@ -4,7 +4,10 @@
 //! consistency checks for static files. The goal is to detect and potentially heal
 //! inconsistencies between `RocksDB` data and MDBX checkpoints.
 
-use super::RocksDBProvider;
+use super::{
+    history_table::{AccountHistorySpec, HistorySpec, HistoryTable, StorageHistorySpec},
+    RocksDBProvider,
+};
 use crate::StaticFileProviderFactory;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::BlockNumber;
@@ -259,87 +262,22 @@ impl RocksDBProvider {
         Provider:
             DBProvider + StageCheckpointReader + StaticFileProviderFactory + StorageChangeSetReader,
     {
-        let checkpoint = provider
-            .get_stage_checkpoint(StageId::IndexStorageHistory)?
-            .map(|cp| cp.block_number)
-            .unwrap_or(0);
-
-        // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
-        if checkpoint == 0 && self.first::<tables::StoragesHistory>()?.is_some() {
-            tracing::info!(
-                target: "reth::providers::rocksdb",
-                "StoragesHistory has data but checkpoint is 0, clearing all"
-            );
-            self.clear::<tables::StoragesHistory>()?;
-            return Ok(None);
-        }
-
-        let sf_tip = provider
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
-            .unwrap_or(0);
-
-        if sf_tip < checkpoint {
-            // This should never happen in normal operation - static files are always
-            // committed before RocksDB. If we get here, something is seriously wrong.
-            // The unwind is a best-effort attempt but is probably futile.
-            tracing::warn!(
-                target: "reth::providers::rocksdb",
-                sf_tip,
-                checkpoint,
-                "StoragesHistory: static file tip behind checkpoint, unwind needed"
-            );
-            return Ok(Some(sf_tip));
-        }
-
-        if sf_tip == checkpoint {
-            return Ok(None);
-        }
-
-        let total_blocks = sf_tip - checkpoint;
-        tracing::info!(
-            target: "reth::providers::rocksdb",
-            checkpoint,
-            sf_tip,
-            total_blocks,
-            "StoragesHistory: healing via changesets"
-        );
-
-        let mut batch_start = checkpoint + 1;
-        let mut batch_num = 0u64;
-        let total_batches = total_blocks.div_ceil(HEAL_HISTORY_BATCH_SIZE);
-
-        while batch_start <= sf_tip {
-            let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(sf_tip);
-            batch_num += 1;
-
-            let changesets = provider.storage_changesets_range(batch_start..=batch_end)?;
-
-            let unique_keys: HashSet<_> = changesets
-                .into_iter()
-                .map(|(block_addr, entry)| (block_addr.address(), entry.key, checkpoint + 1))
-                .collect();
-            let indices: Vec<_> = unique_keys.into_iter().collect();
-
-            if !indices.is_empty() {
-                tracing::info!(
-                    target: "reth::providers::rocksdb",
-                    batch_num,
-                    total_batches,
-                    batch_start,
-                    batch_end,
-                    indices_count = indices.len(),
-                    "StoragesHistory: unwinding batch"
-                );
-
-                let batch = self.unwind_storage_history_indices(&indices)?;
-                self.commit_batch(batch)?;
-            }
-
-            batch_start = batch_end + 1;
-        }
-
-        Ok(None)
+        self.heal_history_inner::<StorageHistorySpec, _, _, _>(
+            provider,
+            "StoragesHistory",
+            |p, range| p.storage_changesets_range(range),
+            |changesets, unwind_from| {
+                let unique_keys: HashSet<_> = changesets
+                    .into_iter()
+                    .map(|(block_addr, entry)| (block_addr.address(), entry.key, unwind_from))
+                    .collect();
+                unique_keys.into_iter().collect()
+            },
+            |rocksdb, indices: &[(_, _, _)]| {
+                let batch = rocksdb.unwind_storage_history_indices(indices)?;
+                rocksdb.commit_batch(batch)
+            },
+        )
     }
 
     /// Heals the `AccountsHistory` table by removing stale entries.
@@ -353,35 +291,75 @@ impl RocksDBProvider {
     where
         Provider: DBProvider + StageCheckpointReader + StaticFileProviderFactory + ChangeSetReader,
     {
-        let checkpoint = provider
-            .get_stage_checkpoint(StageId::IndexAccountHistory)?
-            .map(|cp| cp.block_number)
-            .unwrap_or(0);
+        self.heal_history_inner::<AccountHistorySpec, _, _, _>(
+            provider,
+            "AccountsHistory",
+            |p, range| p.account_changesets_range(range),
+            |changesets, unwind_from| {
+                let mut addresses = HashSet::with_capacity(changesets.len());
+                addresses.extend(changesets.iter().map(|(_, cs)| cs.address));
+                addresses.into_iter().map(|addr| (addr, unwind_from)).collect()
+            },
+            |rocksdb, indices: &[(_, _)]| {
+                let batch = rocksdb.unwind_account_history_indices(indices)?;
+                rocksdb.commit_batch(batch)
+            },
+        )
+    }
+
+    /// Generic history healing implementation parameterized by `HistorySpec`.
+    ///
+    /// This function handles the common logic for healing both `AccountsHistory` and
+    /// `StoragesHistory` tables:
+    /// - Fast path: clear all data if checkpoint is 0 but `RocksDB` has data
+    /// - Return unwind target if static file tip is behind checkpoint
+    /// - Iterate changesets in batches to identify and unwind affected keys
+    ///
+    /// The changeset-specific behavior is provided via closures:
+    /// - `read_changesets`: reads changesets from provider for a block range
+    /// - `extract_indices`: extracts unwind indices from changesets
+    /// - `do_unwind`: performs the actual unwind and commit operation on `RocksDB`
+    fn heal_history_inner<S, P, Changesets, Indices>(
+        &self,
+        provider: &P,
+        table_name: &str,
+        read_changesets: impl Fn(
+            &P,
+            std::ops::RangeInclusive<BlockNumber>,
+        ) -> ProviderResult<Changesets>,
+        extract_indices: impl Fn(Changesets, BlockNumber) -> Vec<Indices>,
+        do_unwind: impl Fn(&Self, &[Indices]) -> ProviderResult<()>,
+    ) -> ProviderResult<Option<BlockNumber>>
+    where
+        S: HistorySpec,
+        P: StageCheckpointReader + StaticFileProviderFactory,
+    {
+        let checkpoint =
+            provider.get_stage_checkpoint(S::STAGE_ID)?.map(|cp| cp.block_number).unwrap_or(0);
 
         // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
-        if checkpoint == 0 && self.first::<tables::AccountsHistory>()?.is_some() {
+        if checkpoint == 0 && self.first::<<S::HT as HistoryTable>::Table>()?.is_some() {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                "AccountsHistory has data but checkpoint is 0, clearing all"
+                "{}: has data but checkpoint is 0, clearing all",
+                table_name
             );
-            self.clear::<tables::AccountsHistory>()?;
+            self.clear::<<S::HT as HistoryTable>::Table>()?;
             return Ok(None);
         }
 
         let sf_tip = provider
             .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
+            .get_highest_static_file_block(S::CHANGESET_STATIC_SEGMENT)
             .unwrap_or(0);
 
         if sf_tip < checkpoint {
-            // This should never happen in normal operation - static files are always
-            // committed before RocksDB. If we get here, something is seriously wrong.
-            // The unwind is a best-effort attempt but is probably futile.
             tracing::warn!(
                 target: "reth::providers::rocksdb",
                 sf_tip,
                 checkpoint,
-                "AccountsHistory: static file tip behind checkpoint, unwind needed"
+                "{}: static file tip behind checkpoint, unwind needed",
+                table_name
             );
             return Ok(Some(sf_tip));
         }
@@ -396,23 +374,21 @@ impl RocksDBProvider {
             checkpoint,
             sf_tip,
             total_blocks,
-            "AccountsHistory: healing via changesets"
+            "{}: healing via changesets",
+            table_name
         );
 
         let mut batch_start = checkpoint + 1;
         let mut batch_num = 0u64;
         let total_batches = total_blocks.div_ceil(HEAL_HISTORY_BATCH_SIZE);
+        let unwind_from = checkpoint + 1;
 
         while batch_start <= sf_tip {
             let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(sf_tip);
             batch_num += 1;
 
-            let changesets = provider.account_changesets_range(batch_start..=batch_end)?;
-
-            let mut addresses = HashSet::with_capacity(changesets.len());
-            addresses.extend(changesets.iter().map(|(_, cs)| cs.address));
-            let unwind_from = checkpoint + 1;
-            let indices: Vec<_> = addresses.into_iter().map(|addr| (addr, unwind_from)).collect();
+            let changesets = read_changesets(provider, batch_start..=batch_end)?;
+            let indices = extract_indices(changesets, unwind_from);
 
             if !indices.is_empty() {
                 tracing::info!(
@@ -422,11 +398,11 @@ impl RocksDBProvider {
                     batch_start,
                     batch_end,
                     indices_count = indices.len(),
-                    "AccountsHistory: unwinding batch"
+                    "{}: unwinding batch",
+                    table_name
                 );
 
-                let batch = self.unwind_account_history_indices(&indices)?;
-                self.commit_batch(batch)?;
+                do_unwind(self, &indices)?;
             }
 
             batch_start = batch_end + 1;
