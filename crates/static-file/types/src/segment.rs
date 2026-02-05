@@ -401,7 +401,7 @@ impl SegmentHeader {
     }
 
     /// Returns the number of changeset offset entries.
-    /// The actual offsets are stored in the .csoff sidecar file.
+    /// The actual offsets are stored in the `.csoff` sidecar file.
     pub const fn changeset_offsets_len(&self) -> u64 {
         self.changeset_offsets_len
     }
