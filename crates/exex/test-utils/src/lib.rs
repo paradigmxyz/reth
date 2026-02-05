@@ -244,15 +244,17 @@ pub async fn test_exex_context_with_chain_spec(
     let evm_config = MockEvmConfig::default();
     let consensus = Arc::new(TestConsensus::default());
 
-    let (static_dir, _) = create_test_static_files_dir();
-    let (rocksdb_dir, _) = create_test_rocksdb_dir();
+    let (static_dir, static_path) = create_test_static_files_dir();
+    let (rocksdb_dir, rocksdb_path) = create_test_rocksdb_dir();
     let db = create_test_rw_db();
     let provider_factory = ProviderFactory::<NodeTypesWithDBAdapter<TestNode, _>>::new(
         db,
         chain_spec.clone(),
-        StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
-        RocksDBProvider::builder(rocksdb_dir.keep()).with_default_tables().build().unwrap(),
+        StaticFileProvider::read_write(static_path).expect("static file provider"),
+        RocksDBProvider::builder(rocksdb_path).with_default_tables().build().unwrap(),
     )?;
+    // Keep temp dirs alive until context is dropped
+    let _temp_dirs = (static_dir, rocksdb_dir);
 
     let genesis_hash = init_genesis(&provider_factory)?;
     let provider = BlockchainProvider::new(provider_factory.clone())?;

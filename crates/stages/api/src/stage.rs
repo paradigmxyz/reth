@@ -340,16 +340,20 @@ mod tests {
     #[test]
     fn test_exec_input_next_block_range_with_transaction_threshold() {
         let mut rng = generators::rng();
+        let (static_dir, static_path) = create_test_static_files_dir();
+        let (rocksdb_dir, rocksdb_path) = create_test_rocksdb_dir();
         let provider_factory = ProviderFactory::<MockNodeTypesWithDB>::new(
             create_test_rw_db(),
             MAINNET.clone(),
-            StaticFileProviderBuilder::read_write(create_test_static_files_dir().0.keep())
+            StaticFileProviderBuilder::read_write(static_path)
                 .with_blocks_per_file(1)
                 .build()
                 .unwrap(),
-            RocksDBProvider::builder(create_test_rocksdb_dir().0.keep()).build().unwrap(),
+            RocksDBProvider::builder(rocksdb_path).build().unwrap(),
         )
         .unwrap();
+        // Keep temp dirs alive until test ends
+        let _temp_dirs = (static_dir, rocksdb_dir);
 
         // Without checkpoint, without transactions in static files
         {
