@@ -39,14 +39,6 @@ pub struct Command {
     #[arg(long, default_value_t = false)]
     pub(crate) skip_consistency_checks: bool,
 
-    /// Allow opening the database in read-write mode to perform recovery if needed.
-    ///
-    /// Use this flag if the database needs recovery. This opens the database in read-write mode
-    /// which allows MDBX to perform automatic recovery, but does not modify the database
-    /// structure or genesis data.
-    #[arg(long, default_value_t = false)]
-    pub(crate) allow_recovery: bool,
-
     /// Show only the total size for static files.
     #[arg(long, default_value_t = false)]
     detailed_sizes: bool,
