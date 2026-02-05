@@ -294,9 +294,7 @@ where
 
         let parent_span = tracing::Span::current();
         executor.spawn_blocking(move || {
-            let _span =
-                debug_span!(parent: parent_span, "run_hashing_task")
-                    .entered();
+            let _span = debug_span!(parent: parent_span, "run_hashing_task").entered();
             Self::run_hashing_task(updates, hashed_state_tx)
         });
 
