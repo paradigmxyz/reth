@@ -231,10 +231,10 @@ struct MeteredStateHook {
 impl OnStateHook for MeteredStateHook {
     fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
         // Update the metrics for the number of accounts, storage slots and bytecodes loaded
-        let (accounts, storage_slots, bytecodes) =
-            state.values().fold((0, 0, 0), |(accounts, storage_slots, bytecodes), account| {
+        let accounts = state.len();
+        let (storage_slots, bytecodes) =
+            state.values().fold((0, 0), |(storage_slots, bytecodes), account| {
                 (
-                    accounts + 1,
                     storage_slots + account.storage.len(),
                     bytecodes + usize::from(!account.info.is_empty_code_hash()),
                 )
