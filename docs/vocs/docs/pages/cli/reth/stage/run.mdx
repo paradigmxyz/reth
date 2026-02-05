@@ -59,6 +59,13 @@ Database:
           - trace:   Enables logging for trace debug-level messages
           - extra:   Enables logging for extra debug-level messages
 
+      --db.use-hashed-state
+          Use hashed state tables (`HashedAccounts`/`HashedStorages`) as the canonical state representation instead of plain state tables (`PlainAccountState`/`PlainStorageState`).
+
+          When enabled: - Execution writes directly to hashed tables, eliminating need for separate hashing stages - State reads come from hashed tables - `AccountHashingStage` and `StorageHashingStage` become no-ops
+
+          WARNING: This setting is only configurable at database creation. Enabling it on an existing database that was created without it requires re-syncing. Disabling it on a database that was created with it also requires re-syncing.
+
       --db.exclusive <EXCLUSIVE>
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
 

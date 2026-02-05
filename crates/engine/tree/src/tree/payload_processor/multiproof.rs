@@ -1581,7 +1581,10 @@ mod tests {
     fn create_cached_provider<F>(factory: F) -> CachedStateProvider<StateProviderBox>
     where
         F: DatabaseProviderFactory<
-                Provider: BlockReader + StageCheckpointReader + PruneCheckpointReader,
+                Provider: BlockReader
+                             + StageCheckpointReader
+                             + PruneCheckpointReader
+                             + reth_provider::StorageSettingsCache,
             > + Clone
             + Send
             + 'static,
