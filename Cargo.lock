@@ -11068,6 +11068,7 @@ version = "1.10.2"
 dependencies = [
  "clap",
  "eyre",
+ "parking_lot",
  "reth-tracing-otlp",
  "rolling-file",
  "tracing",

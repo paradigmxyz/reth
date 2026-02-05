@@ -62,6 +62,7 @@ pub mod __private {
 
 mod formatter;
 mod layers;
+pub mod runtime;
 mod test_tracer;
 mod throttle;
 

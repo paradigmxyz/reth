@@ -79,6 +79,40 @@ impl LogFormat {
             }
         }
     }
+
+    /// Creates a logging layer without any filter attached.
+    ///
+    /// This is used when the filter is provided separately (e.g., via a reload layer).
+    ///
+    /// # Arguments
+    /// * `color` - An optional string that enables or disables ANSI color codes in the logs.
+    /// * `show_target` - Whether to show the target in log output.
+    ///
+    /// # Returns
+    /// A `BoxedLayer<Registry>` that can be added to a tracing subscriber.
+    pub fn apply_unfiltered(
+        &self,
+        color: Option<String>,
+        show_target: bool,
+    ) -> BoxedLayer<Registry> {
+        let ansi = if let Some(color) = color {
+            std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(color != "never")
+        } else {
+            false
+        };
+
+        match self {
+            Self::Json => tracing_subscriber::fmt::layer()
+                .json()
+                .with_ansi(ansi)
+                .with_target(show_target)
+                .boxed(),
+            Self::LogFmt => tracing_logfmt::layer().boxed(),
+            Self::Terminal => {
+                tracing_subscriber::fmt::layer().with_ansi(ansi).with_target(show_target).boxed()
+            }
+        }
+    }
 }
 
 impl Display for LogFormat {

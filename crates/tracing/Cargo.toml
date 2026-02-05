@@ -28,6 +28,7 @@ tracy-client = { workspace = true, optional = true, features = ["demangle"] }
 # misc
 clap = { workspace = true, features = ["derive"] }
 eyre.workspace = true
+parking_lot.workspace = true
 rolling-file.workspace = true
 
 [features]

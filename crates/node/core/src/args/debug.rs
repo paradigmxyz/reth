@@ -108,6 +108,13 @@ pub struct DebugArgs {
     /// the backfill, but did not yet receive any new blocks.
     #[arg(long = "debug.startup-sync-state-idle", help_heading = "Debug")]
     pub startup_sync_state_idle: bool,
+
+    /// Enable trace-level logging for a specific block during `engine_newPayload` processing.
+    ///
+    /// This is useful for debugging block execution issues. Once the block is processed,
+    /// trace logging is automatically disabled (one-shot behavior).
+    #[arg(long = "debug.trace-block", help_heading = "Debug", value_name = "BLOCK_NUMBER")]
+    pub trace_block: Option<u64>,
 }
 
 impl Default for DebugArgs {
@@ -127,6 +134,7 @@ impl Default for DebugArgs {
             healthy_node_rpc_url: None,
             ethstats: None,
             startup_sync_state_idle: false,
+            trace_block: None,
         }
     }
 }

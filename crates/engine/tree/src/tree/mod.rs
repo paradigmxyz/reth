@@ -581,6 +581,9 @@ where
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
+        let _trace_guard =
+            reth_tracing::runtime::maybe_trace_newpayload_block(payload.block_number());
+
         trace!(target: "engine::tree", "invoked new payload");
 
         // start timing for the new payload process

@@ -86,6 +86,8 @@ impl Layers {
 
     /// Adds a stdout layer with specified formatting and filtering.
     ///
+    /// The filter is wrapped in a reload layer to allow dynamic log level changes at runtime.
+    ///
     /// # Type Parameters
     /// * `S` - The type of subscriber that will use these layers.
     ///
@@ -104,9 +106,23 @@ impl Layers {
         filters: &str,
         color: Option<String>,
     ) -> eyre::Result<()> {
-        let filter = build_env_filter(Some(default_directive), filters)?;
-        let layer = format.apply(filter, color, None);
-        self.add_layer(layer);
+        let filter = build_env_filter(Some(default_directive.clone()), filters)?;
+
+        let show_target =
+            std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or_else(|_| {
+                filter.max_level_hint().is_none_or(|max_level| max_level > tracing::Level::INFO)
+            });
+
+        let filter_str = build_filter_string(Some(default_directive), filters);
+
+        let (reload_layer, handle) = tracing_subscriber::reload::Layer::new(filter);
+        crate::runtime::install_stdout_reload(handle, filter_str);
+
+        self.add_layer(reload_layer);
+
+        let fmt_layer = format.apply_unfiltered(color, show_target);
+        self.add_layer(fmt_layer);
+
         Ok(())
     }
 
@@ -250,6 +266,27 @@ impl FileInfo {
     }
 }
 
+/// Builds a filter string that can be used to reconstruct the filter later.
+///
+/// # Arguments
+/// * `default_directive` - An optional `Directive` that sets the default directive.
+/// * `directives` - Additional directives as a comma-separated string.
+///
+/// # Returns
+/// A string representation of the filter that can be parsed by `EnvFilter::try_new`.
+fn build_filter_string(default_directive: Option<Directive>, directives: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    if let Some(directive) = default_directive {
+        parts.push(directive.to_string());
+    }
+
+    parts.extend(DEFAULT_ENV_FILTER_DIRECTIVES.iter().map(|s| s.to_string()));
+    parts.extend(directives.split(',').filter(|d| !d.is_empty()).map(|s| s.to_string()));
+
+    parts.join(",")
+}
+
 /// Builds an environment filter for logging.
 ///
 /// The events are filtered by `default_directive`, unless overridden by `RUST_LOG`.
@@ -264,8 +301,8 @@ fn build_env_filter(
     default_directive: Option<Directive>,
     directives: &str,
 ) -> eyre::Result<EnvFilter> {
-    let env_filter = if let Some(default_directive) = default_directive {
-        EnvFilter::builder().with_default_directive(default_directive).from_env_lossy()
+    let env_filter = if let Some(ref default_directive) = default_directive {
+        EnvFilter::builder().with_default_directive(default_directive.clone()).from_env_lossy()
     } else {
         EnvFilter::builder().from_env_lossy()
     };

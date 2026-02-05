@@ -134,6 +134,12 @@ impl EngineNodeLauncher {
 
         let node_config = ctx.node_config();
 
+        // Configure trace-level logging for specific block if requested
+        if let Some(block_num) = node_config.debug.trace_block {
+            info!(target: "reth::cli", block_num, "Trace-level logging enabled for newPayload block");
+            reth_tracing::runtime::set_trace_block(Some(block_num));
+        }
+
         // We always assume that node is syncing after a restart
         network_handle.update_sync_state(SyncState::Syncing);
 
