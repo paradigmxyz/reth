@@ -1629,12 +1629,12 @@ impl Discv4Service {
             .kbuckets
             .iter_ref()
             .filter(|entry| entry.node.value.is_expired())
-            .map(|n| n.node.value)
+            .map(|n| (n.node.value.record.clone(), n.node.value.last_seen))
             .collect::<Vec<_>>();
-        nodes.sort_by_key(|a| a.last_seen);
-        let to_ping = nodes.into_iter().map(|n| n.record).take(MAX_NODES_PING).collect::<Vec<_>>();
-        for node in to_ping {
-            self.try_ping(node, PingReason::RePing)
+        let (nodes, _, _) =
+            nodes.select_nth_unstable_by_key(MAX_NODES_PING, |(_, last_seen)| *last_seen);
+        for (record, _) in nodes {
+            self.try_ping(*record, PingReason::RePing)
         }
     }
 
