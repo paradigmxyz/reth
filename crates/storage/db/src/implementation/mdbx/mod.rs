@@ -758,8 +758,8 @@ mod tests {
 
             // Create subtxns for both DBIs using the new batch API
             let specs = [
-                ffi::MDBX_subtxn_spec_t { dbi: headers_dbi },
-                ffi::MDBX_subtxn_spec_t { dbi: canonical_dbi },
+                ffi::MDBX_subtxn_spec_t { dbi: headers_dbi, arena_hint: 0 },
+                ffi::MDBX_subtxn_spec_t { dbi: canonical_dbi, arena_hint: 0 },
             ];
             let mut subtxns: [*mut ffi::MDBX_txn; 2] = [ptr::null_mut(); 2];
             let rc = ffi::mdbx_txn_create_subtxns(
