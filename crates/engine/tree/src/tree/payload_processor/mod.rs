@@ -501,7 +501,6 @@ where
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
@@ -520,8 +519,9 @@ where
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
         let executor = self.executor.clone();
 
+        let parent_span = Span::current();
         self.executor.spawn_blocking(move || {
-            let _enter = debug_span!(target: "engine::tree::payload_processor", "sparse_trie_task")
+            let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 
             // Reuse a stored SparseStateTrie if available, applying continuation logic.
