@@ -1,5 +1,5 @@
 use crate::Tables;
-use metrics::Histogram;
+use metrics::{Gauge, Histogram};
 use reth_metrics::{metrics::Counter, Metrics};
 use rustc_hash::FxHashMap;
 use std::time::{Duration, Instant};
@@ -411,6 +411,10 @@ pub(crate) struct EdgeArenaMetrics {
     pages_unused: Counter,
     /// Number of times fallback to parent was triggered
     fallback_count: Counter,
+    /// Pages acquired from parent during fallback
+    pages_acquired: Counter,
+    /// Configured arena size hint for this table (pages)
+    arena_hint: Gauge,
 }
 
 impl EdgeArenaMetrics {
@@ -421,5 +425,7 @@ impl EdgeArenaMetrics {
         self.pages_distributed.increment(stats.pages_distributed as u64);
         self.pages_unused.increment(stats.pages_unused as u64);
         self.fallback_count.increment(stats.fallback_count as u64);
+        self.pages_acquired.increment(stats.pages_acquired as u64);
+        self.arena_hint.set(stats.arena_hint as f64);
     }
 }
