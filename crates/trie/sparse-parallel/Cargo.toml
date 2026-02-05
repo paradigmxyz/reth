@@ -28,6 +28,7 @@ reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
 # misc
+generational-arena = "0.2"
 rayon = { workspace = true, optional = true }
 smallvec.workspace = true
 
