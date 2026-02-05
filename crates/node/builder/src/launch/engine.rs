@@ -373,6 +373,20 @@ impl EngineNodeLauncher {
         };
         ctx.task_executor().spawn_critical("consensus engine", Box::pin(consensus_engine));
 
+        // Spawn RocksDB shutdown task
+        #[cfg(all(unix, feature = "rocksdb"))]
+        {
+            use reth_provider::RocksDBProviderFactory;
+            let rocksdb_provider = ctx.provider_factory().rocksdb_provider();
+            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                "rocksdb shutdown",
+                |shutdown| async move {
+                    let _guard = shutdown.await;
+                    rocksdb_provider.shutdown();
+                },
+            );
+        }
+
         let engine_events_for_ethstats = engine_events.new_listener();
 
         let full_node = FullNode {

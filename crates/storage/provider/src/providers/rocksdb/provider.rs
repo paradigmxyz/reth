@@ -35,7 +35,10 @@ use std::{
     collections::BTreeMap,
     fmt,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     thread,
     time::Instant,
 };
@@ -331,7 +334,11 @@ impl RocksDBBuilder {
                         code: -1,
                     }))
                 })?;
-            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadOnly { db, metrics })))
+            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadOnly {
+                db,
+                metrics,
+                shutdown: AtomicBool::new(false),
+            })))
         } else {
             // Use OptimisticTransactionDB for MDBX-like transaction semantics (read-your-writes,
             // rollback) OptimisticTransactionDB uses optimistic concurrency control (conflict
@@ -345,7 +352,11 @@ impl RocksDBBuilder {
                             code: -1,
                         }))
                     })?;
-            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadWrite { db, metrics })))
+            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadWrite {
+                db,
+                metrics,
+                shutdown: AtomicBool::new(false),
+            })))
         }
     }
 }
@@ -376,6 +387,8 @@ enum RocksDBProviderInner {
         db: OptimisticTransactionDB,
         /// Metrics latency & operations.
         metrics: Option<RocksDBMetrics>,
+        /// Whether `shutdown()` was called.
+        shutdown: AtomicBool,
     },
     /// Read-only mode using `DB` opened with `open_cf_descriptors_read_only`.
     /// This doesn't acquire an exclusive lock, allowing concurrent reads.
@@ -384,6 +397,8 @@ enum RocksDBProviderInner {
         db: DB,
         /// Metrics latency & operations.
         metrics: Option<RocksDBMetrics>,
+        /// Whether `shutdown()` was called.
+        shutdown: AtomicBool,
     },
 }
 
@@ -496,6 +511,32 @@ impl RocksDBProviderInner {
         }
     }
 
+    /// Sets the shutdown flag and returns whether it was already set.
+    fn set_shutdown(&self) -> bool {
+        match self {
+            Self::ReadWrite { shutdown, .. } | Self::ReadOnly { shutdown, .. } => {
+                shutdown.swap(true, Ordering::Relaxed)
+            }
+        }
+    }
+
+    /// Returns whether shutdown has been called.
+    fn is_shutdown(&self) -> bool {
+        match self {
+            Self::ReadWrite { shutdown, .. } | Self::ReadOnly { shutdown, .. } => {
+                shutdown.load(Ordering::Relaxed)
+            }
+        }
+    }
+
+    /// Cancels all background work (compactions, flushes) without blocking.
+    fn cancel_background_work(&self) {
+        match self {
+            Self::ReadWrite { db, .. } => db.cancel_all_background_work(false),
+            Self::ReadOnly { db, .. } => db.cancel_all_background_work(false),
+        }
+    }
+
     /// Returns the total size of WAL (Write-Ahead Log) files in bytes.
     ///
     /// WAL files have a `.log` extension in the `RocksDB` directory.
@@ -597,24 +638,18 @@ impl fmt::Debug for RocksDBProviderInner {
 
 impl Drop for RocksDBProviderInner {
     fn drop(&mut self) {
-        match self {
-            Self::ReadWrite { db, .. } => {
-                // Flush all memtables if possible. If not, they will be rebuilt from the WAL on
-                // restart
-                if let Err(e) = db.flush_wal(true) {
-                    tracing::warn!(target: "providers::rocksdb", ?e, "Failed to flush WAL on drop");
-                }
-                for cf_name in ROCKSDB_TABLES {
-                    if let Some(cf) = db.cf_handle(cf_name) &&
-                        let Err(e) = db.flush_cf(&cf)
-                    {
-                        tracing::warn!(target: "providers::rocksdb", cf = cf_name, ?e, "Failed to flush CF on drop");
-                    }
-                }
-                db.cancel_all_background_work(true);
-            }
-            Self::ReadOnly { db, .. } => db.cancel_all_background_work(true),
+        if self.is_shutdown() {
+            tracing::debug!(target: "providers::rocksdb", "RocksDBProviderInner drop (already shutdown)");
+            return;
         }
+
+        // Fallback: shutdown wasn't called explicitly, do minimal cleanup
+        let drop_start = Instant::now();
+        tracing::info!(target: "providers::rocksdb", "RocksDBProviderInner drop started (shutdown not called)");
+
+        self.cancel_background_work();
+
+        tracing::info!(target: "providers::rocksdb", elapsed_ms = drop_start.elapsed().as_millis(), "RocksDBProviderInner drop completed");
     }
 }
 
@@ -677,6 +712,31 @@ impl RocksDBProvider {
     /// Returns `true` if this provider is in read-only mode.
     pub fn is_read_only(&self) -> bool {
         matches!(self.0.as_ref(), RocksDBProviderInner::ReadOnly { .. })
+    }
+
+    /// Explicitly shut down the `RocksDB` provider.
+    ///
+    /// This method is idempotent and should be called during graceful shutdown
+    /// before dropping the provider. It cancels background work without blocking.
+    ///
+    /// Note: This does not flush memtables or WAL. Data will be recovered from
+    /// WAL on next startup. This is acceptable because `RocksDB` tables in reth
+    /// are rebuildable indexes (history tables, tx lookup).
+    pub fn shutdown(&self) {
+        // Idempotent guard - only run shutdown once.
+        // Relaxed ordering is fine: we only need atomicity, not synchronization
+        // with other memory operations.
+        let already_shutdown = self.0.set_shutdown();
+        if already_shutdown {
+            return;
+        }
+
+        let start = Instant::now();
+        tracing::info!(target: "providers::rocksdb", "RocksDB shutdown started");
+
+        self.0.cancel_background_work();
+
+        tracing::info!(target: "providers::rocksdb", elapsed_ms = start.elapsed().as_millis(), "RocksDB shutdown completed");
     }
 
     /// Creates a new transaction with MDBX-like semantics (read-your-writes, rollback).
