@@ -1,3 +1,7 @@
+#[cfg(all(unix, feature = "rocksdb"))]
+use crate::segments::user::history_common::{
+    build_rocksdb_prune_output, maybe_delete_static_file_segment,
+};
 use crate::{
     db_ext::DbTxPruneExt,
     segments::{
@@ -303,28 +307,21 @@ impl AccountHistory {
         })?;
         trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned account history (RocksDB indices)");
 
-        // Delete static file jars only when fully processed. During provider.commit(), RocksDB
-        // batch is committed before the MDBX checkpoint. If crash occurs after RocksDB commit
-        // but before MDBX commit, on restart the pruner checkpoint indicates data needs
-        // re-pruning, but the RocksDB shards are already pruned - this is safe because pruning
-        // is idempotent (re-pruning already-pruned shards is a no-op).
-        if done {
-            provider.static_file_provider().delete_segment_below_block(
-                StaticFileSegment::AccountChangeSets,
-                last_changeset_pruned_block + 1,
-            )?;
-        }
+        maybe_delete_static_file_segment(
+            provider,
+            done,
+            StaticFileSegment::AccountChangeSets,
+            last_changeset_pruned_block,
+        )?;
 
-        let progress = limiter.progress(done);
-
-        Ok(SegmentOutput {
-            progress,
-            pruned: changesets_processed + deleted_shards + updated_shards,
-            checkpoint: Some(SegmentOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block),
-                tx_number: None,
-            }),
-        })
+        Ok(build_rocksdb_prune_output(
+            &limiter,
+            done,
+            changesets_processed,
+            deleted_shards,
+            updated_shards,
+            last_changeset_pruned_block,
+        ))
     }
 }
 

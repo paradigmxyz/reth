@@ -1,6 +1,7 @@
 mod account_history;
 mod bodies;
 mod history;
+mod history_common;
 mod receipts;
 mod receipts_by_logs;
 mod sender_recovery;
