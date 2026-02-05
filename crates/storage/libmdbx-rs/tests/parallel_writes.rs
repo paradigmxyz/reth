@@ -189,13 +189,14 @@ fn test_parallel_subtxn_freelist_reuse() {
     // This should cause pages to be retired and then reused from freelist
     for round in 0..5 {
         let txn = env.begin_rw_txn().unwrap();
-        
+
         // Enable parallel writes with arena hints
         txn.enable_parallel_writes_with_hints(&[
-            (dbi1, 50),  // accounts - expect ~50 pages
-            (dbi2, 20),  // storage - expect ~20 pages
-            (dbi3, 30),  // trie - expect ~30 pages
-        ]).unwrap();
+            (dbi1, 50), // accounts - expect ~50 pages
+            (dbi2, 20), // storage - expect ~20 pages
+            (dbi3, 30), // trie - expect ~30 pages
+        ])
+        .unwrap();
 
         // Thread 1: Update accounts
         {
@@ -245,7 +246,9 @@ fn test_parallel_subtxn_freelist_reuse() {
     assert!(
         freelist_after <= max_allowed_growth,
         "Freelist grew too much: {} -> {} (max allowed: {}). Pages not being reused from GC!",
-        freelist_before, freelist_after, max_allowed_growth
+        freelist_before,
+        freelist_after,
+        max_allowed_growth
     );
 
     println!("Freelist reuse test passed! {} -> {}", freelist_before, freelist_after);

@@ -310,10 +310,28 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     #[instrument(name = "Tx::commit", level = "debug", target = "providers::db", skip_all)]
     fn commit(self) -> Result<(), DatabaseError> {
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
-            // If parallel writes is enabled (only for RW), commit subtxns first
+            // If parallel writes is enabled (only for RW), commit subtxns first with metrics
             if !K::IS_READ_ONLY && this.inner.is_parallel_writes_enabled() {
-                if let Err(e) = this.inner.commit_subtxns() {
-                    return (Err(DatabaseError::Commit(e.into())), None);
+                let stats_result = this.inner.commit_subtxns_with_stats();
+                match stats_result {
+                    Ok(stats) => {
+                        // Record edge arena metrics if metrics are enabled
+                        if let Some(handler) = &this.metrics_handler {
+                            let dbi_to_table: rustc_hash::FxHashMap<
+                                reth_libmdbx::ffi::MDBX_dbi,
+                                &'static str,
+                            > = this.dbis.iter().map(|(&name, &dbi)| (dbi, name)).collect();
+
+                            for (dbi, subtxn_stats) in &stats {
+                                if let Some(&table) = dbi_to_table.get(dbi) {
+                                    handler
+                                        .env_metrics
+                                        .record_edge_arena_stats(table, subtxn_stats);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => return (Err(DatabaseError::Commit(e.into())), None),
                 }
             }
 
@@ -458,6 +476,28 @@ impl Tx<RW> {
         self.inner.commit_subtxns().map_err(|e| DatabaseError::Commit(e.into()))
     }
 
+    /// Commits all subtransactions serially and records arena stats as Prometheus metrics.
+    ///
+    /// This is the preferred method when metrics are enabled, as it collects per-table
+    /// arena allocation statistics for observability.
+    pub fn commit_subtxns_with_metrics(&self) -> Result<(), DatabaseError> {
+        let stats =
+            self.inner.commit_subtxns_with_stats().map_err(|e| DatabaseError::Commit(e.into()))?;
+
+        if let Some(handler) = &self.metrics_handler {
+            let dbi_to_table: rustc_hash::FxHashMap<MDBX_dbi, &'static str> =
+                self.dbis.iter().map(|(&name, &dbi)| (dbi, name)).collect();
+
+            for (dbi, subtxn_stats) in &stats {
+                if let Some(&table) = dbi_to_table.get(dbi) {
+                    handler.env_metrics.record_edge_arena_stats(table, subtxn_stats);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates a cursor for the given table, using the subtransaction if parallel writes is
     /// enabled.
     pub fn new_cursor_parallel<T: Table>(&self) -> Result<Cursor<RW, T>, DatabaseError> {
@@ -588,6 +628,10 @@ impl DbTxMut for Tx<RW> {
 
     fn commit_subtxns(&self) -> Result<(), DatabaseError> {
         Tx::commit_subtxns(self)
+    }
+
+    fn commit_subtxns_with_metrics(&self) -> Result<(), DatabaseError> {
+        Tx::commit_subtxns_with_metrics(self)
     }
 
     fn enable_parallel_writes_for_tables(&self, tables: &[&str]) -> Result<(), DatabaseError> {

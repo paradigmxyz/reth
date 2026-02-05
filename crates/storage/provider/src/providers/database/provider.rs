@@ -729,7 +729,11 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                         prepared.storage.iter().map(|s| s.storage.len()).sum(),
                         prepared.contracts.len(),
                         merged_trie.account_nodes_ref().len(),
-                        merged_trie.storage_tries_ref().values().map(|t| t.storage_nodes_ref().len()).sum(),
+                        merged_trie
+                            .storage_tries_ref()
+                            .values()
+                            .map(|t| t.storage_nodes_ref().len())
+                            .sum(),
                     );
 
                     self.tx.enable_parallel_writes_for_tables_with_hints(&[
@@ -835,8 +839,10 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
             }
 
             // Commit parallel subtransactions if enabled (MUST happen before parent writes)
+            // Use commit_subtxns_with_metrics to record arena allocation stats as Prometheus
+            // metrics
             if use_parallel_writes {
-                self.tx.commit_subtxns()?;
+                self.tx.commit_subtxns_with_metrics()?;
             }
 
             // Full mode: update history indices (parent can safely write now)

@@ -137,13 +137,13 @@ impl ArenaHints {
 
     /// Returns total estimated pages across all DBIs
     pub fn total(&self) -> usize {
-        self.plain_accounts
-            + self.bytecodes
-            + self.plain_storage
-            + self.hashed_accounts
-            + self.hashed_storages
-            + self.account_trie
-            + self.storage_trie
+        self.plain_accounts +
+            self.bytecodes +
+            self.plain_storage +
+            self.hashed_accounts +
+            self.hashed_storages +
+            self.account_trie +
+            self.storage_trie
     }
 }
 
