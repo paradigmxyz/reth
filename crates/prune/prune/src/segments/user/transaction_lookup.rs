@@ -89,9 +89,10 @@ where
         let (start, end) = match input.get_next_tx_num_range(provider)? {
             Some(range) => range.into_inner(),
             None => {
-                // When using RocksDB storage with PruneMode::Full, we can still clear the table
-                // even if MDBX has no transaction range data (e.g., MDBX was already pruned).
-                // We get the end transaction number from static files instead.
+                // MDBX has no BlockBodyIndices for `to_block` (e.g., data only exists in static
+                // files, or indices not yet populated). For RocksDB with PruneMode::Full, we can
+                // still clear the TransactionHashNumbers table using static files for the
+                // checkpoint.
                 #[cfg(all(unix, feature = "rocksdb"))]
                 if use_rocksdb && self.mode.is_full() {
                     return self.prune_rocksdb_full(provider, input.to_block);
@@ -201,9 +202,9 @@ where
 impl TransactionLookup {
     /// Clears the entire `RocksDB` `TransactionHashNumbers` table for `PruneMode::Full`.
     ///
-    /// This is called when MDBX has no transaction range data (e.g., already pruned)
-    /// but `RocksDB` still contains transaction hash mappings that need to be cleared.
-    /// The checkpoint is derived from static files since MDBX block indices may not exist.
+    /// This is called when MDBX has no `BlockBodyIndices` for `to_block` (e.g., data only
+    /// exists in static files) but `RocksDB` still contains transaction hash mappings that
+    /// need to be cleared. The checkpoint is derived from static files.
     #[cfg(all(unix, feature = "rocksdb"))]
     fn prune_rocksdb_full<Provider>(
         &self,
@@ -214,6 +215,8 @@ impl TransactionLookup {
         Provider: StaticFileProviderFactory + RocksDBProviderFactory,
     {
         let rocksdb = provider.rocksdb_provider();
+        // Uses delete_range_cf which is O(1) to issue; actual deletion happens asynchronously
+        // during compaction. This mirrors MDBX's clear_table behavior for PruneMode::Full.
         rocksdb.clear::<tables::TransactionHashNumbers>()?;
         trace!(target: "pruner", "Cleared transaction lookup table (RocksDB, no MDBX range)");
 
