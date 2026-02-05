@@ -304,30 +304,31 @@ impl SparseTrie for ParallelSparseTrie {
         value: Vec<u8>,
         provider: P,
     ) -> SparseTrieResult<()> {
-        // Check if the value already exists - if so, just update it (no structural changes needed)
+        // Check if the value already exists - if so, just update the value (no structural changes
+        // needed)
         if self.upper_subtrie.inner.values.contains_key(&full_path) {
+            self.upper_subtrie.inner.update_leaf_value(&full_path, value);
             self.prefix_set.insert(full_path);
-            self.upper_subtrie.inner.values.insert(full_path, value);
             return Ok(());
         }
         // Also check lower subtries for existing value
         if let Some(subtrie) = self.lower_subtrie_for_path(&full_path) &&
             subtrie.inner.values.contains_key(&full_path)
         {
-            self.prefix_set.insert(full_path);
             self.lower_subtrie_for_path_mut(&full_path)
                 .expect("subtrie exists")
                 .inner
-                .values
-                .insert(full_path, value);
+                .update_leaf_value(&full_path, value);
+            self.prefix_set.insert(full_path);
             return Ok(());
         }
 
         let retain_updates = self.updates_enabled();
 
-        // Insert value into upper subtrie temporarily. We'll move it to the correct subtrie
-        // during traversal, or clean it up if we error.
-        self.upper_subtrie.inner.values.insert(full_path, value.clone());
+        // Note: We don't insert the value here anymore. The LeafValue will be created
+        // after traversal completes and we know the leaf's prefix path.
+        // The value is passed through to be used when applying leaf operations.
+        let pending_value = value;
 
         // Start at the root, traversing until we find either the node to update or a subtrie to
         // update.
@@ -364,7 +365,7 @@ impl SparseTrie for ParallelSparseTrie {
                 self.upper_subtrie.update_next_node(current, &full_path, retain_updates);
 
             if step_result.is_err() {
-                self.upper_subtrie.inner.values.remove(&full_path);
+                self.upper_subtrie.inner.remove_leaf_by_path(&full_path);
                 return step_result.map(|_| ());
             }
 
@@ -374,7 +375,8 @@ impl SparseTrie for ParallelSparseTrie {
                     // Clear modified_original since we haven't actually modified anything yet
                     modified_original = None;
                 }
-                LeafUpdateStep::Complete { inserted_nodes, reveal_path } => {
+                LeafUpdateStep::Complete { inserted_nodes, reveal_path, leaf_ops } => {
+                    let _ = leaf_ops;
                     new_nodes.extend(inserted_nodes);
 
                     if let Some(reveal_path) = reveal_path {
@@ -467,6 +469,10 @@ impl SparseTrie for ParallelSparseTrie {
         }
 
         // Move nodes from upper subtrie to lower subtries
+        // Track where the new leaf ended up
+        let mut new_leaf_subtrie_path: Option<Nibbles> = None;
+        let mut new_leaf_short_key: Option<Nibbles> = None;
+
         for node_path in &new_nodes {
             // Skip nodes that belong in the upper subtrie
             if SparseSubtrieType::path_len_is_upper(node_path.len()) {
@@ -477,17 +483,38 @@ impl SparseTrie for ParallelSparseTrie {
                 self.upper_subtrie.nodes.remove(node_path).expect("node belongs to upper subtrie");
 
             // If it's a leaf node, extract its value before getting mutable reference to subtrie.
-            let leaf_value = if let SparseNode::Leaf { key, .. } = &node {
-                let mut leaf_full_path = *node_path;
-                leaf_full_path.extend(key);
-                Some((
-                    leaf_full_path,
-                    self.upper_subtrie
-                        .inner
-                        .values
-                        .remove(&leaf_full_path)
-                        .expect("leaf nodes have associated values entries"),
-                ))
+            // Skip the new leaf (whose value doesn't exist yet).
+            let leaf_value = if matches!(&node, SparseNode::Leaf { .. }) {
+                // Check if there's an existing leaf at this prefix
+                if let Some(&leaf_full_path) = self.upper_subtrie.inner.leaf_prefixes.get(node_path)
+                {
+                    if leaf_full_path == full_path {
+                        // This is the new leaf being created - track its location
+                        // Get the short_key from the node (still needed during transition)
+                        if let SparseNode::Leaf { key, .. } = &node {
+                            new_leaf_subtrie_path = Some(*node_path);
+                            new_leaf_short_key = Some(*key);
+                        }
+                        None
+                    } else {
+                        // Existing leaf - move its value (remove from upper, will be inserted into
+                        // lower)
+                        Some((
+                            leaf_full_path,
+                            self.upper_subtrie
+                                .inner
+                                .remove_leaf_by_path(&leaf_full_path)
+                                .expect("existing leaf nodes have associated values entries"),
+                        ))
+                    }
+                } else {
+                    // New leaf not yet in leaf_prefixes - track for later
+                    if let SparseNode::Leaf { key, .. } = &node {
+                        new_leaf_subtrie_path = Some(*node_path);
+                        new_leaf_short_key = Some(*key);
+                    }
+                    None
+                }
             } else {
                 None
             };
@@ -497,21 +524,26 @@ impl SparseTrie for ParallelSparseTrie {
 
             // Insert the leaf value if we have one
             if let Some((leaf_full_path, value)) = leaf_value {
-                subtrie.inner.values.insert(leaf_full_path, value);
+                let prefix = leaf_full_path.slice(..leaf_full_path.len() - value.short_key.len());
+                subtrie.inner.insert_leaf(prefix, leaf_full_path, value);
             }
 
             // Insert the node into the lower subtrie
             subtrie.nodes.insert(*node_path, node);
         }
 
+        // If the new leaf was moved to a lower subtrie, insert its value there
+        if let Some(subtrie_path) = new_leaf_subtrie_path {
+            let short_key = new_leaf_short_key.unwrap_or_else(|| full_path.slice(0..));
+            let subtrie = self.subtrie_for_path_mut(&subtrie_path);
+            let prefix = full_path.slice(..full_path.len() - short_key.len());
+            subtrie.inner.insert_leaf(prefix, full_path, LeafValue::new(short_key, pending_value));
+            self.prefix_set.insert(full_path);
+            return Ok(());
+        }
+
         // If we reached the max depth of the upper trie, we may have had more nodes to insert.
         if let Some(next_path) = next.filter(|n| !SparseSubtrieType::path_len_is_upper(n.len())) {
-            // The value was inserted into the upper subtrie's `values` at the top of this method.
-            // At this point we know the value is not in the upper subtrie, and the call to
-            // `update_leaf` below will insert it into the lower subtrie. So remove it from the
-            // upper subtrie.
-            self.upper_subtrie.inner.values.remove(&full_path);
-
             // Use subtrie_for_path to ensure the subtrie has the correct path.
             //
             // The next_path here represents where we need to continue traversal, which may
@@ -525,7 +557,7 @@ impl SparseTrie for ParallelSparseTrie {
 
             // If we didn't update the target leaf, we need to call update_leaf on the subtrie
             // to ensure that the leaf is updated correctly.
-            match subtrie.update_leaf(full_path, value, provider, retain_updates) {
+            match subtrie.update_leaf(full_path, pending_value, provider, retain_updates) {
                 Ok(Some((revealed_path, revealed_masks))) => {
                     self.branch_node_masks.insert(revealed_path, revealed_masks);
                 }
@@ -533,7 +565,7 @@ impl SparseTrie for ParallelSparseTrie {
                 Err(e) => {
                     // Clean up: remove the value from lower subtrie if it was inserted
                     if let Some(lower) = self.lower_subtrie_for_path_mut(&full_path) {
-                        lower.inner.values.remove(&full_path);
+                        lower.inner.remove_leaf_by_path(&full_path);
                     }
                     // Clean up any branch masks that were inserted during upper subtrie traversal
                     for mask_path in &inserted_masks {
@@ -542,6 +574,36 @@ impl SparseTrie for ParallelSparseTrie {
                     return Err(e);
                 }
             }
+        } else {
+            // Traversal completed in the upper subtrie. Insert the value there.
+            // The short_key can be computed from the node path where the leaf was inserted.
+            let short_key = new_nodes
+                .iter()
+                .find_map(|node_path| {
+                    if self
+                        .upper_subtrie
+                        .nodes
+                        .get(node_path)
+                        .is_some_and(|n| matches!(n, SparseNode::Leaf { .. }))
+                    {
+                        // Check if this is the leaf for our full_path
+                        let expected_short_key = full_path.slice(node_path.len()..);
+                        let mut check_full = *node_path;
+                        check_full.extend(&expected_short_key);
+                        if check_full == full_path {
+                            return Some(expected_short_key);
+                        }
+                    }
+                    None
+                })
+                .unwrap_or_else(|| full_path.slice(0..));
+
+            let prefix = full_path.slice(..full_path.len() - short_key.len());
+            self.upper_subtrie.inner.insert_leaf(
+                prefix,
+                full_path,
+                LeafValue::new(short_key, pending_value),
+            );
         }
 
         // Insert into prefix_set only after all operations succeed
@@ -695,7 +757,7 @@ impl SparseTrie for ParallelSparseTrie {
                 self.lower_subtries[idx].as_revealed_mut().expect("lower subtrie is revealed")
             }
         };
-        leaf_subtrie.inner.values.remove(full_path);
+        leaf_subtrie.inner.remove_leaf_by_path(full_path);
         for (subtrie_type, path) in paths_to_reset_hashes {
             let node = match subtrie_type {
                 SparseSubtrieType::Upper => self.upper_subtrie.nodes.get_mut(&path),
@@ -894,17 +956,15 @@ impl SparseTrie for ParallelSparseTrie {
     }
 
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
-        // `subtrie_for_path` is intended for a node path, but here we are using a full key path. So
-        // we need to check if the subtrie that the key might belong to has any nodes; if not then
-        // the key's portion of the trie doesn't have enough depth to reach into the subtrie, and
-        // the key will be in the upper subtrie
-        if let Some(subtrie) = self.subtrie_for_path(full_path) &&
-            !subtrie.is_empty()
+        // First check lower subtries
+        if let Some(leaf) = self
+            .lower_subtrie_for_path(full_path)
+            .and_then(|subtrie| subtrie.inner.values.get(full_path))
         {
-            return subtrie.inner.values.get(full_path);
+            return Some(&leaf.value);
         }
-
-        self.upper_subtrie.inner.values.get(full_path)
+        // Then check upper subtrie
+        self.upper_subtrie.inner.values.get(full_path).map(|leaf| &leaf.value)
     }
 
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
@@ -972,19 +1032,19 @@ impl SparseTrie for ParallelSparseTrie {
         // First, do a quick check if the value exists in either the upper or lower subtrie's values
         // map. We assume that if there exists a leaf node, then its value will be in the `values`
         // map.
-        if let Some(actual_value) = std::iter::once(self.upper_subtrie.as_ref())
+        if let Some(leaf) = std::iter::once(self.upper_subtrie.as_ref())
             .chain(self.lower_subtrie_for_path(full_path))
             .filter_map(|subtrie| subtrie.inner.values.get(full_path))
             .next()
         {
             // We found the leaf, check if the value matches (if expected value was provided)
             return expected_value
-                .is_none_or(|v| v == actual_value)
+                .is_none_or(|v| v == &leaf.value)
                 .then_some(LeafLookup::Exists)
                 .ok_or_else(|| LeafLookupError::ValueMismatch {
                     path: *full_path,
                     expected: expected_value.cloned(),
-                    actual: actual_value.clone(),
+                    actual: leaf.value.clone(),
                 })
         }
 
@@ -1383,7 +1443,7 @@ impl ParallelSparseTrie {
         inserted_masks: &[Nibbles],
         modified_original: Option<(Nibbles, SparseNode)>,
     ) {
-        self.upper_subtrie.inner.values.remove(full_path);
+        self.upper_subtrie.inner.remove_leaf_by_path(full_path);
         for node_path in inserted_nodes {
             // Try upper subtrie first - nodes may be there even if path length suggests lower
             if self.upper_subtrie.nodes.remove(node_path).is_none() {
@@ -1514,6 +1574,9 @@ impl ParallelSparseTrie {
             SparseNode::Empty => FindNextToLeafOutcome::NotFound,
             SparseNode::Hash(hash) => FindNextToLeafOutcome::BlindedNode(*hash),
             SparseNode::Leaf { key, .. } => {
+                // TODO: Once SparseNode::Leaf.key is removed, this function needs access to
+                // leaf_prefixes to look up the actual full_path for the leaf at from_path.
+                // For now, we still use key from SparseNode::Leaf for correctness.
                 let mut found_full_path = *from_path;
                 found_full_path.extend(key);
 
@@ -1570,6 +1633,8 @@ impl ParallelSparseTrie {
         }
 
         if let SparseNode::Leaf { key, .. } = new_parent_node {
+            // TODO: Once SparseNode::Leaf.key is removed, we'll need to pass the full_path
+            // through the branch_changes_on_leaf_removal call chain.
             let Some(prev_child_subtrie) = self.lower_subtrie_for_path_mut(prev_child_path) else {
                 return;
             };
@@ -1577,8 +1642,8 @@ impl ParallelSparseTrie {
             let mut leaf_full_path = *parent_path;
             leaf_full_path.extend(key);
 
-            let val = prev_child_subtrie.inner.values.remove(&leaf_full_path).expect("ParallelSparseTrie is in an inconsistent state, expected value on subtrie which wasn't found");
-            self.upper_subtrie.inner.values.insert(leaf_full_path, val);
+            let val = prev_child_subtrie.inner.remove_leaf_by_path(&leaf_full_path).expect("ParallelSparseTrie is in an inconsistent state, expected value on subtrie which wasn't found");
+            self.upper_subtrie.inner.insert_leaf(*parent_path, leaf_full_path, val);
         }
     }
 
@@ -1651,6 +1716,8 @@ impl ParallelSparseTrie {
             // leaf node, prepending the nibble to the key, and delete the old
             // child.
             SparseNode::Leaf { key, .. } => {
+                // TODO: Once SparseNode::Leaf.key is removed, get key from leaf_prefixes
+                // For now, key is still available in SparseNode::Leaf
                 let mut new_key = Nibbles::from_nibbles_unchecked([remaining_child_nibble]);
                 new_key.extend(key);
                 (SparseNode::new_leaf(new_key), true)
@@ -1701,6 +1768,7 @@ impl ParallelSparseTrie {
             // could have downgraded the extension node's child into a leaf node from a
             // branch in a previous call to `branch_changes_on_leaf_removal`.
             SparseNode::Leaf { key, .. } => {
+                // TODO: Once SparseNode::Leaf.key is removed, get key from leaf_prefixes
                 let mut new_key = *parent_key;
                 new_key.extend(key);
                 Some(SparseNode::new_leaf(new_key))
@@ -2012,7 +2080,12 @@ impl ParallelSparseTrie {
                 // We need the full path of root node of the lower subtrie to the unchanged prefix
                 // set, so that we don't skip it when calculating hashes for the upper subtrie.
                 match subtrie.nodes.get(&subtrie.path) {
-                    Some(SparseNode::Extension { key, .. } | SparseNode::Leaf { key, .. }) => {
+                    Some(SparseNode::Extension { key, .. }) => {
+                        unchanged_prefix_set.insert(subtrie.path.join(key));
+                    }
+                    Some(SparseNode::Leaf { key, .. }) => {
+                        // TODO: Once SparseNode::Leaf.key is removed, use leaf_prefixes exclusively
+                        // For now, use key from SparseNode::Leaf for correctness
                         unchanged_prefix_set.insert(subtrie.path.join(key));
                     }
                     Some(SparseNode::Branch { .. }) => {
@@ -2335,7 +2408,9 @@ impl SparseSubtrie {
 
         // Check if value already exists - if so, just update it (no structural changes needed)
         if let Entry::Occupied(mut e) = self.inner.values.entry(full_path) {
-            e.insert(value);
+            let leaf = e.get_mut();
+            leaf.value = value;
+            leaf.hash = None; // Invalidate cached hash since value changed
             return Ok(None)
         }
 
@@ -2369,7 +2444,11 @@ impl SparseSubtrie {
                     // Clear modified_original since we haven't actually modified anything yet
                     modified_original = None;
                 }
-                LeafUpdateStep::Complete { inserted_nodes: new_inserted, reveal_path } => {
+                LeafUpdateStep::Complete {
+                    inserted_nodes: new_inserted,
+                    reveal_path,
+                    leaf_ops: _,
+                } => {
                     inserted_nodes.extend(new_inserted);
 
                     if let Some(reveal_path) = reveal_path &&
@@ -2448,8 +2527,27 @@ impl SparseSubtrie {
             }
         }
 
-        // Only insert the value after all structural changes succeed
-        self.inner.values.insert(full_path, value);
+        // Only insert the value after all structural changes succeed.
+        // Compute short_key: it's the portion of full_path after the leaf's prefix.
+        let short_key = inserted_nodes
+            .iter()
+            .find_map(|node_path| {
+                if self.nodes.get(node_path).is_some_and(|n| matches!(n, SparseNode::Leaf { .. })) {
+                    // The short_key is full_path minus the node_path prefix
+                    let expected_short_key = full_path.slice(node_path.len()..);
+                    // Verify: node_path + short_key should equal full_path
+                    let mut check = *node_path;
+                    check.extend(&expected_short_key);
+                    if check == full_path {
+                        return Some(expected_short_key);
+                    }
+                }
+                None
+            })
+            .unwrap_or_else(|| full_path.slice(self.path.len()..));
+
+        let prefix = full_path.slice(..full_path.len() - short_key.len());
+        self.inner.insert_leaf(prefix, full_path, LeafValue::new(short_key, value));
 
         Ok(revealed)
     }
@@ -2465,7 +2563,7 @@ impl SparseSubtrie {
         modified_original: Option<(Nibbles, SparseNode)>,
     ) {
         // Remove any values that may have been inserted
-        self.inner.values.remove(full_path);
+        self.inner.remove_leaf_by_path(full_path);
 
         // Remove all inserted nodes
         for node_path in inserted_nodes {
@@ -2502,47 +2600,64 @@ impl SparseSubtrie {
                 // the subtrie.
                 let path = path.slice(self.path.len()..);
                 *node = SparseNode::new_leaf(path);
-                Ok(LeafUpdateStep::complete_with_insertions(vec![current], None))
+                Ok(LeafUpdateStep::complete_with_insertions(vec![current], None, SmallVec::new()))
             }
             SparseNode::Hash(hash) => {
                 Err(SparseTrieErrorKind::BlindedNode { path: current, hash: *hash }.into())
             }
             SparseNode::Leaf { key: current_key, .. } => {
-                current.extend(current_key);
+                // TODO: Once SparseNode::Leaf.key is removed, use leaf_prefixes exclusively.
+                // For now, use key from SparseNode::Leaf for correctness since not all paths
+                // populate leaf_prefixes yet.
+                let mut existing_full = current;
+                existing_full.extend(current_key);
 
                 // this leaf is being updated
                 debug_assert!(
-                    &current != path,
+                    &existing_full != path,
                     "we already checked leaf presence in the beginning"
                 );
 
                 // find the common prefix
-                let common = current.common_prefix_length(path);
+                let common = existing_full.common_prefix_length(path);
 
-                // update existing node
-                let new_ext_key = current.slice(current.len() - current_key.len()..common);
+                // update existing node to extension
+                let new_ext_key =
+                    existing_full.slice(existing_full.len() - current_key.len()..common);
                 *node = SparseNode::new_ext(new_ext_key);
 
                 // create a branch node and corresponding leaves
                 self.nodes.reserve(3);
-                let branch_path = current.slice(..common);
+                let branch_path = existing_full.slice(..common);
                 let new_leaf_path = path.slice(..=common);
-                let existing_leaf_path = current.slice(..=common);
+                let existing_leaf_path = existing_full.slice(..=common);
 
                 self.nodes.insert(
                     branch_path,
                     SparseNode::new_split_branch(
-                        current.get_unchecked(common),
+                        existing_full.get_unchecked(common),
                         path.get_unchecked(common),
                     ),
                 );
                 self.nodes.insert(new_leaf_path, SparseNode::new_leaf(path.slice(common + 1..)));
-                self.nodes
-                    .insert(existing_leaf_path, SparseNode::new_leaf(current.slice(common + 1..)));
+                self.nodes.insert(
+                    existing_leaf_path,
+                    SparseNode::new_leaf(existing_full.slice(common + 1..)),
+                );
+
+                // Update leaf_prefixes for the moved existing leaf
+                self.inner.leaf_prefixes.remove(&current);
+                self.inner.leaf_prefixes.insert(existing_leaf_path, existing_full);
+                // Update the LeafValue's short_key for the moved leaf
+                if let Some(leaf) = self.inner.values.get_mut(&existing_full) {
+                    leaf.short_key = existing_full.slice(common + 1..);
+                    leaf.hash = None; // Invalidate hash since key changed
+                }
 
                 Ok(LeafUpdateStep::complete_with_insertions(
                     vec![branch_path, new_leaf_path, existing_leaf_path],
                     None,
+                    SmallVec::new(),
                 ))
             }
             SparseNode::Extension { key, .. } => {
@@ -2584,7 +2699,11 @@ impl SparseSubtrie {
                         inserted_nodes.push(ext_path);
                     }
 
-                    return Ok(LeafUpdateStep::complete_with_insertions(inserted_nodes, reveal_path))
+                    return Ok(LeafUpdateStep::complete_with_insertions(
+                        inserted_nodes,
+                        reveal_path,
+                        SmallVec::new(),
+                    ))
                 }
 
                 Ok(LeafUpdateStep::continue_with(current))
@@ -2596,7 +2715,11 @@ impl SparseSubtrie {
                     state_mask.set_bit(nibble);
                     let new_leaf = SparseNode::new_leaf(path.slice(current.len()..));
                     self.nodes.insert(current, new_leaf);
-                    return Ok(LeafUpdateStep::complete_with_insertions(vec![current], None))
+                    return Ok(LeafUpdateStep::complete_with_insertions(
+                        vec![current],
+                        None,
+                        SmallVec::new(),
+                    ))
                 }
 
                 // If the nibble is set, we can continue traversing the branch.
@@ -2716,7 +2839,9 @@ impl SparseSubtrie {
                     SparseNode::Hash(hash) => {
                         let mut full = *entry.key();
                         full.extend(&leaf.key);
-                        self.inner.values.insert(full, leaf.value.clone());
+                        self.inner
+                            .values
+                            .insert(full, LeafValue::new(leaf.key, leaf.value.clone()));
                         entry.insert(SparseNode::Leaf {
                             key: leaf.key,
                             // Memoize the hash of a previously blinded node in a new leaf
@@ -2738,10 +2863,15 @@ impl SparseSubtrie {
                     }
                 },
                 Entry::Vacant(entry) => {
-                    let mut full = *entry.key();
+                    let prefix = *entry.key();
+                    let mut full = prefix;
                     full.extend(&leaf.key);
                     entry.insert(SparseNode::new_leaf(leaf.key));
-                    self.inner.values.insert(full, leaf.value.clone());
+                    self.inner.insert_leaf(
+                        prefix,
+                        full,
+                        LeafValue::new(leaf.key, leaf.value.clone()),
+                    );
                 }
             },
         }
@@ -2878,11 +3008,12 @@ impl SparseSubtrie {
             size += node.memory_size();
         }
 
-        // Values map: key (Nibbles) + value (Vec<u8>)
-        for (path, value) in &self.inner.values {
+        // Values map: key (Nibbles) + value (LeafValue)
+        for (path, leaf) in &self.inner.values {
             size += core::mem::size_of::<Nibbles>();
             size += path.len(); // Nibbles heap allocation
-            size += core::mem::size_of::<Vec<u8>>() + value.capacity();
+            size +=
+                core::mem::size_of::<LeafValue>() + leaf.value.capacity() + leaf.short_key.len();
         }
 
         // Buffers
@@ -2892,18 +3023,114 @@ impl SparseSubtrie {
     }
 }
 
+/// Data stored for each leaf in the sparse trie.
+///
+/// This combines the short key (suffix), value, and cached hash that were previously
+/// split between `SparseNode::Leaf` (in nodes map) and `values` map.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct LeafValue {
+    /// The short key (suffix) for this leaf - the remaining nibbles after the prefix path.
+    pub short_key: Nibbles,
+    /// The RLP-encoded value stored at this leaf (account data or storage value).
+    pub value: Vec<u8>,
+    /// Cached hash of the leaf node's RLP encoding.
+    /// Can be reused unless this leaf has been updated.
+    pub hash: Option<B256>,
+}
+
+impl LeafValue {
+    /// Creates a new leaf value with the given short key and value.
+    pub const fn new(short_key: Nibbles, value: Vec<u8>) -> Self {
+        Self { short_key, value, hash: None }
+    }
+
+    /// Creates a new leaf value with a pre-computed hash.
+    pub const fn with_hash(short_key: Nibbles, value: Vec<u8>, hash: B256) -> Self {
+        Self { short_key, value, hash: Some(hash) }
+    }
+}
+
 /// Helper type for [`SparseSubtrie`] to mutably access only a subset of fields from the original
 /// struct.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 struct SparseSubtrieInner {
-    /// Map from leaf key paths to their values.
-    /// All values are stored here instead of directly in leaf nodes.
-    values: HashMap<Nibbles, Vec<u8>>,
+    /// Map from full leaf paths to their data (short_key, value, hash).
+    /// Key: full_path (64 nibbles for account trie), Value: LeafValue containing short_key, value,
+    /// and cached hash.
+    values: HashMap<Nibbles, LeafValue>,
+    /// Index mapping leaf prefixes to their full paths.
+    /// This enables O(1) lookup of leaves during trie traversal.
+    /// Key: prefix path (where the leaf node would be in nodes map), Value: full_path (key in
+    /// `values`).
+    leaf_prefixes: HashMap<Nibbles, Nibbles>,
     /// Reusable buffers for [`SparseSubtrie::update_hashes`].
     buffers: SparseSubtrieBuffers,
 }
 
 impl SparseSubtrieInner {
+    /// Inserts a leaf into the values map and updates the prefix index.
+    fn insert_leaf(&mut self, prefix: Nibbles, full_path: Nibbles, leaf: LeafValue) {
+        self.values.insert(full_path, leaf);
+        self.leaf_prefixes.insert(prefix, full_path);
+    }
+
+    /// Removes a leaf by its full path, also removing from the prefix index.
+    /// Returns the removed leaf value if it existed.
+    fn remove_leaf_by_path(&mut self, full_path: &Nibbles) -> Option<LeafValue> {
+        if let Some(leaf) = self.values.remove(full_path) {
+            let prefix = full_path.slice(..full_path.len() - leaf.short_key.len());
+            self.leaf_prefixes.remove(&prefix);
+            Some(leaf)
+        } else {
+            None
+        }
+    }
+
+    /// Removes a leaf by its prefix path.
+    /// Returns the removed leaf value if it existed.
+    #[allow(dead_code)]
+    fn remove_leaf_by_prefix(&mut self, prefix: &Nibbles) -> Option<LeafValue> {
+        if let Some(full_path) = self.leaf_prefixes.remove(prefix) {
+            self.values.remove(&full_path)
+        } else {
+            None
+        }
+    }
+
+    /// Gets a reference to a leaf by its prefix path.
+    #[allow(dead_code)]
+    fn get_leaf_by_prefix(&self, prefix: &Nibbles) -> Option<&LeafValue> {
+        self.leaf_prefixes.get(prefix).and_then(|full_path| self.values.get(full_path))
+    }
+
+    /// Gets a mutable reference to a leaf by its prefix path.
+    #[allow(dead_code)]
+    fn get_leaf_by_prefix_mut(&mut self, prefix: &Nibbles) -> Option<&mut LeafValue> {
+        if let Some(full_path) = self.leaf_prefixes.get(prefix).copied() {
+            self.values.get_mut(&full_path)
+        } else {
+            None
+        }
+    }
+
+    /// Returns true if there is a leaf at the given prefix.
+    #[allow(dead_code)]
+    fn has_leaf_at_prefix(&self, prefix: &Nibbles) -> bool {
+        self.leaf_prefixes.contains_key(prefix)
+    }
+
+    /// Updates an existing leaf's value by full path, invalidating the cached hash.
+    /// Returns true if the leaf existed and was updated.
+    fn update_leaf_value(&mut self, full_path: &Nibbles, new_value: Vec<u8>) -> bool {
+        if let Some(leaf) = self.values.get_mut(full_path) {
+            leaf.value = new_value;
+            leaf.hash = None;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Computes the RLP encoding and its hash for a single (trie node)[`SparseNode`].
     ///
     /// # Deferred Processing
@@ -2963,10 +3190,14 @@ impl SparseSubtrieInner {
                 (RlpNode::word_rlp(hash), SparseNodeType::Hash)
             }
             SparseNode::Leaf { key, hash } => {
-                let mut path = path;
-                path.extend(key);
-                let value = self.values.get(&path);
-                if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path) || value.is_none())
+                // TODO: Once SparseNode::Leaf.key is removed, use leaf_prefixes exclusively
+                // For now, compute full_path from key for correctness
+                let mut full_path = path;
+                full_path.extend(key);
+                let leaf = self.values.get(&full_path);
+
+                if let Some(hash) =
+                    hash.filter(|_| !prefix_set_contains(&full_path) || leaf.is_none())
                 {
                     // If the node hash is already computed, and either the node path is not in
                     // the prefix set or the leaf doesn't belong to the current trie (its value is
@@ -2974,9 +3205,10 @@ impl SparseSubtrieInner {
                     (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                 } else {
                     // Encode the leaf node and update its hash
-                    let value = self.values.get(&path).unwrap();
+                    let leaf = leaf.expect("leaf must exist in values");
                     self.buffers.rlp_buf.clear();
-                    let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.buffers.rlp_buf);
+                    let rlp_node =
+                        LeafNodeRef { key, value: &leaf.value }.rlp(&mut self.buffers.rlp_buf);
                     *hash = rlp_node.as_hash();
                     (rlp_node, SparseNodeType::Leaf)
                 }
@@ -3236,6 +3468,28 @@ impl SparseSubtrieInner {
     }
 }
 
+/// Operations on leaf data to be applied after structural trie changes succeed.
+/// This enables two-phase commit: structural changes first, then leaf payload updates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeafOp {
+    /// A new leaf was inserted at the given prefix for the target full_path.
+    InsertNew {
+        /// The prefix path where the leaf node lives in the nodes map.
+        prefix: Nibbles,
+    },
+    /// An existing leaf was moved from old_prefix to new_prefix.
+    /// This happens when inserting a new leaf causes an existing leaf to be relocated
+    /// (e.g., when a leaf splits into a branch with two leaves).
+    MoveExisting {
+        /// The old prefix path where the leaf used to live.
+        old_prefix: Nibbles,
+        /// The new prefix path where the leaf now lives.
+        new_prefix: Nibbles,
+        /// The full path of the existing leaf that was moved.
+        existing_full_path: Nibbles,
+    },
+}
+
 /// Represents the outcome of processing a node during leaf insertion
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum LeafUpdateStep {
@@ -3250,6 +3504,8 @@ pub enum LeafUpdateStep {
         inserted_nodes: Vec<Nibbles>,
         /// Path to a node which may need to be revealed
         reveal_path: Option<Nibbles>,
+        /// Leaf operations to apply after structural changes succeed.
+        leaf_ops: SmallVec<[LeafOp; 2]>,
     },
     /// The node was not found
     #[default]
@@ -3266,8 +3522,14 @@ impl LeafUpdateStep {
     pub const fn complete_with_insertions(
         inserted_nodes: Vec<Nibbles>,
         reveal_path: Option<Nibbles>,
+        leaf_ops: SmallVec<[LeafOp; 2]>,
     ) -> Self {
-        Self::Complete { inserted_nodes, reveal_path }
+        Self::Complete { inserted_nodes, reveal_path, leaf_ops }
+    }
+
+    /// Creates a step indicating completion with no changes.
+    pub fn complete_empty() -> Self {
+        Self::Complete { inserted_nodes: Vec::new(), reveal_path: None, leaf_ops: SmallVec::new() }
     }
 }
 
@@ -3466,8 +3728,8 @@ enum SparseTrieUpdatesAction {
 #[cfg(test)]
 mod tests {
     use super::{
-        path_subtrie_index_unchecked, LowerSparseSubtrie, ParallelSparseTrie, SparseSubtrie,
-        SparseSubtrieType,
+        path_subtrie_index_unchecked, LeafValue, LowerSparseSubtrie, ParallelSparseTrie,
+        SparseSubtrie, SparseSubtrieType,
     };
     use crate::trie::ChangedSubtrie;
     use alloy_primitives::{
@@ -3739,7 +4001,7 @@ mod tests {
         fn has_value(self, path: &Nibbles, expected_value: &[u8]) -> Self {
             let actual = self.subtrie.inner.values.get(path);
             assert_eq!(
-                actual.map(|v| v.as_slice()),
+                actual.map(|v| v.value.as_slice()),
                 Some(expected_value),
                 "Expected value at {path:?} to be {expected_value:?}, found {actual:?}",
             );
@@ -3865,7 +4127,11 @@ mod tests {
             if let SparseNode::Leaf { key, .. } = &node {
                 let mut full_key = path;
                 full_key.extend(key);
-                subtrie.inner.values.insert(full_key, "LEAF VALUE".into());
+                subtrie.inner.insert_leaf(
+                    path,
+                    full_key,
+                    LeafValue::new(*key, b"LEAF VALUE".to_vec()),
+                );
             }
             subtrie.nodes.insert(path, node);
         }
@@ -4105,7 +4371,7 @@ mod tests {
 
             let full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
             assert_eq!(
-                trie.upper_subtrie.inner.values.get(&full_path),
+                trie.upper_subtrie.inner.values.get(&full_path).map(|l| &l.value),
                 Some(&encode_account_value(42))
             );
         }
@@ -7448,7 +7714,12 @@ mod tests {
         // Sanity checks before calculating the root
         assert_eq!(
             Some(&leaf_new_value),
-            trie.lower_subtrie_for_path(&leaf_path).unwrap().inner.values.get(&leaf_full_path)
+            trie.lower_subtrie_for_path(&leaf_path)
+                .unwrap()
+                .inner
+                .values
+                .get(&leaf_full_path)
+                .map(|l| &l.value)
         );
         assert!(trie.upper_subtrie.inner.values.is_empty());
 
@@ -8489,7 +8760,10 @@ mod tests {
 
         // Insert the value into the trie's values map (simulating we know about it)
         let old_value = encode_account_value(99);
-        trie.upper_subtrie.inner.values.insert(full_path, old_value.clone());
+        trie.upper_subtrie
+            .inner
+            .values
+            .insert(full_path, LeafValue::new(Nibbles::default(), old_value.clone()));
 
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
         updates.insert(b256_key, LeafUpdate::Changed(vec![])); // empty = removal
@@ -8512,7 +8786,7 @@ mod tests {
 
         // Original value should be preserved (reverted)
         assert_eq!(
-            trie.upper_subtrie.inner.values.get(&full_path),
+            trie.upper_subtrie.inner.values.get(&full_path).map(|l| &l.value),
             Some(&old_value),
             "Original value should be preserved after failed removal"
         );
@@ -8571,7 +8845,10 @@ mod tests {
         let b256_key = B256::with_last_byte(0x10);
         let full_path = Nibbles::unpack(b256_key);
         let leaf_value = encode_account_value(42);
-        trie.upper_subtrie.inner.values.insert(full_path, leaf_value.clone());
+        trie.upper_subtrie
+            .inner
+            .values
+            .insert(full_path, LeafValue::new(Nibbles::default(), leaf_value.clone()));
 
         // Record state before update_leaves
         let prefix_set_len_before = trie.prefix_set.len();
@@ -8624,7 +8901,7 @@ mod tests {
 
         // Assert: the leaf value still exists (not removed)
         assert_eq!(
-            trie.upper_subtrie.inner.values.get(&full_path),
+            trie.upper_subtrie.inner.values.get(&full_path).map(|l| &l.value),
             Some(&leaf_value),
             "Leaf value should still exist after failed removal"
         );
