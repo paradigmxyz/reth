@@ -167,23 +167,6 @@ pub(crate) struct TotalGasOutput {
 }
 
 impl TotalGasOutput {
-    /// Create a new [`TotalGasOutput`] from gas rows only.
-    ///
-    /// Use this when execution-only timing is not available (e.g., `new_payload_only`).
-    /// `execution_duration` will equal `total_duration`.
-    pub(crate) fn new(rows: Vec<TotalGasRow>) -> eyre::Result<Self> {
-        let total_duration = rows.last().map(|row| row.time).ok_or_eyre("empty results")?;
-        let blocks_processed = rows.len() as u64;
-        let total_gas_used: u64 = rows.into_iter().map(|row| row.gas_used).sum();
-
-        Ok(Self {
-            total_gas_used,
-            total_duration,
-            execution_duration: total_duration,
-            blocks_processed,
-        })
-    }
-
     /// Create a new [`TotalGasOutput`] from gas rows and combined results.
     ///
     /// - `rows`: Used for total gas and wall-clock duration
@@ -198,6 +181,24 @@ impl TotalGasOutput {
 
         // Sum execution-only time from combined results
         let execution_duration: Duration = combined_results.iter().map(|r| r.total_latency).sum();
+
+        Ok(Self { total_gas_used, total_duration, execution_duration, blocks_processed })
+    }
+
+    /// Create a new [`TotalGasOutput`] from gas rows and new payload results.
+    ///
+    /// - `rows`: Used for total gas and wall-clock duration
+    /// - `new_payload_results`: Used for execution-only duration (sum of `latency`)
+    pub(crate) fn with_new_payload_results(
+        rows: Vec<TotalGasRow>,
+        new_payload_results: &[NewPayloadResult],
+    ) -> eyre::Result<Self> {
+        let total_duration = rows.last().map(|row| row.time).ok_or_eyre("empty results")?;
+        let blocks_processed = rows.len() as u64;
+        let total_gas_used: u64 = rows.into_iter().map(|row| row.gas_used).sum();
+
+        // Sum execution-only time from new payload results
+        let execution_duration: Duration = new_payload_results.iter().map(|r| r.latency).sum();
 
         Ok(Self { total_gas_used, total_duration, execution_duration, blocks_processed })
     }
@@ -229,6 +230,38 @@ pub(crate) fn write_benchmark_results(
     info!("Writing engine api call latency output to file: {:?}", output_path);
     let mut writer = Writer::from_path(&output_path)?;
     for result in combined_results {
+        writer.serialize(result)?;
+    }
+    writer.flush()?;
+
+    let output_path = output_dir.join(GAS_OUTPUT_SUFFIX);
+    info!("Writing total gas output to file: {:?}", output_path);
+    let mut writer = Writer::from_path(&output_path)?;
+    for row in gas_results {
+        writer.serialize(row)?;
+    }
+    writer.flush()?;
+
+    info!("Finished writing benchmark output files to {:?}.", output_dir);
+    Ok(())
+}
+
+/// Write new-payload-only benchmark results to CSV files.
+///
+/// Writes two files to the output directory:
+/// - `new_payload_latency.csv`: Per-block newPayload latency results
+/// - `total_gas.csv`: Per-block gas usage over time
+pub(crate) fn write_new_payload_results(
+    output_dir: &Path,
+    gas_results: &[TotalGasRow],
+    new_payload_results: &[NewPayloadResult],
+) -> eyre::Result<()> {
+    fs::create_dir_all(output_dir)?;
+
+    let output_path = output_dir.join(NEW_PAYLOAD_OUTPUT_SUFFIX);
+    info!("Writing newPayload call latency output to file: {:?}", output_path);
+    let mut writer = Writer::from_path(&output_path)?;
+    for result in new_payload_results {
         writer.serialize(result)?;
     }
     writer.flush()?;

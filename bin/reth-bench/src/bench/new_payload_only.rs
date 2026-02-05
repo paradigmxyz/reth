@@ -3,16 +3,12 @@
 use crate::{
     bench::{
         context::BenchContext,
-        output::{
-            NewPayloadResult, TotalGasOutput, TotalGasRow, GAS_OUTPUT_SUFFIX,
-            NEW_PAYLOAD_OUTPUT_SUFFIX,
-        },
+        output::{write_new_payload_results, NewPayloadResult, TotalGasOutput, TotalGasRow},
     },
     valid_payload::{block_to_new_payload, call_new_payload},
 };
 use alloy_provider::Provider;
 use clap::Parser;
-use csv::Writer;
 use eyre::{Context, OptionExt};
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
@@ -122,40 +118,24 @@ impl Command {
             return Err(error);
         }
 
-        let (gas_output_results, new_payload_results): (_, Vec<NewPayloadResult>) =
+        let (gas_output_results, new_payload_results): (Vec<TotalGasRow>, Vec<NewPayloadResult>) =
             results.into_iter().unzip();
 
-        // write the csv output to files
-        if let Some(path) = self.benchmark.output {
-            // first write the new payload results to a file
-            let output_path = path.join(NEW_PAYLOAD_OUTPUT_SUFFIX);
-            info!("Writing newPayload call latency output to file: {:?}", output_path);
-            let mut writer = Writer::from_path(output_path)?;
-            for result in new_payload_results {
-                writer.serialize(result)?;
-            }
-            writer.flush()?;
-
-            // now write the gas output to a file
-            let output_path = path.join(GAS_OUTPUT_SUFFIX);
-            info!("Writing total gas output to file: {:?}", output_path);
-            let mut writer = Writer::from_path(output_path)?;
-            for row in &gas_output_results {
-                writer.serialize(row)?;
-            }
-            writer.flush()?;
-
-            info!("Finished writing benchmark output files to {:?}.", path);
+        if let Some(ref path) = self.benchmark.output {
+            write_new_payload_results(path, &gas_output_results, &new_payload_results)?;
         }
 
-        // accumulate the results and calculate the overall Ggas/s
-        let gas_output = TotalGasOutput::new(gas_output_results)?;
+        let gas_output =
+            TotalGasOutput::with_new_payload_results(gas_output_results, &new_payload_results)?;
+
         info!(
-            total_duration=?gas_output.total_duration,
-            total_gas_used=?gas_output.total_gas_used,
-            blocks_processed=?gas_output.blocks_processed,
-            "Total Ggas/s: {:.4}",
-            gas_output.total_gigagas_per_second()
+            total_gas_used = gas_output.total_gas_used,
+            total_duration = ?gas_output.total_duration,
+            execution_duration = ?gas_output.execution_duration,
+            blocks_processed = gas_output.blocks_processed,
+            wall_clock_ggas_per_second = format_args!("{:.4}", gas_output.total_gigagas_per_second()),
+            execution_ggas_per_second = format_args!("{:.4}", gas_output.execution_gigagas_per_second()),
+            "Benchmark complete"
         );
 
         Ok(())
