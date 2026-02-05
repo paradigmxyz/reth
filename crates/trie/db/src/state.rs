@@ -1,9 +1,9 @@
 use crate::{
     load_prefix_sets_with_provider, DatabaseHashedCursorFactory, DatabaseTrieCursorFactory,
 };
-use alloy_primitives::{map::B256Map, BlockNumber, B256};
+use alloy_primitives::{keccak256, map::B256Map, BlockNumber, B256};
 use reth_db_api::{
-    models::{AccountBeforeTx, BlockNumberHash},
+    models::{AccountBeforeTx, BlockNumberAddress},
     transaction::DbTx,
 };
 use reth_execution_errors::StateRootError;
@@ -265,7 +265,8 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
         let mut accounts = Vec::new();
         let mut seen_accounts = HashSet::new();
         for entry in provider.account_changesets_range(start..end)? {
-            let (_, AccountBeforeTx { hashed_address, info }) = entry;
+            let (_, AccountBeforeTx { address, info }) = entry;
+            let hashed_address = keccak256(address);
             if seen_accounts.insert(hashed_address) {
                 accounts.push((hashed_address, info));
             }
@@ -279,9 +280,10 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
 
         if start < end {
             let end_inclusive = end.saturating_sub(1);
-            for (BlockNumberHash((_, hashed_address)), storage) in
+            for (BlockNumberAddress((_, address)), storage) in
                 provider.storage_changesets_range(start..=end_inclusive)?
             {
+                let hashed_address = keccak256(address);
                 if seen_storage_keys.insert((hashed_address, storage.key)) {
                     storages
                         .entry(hashed_address)
@@ -311,7 +313,7 @@ mod tests {
     use reth_db::test_utils::create_test_rw_db;
     use reth_db_api::{
         database::Database,
-        models::{AccountBeforeTx, BlockNumberHash},
+        models::{AccountBeforeTx, BlockNumberAddress},
         tables,
         transaction::DbTxMut,
     };
@@ -422,21 +424,21 @@ mod tests {
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
-                BlockNumberHash((1, hashed_addr1)),
+                BlockNumberAddress((1, hashed_addr1)),
                 StorageEntry { key: slot2, value: U256::from(200) },
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
-                BlockNumberHash((2, hashed_addr1)),
+                BlockNumberAddress((2, hashed_addr1)),
                 StorageEntry { key: slot1, value: U256::from(100) },
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
-                BlockNumberHash((3, hashed_addr1)),
+                BlockNumberAddress((3, hashed_addr1)),
                 StorageEntry { key: slot1, value: U256::from(999) }, // should be ignored
             )
             .unwrap();

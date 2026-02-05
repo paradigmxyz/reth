@@ -1,7 +1,7 @@
 use std::{future::Future, sync::Arc};
 
 use alloy_eips::BlockId;
-use alloy_primitives::{map::B256Map, U256};
+use alloy_primitives::{keccak256, map::B256Map, U256};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
@@ -73,10 +73,11 @@ where
         let hash_map = accounts_before.iter().try_fold(
             B256Map::default(),
             |mut hash_map, account_before| -> RethResult<_> {
-                let current_balance = state.hashed_account_balance(account_before.hashed_address)?;
+                let hashed_address = keccak256(account_before.address);
+                let current_balance = state.hashed_account_balance(hashed_address)?;
                 let prev_balance = account_before.info.map(|info| info.balance);
                 if current_balance != prev_balance {
-                    hash_map.insert(account_before.hashed_address, current_balance.unwrap_or_default());
+                    hash_map.insert(hashed_address, current_balance.unwrap_or_default());
                 }
                 Ok(hash_map)
             },

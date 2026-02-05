@@ -130,7 +130,7 @@ where
                 provider,
                 range.clone(),
                 ShardedKey::new,
-                |(index, value)| (index, value.hashed_address),
+                |(index, value)| (index, value.address),
                 &self.etl_config,
             )?
         };
@@ -620,7 +620,7 @@ mod tests {
                          entry|
                          -> Result<_, TestRunnerError> {
                             let (index, account) = entry?;
-                            accounts.entry(account.hashed_address).or_default().push(index);
+                            accounts.entry(account.address).or_default().push(index);
                             Ok(accounts)
                         },
                     )?;

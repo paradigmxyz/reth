@@ -7,7 +7,7 @@ use alloy_primitives::{bytes, Address, Bytes, TxKind, B256, U256};
 use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider, MAINNET};
 use reth_config::config::StageConfig;
 use reth_consensus::noop::NoopConsensus;
-use reth_db_api::{cursor::DbCursorRO, models::BlockNumberHash, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, models::BlockNumberAddress, transaction::DbTx};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
@@ -93,7 +93,7 @@ fn assert_changesets_queryable(
         let storage_changesets: Vec<_> = provider
             .tx_ref()
             .cursor_dup_read::<reth_db::tables::StorageChangeSets>()?
-            .walk_range(BlockNumberHash::range(block_range.clone()))?
+            .walk_range(BlockNumberAddress::range(block_range.clone()))?
             .collect::<Result<Vec<_>, _>>()?;
         assert!(
             !storage_changesets.is_empty(),

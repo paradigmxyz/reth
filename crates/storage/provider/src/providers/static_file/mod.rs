@@ -817,14 +817,14 @@ mod tests {
             let result = sf_rw.get_account_before_block(0, test_hash).unwrap();
             assert!(result.is_some());
             let account_before = result.unwrap();
-            assert_eq!(account_before.hashed_address, test_hash);
+            assert_eq!(account_before.address, test_hash);
             assert!(account_before.info.is_none()); // Was created in block 0
 
             // Test retrieving account state before block 2
             let result = sf_rw.get_account_before_block(2, test_hash).unwrap();
             assert!(result.is_some());
             let account_before = result.unwrap();
-            assert_eq!(account_before.hashed_address, test_hash);
+            assert_eq!(account_before.address, test_hash);
             assert!(account_before.info.is_some());
             let info = account_before.info.unwrap();
             assert_eq!(info.nonce, 1);
@@ -842,7 +842,7 @@ mod tests {
             let result = sf_rw.get_account_before_block(1, other_hash).unwrap();
             assert!(result.is_some());
             let account_before = result.unwrap();
-            assert_eq!(account_before.hashed_address, other_hash);
+            assert_eq!(account_before.address, other_hash);
             assert!(account_before.info.is_some());
         }
     }
@@ -1013,19 +1013,19 @@ mod tests {
             // Test finding first hash
             let result = sf_rw.get_account_before_block(block_num, hashes[0]).unwrap();
             assert!(result.is_some());
-            assert_eq!(result.unwrap().hashed_address, hashes[0]);
+            assert_eq!(result.unwrap().address, hashes[0]);
 
             // Test finding last hash
             let result =
                 sf_rw.get_account_before_block(block_num, hashes[num_accounts - 1]).unwrap();
             assert!(result.is_some());
-            assert_eq!(result.unwrap().hashed_address, hashes[num_accounts - 1]);
+            assert_eq!(result.unwrap().address, hashes[num_accounts - 1]);
 
             // Test finding middle hashes
             let mid = num_accounts / 2;
             let result = sf_rw.get_account_before_block(block_num, hashes[mid]).unwrap();
             assert!(result.is_some());
-            assert_eq!(result.unwrap().hashed_address, hashes[mid]);
+            assert_eq!(result.unwrap().address, hashes[mid]);
 
             // Test not finding hash that doesn't exist
             let mut missing_hash = B256::ZERO;
@@ -1038,7 +1038,7 @@ mod tests {
             for i in (0..num_accounts).step_by(10) {
                 let result = sf_rw.get_account_before_block(block_num, hashes[i]).unwrap();
                 assert!(result.is_some());
-                assert_eq!(result.unwrap().hashed_address, hashes[i]);
+                assert_eq!(result.unwrap().address, hashes[i]);
             }
         }
     }

@@ -3,7 +3,7 @@ use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     keccak256, logs_bloom,
-    map::{B256Map, HashMap},
+    map::{AddressMap, B256Map, HashMap},
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
@@ -14,15 +14,15 @@ use revm::{
 };
 
 /// Type used to initialize revms bundle state.
-/// Uses hashed address (B256) as the key since the database stores hashed addresses.
-pub type BundleStateInit = B256Map<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
+/// Uses plain address as the key for changeset reconstruction.
+pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
 
 /// Types used inside `RevertsInit` to initialize revms reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 
 /// Type used to initialize revms reverts.
-/// Uses hashed address (B256) as the key since the database stores hashed addresses.
-pub type RevertsInit = HashMap<BlockNumber, B256Map<AccountRevertInit>>;
+/// Uses plain address as the key for changeset reconstruction.
+pub type RevertsInit = HashMap<BlockNumber, AddressMap<AccountRevertInit>>;
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,19 +95,6 @@ impl<T> ExecutionOutcome<T> {
     ///
     /// This constructor initializes a new `ExecutionOutcome` instance using detailed
     /// initialization parameters.
-    ///
-    /// # TODO: Hashed State Migration
-    ///
-    /// This function is currently **non-functional** because:
-    /// - The database now stores hashed addresses (B256) in changesets
-    /// - revm's `BundleState::new` requires plain `Address` keys
-    /// - We cannot convert hashed addresses back to plain addresses without a reverse mapping
-    ///
-    /// Options to fix:
-    /// 1. Add a `HashedAddressMapping` table (B256 → Address) in the database
-    /// 2. Change revm's `BundleState` to use hashed addresses (requires fork)
-    /// 3. Remove functionality that requires reconstructing execution state from changesets
-    #[allow(unused_variables)]
     pub fn new_init(
         state_init: BundleStateInit,
         revert_init: RevertsInit,
@@ -116,11 +103,34 @@ impl<T> ExecutionOutcome<T> {
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        unimplemented!(
-            "new_init is not functional: database uses hashed addresses (B256) \
-             but revm's BundleState requires plain Address. \
-             A reverse mapping table (B256 → Address) is needed to restore this functionality."
-        )
+        // sort reverts by block number
+        let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
+        reverts.sort_unstable_by_key(|a| a.0);
+
+        // initialize revm bundle
+        let bundle = BundleState::new(
+            state_init.into_iter().map(|(address, (original, present, storage))| {
+                (
+                    address,
+                    original.map(Into::into),
+                    present.map(Into::into),
+                    storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
+                )
+            }),
+            reverts.into_iter().map(|(_, reverts)| {
+                // does not need to be sorted, it is done when taking reverts.
+                reverts.into_iter().map(|(address, (original, storage))| {
+                    (
+                        address,
+                        original.map(|i| i.map(Into::into)),
+                        storage.into_iter().map(|entry| (entry.key.into(), entry.value)),
+                    )
+                })
+            }),
+            contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
+        );
+
+        Self { bundle, receipts, first_block, requests }
     }
 
     /// Creates a new `ExecutionOutcome` from a single block execution result.
@@ -620,14 +630,13 @@ mod tests {
         );
 
         // Create a BundleStateInit object and insert initial data
-        // Keys are now hashed addresses (B256)
-        let mut state_init: BundleStateInit = B256Map::default();
-        let hashed_addr = B256::repeat_byte(2);
-        state_init.insert(hashed_addr, (None, Some(Account::default()), B256Map::default()));
+        let mut state_init: BundleStateInit = AddressMap::default();
+        state_init
+            .insert(Address::new([2; 20]), (None, Some(Account::default()), B256Map::default()));
 
-        // Create a B256Map for account reverts and insert initial data
-        let mut revert_inner: B256Map<AccountRevertInit> = B256Map::default();
-        revert_inner.insert(hashed_addr, (None, vec![]));
+        // Create an AddressMap for account reverts and insert initial data
+        let mut revert_inner: AddressMap<AccountRevertInit> = AddressMap::default();
+        revert_inner.insert(Address::new([2; 20]), (None, vec![]));
 
         // Create a RevertsInit object and insert the revert_inner data
         let mut revert_init: RevertsInit = HashMap::default();

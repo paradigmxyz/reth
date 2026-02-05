@@ -1,25 +1,25 @@
-use alloy_primitives::B256;
+use alloy_primitives::Address;
 use reth_primitives_traits::{Account, ValueWithSubKey};
 
 /// Account as it is saved in the database.
 ///
-/// [`B256`] (hashed address) is the subkey.
+/// [`Address`] is the subkey.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct AccountBeforeTx {
-    /// Hashed address for the account. Acts as `DupSort::SubKey`.
-    pub hashed_address: B256,
+    /// Address for the account. Acts as `DupSort::SubKey`.
+    pub address: Address,
     /// Account state before the transaction.
     pub info: Option<Account>,
 }
 
 impl ValueWithSubKey for AccountBeforeTx {
-    type SubKey = B256;
+    type SubKey = Address;
 
     fn get_subkey(&self) -> Self::SubKey {
-        self.hashed_address
+        self.address
     }
 }
 
@@ -33,23 +33,23 @@ impl reth_codecs::Compact for AccountBeforeTx {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         // for now put full bytes and later compress it.
-        buf.put_slice(self.hashed_address.as_slice());
+        buf.put_slice(self.address.as_slice());
 
         let acc_len = if let Some(account) = self.info { account.to_compact(buf) } else { 0 };
-        acc_len + 32
+        acc_len + 20
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         use bytes::Buf;
-        let hashed_address = B256::from_slice(&buf[..32]);
-        buf.advance(32);
+        let address = Address::from_slice(&buf[..20]);
+        buf.advance(20);
 
-        let info = (len - 32 > 0).then(|| {
-            let (acc, advanced_buf) = Account::from_compact(buf, len - 32);
+        let info = (len - 20 > 0).then(|| {
+            let (acc, advanced_buf) = Account::from_compact(buf, len - 20);
             buf = advanced_buf;
             acc
         });
 
-        (Self { hashed_address, info }, buf)
+        (Self { address, info }, buf)
     }
 }

@@ -6,9 +6,9 @@ use crate::{
     },
     PrunerError,
 };
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{Address, BlockNumber, B256};
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, BlockNumberHash},
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
     tables,
     transaction::DbTxMut,
 };
@@ -134,7 +134,7 @@ impl StorageHistory {
             }
             let (block_address, entry) = result?;
             let block_number = block_address.block_number();
-            let hashed_address = block_address.hashed_address();
+            let hashed_address = block_address.address();
             highest_deleted_storages.insert((hashed_address, entry.key), block_number);
             last_changeset_pruned_block = Some(block_number);
             pruned_changesets += 1;
@@ -155,15 +155,15 @@ impl StorageHistory {
             pruned_count: pruned_changesets,
             done,
         };
-        finalize_history_prune::<_, tables::StoragesHistory, (B256, B256), _>(
+        finalize_history_prune::<_, tables::StoragesHistory, (Address, B256), _>(
             provider,
             result,
             range_end,
             &limiter,
-            |(hashed_address, storage_key), block_number| {
-                StorageShardedKey::new(hashed_address, storage_key, block_number)
+            |(address, storage_key), block_number| {
+                StorageShardedKey::new(address, storage_key, block_number)
             },
-            |a, b| a.hashed_address == b.hashed_address && a.sharded_key.key == b.sharded_key.key,
+            |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
         )
         .map_err(Into::into)
     }
@@ -203,10 +203,10 @@ impl StorageHistory {
         let mut highest_deleted_storages = FxHashMap::default();
         let (pruned_changesets, done) =
             provider.tx_ref().prune_table_with_range::<tables::StorageChangeSets>(
-                BlockNumberHash::range(range),
+                BlockNumberAddress::range(range),
                 &mut limiter,
                 |_| false,
-                |(BlockNumberHash((block_number, hashed_address)), entry)| {
+                |(BlockNumberAddress((block_number, hashed_address)), entry)| {
                     highest_deleted_storages.insert((hashed_address, entry.key), block_number);
                     last_changeset_pruned_block = Some(block_number);
                 },
@@ -219,15 +219,15 @@ impl StorageHistory {
             pruned_count: pruned_changesets,
             done,
         };
-        finalize_history_prune::<_, tables::StoragesHistory, (B256, B256), _>(
+        finalize_history_prune::<_, tables::StoragesHistory, (Address, B256), _>(
             provider,
             result,
             range_end,
             &limiter,
-            |(hashed_address, storage_key), block_number| {
-                StorageShardedKey::new(hashed_address, storage_key, block_number)
+            |(address, storage_key), block_number| {
+                StorageShardedKey::new(address, storage_key, block_number)
             },
-            |a, b| a.hashed_address == b.hashed_address && a.sharded_key.key == b.sharded_key.key,
+            |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
         )
         .map_err(Into::into)
     }
@@ -272,7 +272,7 @@ impl StorageHistory {
             }
             let (block_address, entry) = result?;
             let block_number = block_address.block_number();
-            let hashed_address = block_address.hashed_address();
+            let hashed_address = block_address.address();
             highest_deleted_storages.insert((hashed_address, entry.key), block_number);
             last_changeset_pruned_block = Some(block_number);
             changesets_processed += 1;
@@ -380,7 +380,7 @@ mod tests {
         let storage_occurrences = db.table::<tables::StoragesHistory>().unwrap().into_iter().fold(
             BTreeMap::<_, usize>::new(),
             |mut map, (key, _)| {
-                map.entry((key.hashed_address, key.sharded_key.key)).or_default().add_assign(1);
+                map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
                 map
             },
         );
@@ -549,7 +549,7 @@ mod tests {
         let storage_occurrences = db.table::<tables::StoragesHistory>().unwrap().into_iter().fold(
             BTreeMap::<_, usize>::new(),
             |mut map, (key, _)| {
-                map.entry((key.hashed_address, key.sharded_key.key)).or_default().add_assign(1);
+                map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
                 map
             },
         );

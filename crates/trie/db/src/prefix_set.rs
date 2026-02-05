@@ -1,11 +1,12 @@
 use alloy_primitives::{
+    keccak256,
     map::{HashMap, HashSet},
     BlockNumber, B256,
 };
 use core::ops::RangeInclusive;
 use reth_db_api::{
     cursor::DbCursorRO,
-    models::{AccountBeforeTx, BlockNumberHash},
+    models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::DbTx,
 };
@@ -39,7 +40,8 @@ where
     // We still need direct access to HashedAccounts table
     let mut account_hashed_state_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
-    for (_, AccountBeforeTx { hashed_address, .. }) in account_changesets {
+    for (_, AccountBeforeTx { address, .. }) in account_changesets {
+        let hashed_address = keccak256(address);
         account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
         if account_hashed_state_cursor.seek_exact(hashed_address)?.is_none() {
@@ -49,7 +51,8 @@ where
 
     // Walk storage changesets using the provider (handles static files + database)
     let storage_changesets = provider.storage_changesets_range(range)?;
-    for (BlockNumberHash((_, hashed_address)), StorageEntry { key, .. }) in storage_changesets {
+    for (BlockNumberAddress((_, address)), StorageEntry { key, .. }) in storage_changesets {
+        let hashed_address = keccak256(address);
         account_prefix_set.insert(Nibbles::unpack(hashed_address));
         storage_prefix_sets.entry(hashed_address).or_default().insert(Nibbles::unpack(key));
     }

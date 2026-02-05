@@ -11,7 +11,7 @@ use reth_db_api::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
-    models::{AccountBeforeTx, BlockNumberHash, StorageBeforeTx, StoredBlockBodyIndices},
+    models::{AccountBeforeTx, BlockNumberAddress, StorageBeforeTx, StoredBlockBodyIndices},
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -448,15 +448,14 @@ impl TestStageDB {
             changesets.into_iter().enumerate().try_for_each(|(block, changeset)| {
                 changeset.into_iter().try_for_each(|(address, old_account, old_storage)| {
                     let block = offset + block as u64;
-                    let hashed_address = keccak256(address);
 
                     // Insert into account changeset.
                     tx.put::<tables::AccountChangeSets>(
                         block,
-                        AccountBeforeTx { hashed_address, info: Some(old_account) },
+                        AccountBeforeTx { address, info: Some(old_account) },
                     )?;
 
-                    let block_hash: BlockNumberHash = (block, hashed_address).into();
+                    let block_hash: BlockNumberAddress = (block, address).into();
 
                     // Insert into storage changeset.
                     old_storage.into_iter().try_for_each(|entry| {
@@ -493,12 +492,11 @@ impl TestStageDB {
             let mut storage_changesets = Vec::new();
 
             for (address, old_account, old_storage) in changeset {
-                let hashed_address = keccak256(address);
-                account_changesets.push(AccountBeforeTx { hashed_address, info: Some(old_account) });
+                account_changesets.push(AccountBeforeTx { address, info: Some(old_account) });
 
                 for entry in old_storage {
                     storage_changesets.push(StorageBeforeTx {
-                        hashed_address,
+                        address,
                         key: keccak256(entry.key),
                         value: entry.value,
                     });
@@ -519,15 +517,14 @@ impl TestStageDB {
     where
         I: IntoIterator<Item = ChangeSet>,
     {
-        let mut accounts = BTreeMap::<B256, Vec<u64>>::new();
-        let mut storages = BTreeMap::<(B256, B256), Vec<u64>>::new();
+        let mut accounts = BTreeMap::<Address, Vec<u64>>::new();
+        let mut storages = BTreeMap::<(Address, B256), Vec<u64>>::new();
 
         for (block, changeset) in changesets.into_iter().enumerate() {
             for (address, _, storage_entries) in changeset {
-                let hashed_address = keccak256(address);
-                accounts.entry(hashed_address).or_default().push(block as u64);
+                accounts.entry(address).or_default().push(block as u64);
                 for storage_entry in storage_entries {
-                    storages.entry((hashed_address, keccak256(storage_entry.key))).or_default().push(block as u64);
+                    storages.entry((address, keccak256(storage_entry.key))).or_default().push(block as u64);
                 }
             }
         }

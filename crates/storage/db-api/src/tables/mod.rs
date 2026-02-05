@@ -18,7 +18,7 @@ pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 
 use crate::{
     models::{
-        accounts::BlockNumberHash,
+        accounts::BlockNumberAddress,
         blocks::{HeaderHash, StoredBlockOmmers},
         storage_sharded_key::StorageShardedKey,
         AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
@@ -383,14 +383,14 @@ tables! {
         type Value = Bytecode;
     }
 
-    /// Stores pointers to block changeset with changes for each hashed account key.
+    /// Stores pointers to block changeset with changes for each account address.
     ///
     /// Last shard key of the storage will contain `u64::MAX` `BlockNumber`,
-    /// this would allows us small optimization on db access when change is in hashed state.
+    /// this would allows us small optimization on db access when change is in plain state.
     ///
     /// Imagine having shards as:
-    /// * `HashedAddress | 100`
-    /// * `HashedAddress | u64::MAX`
+    /// * `Address | 100`
+    /// * `Address | u64::MAX`
     ///
     /// What we need to find is number that is one greater than N. Db `seek` function allows us to fetch
     /// the shard that equal or more than asked. For example:
@@ -401,18 +401,18 @@ tables! {
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
     table AccountsHistory {
-        type Key = ShardedKey<B256>;
+        type Key = ShardedKey<Address>;
         type Value = BlockNumberList;
     }
 
     /// Stores pointers to block number changeset with changes for each storage key.
     ///
     /// Last shard key of the storage will contain `u64::MAX` `BlockNumber`,
-    /// this would allows us small optimization on db access when change is in hashed state.
+    /// this would allows us small optimization on db access when change is in plain state.
     ///
     /// Imagine having shards as:
-    /// * `HashedAddress | StorageKey | 100`
-    /// * `HashedAddress | StorageKey | u64::MAX`
+    /// * `Address | StorageKey | 100`
+    /// * `Address | StorageKey | u64::MAX`
     ///
     /// What we need to find is number that is one greater than N. Db `seek` function allows us to fetch
     /// the shard that equal or more than asked. For example:
@@ -433,14 +433,14 @@ tables! {
     table AccountChangeSets {
         type Key = BlockNumber;
         type Value = AccountBeforeTx;
-        type SubKey = B256;
+        type SubKey = Address;
     }
 
     /// Stores the state of a storage key before a certain transaction changed it.
     /// If [`StorageEntry::value`] is zero, this means storage was not existing
     /// and needs to be removed.
     table StorageChangeSets {
-        type Key = BlockNumberHash;
+        type Key = BlockNumberAddress;
         type Value = StorageEntry;
         type SubKey = B256;
     }

@@ -993,7 +993,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     fn get_account_before_block(
         &self,
         _block_number: BlockNumber,
-        _hashed_address: B256,
+        _address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         Ok(None)
     }
@@ -1016,14 +1016,14 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
     fn storage_changeset(
         &self,
         _block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberHash, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
         Ok(Vec::default())
     }
 
     fn get_storage_before_block(
         &self,
         _block_number: BlockNumber,
-        _hashed_address: B256,
+        _address: Address,
         _storage_key: B256,
     ) -> ProviderResult<Option<StorageEntry>> {
         Ok(None)
@@ -1032,7 +1032,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
     fn storage_changesets_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberHash, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
         Ok(Vec::default())
     }
 

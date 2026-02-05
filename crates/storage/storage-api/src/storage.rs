@@ -25,13 +25,13 @@ pub trait StorageReader: Send {
 
     /// Iterate over storage changesets and return all storage slots that were changed alongside
     /// each specific set of blocks.
-    /// Keys are (hashed_address, storage_key).
+    /// Keys are (address, storage_key).
     ///
     /// NOTE: Get inclusive range of blocks.
     fn changed_storages_and_blocks_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<BTreeMap<(B256, B256), Vec<u64>>>;
+    ) -> ProviderResult<BTreeMap<(Address, B256), Vec<u64>>>;
 }
 
 /// Storage `ChangeSet` reader
@@ -42,16 +42,16 @@ pub trait StorageChangeSetReader: Send {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberHash, StorageEntry)>>;
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>>;
 
-    /// Search the block's changesets for the given hashed address and storage key, and return the
+    /// Search the block's changesets for the given address and storage key, and return the
     /// result.
     ///
     /// Returns `None` if the storage slot was not changed in this block.
     fn get_storage_before_block(
         &self,
         block_number: BlockNumber,
-        hashed_address: B256,
+        address: Address,
         storage_key: B256,
     ) -> ProviderResult<Option<StorageEntry>>;
 
@@ -59,7 +59,7 @@ pub trait StorageChangeSetReader: Send {
     fn storage_changesets_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberHash, StorageEntry)>>;
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>>;
 
     /// Get the total count of all storage changes.
     fn storage_changeset_count(&self) -> ProviderResult<usize>;
@@ -74,8 +74,8 @@ pub trait StorageChangeSetReader: Send {
         self.storage_changeset(block_number).map(|changesets| {
             changesets
                 .into_iter()
-                .map(|(block_hash, entry)| reth_db_models::StorageBeforeTx {
-                    hashed_address: block_hash.hashed_address(),
+                .map(|(block_address, entry)| reth_db_models::StorageBeforeTx {
+                    address: block_address.address(),
                     key: entry.key,
                     value: entry.value,
                 })

@@ -1070,7 +1070,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.ensure_no_queued_prune()?;
 
         // first sort the changeset by hashed address
-        changeset.sort_by_key(|change| change.hashed_address);
+        changeset.sort_by_key(|change| change.address);
 
         let mut count: u64 = 0;
 
@@ -1106,7 +1106,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.ensure_no_queued_prune()?;
 
         // sort by hashed address + storage key
-        changeset.sort_by_key(|change| (change.hashed_address, change.key));
+        changeset.sort_by_key(|change| (change.address, change.key));
 
         let mut count: u64 = 0;
         for change in changeset {

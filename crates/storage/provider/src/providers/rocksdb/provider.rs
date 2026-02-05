@@ -1058,7 +1058,7 @@ impl RocksDBProvider {
                     let key = StorageShardedKey::decode(&key_bytes)
                         .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
-                    if key.hashed_address != hashed_address || key.sharded_key.key != storage_key {
+                    if key.address != hashed_address || key.sharded_key.key != storage_key {
                         break;
                     }
 
@@ -2271,11 +2271,11 @@ impl<'db> RocksTx<'db> {
             lowest_available_block_number,
             |key_bytes| {
                 let k = <StorageShardedKey as Decode>::decode(key_bytes)?;
-                Ok(k.hashed_address == hashed_address && k.sharded_key.key == storage_key)
+                Ok(k.address == hashed_address && k.sharded_key.key == storage_key)
             },
             |prev_bytes| {
                 <StorageShardedKey as Decode>::decode(prev_bytes)
-                    .map(|k| k.hashed_address == hashed_address && k.sharded_key.key == storage_key)
+                    .map(|k| k.address == hashed_address && k.sharded_key.key == storage_key)
                     .unwrap_or(false)
             },
         )

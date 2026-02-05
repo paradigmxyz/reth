@@ -1229,7 +1229,7 @@ mod tests {
         let mut account_changesets = test_db.table::<tables::AccountChangeSets>().unwrap();
         let storage_changesets = test_db.table::<tables::StorageChangeSets>().unwrap();
 
-        account_changesets.sort_by_key(|(_, changeset)| changeset.hashed_address);
+        account_changesets.sort_by_key(|(_, changeset)| changeset.address);
         let mut expected_account_changesets = vec![
             (
                 block.number,
@@ -1250,7 +1250,7 @@ mod tests {
                 },
             ),
         ];
-        expected_account_changesets.sort_by_key(|(_, changeset)| changeset.hashed_address);
+        expected_account_changesets.sort_by_key(|(_, changeset)| changeset.address);
         assert_eq!(account_changesets, expected_account_changesets);
 
         assert_eq!(

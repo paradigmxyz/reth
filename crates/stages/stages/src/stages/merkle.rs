@@ -783,7 +783,7 @@ mod tests {
                             break
                         }
 
-                        tree.entry(bn_address.hashed_address())
+                        tree.entry(bn_address.address())
                             .or_default()
                             .insert(entry.key, entry.value);
                     }
@@ -816,13 +816,13 @@ mod tests {
 
                         if let Some(acc) = account_before_tx.info {
                             tx.put::<tables::HashedAccounts>(
-                                account_before_tx.hashed_address,
+                                account_before_tx.address,
                                 acc,
                             )
                             .unwrap();
                         } else {
                             tx.delete::<tables::HashedAccounts>(
-                                account_before_tx.hashed_address,
+                                account_before_tx.address,
                                 None,
                             )
                             .unwrap();

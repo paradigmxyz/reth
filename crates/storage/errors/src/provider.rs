@@ -57,13 +57,13 @@ pub enum ProviderError {
         // second largest (which uses `BlockHashOrNumber`).
         storage_key: Box<B256>,
     },
-    /// The block number was found for the given hashed address, but the changeset was not found.
-    #[error("account change set for hashed address {hashed_address} at block #{block_number} does not exist")]
+    /// The block number was found for the given address, but the changeset was not found.
+    #[error("account change set for address {address} at block #{block_number} does not exist")]
     AccountChangesetNotFound {
-        /// Block number found for the hashed address.
+        /// Block number found for the address.
         block_number: BlockNumber,
-        /// The hashed account address.
-        hashed_address: B256,
+        /// The account address.
+        address: Address,
     },
     /// When required header related data was not found but was required.
     #[error("no header found for {_0:?}")]

@@ -13,7 +13,7 @@ use crate::{
     providers::{history_info, HistoryInfo, StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
 };
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{keccak256, map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
@@ -24,7 +24,7 @@ use reth_db::{
 };
 use reth_db_api::{
     cursor::DbCursorRW,
-    models::{storage_sharded_key::StorageShardedKey, BlockNumberHash, ShardedKey},
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress, ShardedKey},
     tables,
     tables::BlockNumberList,
 };
@@ -578,13 +578,13 @@ where
         }
     }
 
-    /// Gets the last shard for a hashed address and storage key (keyed with `u64::MAX`).
+    /// Gets the last shard for an address and storage key (keyed with `u64::MAX`).
     pub fn get_last_storage_history_shard(
         &mut self,
-        hashed_address: B256,
+        address: Address,
         storage_key: B256,
     ) -> ProviderResult<Option<BlockNumberList>> {
-        let key = StorageShardedKey::last(hashed_address, storage_key);
+        let key = StorageShardedKey::last(address, storage_key);
         match self {
             Self::Database(cursor) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
@@ -601,7 +601,7 @@ where
     /// Appends an account history entry (for first sync - more efficient).
     pub fn append_account_history(
         &mut self,
-        key: ShardedKey<B256>,
+        key: ShardedKey<Address>,
         value: &BlockNumberList,
     ) -> ProviderResult<()> {
         match self {
@@ -615,7 +615,7 @@ where
     /// Upserts an account history entry (for incremental sync).
     pub fn upsert_account_history(
         &mut self,
-        key: ShardedKey<B256>,
+        key: ShardedKey<Address>,
         value: &BlockNumberList,
     ) -> ProviderResult<()> {
         match self {
@@ -626,25 +626,23 @@ where
         }
     }
 
-    /// Gets the last shard for a hashed address (keyed with `u64::MAX`).
+    /// Gets the last shard for an address (keyed with `u64::MAX`).
     pub fn get_last_account_history_shard(
         &mut self,
-        hashed_address: B256,
+        address: Address,
     ) -> ProviderResult<Option<BlockNumberList>> {
         match self {
             Self::Database(cursor) => {
-                Ok(cursor.seek_exact(ShardedKey::last(hashed_address))?.map(|(_, v)| v))
+                Ok(cursor.seek_exact(ShardedKey::last(address))?.map(|(_, v)| v))
             }
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(batch) => {
-                batch.get::<tables::AccountsHistory>(ShardedKey::last(hashed_address))
-            }
+            Self::RocksDB(batch) => batch.get::<tables::AccountsHistory>(ShardedKey::last(address)),
         }
     }
 
     /// Deletes an account history entry.
-    pub fn delete_account_history(&mut self, key: ShardedKey<B256>) -> ProviderResult<()> {
+    pub fn delete_account_history(&mut self, key: ShardedKey<Address>) -> ProviderResult<()> {
         match self {
             Self::Database(cursor) => {
                 if cursor.seek_exact(key)?.is_some() {
@@ -672,7 +670,7 @@ where
         mut changeset: Vec<AccountBeforeTx>,
     ) -> ProviderResult<()> {
         // First sort the changesets
-        changeset.par_sort_by_key(|a| a.hashed_address);
+        changeset.par_sort_by_key(|a| a.address);
         match self {
             Self::Database(cursor) => {
                 for change in changeset {
@@ -702,12 +700,12 @@ where
         block_number: BlockNumber,
         mut changeset: Vec<StorageBeforeTx>,
     ) -> ProviderResult<()> {
-        changeset.par_sort_by_key(|change| (change.hashed_address, change.key));
+        changeset.par_sort_by_key(|change| (change.address, change.key));
 
         match self {
             Self::Database(cursor) => {
                 for change in changeset {
-                    let storage_id = BlockNumberHash((block_number, change.hashed_address));
+                    let storage_id = BlockNumberAddress((block_number, change.address));
                     cursor.append_dup(
                         storage_id,
                         StorageEntry { key: change.key, value: change.value },
@@ -911,30 +909,27 @@ where
     /// Lookup storage history and return [`HistoryInfo`].
     pub fn storage_history_info(
         &mut self,
-        hashed_address: B256,
+        address: Address,
         storage_key: alloy_primitives::B256,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         match self {
             Self::Database(cursor, _) => {
-                let key = StorageShardedKey::new(hashed_address, storage_key, block_number);
+                let key = StorageShardedKey::new(address, storage_key, block_number);
                 history_info::<tables::StoragesHistory, _, _>(
                     cursor,
                     key,
                     block_number,
-                    |k| k.hashed_address == hashed_address && k.sharded_key.key == storage_key,
+                    |k| k.address == address && k.sharded_key.key == storage_key,
                     lowest_available_block_number,
                 )
             }
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(tx) => tx.storage_history_info(
-                hashed_address,
-                storage_key,
-                block_number,
-                lowest_available_block_number,
-            ),
+            Self::RocksDB(tx) => {
+                tx.storage_history_info(address, storage_key, block_number, lowest_available_block_number)
+            }
         }
     }
 }
@@ -946,7 +941,7 @@ where
     /// Gets an account history shard entry for the given [`ShardedKey`], if present.
     pub fn get_account_history(
         &mut self,
-        key: ShardedKey<B256>,
+        key: ShardedKey<Address>,
     ) -> ProviderResult<Option<BlockNumberList>> {
         match self {
             Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
@@ -959,25 +954,25 @@ where
     /// Lookup account history and return [`HistoryInfo`].
     pub fn account_history_info(
         &mut self,
-        hashed_address: B256,
+        address: Address,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         match self {
             Self::Database(cursor, _) => {
-                let key = ShardedKey::new(hashed_address, block_number);
+                let key = ShardedKey::new(address, block_number);
                 history_info::<tables::AccountsHistory, _, _>(
                     cursor,
                     key,
                     block_number,
-                    |k| k.key == hashed_address,
+                    |k| k.key == address,
                     lowest_available_block_number,
                 )
             }
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => {
-                tx.account_history_info(hashed_address, block_number, lowest_available_block_number)
+                tx.account_history_info(address, block_number, lowest_available_block_number)
             }
         }
     }
@@ -1011,7 +1006,7 @@ where
                     for block in start..=static_end {
                         let block_changesets = provider.account_block_changeset(block)?;
                         for changeset in block_changesets {
-                            changed_accounts.insert(changeset.hashed_address);
+                            changed_accounts.insert(keccak256(changeset.address));
                         }
                     }
                 }
@@ -1022,7 +1017,7 @@ where
                 .walk_range(range)?
                 .map(|entry| {
                     entry
-                        .map(|(_, account_before)| account_before.hashed_address)
+                        .map(|(_, account_before)| keccak256(account_before.address))
                         .map_err(Into::into)
                 })
                 .collect(),

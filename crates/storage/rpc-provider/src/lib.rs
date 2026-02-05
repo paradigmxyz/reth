@@ -1229,7 +1229,7 @@ where
     fn changed_storages_and_blocks_with_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> Result<BTreeMap<(B256, StorageKey), Vec<u64>>, ProviderError> {
+    ) -> Result<BTreeMap<(Address, StorageKey), Vec<u64>>, ProviderError> {
         Ok(BTreeMap::new())
     }
 }
@@ -1740,7 +1740,7 @@ where
     fn get_account_before_block(
         &self,
         _block_number: BlockNumber,
-        _hashed_address: B256,
+        _address: Address,
     ) -> ProviderResult<Option<reth_db_api::models::AccountBeforeTx>> {
         Err(ProviderError::UnsupportedProvider)
     }

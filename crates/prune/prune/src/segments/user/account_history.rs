@@ -135,7 +135,7 @@ impl AccountHistory {
                 break;
             }
             let (block_number, changeset) = result?;
-            highest_deleted_accounts.insert(changeset.hashed_address, block_number);
+            highest_deleted_accounts.insert(changeset.address, block_number);
             last_changeset_pruned_block = Some(block_number);
             pruned_changesets += 1;
             limiter.increment_deleted_entries_count();
@@ -205,7 +205,7 @@ impl AccountHistory {
                 &mut limiter,
                 |_| false,
                 |(block_number, account)| {
-                    highest_deleted_accounts.insert(account.hashed_address, block_number);
+                    highest_deleted_accounts.insert(account.address, block_number);
                     last_changeset_pruned_block = Some(block_number);
                 },
             )?;
@@ -270,7 +270,7 @@ impl AccountHistory {
                 break;
             }
             let (block_number, changeset) = result?;
-            highest_deleted_accounts.insert(changeset.hashed_address, block_number);
+            highest_deleted_accounts.insert(changeset.address, block_number);
             last_changeset_pruned_block = Some(block_number);
             changesets_processed += 1;
             limiter.increment_deleted_entries_count();

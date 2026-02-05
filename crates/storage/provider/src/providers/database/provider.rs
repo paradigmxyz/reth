@@ -39,8 +39,8 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     models::{
-        sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberHash,
-        BlockNumberHashRange, ShardedKey, StorageBeforeTx, StorageSettings,
+        sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
+        BlockNumberAddressRange, ShardedKey, StorageBeforeTx, StorageSettings,
         StoredBlockBodyIndices,
     },
     table::Table,
@@ -1141,7 +1141,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     fn populate_bundle_state<A, S>(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
-        storage_changeset: Vec<(BlockNumberHash, StorageEntry)>,
+        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         hashed_accounts_cursor: &mut A,
         hashed_storage_cursor: &mut S,
     ) -> ProviderResult<(BundleStateInit, RevertsInit)>
@@ -1163,10 +1163,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 
         // add account changeset changes
         for (block_number, account_before) in account_changeset.into_iter().rev() {
-            let AccountBeforeTx { hashed_address, info: old_info } = account_before;
-            match state.entry(hashed_address) {
+            let AccountBeforeTx { address, info: old_info } = account_before;
+            let hashed_address = keccak256(address);
+            match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
-                    let new_info = hashed_accounts_cursor.seek_exact(hashed_address)?.map(|kv| kv.1);
+                    let new_info =
+                        hashed_accounts_cursor.seek_exact(hashed_address)?.map(|kv| kv.1);
                     entry.insert((old_info, new_info, HashMap::default()));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
@@ -1175,16 +1177,17 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
                 }
             }
             // insert old info into reverts.
-            reverts.entry(block_number).or_default().entry(hashed_address).or_default().0 =
+            reverts.entry(block_number).or_default().entry(address).or_default().0 =
                 Some(old_info);
         }
 
         // add storage changeset changes
         for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
-            let BlockNumberHash((block_number, hashed_address)) = block_and_address;
+            let BlockNumberAddress((block_number, address)) = block_and_address;
+            let hashed_address = keccak256(address);
             let hashed_storage_key = old_storage.key;
             // get account state or insert from hashed state.
-            let account_state = match state.entry(hashed_address) {
+            let account_state = match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
                     let present_info =
                         hashed_accounts_cursor.seek_exact(hashed_address)?.map(|kv| kv.1);
@@ -1210,7 +1213,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             reverts
                 .entry(block_number)
                 .or_default()
-                .entry(hashed_address)
+                .entry(address)
                 .or_default()
                 .1
                 .push(old_storage);
@@ -1317,7 +1320,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
     fn changed_accounts_and_blocks_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<BTreeMap<B256, Vec<u64>>> {
+    ) -> ProviderResult<BTreeMap<Address, Vec<u64>>> {
         let highest_static_block = self
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
@@ -1328,13 +1331,13 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
             let start = *range.start();
             let static_end = (*range.end()).min(highest + 1);
 
-            let mut changed_accounts_and_blocks: BTreeMap<_, Vec<u64>> = BTreeMap::default();
+            let mut changed_accounts_and_blocks: BTreeMap<Address, Vec<u64>> = BTreeMap::default();
             if start <= static_end {
                 for block in start..=static_end {
                     let block_changesets = self.account_block_changeset(block)?;
                     for changeset in block_changesets {
                         changed_accounts_and_blocks
-                            .entry(changeset.hashed_address)
+                            .entry(changeset.address)
                             .or_default()
                             .push(block);
                     }
@@ -1347,9 +1350,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
 
             let account_transitions = changeset_cursor.walk_range(range)?.try_fold(
                 BTreeMap::new(),
-                |mut accounts: BTreeMap<B256, Vec<u64>>, entry| -> ProviderResult<_> {
+                |mut accounts: BTreeMap<Address, Vec<u64>>, entry| -> ProviderResult<_> {
                     let (index, account) = entry?;
-                    accounts.entry(account.hashed_address).or_default().push(index);
+                    accounts.entry(account.address).or_default().push(index);
                     Ok(accounts)
                 },
             )?;
@@ -1363,12 +1366,12 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(BlockNumberHash, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         if self.cached_storage_settings().storage_changesets_in_static_files {
             self.static_file_provider.storage_changeset(block_number)
         } else {
             let range = block_number..=block_number;
-            let storage_range = BlockNumberHash::range(range);
+            let storage_range = BlockNumberAddress::range(range);
             self.tx
                 .cursor_dup_read::<tables::StorageChangeSets>()?
                 .walk_range(storage_range)?
@@ -1380,16 +1383,15 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
     fn get_storage_before_block(
         &self,
         block_number: BlockNumber,
-        hashed_address: B256,
+        address: Address,
         storage_key: B256,
     ) -> ProviderResult<Option<StorageEntry>> {
         if self.cached_storage_settings().storage_changesets_in_static_files {
-            self.static_file_provider
-                .get_storage_before_block(block_number, hashed_address, storage_key)
+            self.static_file_provider.get_storage_before_block(block_number, address, storage_key)
         } else {
             self.tx
                 .cursor_dup_read::<tables::StorageChangeSets>()?
-                .seek_by_key_subkey(BlockNumberHash((block_number, hashed_address)), storage_key)?
+                .seek_by_key_subkey(BlockNumberAddress((block_number, address)), storage_key)?
                 .filter(|entry| entry.key == storage_key)
                 .map(Ok)
                 .transpose()
@@ -1399,13 +1401,13 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
     fn storage_changesets_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(BlockNumberHash, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         if self.cached_storage_settings().storage_changesets_in_static_files {
             self.static_file_provider.storage_changesets_range(range)
         } else {
             self.tx
                 .cursor_dup_read::<tables::StorageChangeSets>()?
-                .walk_range(BlockNumberHashRange::from(range))?
+                .walk_range(BlockNumberAddressRange::from(range))?
                 .map(|r| r.map_err(Into::into))
                 .collect()
         }
@@ -1445,15 +1447,15 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
     fn get_account_before_block(
         &self,
         block_number: BlockNumber,
-        hashed_address: B256,
+        address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         if self.cached_storage_settings().account_changesets_in_static_files {
-            Ok(self.static_file_provider.get_account_before_block(block_number, hashed_address)?)
+            Ok(self.static_file_provider.get_account_before_block(block_number, address)?)
         } else {
             self.tx
                 .cursor_dup_read::<tables::AccountChangeSets>()?
-                .seek_by_key_subkey(block_number, hashed_address)?
-                .filter(|acc| acc.hashed_address == hashed_address)
+                .seek_by_key_subkey(block_number, address)?
+                .filter(|acc| acc.address == address)
                 .map(Ok)
                 .transpose()
         }
@@ -2128,22 +2130,22 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
             self.storage_changesets_range(range)?.into_iter().try_fold(
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<B256, BTreeSet<B256>>, entry| {
-                    let (BlockNumberHash((_, hashed_address)), storage_entry) = entry;
-                    accounts.entry(hashed_address).or_default().insert(storage_entry.key);
+                    let (BlockNumberAddress((_, address)), storage_entry) = entry;
+                    accounts.entry(keccak256(address)).or_default().insert(storage_entry.key);
                     Ok(accounts)
                 },
             )
         } else {
             self.tx
                 .cursor_read::<tables::StorageChangeSets>()?
-                .walk_range(BlockNumberHash::range(range))?
+                .walk_range(BlockNumberAddress::range(range))?
                 // fold all storages and save its old state so we can remove it from HashedStorage
                 // it is needed as it is dup table.
                 .try_fold(
                     BTreeMap::new(),
                     |mut accounts: BTreeMap<B256, BTreeSet<B256>>, entry| {
-                        let (BlockNumberHash((_, hashed_address)), storage_entry) = entry?;
-                        accounts.entry(hashed_address).or_default().insert(storage_entry.key);
+                        let (BlockNumberAddress((_, address)), storage_entry) = entry?;
+                        accounts.entry(keccak256(address)).or_default().insert(storage_entry.key);
                         Ok(accounts)
                     },
                 )
@@ -2153,13 +2155,13 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
     fn changed_storages_and_blocks_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<BTreeMap<(B256, B256), Vec<u64>>> {
+    ) -> ProviderResult<BTreeMap<(Address, B256), Vec<u64>>> {
         if self.cached_storage_settings().storage_changesets_in_static_files {
             self.storage_changesets_range(range)?.into_iter().try_fold(
                 BTreeMap::new(),
-                |mut storages: BTreeMap<(B256, B256), Vec<u64>>, (index, storage)| {
+                |mut storages: BTreeMap<(Address, B256), Vec<u64>>, (index, storage)| {
                     storages
-                        .entry((index.hashed_address(), storage.key))
+                        .entry((index.address(), storage.key))
                         .or_default()
                         .push(index.block_number());
                     Ok(storages)
@@ -2169,14 +2171,14 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
             let mut changeset_cursor = self.tx.cursor_read::<tables::StorageChangeSets>()?;
 
             let storage_changeset_lists =
-                changeset_cursor.walk_range(BlockNumberHash::range(range))?.try_fold(
+                changeset_cursor.walk_range(BlockNumberAddress::range(range))?.try_fold(
                     BTreeMap::new(),
-                    |mut storages: BTreeMap<(B256, B256), Vec<u64>>,
+                    |mut storages: BTreeMap<(Address, B256), Vec<u64>>,
                      entry|
                      -> ProviderResult<_> {
                         let (index, storage) = entry?;
                         storages
-                            .entry((index.hashed_address(), storage.key))
+                            .entry((index.address(), storage.key))
                             .or_default()
                             .push(index.block_number());
                         Ok(storages)
@@ -2347,7 +2349,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                     tracing::trace!(?address, ?storage, "Writing storage reverts");
                     for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
-                        changeset.push(StorageBeforeTx { hashed_address, key, value });
+                        changeset.push(StorageBeforeTx { address, key, value });
                     }
                 }
 
@@ -2367,10 +2369,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let block_number = first_block + block_index as BlockNumber;
             let changeset = account_block_reverts
                 .into_iter()
-                .map(|(address, info)| AccountBeforeTx {
-                    hashed_address: keccak256(address),
-                    info: info.map(Into::into),
-                })
+                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
                 .collect::<Vec<_>>();
             let mut account_changesets_writer =
                 EitherWriter::new_account_changesets(self, block_number)?;
@@ -2520,7 +2519,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let from_transaction_num =
             block_bodies.first().expect("already checked if there are blocks").first_tx_num();
 
-        let storage_range = BlockNumberHash::range(range.clone());
+        let storage_range = BlockNumberAddress::range(range.clone());
         let storage_changeset = if self.cached_storage_settings().storage_changesets_in_static_files
         {
             let changesets = self.storage_changesets_range(range.clone())?;
@@ -2636,7 +2635,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let to_transaction_num =
             block_bodies.last().expect("already checked if there are blocks").last_tx_num();
 
-        let storage_range = BlockNumberHash::range(range.clone());
+        let storage_range = BlockNumberAddress::range(range.clone());
         let storage_changeset = if let Some(highest_block) = self
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::StorageChangeSets) &&
@@ -2845,10 +2844,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         // Aggregate all block changesets and make a list of accounts that have been changed.
         // Note that collecting and then reversing the order is necessary to ensure that the
         // changes are applied in the correct order.
-        // The database already stores hashed addresses, so no need to hash again.
+        // Hash the address since changesets store plain addresses but HashedAccounts uses hashed.
         let hashed_accounts = changesets
             .into_iter()
-            .map(|(_, e)| (e.hashed_address, e.info))
+            .map(|(_, e)| (keccak256(e.address), e.info))
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
@@ -2894,14 +2893,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
 
     fn unwind_storage_hashing(
         &self,
-        changesets: impl Iterator<Item = (BlockNumberHash, StorageEntry)>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<B256Map<BTreeSet<B256>>> {
         // Aggregate all block changesets and make list of accounts that have been changed.
-        // BlockNumberHash already contains hashed address, and storage key is also hashed.
+        // BlockNumberAddress already contains hashed address, and storage key is also hashed.
         let mut hashed_storages = changesets
             .into_iter()
-            .map(|(BlockNumberHash((_, hashed_address)), storage_entry)| {
-                (hashed_address, storage_entry.key, storage_entry.value)
+            .map(|(BlockNumberAddress((_, address)), storage_entry)| {
+                (keccak256(address), storage_entry.key, storage_entry.value)
             })
             .collect::<Vec<_>>();
         hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
@@ -2987,7 +2986,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     ) -> ProviderResult<usize> {
         let mut last_indices = changesets
             .into_iter()
-            .map(|(index, account)| (account.hashed_address, *index))
+            .map(|(index, account)| (account.address, *index))
             .collect::<Vec<_>>();
         last_indices.sort_unstable_by_key(|(a, _)| *a);
 
@@ -3033,7 +3032,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
 
     fn insert_account_history_index(
         &self,
-        account_transitions: impl IntoIterator<Item = (B256, impl IntoIterator<Item = u64>)>,
+        account_transitions: impl IntoIterator<Item = (Address, impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()> {
         self.append_history_index::<_, tables::AccountsHistory>(
             account_transitions,
@@ -3043,15 +3042,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
 
     fn unwind_storage_history_indices(
         &self,
-        changesets: impl Iterator<Item = (BlockNumberHash, StorageEntry)>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<usize> {
         let mut storage_changesets = changesets
             .into_iter()
-            .map(|(BlockNumberHash((bn, hashed_address)), storage)| {
-                (hashed_address, storage.key, bn)
-            })
+            .map(|(BlockNumberAddress((bn, address)), storage)| (address, storage.key, bn))
             .collect::<Vec<_>>();
-        storage_changesets.sort_by_key(|(hashed_address, key, _)| (*hashed_address, *key));
+        storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
 
         if self.cached_storage_settings().storages_history_in_rocksdb {
             #[cfg(all(unix, feature = "rocksdb"))]
@@ -3063,14 +3060,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         } else {
             // Unwind the storage history index in MDBX.
             let mut cursor = self.tx.cursor_write::<tables::StoragesHistory>()?;
-            for &(hashed_address, hashed_slot, rem_index) in &storage_changesets {
+            for &(address, storage_key, rem_index) in &storage_changesets {
                 let partial_shard = unwind_history_shards::<_, tables::StoragesHistory, _>(
                     &mut cursor,
-                    StorageShardedKey::last(hashed_address, hashed_slot),
+                    StorageShardedKey::last(address, storage_key),
                     rem_index,
                     |storage_sharded_key| {
-                        storage_sharded_key.hashed_address == hashed_address &&
-                            storage_sharded_key.sharded_key.key == hashed_slot
+                        storage_sharded_key.address == address &&
+                            storage_sharded_key.sharded_key.key == storage_key
                     },
                 )?;
 
@@ -3078,7 +3075,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
                 // If it's not empty, the shard needs to be reinserted.
                 if !partial_shard.is_empty() {
                     cursor.insert(
-                        StorageShardedKey::last(hashed_address, hashed_slot),
+                        StorageShardedKey::last(address, storage_key),
                         &BlockNumberList::new_pre_sorted(partial_shard),
                     )?;
                 }
@@ -3099,12 +3096,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
 
     fn insert_storage_history_index(
         &self,
-        storage_transitions: impl IntoIterator<Item = ((B256, B256), impl IntoIterator<Item = u64>)>,
+        storage_transitions: impl IntoIterator<Item = ((Address, B256), impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()> {
         self.append_history_index::<_, tables::StoragesHistory>(
             storage_transitions,
-            |(hashed_address, hashed_key), highest_block_number| {
-                StorageShardedKey::new(hashed_address, hashed_key, highest_block_number)
+            |(address, storage_key), highest_block_number| {
+                StorageShardedKey::new(address, storage_key, highest_block_number)
             },
         )
     }
@@ -3376,21 +3373,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // This is necessary because with edge storage, changesets are written to static files
         // whose index isn't updated until commit, making them invisible to subsequent reads
         // within the same transaction.
-        // Note: We hash addresses since history tables now use hashed addresses.
         let (account_transitions, storage_transitions) = {
-            let mut account_transitions: BTreeMap<B256, Vec<u64>> = BTreeMap::new();
-            let mut storage_transitions: BTreeMap<(B256, B256), Vec<u64>> = BTreeMap::new();
+            let mut account_transitions: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+            let mut storage_transitions: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
             for (block_idx, block_reverts) in execution_outcome.bundle.reverts.iter().enumerate() {
                 let block_number = first_number + block_idx as u64;
                 for (address, account_revert) in block_reverts {
-                    let hashed_address = keccak256(address);
-                    account_transitions.entry(hashed_address).or_default().push(block_number);
+                    account_transitions.entry(*address).or_default().push(block_number);
                     for storage_key in account_revert.storage.keys() {
                         let key = B256::new(storage_key.to_be_bytes());
-                        storage_transitions
-                            .entry((hashed_address, key))
-                            .or_default()
-                            .push(block_number);
+                        storage_transitions.entry((*address, key)).or_default().push(block_number);
                     }
                 }
             }

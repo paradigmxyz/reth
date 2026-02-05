@@ -317,7 +317,7 @@ impl RocksDBProvider {
 
             let unique_keys: HashSet<_> = changesets
                 .into_iter()
-                .map(|(block_addr, entry)| (block_addr.hashed_address(), entry.key, checkpoint + 1))
+                .map(|(block_addr, entry)| (block_addr.address(), entry.key, checkpoint + 1))
                 .collect();
             let indices: Vec<_> = unique_keys.into_iter().collect();
 
@@ -410,7 +410,7 @@ impl RocksDBProvider {
             let changesets = provider.account_changesets_range(batch_start..=batch_end)?;
 
             let mut addresses = HashSet::with_capacity(changesets.len());
-            addresses.extend(changesets.iter().map(|(_, cs)| cs.hashed_address));
+            addresses.extend(changesets.iter().map(|(_, cs)| cs.address));
             let unwind_from = checkpoint + 1;
             let indices: Vec<_> = addresses.into_iter().map(|addr| (addr, unwind_from)).collect();
 

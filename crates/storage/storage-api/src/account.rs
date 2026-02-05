@@ -41,14 +41,14 @@ pub trait AccountExtReader {
         _iter: impl IntoIterator<Item = Address>,
     ) -> ProviderResult<Vec<(Address, Option<Account>)>>;
 
-    /// Iterate over account changesets and return all hashed addresses that were changed alongside
+    /// Iterate over account changesets and return all addresses that were changed alongside
     /// each specific set of blocks.
     ///
     /// NOTE: Get inclusive range of blocks.
     fn changed_accounts_and_blocks_with_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<BTreeMap<B256, Vec<BlockNumber>>>;
+    ) -> ProviderResult<BTreeMap<Address, Vec<BlockNumber>>>;
 }
 
 /// `AccountChange` reader
@@ -60,13 +60,13 @@ pub trait ChangeSetReader {
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>>;
 
-    /// Search the block's changesets for the given hashed address, and return the result.
+    /// Search the block's changesets for the given address, and return the result.
     ///
     /// Returns `None` if the account was not changed in this block.
     fn get_account_before_block(
         &self,
         block_number: BlockNumber,
-        hashed_address: B256,
+        address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>>;
 
     /// Get all account changesets in a range of blocks.

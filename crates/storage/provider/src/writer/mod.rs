@@ -6,7 +6,7 @@ mod tests {
     use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-        models::{AccountBeforeTx, BlockNumberHash},
+        models::{AccountBeforeTx, BlockNumberAddress},
         tables,
         transaction::{DbTx, DbTxMut},
     };
@@ -330,9 +330,9 @@ mod tests {
             .cursor_dup_read::<tables::StorageChangeSets>()
             .expect("Could not open storage changeset cursor");
         assert_eq!(
-            changeset_cursor.seek_exact(BlockNumberHash((1, address_a))).unwrap(),
+            changeset_cursor.seek_exact(BlockNumberAddress((1, address_a))).unwrap(),
             Some((
-                BlockNumberHash((1, address_a)),
+                BlockNumberAddress((1, address_a)),
                 StorageEntry { key: B256::ZERO, value: U256::from(0) }
             )),
             "Slot 0 for account A should have changed from 0"
@@ -340,7 +340,7 @@ mod tests {
         assert_eq!(
             changeset_cursor.next_dup().unwrap(),
             Some((
-                BlockNumberHash((1, address_a)),
+                BlockNumberAddress((1, address_a)),
                 StorageEntry { key: B256::from(U256::from(1).to_be_bytes()), value: U256::from(0) }
             )),
             "Slot 1 for account A should have changed from 0"
@@ -352,9 +352,9 @@ mod tests {
         );
 
         assert_eq!(
-            changeset_cursor.seek_exact(BlockNumberHash((1, address_b))).unwrap(),
+            changeset_cursor.seek_exact(BlockNumberAddress((1, address_b))).unwrap(),
             Some((
-                BlockNumberHash((1, address_b)),
+                BlockNumberAddress((1, address_b)),
                 StorageEntry { key: B256::from(U256::from(1).to_be_bytes()), value: U256::from(1) }
             )),
             "Slot 1 for account B should have changed from 1"
@@ -392,9 +392,9 @@ mod tests {
         );
 
         assert_eq!(
-            changeset_cursor.seek_exact(BlockNumberHash((2, address_a))).unwrap(),
+            changeset_cursor.seek_exact(BlockNumberAddress((2, address_a))).unwrap(),
             Some((
-                BlockNumberHash((2, address_a)),
+                BlockNumberAddress((2, address_a)),
                 StorageEntry { key: B256::ZERO, value: U256::from(1) }
             )),
             "Slot 0 for account A should have changed from 1 on deletion"
@@ -402,7 +402,7 @@ mod tests {
         assert_eq!(
             changeset_cursor.next_dup().unwrap(),
             Some((
-                BlockNumberHash((2, address_a)),
+                BlockNumberAddress((2, address_a)),
                 StorageEntry { key: B256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
             )),
             "Slot 1 for account A should have changed from 2 on deletion"
@@ -630,14 +630,14 @@ mod tests {
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((0, address1)),
+                BlockNumberAddress((0, address1)),
                 StorageEntry { key: B256::with_last_byte(0), value: U256::ZERO }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((0, address1)),
+                BlockNumberAddress((0, address1)),
                 StorageEntry { key: B256::with_last_byte(1), value: U256::ZERO }
             )))
         );
@@ -647,7 +647,7 @@ mod tests {
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((1, address1)),
+                BlockNumberAddress((1, address1)),
                 StorageEntry { key: B256::with_last_byte(0), value: U256::from(1) }
             )))
         );
@@ -658,14 +658,14 @@ mod tests {
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((2, address1)),
+                BlockNumberAddress((2, address1)),
                 StorageEntry { key: B256::with_last_byte(0), value: U256::from(2) }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((2, address1)),
+                BlockNumberAddress((2, address1)),
                 StorageEntry { key: B256::with_last_byte(1), value: U256::from(2) }
             )))
         );
@@ -680,21 +680,21 @@ mod tests {
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((4, address1)),
+                BlockNumberAddress((4, address1)),
                 StorageEntry { key: B256::with_last_byte(0), value: U256::ZERO }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((4, address1)),
+                BlockNumberAddress((4, address1)),
                 StorageEntry { key: B256::with_last_byte(2), value: U256::ZERO }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((4, address1)),
+                BlockNumberAddress((4, address1)),
                 StorageEntry { key: B256::with_last_byte(6), value: U256::ZERO }
             )))
         );
@@ -706,21 +706,21 @@ mod tests {
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((5, address1)),
+                BlockNumberAddress((5, address1)),
                 StorageEntry { key: B256::with_last_byte(0), value: U256::from(2) }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((5, address1)),
+                BlockNumberAddress((5, address1)),
                 StorageEntry { key: B256::with_last_byte(2), value: U256::from(4) }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((5, address1)),
+                BlockNumberAddress((5, address1)),
                 StorageEntry { key: B256::with_last_byte(6), value: U256::from(6) }
             )))
         );
@@ -733,7 +733,7 @@ mod tests {
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((7, address1)),
+                BlockNumberAddress((7, address1)),
                 StorageEntry { key: B256::with_last_byte(0), value: U256::ZERO }
             )))
         );
@@ -831,20 +831,20 @@ mod tests {
             .tx_ref()
             .cursor_dup_read::<tables::StorageChangeSets>()
             .expect("Could not open plain storage state cursor");
-        let range = BlockNumberHash::range(1..=1);
+        let range = BlockNumberAddress::range(1..=1);
         let mut storage_changes = storage_changeset_cursor.walk_range(range).unwrap();
 
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((1, address1)),
+                BlockNumberAddress((1, address1)),
                 StorageEntry { key: B256::with_last_byte(0), value: U256::from(1) }
             )))
         );
         assert_eq!(
             storage_changes.next(),
             Some(Ok((
-                BlockNumberHash((1, address1)),
+                BlockNumberAddress((1, address1)),
                 StorageEntry { key: B256::with_last_byte(1), value: U256::from(2) }
             )))
         );

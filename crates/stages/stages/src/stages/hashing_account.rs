@@ -117,9 +117,7 @@ mod test_utils {
                         balance: balance - U256::from(1),
                         bytecode_hash: None,
                     };
-                    let hashed_address = alloy_primitives::keccak256(addr);
-                    let acc_before_tx =
-                        AccountBeforeTx { hashed_address, info: Some(prev_acc) };
+                    let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
                     acc_changeset_cursor.append(t, &acc_before_tx)?;
                 }
             }

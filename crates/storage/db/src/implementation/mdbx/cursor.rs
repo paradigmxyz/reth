@@ -369,7 +369,7 @@ mod tests {
     use alloy_primitives::{address, keccak256, Address, B256, U256};
     use reth_db_api::{
         cursor::{DbCursorRO, DbDupCursorRW},
-        models::{BlockNumberHash, ClientVersion},
+        models::{BlockNumberAddress, ClientVersion},
         table::TableImporter,
         transaction::{DbTx, DbTxMut},
     };
@@ -400,31 +400,31 @@ mod tests {
         let target_db = create_test_db();
         let test_data = vec![
             (
-                BlockNumberHash((100, hash1)),
+                BlockNumberAddress((100, hash1)),
                 StorageEntry { key: B256::with_last_byte(1), value: U256::from(100) },
             ),
             (
-                BlockNumberHash((100, hash1)),
+                BlockNumberAddress((100, hash1)),
                 StorageEntry { key: B256::with_last_byte(2), value: U256::from(200) },
             ),
             (
-                BlockNumberHash((100, hash1)),
+                BlockNumberAddress((100, hash1)),
                 StorageEntry { key: B256::with_last_byte(3), value: U256::from(300) },
             ),
             (
-                BlockNumberHash((101, hash1)),
+                BlockNumberAddress((101, hash1)),
                 StorageEntry { key: B256::with_last_byte(1), value: U256::from(400) },
             ),
             (
-                BlockNumberHash((101, hash2)),
+                BlockNumberAddress((101, hash2)),
                 StorageEntry { key: B256::with_last_byte(1), value: U256::from(500) },
             ),
             (
-                BlockNumberHash((101, hash2)),
+                BlockNumberAddress((101, hash2)),
                 StorageEntry { key: B256::with_last_byte(2), value: U256::from(600) },
             ),
             (
-                BlockNumberHash((102, hash3)),
+                BlockNumberAddress((102, hash3)),
                 StorageEntry { key: B256::with_last_byte(1), value: U256::from(700) },
             ),
         ];
@@ -446,8 +446,8 @@ mod tests {
         target_tx
             .import_table_with_range::<StorageChangeSets, _>(
                 &source_tx,
-                Some(BlockNumberHash((100, B256::ZERO))),
-                BlockNumberHash((102, B256::repeat_byte(0xff))),
+                Some(BlockNumberAddress((100, B256::ZERO))),
+                BlockNumberAddress((102, B256::repeat_byte(0xff))),
             )
             .unwrap();
         target_tx.commit().unwrap();

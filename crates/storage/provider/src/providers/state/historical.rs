@@ -132,15 +132,6 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     where
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
-        let hashed_address = keccak256(address);
-        self.hashed_address_history_lookup(hashed_address)
-    }
-
-    /// Lookup an account in the `AccountsHistory` table by hashed address using `EitherReader`.
-    pub fn hashed_address_history_lookup(&self, hashed_address: B256) -> ProviderResult<HistoryInfo>
-    where
-        Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
-    {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
@@ -148,7 +139,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         self.provider.with_rocksdb_tx(|rocks_tx_ref| {
             let mut reader = EitherReader::new_accounts_history(self.provider, rocks_tx_ref)?;
             reader.account_history_info(
-                hashed_address,
+                address,
                 self.block_number,
                 self.lowest_available_blocks.account_history_block_number,
             )
@@ -168,12 +159,11 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        let hashed_address = keccak256(address);
         let hashed_storage_key = keccak256(storage_key);
         self.provider.with_rocksdb_tx(|rocks_tx_ref| {
             let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
             reader.storage_history_info(
-                hashed_address,
+                address,
                 hashed_storage_key,
                 self.block_number,
                 self.lowest_available_blocks.storage_history_block_number,
@@ -261,27 +251,29 @@ impl<
 {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        let hashed_address = keccak256(address);
-        self.hashed_basic_account(hashed_address)
-    }
-
-    fn hashed_basic_account(&self, hashed_address: B256) -> ProviderResult<Option<Account>> {
-        match self.hashed_address_history_lookup(hashed_address)? {
+        match self.account_history_lookup(*address)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => {
                 // Use ChangeSetReader trait method to get the account from changesets
                 self.provider
-                    .get_account_before_block(changeset_block_number, hashed_address)?
+                    .get_account_before_block(changeset_block_number, *address)?
                     .ok_or(ProviderError::AccountChangesetNotFound {
                         block_number: changeset_block_number,
-                        hashed_address,
+                        address: *address,
                     })
                     .map(|account_before| account_before.info)
             }
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                let hashed_address = keccak256(address);
                 Ok(self.tx().get::<tables::HashedAccounts>(hashed_address)?)
             }
         }
+    }
+
+    fn hashed_basic_account(&self, hashed_address: B256) -> ProviderResult<Option<Account>> {
+        // For hashed address lookup, we can only check HashedAccounts directly
+        // History and changesets use plain addresses which we can't reverse from hash
+        Ok(self.tx().get::<tables::HashedAccounts>(hashed_address)?)
     }
 }
 
@@ -434,13 +426,12 @@ impl<
         address: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        let hashed_address = keccak256(address);
         let hashed_storage_key = keccak256(storage_key);
         match self.storage_history_lookup(address, storage_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => self
                 .provider
-                .get_storage_before_block(changeset_block_number, hashed_address, hashed_storage_key)?
+                .get_storage_before_block(changeset_block_number, address, hashed_storage_key)?
                 .ok_or_else(|| ProviderError::StorageChangesetNotFound {
                     block_number: changeset_block_number,
                     address,
@@ -449,6 +440,7 @@ impl<
                 .map(|entry| entry.value)
                 .map(Some),
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                let hashed_address = keccak256(address);
                 Ok(self
                     .tx()
                     .cursor_dup_read::<tables::HashedStorages>()?

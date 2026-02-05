@@ -4,7 +4,7 @@ use reth_config::config::{EtlConfig, IndexHistoryConfig};
 #[cfg(all(unix, feature = "rocksdb"))]
 use reth_db_api::Tables;
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, BlockNumberHash},
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
     tables,
     transaction::DbTxMut,
 };
@@ -130,11 +130,11 @@ where
         } else {
             collect_history_indices::<_, tables::StorageChangeSets, tables::StoragesHistory, _>(
                 provider,
-                BlockNumberHash::range(range.clone()),
+                BlockNumberAddress::range(range.clone()),
                 |(hashed_address, storage_key), highest_block_number| {
                     StorageShardedKey::new(hashed_address, storage_key, highest_block_number)
                 },
-                |(key, value)| (key.block_number(), (key.hashed_address(), value.key)),
+                |(key, value)| (key.block_number(), (key.address(), value.key)),
                 &self.etl_config,
             )?
         };
@@ -184,7 +184,7 @@ mod tests {
     use reth_db_api::{
         cursor::DbCursorRO,
         models::{
-            sharded_key, storage_sharded_key::NUM_OF_INDICES_IN_SHARD, BlockNumberHash, ShardedKey,
+            sharded_key, storage_sharded_key::NUM_OF_INDICES_IN_SHARD, BlockNumberAddress, ShardedKey,
             StoredBlockBodyIndices,
         },
         transaction::DbTx,
@@ -210,8 +210,8 @@ mod tests {
         StorageEntry { key, value: U256::ZERO }
     }
 
-    fn block_number_hash(block_number: u64) -> BlockNumberHash {
-        BlockNumberHash((block_number, keccak256(ADDRESS)))
+    fn block_number_hash(block_number: u64) -> BlockNumberAddress {
+        BlockNumberAddress((block_number, keccak256(ADDRESS)))
     }
 
     /// Shard for account
@@ -630,7 +630,7 @@ mod tests {
                     provider.tx_ref().cursor_read::<tables::StorageChangeSets>()?;
 
                 let storage_transitions = changeset_cursor
-                    .walk_range(BlockNumberHash::range(start_block..=end_block))?
+                    .walk_range(BlockNumberAddress::range(start_block..=end_block))?
                     .try_fold(
                         BTreeMap::new(),
                         |mut storages: BTreeMap<(B256, B256), Vec<u64>>,
@@ -638,7 +638,7 @@ mod tests {
                          -> Result<_, TestRunnerError> {
                             let (index, storage) = entry?;
                             storages
-                                .entry((index.hashed_address(), storage.key))
+                                .entry((index.address(), storage.key))
                                 .or_default()
                                 .push(index.block_number());
                             Ok(storages)

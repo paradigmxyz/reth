@@ -4,7 +4,7 @@ use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{
     keccak256,
-    map::{B256Map, HashMap},
+    map::{AddressMap, B256Map, HashMap},
     Address, B256, U256,
 };
 use reth_chainspec::EthChainSpec;
@@ -312,14 +312,13 @@ where
 {
     let capacity = alloc.size_hint().1.unwrap_or(0);
     let mut state_init: BundleStateInit =
-        B256Map::with_capacity_and_hasher(capacity, Default::default());
-    let mut reverts_init: B256Map<_> =
-        B256Map::with_capacity_and_hasher(capacity, Default::default());
+        AddressMap::with_capacity_and_hasher(capacity, Default::default());
+    let mut reverts_init: AddressMap<_> =
+        AddressMap::with_capacity_and_hasher(capacity, Default::default());
     let mut contracts: B256Map<Bytecode> =
         B256Map::with_capacity_and_hasher(capacity, Default::default());
 
     for (address, account) in alloc {
-        let hashed_address = keccak256(address);
         let bytecode_hash = if let Some(code) = &account.code {
             match Bytecode::new_raw_checked(code.clone()) {
                 Ok(bytecode) => {
@@ -351,12 +350,12 @@ where
             .unwrap_or_default();
 
         reverts_init.insert(
-            hashed_address,
+            *address,
             (Some(None), storage.keys().map(|k| StorageEntry::new(*k, U256::ZERO)).collect()),
         );
 
         state_init.insert(
-            hashed_address,
+            *address,
             (
                 None,
                 Some(Account {
@@ -457,8 +456,7 @@ where
         let mut writer = EitherWriter::new_accounts_history(provider, batch)?;
         let list = BlockNumberList::new([block]).expect("single block always fits");
         for (addr, _) in alloc.clone() {
-            let hashed_address = keccak256(addr);
-            writer.upsert_account_history(ShardedKey::last(hashed_address), &list)?;
+            writer.upsert_account_history(ShardedKey::last(*addr), &list)?;
         }
         trace!(target: "reth::cli", "Inserted account history");
         Ok(((), writer.into_raw_rocksdb_batch()))
@@ -469,9 +467,8 @@ where
         let list = BlockNumberList::new([block]).expect("single block always fits");
         for (addr, account) in alloc {
             if let Some(storage) = &account.storage {
-                let hashed_address = keccak256(addr);
                 for key in storage.keys() {
-                    writer.upsert_storage_history(StorageShardedKey::last(hashed_address, *key), &list)?;
+                    writer.upsert_storage_history(StorageShardedKey::last(*addr, *key), &list)?;
                 }
             }
         }

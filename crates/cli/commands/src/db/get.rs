@@ -93,7 +93,7 @@ impl Command {
                     if let Some(storage_key) = storage_key {
                         let entry = provider.get_storage_before_block(
                             key.block_number(),
-                            key.hashed_address(),
+                            key.address(),
                             storage_key,
                         )?;
 

@@ -1,7 +1,7 @@
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{Address, BlockNumber, B256};
 use auto_impl::auto_impl;
 use core::ops::{RangeBounds, RangeInclusive};
-use reth_db_api::models::BlockNumberHash;
+use reth_db_api::models::BlockNumberAddress;
 use reth_db_models::AccountBeforeTx;
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
@@ -28,7 +28,7 @@ pub trait HistoryWriter: Send {
     /// Insert account change index to database. Used inside `AccountHistoryIndex` stage
     fn insert_account_history_index(
         &self,
-        index_updates: impl IntoIterator<Item = (B256, impl IntoIterator<Item = u64>)>,
+        index_updates: impl IntoIterator<Item = (Address, impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()>;
 
     /// Unwind and clear storage history indices.
@@ -36,7 +36,7 @@ pub trait HistoryWriter: Send {
     /// Returns number of changesets walked.
     fn unwind_storage_history_indices(
         &self,
-        changesets: impl Iterator<Item = (BlockNumberHash, StorageEntry)>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<usize>;
 
     /// Unwind and clear storage history indices in a given block range.
@@ -50,7 +50,7 @@ pub trait HistoryWriter: Send {
     /// Insert storage change index to database. Used inside `StorageHistoryIndex` stage
     fn insert_storage_history_index(
         &self,
-        storage_transitions: impl IntoIterator<Item = ((B256, B256), impl IntoIterator<Item = u64>)>,
+        storage_transitions: impl IntoIterator<Item = ((Address, B256), impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()>;
 
     /// Read account/storage changesets and update account/storage history indices.

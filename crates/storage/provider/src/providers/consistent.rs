@@ -12,12 +12,10 @@ use alloy_eips::{
     eip2718::Encodable2718, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
     HashOrNumber,
 };
-use alloy_primitives::{
-    keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
-};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::ChainInfo;
-use reth_db_api::models::{AccountBeforeTx, BlockNumberHash, StoredBlockBodyIndices};
+use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry};
@@ -232,7 +230,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     fn populate_bundle_state(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
-        storage_changeset: Vec<(BlockNumberHash, StorageEntry)>,
+        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         block_range_end: BlockNumber,
     ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
         unimplemented!(
@@ -1262,7 +1260,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(BlockNumberHash, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
@@ -1277,10 +1275,10 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .into_iter()
                 .flatten()
                 .flat_map(|revert: PlainStorageRevert| {
-                    let hashed_address = keccak256(revert.address);
+                    let address = revert.address;
                     revert.storage_revert.into_iter().map(move |(key, value)| {
                         (
-                            BlockNumberHash((block_number, hashed_address)),
+                            BlockNumberAddress((block_number, address)),
                             StorageEntry { key: key.into(), value: value.to_previous_value() },
                         )
                     })
@@ -1314,7 +1312,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
     fn get_storage_before_block(
         &self,
         block_number: BlockNumber,
-        hashed_address: B256,
+        address: Address,
         storage_key: B256,
     ) -> ProviderResult<Option<StorageEntry>> {
         if let Some(state) =
@@ -1331,7 +1329,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .into_iter()
                 .flatten()
                 .find_map(|revert: PlainStorageRevert| {
-                    if keccak256(revert.address) != hashed_address {
+                    if revert.address != address {
                         return None
                     }
                     revert.storage_revert.into_iter().find_map(|(key, value)| {
@@ -1354,15 +1352,14 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 return Err(ProviderError::StateAtBlockPruned(block_number))
             }
 
-            self.storage_provider
-                .get_storage_before_block(block_number, hashed_address, storage_key)
+            self.storage_provider.get_storage_before_block(block_number, address, storage_key)
         }
     }
 
     fn storage_changesets_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(BlockNumberHash, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         let range = to_range(range);
         let mut changesets = Vec::new();
         let database_start = range.start;
@@ -1384,10 +1381,10 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .into_iter()
                     .flatten()
                     .flat_map(|revert: PlainStorageRevert| {
-                        let hashed_address = keccak256(revert.address);
+                        let address = revert.address;
                         revert.storage_revert.into_iter().map(move |(key, value)| {
                             (
-                                BlockNumberHash((state.number(), hashed_address)),
+                                BlockNumberAddress((state.number(), address)),
                                 StorageEntry { key: key.into(), value: value.to_previous_value() },
                             )
                         })
@@ -1464,10 +1461,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .accounts
                 .into_iter()
                 .flatten()
-                .map(|(address, info)| AccountBeforeTx {
-                    hashed_address: keccak256(address),
-                    info: info.map(Into::into),
-                })
+                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
                 .collect();
             Ok(changesets)
         } else {
@@ -1497,7 +1491,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
     fn get_account_before_block(
         &self,
         block_number: BlockNumber,
-        hashed_address: B256,
+        address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
@@ -1513,11 +1507,8 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .accounts
                 .into_iter()
                 .flatten()
-                .find(|(addr, _)| keccak256(addr) == hashed_address)
-                .map(|(address, info)| AccountBeforeTx {
-                    hashed_address: keccak256(address),
-                    info: info.map(Into::into),
-                });
+                .find(|(addr, _)| *addr == address)
+                .map(|(addr, info)| AccountBeforeTx { address: addr, info: info.map(Into::into) });
             Ok(changeset)
         } else {
             // Perform checks on whether or not changesets exist for the block.
@@ -1539,7 +1530,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             }
 
             // Delegate to the storage provider for database lookups
-            self.storage_provider.get_account_before_block(block_number, hashed_address)
+            self.storage_provider.get_account_before_block(block_number, address)
         }
     }
 
@@ -1571,9 +1562,9 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                     .into_iter()
                     .flatten()
                     .map(|(address, info)| AccountBeforeTx {
-                    hashed_address: keccak256(address),
-                    info: info.map(Into::into),
-                });
+                        address,
+                        info: info.map(Into::into),
+                    });
 
                 for changeset in block_changesets {
                     changesets.push((state.number(), changeset));
@@ -2022,7 +2013,7 @@ mod tests {
                 .account_block_changeset(last_database_block)
                 .unwrap()
                 .into_iter()
-                .sorted_by_key(|entry| entry.hashed_address)
+                .sorted_by_key(|entry| entry.address)
                 .collect::<Vec<_>>(),
             database_changesets
                 .into_iter()
@@ -2033,7 +2024,7 @@ mod tests {
                     hashed_address: keccak256(address),
                     info: Some(account),
                 })
-                .sorted_by_key(|entry| entry.hashed_address)
+                .sorted_by_key(|entry| entry.address)
                 .collect::<Vec<_>>()
         );
         assert_eq!(
@@ -2041,7 +2032,7 @@ mod tests {
                 .account_block_changeset(first_in_memory_block)
                 .unwrap()
                 .into_iter()
-                .sorted_by_key(|entry| entry.hashed_address)
+                .sorted_by_key(|entry| entry.address)
                 .collect::<Vec<_>>(),
             in_memory_changesets
                 .into_iter()
@@ -2049,7 +2040,7 @@ mod tests {
                     hashed_address: keccak256(address),
                     info: Some(account),
                 })
-                .sorted_by_key(|entry| entry.hashed_address)
+                .sorted_by_key(|entry| entry.address)
                 .collect::<Vec<_>>()
         );
 
