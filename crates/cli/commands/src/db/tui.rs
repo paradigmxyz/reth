@@ -157,7 +157,7 @@ where
         self.list_state.select(Some(
             self.list_state
                 .selected()
-                .map(|i| if i >= self.entries.len() - 1 { 0 } else { i + 1 })
+                .map(|i| if i >= self.entries.len().saturating_sub(1) { 0 } else { i + 1 })
                 .unwrap_or(0),
         ));
     }
@@ -167,7 +167,7 @@ where
         self.list_state.select(Some(
             self.list_state
                 .selected()
-                .map(|i| if i == 0 { self.entries.len() - 1 } else { i - 1 })
+                .map(|i| if i == 0 { self.entries.len().saturating_sub(1) } else { i - 1 })
                 .unwrap_or(0),
         ));
     }
