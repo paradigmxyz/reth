@@ -150,38 +150,25 @@ where
         {
             num_entries += 1;
             let nibbles = StoredNibblesSubKey(*nibbles);
+            // Delete the old entry if it exists.
             op_counts.seek_count += 1;
-            let exists = self
+            if self
                 .cursor
                 .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
                 .filter(|e| e.nibbles == nibbles)
-                .is_some();
+                .is_some()
+            {
+                op_counts.delete_count += 1;
+                self.cursor.delete_current()?;
+            }
 
-            match (exists, maybe_updated) {
-                (true, Some(node)) => {
-                    // Update existing entry using replace_current (avoids delete + upsert)
-                    op_counts.upsert_count += 1;
-                    self.cursor.replace_current(
-                        self.hashed_address,
-                        StorageTrieEntry { nibbles, node: node.clone() },
-                    )?;
-                }
-                (true, None) => {
-                    // Delete existing entry
-                    op_counts.delete_count += 1;
-                    self.cursor.delete_current()?;
-                }
-                (false, Some(node)) => {
-                    // Insert new entry
-                    op_counts.upsert_count += 1;
-                    self.cursor.upsert(
-                        self.hashed_address,
-                        &StorageTrieEntry { nibbles, node: node.clone() },
-                    )?;
-                }
-                (false, None) => {
-                    // Nothing to do - entry doesn't exist and no update
-                }
+            // There is an updated version of this node, insert new entry.
+            if let Some(node) = maybe_updated {
+                op_counts.upsert_count += 1;
+                self.cursor.upsert(
+                    self.hashed_address,
+                    &StorageTrieEntry { nibbles, node: node.clone() },
+                )?;
             }
         }
 
@@ -362,56 +349,5 @@ mod tests {
         let nodes: Vec<_> = entries.iter().map(|(_, e)| e.node.clone()).collect();
         assert!(nodes.contains(&value1), "Original value should still exist");
         assert!(nodes.contains(&value2), "New value should be appended");
-    }
-
-    #[test]
-    fn test_replace_current_updates_without_duplicates() {
-        use reth_db_api::cursor::DbDupCursorRW;
-
-        let factory = create_test_provider_factory();
-        let provider = factory.provider_rw().unwrap();
-        let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
-
-        let hashed_address = B256::random();
-        let nibbles = StoredNibblesSubKey::from(vec![0x1, 0x2]);
-
-        // Insert initial value
-        let value1 = BranchNodeCompact::new(1, 1, 0, vec![], None);
-        cursor
-            .upsert(
-                hashed_address,
-                &StorageTrieEntry { nibbles: nibbles.clone(), node: value1.clone() },
-            )
-            .unwrap();
-
-        // Seek to the entry and use replace_current
-        let found = cursor
-            .seek_by_key_subkey(hashed_address, nibbles.clone())
-            .unwrap()
-            .filter(|e| e.nibbles == nibbles);
-        assert!(found.is_some(), "Entry should exist");
-
-        let value2 = BranchNodeCompact::new(2, 2, 0, vec![], None);
-        cursor
-            .replace_current(
-                hashed_address,
-                StorageTrieEntry { nibbles: nibbles.clone(), node: value2.clone() },
-            )
-            .unwrap();
-
-        // Verify only one entry exists (not two like with plain upsert)
-        let entries: Vec<_> = cursor
-            .walk_dup(Some(hashed_address), None)
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-
-        assert_eq!(
-            entries.len(),
-            1,
-            "replace_current should update in place, not append. Got {} entries",
-            entries.len()
-        );
-        assert_eq!(entries[0].1.node, value2, "Value should be updated");
     }
 }

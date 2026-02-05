@@ -391,10 +391,4 @@ impl<T: DupSort> DbDupCursorRW<T> for CursorMock {
     fn append_dup(&mut self, _key: <T>::Key, _value: <T>::Value) -> Result<(), DatabaseError> {
         Ok(())
     }
-
-    /// Replaces the value at the current cursor position.
-    /// **Mock behavior**: Always succeeds without modifying any data.
-    fn replace_current(&mut self, _key: <T>::Key, _value: <T>::Value) -> Result<(), DatabaseError> {
-        Ok(())
-    }
 }
