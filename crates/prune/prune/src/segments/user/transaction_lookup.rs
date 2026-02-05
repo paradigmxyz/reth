@@ -224,18 +224,26 @@ impl TransactionLookup {
         rocksdb.clear::<tables::TransactionHashNumbers>()?;
         trace!(target: "pruner", "Cleared transaction lookup table (RocksDB, no MDBX range)");
 
-        // Get the last transaction number from static files for the checkpoint
+        // Get checkpoint from static files. Use the actual highest block/tx from static files
+        // to ensure consistency, clamped to to_block (we shouldn't report pruning beyond to_block).
         let static_file_provider = provider.static_file_provider();
-        let highest_tx = static_file_provider
-            .get_highest_static_file_tx(StaticFileSegment::Transactions)
-            .unwrap_or(0);
+        let highest_static_block =
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Transactions);
+        let highest_tx =
+            static_file_provider.get_highest_static_file_tx(StaticFileSegment::Transactions);
+
+        // Use the minimum of to_block and highest static block for consistency
+        let checkpoint_block = match highest_static_block {
+            Some(static_block) => Some(to_block.min(static_block)),
+            None => Some(to_block),
+        };
 
         Ok(SegmentOutput {
             progress: PruneProgress::Finished,
             pruned: 0, // RocksDB clear doesn't return count
             checkpoint: Some(SegmentOutputCheckpoint {
-                block_number: Some(to_block),
-                tx_number: Some(highest_tx),
+                block_number: checkpoint_block,
+                tx_number: highest_tx,
             }),
         })
     }
@@ -659,10 +667,24 @@ mod tests {
         let result = segment.prune(&provider, input).unwrap();
         provider.commit().expect("commit");
 
-        // Verify pruning completed successfully
+        // Verify pruning completed successfully with correct checkpoint
         assert_matches!(
             result,
             SegmentOutput { progress: PruneProgress::Finished, checkpoint: Some(_), .. }
+        );
+
+        // Verify checkpoint values are consistent with static files
+        let checkpoint = result.checkpoint.unwrap();
+        let highest_tx = tx_hash_numbers.len() as u64 - 1; // 0-indexed
+        assert_eq!(
+            checkpoint.block_number,
+            Some(to_block),
+            "Checkpoint block should match to_block (which equals highest static block)"
+        );
+        assert_eq!(
+            checkpoint.tx_number,
+            Some(highest_tx),
+            "Checkpoint tx should match highest static file tx"
         );
 
         // Verify RocksDB is now empty
