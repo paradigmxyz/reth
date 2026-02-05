@@ -5,26 +5,24 @@ use crate::{
 };
 use std::fmt::Debug;
 
-/// Source of arena hint value after floor/cap was applied.
+/// Source of arena hint value after floor was applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ArenaHintSource {
-    /// Raw estimate was used (no floor/cap applied)
+    /// Raw estimate was used (no floor applied)
     #[default]
     Estimated = 0,
     /// Floor was applied (estimate was below minimum)
     Floored = 1,
-    /// Cap was applied (estimate exceeded maximum)
-    Capped = 2,
 }
 
 /// Estimation stats for a single table's arena hint.
 ///
-/// Used for tracking whether arena hint estimation is working or always hitting floor/cap.
+/// Used for tracking whether arena hint estimation is working or always hitting floor.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ArenaHintEstimationStats {
-    /// Raw calculated estimate before floor/cap
+    /// Raw calculated estimate before floor
     pub estimated: usize,
-    /// Final value used after floor/cap
+    /// Final value used after floor
     pub actual: usize,
     /// Source of the final value
     pub source: ArenaHintSource,
