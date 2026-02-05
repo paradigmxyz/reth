@@ -598,30 +598,6 @@ where
         let (accounts_result, storages_result) = maybe_join(
             num_storage_updates.min(num_account_updates) > 100,
             || {
-                let _span =
-                    debug_span!(parent: &parent_span, "process_account_leaf_updates", num_updates = num_account_updates)
-                        .entered();
-
-                account_trie.update_leaves(account_updates, |target, min_len| {
-                    match self.fetched_account_targets.entry(target) {
-                        Entry::Occupied(mut entry) => {
-                            if min_len < *entry.get() {
-                                entry.insert(min_len);
-                                self.pending_targets
-                                    .account_targets
-                                    .push(Target::new(target).with_min_len(min_len));
-                            }
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(min_len);
-                            self.pending_targets
-                                .account_targets
-                                .push(Target::new(target).with_min_len(min_len));
-                        }
-                    }
-                })
-            },
-            || {
                 let _updates_span =
                     debug_span!(parent: &parent_span, "process_storage_leaf_updates", num_updates = num_storage_updates)
                         .entered();
@@ -656,6 +632,30 @@ where
                 }
 
                 Ok(())
+            },
+            || {
+                let _span =
+                    debug_span!(parent: &parent_span, "process_account_leaf_updates", num_updates = num_account_updates)
+                        .entered();
+
+                account_trie.update_leaves(account_updates, |target, min_len| {
+                    match self.fetched_account_targets.entry(target) {
+                        Entry::Occupied(mut entry) => {
+                            if min_len < *entry.get() {
+                                entry.insert(min_len);
+                                self.pending_targets
+                                    .account_targets
+                                    .push(Target::new(target).with_min_len(min_len));
+                            }
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(min_len);
+                            self.pending_targets
+                                .account_targets
+                                .push(Target::new(target).with_min_len(min_len));
+                        }
+                    }
+                })
             },
         );
 
