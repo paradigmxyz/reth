@@ -82,6 +82,7 @@ exclude_crates=(
   reth-era-utils # tokio
   reth-tracing-otlp
   reth-node-ethstats
+  reth-db-tune # rocksdb
 )
 
 # Array to hold the results
