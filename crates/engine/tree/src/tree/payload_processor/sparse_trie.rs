@@ -11,7 +11,9 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
 use reth_primitives_traits::{Account, ParallelBridgeBuffered};
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, Nibbles,
@@ -640,33 +642,39 @@ where
                 if num_storage_updates > 100 {
                     // Process all storage updates in parallel, skipping tries with no pending
                     // updates.
-                    let storage_results = storage_updates
-                    .iter_mut()
-                    .filter(|(_, updates)| !updates.is_empty())
-                    .map(|(address, updates)| {
-                        let trie = storage_tries.take_or_create_trie(address);
-                        let fetched =
-                            self.fetched_storage_targets.remove(address).unwrap_or_default();
+                    let storage_updates = storage_updates
+                        .iter_mut()
+                        .filter(|(_, updates)| !updates.is_empty())
+                        .map(|(address, updates)| {
+                            let trie = storage_tries.take_or_create_trie(address);
+                            let fetched =
+                                self.fetched_storage_targets.remove(address).unwrap_or_default();
 
-                        (address, updates, fetched, trie)
-                    })
-                    .par_bridge_buffered()
-                    .map(|(address, updates, mut fetched, mut trie)| {
-                        let _span = debug_span!(parent: &_updates_span, "process_storage_leaf_updates", num_updates = updates.len()).entered();
+                            (address, updates, fetched, trie)
+                        })
+                        .collect::<Vec<_>>();
 
-                        let mut targets = Vec::new();
+                    let total_items = storage_updates.len();
 
-                        trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                            Entry::Occupied(mut entry) => {
-                                if min_len < *entry.get() {
+                    storage_updates
+                        .into_par_iter()
+                        .with_min_len(total_items / 2)
+                        .map(|(address, updates, mut fetched, mut trie)| {
+                            let _span = debug_span!(parent: &_updates_span, "process_storage_leaf_updates", num_updates = updates.len()).entered();
+
+                            let mut targets = Vec::new();
+
+                            trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+                                Entry::Occupied(mut entry) => {
+                                    if min_len < *entry.get() {
+                                        entry.insert(min_len);
+                                        targets.push(Target::new(path).with_min_len(min_len));
+                                    }
+                                }
+                                Entry::Vacant(entry) => {
                                     entry.insert(min_len);
                                     targets.push(Target::new(path).with_min_len(min_len));
                                 }
-                            }
-                            Entry::Vacant(entry) => {
-                                entry.insert(min_len);
-                                targets.push(Target::new(path).with_min_len(min_len));
-                            }
                         })?;
 
                         SparseTrieResult::Ok((address, targets, fetched, trie))
