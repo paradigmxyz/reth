@@ -7,5 +7,14 @@ updates:
 - package-ecosystem: "cargo"
   directory: "/"
   schedule:
-    interval: "daily"
-  rebase-strategy: "disabled"
+    interval: "weekly"
+  labels:
+    - "A-dependencies"
+  commit-message:
+    prefix: "chore(deps)"
+  open-pull-requests-limit: 1
+  groups:
+    cargo-weekly:
+      applies-to: "version-updates"
+      patterns: ["*"]
+      update-types: ["minor", "patch"]
