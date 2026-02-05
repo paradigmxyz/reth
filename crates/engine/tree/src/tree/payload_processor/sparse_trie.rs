@@ -601,21 +601,19 @@ where
                 let _updates_span =
                     debug_span!(parent: &parent_span, "process_storage_leaf_updates", num_updates = num_storage_updates)
                         .entered();
-            
+
                 for (address, updates) in storage_updates {
                     if updates.is_empty() {
                         continue;
                     }
 
-                    let _span = debug_span!(
-                        "process_storage_leaf_updates",
-                        num_updates = updates.len()
-                    )
-                    .entered();
+                    let _span =
+                        debug_span!("process_storage_leaf_updates", num_updates = updates.len())
+                            .entered();
 
                     let trie = storage_tries.get_or_create_trie_mut(*address);
                     let fetched = self.fetched_storage_targets.entry(*address).or_default();
-                    let targets = self.pending_targets.storage_targets.entry(*address).or_default();
+                    let mut targets = Vec::new();
 
                     trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
                         Entry::Occupied(mut entry) => {
@@ -629,6 +627,14 @@ where
                             targets.push(Target::new(path).with_min_len(min_len));
                         }
                     })?;
+
+                    if !targets.is_empty() {
+                        self.pending_targets
+                            .storage_targets
+                            .entry(*address)
+                            .or_default()
+                            .extend(targets);
+                    }
                 }
 
                 Ok(())
