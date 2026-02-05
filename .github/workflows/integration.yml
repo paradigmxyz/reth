@@ -29,11 +29,8 @@ jobs:
       RUST_BACKTRACE: 1
     strategy:
       matrix:
-        network: ["ethereum", "optimism"]
+        network: ["ethereum"]
         storage: ["stable", "edge"]
-        exclude:
-          - network: optimism
-            storage: edge
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
@@ -46,18 +43,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - if: matrix.network == 'ethereum'
-        name: Run tests
+      - name: Run tests
         run: |
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }} ${{ matrix.storage == 'edge' && 'edge' || '' }}" \
             --workspace --exclude ef-tests \
             -E "kind(test) and not binary(e2e_testsuite)"
-      - if: matrix.network == 'optimism'
-        name: Run tests
-        run: |
-          cargo nextest run \
-            --locked -p reth-optimism-node
 
   integration-success:
     name: integration success

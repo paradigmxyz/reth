@@ -27,7 +27,7 @@ pub trait RethCli: Sized {
     /// The associated `ChainSpecParser` type
     type ChainSpecParser: ChainSpecParser;
 
-    /// The name of the implementation, eg. `reth`, `op-reth`, etc.
+    /// The name of the implementation, eg. `reth`.
     fn name(&self) -> Cow<'static, str>;
 
     /// The version of the node, such as `reth/v1.0.0`

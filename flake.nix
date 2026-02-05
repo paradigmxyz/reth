@@ -74,10 +74,6 @@
           ];
         };
 
-        withOp = prev: {
-          cargoExtraArgs = prev.cargoExtraArgs or "" + " -p op-reth --bin=op-reth";
-        };
-
         mkReth = overrides: craneLib.buildPackage (composeAttrOverrides {
           pname = "reth";
           version = packageVersion;
@@ -93,14 +89,6 @@
           reth = mkReth ([
             withClang
             withMaxPerf
-          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-            withMold
-          ]);
-
-          op-reth = mkReth ([
-            withClang
-            withMaxPerf
-            withOp
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             withMold
           ]);

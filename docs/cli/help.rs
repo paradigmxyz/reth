@@ -265,7 +265,7 @@ fn generate_sidebar_files(
     output: &[(Cmd, String)],
     verbose: bool,
 ) -> io::Result<()> {
-    // Group commands by their root command name (reth or op-reth)
+    // Group commands by their root command name
     // Also create a map of commands to their help output
     let mut commands_by_root: std::collections::HashMap<String, Vec<&Cmd>> =
         std::collections::HashMap::new();
@@ -285,7 +285,6 @@ fn generate_sidebar_files(
         let sidebar_content = generate_sidebar_ts(&root_name, cmds, root_help, &help_map)?;
         let file_name = match root_name.as_str() {
             "reth" => "sidebar-cli-reth.ts",
-            "op-reth" => "sidebar-cli-op-reth.ts",
             _ => {
                 if verbose {
                     println!("Skipping unknown command: {}", root_name);
@@ -337,7 +336,6 @@ fn generate_sidebar_ts(
     // Generate TypeScript code
     let var_name = match root_name {
         "reth" => "rethCliSidebar",
-        "op-reth" => "opRethCliSidebar",
         _ => "cliSidebar",
     };
 
