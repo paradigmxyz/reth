@@ -56,6 +56,7 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         .fork(EthereumHardfork::London)
         .active_at_block(0)
         .then(|| genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(INITIAL_BASE_FEE));
+    tracing::debug!("Base fee: {:?}", base_fee_per_gas);
 
     // If shanghai is activated, initialize the header with an empty withdrawals hash, and
     // empty withdrawals list.
