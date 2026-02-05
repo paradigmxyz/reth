@@ -450,17 +450,6 @@ pub(crate) use reth_db_api::transaction::{ArenaHintEstimationStats, ArenaHintSou
 impl EdgeArenaMetrics {
     /// Record stats from a single subtransaction.
     pub(crate) fn record(&self, stats: &reth_libmdbx::SubTransactionStats) {
-        println!(
-            "[ARENA] page_allocations={} refill_events={} initial_pages={} unused={} refill_pages={} hint={} from_gc={} from_eof={}",
-            stats.arena_page_allocations,
-            stats.arena_refill_events,
-            stats.arena_initial_pages,
-            stats.pages_unused,
-            stats.arena_refill_pages,
-            stats.arena_hint,
-            stats.pages_from_gc,
-            stats.pages_from_eof
-        );
         self.arena_page_allocations.increment(stats.arena_page_allocations as u64);
         self.arena_refill_events.increment(stats.arena_refill_events as u64);
         self.arena_refills_per_batch.record(stats.arena_refill_events as f64);
