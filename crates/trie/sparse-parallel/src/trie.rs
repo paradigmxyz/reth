@@ -3059,7 +3059,6 @@ struct SparseSubtrieInner {
     /// and cached hash.
     values: HashMap<Nibbles, LeafValue>,
     /// Index mapping leaf prefixes to their full paths.
-    /// This enables O(1) lookup of leaves during trie traversal.
     /// Key: prefix path (where the leaf node would be in nodes map), Value: full_path (key in
     /// `values`).
     leaf_prefixes: HashMap<Nibbles, Nibbles>,
