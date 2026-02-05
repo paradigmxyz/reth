@@ -230,20 +230,17 @@ impl ArenaHints {
 
     /// Estimate arena sizes from state data.
     ///
-    /// The estimation uses fractional pages-per-entry ratios based on observed production data.
-    /// Each table has different page requirements due to B-tree structure, key sizes, and
-    /// value sizes.
+    /// Uses pages-per-entry ratios derived from production metrics (dev-joshie, 2026-02-05).
+    /// Each ratio is rounded up from observed data to provide ~10% headroom.
     ///
-    /// # Estimation Strategy
-    ///
-    /// For data tables (PlainAccountState, HashedAccounts, PlainStorageState, HashedStorages):
-    /// - Multiple entries typically fit per 4KB page
-    /// - We use `entries / entries_per_page` with a 2x safety factor
-    ///
-    /// For trie tables (AccountsTrie, StoragesTrie):
-    /// - Each node update can cause page splits and parent updates up the tree
-    /// - Tree depth is typically 4-8 levels, so one logical update can touch multiple pages
-    /// - We use `nodes * pages_per_node` to account for this amplification
+    /// # Observed Ratios (pages per entry)
+    /// - PlainAccountState: 2.63 → use 3
+    /// - PlainStorageState: 3.03 → use 3
+    /// - HashedAccounts: 2.87 → use 3
+    /// - HashedStorages: 3.31 → use 4
+    /// - AccountsTrie: 1.59 pages/node → use 2
+    /// - StoragesTrie: 2.87 pages/node → use 3
+    /// - Bytecodes: 1.67 → use 2
     ///
     /// # Arguments
     /// * `num_accounts` - Number of account changes
@@ -260,25 +257,29 @@ impl ArenaHints {
     ) -> Self {
         let default = Self::default_hints();
 
-        // Data tables: multiple entries fit per page
-        // Account record ~80 bytes, ~50 per 4KB page → use 25 with 2x safety
-        let plain_accounts_detail = Self::calc_with_floor(num_accounts, 25, default.plain_accounts);
-        // Bytecode entries are large but rare, use minimal estimate
+        // Observed: 2.63 pages/account → use 3
+        let plain_accounts_detail =
+            Self::calc_linear_with_floor(num_accounts, 3, default.plain_accounts);
+        // Observed: 1.67 pages/contract → use 2
         let bytecodes_detail =
-            Self::calc_with_floor(num_contracts, 1, Self::DEFAULT_BYTECODES_PAGES);
-        // Storage entry ~64 bytes, ~60 per page → use 30 with 2x safety
-        let plain_storage_detail = Self::calc_with_floor(num_storage, 30, default.plain_storage);
+            Self::calc_linear_with_floor(num_contracts, 2, Self::DEFAULT_BYTECODES_PAGES);
+        // Observed: 3.03 pages/slot → use 3
+        let plain_storage_detail =
+            Self::calc_linear_with_floor(num_storage, 3, default.plain_storage);
+        // Observed: 2.87 pages/account → use 3
         let hashed_accounts_detail =
-            Self::calc_with_floor(num_accounts, 25, default.hashed_accounts);
+            Self::calc_linear_with_floor(num_accounts, 3, default.hashed_accounts);
+        // Observed: 3.31 pages/slot → use 4
         let hashed_storages_detail =
-            Self::calc_with_floor(num_storage, 30, default.hashed_storages);
+            Self::calc_linear_with_floor(num_storage, 4, default.hashed_storages);
 
-        // Trie tables: use multiplication-based estimation
-        // Each trie node update can touch multiple pages due to tree structure
+        // Trie tables: observed pages per node
+        // AccountsTrie: 1.59 pages/node → use 2
         let account_trie_detail =
-            Self::calc_trie_with_floor(num_account_trie_nodes, 3, default.account_trie);
+            Self::calc_linear_with_floor(num_account_trie_nodes, 2, default.account_trie);
+        // StoragesTrie: 2.87 pages/node → use 3
         let storage_trie_detail =
-            Self::calc_trie_with_floor(num_storage_trie_nodes, 4, default.storage_trie);
+            Self::calc_linear_with_floor(num_storage_trie_nodes, 3, default.storage_trie);
 
         Self {
             plain_accounts: plain_accounts_detail.used,
@@ -300,33 +301,28 @@ impl ArenaHints {
         }
     }
 
-    /// Calculate arena hint for data tables where multiple entries fit per page.
+    /// Calculate arena hint using linear pages-per-entry ratio.
     ///
-    /// Formula: `(entries / entries_per_page) * 2 + 8`
-    /// - Division gives base page count
-    /// - 2x multiplier for B-tree overhead and page splits
-    /// - +8 for minimum working set
-    fn calc_with_floor(entries: usize, entries_per_page: usize, floor: usize) -> ArenaHintDetail {
+    /// Formula: `entries * pages_per_entry + MIN_ARENA_PAGES`
+    /// - Direct multiplication based on observed production ratios
+    /// - +MIN_ARENA_PAGES for minimum working set
+    fn calc_linear_with_floor(
+        entries: usize,
+        pages_per_entry: usize,
+        floor: usize,
+    ) -> ArenaHintDetail {
         let raw_estimate = if entries == 0 {
             Self::MIN_ARENA_PAGES
         } else {
-            let base = entries.div_ceil(entries_per_page);
-            base.saturating_mul(2).saturating_add(8)
+            entries.saturating_mul(pages_per_entry).saturating_add(Self::MIN_ARENA_PAGES)
         };
 
         Self::apply_bounds(raw_estimate, floor)
     }
 
     /// Calculate arena hint for trie tables where each node may require multiple pages.
-    ///
-    /// Formula: `nodes * pages_per_node + 8`
-    /// - Multiplication accounts for tree depth and node splits
-    /// - +8 for minimum working set
-    ///
-    /// Trie updates are expensive because:
-    /// 1. Each node update may split into multiple nodes
-    /// 2. Updates propagate up to parent nodes (tree depth typically 4-8)
-    /// 3. StoragesTrie is a dupsort table with per-account subtries
+    /// (Kept for backwards compatibility, delegates to calc_linear_with_floor)
+    #[allow(dead_code)]
     fn calc_trie_with_floor(nodes: usize, pages_per_node: usize, floor: usize) -> ArenaHintDetail {
         let raw_estimate = if nodes == 0 {
             Self::MIN_ARENA_PAGES
@@ -640,47 +636,55 @@ mod tests {
 
     #[test]
     fn test_arena_hints_estimate_trie_scaling() {
-        // Trie tables should scale with multiplication, not division
-        // With 2200 storage trie nodes at 4 pages/node, expect 2200*4+8 = 8808 pages
-        // This exceeds floor(8800), so we get Estimated
-        let hints = ArenaHints::estimate(0, 0, 0, 0, 2200);
-        assert_eq!(hints.details.storage_trie.estimated, 8808);
-        assert_eq!(hints.storage_trie, 8808);
-        assert_eq!(hints.details.storage_trie.source, ArenaHintSource::Estimated);
-
-        // With 3000 nodes, expect ~12008 pages - no cap, grows unbounded
+        // StoragesTrie: 3 pages/node (observed 2.87)
+        // With 3000 nodes: 3000*3+8 = 9008 > floor(8800), so Estimated
         let hints = ArenaHints::estimate(0, 0, 0, 0, 3000);
-        assert_eq!(hints.details.storage_trie.estimated, 12008);
-        assert_eq!(hints.storage_trie, 12008);
+        assert_eq!(hints.details.storage_trie.estimated, 9008);
+        assert_eq!(hints.storage_trie, 9008);
         assert_eq!(hints.details.storage_trie.source, ArenaHintSource::Estimated);
 
-        // With 10000 nodes: 10000*4+8 = 40008 - grows unbounded based on workload
+        // With 10000 nodes: 10000*3+8 = 30008 - grows unbounded
         let hints = ArenaHints::estimate(0, 0, 0, 0, 10000);
-        assert_eq!(hints.details.storage_trie.estimated, 40008);
-        assert_eq!(hints.storage_trie, 40008);
+        assert_eq!(hints.details.storage_trie.estimated, 30008);
+        assert_eq!(hints.storage_trie, 30008);
         assert_eq!(hints.details.storage_trie.source, ArenaHintSource::Estimated);
 
-        // With 2000 nodes: 2000*4+8 = 8008 < floor(8800), so floored
+        // With 2000 nodes: 2000*3+8 = 6008 < floor(8800), so floored
         let hints = ArenaHints::estimate(0, 0, 0, 0, 2000);
-        assert_eq!(hints.details.storage_trie.estimated, 8008);
+        assert_eq!(hints.details.storage_trie.estimated, 6008);
         assert_eq!(hints.storage_trie, 8800);
         assert_eq!(hints.details.storage_trie.source, ArenaHintSource::Floored);
+
+        // AccountsTrie: 2 pages/node (observed 1.59)
+        // With 4000 nodes: 4000*2+8 = 8008 > floor(7300), so Estimated
+        let hints = ArenaHints::estimate(0, 0, 0, 4000, 0);
+        assert_eq!(hints.details.account_trie.estimated, 8008);
+        assert_eq!(hints.account_trie, 8008);
+        assert_eq!(hints.details.account_trie.source, ArenaHintSource::Estimated);
     }
 
     #[test]
     fn test_arena_hints_estimate_data_tables() {
-        // Data tables use division: 1000 storage / 30 entries_per_page = 34, * 2 + 8 = 76
+        // New formula: entries * pages_per_entry + MIN_ARENA_PAGES
+        // HashedStorages: 4 pages/slot (observed 3.31)
+        // 1000 storage * 4 + 8 = 4008 > floor(4000), so Estimated
         let hints = ArenaHints::estimate(0, 1000, 0, 0, 0);
-        assert_eq!(hints.details.hashed_storages.estimated, 76);
-        // But 76 < floor(4000), so floored
+        assert_eq!(hints.details.hashed_storages.estimated, 4008);
+        assert_eq!(hints.hashed_storages, 4008);
+        assert_eq!(hints.details.hashed_storages.source, ArenaHintSource::Estimated);
+
+        // 500 storage * 4 + 8 = 2008 < floor(4000), so floored
+        let hints = ArenaHints::estimate(0, 500, 0, 0, 0);
+        assert_eq!(hints.details.hashed_storages.estimated, 2008);
         assert_eq!(hints.hashed_storages, 4000);
         assert_eq!(hints.details.hashed_storages.source, ArenaHintSource::Floored);
 
-        // Large storage count: 70000 / 30 = 2334, * 2 + 8 = 4676
-        let hints = ArenaHints::estimate(0, 70000, 0, 0, 0);
-        assert_eq!(hints.details.hashed_storages.estimated, 4676);
-        assert_eq!(hints.hashed_storages, 4676);
-        assert_eq!(hints.details.hashed_storages.source, ArenaHintSource::Estimated);
+        // PlainAccountState: 3 pages/account (observed 2.63)
+        // 2000 accounts * 3 + 8 = 6008 > floor(3000), so Estimated
+        let hints = ArenaHints::estimate(2000, 0, 0, 0, 0);
+        assert_eq!(hints.details.plain_accounts.estimated, 6008);
+        assert_eq!(hints.plain_accounts, 6008);
+        assert_eq!(hints.details.plain_accounts.source, ArenaHintSource::Estimated);
     }
 
     #[test]
