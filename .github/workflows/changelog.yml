@@ -6,6 +6,8 @@ on:
 
 jobs:
   changelog:
+    # Skip for fork PRs since they can't access secrets
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -14,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.head_ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
       - run: npm install -g @anthropic-ai/claude-code
       - uses: wevm/changelogs/check@master
         with:
