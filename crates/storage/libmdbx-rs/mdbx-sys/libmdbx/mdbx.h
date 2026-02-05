@@ -6742,6 +6742,34 @@ LIBMDBX_API int mdbx_subtx_abort(MDBX_txn *subtxn);
  */
 LIBMDBX_API int mdbx_txn_is_subtx(const MDBX_txn *txn);
 
+/** \brief Statistics for a parallel subtransaction.
+ *
+ * Contains metrics about page allocation and fallback behavior.
+ */
+typedef struct MDBX_subtxn_stats {
+  size_t arena_hits;       /**< Pages allocated from pre-distributed arena */
+  size_t arena_misses;     /**< Times fallback to parent was needed */
+  size_t pages_distributed; /**< Initial pages distributed to this subtxn */
+  size_t pages_acquired;   /**< Additional pages acquired from parent during fallback */
+  size_t pages_unused;     /**< Pages returned to parent on commit (not consumed) */
+  size_t fallback_count;   /**< Number of times fallback to parent was triggered */
+  size_t arena_hint;       /**< Original arena hint for this subtxn */
+  MDBX_dbi assigned_dbi;   /**< DBI this subtxn is bound to */
+} MDBX_subtxn_stats;
+
+/** \brief Get statistics for a parallel subtransaction.
+ *
+ * Retrieves allocation and fallback metrics for a subtransaction.
+ *
+ * \param [in] subtxn   A subtransaction handle created by mdbx_txn_create_subtxns().
+ * \param [out] stats   Pointer to stats structure to fill.
+ *
+ * \returns A non-zero error value on failure and 0 on success.
+ * \retval MDBX_EINVAL   subtxn or stats is NULL, or subtxn is not a subtransaction.
+ * \retval MDBX_BAD_TXN  subtxn has an invalid signature.
+ */
+LIBMDBX_API int mdbx_subtxn_get_stats(const MDBX_txn *subtxn, MDBX_subtxn_stats *stats);
+
 /** end of c_parallel @} */
 
 /** end of c_api @} */

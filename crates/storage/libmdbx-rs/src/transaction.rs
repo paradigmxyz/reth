@@ -71,6 +71,27 @@ where
     parallel_writes_enabled: AtomicBool,
 }
 
+/// Statistics for a parallel subtransaction.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SubTransactionStats {
+    /// Pages allocated from pre-distributed arena.
+    pub arena_hits: usize,
+    /// Times fallback to parent was needed.
+    pub arena_misses: usize,
+    /// Initial pages distributed to this subtxn.
+    pub pages_distributed: usize,
+    /// Additional pages acquired from parent during fallback.
+    pub pages_acquired: usize,
+    /// Pages returned to parent on commit (not consumed).
+    pub pages_unused: usize,
+    /// Number of times fallback to parent was triggered.
+    pub fallback_count: usize,
+    /// Original arena hint for this subtxn.
+    pub arena_hint: usize,
+    /// DBI this subtxn is bound to.
+    pub assigned_dbi: ffi::MDBX_dbi,
+}
+
 /// A subtransaction for parallel writes.
 /// Each subtransaction is bound to a single DBI.
 #[derive(Debug)]
@@ -119,6 +140,24 @@ impl SubTransaction {
             mdbx_result(unsafe { ffi::mdbx_subtx_abort(ptr) })
         })??;
         Ok(())
+    }
+
+    /// Returns statistics for this subtransaction.
+    pub fn get_stats(&self) -> Result<SubTransactionStats> {
+        self.txn_ptr.txn_execute_fail_on_timeout(|ptr| {
+            let mut stats: ffi::MDBX_subtxn_stats = unsafe { std::mem::zeroed() };
+            mdbx_result(unsafe { ffi::mdbx_subtxn_get_stats(ptr, &mut stats) })?;
+            Ok(SubTransactionStats {
+                arena_hits: stats.arena_hits,
+                arena_misses: stats.arena_misses,
+                pages_distributed: stats.pages_distributed,
+                pages_acquired: stats.pages_acquired,
+                pages_unused: stats.pages_unused,
+                fallback_count: stats.fallback_count,
+                arena_hint: stats.arena_hint,
+                assigned_dbi: stats.assigned_dbi,
+            })
+        })?
     }
 }
 
