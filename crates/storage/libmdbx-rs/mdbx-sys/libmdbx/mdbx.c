@@ -16457,22 +16457,26 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
         parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0,
         parent->tw.retired_pages ? MDBX_PNL_GETSIZE(parent->tw.retired_pages) : 0);
 
-  /* Re-sort parent's repnl after merging pages from subtxn.
-   * pnl_check/pnl_check_allocated assume the list is sorted (MDBX_PNL_MOST
-   * returns first or last element depending on sort order). Without sorting,
-   * assertions in page_alloc_finalize will fail with false positives. */
-  if (MDBX_PNL_GETSIZE(parent->tw.repnl) > 1)
+  /* Defer sorting parent's repnl until the last subtxn commits.
+   * This avoids O(n log n) × k sorts (where k = number of subtxns) by doing
+   * a single sort when all subtxns have merged their pages.
+   * Check for last subtxn BEFORE unlinking (subtxn is still in the list). */
+  const bool is_last_subtxn = (subtxn->tw.subtxn_prev == nullptr && subtxn->tw.subtxn_next == nullptr);
+  if (is_last_subtxn && MDBX_PNL_GETSIZE(parent->tw.repnl) > 1)
     pnl_sort(parent->tw.repnl, parent->geo.first_unallocated);
 
-  /* ===== DIAGNOSTIC: Check for duplicates in parent repnl AFTER merge and sort ===== */
+  /* ===== DIAGNOSTIC: Check for duplicates in parent repnl AFTER merge ===== */
 #if MDBX_DEBUG
   {
     const size_t repnl_sz = MDBX_PNL_GETSIZE(parent->tw.repnl);
+    /* Use O(n²) check that works on unsorted list (deferred sort optimization) */
     if (repnl_sz > 1) {
-      for (size_t i = 2; i <= repnl_sz; ++i) {
-        if (parent->tw.repnl[i] == parent->tw.repnl[i-1])
-          ERROR("DUPLICATE page %" PRIaPGNO " in parent repnl after subtxn commit! (pos %zu and %zu)",
-                parent->tw.repnl[i], i-1, i);
+      for (size_t i = 1; i <= repnl_sz; ++i) {
+        for (size_t j = i + 1; j <= repnl_sz; ++j) {
+          if (parent->tw.repnl[i] == parent->tw.repnl[j])
+            ERROR("DUPLICATE page %" PRIaPGNO " in parent repnl after subtxn commit! (pos %zu and %zu)",
+                  parent->tw.repnl[i], i, j);
+        }
       }
     }
     /* Also check parent retired_pages for duplicates */
@@ -16563,8 +16567,10 @@ LIBMDBX_API int mdbx_subtx_abort(MDBX_txn *subtxn) {
       }
     }
 
-    /* Sort parent's repnl after merging */
-    if (MDBX_PNL_GETSIZE(parent->tw.repnl) > 1)
+    /* Defer sorting parent's repnl until the last subtxn commits/aborts.
+     * Check for last subtxn BEFORE unlinking (subtxn is still in the list). */
+    const bool is_last_subtxn = (subtxn->tw.subtxn_prev == nullptr && subtxn->tw.subtxn_next == nullptr);
+    if (is_last_subtxn && MDBX_PNL_GETSIZE(parent->tw.repnl) > 1)
       pnl_sort(parent->tw.repnl, parent->geo.first_unallocated);
 
     /* Page accounting for abort (all pages should be returned since work is discarded) */

@@ -264,8 +264,7 @@ impl ArenaHints {
         let bytecodes_detail =
             Self::calc_with_ratio(num_contracts, 2.0, Self::DEFAULT_BYTECODES_PAGES);
         // Actual: 1.50 * 1.2 = 1.80 pages/slot
-        let plain_storage_detail =
-            Self::calc_with_ratio(num_storage, 1.80, default.plain_storage);
+        let plain_storage_detail = Self::calc_with_ratio(num_storage, 1.80, default.plain_storage);
         // Actual: 1.55 * 1.2 = 1.86 pages/account
         let hashed_accounts_detail =
             Self::calc_with_ratio(num_accounts, 1.86, default.hashed_accounts);
