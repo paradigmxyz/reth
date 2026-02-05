@@ -212,6 +212,9 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     minimum_pruning_distance: u64,
     /// Database provider metrics
     metrics: metrics::DatabaseProviderMetrics,
+    /// Per-table arena hint estimation metrics
+    #[cfg(feature = "edge")]
+    arena_hint_metrics: metrics::ArenaHintMetrics,
 }
 
 impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
@@ -373,6 +376,8 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
+            #[cfg(feature = "edge")]
+            arena_hint_metrics: metrics::ArenaHintMetrics::default(),
         }
     }
 
@@ -735,6 +740,22 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                             .map(|t| t.storage_nodes_ref().len())
                             .sum(),
                     );
+
+                    // Record per-table arena hint estimation quality metrics
+                    self.arena_hint_metrics
+                        .record(tables::PlainAccountState::NAME, &hints.details.plain_accounts);
+                    self.arena_hint_metrics
+                        .record(tables::PlainStorageState::NAME, &hints.details.plain_storage);
+                    self.arena_hint_metrics
+                        .record(tables::Bytecodes::NAME, &hints.details.bytecodes);
+                    self.arena_hint_metrics
+                        .record(tables::HashedAccounts::NAME, &hints.details.hashed_accounts);
+                    self.arena_hint_metrics
+                        .record(tables::HashedStorages::NAME, &hints.details.hashed_storages);
+                    self.arena_hint_metrics
+                        .record(tables::AccountsTrie::NAME, &hints.details.account_trie);
+                    self.arena_hint_metrics
+                        .record(tables::StoragesTrie::NAME, &hints.details.storage_trie);
 
                     self.tx.enable_parallel_writes_for_tables_with_hints(&[
                         (tables::PlainAccountState::NAME, hints.plain_accounts),
@@ -1151,6 +1172,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
+            #[cfg(feature = "edge")]
+            arena_hint_metrics: metrics::ArenaHintMetrics::default(),
         }
     }
 

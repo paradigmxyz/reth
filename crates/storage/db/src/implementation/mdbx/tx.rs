@@ -556,6 +556,19 @@ impl Tx<RW> {
             .enable_parallel_writes_with_hints(&specs)
             .map_err(|e| DatabaseError::InitCursor(e.into()))
     }
+
+    /// Records arena hint estimation stats for a table.
+    ///
+    /// This tracks whether the arena hint estimation is working or always hitting floor/cap.
+    pub fn record_arena_estimation(
+        &self,
+        table: &'static str,
+        stats: &crate::metrics::ArenaHintEstimationStats,
+    ) {
+        if let Some(handler) = &self.metrics_handler {
+            handler.env_metrics.record_arena_estimation(table, stats);
+        }
+    }
 }
 
 impl DbTxMut for Tx<RW> {
@@ -643,6 +656,14 @@ impl DbTxMut for Tx<RW> {
         tables: &[(&str, usize)],
     ) -> Result<(), DatabaseError> {
         Tx::enable_parallel_writes_for_tables_with_hints(self, tables)
+    }
+
+    fn record_arena_estimation(
+        &self,
+        table: &'static str,
+        stats: &reth_db_api::transaction::ArenaHintEstimationStats,
+    ) {
+        Tx::record_arena_estimation(self, table, stats)
     }
 }
 

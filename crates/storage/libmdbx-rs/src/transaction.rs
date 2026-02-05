@@ -75,17 +75,15 @@ where
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SubTransactionStats {
     /// Pages allocated from pre-distributed arena.
-    pub arena_hits: usize,
-    /// Times fallback to parent was needed.
-    pub arena_misses: usize,
+    pub arena_page_allocations: usize,
+    /// Times fallback to parent was needed (arena refill events).
+    pub arena_refill_events: usize,
     /// Initial pages distributed to this subtxn.
-    pub pages_distributed: usize,
+    pub arena_initial_pages: usize,
     /// Additional pages acquired from parent during fallback.
-    pub pages_acquired: usize,
+    pub arena_refill_pages: usize,
     /// Pages returned to parent on commit (not consumed).
     pub pages_unused: usize,
-    /// Number of times fallback to parent was triggered.
-    pub fallback_count: usize,
     /// Original arena hint for this subtxn.
     pub arena_hint: usize,
     /// DBI this subtxn is bound to.
@@ -152,12 +150,11 @@ impl SubTransaction {
             let mut stats: ffi::MDBX_subtxn_stats = unsafe { std::mem::zeroed() };
             mdbx_result(unsafe { ffi::mdbx_subtxn_get_stats(ptr, &mut stats) })?;
             Ok(SubTransactionStats {
-                arena_hits: stats.arena_hits,
-                arena_misses: stats.arena_misses,
-                pages_distributed: stats.pages_distributed,
-                pages_acquired: stats.pages_acquired,
+                arena_page_allocations: stats.arena_page_allocations,
+                arena_refill_events: stats.arena_refill_events,
+                arena_initial_pages: stats.arena_initial_pages,
+                arena_refill_pages: stats.arena_refill_pages,
                 pages_unused: stats.pages_unused,
-                fallback_count: stats.fallback_count,
                 arena_hint: stats.arena_hint,
                 assigned_dbi: stats.assigned_dbi,
                 pages_from_gc: stats.pages_from_gc,
@@ -424,23 +421,21 @@ where
         let subtxns = self.subtxns.read();
         let mut stats_vec = Vec::with_capacity(subtxns.len());
 
-        let mut total_hits = 0usize;
-        let mut total_misses = 0usize;
-        let mut total_distributed = 0usize;
-        let mut total_acquired = 0usize;
+        let mut total_page_allocations = 0usize;
+        let mut total_refill_events = 0usize;
+        let mut total_initial_pages = 0usize;
+        let mut total_refill_pages = 0usize;
         let mut total_unused = 0usize;
-        let mut total_fallback = 0usize;
         let mut total_from_gc = 0usize;
         let mut total_from_eof = 0usize;
 
         for subtxn in subtxns.values() {
             let stats = subtxn.get_stats()?;
-            total_hits += stats.arena_hits;
-            total_misses += stats.arena_misses;
-            total_distributed += stats.pages_distributed;
-            total_acquired += stats.pages_acquired;
+            total_page_allocations += stats.arena_page_allocations;
+            total_refill_events += stats.arena_refill_events;
+            total_initial_pages += stats.arena_initial_pages;
+            total_refill_pages += stats.arena_refill_pages;
             total_unused += stats.pages_unused;
-            total_fallback += stats.fallback_count;
             total_from_gc += stats.pages_from_gc;
             total_from_eof += stats.pages_from_eof;
             subtxn.commit()?;
@@ -449,14 +444,14 @@ where
 
         // Temporary debug output for stress testing
         if !stats_vec.is_empty() {
-            let hit_rate = if total_hits + total_misses > 0 {
-                (total_hits as f64 / (total_hits + total_misses) as f64) * 100.0
+            let hit_rate = if total_page_allocations + total_refill_events > 0 {
+                (total_page_allocations as f64 / (total_page_allocations + total_refill_events) as f64) * 100.0
             } else {
                 0.0
             };
             eprintln!(
-                "[ARENA] subtxns={} hits={} misses={} hit_rate={:.1}% distributed={} acquired={} unused={} fallback={} from_gc={} from_eof={}",
-                stats_vec.len(), total_hits, total_misses, hit_rate, total_distributed, total_acquired, total_unused, total_fallback, total_from_gc, total_from_eof
+                "[ARENA] subtxns={} page_allocations={} refill_events={} hit_rate={:.1}% initial_pages={} refill_pages={} unused={} from_gc={} from_eof={}",
+                stats_vec.len(), total_page_allocations, total_refill_events, hit_rate, total_initial_pages, total_refill_pages, total_unused, total_from_gc, total_from_eof
             );
         }
 

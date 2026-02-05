@@ -4327,15 +4327,14 @@ struct MDBX_txn {
       MDBX_txn *subtxn_prev;        /* Prev sibling for O(1) unlink */
       MDBX_dbi assigned_dbi;        /* DBI this subtxn is bound to (0 = unbound) */
       pnl_t subtxn_repnl;           /* Pre-claimed reclaimed pages for this subtxn */
-      size_t subtxn_repnl_distributed; /* Initial pages distributed (for accounting) */
-      size_t subtxn_repnl_acquired;    /* Pages acquired from parent during fallback */
-      size_t subtxn_pages_from_gc;     /* Pages acquired from parent's repnl (GC) */
-      size_t subtxn_pages_from_eof;    /* Pages acquired via EOF extension */
-      size_t subtxn_fallback_count;    /* Number of times fallback to parent was triggered */
-      size_t subtxn_pages_unused;      /* Pages returned to parent on commit (not consumed) */
-      size_t subtxn_arena_hint;        /* Original arena hint for this subtxn */
-      size_t subtxn_arena_hits;        /* Pages allocated from subtxn_repnl */
-      size_t subtxn_arena_misses;      /* Times fallback to parent was needed */
+      size_t subtxn_arena_initial_pages;    /* Initial pages distributed (for accounting) */
+      size_t subtxn_arena_refill_pages;     /* Pages acquired from parent during fallback */
+      size_t subtxn_pages_from_gc;          /* Pages acquired from parent's repnl (GC) */
+      size_t subtxn_pages_from_eof;         /* Pages acquired via EOF extension */
+      size_t subtxn_pages_unused;           /* Pages returned to parent on commit (not consumed) */
+      size_t subtxn_arena_hint;             /* Original arena hint for this subtxn */
+      size_t subtxn_arena_page_allocations; /* Pages allocated from subtxn_repnl */
+      size_t subtxn_arena_refill_events;    /* Times fallback to parent was needed */
       osal_fastmutex_t *subtxn_alloc_mutex; /* Mutex for synchronized parent allocation */
     } tw;
   };
@@ -15857,12 +15856,12 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
     return LOG_IFERR(MDBX_ENOMEM);
   }
   txn->tw.subtxn_repnl = nullptr; /* Will be set by mdbx_txn_create_subtxns */
-  txn->tw.subtxn_repnl_distributed = 0;
-  txn->tw.subtxn_repnl_acquired = 0;
+  txn->tw.subtxn_arena_initial_pages = 0;
+  txn->tw.subtxn_arena_refill_pages = 0;
   txn->tw.subtxn_pages_from_gc = 0;
   txn->tw.subtxn_pages_from_eof = 0;
-  txn->tw.subtxn_arena_hits = 0;
-  txn->tw.subtxn_arena_misses = 0;
+  txn->tw.subtxn_arena_page_allocations = 0;
+  txn->tw.subtxn_arena_refill_events = 0;
   txn->tw.subtxn_alloc_mutex = parent->tw.subtxn_alloc_mutex; /* Share parent's mutex */
 
   /* Insert at head of doubly-linked sibling list */
@@ -16158,14 +16157,14 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
       }
 
       subtxns[i]->tw.subtxn_repnl = subtxn_pnl;
-      subtxns[i]->tw.subtxn_repnl_distributed = MDBX_PNL_GETSIZE(subtxn_pnl);
-      subtxns[i]->tw.subtxn_repnl_acquired = 0;
+      subtxns[i]->tw.subtxn_arena_initial_pages = MDBX_PNL_GETSIZE(subtxn_pnl);
+      subtxns[i]->tw.subtxn_arena_refill_pages = 0;
       subtxns[i]->tw.subtxn_pages_from_gc = 0;
       subtxns[i]->tw.subtxn_pages_from_eof = 0;
-      subtxns[i]->tw.subtxn_arena_hits = 0;
-      subtxns[i]->tw.subtxn_arena_misses = 0;
-      DEBUG("subtxn %zu: assigned %zu GC pages (distributed=%zu)",
-            i, MDBX_PNL_GETSIZE(subtxn_pnl), subtxns[i]->tw.subtxn_repnl_distributed);
+      subtxns[i]->tw.subtxn_arena_page_allocations = 0;
+      subtxns[i]->tw.subtxn_arena_refill_events = 0;
+      DEBUG("subtxn %zu: assigned %zu GC pages (initial_pages=%zu)",
+            i, MDBX_PNL_GETSIZE(subtxn_pnl), subtxns[i]->tw.subtxn_arena_initial_pages);
     }
   }
 
@@ -16294,10 +16293,10 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
           (void*)subtxn, retired_sz, repnl_sz, subtxn_repnl_sz, (size_t)subtxn->tw.loose_count,
           parent_retired_sz, parent_repnl_sz);
 
-    DEBUG("subtxn %p DISTRIBUTION: dbi=%u hint=%zu distributed=%zu acquired=%zu",
+    DEBUG("subtxn %p DISTRIBUTION: dbi=%u hint=%zu initial_pages=%zu refill_pages=%zu",
           (void*)subtxn, subtxn->tw.assigned_dbi,
-          subtxn->tw.subtxn_arena_hint, subtxn->tw.subtxn_repnl_distributed,
-          subtxn->tw.subtxn_repnl_acquired);
+          subtxn->tw.subtxn_arena_hint, subtxn->tw.subtxn_arena_initial_pages,
+          subtxn->tw.subtxn_arena_refill_pages);
 
     /* Check if any page in subtxn retired_pages also appears in subtxn repnl */
     if (retired_sz > 0 && repnl_sz > 0) {
@@ -16428,22 +16427,22 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
   }
 
   /* Page accounting summary:
-   * - distributed: pages given at subtxn creation from parent repnl
-   * - acquired: pages obtained during runtime from parent (fallback)
+   * - initial_pages: pages given at subtxn creation from parent repnl
+   * - refill_pages: pages obtained during runtime from parent (fallback)
    * - remaining: pages left in subtxn_repnl (not consumed)
-   * - consumed = (distributed + acquired) - remaining */
+   * - consumed = (initial_pages + refill_pages) - remaining */
   {
-    const size_t distributed = subtxn->tw.subtxn_repnl_distributed;
-    const size_t acquired = subtxn->tw.subtxn_repnl_acquired;
+    const size_t initial_pages = subtxn->tw.subtxn_arena_initial_pages;
+    const size_t refill_pages = subtxn->tw.subtxn_arena_refill_pages;
     const size_t remaining = subtxn->tw.subtxn_pages_unused;
-    const size_t total_given = distributed + acquired;
+    const size_t total_given = initial_pages + refill_pages;
     const size_t consumed = (total_given >= remaining) ? total_given - remaining : 0;
-    DEBUG("subtxn %p PAGE ACCOUNTING: distributed=%zu acquired=%zu total=%zu consumed=%zu returning=%zu",
-          (void*)subtxn, distributed, acquired, total_given, consumed, remaining);
-    DEBUG("subtxn %p FINAL STATS: distributed=%zu acquired=%zu consumed=%zu unused=%zu fallbacks=%zu",
-          (void*)subtxn, distributed, acquired, consumed, remaining, subtxn->tw.subtxn_fallback_count);
-    DEBUG("subtxn %p ARENA STATS: hits=%zu, misses=%zu",
-          (void*)subtxn, subtxn->tw.subtxn_arena_hits, subtxn->tw.subtxn_arena_misses);
+    DEBUG("subtxn %p PAGE ACCOUNTING: initial_pages=%zu refill_pages=%zu total=%zu consumed=%zu returning=%zu",
+          (void*)subtxn, initial_pages, refill_pages, total_given, consumed, remaining);
+    DEBUG("subtxn %p FINAL STATS: initial_pages=%zu refill_pages=%zu consumed=%zu unused=%zu refill_events=%zu",
+          (void*)subtxn, initial_pages, refill_pages, consumed, remaining, subtxn->tw.subtxn_arena_refill_events);
+    DEBUG("subtxn %p ARENA STATS: page_allocations=%zu, refill_events=%zu",
+          (void*)subtxn, subtxn->tw.subtxn_arena_page_allocations, subtxn->tw.subtxn_arena_refill_events);
     if (total_given < remaining) {
       ERROR("subtxn %p PAGE LEAK: returning more pages (%zu) than were given (%zu)!",
             (void*)subtxn, remaining, total_given);
@@ -16570,12 +16569,12 @@ LIBMDBX_API int mdbx_subtx_abort(MDBX_txn *subtxn) {
 
     /* Page accounting for abort (all pages should be returned since work is discarded) */
     {
-      const size_t distributed = subtxn->tw.subtxn_repnl_distributed;
-      const size_t acquired = subtxn->tw.subtxn_repnl_acquired;
+      const size_t initial_pages = subtxn->tw.subtxn_arena_initial_pages;
+      const size_t refill_pages = subtxn->tw.subtxn_arena_refill_pages;
       const size_t remaining = subtxn->tw.subtxn_repnl ? MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl) : 0;
-      const size_t total_given = distributed + acquired;
-      DEBUG("subtxn %p ABORT ACCOUNTING: distributed=%zu acquired=%zu total=%zu returning=%zu (expected all)",
-            (void*)subtxn, distributed, acquired, total_given, remaining);
+      const size_t total_given = initial_pages + refill_pages;
+      DEBUG("subtxn %p ABORT ACCOUNTING: initial_pages=%zu refill_pages=%zu total=%zu returning=%zu (expected all)",
+            (void*)subtxn, initial_pages, refill_pages, total_given, remaining);
     }
   }
 
@@ -16600,14 +16599,13 @@ LIBMDBX_API int mdbx_subtxn_get_stats(const MDBX_txn *subtxn, MDBX_subtxn_stats 
   if (unlikely(!(subtxn->flags & txn_parallel_subtx)))
     return MDBX_EINVAL;
 
-  stats->arena_hits = subtxn->tw.subtxn_arena_hits;
-  stats->arena_misses = subtxn->tw.subtxn_arena_misses;
-  stats->pages_distributed = subtxn->tw.subtxn_repnl_distributed;
-  stats->pages_acquired = subtxn->tw.subtxn_repnl_acquired;
+  stats->arena_page_allocations = subtxn->tw.subtxn_arena_page_allocations;
+  stats->arena_refill_events = subtxn->tw.subtxn_arena_refill_events;
+  stats->arena_initial_pages = subtxn->tw.subtxn_arena_initial_pages;
+  stats->arena_refill_pages = subtxn->tw.subtxn_arena_refill_pages;
   stats->pages_from_gc = subtxn->tw.subtxn_pages_from_gc;
   stats->pages_from_eof = subtxn->tw.subtxn_pages_from_eof;
   stats->pages_unused = subtxn->tw.subtxn_pages_unused;
-  stats->fallback_count = subtxn->tw.subtxn_fallback_count;
   stats->arena_hint = subtxn->tw.subtxn_arena_hint;
   stats->assigned_dbi = subtxn->tw.assigned_dbi;
   return MDBX_SUCCESS;
@@ -23485,13 +23483,12 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
       const size_t idx = MDBX_PNL_GETSIZE(txn->tw.subtxn_repnl);
       const pgno_t pgno = txn->tw.subtxn_repnl[idx];
       MDBX_PNL_SETSIZE(txn->tw.subtxn_repnl, idx - 1);
-      txn->tw.subtxn_arena_hits++;
+      txn->tw.subtxn_arena_page_allocations++;
       return page_alloc_finalize(env, txn, mc, pgno, 1);
     }
     /* Fallback to synchronized parent allocation: try GC first, then EOF */
-    txn->tw.subtxn_fallback_count++;
-    txn->tw.subtxn_arena_misses++;
-    DEBUG("subtxn %p: exhausted subtxn_repnl (need %zu pages), falling back to parent (fallback #%zu)", (void*)txn, num, txn->tw.subtxn_fallback_count);
+    txn->tw.subtxn_arena_refill_events++;
+    DEBUG("subtxn %p: exhausted subtxn_repnl (need %zu pages), falling back to parent (refill #%zu)", (void*)txn, num, txn->tw.subtxn_arena_refill_events);
     MDBX_txn *parent = txn->tw.subparent;
     if (unlikely(!parent || !txn->tw.subtxn_alloc_mutex)) {
       ret.page = nullptr;
@@ -23555,12 +23552,12 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
           pnl_append_prereserved(txn->tw.subtxn_repnl, parent->tw.repnl[parent_len]);
         }
         MDBX_PNL_SETSIZE(parent->tw.repnl, parent_len);
-        txn->tw.subtxn_repnl_acquired += take;
+        txn->tw.subtxn_arena_refill_pages += take;
         txn->tw.subtxn_pages_from_gc += take;
       }
 
-      DEBUG("subtxn %p: got %zu pages from parent repnl (acquired now %zu, from_gc=%zu), allocated_pgno=%u",
-            (void*)txn, got_from_gc + (allocated_pgno ? 1 : 0), txn->tw.subtxn_repnl_acquired, txn->tw.subtxn_pages_from_gc, allocated_pgno);
+      DEBUG("subtxn %p: got %zu pages from parent repnl (refill_pages now %zu, from_gc=%zu), allocated_pgno=%u",
+            (void*)txn, got_from_gc + (allocated_pgno ? 1 : 0), txn->tw.subtxn_arena_refill_pages, txn->tw.subtxn_pages_from_gc, allocated_pgno);
     }
 
     /* Step 2: If we got our page from GC, we're done */
@@ -23631,7 +23628,7 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
                     pnl_append_prereserved(txn->tw.subtxn_repnl, parent->tw.repnl[parent_len]);
                   }
                   MDBX_PNL_SETSIZE(parent->tw.repnl, parent_len);
-                  txn->tw.subtxn_repnl_acquired += take;
+                  txn->tw.subtxn_arena_refill_pages += take;
                   txn->tw.subtxn_pages_from_gc += take;
                 }
               }
@@ -23699,7 +23696,7 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
       for (pgno_t p = extra_start; p < extra_end; ++p) {
         pnl_append_prereserved(txn->tw.subtxn_repnl, p);
       }
-      txn->tw.subtxn_repnl_acquired += extra;
+      txn->tw.subtxn_arena_refill_pages += extra;
       txn->tw.subtxn_pages_from_eof += extra;
     }
     txn->tw.subtxn_pages_from_eof += num;
@@ -24206,13 +24203,12 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
       const size_t idx = MDBX_PNL_GETSIZE(txn->tw.subtxn_repnl);
       const pgno_t pgno = txn->tw.subtxn_repnl[idx];
       MDBX_PNL_SETSIZE(txn->tw.subtxn_repnl, idx - 1);
-      txn->tw.subtxn_arena_hits++;
+      txn->tw.subtxn_arena_page_allocations++;
       return page_alloc_finalize(txn->env, txn, mc, pgno, 1);
     }
     /* Fallback to synchronized parent allocation (EOF extension) with batch pre-claim */
-    txn->tw.subtxn_fallback_count++;
-    txn->tw.subtxn_arena_misses++;
-    DEBUG("subtxn %p: exhausted subtxn_repnl, falling back to parent with batch (fallback #%zu)", (void*)txn, txn->tw.subtxn_fallback_count);
+    txn->tw.subtxn_arena_refill_events++;
+    DEBUG("subtxn %p: exhausted subtxn_repnl, falling back to parent with batch (refill #%zu)", (void*)txn, txn->tw.subtxn_arena_refill_events);
     MDBX_txn *parent = txn->tw.subparent;
     MDBX_env *env = txn->env;
     pgr_t ret;
@@ -24292,7 +24288,7 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
           pnl_append_prereserved(txn->tw.subtxn_repnl, parent->tw.repnl[parent_len]);
         }
         MDBX_PNL_SETSIZE(parent->tw.repnl, parent_len);
-        txn->tw.subtxn_repnl_acquired += extra;
+        txn->tw.subtxn_arena_refill_pages += extra;
         txn->tw.subtxn_pages_from_gc += extra;
       }
 
@@ -24361,10 +24357,10 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
       for (pgno_t p = start + 1; p < extra_end; ++p) {
         pnl_append_prereserved(txn->tw.subtxn_repnl, p);
       }
-      txn->tw.subtxn_repnl_acquired += extra_for_repnl;
+      txn->tw.subtxn_arena_refill_pages += extra_for_repnl;
       txn->tw.subtxn_pages_from_eof += extra_for_repnl;
-      DEBUG("subtxn %p: acquired %zu pages from EOF (total acquired=%zu, from_eof=%zu)",
-            (void*)txn, extra_for_repnl, txn->tw.subtxn_repnl_acquired, txn->tw.subtxn_pages_from_eof);
+      DEBUG("subtxn %p: acquired %zu pages from EOF (total refill_pages=%zu, from_eof=%zu)",
+            (void*)txn, extra_for_repnl, txn->tw.subtxn_arena_refill_pages, txn->tw.subtxn_pages_from_eof);
     }
     txn->tw.subtxn_pages_from_eof += 1;
     return page_alloc_finalize(env, txn, mc, start, 1);
