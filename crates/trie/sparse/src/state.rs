@@ -47,6 +47,10 @@ pub struct SparseStateTrie<
     storage: StorageTries<S>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
+    /// When true, skip filtering of V2 proof nodes that have already been revealed.
+    /// This is useful when the sparse trie is being reused across blocks and already
+    /// tracks revealed nodes internally.
+    skip_proof_node_filtering: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
     account_rlp_buf: Vec<u8>,
     /// Holds data that should be dropped after final state root is calculated.
@@ -67,6 +71,7 @@ where
             revealed_account_paths: Default::default(),
             storage: Default::default(),
             retain_updates: false,
+            skip_proof_node_filtering: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             deferred_drops: DeferredDrops::default(),
             #[cfg(feature = "metrics")]
@@ -116,6 +121,16 @@ impl<A, S> SparseStateTrie<A, S> {
     /// [`RevealableSparseTrie`]s.
     pub fn with_default_storage_trie(mut self, trie: RevealableSparseTrie<S>) -> Self {
         self.set_default_storage_trie(trie);
+        self
+    }
+
+    /// Set whether to skip filtering of V2 proof nodes.
+    ///
+    /// When true, `reveal_*_v2_proof_nodes` methods will pass all nodes directly to the
+    /// sparse trie without filtering already-revealed paths. This is useful when the
+    /// sparse trie is being reused across blocks and handles node deduplication internally.
+    pub const fn with_skip_proof_node_filtering(mut self, skip: bool) -> Self {
+        self.skip_proof_node_filtering = skip;
         self
     }
 
@@ -381,6 +396,7 @@ where
             use reth_primitives_traits::ParallelBridgeBuffered;
 
             let retain_updates = self.retain_updates;
+            let skip_filtering = self.skip_proof_node_filtering;
 
             // Process all storage trie revealings in parallel, having first removed the
             // `reveal_nodes` tracking and `RevealableSparseTrie`s for each account from their
@@ -403,6 +419,7 @@ where
                         &mut trie,
                         &mut bufs,
                         retain_updates,
+                        skip_filtering,
                     );
                     (account, result, revealed_nodes, trie, bufs)
                 })
@@ -493,8 +510,33 @@ where
     /// so no separate masks map is needed.
     pub fn reveal_account_v2_proof_nodes(
         &mut self,
-        nodes: Vec<ProofTrieNode>,
+        mut nodes: Vec<ProofTrieNode>,
     ) -> SparseStateTrieResult<()> {
+        if self.skip_proof_node_filtering {
+            let capacity = estimate_v2_proof_capacity(&nodes);
+
+            #[cfg(feature = "metrics")]
+            self.metrics.increment_total_account_nodes(nodes.len() as u64);
+
+            let root_node = nodes.iter().find(|n| n.path.is_empty());
+            let trie = if let Some(root_node) = root_node {
+                trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
+                self.state.reveal_root(
+                    root_node.node.clone(),
+                    root_node.masks,
+                    self.retain_updates,
+                )?
+            } else {
+                self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+            };
+            trie.reserve_nodes(capacity);
+            trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof (unfiltered)");
+            trie.reveal_nodes(&mut nodes)?;
+
+            self.deferred_drops.proof_nodes_bufs.push(nodes);
+            return Ok(())
+        }
+
         let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values: _metric_values } =
             filter_revealed_v2_proof_nodes(nodes, &mut self.revealed_account_paths)?;
 
@@ -539,6 +581,7 @@ where
             trie,
             &mut self.deferred_drops.proof_nodes_bufs,
             self.retain_updates,
+            self.skip_proof_node_filtering,
         )?;
 
         #[cfg(feature = "metrics")]
@@ -554,12 +597,33 @@ where
     /// designed to handle a variety of associated public functions.
     fn reveal_storage_v2_proof_nodes_inner(
         account: B256,
-        nodes: Vec<ProofTrieNode>,
+        mut nodes: Vec<ProofTrieNode>,
         revealed_nodes: &mut HashSet<Nibbles>,
         trie: &mut RevealableSparseTrie<S>,
         bufs: &mut Vec<Vec<ProofTrieNode>>,
         retain_updates: bool,
+        skip_filtering: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
+        if skip_filtering {
+            let capacity = estimate_v2_proof_capacity(&nodes);
+            let metric_values =
+                ProofNodesMetricValues { total_nodes: nodes.len(), skipped_nodes: 0 };
+
+            let root_node = nodes.iter().find(|n| n.path.is_empty());
+            let trie = if let Some(root_node) = root_node {
+                trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
+                trie.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
+            } else {
+                trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+            };
+            trie.reserve_nodes(capacity);
+            trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof (unfiltered)");
+            trie.reveal_nodes(&mut nodes)?;
+
+            bufs.push(nodes);
+            return Ok(metric_values)
+        }
+
         let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values } =
             filter_revealed_v2_proof_nodes(nodes, revealed_nodes)?;
 
@@ -1531,6 +1595,29 @@ struct FilteredV2ProofNodes {
     new_nodes: usize,
     /// Values which are being returned so they can be incremented into metrics.
     metric_values: ProofNodesMetricValues,
+}
+
+/// Calculates capacity estimation for V2 proof nodes without filtering.
+///
+/// This counts nodes and their children (for branch and extension nodes) to provide
+/// proper capacity hints for `reserve_nodes`. Used when `skip_proof_node_filtering` is
+/// enabled and no filtering is performed.
+fn estimate_v2_proof_capacity(nodes: &[ProofTrieNode]) -> usize {
+    let mut capacity = nodes.len();
+
+    for node in nodes {
+        match &node.node {
+            TrieNode::Branch(branch) => {
+                capacity += branch.state_mask.count_ones() as usize;
+            }
+            TrieNode::Extension(_) => {
+                capacity += 1;
+            }
+            _ => {}
+        };
+    }
+
+    capacity
 }
 
 /// Filters V2 proof nodes that are already revealed, separates the root node if present, and
