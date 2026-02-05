@@ -6,6 +6,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::Decodable;
 use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
+use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
@@ -1235,6 +1236,50 @@ impl SparseTrieExt for ParallelSparseTrie {
     ) -> SparseTrieResult<()> {
         use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
 
+        let touched = updates
+            .iter()
+            .filter_map(|(key, update)| update.is_touched().then_some(*key))
+            .collect::<Vec<_>>();
+
+        let skip_touched = if touched.len() > 100 {
+            let results = touched
+                .par_chunks(50)
+                .map(|chunk| {
+                    chunk
+                        .iter()
+                        .map(|key| {
+                            let full_path = Nibbles::unpack(key);
+
+                            // Touched is read-only: check if path is accessible, request proof if
+                            // blinded.
+                            match self.find_leaf(&full_path, None) {
+                                Err(LeafLookupError::BlindedNode { path, .. }) => {
+                                    let (target_key, min_len) =
+                                        Self::proof_target_for_path(*key, &full_path, &path);
+                                    (key, Some((target_key, min_len)))
+                                }
+                                // Path is fully revealed (exists or proven non-existent), no action
+                                // needed.
+                                Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => (key, None),
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+
+            for (key, target) in results.into_iter().flatten() {
+                if let Some((target_key, min_len)) = target {
+                    proof_required_fn(target_key, min_len);
+                } else {
+                    updates.remove(key);
+                }
+            }
+
+            true
+        } else {
+            false
+        };
+
         // Collect keys upfront since we mutate `updates` during iteration.
         // On success, entries are removed; on blinded node failure, they're re-inserted.
         let keys: Vec<B256> = updates.keys().copied().collect();
@@ -1242,7 +1287,14 @@ impl SparseTrieExt for ParallelSparseTrie {
         for key in keys {
             let full_path = Nibbles::unpack(key);
             // Remove upfront - we'll re-insert if the operation fails due to blinded node.
-            let update = updates.remove(&key).unwrap();
+            let Entry::Occupied(e) = updates.entry(key) else {
+                unreachable!("only iterating over existing keys")
+            };
+            let update = if e.get().is_touched() && skip_touched {
+                continue;
+            } else {
+                e.remove()
+            };
 
             match update {
                 LeafUpdate::Changed(value) => {
