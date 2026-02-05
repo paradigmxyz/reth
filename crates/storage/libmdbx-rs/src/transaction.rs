@@ -383,10 +383,12 @@ where
 
     /// Commits all subtransactions serially.
     ///
-    /// This is a no-op for read-only transactions.
+    /// This is a no-op for read-only transactions or if subtxns already committed.
+    /// After calling this, `parallel_writes_enabled` is set to false to prevent
+    /// double-commit attempts.
     pub fn commit_subtxns(&self) -> Result<()> {
         if K::IS_READ_ONLY ||
-            !self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst)
+            !self.parallel_writes_enabled.swap(false, std::sync::atomic::Ordering::SeqCst)
         {
             return Ok(());
         }
@@ -404,9 +406,11 @@ where
     /// Returns a vector of (dbi, stats) pairs for each subtransaction.
     ///
     /// This is a no-op for read-only transactions, returning an empty vector.
+    /// After calling this, `parallel_writes_enabled` is set to false to prevent
+    /// double-commit attempts.
     pub fn commit_subtxns_with_stats(&self) -> Result<Vec<(ffi::MDBX_dbi, SubTransactionStats)>> {
         if K::IS_READ_ONLY ||
-            !self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst)
+            !self.parallel_writes_enabled.swap(false, std::sync::atomic::Ordering::SeqCst)
         {
             return Ok(Vec::new());
         }
