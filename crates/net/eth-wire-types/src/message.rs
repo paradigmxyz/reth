@@ -912,7 +912,7 @@ mod tests {
     fn decode_status_success() {
         use crate::{Status, StatusMessage};
         use alloy_primitives::{B256, U256};
-        use reth_ethereum_forks::{ForkHash, ForkId};
+        use alloy_hardforks::{ForkHash, ForkId};
 
         let status = Status {
             version: EthVersion::Eth68,
