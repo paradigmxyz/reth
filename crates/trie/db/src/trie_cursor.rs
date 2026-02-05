@@ -274,4 +274,62 @@ mod tests {
         let mut cursor = DatabaseStorageTrieCursor::new(cursor, hashed_address);
         assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
     }
+
+    /// Tests MDBX DUPSORT upsert behavior: upsert APPENDS rather than replaces
+    /// when the subkey is the same but the full value differs.
+    ///
+    /// This test documents why we MUST use seek+delete before upsert for updates
+    /// in DUPSORT tables like StoragesTrie. Without the delete, we'd create duplicate
+    /// entries with the same nibbles but different node values.
+    #[test]
+    fn test_dupsort_upsert_appends_not_replaces() {
+        use reth_db_api::cursor::DbDupCursorRO;
+
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+
+        let hashed_address = B256::random();
+        let nibbles = StoredNibblesSubKey::from(vec![0x1, 0x2]);
+
+        // Insert initial value
+        let value1 = BranchNodeCompact::new(1, 1, 0, vec![], None);
+        cursor
+            .upsert(
+                hashed_address,
+                &StorageTrieEntry { nibbles: nibbles.clone(), node: value1.clone() },
+            )
+            .unwrap();
+
+        // Upsert with same nibbles but different node - this will APPEND in DUPSORT
+        let value2 = BranchNodeCompact::new(2, 2, 0, vec![], None);
+        cursor
+            .upsert(
+                hashed_address,
+                &StorageTrieEntry { nibbles: nibbles.clone(), node: value2.clone() },
+            )
+            .unwrap();
+
+        // Count how many entries we have for this key
+        let entries: Vec<_> = cursor
+            .walk_dup(Some(hashed_address), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        // CRITICAL: With DUPSORT, upsert APPENDS - so we have 2 entries.
+        // This demonstrates why write_storage_trie_updates_sorted MUST seek+delete
+        // before upserting, otherwise we'd accumulate duplicate entries.
+        assert_eq!(
+            entries.len(),
+            2,
+            "MDBX DUPSORT upsert should APPEND, not replace. Got {} entries",
+            entries.len()
+        );
+
+        // Verify both values are present (entries are (key, StorageTrieEntry) tuples)
+        let nodes: Vec<_> = entries.iter().map(|(_, e)| e.node.clone()).collect();
+        assert!(nodes.contains(&value1), "Original value should still exist");
+        assert!(nodes.contains(&value2), "New value should be appended");
+    }
 }
