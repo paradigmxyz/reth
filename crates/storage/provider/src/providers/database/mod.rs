@@ -58,7 +58,7 @@ mod metrics;
 #[cfg(feature = "edge")]
 mod parallel_writes;
 #[cfg(feature = "edge")]
-pub use parallel_writes::{ParallelWriteTimings, PreparedStateWrites, PreparedStorageWrite};
+pub use parallel_writes::{ArenaHints, ParallelWriteTimings, PreparedStateWrites, PreparedStorageWrite};
 
 mod chain;
 pub use chain::*;

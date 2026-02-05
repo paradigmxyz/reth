@@ -6678,6 +6678,7 @@ typedef struct MDBX_page_range {
  */
 typedef struct MDBX_subtxn_spec {
   MDBX_dbi dbi;           /**< DBI this subtxn will write to (enforced) */
+  size_t arena_hint;      /**< Estimated pages needed (0 = use equal distribution) */
 } MDBX_subtxn_spec_t;
 
 /** \brief Create multiple subtransactions for parallel writes.

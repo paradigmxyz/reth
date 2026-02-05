@@ -484,14 +484,37 @@ impl Tx<RW> {
     /// # Returns
     /// Ok(()) on success, or an error if subtransaction creation fails.
     pub fn enable_parallel_writes_for_tables(&self, tables: &[&str]) -> Result<(), DatabaseError> {
-        let dbis: Vec<MDBX_dbi> =
-            tables.iter().filter_map(|name| self.dbis.get(*name).copied()).collect();
+        let hints: Vec<_> = tables.iter().map(|&t| (t, 0usize)).collect();
+        self.enable_parallel_writes_for_tables_with_hints(&hints)
+    }
 
-        if dbis.is_empty() {
+    /// Enables parallel writes mode with arena size hints for specified tables.
+    ///
+    /// Similar to [`enable_parallel_writes_for_tables`], but allows specifying an arena_hint
+    /// for each table to guide page pre-allocation. An arena_hint of 0 means use
+    /// equal distribution among all subtransactions.
+    ///
+    /// # Arguments
+    /// * `tables` - Slice of (table_name, arena_hint) tuples.
+    ///
+    /// # Returns
+    /// Ok(()) on success, or an error if subtransaction creation fails.
+    pub fn enable_parallel_writes_for_tables_with_hints(
+        &self,
+        tables: &[(&str, usize)],
+    ) -> Result<(), DatabaseError> {
+        let specs: Vec<(MDBX_dbi, usize)> = tables
+            .iter()
+            .filter_map(|(name, hint)| self.dbis.get(*name).map(|&dbi| (dbi, *hint)))
+            .collect();
+
+        if specs.is_empty() {
             return Ok(());
         }
 
-        self.inner.enable_parallel_writes(&dbis).map_err(|e| DatabaseError::InitCursor(e.into()))
+        self.inner
+            .enable_parallel_writes_with_hints(&specs)
+            .map_err(|e| DatabaseError::InitCursor(e.into()))
     }
 }
 
@@ -569,6 +592,13 @@ impl DbTxMut for Tx<RW> {
 
     fn enable_parallel_writes_for_tables(&self, tables: &[&str]) -> Result<(), DatabaseError> {
         Tx::enable_parallel_writes_for_tables(self, tables)
+    }
+
+    fn enable_parallel_writes_for_tables_with_hints(
+        &self,
+        tables: &[(&str, usize)],
+    ) -> Result<(), DatabaseError> {
+        Tx::enable_parallel_writes_for_tables_with_hints(self, tables)
     }
 }
 

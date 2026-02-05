@@ -66,6 +66,87 @@ pub struct ParallelWriteTimings {
     pub storage_trie: Duration,
 }
 
+/// Hints for per-DBI arena allocation during parallel writes.
+/// These hints inform the MDBX layer how to distribute freelist pages
+/// proportionally among subtransactions.
+#[derive(Debug, Default, Clone)]
+pub struct ArenaHints {
+    /// Estimated pages for PlainAccountState
+    pub plain_accounts: usize,
+    /// Estimated pages for Bytecodes
+    pub bytecodes: usize,
+    /// Estimated pages for PlainStorageState
+    pub plain_storage: usize,
+    /// Estimated pages for HashedAccounts
+    pub hashed_accounts: usize,
+    /// Estimated pages for HashedStorages
+    pub hashed_storages: usize,
+    /// Estimated pages for AccountsTrie
+    pub account_trie: usize,
+    /// Estimated pages for StoragesTrie
+    pub storage_trie: usize,
+}
+
+impl ArenaHints {
+    /// Maximum pages per arena to prevent memory bloat
+    pub const MAX_ARENA_PAGES: usize = 512;
+    /// Minimum arena size
+    pub const MIN_ARENA_PAGES: usize = 8;
+
+    /// Estimate arena sizes from state data.
+    ///
+    /// # Arguments
+    /// * `num_accounts` - Number of account changes
+    /// * `num_storage` - Number of storage slot changes
+    /// * `num_contracts` - Number of new contracts
+    /// * `num_account_trie_nodes` - Number of account trie node updates
+    /// * `num_storage_trie_nodes` - Number of storage trie node updates
+    pub fn estimate(
+        num_accounts: usize,
+        num_storage: usize,
+        num_contracts: usize,
+        num_account_trie_nodes: usize,
+        num_storage_trie_nodes: usize,
+    ) -> Self {
+        Self {
+            // ~100 accounts per 4KB page, 2x for B+ tree overhead
+            plain_accounts: Self::calc(num_accounts, 50),
+            // Bytecodes are large but few per block
+            bytecodes: Self::calc(num_contracts, 1).max(Self::MIN_ARENA_PAGES),
+            // ~65 storage slots per page
+            plain_storage: Self::calc(num_storage, 30),
+            // Same as plain accounts (hashed)
+            hashed_accounts: Self::calc(num_accounts, 50),
+            // Same as plain storage (hashed)
+            hashed_storages: Self::calc(num_storage, 30),
+            // Trie nodes: ~200 per page, but tree traversal touches many
+            account_trie: Self::calc(num_account_trie_nodes, 20),
+            storage_trie: Self::calc(num_storage_trie_nodes, 20),
+        }
+    }
+
+    fn calc(entries: usize, entries_per_page: usize) -> usize {
+        if entries == 0 {
+            return Self::MIN_ARENA_PAGES;
+        }
+        let base = entries.div_ceil(entries_per_page);
+        // 2x for B+ tree traversal overhead + buffer
+        let with_overhead = base.saturating_mul(2).saturating_add(8);
+        with_overhead.clamp(Self::MIN_ARENA_PAGES, Self::MAX_ARENA_PAGES)
+    }
+
+    /// Returns total estimated pages across all DBIs
+    pub fn total(&self) -> usize {
+        self.plain_accounts
+            + self.bytecodes
+            + self.plain_storage
+            + self.hashed_accounts
+            + self.hashed_storages
+            + self.account_trie
+            + self.storage_trie
+    }
+}
+
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Preprocesses state data for parallel writes.
     ///

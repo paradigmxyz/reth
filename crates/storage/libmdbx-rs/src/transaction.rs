@@ -643,7 +643,26 @@ impl Transaction<RW> {
     /// # Returns
     /// Ok(()) on success, or an error if subtransaction creation fails.
     pub fn enable_parallel_writes(&self, dbis: &[ffi::MDBX_dbi]) -> Result<()> {
-        if dbis.is_empty() {
+        let specs_with_hints: Vec<_> = dbis.iter().map(|&dbi| (dbi, 0usize)).collect();
+        self.enable_parallel_writes_with_hints(&specs_with_hints)
+    }
+
+    /// Enables parallel writes mode with arena size hints for specified DBIs.
+    ///
+    /// Similar to [`enable_parallel_writes`], but allows specifying an arena_hint
+    /// for each DBI to guide page pre-allocation. An arena_hint of 0 means use
+    /// equal distribution among all subtransactions.
+    ///
+    /// # Arguments
+    /// * `specs_input` - Slice of (DBI, arena_hint) tuples.
+    ///
+    /// # Returns
+    /// Ok(()) on success, or an error if subtransaction creation fails.
+    pub fn enable_parallel_writes_with_hints(
+        &self,
+        specs_input: &[(ffi::MDBX_dbi, usize)],
+    ) -> Result<()> {
+        if specs_input.is_empty() {
             return Ok(());
         }
 
@@ -653,7 +672,7 @@ impl Transaction<RW> {
         }
 
         // Debug: verify parent can read BEFORE subtxn creation
-        for &dbi in dbis {
+        for &(dbi, _) in specs_input {
             self.txn_execute(|txn| unsafe {
                 let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
                 let rc = ffi::mdbx_cursor_open(txn, dbi, &mut cursor);
@@ -666,7 +685,7 @@ impl Transaction<RW> {
         // Pre-touch each DBI to ensure MAIN_DBI is dirty in parent.
         // This prevents races in subtxns when they try to modify the B-tree.
         // We do this by performing a put+delete operation which triggers cursor_touch/touch_dbi.
-        for &dbi in dbis {
+        for &(dbi, _) in specs_input {
             // Check if this is a DupSort table - they need special handling
             let db_flags = self.db_flags(dbi)?;
             let is_dupsort = db_flags.contains(DatabaseFlags::DUP_SORT);
@@ -709,11 +728,13 @@ impl Transaction<RW> {
         }
 
         // Create specs array for the C API
-        let specs: Vec<ffi::MDBX_subtxn_spec_t> =
-            dbis.iter().map(|&dbi| ffi::MDBX_subtxn_spec_t { dbi }).collect();
+        let specs: Vec<ffi::MDBX_subtxn_spec_t> = specs_input
+            .iter()
+            .map(|&(dbi, arena_hint)| ffi::MDBX_subtxn_spec_t { dbi, arena_hint })
+            .collect();
 
         // Allocate space for subtransaction pointers
-        let mut subtxn_ptrs: Vec<*mut ffi::MDBX_txn> = vec![ptr::null_mut(); dbis.len()];
+        let mut subtxn_ptrs: Vec<*mut ffi::MDBX_txn> = vec![ptr::null_mut(); specs_input.len()];
 
         // Create all subtransactions atomically
         let create_result = self.txn_execute(|parent_txn| unsafe {
@@ -730,7 +751,7 @@ impl Transaction<RW> {
         // Store subtransactions in the map
         {
             let mut subtxns = self.subtxns.write();
-            for (i, &dbi) in dbis.iter().enumerate() {
+            for (i, &(dbi, _)) in specs_input.iter().enumerate() {
                 subtxns.insert(dbi, SubTransaction::new(subtxn_ptrs[i], dbi));
             }
         }

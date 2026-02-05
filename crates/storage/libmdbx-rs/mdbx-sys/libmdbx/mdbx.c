@@ -15917,10 +15917,12 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
     }
   }
 
-  /* === GC-FIRST ALLOCATION STRATEGY WITH PARENT FALLBACK ===
+  /* === GC-FIRST ALLOCATION STRATEGY WITH PROPORTIONAL DISTRIBUTION ===
    * 1. Harvest available pages from parent's repnl (reclaimed GC pages)
    *    and loose_pages (freed within this txn)
-   * 2. Distribute harvested pages among subtxns equally
+   * 2. Distribute harvested pages proportionally based on arena_hints
+   *    - If hints provided: distribute proportionally to estimated needs
+   *    - If no hints (all zero): fall back to equal distribution
    * 3. If subtxn exhausts its pool, it locks the mutex and allocates from parent
    */
 
@@ -15946,12 +15948,58 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
         parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0,
         parent->tw.loose_count);
 
-  /* Distribute GC pages equally among subtxns */
-  size_t gc_per_subtxn = gc_available / count;
-  size_t gc_remainder = gc_available % count;
+  /* Calculate total arena hints to determine distribution strategy */
+  size_t total_hints = 0;
+  for (size_t i = 0; i < count; ++i)
+    total_hints += specs[i].arena_hint;
 
-  DEBUG("parallel subtxns: distributing %zu GC pages (%zu per subtxn + %zu remainder)",
-        gc_available, gc_per_subtxn, gc_remainder);
+  /* Pre-compute GC allocation per subtxn based on hints or equal distribution */
+  size_t *gc_alloc = osal_malloc(count * sizeof(size_t));
+  if (unlikely(!gc_alloc)) {
+    osal_fastmutex_destroy(alloc_mutex);
+    osal_free(alloc_mutex);
+    return LOG_IFERR(MDBX_ENOMEM);
+  }
+
+  if (total_hints > 0) {
+    /* Proportional distribution based on arena_hints */
+    size_t distributed = 0;
+    for (size_t i = 0; i < count; ++i) {
+      /* Each subtxn gets: min(arena_hint, proportional share of gc_available) */
+      size_t proportional = (gc_available * specs[i].arena_hint) / total_hints;
+      /* Cap at arena_hint - don't give more than requested */
+      gc_alloc[i] = (proportional < specs[i].arena_hint) ? proportional : specs[i].arena_hint;
+      distributed += gc_alloc[i];
+    }
+    /* Distribute any remaining pages to largest consumers first */
+    size_t remaining = gc_available - distributed;
+    while (remaining > 0) {
+      size_t max_deficit = 0;
+      size_t max_idx = 0;
+      for (size_t i = 0; i < count; ++i) {
+        size_t deficit = specs[i].arena_hint > gc_alloc[i] ? specs[i].arena_hint - gc_alloc[i] : 0;
+        if (deficit > max_deficit) {
+          max_deficit = deficit;
+          max_idx = i;
+        }
+      }
+      if (max_deficit == 0) break;
+      gc_alloc[max_idx]++;
+      remaining--;
+    }
+    DEBUG("parallel subtxns: proportional distribution (total_hints=%zu)", total_hints);
+  } else {
+    /* Equal distribution (legacy behavior when no hints provided) */
+    size_t gc_per_subtxn = gc_available / count;
+    size_t gc_remainder = gc_available % count;
+    for (size_t i = 0; i < count; ++i)
+      gc_alloc[i] = gc_per_subtxn + (i < gc_remainder ? 1 : 0);
+    DEBUG("parallel subtxns: equal distribution (%zu per subtxn)", gc_per_subtxn);
+  }
+
+  for (size_t i = 0; i < count; ++i)
+    DEBUG("  subtxn %zu (dbi=%u): arena_hint=%zu, gc_alloc=%zu",
+          i, specs[i].dbi, specs[i].arena_hint, gc_alloc[i]);
 
   /* Create subtxns with NO EOF range - they'll fall back to parent if needed */
   size_t gc_offset = 0;
@@ -15966,11 +16014,12 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
           subtxns[j] = nullptr;
         }
       }
+      osal_free(gc_alloc);
       return rc;
     }
 
-    /* Calculate GC pages for this subtxn (equal distribution + remainder to first subtxns) */
-    size_t gc_for_this = gc_per_subtxn + (i < gc_remainder ? 1 : 0);
+    /* Use pre-computed GC allocation for this subtxn */
+    size_t gc_for_this = gc_alloc[i];
 
     /* Allocate and populate subtxn's private repnl from parent's repnl */
     if (gc_for_this > 0) {
@@ -15982,6 +16031,7 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
             subtxns[j] = nullptr;
           }
         }
+        osal_free(gc_alloc);
         return LOG_IFERR(MDBX_ENOMEM);
       }
 
@@ -16017,6 +16067,7 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
     MDBX_PNL_SETSIZE(parent->tw.repnl, remaining);
   }
 
+  osal_free(gc_alloc);
   return MDBX_SUCCESS;
 }
 

@@ -83,6 +83,9 @@ use std::{
 };
 use tracing::{debug, instrument, trace};
 
+#[cfg(feature = "edge")]
+use super::ArenaHints;
+
 /// Determines the commit order for database operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CommitOrder {
@@ -652,23 +655,6 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 timings.insert_block += start.elapsed();
             }
 
-            // Enable parallel MDBX subtransactions for state writes only.
-            // This is placed AFTER insert_block_mdbx_only to avoid conflicts with block index
-            // writes. NOTE: DupSort tables (PlainStorageState, HashedStorages,
-            // StoragesTrie) are excluded because parallel subtxns don't properly handle
-            // DupSort nested B-tree operations.
-            if use_parallel_writes {
-                self.tx.enable_parallel_writes_for_tables(&[
-                    tables::PlainAccountState::NAME,
-                    tables::PlainStorageState::NAME,
-                    tables::Bytecodes::NAME,
-                    tables::HashedAccounts::NAME,
-                    tables::HashedStorages::NAME,
-                    tables::AccountsTrie::NAME,
-                    tables::StoragesTrie::NAME,
-                ])?;
-            }
-
             // Write state, hashed state, and trie updates
             if save_mode.with_state() {
                 let state_write_config = StateWriteConfig {
@@ -687,7 +673,6 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 // - Thread 7: StoragesTrie
                 #[cfg(feature = "edge")]
                 if use_parallel_writes {
-                    eprintln!(">>> PARALLEL WRITES PATH ENTERED <<<");
                     let mut edge_timings = metrics::EdgeWriteTimings::default();
                     let total_start = Instant::now();
 
@@ -737,6 +722,25 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                         .collect();
 
                     edge_timings.preprocessing = preprocess_start.elapsed();
+
+                    // Compute arena hints from prepared data and enable parallel writes
+                    let hints = ArenaHints::estimate(
+                        prepared.accounts.len(),
+                        prepared.storage.iter().map(|s| s.storage.len()).sum(),
+                        prepared.contracts.len(),
+                        merged_trie.account_nodes_ref().len(),
+                        merged_trie.storage_tries_ref().values().map(|t| t.storage_nodes_ref().len()).sum(),
+                    );
+
+                    self.tx.enable_parallel_writes_for_tables_with_hints(&[
+                        (tables::PlainAccountState::NAME, hints.plain_accounts),
+                        (tables::PlainStorageState::NAME, hints.plain_storage),
+                        (tables::Bytecodes::NAME, hints.bytecodes),
+                        (tables::HashedAccounts::NAME, hints.hashed_accounts),
+                        (tables::HashedStorages::NAME, hints.hashed_storages),
+                        (tables::AccountsTrie::NAME, hints.account_trie),
+                        (tables::StoragesTrie::NAME, hints.storage_trie),
+                    ])?;
 
                     // SPAWN 7 THREADS: One per DBI for maximum parallelism
                     let parallel_start = Instant::now();
@@ -790,8 +794,6 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                     edge_timings.parallel_wall = parallel_start.elapsed();
                     edge_timings.total = total_start.elapsed();
                     edge_timings.subtxn_count = 7;
-                    eprintln!(">>> EDGE TIMINGS: preprocessing={:?} parallel_wall={:?} total={:?} subtxn_count={}", 
-                        edge_timings.preprocessing, edge_timings.parallel_wall, edge_timings.total, edge_timings.subtxn_count);
                     self.metrics.record_edge_writes(&edge_timings);
 
                     // Also update the standard timings for backward compatibility
