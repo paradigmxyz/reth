@@ -137,8 +137,11 @@ fn main() -> io::Result<()> {
 
     // Generate root SUMMARY.mdx.
     if args.root_summary {
-        let root_summary: String =
-            output.iter().map(|(cmd, _)| cmd_summary(cmd, args.root_indentation)).collect();
+        let root_summary: String = output
+            .iter()
+            .map(|(cmd, _)| cmd_summary(cmd, args.root_indentation))
+            .chain(once("\n".to_string()))
+            .collect();
 
         let path = Path::new(args.root_dir.as_str());
         if args.verbose {
