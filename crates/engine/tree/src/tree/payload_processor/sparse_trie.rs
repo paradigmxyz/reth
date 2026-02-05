@@ -292,7 +292,13 @@ where
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
-        executor.spawn_blocking(move || Self::run_hashing_task(updates, hashed_state_tx));
+        let parent_span = tracing::Span::current();
+        executor.spawn_blocking(move || {
+            let _span =
+                debug_span!(parent: parent_span, "run_hashing_task")
+                    .entered();
+            Self::run_hashing_task(updates, hashed_state_tx)
+        });
 
         Self {
             proof_result_tx,
@@ -329,6 +335,7 @@ where
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
                 MultiProofMessage::StateUpdate(_, state) => {
+                    let _span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing state update", update_len = state.len()).entered();
                     let hashed = evm_state_to_hashed_post_state(state);
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
