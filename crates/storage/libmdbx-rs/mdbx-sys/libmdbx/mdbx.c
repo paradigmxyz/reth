@@ -16605,7 +16605,7 @@ LIBMDBX_API int mdbx_subtxn_get_stats(const MDBX_txn *subtxn, MDBX_subtxn_stats 
   stats->arena_refill_pages = subtxn->tw.subtxn_arena_refill_pages;
   stats->pages_from_gc = subtxn->tw.subtxn_pages_from_gc;
   stats->pages_from_eof = subtxn->tw.subtxn_pages_from_eof;
-  stats->pages_unused = subtxn->tw.subtxn_pages_unused;
+  stats->pages_unused = subtxn->tw.subtxn_repnl ? MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl) : 0;
   stats->arena_hint = subtxn->tw.subtxn_arena_hint;
   stats->assigned_dbi = subtxn->tw.assigned_dbi;
   return MDBX_SUCCESS;
