@@ -109,19 +109,20 @@ impl ArenaHints {
         num_storage_trie_nodes: usize,
     ) -> Self {
         Self {
-            // ~100 accounts per 4KB page, 2x for B+ tree overhead
-            plain_accounts: Self::calc(num_accounts, 50),
+            // Target ~120 pages based on 187 hits/s peak (+20% headroom)
+            plain_accounts: Self::calc(num_accounts, 25),
             // Bytecodes are large but few per block
             bytecodes: Self::calc(num_contracts, 1).max(Self::MIN_ARENA_PAGES),
-            // ~65 storage slots per page
-            plain_storage: Self::calc(num_storage, 30),
-            // Same as plain accounts (hashed)
-            hashed_accounts: Self::calc(num_accounts, 50),
-            // Same as plain storage (hashed)
-            hashed_storages: Self::calc(num_storage, 30),
-            // Trie nodes: ~200 per page, but tree traversal touches many
-            account_trie: Self::calc(num_account_trie_nodes, 20),
-            storage_trie: Self::calc(num_storage_trie_nodes, 20),
+            // Target ~150 pages based on 211 hits/s peak (+20% headroom)
+            plain_storage: Self::calc(num_storage, 20),
+            // Target ~120 pages based on 205 hits/s peak (+20% headroom)
+            hashed_accounts: Self::calc(num_accounts, 25),
+            // Target ~150 pages based on 236 hits/s peak (+20% headroom)
+            hashed_storages: Self::calc(num_storage, 20),
+            // Target ~560 pages based on 467 hits/s peak (+20% headroom)
+            account_trie: Self::calc(num_account_trie_nodes, 8),
+            // Target ~500 pages based on 485 hits/s peak (+20% headroom)
+            storage_trie: Self::calc(num_storage_trie_nodes, 10),
         }
     }
 

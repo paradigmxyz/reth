@@ -415,11 +415,27 @@ pub(crate) struct EdgeArenaMetrics {
     pages_acquired: Counter,
     /// Configured arena size hint for this table (pages)
     arena_hint: Gauge,
+    /// Pages reclaimed from GC (garbage collector / freeDB)
+    pages_from_gc: Counter,
+    /// Pages allocated from end-of-file (extending the database)
+    pages_from_eof: Counter,
 }
 
 impl EdgeArenaMetrics {
     /// Record stats from a single subtransaction.
     pub(crate) fn record(&self, stats: &reth_libmdbx::SubTransactionStats) {
+        println!(
+            "[ARENA] hits={} misses={} distributed={} unused={} fallback={} acquired={} hint={} from_gc={} from_eof={}",
+            stats.arena_hits,
+            stats.arena_misses,
+            stats.pages_distributed,
+            stats.pages_unused,
+            stats.fallback_count,
+            stats.pages_acquired,
+            stats.arena_hint,
+            stats.pages_from_gc,
+            stats.pages_from_eof
+        );
         self.arena_hits.increment(stats.arena_hits as u64);
         self.arena_misses.increment(stats.arena_misses as u64);
         self.pages_distributed.increment(stats.pages_distributed as u64);
@@ -427,5 +443,7 @@ impl EdgeArenaMetrics {
         self.fallback_count.increment(stats.fallback_count as u64);
         self.pages_acquired.increment(stats.pages_acquired as u64);
         self.arena_hint.set(stats.arena_hint as f64);
+        self.pages_from_gc.increment(stats.pages_from_gc as u64);
+        self.pages_from_eof.increment(stats.pages_from_eof as u64);
     }
 }

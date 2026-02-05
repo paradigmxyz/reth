@@ -4329,6 +4329,8 @@ struct MDBX_txn {
       pnl_t subtxn_repnl;           /* Pre-claimed reclaimed pages for this subtxn */
       size_t subtxn_repnl_distributed; /* Initial pages distributed (for accounting) */
       size_t subtxn_repnl_acquired;    /* Pages acquired from parent during fallback */
+      size_t subtxn_pages_from_gc;     /* Pages acquired from parent's repnl (GC) */
+      size_t subtxn_pages_from_eof;    /* Pages acquired via EOF extension */
       size_t subtxn_fallback_count;    /* Number of times fallback to parent was triggered */
       size_t subtxn_pages_unused;      /* Pages returned to parent on commit (not consumed) */
       size_t subtxn_arena_hint;        /* Original arena hint for this subtxn */
@@ -15857,6 +15859,8 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   txn->tw.subtxn_repnl = nullptr; /* Will be set by mdbx_txn_create_subtxns */
   txn->tw.subtxn_repnl_distributed = 0;
   txn->tw.subtxn_repnl_acquired = 0;
+  txn->tw.subtxn_pages_from_gc = 0;
+  txn->tw.subtxn_pages_from_eof = 0;
   txn->tw.subtxn_arena_hits = 0;
   txn->tw.subtxn_arena_misses = 0;
   txn->tw.subtxn_alloc_mutex = parent->tw.subtxn_alloc_mutex; /* Share parent's mutex */
@@ -16156,6 +16160,8 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
       subtxns[i]->tw.subtxn_repnl = subtxn_pnl;
       subtxns[i]->tw.subtxn_repnl_distributed = MDBX_PNL_GETSIZE(subtxn_pnl);
       subtxns[i]->tw.subtxn_repnl_acquired = 0;
+      subtxns[i]->tw.subtxn_pages_from_gc = 0;
+      subtxns[i]->tw.subtxn_pages_from_eof = 0;
       subtxns[i]->tw.subtxn_arena_hits = 0;
       subtxns[i]->tw.subtxn_arena_misses = 0;
       DEBUG("subtxn %zu: assigned %zu GC pages (distributed=%zu)",
@@ -16598,6 +16604,8 @@ LIBMDBX_API int mdbx_subtxn_get_stats(const MDBX_txn *subtxn, MDBX_subtxn_stats 
   stats->arena_misses = subtxn->tw.subtxn_arena_misses;
   stats->pages_distributed = subtxn->tw.subtxn_repnl_distributed;
   stats->pages_acquired = subtxn->tw.subtxn_repnl_acquired;
+  stats->pages_from_gc = subtxn->tw.subtxn_pages_from_gc;
+  stats->pages_from_eof = subtxn->tw.subtxn_pages_from_eof;
   stats->pages_unused = subtxn->tw.subtxn_pages_unused;
   stats->fallback_count = subtxn->tw.subtxn_fallback_count;
   stats->arena_hint = subtxn->tw.subtxn_arena_hint;
@@ -23548,10 +23556,11 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
         }
         MDBX_PNL_SETSIZE(parent->tw.repnl, parent_len);
         txn->tw.subtxn_repnl_acquired += take;
+        txn->tw.subtxn_pages_from_gc += take;
       }
 
-      DEBUG("subtxn %p: got %zu pages from parent repnl (acquired now %zu), allocated_pgno=%u",
-            (void*)txn, got_from_gc + (allocated_pgno ? 1 : 0), txn->tw.subtxn_repnl_acquired, allocated_pgno);
+      DEBUG("subtxn %p: got %zu pages from parent repnl (acquired now %zu, from_gc=%zu), allocated_pgno=%u",
+            (void*)txn, got_from_gc + (allocated_pgno ? 1 : 0), txn->tw.subtxn_repnl_acquired, txn->tw.subtxn_pages_from_gc, allocated_pgno);
     }
 
     /* Step 2: If we got our page from GC, we're done */
@@ -23622,10 +23631,12 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
                     pnl_append_prereserved(txn->tw.subtxn_repnl, parent->tw.repnl[parent_len]);
                   }
                   MDBX_PNL_SETSIZE(parent->tw.repnl, parent_len);
+                  txn->tw.subtxn_repnl_acquired += take;
+                  txn->tw.subtxn_pages_from_gc += take;
                 }
               }
               
-              DEBUG("subtxn %p: got page %u from GC reclaim, refilled %zu", (void*)txn, allocated_pgno, take);
+              DEBUG("subtxn %p: got page %u from GC reclaim, refilled %zu (from_gc=%zu)", (void*)txn, allocated_pgno, take, txn->tw.subtxn_pages_from_gc);
               osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
               return page_alloc_finalize(env, txn, mc, allocated_pgno, 1);
             }
@@ -23688,7 +23699,11 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
       for (pgno_t p = extra_start; p < extra_end; ++p) {
         pnl_append_prereserved(txn->tw.subtxn_repnl, p);
       }
+      txn->tw.subtxn_repnl_acquired += extra;
+      txn->tw.subtxn_pages_from_eof += extra;
     }
+    txn->tw.subtxn_pages_from_eof += num;
+    DEBUG("subtxn %p: acquired %zu pages from EOF (total from_eof=%zu)", (void*)txn, num + extra, txn->tw.subtxn_pages_from_eof);
     return page_alloc_finalize(env, txn, mc, start, num);
   }
 
@@ -24275,9 +24290,11 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
         pnl_append_prereserved(txn->tw.subtxn_repnl, p);
       }
       txn->tw.subtxn_repnl_acquired += extra_for_repnl;
-      DEBUG("subtxn %p: acquired %zu pages from EOF (total acquired=%zu)",
-            (void*)txn, extra_for_repnl, txn->tw.subtxn_repnl_acquired);
+      txn->tw.subtxn_pages_from_eof += extra_for_repnl;
+      DEBUG("subtxn %p: acquired %zu pages from EOF (total acquired=%zu, from_eof=%zu)",
+            (void*)txn, extra_for_repnl, txn->tw.subtxn_repnl_acquired, txn->tw.subtxn_pages_from_eof);
     }
+    txn->tw.subtxn_pages_from_eof += 1;
     return page_alloc_finalize(env, txn, mc, start, 1);
   }
 
