@@ -64,27 +64,25 @@ where
         // data. If the TransactionLookup checkpoint is lagging behind (which can happen e.g. when
         // pre-merge history is dropped and then later tx lookup pruning is enabled) then we can
         // only prune from the lowest static file.
-        //
-        // Only adjust checkpoint if lowest range starts after block 0, otherwise we'd incorrectly
-        // skip genesis block transactions.
         if let Some(lowest_range) =
             provider.static_file_provider().get_lowest_range(StaticFileSegment::Transactions) &&
             input
                 .previous_checkpoint
-                .is_none_or(|checkpoint| checkpoint.block_number < Some(lowest_range.start())) &&
-            let Some(new_checkpoint) = lowest_range.start().checked_sub(1) &&
-            let Some(body_indices) = provider.block_body_indices(new_checkpoint)?
+                .is_none_or(|checkpoint| checkpoint.block_number < Some(lowest_range.start()))
         {
-            input.previous_checkpoint = Some(PruneCheckpoint {
-                block_number: Some(new_checkpoint),
-                tx_number: Some(body_indices.last_tx_num()),
-                prune_mode: self.mode,
-            });
-            debug!(
-                target: "pruner",
-                static_file_checkpoint = ?input.previous_checkpoint,
-                "Using static file transaction checkpoint as TransactionLookup starting point"
-            );
+            let new_checkpoint = lowest_range.start().saturating_sub(1);
+            if let Some(body_indices) = provider.block_body_indices(new_checkpoint)? {
+                input.previous_checkpoint = Some(PruneCheckpoint {
+                    block_number: Some(new_checkpoint),
+                    tx_number: Some(body_indices.last_tx_num()),
+                    prune_mode: self.mode,
+                });
+                debug!(
+                    target: "pruner",
+                    static_file_checkpoint = ?input.previous_checkpoint,
+                    "Using static file transaction checkpoint as TransactionLookup starting point"
+                );
+            }
         }
 
         let (start, end) = match input.get_next_tx_num_range(provider)? {

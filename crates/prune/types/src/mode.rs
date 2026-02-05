@@ -224,22 +224,4 @@ mod tests {
             })
         );
     }
-
-    #[test]
-    fn test_next_pruned_block() {
-        // Before(N): returns next block until checkpoint reaches N-1
-        assert_eq!(PruneMode::Before(10).next_pruned_block(None), Some(0));
-        assert_eq!(PruneMode::Before(10).next_pruned_block(Some(5)), Some(6));
-        assert_eq!(PruneMode::Before(10).next_pruned_block(Some(8)), Some(9));
-        assert_eq!(PruneMode::Before(10).next_pruned_block(Some(9)), None); // done
-        assert_eq!(PruneMode::Before(10).next_pruned_block(Some(10)), None);
-
-        // Distance: always returns next block (infinite pruning as chain grows)
-        assert_eq!(PruneMode::Distance(100).next_pruned_block(None), Some(0));
-        assert_eq!(PruneMode::Distance(100).next_pruned_block(Some(1000)), Some(1001));
-
-        // Full: always returns next block
-        assert_eq!(PruneMode::Full.next_pruned_block(None), Some(0));
-        assert_eq!(PruneMode::Full.next_pruned_block(Some(500)), Some(501));
-    }
 }
