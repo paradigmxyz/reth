@@ -266,7 +266,8 @@ impl TransactionLookup {
         let done = deleted == hashes.len() && tx_range_end == end;
         trace!(target: "pruner", %deleted, %done, "Pruned transaction lookup (RocksDB)");
 
-        let last_pruned_transaction = if deleted > 0 { start + deleted as u64 - 1 } else { start };
+        let last_pruned_transaction =
+            if deleted > 0 { start + deleted as u64 - 1 } else { tx_range_end };
 
         let last_pruned_block = provider
             .block_by_transaction_id(last_pruned_transaction)?
