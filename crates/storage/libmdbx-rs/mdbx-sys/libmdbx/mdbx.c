@@ -16251,47 +16251,18 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
   if (unlikely(!parent))
     return LOG_IFERR(MDBX_BAD_TXN);
 
-  /* Serialize sibling subtxn commits to avoid races on parent state */
-  if (subtxn->tw.subtxn_alloc_mutex) {
-    int lock_rc = osal_fastmutex_acquire(subtxn->tw.subtxn_alloc_mutex);
-    if (unlikely(lock_rc != MDBX_SUCCESS))
-      return LOG_IFERR(lock_rc);
-  }
-
   DEBUG("committing parallel subtx %p, dirty_npages %zu",
         (void *)subtxn, (size_t)subtxn->tw.writemap_dirty_npages);
 
-  /* WRITEMAP: pages already modified in-place, just merge the counter */
-  parent->tw.writemap_dirty_npages += subtxn->tw.writemap_dirty_npages;
-  if (subtxn->tw.writemap_dirty_npages > 0)
-    parent->flags |= MDBX_TXN_DIRTY;
-
-  /* Merge dbi metadata (B-tree roots, stats) for modified databases.
-   * Note: This only works correctly when subtxns are committed serially
-   * and don't have overlapping modifications to the same dbi.
-   * Only merge DBIs actually dirtied by this subtxn (not inherited DBI_FRESH). */
-  for (size_t dbi = 0; dbi < subtxn->n_dbi; ++dbi) {
-    if (subtxn->dbi_state[dbi] & DBI_DIRTY) {
-      parent->dbs[dbi] = subtxn->dbs[dbi];
-      parent->dbi_state[dbi] |= DBI_DIRTY;
-    }
-  }
-
-  /* Update parent's canary if subtxn modified it */
-  parent->canary = subtxn->canary;
-
-  /* ===== DIAGNOSTIC: Log sizes and check for cross-list duplicates BEFORE merge ===== */
+  /* ===== PRE-MERGE DIAGNOSTIC (outside mutex - reads only subtxn-local state) ===== */
 #if MDBX_DEBUG
   {
     const size_t retired_sz = subtxn->tw.retired_pages ? MDBX_PNL_GETSIZE(subtxn->tw.retired_pages) : 0;
     const size_t repnl_sz = subtxn->tw.repnl ? MDBX_PNL_GETSIZE(subtxn->tw.repnl) : 0;
     const size_t subtxn_repnl_sz = subtxn->tw.subtxn_repnl ? MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl) : 0;
-    const size_t parent_retired_sz = parent->tw.retired_pages ? MDBX_PNL_GETSIZE(parent->tw.retired_pages) : 0;
-    const size_t parent_repnl_sz = parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0;
 
-    DEBUG("subtxn %p PRE-MERGE: subtxn retired=%zu repnl=%zu subtxn_repnl=%zu loose=%zu | parent retired=%zu repnl=%zu",
-          (void*)subtxn, retired_sz, repnl_sz, subtxn_repnl_sz, (size_t)subtxn->tw.loose_count,
-          parent_retired_sz, parent_repnl_sz);
+    DEBUG("subtxn %p PRE-MERGE: subtxn retired=%zu repnl=%zu subtxn_repnl=%zu loose=%zu",
+          (void*)subtxn, retired_sz, repnl_sz, subtxn_repnl_sz, (size_t)subtxn->tw.loose_count);
 
     DEBUG("subtxn %p DISTRIBUTION: dbi=%u hint=%zu initial_pages=%zu refill_pages=%zu",
           (void*)subtxn, subtxn->tw.assigned_dbi,
@@ -16353,21 +16324,37 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
       }
       lp = page_next(lp);
     }
-
-    /* Check subtxn lists against parent lists for pages that would be double-added */
-    if (retired_sz > 0 && parent_retired_sz > 0) {
-      for (size_t i = 1; i <= retired_sz; ++i) {
-        pgno_t pg = subtxn->tw.retired_pages[i];
-        for (size_t j = 1; j <= parent_retired_sz; ++j) {
-          if (parent->tw.retired_pages[j] == pg) {
-            ERROR("DUPLICATE detected: page %" PRIaPGNO " already in parent retired_pages, subtxn would add again!", pg);
-          }
-        }
-      }
-    }
   }
 #endif
-  /* ===== END DIAGNOSTIC ===== */
+  /* ===== END PRE-MERGE DIAGNOSTIC ===== */
+
+  /* Serialize sibling subtxn commits to avoid races on parent state.
+   * Lock acquired AFTER pre-merge diagnostics (which only read subtxn-local state)
+   * to reduce lock contention. */
+  if (subtxn->tw.subtxn_alloc_mutex) {
+    int lock_rc = osal_fastmutex_acquire(subtxn->tw.subtxn_alloc_mutex);
+    if (unlikely(lock_rc != MDBX_SUCCESS))
+      return LOG_IFERR(lock_rc);
+  }
+
+  /* WRITEMAP: pages already modified in-place, just merge the counter */
+  parent->tw.writemap_dirty_npages += subtxn->tw.writemap_dirty_npages;
+  if (subtxn->tw.writemap_dirty_npages > 0)
+    parent->flags |= MDBX_TXN_DIRTY;
+
+  /* Merge dbi metadata (B-tree roots, stats) for modified databases.
+   * Note: This only works correctly when subtxns are committed serially
+   * and don't have overlapping modifications to the same dbi.
+   * Only merge DBIs actually dirtied by this subtxn (not inherited DBI_FRESH). */
+  for (size_t dbi = 0; dbi < subtxn->n_dbi; ++dbi) {
+    if (subtxn->dbi_state[dbi] & DBI_DIRTY) {
+      parent->dbs[dbi] = subtxn->dbs[dbi];
+      parent->dbi_state[dbi] |= DBI_DIRTY;
+    }
+  }
+
+  /* Update parent's canary if subtxn modified it */
+  parent->canary = subtxn->canary;
 
   /* Merge retired_pages from subtxn into parent */
   if (subtxn->tw.retired_pages && MDBX_PNL_GETSIZE(subtxn->tw.retired_pages) > 0) {
@@ -16465,11 +16452,21 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
   if (is_last_subtxn && MDBX_PNL_GETSIZE(parent->tw.repnl) > 1)
     pnl_sort(parent->tw.repnl, parent->geo.first_unallocated);
 
-  /* ===== DIAGNOSTIC: Check for duplicates in parent repnl AFTER merge ===== */
+  /* Unlink from parent's list while still holding mutex to prevent races
+   * with concurrent subtxn commits checking/modifying the list. */
+  subtx_unlink_from_parent(subtxn);
+
+  if (subtxn->tw.subtxn_alloc_mutex)
+    osal_fastmutex_release(subtxn->tw.subtxn_alloc_mutex);
+
+  /* ===== POST-MERGE DIAGNOSTIC (outside mutex - O(n²) checks on snapshot) ===== */
 #if MDBX_DEBUG
   {
     const size_t repnl_sz = MDBX_PNL_GETSIZE(parent->tw.repnl);
-    /* Use O(n²) check that works on unsorted list (deferred sort optimization) */
+    /* Use O(n²) check that works on unsorted list (deferred sort optimization).
+     * Note: Other subtxns may be modifying parent state concurrently, but this
+     * diagnostic is best-effort - we're checking for bugs, not guaranteeing
+     * atomicity of the check. */
     if (repnl_sz > 1) {
       for (size_t i = 1; i <= repnl_sz; ++i) {
         for (size_t j = i + 1; j <= repnl_sz; ++j) {
@@ -16482,7 +16479,6 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
     /* Also check parent retired_pages for duplicates */
     const size_t retired_sz = parent->tw.retired_pages ? MDBX_PNL_GETSIZE(parent->tw.retired_pages) : 0;
     if (retired_sz > 1) {
-      /* Sort temporarily to check for dups (retired_pages may not be sorted) */
       for (size_t i = 1; i <= retired_sz; ++i) {
         for (size_t j = i + 1; j <= retired_sz; ++j) {
           if (parent->tw.retired_pages[i] == parent->tw.retired_pages[j])
@@ -16507,10 +16503,6 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
 #endif
   /* ===== END DIAGNOSTIC ===== */
 
-  if (subtxn->tw.subtxn_alloc_mutex)
-    osal_fastmutex_release(subtxn->tw.subtxn_alloc_mutex);
-
-  subtx_unlink_from_parent(subtxn);
   subtx_free_resources(subtxn);
   osal_free(subtxn);
 

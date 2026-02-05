@@ -59,8 +59,8 @@ mod metrics;
 mod parallel_writes;
 #[cfg(feature = "edge")]
 pub use parallel_writes::{
-    ArenaHintDetail, ArenaHintDetails, ArenaHintSource, ArenaHints, ParallelWriteTimings,
-    PreparedStateWrites, PreparedStorageWrite,
+    ArenaHintDetail, ArenaHintDetails, ArenaHintSource, ArenaHints, ArenaUsageSnapshot,
+    ArenaUsageTracker, ParallelWriteTimings, PreparedStateWrites, PreparedStorageWrite,
 };
 
 mod chain;

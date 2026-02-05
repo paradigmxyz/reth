@@ -862,9 +862,10 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                         let (_, account_trie_duration) =
                             t6.join().expect("account_trie thread panicked")?;
                         edge_timings.account_trie = account_trie_duration;
-                        let (_, storage_trie_duration) =
+                        let (_, storage_trie_op_counts, storage_trie_duration) =
                             t7.join().expect("storage_trie thread panicked")?;
                         edge_timings.storage_trie = storage_trie_duration;
+                        edge_timings.storage_trie_op_counts = storage_trie_op_counts.into();
 
                         Ok::<_, ProviderError>(())
                     })?;
@@ -3087,8 +3088,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         for (hashed_address, storage_trie_updates) in storage_tries {
             let mut db_storage_trie_cursor =
                 DatabaseStorageTrieCursor::new(cursor, *hashed_address);
-            num_entries +=
+            let (entries, _op_counts) =
                 db_storage_trie_cursor.write_storage_trie_updates_sorted(storage_trie_updates)?;
+            num_entries += entries;
             cursor = db_storage_trie_cursor.cursor;
         }
 

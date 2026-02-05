@@ -11,6 +11,18 @@ use reth_trie::{
     BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
 
+/// Operation counts for storage trie cursor operations.
+/// Used to identify which operation type dominates storage_trie write time.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct StorageTrieOpCounts {
+    /// Number of `seek_by_key_subkey` calls
+    pub seek_count: u64,
+    /// Number of `delete_current` calls
+    pub delete_count: u64,
+    /// Number of `upsert` calls
+    pub upsert_count: u64,
+}
+
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
 #[derive(Debug, Clone)]
 pub struct DatabaseTrieCursorFactory<T>(T);
@@ -120,11 +132,14 @@ where
         + DbDupCursorRO<tables::StoragesTrie>
         + DbDupCursorRW<tables::StoragesTrie>,
 {
-    /// Writes storage updates that are already sorted
+    /// Writes storage updates that are already sorted.
+    /// Returns a tuple of (entries modified, operation counts).
     pub fn write_storage_trie_updates_sorted(
         &mut self,
         updates: &StorageTrieUpdatesSorted,
-    ) -> Result<usize, DatabaseError> {
+    ) -> Result<(usize, StorageTrieOpCounts), DatabaseError> {
+        let mut op_counts = StorageTrieOpCounts::default();
+
         // The storage trie for this account has to be deleted.
         if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
             self.cursor.delete_current_duplicates()?;
@@ -136,17 +151,20 @@ where
             num_entries += 1;
             let nibbles = StoredNibblesSubKey(*nibbles);
             // Delete the old entry if it exists.
+            op_counts.seek_count += 1;
             if self
                 .cursor
                 .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
                 .filter(|e| e.nibbles == nibbles)
                 .is_some()
             {
+                op_counts.delete_count += 1;
                 self.cursor.delete_current()?;
             }
 
             // There is an updated version of this node, insert new entry.
             if let Some(node) = maybe_updated {
+                op_counts.upsert_count += 1;
                 self.cursor.upsert(
                     self.hashed_address,
                     &StorageTrieEntry { nibbles, node: node.clone() },
@@ -154,7 +172,7 @@ where
             }
         }
 
-        Ok(num_entries)
+        Ok((num_entries, op_counts))
     }
 }
 
