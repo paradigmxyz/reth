@@ -120,7 +120,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
         let genesis_block_number = self.chain.genesis().number.unwrap_or_default();
         let (db, sfp) = match access {
-            AccessRights::RW => (
+            AccessRights::RW | AccessRights::RWMetadataOnly => (
                 init_db(db_path, self.db.database_args())?,
                 StaticFileProviderBuilder::read_write(sf_path)
                     .with_metrics()
@@ -146,7 +146,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
         let provider_factory =
             self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
-        if access.is_read_write() {
+        if access.is_read_write() && !access.skip_genesis_init() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis_with_settings(&provider_factory, self.storage_settings())?;
         }
@@ -245,18 +245,25 @@ pub enum AccessRights {
     RO,
     /// Read-only access with possibly inconsistent data
     RoInconsistent,
+    /// Read-write access for metadata only (skips genesis initialization)
+    RWMetadataOnly,
 }
 
 impl AccessRights {
     /// Returns `true` if it requires read-write access to the environment.
     pub const fn is_read_write(&self) -> bool {
-        matches!(self, Self::RW)
+        matches!(self, Self::RW | Self::RWMetadataOnly)
     }
 
     /// Returns `true` if it requires read-only access to the environment with possibly inconsistent
     /// data.
     pub const fn is_read_only_inconsistent(&self) -> bool {
         matches!(self, Self::RoInconsistent)
+    }
+
+    /// Returns `true` if genesis initialization should be skipped.
+    pub const fn skip_genesis_init(&self) -> bool {
+        matches!(self, Self::RWMetadataOnly)
     }
 }
 
