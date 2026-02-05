@@ -911,8 +911,8 @@ mod tests {
     #[test]
     fn decode_status_success() {
         use crate::{Status, StatusMessage};
-        use alloy_primitives::{B256, U256};
         use alloy_hardforks::{ForkHash, ForkId};
+        use alloy_primitives::{B256, U256};
 
         let status = Status {
             version: EthVersion::Eth68,
