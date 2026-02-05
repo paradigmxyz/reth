@@ -83,8 +83,11 @@ where
             "7ef8f8a0683079df94aa5b9cf86687d739a60a9b4f0835e520ec4d664e2e415dca17a6df94deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e200000146b000f79c500000000000000040000000066d052e700000000013ad8a3000000000000000000000000000000000000000000000000000000003ef1278700000000000000000000000000000000000000000000000000000000000000012fdf87b89884a61e74b322bbcf60386f543bfae7827725efaaf0ab1de2294a590000000000000000000000006887246668a3b87f54deb3b94ba47a6f63f32985"
         );
 
+        // Configure EIP-1559 parameters for dev mode. These can be overridden via environment
+        // variables (OP_DEV_EIP1559_DENOMINATOR, OP_DEV_EIP1559_ELASTICITY, OP_DEV_GAS_LIMIT),
+        // otherwise defaults from Optimism's BaseFeeParams are used. The parameters are encoded
+        // as an 8-byte value (denominator + elasticity) required by Optimism's Jovian fork.
         let default_eip_1559_params = BaseFeeParams::optimism();
-
         let denominator = env::var("OP_DEV_EIP1559_DENOMINATOR")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
