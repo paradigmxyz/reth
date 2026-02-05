@@ -185,6 +185,73 @@ pub(crate) struct DatabaseProviderMetrics {
     edge_parallel_subtxn_count_last: Gauge,
 }
 
+/// Per-table arena hint metrics for tracking estimation quality.
+#[derive(Debug)]
+#[cfg(feature = "edge")]
+pub(crate) struct ArenaHintMetrics {
+    handles: std::collections::HashMap<&'static str, ArenaHintTableMetrics>,
+}
+
+#[cfg(feature = "edge")]
+impl Default for ArenaHintMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "edge")]
+impl ArenaHintMetrics {
+    pub(crate) fn new() -> Self {
+        use reth_db::tables;
+        use reth_db_api::table::Table;
+        let tables = [
+            tables::PlainAccountState::NAME,
+            tables::PlainStorageState::NAME,
+            tables::Bytecodes::NAME,
+            tables::HashedAccounts::NAME,
+            tables::HashedStorages::NAME,
+            tables::AccountsTrie::NAME,
+            tables::StoragesTrie::NAME,
+        ];
+
+        let handles =
+            tables.into_iter().map(|name| (name, ArenaHintTableMetrics::new(name))).collect();
+
+        Self { handles }
+    }
+
+    pub(crate) fn record(&self, table: &'static str, detail: &super::ArenaHintDetail) {
+        if let Some(metrics) = self.handles.get(&table) {
+            ArenaHintTableMetrics::record(metrics, detail);
+        }
+    }
+}
+
+#[cfg(feature = "edge")]
+#[derive(Debug)]
+struct ArenaHintTableMetrics {
+    estimated: Gauge,
+    used: Gauge,
+    source: Gauge,
+}
+
+#[cfg(feature = "edge")]
+impl ArenaHintTableMetrics {
+    fn new(table: &'static str) -> Self {
+        Self {
+            estimated: metrics::gauge!("database_edge_arena_hint_estimated", "table" => table),
+            used: metrics::gauge!("database_edge_arena_hint_used", "table" => table),
+            source: metrics::gauge!("database_edge_arena_hint_source", "table" => table),
+        }
+    }
+
+    fn record(&self, detail: &super::ArenaHintDetail) {
+        self.estimated.set(detail.estimated as f64);
+        self.used.set(detail.used as f64);
+        self.source.set(detail.source.as_f64());
+    }
+}
+
 /// Timings collected during a `save_blocks` call.
 #[derive(Debug, Default)]
 pub(crate) struct SaveBlocksTimings {

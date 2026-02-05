@@ -171,6 +171,20 @@ impl DatabaseEnvMetrics {
             metrics.record(stats);
         }
     }
+
+    /// Record arena hint estimation stats for a table.
+    ///
+    /// Tracks whether arena hint estimation is working or always hitting floor/cap.
+    #[cfg(feature = "mdbx")]
+    pub(crate) fn record_arena_estimation(
+        &self,
+        table: &'static str,
+        stats: &ArenaHintEstimationStats,
+    ) {
+        if let Some(metrics) = self.edge_arena.get(table) {
+            metrics.record_estimation(stats);
+        }
+    }
 }
 
 /// Transaction mode for the database, either read-only or read-write.
@@ -402,48 +416,69 @@ impl OperationMetrics {
 #[metrics(scope = "database.edge")]
 pub(crate) struct EdgeArenaMetrics {
     /// Pages allocated from pre-distributed arena (fast path)
-    arena_hits: Counter,
-    /// Times fallback to parent was needed (slow path)
-    arena_misses: Counter,
+    arena_page_allocations: Counter,
+    /// Times fallback to parent was needed (arena refill events)
+    arena_refill_events: Counter,
     /// Pages initially distributed to subtxn
-    pages_distributed: Counter,
+    arena_initial_pages: Counter,
     /// Pages returned to parent on commit (not consumed)
     pages_unused: Counter,
-    /// Number of times fallback to parent was triggered
-    fallback_count: Counter,
-    /// Pages acquired from parent during fallback
-    pages_acquired: Counter,
+    /// Pages acquired from parent during fallback (arena refill)
+    arena_refill_pages: Counter,
     /// Configured arena size hint for this table (pages)
     arena_hint: Gauge,
     /// Pages reclaimed from GC (garbage collector / freeDB)
     pages_from_gc: Counter,
     /// Pages allocated from end-of-file (extending the database)
     pages_from_eof: Counter,
+    /// Raw calculated estimate before floor/cap was applied
+    arena_hint_estimated: Gauge,
+    /// Final hint value used after floor/cap
+    arena_hint_actual: Gauge,
+    /// Times the estimate was below floor and floored value was used
+    arena_hint_floored_total: Counter,
+    /// Times the estimate was above cap and capped value was used
+    arena_hint_capped_total: Counter,
+    /// Current source of hint: 0=estimated, 1=floored, 2=capped
+    arena_hint_source: Gauge,
 }
+
+pub(crate) use reth_db_api::transaction::{ArenaHintEstimationStats, ArenaHintSource};
 
 impl EdgeArenaMetrics {
     /// Record stats from a single subtransaction.
     pub(crate) fn record(&self, stats: &reth_libmdbx::SubTransactionStats) {
         println!(
-            "[ARENA] hits={} misses={} distributed={} unused={} fallback={} acquired={} hint={} from_gc={} from_eof={}",
-            stats.arena_hits,
-            stats.arena_misses,
-            stats.pages_distributed,
+            "[ARENA] page_allocations={} refill_events={} initial_pages={} unused={} refill_pages={} hint={} from_gc={} from_eof={}",
+            stats.arena_page_allocations,
+            stats.arena_refill_events,
+            stats.arena_initial_pages,
             stats.pages_unused,
-            stats.fallback_count,
-            stats.pages_acquired,
+            stats.arena_refill_pages,
             stats.arena_hint,
             stats.pages_from_gc,
             stats.pages_from_eof
         );
-        self.arena_hits.increment(stats.arena_hits as u64);
-        self.arena_misses.increment(stats.arena_misses as u64);
-        self.pages_distributed.increment(stats.pages_distributed as u64);
+        self.arena_page_allocations.increment(stats.arena_page_allocations as u64);
+        self.arena_refill_events.increment(stats.arena_refill_events as u64);
+        self.arena_initial_pages.increment(stats.arena_initial_pages as u64);
         self.pages_unused.increment(stats.pages_unused as u64);
-        self.fallback_count.increment(stats.fallback_count as u64);
-        self.pages_acquired.increment(stats.pages_acquired as u64);
+        self.arena_refill_pages.increment(stats.arena_refill_pages as u64);
         self.arena_hint.set(stats.arena_hint as f64);
         self.pages_from_gc.increment(stats.pages_from_gc as u64);
         self.pages_from_eof.increment(stats.pages_from_eof as u64);
+    }
+
+    /// Record estimation stats for arena hint calculation.
+    pub(crate) fn record_estimation(&self, stats: &ArenaHintEstimationStats) {
+        self.arena_hint_estimated.set(stats.estimated as f64);
+        self.arena_hint_actual.set(stats.actual as f64);
+        self.arena_hint_source.set(stats.source as i64 as f64);
+
+        match stats.source {
+            ArenaHintSource::Floored => self.arena_hint_floored_total.increment(1),
+            ArenaHintSource::Capped => self.arena_hint_capped_total.increment(1),
+            ArenaHintSource::Estimated => {}
+        }
     }
 }

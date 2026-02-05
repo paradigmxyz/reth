@@ -6747,16 +6747,15 @@ LIBMDBX_API int mdbx_txn_is_subtx(const MDBX_txn *txn);
  * Contains metrics about page allocation and fallback behavior.
  */
 typedef struct MDBX_subtxn_stats {
-  size_t arena_hits;       /**< Pages allocated from pre-distributed arena */
-  size_t arena_misses;     /**< Times fallback to parent was needed */
-  size_t pages_distributed; /**< Initial pages distributed to this subtxn */
-  size_t pages_acquired;   /**< Additional pages acquired from parent during fallback */
-  size_t pages_from_gc;    /**< Pages acquired from parent's repnl (GC) */
-  size_t pages_from_eof;   /**< Pages acquired via EOF extension */
-  size_t pages_unused;     /**< Pages returned to parent on commit (not consumed) */
-  size_t fallback_count;   /**< Number of times fallback to parent was triggered */
-  size_t arena_hint;       /**< Original arena hint for this subtxn */
-  MDBX_dbi assigned_dbi;   /**< DBI this subtxn is bound to */
+  size_t arena_page_allocations; /**< Pages allocated from pre-distributed arena */
+  size_t arena_refill_events;    /**< Times fallback to parent was needed */
+  size_t arena_initial_pages;    /**< Initial pages distributed to this subtxn */
+  size_t arena_refill_pages;     /**< Additional pages acquired from parent during fallback */
+  size_t pages_from_gc;          /**< Pages acquired from parent's repnl (GC) */
+  size_t pages_from_eof;         /**< Pages acquired via EOF extension */
+  size_t pages_unused;           /**< Pages returned to parent on commit (not consumed) */
+  size_t arena_hint;             /**< Original arena hint for this subtxn */
+  MDBX_dbi assigned_dbi;         /**< DBI this subtxn is bound to */
 } MDBX_subtxn_stats;
 
 /** \brief Get statistics for a parallel subtransaction.

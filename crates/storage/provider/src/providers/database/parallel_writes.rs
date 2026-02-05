@@ -67,6 +67,65 @@ pub struct ParallelWriteTimings {
 }
 
 /// Hints for per-DBI arena allocation during parallel writes.
+/// Source of the arena hint value after applying floor/cap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArenaHintSource {
+    /// Raw estimate was used (no floor/cap applied)
+    #[default]
+    Estimated,
+    /// Floor was applied (estimate was below minimum)
+    Floored,
+    /// Cap was applied (estimate exceeded maximum)
+    Capped,
+}
+
+impl ArenaHintSource {
+    /// Returns the source as a static string for metrics labels.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Estimated => "estimated",
+            Self::Floored => "floored",
+            Self::Capped => "capped",
+        }
+    }
+
+    /// Returns numeric representation for gauge (0=estimated, 1=floored, 2=capped)
+    pub const fn as_f64(&self) -> f64 {
+        match self {
+            Self::Estimated => 0.0,
+            Self::Floored => 1.0,
+            Self::Capped => 2.0,
+        }
+    }
+}
+
+/// Details about a single arena hint calculation.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArenaHintDetail {
+    /// Raw calculated estimate before floor/cap
+    pub estimated: usize,
+    /// Actual hint after applying floor/cap
+    pub used: usize,
+    /// Whether the value was estimated, floored, or capped
+    pub source: ArenaHintSource,
+}
+
+impl ArenaHintDetail {
+    /// Converts to the db-api's `ArenaHintEstimationStats` for metric recording.
+    pub fn to_estimation_stats(&self) -> reth_db_api::transaction::ArenaHintEstimationStats {
+        use reth_db_api::transaction::ArenaHintSource as DbApiSource;
+        reth_db_api::transaction::ArenaHintEstimationStats {
+            estimated: self.estimated,
+            actual: self.used,
+            source: match self.source {
+                ArenaHintSource::Estimated => DbApiSource::Estimated,
+                ArenaHintSource::Floored => DbApiSource::Floored,
+                ArenaHintSource::Capped => DbApiSource::Capped,
+            },
+        }
+    }
+}
+
 /// These hints inform the MDBX layer how to distribute freelist pages
 /// proportionally among subtransactions.
 #[derive(Debug, Default, Clone)]
@@ -85,13 +144,107 @@ pub struct ArenaHints {
     pub account_trie: usize,
     /// Estimated pages for StoragesTrie
     pub storage_trie: usize,
+    /// Per-table estimation details for metrics
+    pub details: ArenaHintDetails,
+}
+
+/// Per-table arena hint estimation details.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ArenaHintDetails {
+    /// PlainAccountState hint details
+    pub plain_accounts: ArenaHintDetail,
+    /// Bytecodes hint details
+    pub bytecodes: ArenaHintDetail,
+    /// PlainStorageState hint details
+    pub plain_storage: ArenaHintDetail,
+    /// HashedAccounts hint details
+    pub hashed_accounts: ArenaHintDetail,
+    /// HashedStorages hint details
+    pub hashed_storages: ArenaHintDetail,
+    /// AccountsTrie hint details
+    pub account_trie: ArenaHintDetail,
+    /// StoragesTrie hint details
+    pub storage_trie: ArenaHintDetail,
 }
 
 impl ArenaHints {
-    /// Maximum pages per arena to prevent memory bloat
-    pub const MAX_ARENA_PAGES: usize = 512;
+    /// Maximum pages per arena to prevent memory bloat.
+    ///
+    /// Updated based on actual usage metrics:
+    /// - StoragesTrie: ~11,357 pages/batch
+    /// - AccountsTrie: ~9,643 pages/batch
+    /// - HashedStorages: ~5,500 pages/batch
+    /// - PlainStorageState: ~5,071 pages/batch
+    /// - HashedAccounts: ~4,281 pages/batch
+    /// - PlainAccountState: ~3,928 pages/batch
+    ///
+    /// We set max to 6000 to accommodate the heaviest tables (trie tables)
+    /// while still preventing unbounded memory growth.
+    pub const MAX_ARENA_PAGES: usize = 6000;
     /// Minimum arena size
     pub const MIN_ARENA_PAGES: usize = 8;
+    /// Default minimum for bytecodes (low usage, typically 0)
+    pub const DEFAULT_BYTECODES_PAGES: usize = 12;
+
+    /// Default hints based on observed production usage patterns.
+    ///
+    /// These values target ~50% of average batch demand to balance between
+    /// over-allocation and fallback frequency. Derived from metrics showing:
+    /// - StoragesTrie: ~159K pages total across 14 batches → ~11,357 pages/batch
+    /// - AccountsTrie: ~135K pages total across 14 batches → ~9,643 pages/batch
+    /// - HashedStorages: ~77K pages → ~5,500 pages/batch
+    /// - PlainStorageState: ~71K pages → ~5,071 pages/batch
+    /// - HashedAccounts: ~60K pages → ~4,281 pages/batch
+    /// - PlainAccountState: ~55K pages → ~3,928 pages/batch
+    /// - Bytecodes: 0 pages (fine as-is)
+    pub const fn default_hints() -> Self {
+        Self {
+            plain_accounts: 2000,
+            bytecodes: Self::DEFAULT_BYTECODES_PAGES,
+            plain_storage: 2500,
+            hashed_accounts: 2000,
+            hashed_storages: 2500,
+            account_trie: 5000,
+            storage_trie: 5000,
+            details: ArenaHintDetails {
+                plain_accounts: ArenaHintDetail {
+                    estimated: 2000,
+                    used: 2000,
+                    source: ArenaHintSource::Estimated,
+                },
+                bytecodes: ArenaHintDetail {
+                    estimated: Self::DEFAULT_BYTECODES_PAGES,
+                    used: Self::DEFAULT_BYTECODES_PAGES,
+                    source: ArenaHintSource::Estimated,
+                },
+                plain_storage: ArenaHintDetail {
+                    estimated: 2500,
+                    used: 2500,
+                    source: ArenaHintSource::Estimated,
+                },
+                hashed_accounts: ArenaHintDetail {
+                    estimated: 2000,
+                    used: 2000,
+                    source: ArenaHintSource::Estimated,
+                },
+                hashed_storages: ArenaHintDetail {
+                    estimated: 2500,
+                    used: 2500,
+                    source: ArenaHintSource::Estimated,
+                },
+                account_trie: ArenaHintDetail {
+                    estimated: 5000,
+                    used: 5000,
+                    source: ArenaHintSource::Estimated,
+                },
+                storage_trie: ArenaHintDetail {
+                    estimated: 5000,
+                    used: 5000,
+                    source: ArenaHintSource::Estimated,
+                },
+            },
+        }
+    }
 
     /// Estimate arena sizes from state data.
     ///
@@ -108,32 +261,58 @@ impl ArenaHints {
         num_account_trie_nodes: usize,
         num_storage_trie_nodes: usize,
     ) -> Self {
+        let default = Self::default_hints();
+
+        let plain_accounts_detail = Self::calc_with_floor(num_accounts, 25, default.plain_accounts);
+        let bytecodes_detail =
+            Self::calc_with_floor(num_contracts, 1, Self::DEFAULT_BYTECODES_PAGES);
+        let plain_storage_detail = Self::calc_with_floor(num_storage, 20, default.plain_storage);
+        let hashed_accounts_detail =
+            Self::calc_with_floor(num_accounts, 25, default.hashed_accounts);
+        let hashed_storages_detail =
+            Self::calc_with_floor(num_storage, 20, default.hashed_storages);
+        let account_trie_detail =
+            Self::calc_with_floor(num_account_trie_nodes, 8, default.account_trie);
+        let storage_trie_detail =
+            Self::calc_with_floor(num_storage_trie_nodes, 10, default.storage_trie);
+
         Self {
-            // Target ~120 pages based on 187 hits/s peak (+20% headroom)
-            plain_accounts: Self::calc(num_accounts, 25),
-            // Bytecodes are large but few per block
-            bytecodes: Self::calc(num_contracts, 1).max(Self::MIN_ARENA_PAGES),
-            // Target ~150 pages based on 211 hits/s peak (+20% headroom)
-            plain_storage: Self::calc(num_storage, 20),
-            // Target ~120 pages based on 205 hits/s peak (+20% headroom)
-            hashed_accounts: Self::calc(num_accounts, 25),
-            // Target ~150 pages based on 236 hits/s peak (+20% headroom)
-            hashed_storages: Self::calc(num_storage, 20),
-            // Target ~560 pages based on 467 hits/s peak (+20% headroom)
-            account_trie: Self::calc(num_account_trie_nodes, 8),
-            // Target ~500 pages based on 485 hits/s peak (+20% headroom)
-            storage_trie: Self::calc(num_storage_trie_nodes, 10),
+            plain_accounts: plain_accounts_detail.used,
+            bytecodes: bytecodes_detail.used,
+            plain_storage: plain_storage_detail.used,
+            hashed_accounts: hashed_accounts_detail.used,
+            hashed_storages: hashed_storages_detail.used,
+            account_trie: account_trie_detail.used,
+            storage_trie: storage_trie_detail.used,
+            details: ArenaHintDetails {
+                plain_accounts: plain_accounts_detail,
+                bytecodes: bytecodes_detail,
+                plain_storage: plain_storage_detail,
+                hashed_accounts: hashed_accounts_detail,
+                hashed_storages: hashed_storages_detail,
+                account_trie: account_trie_detail,
+                storage_trie: storage_trie_detail,
+            },
         }
     }
 
-    fn calc(entries: usize, entries_per_page: usize) -> usize {
-        if entries == 0 {
-            return Self::MIN_ARENA_PAGES;
-        }
-        let base = entries.div_ceil(entries_per_page);
-        // 2x for B+ tree traversal overhead + buffer
-        let with_overhead = base.saturating_mul(2).saturating_add(8);
-        with_overhead.clamp(Self::MIN_ARENA_PAGES, Self::MAX_ARENA_PAGES)
+    fn calc_with_floor(entries: usize, entries_per_page: usize, floor: usize) -> ArenaHintDetail {
+        let raw_estimate = if entries == 0 {
+            Self::MIN_ARENA_PAGES
+        } else {
+            let base = entries.div_ceil(entries_per_page);
+            base.saturating_mul(2).saturating_add(8)
+        };
+
+        let (used, source) = if raw_estimate < floor {
+            (floor, ArenaHintSource::Floored)
+        } else if raw_estimate > Self::MAX_ARENA_PAGES {
+            (Self::MAX_ARENA_PAGES, ArenaHintSource::Capped)
+        } else {
+            (raw_estimate, ArenaHintSource::Estimated)
+        };
+
+        ArenaHintDetail { estimated: raw_estimate, used, source }
     }
 
     /// Returns total estimated pages across all DBIs

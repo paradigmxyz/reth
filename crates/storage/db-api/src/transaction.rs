@@ -5,6 +5,31 @@ use crate::{
 };
 use std::fmt::Debug;
 
+/// Source of arena hint value after floor/cap was applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArenaHintSource {
+    /// Raw estimate was used (no floor/cap applied)
+    #[default]
+    Estimated = 0,
+    /// Floor was applied (estimate was below minimum)
+    Floored = 1,
+    /// Cap was applied (estimate exceeded maximum)
+    Capped = 2,
+}
+
+/// Estimation stats for a single table's arena hint.
+///
+/// Used for tracking whether arena hint estimation is working or always hitting floor/cap.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArenaHintEstimationStats {
+    /// Raw calculated estimate before floor/cap
+    pub estimated: usize,
+    /// Final value used after floor/cap
+    pub actual: usize,
+    /// Source of the final value
+    pub source: ArenaHintSource,
+}
+
 /// Helper adapter type for accessing [`DbTx`] cursor.
 pub type CursorTy<TX, T> = <TX as DbTx>::Cursor<T>;
 
@@ -124,4 +149,10 @@ pub trait DbTxMut: Send {
     ) -> Result<(), DatabaseError> {
         Ok(())
     }
+
+    /// Records arena hint estimation stats for a table.
+    ///
+    /// Tracks whether arena hint estimation is working or always hitting floor/cap.
+    /// This is a no-op by default; implementations may override to record metrics.
+    fn record_arena_estimation(&self, _table: &'static str, _stats: &ArenaHintEstimationStats) {}
 }
