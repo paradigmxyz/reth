@@ -1315,7 +1315,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
             self.cached_storage_settings().account_changesets_in_static_files
         {
             let start = *range.start();
-            let static_end = (*range.end()).min(highest + 1);
+            let static_end = (*range.end()).min(highest);
 
             let mut changed_accounts_and_blocks: BTreeMap<_, Vec<u64>> = BTreeMap::default();
             if start <= static_end {
