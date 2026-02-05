@@ -1,6 +1,6 @@
 //! E2E tests for `RocksDB` provider functionality.
 
-#![cfg(all(feature = "edge", unix))]
+#![cfg(all(feature = "rocksdb", unix))]
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
@@ -96,23 +96,19 @@ fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
 
-/// Verifies that `RocksDB` CLI defaults match `StorageSettings::base()`.
+/// Verifies that `RocksDB` CLI defaults are `None` (deferred to storage mode).
 #[test]
-fn test_rocksdb_defaults_match_storage_settings() {
+fn test_rocksdb_defaults_are_none() {
     let args = RocksDbArgs::default();
-    let settings = StorageSettings::base();
 
-    assert_eq!(
-        args.tx_hash, settings.transaction_hash_numbers_in_rocksdb,
-        "tx_hash default should match StorageSettings::base()"
+    assert!(args.tx_hash.is_none(), "tx_hash default should be None (deferred to --storage.v2)");
+    assert!(
+        args.storages_history.is_none(),
+        "storages_history default should be None (deferred to --storage.v2)"
     );
-    assert_eq!(
-        args.storages_history, settings.storages_history_in_rocksdb,
-        "storages_history default should match StorageSettings::base()"
-    );
-    assert_eq!(
-        args.account_history, settings.account_history_in_rocksdb,
-        "account_history default should match StorageSettings::base()"
+    assert!(
+        args.account_history.is_none(),
+        "account_history default should be None (deferred to --storage.v2)"
     );
 }
 

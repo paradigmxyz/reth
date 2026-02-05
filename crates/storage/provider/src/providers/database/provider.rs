@@ -4110,7 +4110,7 @@ mod tests {
         // Legacy mode (receipts in DB) - should be prunable
         {
             let factory = create_test_provider_factory();
-            let storage_settings = StorageSettings::legacy();
+            let storage_settings = StorageSettings::v1();
             factory.set_storage_settings_cache(storage_settings);
             let factory = factory.with_prune_modes(PruneModes {
                 receipts: Some(PruneMode::Before(100)),
@@ -4147,7 +4147,7 @@ mod tests {
         // Static files mode
         {
             let factory = create_test_provider_factory();
-            let storage_settings = StorageSettings::legacy().with_receipts_in_static_files(true);
+            let storage_settings = StorageSettings::v1().with_receipts_in_static_files(true);
             factory.set_storage_settings_cache(storage_settings);
             let factory = factory.with_prune_modes(PruneModes {
                 receipts: Some(PruneMode::Before(2)),

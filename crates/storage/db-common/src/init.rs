@@ -118,14 +118,7 @@ where
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
-    #[cfg(feature = "edge")]
-    {
-        init_genesis_with_settings(factory, StorageSettings::edge())
-    }
-    #[cfg(not(feature = "edge"))]
-    {
-        init_genesis_with_settings(factory, StorageSettings::legacy())
-    }
+    init_genesis_with_settings(factory, StorageSettings::base())
 }
 
 /// Write the genesis block if it has not already been written with [`StorageSettings`].
@@ -177,7 +170,7 @@ where
                     return Err(InitStorageError::UninitializedDatabase)
                 }
 
-                let stored = factory.storage_settings()?.unwrap_or_else(StorageSettings::legacy);
+                let stored = factory.storage_settings()?.unwrap_or_else(StorageSettings::v1);
                 if stored != genesis_storage_settings {
                     warn!(
                         target: "reth::storage",
@@ -1010,12 +1003,12 @@ mod tests {
     #[test]
     fn warn_storage_settings_mismatch() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        init_genesis_with_settings(&factory, StorageSettings::legacy()).unwrap();
+        init_genesis_with_settings(&factory, StorageSettings::v1()).unwrap();
 
         // Request different settings - should warn but succeed
         let result = init_genesis_with_settings(
             &factory,
-            StorageSettings::legacy().with_receipts_in_static_files(true),
+            StorageSettings::v1().with_receipts_in_static_files(true),
         );
 
         // Should succeed (warning is logged, not an error)
@@ -1025,7 +1018,7 @@ mod tests {
     #[test]
     fn allow_same_storage_settings() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        let settings = StorageSettings::legacy().with_receipts_in_static_files(true);
+        let settings = StorageSettings::v1().with_receipts_in_static_files(true);
         init_genesis_with_settings(&factory, settings).unwrap();
 
         let result = init_genesis_with_settings(&factory, settings);
