@@ -38,6 +38,7 @@ use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFacto
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
+    worker_pool::ProofWorkerPool,
 };
 use reth_trie_sparse::{RevealableSparseTrie, SparseStateTrie};
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
@@ -137,6 +138,8 @@ where
     sparse_trie_max_storage_tries: usize,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
+    /// Persistent proof worker pool for reusing threads across payloads.
+    proof_worker_pool: ProofWorkerPool,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -156,6 +159,10 @@ where
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     ) -> Self {
+        // Create persistent proof worker pool with total workers = storage + account
+        let total_workers = config.storage_worker_count() + config.account_worker_count();
+        let proof_worker_pool = ProofWorkerPool::new(total_workers);
+
         Self {
             executor,
             execution_cache: Default::default(),
@@ -171,6 +178,7 @@ where
             sparse_trie_prune_depth: config.sparse_trie_prune_depth(),
             sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
             disable_cache_metrics: config.disable_cache_metrics(),
+            proof_worker_pool,
         }
     }
 }
@@ -276,12 +284,14 @@ where
             )
         };
 
-        // Create and spawn the storage proof task
+        // Create proof handle using the persistent worker pool
+        // Workers are pre-started at PayloadProcessor initialization, eliminating
+        // thread spawn overhead on the critical path
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let proof_handle = ProofWorkerHandle::new(
-            self.executor.handle().clone(),
+        let proof_handle = ProofWorkerHandle::new_with_pool(
+            &self.proof_worker_pool,
             task_ctx,
             storage_worker_count,
             account_worker_count,
