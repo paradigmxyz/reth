@@ -1966,10 +1966,35 @@ impl ParallelSparseTrie {
 
         while let Some(stack_item) = self.upper_subtrie.inner.buffers.path_stack.pop() {
             let path = stack_item.path;
+
+            // First check if this path is a leaf in the upper subtrie
+            if let Some(&full_path) = self.upper_subtrie.inner.leaf_prefixes.get(&path) {
+                self.upper_subtrie.inner.rlp_leaf(prefix_set, stack_item, full_path);
+                continue;
+            }
+
             let node = if path.len() < UPPER_TRIE_MAX_DEPTH {
                 self.upper_subtrie.nodes.get_mut(&path).expect("upper subtrie node must exist")
             } else {
                 let index = path_subtrie_index_unchecked(&path);
+
+                // Check if this is a leaf in the lower subtrie
+                if let Some(subtrie) = self.lower_subtries[index].as_revealed_ref() {
+                    if let Some(&full_path) = subtrie.inner.leaf_prefixes.get(&path) {
+                        // This is a lower subtrie leaf being processed from upper subtrie context
+                        // Get the leaf value and compute RLP
+                        let subtrie_mut = self.lower_subtries[index]
+                            .as_revealed_mut()
+                            .expect("lower subtrie must exist");
+                        subtrie_mut.inner.rlp_leaf(prefix_set, stack_item, full_path);
+                        // Move the RLP result to the upper subtrie's stack
+                        if let Some(item) = subtrie_mut.inner.buffers.rlp_node_stack.pop() {
+                            self.upper_subtrie.inner.buffers.rlp_node_stack.push(item);
+                        }
+                        continue;
+                    }
+                }
+
                 let node = self.lower_subtries[index]
                     .as_revealed_mut()
                     .expect("lower subtrie must exist")
@@ -2833,47 +2858,40 @@ impl SparseSubtrie {
                     }
                 }
             },
-            TrieNode::Leaf(leaf) => match self.nodes.entry(path) {
-                Entry::Occupied(mut entry) => match entry.get() {
-                    // Replace a hash node with a revealed leaf node and store leaf node value.
-                    SparseNode::Hash(hash) => {
-                        let mut full = *entry.key();
-                        full.extend(&leaf.key);
-                        self.inner
-                            .values
-                            .insert(full, LeafValue::new(leaf.key, leaf.value.clone()));
-                        entry.insert(SparseNode::Leaf {
-                            key: leaf.key,
-                            // Memoize the hash of a previously blinded node in a new leaf
-                            // node.
-                            hash: Some(*hash),
-                        });
-                    }
-                    // Leaf node already exists.
-                    SparseNode::Leaf { .. } => {}
-                    // All other node types can't be handled.
-                    node @ (SparseNode::Empty |
-                    SparseNode::Extension { .. } |
-                    SparseNode::Branch { .. }) => {
-                        return Err(SparseTrieErrorKind::Reveal {
-                            path: *entry.key(),
-                            node: Box::new(node.clone()),
-                        }
-                        .into())
-                    }
-                },
-                Entry::Vacant(entry) => {
-                    let prefix = *entry.key();
-                    let mut full = prefix;
-                    full.extend(&leaf.key);
-                    entry.insert(SparseNode::new_leaf(leaf.key));
-                    self.inner.insert_leaf(
-                        prefix,
-                        full,
-                        LeafValue::new(leaf.key, leaf.value.clone()),
-                    );
+            TrieNode::Leaf(leaf) => {
+                let prefix = path;
+                let mut full = prefix;
+                full.extend(&leaf.key);
+
+                // Check if this leaf already exists in leaf_prefixes
+                if self.inner.leaf_prefixes.contains_key(&prefix) {
+                    // Leaf already revealed, nothing to do
+                    return Ok(());
                 }
-            },
+
+                // If there's a hash node at this path, remove it and memoize the hash
+                let memoized_hash = if let Some(SparseNode::Hash(hash)) = self.nodes.remove(&path) {
+                    Some(hash)
+                } else if let Some(node) = self.nodes.get(&path) {
+                    // Can't reveal a leaf where another non-hash node type exists
+                    return Err(SparseTrieErrorKind::Reveal {
+                        path,
+                        node: Box::new(node.clone()),
+                    }
+                    .into());
+                } else {
+                    None
+                };
+
+                // Don't insert SparseNode::Leaf into nodes - leaves are tracked via leaf_prefixes
+                // Insert leaf with memoized hash if available
+                let leaf_value = if let Some(hash) = memoized_hash {
+                    LeafValue::with_hash(leaf.key, leaf.value.clone(), hash)
+                } else {
+                    LeafValue::new(leaf.key, leaf.value.clone())
+                };
+                self.inner.insert_leaf(prefix, full, leaf_value);
+            }
         }
 
         Ok(())
@@ -2962,6 +2980,13 @@ impl SparseSubtrie {
 
         while let Some(stack_item) = self.inner.buffers.path_stack.pop() {
             let path = stack_item.path;
+
+            // First check if this path is a leaf (leaves are not stored in nodes map)
+            if let Some(&full_path) = self.inner.leaf_prefixes.get(&path) {
+                self.inner.rlp_leaf(prefix_set, stack_item, full_path);
+                continue;
+            }
+
             let node = self
                 .nodes
                 .get_mut(&path)
@@ -3128,6 +3153,44 @@ impl SparseSubtrieInner {
         } else {
             false
         }
+    }
+
+    /// Computes the RLP encoding for a leaf node and pushes it onto the RLP node stack.
+    ///
+    /// This is called when a path in the path_stack corresponds to a leaf (found via leaf_prefixes)
+    /// rather than a node in the nodes map.
+    fn rlp_leaf(
+        &mut self,
+        prefix_set: &mut PrefixSet,
+        stack_item: RlpNodePathStackItem,
+        full_path: Nibbles,
+    ) {
+        let path = stack_item.path;
+        let leaf = self.values.get_mut(&full_path).expect("leaf must exist in values");
+
+        // Check if the path is in the prefix set (i.e., was modified)
+        let is_in_prefix_set = stack_item
+            .is_in_prefix_set
+            .unwrap_or_else(|| prefix_set.contains(&full_path));
+
+        let rlp_node = if let Some(hash) = leaf.hash.filter(|_| !is_in_prefix_set) {
+            // If the node hash is already computed and the node was not modified,
+            // return the pre-computed hash
+            RlpNode::word_rlp(&hash)
+        } else {
+            // Encode the leaf node and update its hash
+            self.buffers.rlp_buf.clear();
+            let rlp_node =
+                LeafNodeRef { key: &leaf.short_key, value: &leaf.value }.rlp(&mut self.buffers.rlp_buf);
+            leaf.hash = rlp_node.as_hash();
+            rlp_node
+        };
+
+        self.buffers.rlp_node_stack.push(RlpNodeStackItem {
+            path,
+            rlp_node,
+            node_type: SparseNodeType::Leaf,
+        });
     }
 
     /// Computes the RLP encoding and its hash for a single (trie node)[`SparseNode`].
@@ -4362,17 +4425,13 @@ mod tests {
 
             trie.reveal_nodes(&mut [ProofTrieNode { path, node, masks }]).unwrap();
 
-            assert_matches!(
-                trie.upper_subtrie.nodes.get(&path),
-                Some(SparseNode::Leaf { key, hash: None })
-                if key == &Nibbles::from_nibbles([0x2, 0x3])
-            );
-
+            // Leaves are not stored in nodes map, they're tracked via leaf_prefixes
             let full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
-            assert_eq!(
-                trie.upper_subtrie.inner.values.get(&full_path).map(|l| &l.value),
-                Some(&encode_account_value(42))
-            );
+            assert_eq!(trie.upper_subtrie.inner.leaf_prefixes.get(&path), Some(&full_path));
+
+            let leaf_value = trie.upper_subtrie.inner.values.get(&full_path).unwrap();
+            assert_eq!(&leaf_value.value, &encode_account_value(42));
+            assert_eq!(leaf_value.short_key, Nibbles::from_nibbles([0x2, 0x3]));
         }
 
         // Reveal leaf in a lower trie
@@ -4391,11 +4450,11 @@ mod tests {
             let lower_subtrie = trie.lower_subtries[idx].as_revealed_ref().unwrap();
             assert_eq!(lower_subtrie.path, path);
 
-            assert_matches!(
-                lower_subtrie.nodes.get(&path),
-                Some(SparseNode::Leaf { key, hash: None })
-                if key == &Nibbles::from_nibbles([0x3, 0x4])
-            );
+            // Leaves are tracked via leaf_prefixes, not nodes map
+            let full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
+            assert_eq!(lower_subtrie.inner.leaf_prefixes.get(&path), Some(&full_path));
+            let leaf_value = lower_subtrie.inner.values.get(&full_path).unwrap();
+            assert_eq!(leaf_value.short_key, Nibbles::from_nibbles([0x3, 0x4]));
         }
 
         // Reveal leaf in a lower trie with a longer path, shouldn't result in the subtrie's root
@@ -4733,19 +4792,38 @@ mod tests {
         let subtrie_branch_2_hash = subtrie.nodes.get(&branch_2_path).unwrap().hash().unwrap();
         assert_eq!(hash_builder_branch_2_hash, subtrie_branch_2_hash);
 
-        let subtrie_leaf_1_hash = subtrie.nodes.get(&leaf_1_path).unwrap().hash().unwrap();
+        // Leaf hashes are stored in LeafValue, not in SparseNode::Leaf
+        let subtrie_leaf_1_hash = subtrie
+            .inner
+            .values
+            .get(&leaf_1_full_path)
+            .unwrap()
+            .hash
+            .unwrap();
         let hash_builder_leaf_1_hash =
             RlpNode::from_rlp(proof_nodes.get(&leaf_1_path).unwrap().as_ref()).as_hash().unwrap();
         assert_eq!(hash_builder_leaf_1_hash, subtrie_leaf_1_hash);
 
         let hash_builder_leaf_2_hash =
             RlpNode::from_rlp(proof_nodes.get(&leaf_2_path).unwrap().as_ref()).as_hash().unwrap();
-        let subtrie_leaf_2_hash = subtrie.nodes.get(&leaf_2_path).unwrap().hash().unwrap();
+        let subtrie_leaf_2_hash = subtrie
+            .inner
+            .values
+            .get(&leaf_2_full_path)
+            .unwrap()
+            .hash
+            .unwrap();
         assert_eq!(hash_builder_leaf_2_hash, subtrie_leaf_2_hash);
 
         let hash_builder_leaf_3_hash =
             RlpNode::from_rlp(proof_nodes.get(&leaf_3_path).unwrap().as_ref()).as_hash().unwrap();
-        let subtrie_leaf_3_hash = subtrie.nodes.get(&leaf_3_path).unwrap().hash().unwrap();
+        let subtrie_leaf_3_hash = subtrie
+            .inner
+            .values
+            .get(&leaf_3_full_path)
+            .unwrap()
+            .hash
+            .unwrap();
         assert_eq!(hash_builder_leaf_3_hash, subtrie_leaf_3_hash);
     }
 
