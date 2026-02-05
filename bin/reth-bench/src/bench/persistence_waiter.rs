@@ -178,6 +178,59 @@ pub(crate) async fn setup_persistence_subscription(
     Ok(PersistenceSubscription::new(provider, subscription.into_stream()))
 }
 
+/// Logs the waiter configuration for benchmarks.
+pub(crate) fn log_waiter_config(
+    wait_time: Option<Duration>,
+    wait_for_persistence: bool,
+    persistence_threshold: u64,
+) {
+    if let Some(duration) = wait_time {
+        info!("Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+    }
+    if wait_for_persistence {
+        info!(
+            "Persistence waiting enabled (waits after every {} blocks to match engine gap > {} behavior)",
+            persistence_threshold + 1,
+            persistence_threshold
+        );
+    }
+}
+
+/// Creates a [`PersistenceWaiter`] based on the provided configuration.
+///
+/// Returns `None` if neither `wait_time` nor `wait_for_persistence` is enabled.
+pub(crate) async fn create_waiter(
+    wait_time: Option<Duration>,
+    wait_for_persistence: bool,
+    ws_rpc_url: Option<&str>,
+    engine_rpc_url: &str,
+    persistence_threshold: u64,
+) -> eyre::Result<Option<PersistenceWaiter>> {
+    match (wait_time, wait_for_persistence) {
+        (Some(duration), true) => {
+            let ws_url = derive_ws_rpc_url(ws_rpc_url, engine_rpc_url)?;
+            let sub = setup_persistence_subscription(ws_url).await?;
+            Ok(Some(PersistenceWaiter::with_duration_and_subscription(
+                duration,
+                sub,
+                persistence_threshold,
+                PERSISTENCE_CHECKPOINT_TIMEOUT,
+            )))
+        }
+        (Some(duration), false) => Ok(Some(PersistenceWaiter::with_duration(duration))),
+        (None, true) => {
+            let ws_url = derive_ws_rpc_url(ws_rpc_url, engine_rpc_url)?;
+            let sub = setup_persistence_subscription(ws_url).await?;
+            Ok(Some(PersistenceWaiter::with_subscription(
+                sub,
+                persistence_threshold,
+                PERSISTENCE_CHECKPOINT_TIMEOUT,
+            )))
+        }
+        (None, false) => Ok(None),
+    }
+}
+
 /// Encapsulates the block waiting logic.
 ///
 /// Provides a simple `on_block()` interface that handles both:

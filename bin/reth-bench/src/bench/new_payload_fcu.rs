@@ -15,10 +15,7 @@ use crate::{
         output::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
-        persistence_waiter::{
-            derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
-            PERSISTENCE_CHECKPOINT_TIMEOUT,
-        },
+        persistence_waiter::{create_waiter, log_waiter_config},
     },
     valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload},
 };
@@ -84,49 +81,16 @@ pub struct Command {
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        // Log mode configuration
-        if let Some(duration) = self.wait_time {
-            info!("Using wait-time mode with {}ms delay between blocks", duration.as_millis());
-        }
-        if self.wait_for_persistence {
-            info!(
-                "Persistence waiting enabled (waits after every {} blocks to match engine gap > {} behavior)",
-                self.persistence_threshold + 1,
-                self.persistence_threshold
-            );
-        }
+        log_waiter_config(self.wait_time, self.wait_for_persistence, self.persistence_threshold);
 
-        // Set up waiter based on configured options
-        // When both are set: wait at least wait_time, and also wait for persistence if needed
-        let mut waiter = match (self.wait_time, self.wait_for_persistence) {
-            (Some(duration), true) => {
-                let ws_url = derive_ws_rpc_url(
-                    self.benchmark.ws_rpc_url.as_deref(),
-                    &self.benchmark.engine_rpc_url,
-                )?;
-                let sub = setup_persistence_subscription(ws_url).await?;
-                Some(PersistenceWaiter::with_duration_and_subscription(
-                    duration,
-                    sub,
-                    self.persistence_threshold,
-                    PERSISTENCE_CHECKPOINT_TIMEOUT,
-                ))
-            }
-            (Some(duration), false) => Some(PersistenceWaiter::with_duration(duration)),
-            (None, true) => {
-                let ws_url = derive_ws_rpc_url(
-                    self.benchmark.ws_rpc_url.as_deref(),
-                    &self.benchmark.engine_rpc_url,
-                )?;
-                let sub = setup_persistence_subscription(ws_url).await?;
-                Some(PersistenceWaiter::with_subscription(
-                    sub,
-                    self.persistence_threshold,
-                    PERSISTENCE_CHECKPOINT_TIMEOUT,
-                ))
-            }
-            (None, false) => None,
-        };
+        let mut waiter = create_waiter(
+            self.wait_time,
+            self.wait_for_persistence,
+            self.benchmark.ws_rpc_url.as_deref(),
+            &self.benchmark.engine_rpc_url,
+            self.persistence_threshold,
+        )
+        .await?;
 
         let BenchContext {
             benchmark_mode,
