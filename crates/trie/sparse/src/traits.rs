@@ -24,6 +24,18 @@ pub enum LeafUpdate {
     Touched,
 }
 
+impl LeafUpdate {
+    /// Returns true if the leaf update is a change.
+    pub const fn is_changed(&self) -> bool {
+        matches!(self, Self::Changed(_))
+    }
+
+    /// Returns true if the leaf update is a touched update.
+    pub const fn is_touched(&self) -> bool {
+        matches!(self, Self::Touched)
+    }
+}
+
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
 /// This trait abstracts over different sparse trie implementations (serial vs parallel)
