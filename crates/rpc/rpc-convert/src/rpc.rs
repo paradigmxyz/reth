@@ -80,24 +80,3 @@ impl SignableTxRequest<EthereumTxEnvelope<TxEip4844>> for TransactionRequest {
     }
 }
 
-#[cfg(feature = "op")]
-impl SignableTxRequest<op_alloy_consensus::OpTxEnvelope>
-    for op_alloy_rpc_types::OpTransactionRequest
-{
-    async fn try_build_and_sign(
-        self,
-        signer: impl TxSigner<Signature> + Send,
-    ) -> Result<op_alloy_consensus::OpTxEnvelope, SignTxRequestError> {
-        let mut tx =
-            self.build_typed_tx().map_err(|_| SignTxRequestError::InvalidTransactionRequest)?;
-
-        // sanity check: deposit transactions must not be signed by the user
-        if tx.is_deposit() {
-            return Err(SignTxRequestError::InvalidTransactionRequest);
-        }
-
-        let signature = signer.sign_transaction(&mut tx).await?;
-
-        Ok(tx.into_signed(signature).into())
-    }
-}

@@ -122,8 +122,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86debde32d8dbb0ab29e7cc75ae1a98688ac7a4c9da54b3a9b14593b9b3c46d3"
+source = "git+https://github.com/theochap/alloy?branch=theo%2Fadd-reth-traits#008019b41da609bf1e5cf2385f85c553d2af9719"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -150,8 +149,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d6cb2e7efd385b333f5a77b71baaa2605f7e22f1d583f2879543b54cbce777c"
+source = "git+https://github.com/theochap/alloy?branch=theo%2Fadd-reth-traits#008019b41da609bf1e5cf2385f85c553d2af9719"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -263,8 +261,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be47bf1b91674a5f394b9ed3c691d764fb58ba43937f1371550ff4bc8e59c295"
+source = "git+https://github.com/theochap/alloy?branch=theo%2Fadd-reth-traits#008019b41da609bf1e5cf2385f85c553d2af9719"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -353,8 +350,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a24c81a56d684f525cd1c012619815ad3a1dd13b0238f069356795d84647d3c"
+source = "git+https://github.com/theochap/alloy?branch=theo%2Fadd-reth-traits#008019b41da609bf1e5cf2385f85c553d2af9719"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -368,8 +364,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "786c5b3ad530eaf43cda450f973fe7fb1c127b4c8990adf66709dafca25e3f6f"
+source = "git+https://github.com/theochap/alloy?branch=theo%2Fadd-reth-traits#008019b41da609bf1e5cf2385f85c553d2af9719"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -394,8 +389,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1ed40adf21ae4be786ef5eb62db9c692f6a30f86d34452ca3f849d6390ce319"
+source = "git+https://github.com/theochap/alloy?branch=theo%2Fadd-reth-traits#008019b41da609bf1e5cf2385f85c553d2af9719"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -602,8 +596,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0e98aabb013a71a4b67b52825f7b503e5bb6057fb3b7b2290d514b0b0574b57"
+source = "git+https://github.com/theochap/alloy?branch=theo%2Fadd-reth-traits#008019b41da609bf1e5cf2385f85c553d2af9719"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -645,8 +638,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddc871ae69688e358cf242a6a7ee6b6e0476a03fd0256434c68daedaec086ec4"
+source = "git+https://github.com/theochap/alloy?branch=theo%2Fadd-reth-traits#008019b41da609bf1e5cf2385f85c553d2af9719"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -666,8 +658,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5899af8417dcf89f40f88fa3bdb2f3f172605d8e167234311ee34811bbfdb0bf"
+source = "git+https://github.com/theochap/alloy?branch=theo%2Fadd-reth-traits#008019b41da609bf1e5cf2385f85c553d2af9719"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -729,8 +720,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "feb73325ee881e42972a5a7bc85250f6af89f92c6ad1222285f74384a203abeb"
+source = "git+https://github.com/theochap/alloy?branch=theo%2Fadd-reth-traits#008019b41da609bf1e5cf2385f85c553d2af9719"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -741,8 +731,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bea4c8f30eddb11d7ab56e83e49c814655daa78ca708df26c300c10d0189cbc"
+source = "git+https://github.com/theochap/alloy?branch=theo%2Fadd-reth-traits#008019b41da609bf1e5cf2385f85c553d2af9719"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -941,8 +930,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a91d6b4c2f6574fdbcb1611e460455c326667cf5b805c6bd1640dad8e8ee4d2"
+source = "git+https://github.com/theochap/alloy?branch=theo%2Fadd-reth-traits#008019b41da609bf1e5cf2385f85c553d2af9719"
 dependencies = [
  "darling 0.21.3",
  "proc-macro2",
@@ -3423,7 +3411,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5091,7 +5079,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6276,10 +6264,8 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-eth",
  "alloy-serde",
- "arbitrary",
  "derive_more",
  "serde",
- "serde_with",
  "thiserror 2.0.18",
 ]
 
@@ -7838,7 +7824,6 @@ dependencies = [
  "arbitrary",
  "bytes",
  "modular-bitfield",
- "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-codecs-derive",
@@ -7976,7 +7961,6 @@ dependencies = [
  "derive_more",
  "metrics",
  "modular-bitfield",
- "op-alloy-consensus",
  "parity-scale-codec",
  "proptest",
  "proptest-arbitrary-interop",
@@ -8250,7 +8234,6 @@ dependencies = [
  "alloy-rpc-types-engine",
  "eyre",
  "futures-util",
- "op-alloy-rpc-types-engine",
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
@@ -9523,7 +9506,6 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "either",
- "op-alloy-rpc-types-engine",
  "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
@@ -9595,7 +9577,6 @@ dependencies = [
  "derive_more",
  "modular-bitfield",
  "once_cell",
- "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
@@ -9984,9 +9965,6 @@ dependencies = [
  "auto_impl",
  "dyn-clone",
  "jsonrpsee-types",
- "op-alloy-consensus",
- "op-alloy-network",
- "op-alloy-rpc-types",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-primitives-traits",
@@ -11187,7 +11165,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12036,7 +12014,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12734,7 +12712,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5f7c95348f20c1c913d72157b3c6dee6ea3e30b3d19502c5a7f6d3f160dacbf"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]

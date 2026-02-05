@@ -146,13 +146,3 @@ where
     Self: Clone + PartialEq + Eq + Decodable + Decodable2718 + MaybeSerde + InMemorySize,
 {
 }
-
-#[cfg(feature = "op")]
-mod op {
-    use super::*;
-    use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
-
-    impl SignedTransaction for OpPooledTransaction {}
-
-    impl SignedTransaction for OpTxEnvelope {}
-}

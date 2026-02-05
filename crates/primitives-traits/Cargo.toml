@@ -26,9 +26,6 @@ revm-primitives.workspace = true
 revm-bytecode.workspace = true
 revm-state.workspace = true
 
-# op
-op-alloy-consensus = { workspace = true, optional = true, features = ["k256"] }
-
 # crypto
 secp256k1 = { workspace = true, features = ["recovery"], optional = true }
 
@@ -88,7 +85,6 @@ std = [
     "secp256k1?/std",
     "thiserror/std",
     "alloy-trie/std",
-    "op-alloy-consensus?/std",
     "serde_json/std",
     "reth-chainspec/std",
     "revm-bytecode/std",
@@ -113,7 +109,6 @@ arbitrary = [
     "reth-codecs?/arbitrary",
     "secp256k1?/global-context",
     "secp256k1?/rand",
-    "op-alloy-consensus?/arbitrary",
     "alloy-trie/arbitrary",
     "reth-chainspec/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
@@ -124,8 +119,6 @@ serde-bincode-compat = [
     "serde_with",
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
-    "op-alloy-consensus?/serde",
-    "op-alloy-consensus?/serde-bincode-compat",
     "alloy-genesis/serde-bincode-compat",
     "alloy-rpc-types-eth?/serde-bincode-compat",
 ]
@@ -139,7 +132,6 @@ serde = [
     "reth-codecs?/serde",
     "revm-primitives/serde",
     "revm-primitives/serde",
-    "op-alloy-consensus?/serde",
     "secp256k1?/serde",
     "alloy-trie/serde",
     "revm-bytecode/serde",
@@ -152,10 +144,6 @@ reth-codec = [
     "dep:reth-codecs",
     "dep:modular-bitfield",
     "dep:byteorder",
-]
-op = [
-    "dep:op-alloy-consensus",
-    "reth-codecs?/op",
 ]
 rayon = [
     "dep:rayon",

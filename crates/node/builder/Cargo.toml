@@ -122,9 +122,5 @@ test-utils = [
     "reth-primitives-traits/test-utils",
 ]
 op = [
-    "reth-db/op",
-    "reth-db-api/op",
-    "reth-engine-local/op",
     "reth-evm/op",
-    "reth-primitives-traits/op",
 ]

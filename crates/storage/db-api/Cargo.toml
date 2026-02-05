@@ -27,9 +27,6 @@ alloy-primitives.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
 
-# optimism
-op-alloy-consensus = { workspace = true, optional = true }
-
 # codecs
 modular-bitfield.workspace = true
 roaring.workspace = true
@@ -85,13 +82,7 @@ arbitrary = [
     "reth-prune-types/arbitrary",
     "reth-stages-types/arbitrary",
     "alloy-consensus/arbitrary",
-    "op-alloy-consensus?/arbitrary",
     "reth-ethereum-primitives/arbitrary",
-]
-op = [
-    "dep:op-alloy-consensus",
-    "reth-codecs/op",
-    "reth-primitives-traits/op",
 ]
 bench = []
 edge = []

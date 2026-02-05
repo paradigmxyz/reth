@@ -178,21 +178,6 @@ impl PayloadAttributes for EthPayloadAttributes {
     }
 }
 
-#[cfg(feature = "op")]
-impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
-    fn timestamp(&self) -> u64 {
-        self.payload_attributes.timestamp
-    }
-
-    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
-        self.payload_attributes.withdrawals.as_ref()
-    }
-
-    fn parent_beacon_block_root(&self) -> Option<B256> {
-        self.payload_attributes.parent_beacon_block_root
-    }
-}
-
 /// Factory trait for creating payload attributes.
 ///
 /// Enables different strategies for generating payload attributes based on

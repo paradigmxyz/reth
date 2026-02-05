@@ -25,7 +25,6 @@ alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
-op-alloy-rpc-types-engine = { workspace = true, optional = true, features = ["serde"] }
 
 # misc
 auto_impl.workspace = true
@@ -46,14 +45,9 @@ std = [
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-rpc-types-engine/std",
-    "op-alloy-rpc-types-engine?/std",
     "serde/std",
     "thiserror/std",
     "reth-primitives-traits/std",
     "either/std",
     "alloy-consensus/std",
-]
-op = [
-    "dep:op-alloy-rpc-types-engine",
-    "reth-primitives-traits/op",
 ]

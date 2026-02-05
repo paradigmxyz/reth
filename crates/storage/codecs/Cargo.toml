@@ -22,9 +22,6 @@ alloy-genesis = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-trie = { workspace = true, optional = true }
 
-# optimism
-op-alloy-consensus = { workspace = true, optional = true }
-
 # misc
 bytes.workspace = true
 modular-bitfield.workspace = true
@@ -54,7 +51,6 @@ std = [
     "alloy-genesis?/std",
     "alloy-trie?/std",
     "serde/std",
-    "op-alloy-consensus?/std",
     "serde_json/std",
     "reth-zstd-compressors?/std",
 ]
@@ -65,7 +61,6 @@ alloy = [
     "dep:alloy-trie",
     "dep:reth-zstd-compressors",
 ]
-op = ["alloy", "dep:op-alloy-consensus"]
 test-utils = [
     "std",
     "alloy",
@@ -79,12 +74,10 @@ serde = [
     "alloy-primitives/serde",
     "alloy-trie?/serde",
     "bytes/serde",
-    "op-alloy-consensus?/serde",
 ]
 arbitrary = [
     "alloy-consensus?/arbitrary",
     "alloy-eips?/arbitrary",
     "alloy-primitives/arbitrary",
     "alloy-trie?/arbitrary",
-    "op-alloy-consensus?/arbitrary",
 ]

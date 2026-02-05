@@ -170,45 +170,6 @@ where
     }
 }
 
-#[cfg(feature = "op")]
-impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
-    fn parent_hash(&self) -> B256 {
-        self.parent_hash()
-    }
-
-    fn block_hash(&self) -> B256 {
-        self.block_hash()
-    }
-
-    fn block_number(&self) -> u64 {
-        self.block_number()
-    }
-
-    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
-        self.payload.as_v2().map(|p| &p.withdrawals)
-    }
-
-    fn block_access_list(&self) -> Option<&Bytes> {
-        None
-    }
-
-    fn parent_beacon_block_root(&self) -> Option<B256> {
-        self.sidecar.parent_beacon_block_root()
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.payload.as_v1().timestamp
-    }
-
-    fn gas_used(&self) -> u64 {
-        self.payload.as_v1().gas_used
-    }
-
-    fn transaction_count(&self) -> usize {
-        self.payload.as_v1().transactions.len()
-    }
-}
-
 /// Extended functionality for Ethereum execution payloads
 impl<Attributes> PayloadOrAttributes<'_, ExecutionData, Attributes>
 where

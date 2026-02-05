@@ -28,17 +28,6 @@ impl TryFromReceiptResponse<alloy_network::Ethereum> for reth_ethereum_primitive
     }
 }
 
-#[cfg(feature = "op")]
-impl TryFromReceiptResponse<op_alloy_network::Optimism> for op_alloy_consensus::OpReceipt {
-    type Error = Infallible;
-
-    fn from_receipt_response(
-        receipt_response: op_alloy_rpc_types::OpTransactionReceipt,
-    ) -> Result<Self, Self::Error> {
-        Ok(receipt_response.inner.inner.into_components().0.map_logs(Into::into))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,36 +56,4 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[cfg(feature = "op")]
-    #[test]
-    fn test_try_from_receipt_response_optimism() {
-        use alloy_consensus::ReceiptWithBloom;
-        use op_alloy_consensus::OpReceipt;
-        use op_alloy_network::Optimism;
-        use op_alloy_rpc_types::OpTransactionReceipt;
-
-        let op_receipt = OpTransactionReceipt {
-            inner: alloy_rpc_types_eth::TransactionReceipt {
-                inner: ReceiptWithBloom {
-                    receipt: OpReceipt::Eip1559(Default::default()),
-                    logs_bloom: Default::default(),
-                },
-                transaction_hash: Default::default(),
-                transaction_index: None,
-                block_hash: None,
-                block_number: None,
-                gas_used: 0,
-                effective_gas_price: 0,
-                blob_gas_used: None,
-                blob_gas_price: None,
-                from: Default::default(),
-                to: None,
-                contract_address: None,
-            },
-            l1_block_info: Default::default(),
-        };
-        let result =
-            <OpReceipt as TryFromReceiptResponse<Optimism>>::from_receipt_response(op_receipt);
-        assert!(result.is_ok());
-    }
 }

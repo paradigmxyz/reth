@@ -32,14 +32,6 @@ futures-util.workspace = true
 # misc
 eyre.workspace = true
 tracing.workspace = true
-op-alloy-rpc-types-engine = { workspace = true, optional = true }
 
 [lints]
 workspace = true
-
-[features]
-op = [
-    "dep:op-alloy-rpc-types-engine",
-    "reth-payload-primitives/op",
-    "reth-primitives-traits/op",
-]

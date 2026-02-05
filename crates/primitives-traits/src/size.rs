@@ -66,9 +66,6 @@ impl<T: TxEip4844Sidecar> InMemorySize for TxEip4844WithSidecar<T> {
     }
 }
 
-#[cfg(feature = "op")]
-impl_in_mem_size_size_of!(op_alloy_consensus::OpTxType);
-
 impl InMemorySize for alloy_consensus::Receipt {
     fn size(&self) -> usize {
         let Self { status, cumulative_gas_used, logs } = self;
@@ -134,67 +131,6 @@ impl InMemorySize for u64 {
     }
 }
 
-/// Implementation for optimism types
-#[cfg(feature = "op")]
-mod op {
-    use super::*;
-
-    impl InMemorySize for op_alloy_consensus::OpDepositReceipt {
-        fn size(&self) -> usize {
-            let Self { inner, deposit_nonce, deposit_receipt_version } = self;
-            inner.size() +
-                core::mem::size_of_val(deposit_nonce) +
-                core::mem::size_of_val(deposit_receipt_version)
-        }
-    }
-
-    impl InMemorySize for op_alloy_consensus::OpReceipt {
-        fn size(&self) -> usize {
-            match self {
-                Self::Legacy(receipt) |
-                Self::Eip2930(receipt) |
-                Self::Eip1559(receipt) |
-                Self::Eip7702(receipt) => receipt.size(),
-                Self::Deposit(receipt) => receipt.size(),
-            }
-        }
-    }
-
-    impl InMemorySize for op_alloy_consensus::OpTypedTransaction {
-        fn size(&self) -> usize {
-            match self {
-                Self::Legacy(tx) => tx.size(),
-                Self::Eip2930(tx) => tx.size(),
-                Self::Eip1559(tx) => tx.size(),
-                Self::Eip7702(tx) => tx.size(),
-                Self::Deposit(tx) => tx.size(),
-            }
-        }
-    }
-
-    impl InMemorySize for op_alloy_consensus::OpPooledTransaction {
-        fn size(&self) -> usize {
-            match self {
-                Self::Legacy(tx) => tx.size(),
-                Self::Eip2930(tx) => tx.size(),
-                Self::Eip1559(tx) => tx.size(),
-                Self::Eip7702(tx) => tx.size(),
-            }
-        }
-    }
-
-    impl InMemorySize for op_alloy_consensus::OpTxEnvelope {
-        fn size(&self) -> usize {
-            match self {
-                Self::Legacy(tx) => tx.size(),
-                Self::Eip2930(tx) => tx.size(),
-                Self::Eip1559(tx) => tx.size(),
-                Self::Eip7702(tx) => tx.size(),
-                Self::Deposit(tx) => tx.size(),
-            }
-        }
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;

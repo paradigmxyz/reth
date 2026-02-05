@@ -866,44 +866,6 @@ where
     }
 }
 
-/// Optimism specific RPC transaction compatibility implementations.
-#[cfg(feature = "op")]
-pub mod op {
-    use super::*;
-    use alloy_consensus::SignableTransaction;
-    use alloy_signer::Signature;
-    use op_alloy_consensus::{transaction::OpTransactionInfo, OpTxEnvelope};
-    use op_alloy_rpc_types::OpTransactionRequest;
-
-    impl<T: op_alloy_consensus::OpTransaction + alloy_consensus::Transaction> FromConsensusTx<T>
-        for op_alloy_rpc_types::Transaction<T>
-    {
-        type TxInfo = OpTransactionInfo;
-        type Err = Infallible;
-
-        fn from_consensus_tx(
-            tx: T,
-            signer: Address,
-            tx_info: Self::TxInfo,
-        ) -> Result<Self, Self::Err> {
-            Ok(Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info))
-        }
-    }
-
-    impl TryIntoSimTx<OpTxEnvelope> for OpTransactionRequest {
-        fn try_into_sim_tx(self) -> Result<OpTxEnvelope, ValueError<Self>> {
-            let tx = self
-                .build_typed_tx()
-                .map_err(|request| ValueError::new(request, "Required fields missing"))?;
-
-            // Create an empty signature for the transaction.
-            let signature = Signature::new(Default::default(), Default::default(), false);
-
-            Ok(tx.into_signed(signature).into())
-        }
-    }
-}
-
 /// Trait for converting network transaction responses to primitive transaction types.
 pub trait TryFromTransactionResponse<N: Network> {
     /// The error type returned if the conversion fails.
@@ -928,17 +890,6 @@ impl TryFromTransactionResponse<alloy_network::Ethereum>
 
     fn from_transaction_response(transaction_response: Transaction) -> Result<Self, Self::Error> {
         Ok(transaction_response.into_inner().into())
-    }
-}
-
-#[cfg(feature = "op")]
-impl TryFromTransactionResponse<op_alloy_network::Optimism> for op_alloy_consensus::OpTxEnvelope {
-    type Error = Infallible;
-
-    fn from_transaction_response(
-        transaction_response: op_alloy_rpc_types::Transaction,
-    ) -> Result<Self, Self::Error> {
-        Ok(transaction_response.inner.into_inner())
     }
 }
 
@@ -973,42 +924,4 @@ mod transaction_response_tests {
         assert!(result.is_ok());
     }
 
-    #[cfg(feature = "op")]
-    mod op {
-        use super::*;
-
-        #[test]
-        fn test_optimism_transaction_conversion() {
-            use op_alloy_consensus::OpTxEnvelope;
-            use op_alloy_network::Optimism;
-
-            let signed_tx = Signed::new_unchecked(
-                TxLegacy::default(),
-                Signature::new(U256::ONE, U256::ONE, false),
-                B256::ZERO,
-            );
-            let envelope = OpTxEnvelope::Legacy(signed_tx);
-
-            let inner_tx = Transaction {
-                inner: Recovered::new_unchecked(envelope, Address::ZERO),
-                block_hash: None,
-                block_number: None,
-                transaction_index: None,
-                effective_gas_price: None,
-            };
-
-            let tx_response = op_alloy_rpc_types::Transaction {
-                inner: inner_tx,
-                deposit_nonce: None,
-                deposit_receipt_version: None,
-            };
-
-            let result =
-                <OpTxEnvelope as TryFromTransactionResponse<Optimism>>::from_transaction_response(
-                    tx_response,
-                );
-
-            assert!(result.is_ok());
-        }
-    }
 }
