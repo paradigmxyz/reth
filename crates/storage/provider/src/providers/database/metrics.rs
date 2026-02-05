@@ -252,6 +252,69 @@ impl ArenaHintTableMetrics {
     }
 }
 
+/// Raw input counts used for arena hint estimation.
+/// These metrics enable correlation between inputs and actual page demand.
+#[derive(Debug, Default, Clone, Copy)]
+#[cfg(feature = "edge")]
+pub(crate) struct ArenaHintInputs {
+    /// Number of account changes in batch
+    pub num_accounts: usize,
+    /// Total number of storage slot changes across all addresses
+    pub num_storage: usize,
+    /// Number of new contracts
+    pub num_contracts: usize,
+    /// Number of account trie node updates
+    pub num_account_trie_nodes: usize,
+    /// Number of storage trie node updates (summed across all addresses)
+    pub num_storage_trie_nodes: usize,
+    /// Number of unique addresses with storage trie updates
+    pub num_storage_trie_addresses: usize,
+}
+
+/// Metrics for recording arena hint estimation inputs.
+#[derive(Debug)]
+#[cfg(feature = "edge")]
+pub(crate) struct ArenaHintInputMetrics {
+    num_accounts: Gauge,
+    num_storage: Gauge,
+    num_contracts: Gauge,
+    num_account_trie_nodes: Gauge,
+    num_storage_trie_nodes: Gauge,
+    num_storage_trie_addresses: Gauge,
+}
+
+#[cfg(feature = "edge")]
+impl Default for ArenaHintInputMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "edge")]
+impl ArenaHintInputMetrics {
+    pub(crate) fn new() -> Self {
+        Self {
+            num_accounts: metrics::gauge!("database_edge_input_num_accounts"),
+            num_storage: metrics::gauge!("database_edge_input_num_storage"),
+            num_contracts: metrics::gauge!("database_edge_input_num_contracts"),
+            num_account_trie_nodes: metrics::gauge!("database_edge_input_num_account_trie_nodes"),
+            num_storage_trie_nodes: metrics::gauge!("database_edge_input_num_storage_trie_nodes"),
+            num_storage_trie_addresses: metrics::gauge!(
+                "database_edge_input_num_storage_trie_addresses"
+            ),
+        }
+    }
+
+    pub(crate) fn record(&self, inputs: &ArenaHintInputs) {
+        self.num_accounts.set(inputs.num_accounts as f64);
+        self.num_storage.set(inputs.num_storage as f64);
+        self.num_contracts.set(inputs.num_contracts as f64);
+        self.num_account_trie_nodes.set(inputs.num_account_trie_nodes as f64);
+        self.num_storage_trie_nodes.set(inputs.num_storage_trie_nodes as f64);
+        self.num_storage_trie_addresses.set(inputs.num_storage_trie_addresses as f64);
+    }
+}
+
 /// Timings collected during a `save_blocks` call.
 #[derive(Debug, Default)]
 pub(crate) struct SaveBlocksTimings {

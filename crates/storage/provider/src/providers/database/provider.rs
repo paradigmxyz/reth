@@ -215,6 +215,9 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Per-table arena hint estimation metrics
     #[cfg(feature = "edge")]
     arena_hint_metrics: metrics::ArenaHintMetrics,
+    /// Arena hint input metrics for correlation analysis
+    #[cfg(feature = "edge")]
+    arena_input_metrics: metrics::ArenaHintInputMetrics,
 }
 
 impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
@@ -378,6 +381,8 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             metrics: metrics::DatabaseProviderMetrics::default(),
             #[cfg(feature = "edge")]
             arena_hint_metrics: metrics::ArenaHintMetrics::default(),
+            #[cfg(feature = "edge")]
+            arena_input_metrics: metrics::ArenaHintInputMetrics::default(),
         }
     }
 
@@ -728,17 +733,35 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
 
                     edge_timings.preprocessing = preprocess_start.elapsed();
 
+                    // Collect input counts for arena hint estimation
+                    let num_accounts = prepared.accounts.len();
+                    let num_storage: usize = prepared.storage.iter().map(|s| s.storage.len()).sum();
+                    let num_contracts = prepared.contracts.len();
+                    let num_account_trie_nodes = merged_trie.account_nodes_ref().len();
+                    let num_storage_trie_nodes: usize = merged_trie
+                        .storage_tries_ref()
+                        .values()
+                        .map(|t| t.storage_nodes_ref().len())
+                        .sum();
+                    let num_storage_trie_addresses = merged_trie.storage_tries_ref().len();
+
+                    // Record input metrics for correlation analysis
+                    self.arena_input_metrics.record(&metrics::ArenaHintInputs {
+                        num_accounts,
+                        num_storage,
+                        num_contracts,
+                        num_account_trie_nodes,
+                        num_storage_trie_nodes,
+                        num_storage_trie_addresses,
+                    });
+
                     // Compute arena hints from prepared data and enable parallel writes
                     let hints = ArenaHints::estimate(
-                        prepared.accounts.len(),
-                        prepared.storage.iter().map(|s| s.storage.len()).sum(),
-                        prepared.contracts.len(),
-                        merged_trie.account_nodes_ref().len(),
-                        merged_trie
-                            .storage_tries_ref()
-                            .values()
-                            .map(|t| t.storage_nodes_ref().len())
-                            .sum(),
+                        num_accounts,
+                        num_storage,
+                        num_contracts,
+                        num_account_trie_nodes,
+                        num_storage_trie_nodes,
                     );
 
                     // Record per-table arena hint estimation quality metrics (provider-level)
@@ -1204,6 +1227,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             metrics: metrics::DatabaseProviderMetrics::default(),
             #[cfg(feature = "edge")]
             arena_hint_metrics: metrics::ArenaHintMetrics::default(),
+            #[cfg(feature = "edge")]
+            arena_input_metrics: metrics::ArenaHintInputMetrics::default(),
         }
     }
 

@@ -445,7 +445,9 @@ where
         // Temporary debug output for stress testing
         if !stats_vec.is_empty() {
             let hit_rate = if total_page_allocations + total_refill_events > 0 {
-                (total_page_allocations as f64 / (total_page_allocations + total_refill_events) as f64) * 100.0
+                (total_page_allocations as f64 /
+                    (total_page_allocations + total_refill_events) as f64) *
+                    100.0
             } else {
                 0.0
             };
