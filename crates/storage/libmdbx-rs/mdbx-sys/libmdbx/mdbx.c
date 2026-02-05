@@ -436,22 +436,6 @@ __extern_C key_t ftok(const char *, int);
 #include <sys/time.h>
 #include <sys/uio.h>
 
-/*----------------------------------------------------------------------------*/
-/* io_uring support for batch prefaulting in parallel subtxns.
- * Required for parallel subtxn performance - no fallback path. */
-
-#ifndef MDBX_HAVE_IO_URING
-#if (defined(__linux__) || defined(__gnu_linux__))
-#define MDBX_HAVE_IO_URING 1
-#else
-#define MDBX_HAVE_IO_URING 0
-#endif
-#endif /* MDBX_HAVE_IO_URING */
-
-#if MDBX_HAVE_IO_URING
-#include <liburing.h>
-#endif /* MDBX_HAVE_IO_URING */
-
 #endif /*---------------------------------------------------------------------*/
 
 #if defined(__ANDROID_API__) || defined(ANDROID)
@@ -4351,7 +4335,6 @@ struct MDBX_txn {
       size_t subtxn_arena_hint;             /* Original arena hint for this subtxn */
       size_t subtxn_arena_page_allocations; /* Pages allocated from subtxn_repnl */
       size_t subtxn_arena_refill_events;    /* Times fallback to parent was needed */
-      bool subtxn_arena_prefaulted;         /* true if initial arena pages were batch-prefaulted */
       osal_fastmutex_t *subtxn_alloc_mutex; /* Mutex for synchronized parent allocation */
     } tw;
   };
@@ -15879,7 +15862,6 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   txn->tw.subtxn_pages_from_eof = 0;
   txn->tw.subtxn_arena_page_allocations = 0;
   txn->tw.subtxn_arena_refill_events = 0;
-  txn->tw.subtxn_arena_prefaulted = false;
   txn->tw.subtxn_alloc_mutex = parent->tw.subtxn_alloc_mutex; /* Share parent's mutex */
 
   /* Insert at head of doubly-linked sibling list */
@@ -15893,79 +15875,6 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   DEBUG("created parallel subtx %p for dbi %u", (void *)txn, dbi);
 
   *subtxn = txn;
-  return MDBX_SUCCESS;
-}
-
-/* Prefault this subtxn's arena pages using io_uring.
- * Called by each subtxn thread at the start of its work.
- * Each thread has its own io_uring ring - true parallel I/O. */
-static void subtxn_prefault_own_arena(MDBX_txn *subtxn) {
-  if (!(subtxn->flags & txn_parallel_subtx))
-    return;
-  if (!subtxn->tw.subtxn_repnl)
-    return;
-
-  MDBX_env *env = subtxn->env;
-  if (!subtxn->tw.prefault_write_activated)
-    return;
-
-  const size_t npages = MDBX_PNL_GETSIZE(subtxn->tw.subtxn_repnl);
-  if (npages == 0)
-    return;
-
-#if !MDBX_HAVE_IO_URING
-  return; /* Silently skip on non-Linux */
-#else
-  DEBUG("io_uring per-subtxn prefault: %zu pages for subtxn %p", npages, (void *)subtxn);
-
-  void *const pattern = ptr_disp(env->page_auxbuf, env->ps * 2);
-
-  const size_t ring_size = npages < 32768 ? npages : 32768;
-  struct io_uring ring;
-  int ret = io_uring_queue_init(ring_size, &ring, 0);
-  if (ret < 0)
-    return; /* Soft fail - prefetch is optimization */
-
-  for (size_t i = 0; i < npages; ++i) {
-    pgno_t pgno = subtxn->tw.subtxn_repnl[i + 1];
-    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
-    if (unlikely(!sqe)) {
-      io_uring_submit(&ring);
-      sqe = io_uring_get_sqe(&ring);
-      if (!sqe)
-        continue;
-    }
-    io_uring_prep_write(sqe, env->lazy_fd, pattern, env->ps,
-                        pgno2bytes(env, pgno));
-  }
-
-  io_uring_submit(&ring);
-  
-  /* Fire-and-forget: don't wait for completions.
-   * Pages will be resident by time we need them, or soft fault handles it.
-   * This overlaps I/O with actual cursor work. */
-  io_uring_queue_exit(&ring);
-  subtxn->tw.subtxn_arena_prefaulted = true;
-
-#if MDBX_ENABLE_PGOP_STAT
-  env->lck->pgops.prefault.weak += npages;
-#endif
-#endif /* MDBX_HAVE_IO_URING */
-}
-
-/* Public API for Rust to trigger per-subtxn arena prefault.
- * Call this at the start of each subtxn thread's work. */
-LIBMDBX_API int mdbx_subtxn_prefault_arena(MDBX_txn *txn) {
-  if (unlikely(!txn))
-    return MDBX_EINVAL;
-  if (unlikely(txn->signature != txn_signature))
-    return MDBX_EBADSIGN;
-  if (!(txn->flags & txn_parallel_subtx))
-    return MDBX_EINVAL;
-  if (txn->tw.subtxn_arena_prefaulted)
-    return MDBX_SUCCESS; /* Already done */
-
-  subtxn_prefault_own_arena(txn);
   return MDBX_SUCCESS;
 }
 
@@ -16254,7 +16163,6 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
       subtxns[i]->tw.subtxn_pages_from_eof = 0;
       subtxns[i]->tw.subtxn_arena_page_allocations = 0;
       subtxns[i]->tw.subtxn_arena_refill_events = 0;
-      subtxns[i]->tw.subtxn_arena_prefaulted = false;
       DEBUG("subtxn %zu: assigned %zu GC pages (initial_pages=%zu)",
             i, MDBX_PNL_GETSIZE(subtxn_pnl), subtxns[i]->tw.subtxn_arena_initial_pages);
     }
@@ -16272,11 +16180,6 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
   }
 
   osal_free(gc_alloc);
-
-  /* Arena prefault is now per-subtxn via mdbx_subtxn_prefault_arena().
-   * Rust calls this at the start of each subtxn thread's work,
-   * enabling true parallel I/O with per-thread io_uring rings. */
-
   return MDBX_SUCCESS;
 }
 
@@ -23485,14 +23388,6 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
      * грязной I/O очереди. Из-за этого штраф за лишнюю запись может быть
      * сравним с избегаемым ненужным чтением. */
     if (txn->tw.prefault_write_activated) {
-      /* For subtxns with batch-prefaulted arenas, skip per-page mincore
-       * for pages from the initial distribution (not refills) */
-      if ((txn->flags & txn_parallel_subtx) &&
-          txn->tw.subtxn_arena_prefaulted &&
-          txn->tw.subtxn_arena_page_allocations < txn->tw.subtxn_arena_initial_pages) {
-        need_clean = false;
-        goto skip_prefault;
-      }
       void *const auxbuf = (txn->flags & txn_parallel_subtx) && txn->tw.txn_page_auxbuf
                                ? txn->tw.txn_page_auxbuf
                                : env->page_auxbuf;
@@ -23533,7 +23428,6 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
         if (cleared == num)
           need_clean = false;
       }
-    skip_prefault:;
     }
   } else {
     ret.page = page_shadow_alloc(txn, num);

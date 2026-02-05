@@ -39,7 +39,6 @@ fn main() {
     }
 
     cc.file(mdbx.join("mdbx.c")).compile("libmdbx.a");
-    println!("cargo:rustc-link-lib=uring");
 }
 
 fn generate_bindings(mdbx: &Path, out_file: &Path) {

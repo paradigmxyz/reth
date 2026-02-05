@@ -153,15 +153,4 @@ pub trait DbTxMut: Send {
     /// Tracks whether arena hint estimation is working or always hitting floor/cap.
     /// This is a no-op by default; implementations may override to record metrics.
     fn record_arena_estimation(&self, _table: &'static str, _stats: &ArenaHintEstimationStats) {}
-
-    /// Prefaults the arena for the subtransaction bound to the given table.
-    ///
-    /// Call this at the start of subtxn work to overlap I/O with sibling subtxns.
-    /// Each subtxn thread should call this - they prefault in parallel via `io_uring`.
-    ///
-    /// Returns `Ok(true)` if prefault was performed, `Ok(false)` if no subtxn exists for
-    /// this table (e.g., parallel writes not enabled).
-    fn prefault_arena_for_table<T: Table>(&self) -> Result<bool, DatabaseError> {
-        Ok(false)
-    }
 }

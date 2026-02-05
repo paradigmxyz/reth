@@ -6771,16 +6771,6 @@ typedef struct MDBX_subtxn_stats {
  */
 LIBMDBX_API int mdbx_subtxn_get_stats(const MDBX_txn *subtxn, MDBX_subtxn_stats *stats);
 
-/** \brief Prefault this subtxn's arena pages using io_uring.
- *
- * Call this at the start of subtxn work to overlap I/O with sibling subtxns.
- * Each subtxn thread should call this - they prefault in parallel.
- *
- * \param [in] txn  A valid subtransaction handle.
- * \returns A non-zero error value on failure and 0 on success.
- */
-LIBMDBX_API int mdbx_subtxn_prefault_arena(MDBX_txn *txn);
-
 /** end of c_parallel @} */
 
 /** end of c_api @} */
