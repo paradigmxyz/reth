@@ -15839,10 +15839,7 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   txn->tw.gc.retxl = nullptr;
   txn->tw.gc.last_reclaimed = 0;
   txn->tw.spilled.list = nullptr;
-  /* Disable prefault for parallel subtxns: pages allocated from GC are likely
-   * still hot in page cache, and mincore() syscall overhead dominates (~47% of
-   * storage trie write time). Empirical test - revert if page faults increase. */
-  txn->tw.prefault_write_activated = false;
+  txn->tw.prefault_write_activated = parent->tw.prefault_write_activated;
 
   /* WRITEMAP mode: no ioring needed (no spill-to-disk) */
   txn->tw.txn_ioring = nullptr;
