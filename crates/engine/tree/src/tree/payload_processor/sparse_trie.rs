@@ -234,7 +234,11 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
 
     /// Account trie updates.
     account_updates: B256Map<LeafUpdate>,
-    /// Storage trie updates. hashed address -> slot -> update.
+    /// Storage trie updates. Maps hashed address to slot updates.
+    ///
+    /// Contains updates that have been applied to the trie or are waiting for proofs to reveal
+    /// blinded nodes. Once all slot updates for an address are drained (applied successfully)
+    /// and the storage root is computed, the entry is removed.
     storage_updates: B256Map<B256Map<LeafUpdate>>,
 
     /// Account updates that are buffered but were not yet applied to the trie.
@@ -678,6 +682,10 @@ where
             return Ok(());
         }
 
+        // Compute storage roots for addresses where all updates have been drained.
+        // We filter for `updates.is_empty()` because:
+        // - Non-empty means pending updates still need proofs to reveal blinded nodes
+        // - Empty means all slot updates were successfully applied and we can compute the root
         let roots = self
             .trie
             .storage_tries_mut()
@@ -694,6 +702,9 @@ where
             .collect::<Vec<_>>();
 
         for (addr, storage_root) in roots {
+            // Remove processed storage updates to avoid re-iterating in future calls.
+            self.storage_updates.remove(addr);
+
             // If the storage root is known and we have a pending update for this account, encode it
             // into a proper update.
             if let Entry::Occupied(entry) = self.pending_account_updates.entry(*addr) &&
