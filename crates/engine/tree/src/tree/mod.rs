@@ -231,9 +231,14 @@ struct MeteredStateHook {
 impl OnStateHook for MeteredStateHook {
     fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
         // Update the metrics for the number of accounts, storage slots and bytecodes loaded
-        let accounts = state.keys().len();
-        let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = state.values().filter(|account| !account.info.is_empty_code_hash()).count();
+        let accounts = state.len();
+        let (storage_slots, bytecodes) =
+            state.values().fold((0, 0), |(storage_slots, bytecodes), account| {
+                (
+                    storage_slots + account.storage.len(),
+                    bytecodes + usize::from(!account.info.is_empty_code_hash()),
+                )
+            });
 
         self.metrics.accounts_loaded_histogram.record(accounts as f64);
         self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
