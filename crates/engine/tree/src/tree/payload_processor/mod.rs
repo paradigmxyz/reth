@@ -288,7 +288,7 @@ where
             v2_proofs_enabled,
         );
 
-        if config.legacy_trie() {
+        if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(
                 proof_handle.clone(),
                 to_sparse_trie,
@@ -512,7 +512,7 @@ where
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
-        let legacy_trie = config.legacy_trie();
+        let disable_trie_cache = config.disable_trie_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
         let chunk_size =
@@ -552,7 +552,7 @@ where
                         .with_updates(true)
                 });
 
-            let mut task = if legacy_trie {
+            let mut task = if disable_trie_cache {
                 SpawnedSparseTrieTask::Cleared(SparseTrieTask::new(
                     sparse_trie_rx,
                     proof_worker_handle,
