@@ -163,17 +163,9 @@ impl<B: FullBlock> FileClient<B> {
         if self.headers.is_empty() {
             return true
         }
-        let mut nums = self.headers.keys().copied().collect::<Vec<_>>();
-        nums.sort_unstable();
-        let mut iter = nums.into_iter();
-        let mut lowest = iter.next().expect("not empty");
-        for next in iter {
-            if next != lowest + 1 {
-                return false
-            }
-            lowest = next;
-        }
-        true
+        let min_block_num = self.min_block().unwrap_or_default();
+        let max_block_num = self.max_block().unwrap_or_default();
+        (max_block_num - min_block_num + 1) as usize == self.headers.len()
     }
 
     /// Use the provided bodies as the file client's block body buffer.
