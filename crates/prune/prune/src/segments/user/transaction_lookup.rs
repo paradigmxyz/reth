@@ -529,7 +529,7 @@ mod tests {
         }
     }
 
-    /// Tests that when RocksDB prune deletes nothing (limit exhausted), checkpoint doesn't advance.
+    /// Tests that when `RocksDB` prune deletes nothing (limit exhausted), checkpoint doesn't advance.
     ///
     /// This test simulates a scenario where:
     /// 1. Some transactions have already been pruned (checkpoint at tx 5)
