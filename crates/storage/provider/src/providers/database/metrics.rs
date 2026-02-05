@@ -183,6 +183,12 @@ pub(crate) struct DatabaseProviderMetrics {
     edge_parallel_subtxn_count: Histogram,
     /// Last number of parallel subtxns used
     edge_parallel_subtxn_count_last: Gauge,
+    /// Storage trie seek operation count
+    edge_storage_trie_seek_count: Gauge,
+    /// Storage trie delete operation count
+    edge_storage_trie_delete_count: Gauge,
+    /// Storage trie upsert operation count
+    edge_storage_trie_upsert_count: Gauge,
 }
 
 /// Per-table arena hint metrics for tracking estimation quality.
@@ -357,6 +363,32 @@ pub(crate) struct EdgeWriteTimings {
     /// Total time including preprocessing
     pub total: Duration,
     pub subtxn_count: u64,
+    /// Storage trie operation counts for debugging
+    pub storage_trie_op_counts: StorageTrieOpCounts,
+}
+
+/// Operation counts for storage trie cursor operations.
+/// Used to identify which operation type dominates storage_trie write time.
+#[cfg(feature = "edge")]
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct StorageTrieOpCounts {
+    /// Number of `seek_by_key_subkey` calls
+    pub seek_count: u64,
+    /// Number of `delete_current` calls
+    pub delete_count: u64,
+    /// Number of `upsert` calls
+    pub upsert_count: u64,
+}
+
+#[cfg(feature = "edge")]
+impl From<reth_trie_db::StorageTrieOpCounts> for StorageTrieOpCounts {
+    fn from(counts: reth_trie_db::StorageTrieOpCounts) -> Self {
+        Self {
+            seek_count: counts.seek_count,
+            delete_count: counts.delete_count,
+            upsert_count: counts.upsert_count,
+        }
+    }
 }
 
 impl DatabaseProviderMetrics {
@@ -467,5 +499,9 @@ impl DatabaseProviderMetrics {
 
         self.edge_parallel_subtxn_count.record(timings.subtxn_count as f64);
         self.edge_parallel_subtxn_count_last.set(timings.subtxn_count as f64);
+
+        self.edge_storage_trie_seek_count.set(timings.storage_trie_op_counts.seek_count as f64);
+        self.edge_storage_trie_delete_count.set(timings.storage_trie_op_counts.delete_count as f64);
+        self.edge_storage_trie_upsert_count.set(timings.storage_trie_op_counts.upsert_count as f64);
     }
 }
