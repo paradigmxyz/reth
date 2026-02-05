@@ -924,7 +924,7 @@ mod tests {
         };
 
         let protocol_message = ProtocolMessage::<EthNetworkPrimitives>::from(EthMessage::Status(
-            StatusMessage::Legacy(status.clone()),
+            StatusMessage::Legacy(status),
         ));
         let encoded = encode(protocol_message);
 
