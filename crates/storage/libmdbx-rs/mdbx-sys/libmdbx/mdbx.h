@@ -6751,6 +6751,8 @@ typedef struct MDBX_subtxn_stats {
   size_t arena_misses;     /**< Times fallback to parent was needed */
   size_t pages_distributed; /**< Initial pages distributed to this subtxn */
   size_t pages_acquired;   /**< Additional pages acquired from parent during fallback */
+  size_t pages_from_gc;    /**< Pages acquired from parent's repnl (GC) */
+  size_t pages_from_eof;   /**< Pages acquired via EOF extension */
   size_t pages_unused;     /**< Pages returned to parent on commit (not consumed) */
   size_t fallback_count;   /**< Number of times fallback to parent was triggered */
   size_t arena_hint;       /**< Original arena hint for this subtxn */

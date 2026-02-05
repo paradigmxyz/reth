@@ -90,6 +90,10 @@ pub struct SubTransactionStats {
     pub arena_hint: usize,
     /// DBI this subtxn is bound to.
     pub assigned_dbi: ffi::MDBX_dbi,
+    /// Pages reclaimed from GC (garbage collector / freeDB).
+    pub pages_from_gc: usize,
+    /// Pages allocated from end-of-file (extending the database).
+    pub pages_from_eof: usize,
 }
 
 /// A subtransaction for parallel writes.
@@ -156,6 +160,8 @@ impl SubTransaction {
                 fallback_count: stats.fallback_count,
                 arena_hint: stats.arena_hint,
                 assigned_dbi: stats.assigned_dbi,
+                pages_from_gc: stats.pages_from_gc,
+                pages_from_eof: stats.pages_from_eof,
             })
         })?
     }
@@ -418,10 +424,40 @@ where
         let subtxns = self.subtxns.read();
         let mut stats_vec = Vec::with_capacity(subtxns.len());
 
+        let mut total_hits = 0usize;
+        let mut total_misses = 0usize;
+        let mut total_distributed = 0usize;
+        let mut total_acquired = 0usize;
+        let mut total_unused = 0usize;
+        let mut total_fallback = 0usize;
+        let mut total_from_gc = 0usize;
+        let mut total_from_eof = 0usize;
+
         for subtxn in subtxns.values() {
             let stats = subtxn.get_stats()?;
+            total_hits += stats.arena_hits;
+            total_misses += stats.arena_misses;
+            total_distributed += stats.pages_distributed;
+            total_acquired += stats.pages_acquired;
+            total_unused += stats.pages_unused;
+            total_fallback += stats.fallback_count;
+            total_from_gc += stats.pages_from_gc;
+            total_from_eof += stats.pages_from_eof;
             subtxn.commit()?;
             stats_vec.push((subtxn.dbi(), stats));
+        }
+
+        // Temporary debug output for stress testing
+        if !stats_vec.is_empty() {
+            let hit_rate = if total_hits + total_misses > 0 {
+                (total_hits as f64 / (total_hits + total_misses) as f64) * 100.0
+            } else {
+                0.0
+            };
+            eprintln!(
+                "[ARENA] subtxns={} hits={} misses={} hit_rate={:.1}% distributed={} acquired={} unused={} fallback={} from_gc={} from_eof={}",
+                stats_vec.len(), total_hits, total_misses, hit_rate, total_distributed, total_acquired, total_unused, total_fallback, total_from_gc, total_from_eof
+            );
         }
 
         Ok(stats_vec)
