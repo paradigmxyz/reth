@@ -1,0 +1,19 @@
+[package]
+name = "example-engine-persistence-threshold"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["node", "test-utils"] }
+alloy-genesis.workspace = true
+alloy-network.workspace = true
+alloy-primitives.workspace = true
+alloy-signer-local.workspace = true
+clap.workspace = true
+eyre.workspace = true
+futures-util.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true

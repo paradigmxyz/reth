@@ -37,6 +37,7 @@ See examples in a [dedicated repository](https://github.com/paradigmxyz/reth-exe
 | Example                  | Description                                                     |
 | ------------------------ | --------------------------------------------------------------- |
 | [DB access](./db-access) | Illustrates how to access Reth's database in a separate process |
+| [Engine persistence threshold](./engine-persistence-threshold) | Demonstrates immediate on-disk persistence with `--engine.persistence-threshold 0` |
 
 ## Network
 

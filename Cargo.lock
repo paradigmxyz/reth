@@ -3772,6 +3772,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-engine-persistence-threshold"
+version = "0.0.0"
+dependencies = [
+ "alloy-genesis",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-signer-local",
+ "clap",
+ "eyre",
+ "futures-util",
+ "reth-ethereum",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "example-exex-hello-world"
 version = "0.0.0"
 dependencies = [

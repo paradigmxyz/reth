@@ -236,8 +236,14 @@ pub struct EngineArgs {
     /// must be in-memory, ahead of the last persisted block, before flushing canonical blocks to
     /// disk again.
     ///
-    /// To persist blocks as fast as the node receives them, set this value to zero. This will
-    /// cause more frequent DB writes.
+    /// Default is 2 blocks to optimize reorg handling (2-block deep reorgs handled in memory).
+    /// However, this means external processes reading the DB will see data lagging by ~2 blocks.
+    ///
+    /// Setting to 0 makes blocks visible on disk immediately for external readers (e.g., block
+    /// builders, indexers), but increases DB write frequency and I/O overhead. Note that even
+    /// with threshold 0, persistence remains asynchronous.
+    ///
+    /// See `examples/engine-persistence-threshold` for a demonstration of this behavior.
     #[arg(long = "engine.persistence-threshold", default_value_t = DefaultEngineValues::get_global().persistence_threshold)]
     pub persistence_threshold: u64,
 
