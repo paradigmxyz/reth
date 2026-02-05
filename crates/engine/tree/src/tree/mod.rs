@@ -244,6 +244,7 @@ impl OnStateHook for MeteredStateHook {
         self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
         self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
 
+        // Call the original state hook
         self.inner_hook.on_state(source, state);
     }
 }
