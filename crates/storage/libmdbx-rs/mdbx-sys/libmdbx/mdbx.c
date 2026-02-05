@@ -23235,19 +23235,63 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
     /* Step 3: Try to reclaim more from GC if parent's repnl was insufficient */
     if ((num == 1 && allocated_pgno == 0) || (num > 1)) {
       /* Try GC reclaim on parent - this populates parent->tw.repnl */
-      if (parent->dbs[FREE_DBI].items > 0 && !(parent->flags & txn_gc_drained)) {
+      if (parent->dbs[FREE_DBI].items > 0) {
         cursor_couple_t gc_couple;
         int rc = cursor_init(&gc_couple.outer, parent, FREE_DBI);
         if (rc == MDBX_SUCCESS) {
-          /* Call gc_alloc_ex on parent with ALLOC_RESERVE to trigger GC reclaim */
-          pgr_t gc_ret = gc_alloc_ex(&gc_couple.outer, 0, ALLOC_RESERVE | ALLOC_UNIMPORTANT);
-          if (gc_ret.err == MDBX_SUCCESS && parent->tw.repnl && MDBX_PNL_GETSIZE(parent->tw.repnl) > 0) {
-            /* Got more pages from GC, now try again */
+          /* Loop reclaiming from GC until we have enough pages or GC is depleted.
+           * Each gc_alloc_ex call reads one GC record (~1000 pages typically).
+           * We need num + batch pages, so loop until we have that many. */
+          const size_t want = num + MDBX_SUBTXN_PAGE_BATCH;
+          size_t attempts = 0;
+          const size_t max_attempts = 16; /* Prevent infinite loop */
+          
+          while (attempts++ < max_attempts) {
+            size_t have = parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0;
+            if (have >= want)
+              break; /* Got enough pages */
+            
+            /* Clear the drained flag before each attempt - we're actively trying to reclaim */
+            parent->flags &= ~txn_gc_drained;
+            
+            pgr_t gc_ret = gc_alloc_ex(&gc_couple.outer, 0, ALLOC_RESERVE | ALLOC_UNIMPORTANT);
+            if (gc_ret.err == MDBX_NOTFOUND) {
+              /* GC truly depleted */
+              DEBUG("subtxn %p: GC depleted after %zu attempts", (void*)txn, attempts);
+              break;
+            }
+            if (gc_ret.err != MDBX_SUCCESS) {
+              DEBUG("subtxn %p: GC reclaim error %d", (void*)txn, gc_ret.err);
+              break;
+            }
+          }
+          
+          /* Check if we got pages */
+          if (parent->tw.repnl && MDBX_PNL_GETSIZE(parent->tw.repnl) > 0) {
             size_t avail = MDBX_PNL_GETSIZE(parent->tw.repnl);
             if (num == 1) {
               allocated_pgno = parent->tw.repnl[avail];
               MDBX_PNL_SETSIZE(parent->tw.repnl, avail - 1);
-              DEBUG("subtxn %p: got page %u from GC reclaim", (void*)txn, allocated_pgno);
+              avail--;
+              
+              /* Also refill subtxn_repnl while we have the lock */
+              size_t take = (avail >= MDBX_SUBTXN_PAGE_BATCH) ? MDBX_SUBTXN_PAGE_BATCH : avail;
+              if (take > 0) {
+                if (!txn->tw.subtxn_repnl) {
+                  txn->tw.subtxn_repnl = pnl_alloc(take);
+                } else {
+                  pnl_need(&txn->tw.subtxn_repnl, take);
+                }
+                if (txn->tw.subtxn_repnl) {
+                  size_t parent_len = MDBX_PNL_GETSIZE(parent->tw.repnl);
+                  for (size_t i = 0; i < take && parent_len > 0; ++i, --parent_len) {
+                    pnl_append_prereserved(txn->tw.subtxn_repnl, parent->tw.repnl[parent_len]);
+                  }
+                  MDBX_PNL_SETSIZE(parent->tw.repnl, parent_len);
+                }
+              }
+              
+              DEBUG("subtxn %p: got page %u from GC reclaim, refilled %zu", (void*)txn, allocated_pgno, take);
               osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
               return page_alloc_finalize(env, txn, mc, allocated_pgno, 1);
             }
