@@ -177,6 +177,8 @@ where
 
         for segment in &self.segments {
             if limiter.is_limit_reached() {
+                output.progress =
+                    output.progress.combine(PruneProgress::HasMoreData(limiter.interrupt_reason()));
                 break
             }
 
@@ -233,7 +235,7 @@ where
                         .set(highest_pruned_block as f64);
                 }
 
-                output.progress = segment_output.progress;
+                output.progress = output.progress.combine(segment_output.progress);
                 output.segments.push((segment.segment(), segment_output));
 
                 debug!(
