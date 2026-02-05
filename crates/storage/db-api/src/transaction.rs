@@ -93,6 +93,14 @@ pub trait DbTxMut: Send {
         Ok(())
     }
 
+    /// Commits all sub-transactions and records arena stats as Prometheus metrics.
+    ///
+    /// This is the preferred method when metrics are enabled, as it collects per-table
+    /// arena allocation statistics for observability.
+    fn commit_subtxns_with_metrics(&self) -> Result<(), DatabaseError> {
+        self.commit_subtxns()
+    }
+
     /// Enables parallel writes mode only for the specified tables.
     ///
     /// This creates subtransactions only for the listed tables, allowing parallel

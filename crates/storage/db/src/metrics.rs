@@ -23,6 +23,9 @@ pub(crate) struct DatabaseEnvMetrics {
     /// outcome. Can only be updated at tx close, as outcome is only known at that point.
     transaction_outcomes:
         FxHashMap<(TransactionMode, TransactionOutcome), TransactionOutcomeMetrics>,
+    /// Caches `EdgeArenaMetrics` handles for each table.
+    /// Used for tracking parallel subtransaction arena allocation stats.
+    edge_arena: FxHashMap<&'static str, EdgeArenaMetrics>,
 }
 
 impl DatabaseEnvMetrics {
@@ -33,6 +36,7 @@ impl DatabaseEnvMetrics {
             operations: Self::generate_operation_handles(),
             transactions: Self::generate_transaction_handles(),
             transaction_outcomes: Self::generate_transaction_outcome_handles(),
+            edge_arena: Self::generate_edge_arena_handles(),
         }
     }
 
@@ -95,6 +99,20 @@ impl DatabaseEnvMetrics {
         transaction_outcomes
     }
 
+    /// Generate a map of all table names to edge arena metric handles.
+    /// Used for tracking parallel subtransaction arena allocation stats.
+    fn generate_edge_arena_handles() -> FxHashMap<&'static str, EdgeArenaMetrics> {
+        Tables::ALL
+            .iter()
+            .map(|table| {
+                (
+                    table.name(),
+                    EdgeArenaMetrics::new_with_labels(&[(Labels::Table.as_str(), table.name())]),
+                )
+            })
+            .collect()
+    }
+
     /// Record a metric for database operation executed in `f`.
     /// Panics if a metric recorder is not found for the given table and operation.
     pub(crate) fn record_operation<R>(
@@ -138,6 +156,20 @@ impl DatabaseEnvMetrics {
             .get(&(mode, outcome))
             .expect("transaction outcome metric handle not found")
             .record(open_duration, close_duration, commit_latency);
+    }
+
+    /// Record edge arena stats for a subtransaction.
+    ///
+    /// The table name is looked up from the provided dbi-to-table mapping.
+    #[cfg(feature = "mdbx")]
+    pub(crate) fn record_edge_arena_stats(
+        &self,
+        table: &'static str,
+        stats: &reth_libmdbx::SubTransactionStats,
+    ) {
+        if let Some(metrics) = self.edge_arena.get(table) {
+            metrics.record(stats);
+        }
     }
 }
 
@@ -361,5 +393,33 @@ impl OperationMetrics {
         } else {
             f()
         }
+    }
+}
+
+/// Metrics for parallel subtransaction (edge mode) arena allocation.
+/// Tracks page allocation efficiency from pre-distributed arenas.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "database.edge")]
+pub(crate) struct EdgeArenaMetrics {
+    /// Pages allocated from pre-distributed arena (fast path)
+    arena_hits: Counter,
+    /// Times fallback to parent was needed (slow path)
+    arena_misses: Counter,
+    /// Pages initially distributed to subtxn
+    pages_distributed: Counter,
+    /// Pages returned to parent on commit (not consumed)
+    pages_unused: Counter,
+    /// Number of times fallback to parent was triggered
+    fallback_count: Counter,
+}
+
+impl EdgeArenaMetrics {
+    /// Record stats from a single subtransaction.
+    pub(crate) fn record(&self, stats: &reth_libmdbx::SubTransactionStats) {
+        self.arena_hits.increment(stats.arena_hits as u64);
+        self.arena_misses.increment(stats.arena_misses as u64);
+        self.pages_distributed.increment(stats.pages_distributed as u64);
+        self.pages_unused.increment(stats.pages_unused as u64);
+        self.fallback_count.increment(stats.fallback_count as u64);
     }
 }

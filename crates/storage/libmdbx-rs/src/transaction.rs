@@ -397,6 +397,31 @@ where
         }
         Ok(())
     }
+
+    /// Commits all subtransactions serially and returns their stats.
+    ///
+    /// Stats are collected BEFORE commit (commit invalidates the subtxn pointer).
+    /// Returns a vector of (dbi, stats) pairs for each subtransaction.
+    ///
+    /// This is a no-op for read-only transactions, returning an empty vector.
+    pub fn commit_subtxns_with_stats(&self) -> Result<Vec<(ffi::MDBX_dbi, SubTransactionStats)>> {
+        if K::IS_READ_ONLY ||
+            !self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Ok(Vec::new());
+        }
+
+        let subtxns = self.subtxns.read();
+        let mut stats_vec = Vec::with_capacity(subtxns.len());
+
+        for subtxn in subtxns.values() {
+            let stats = subtxn.get_stats()?;
+            subtxn.commit()?;
+            stats_vec.push((subtxn.dbi(), stats));
+        }
+
+        Ok(stats_vec)
+    }
 }
 
 impl<K> Clone for Transaction<K>
