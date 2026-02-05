@@ -117,7 +117,7 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
             ),
             tx_type: tx.into_parts().1.tx().tx_type(),
             blob_gas_used: 0,
-            gas_limit: None,
+            floor_cost: None,
         })
     }
 
