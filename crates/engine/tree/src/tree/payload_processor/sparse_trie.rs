@@ -211,16 +211,6 @@ where
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
 
-/// Message type for the sparse trie task.
-enum SparseTrieTaskMessage {
-    /// A hashed state update ready to be processed.
-    HashedState(HashedPostState),
-    /// Prefetch proof targets (passed through directly).
-    PrefetchProofs(VersionedMultiProofTargets),
-    /// Signals that all state updates have been received.
-    FinishedStateUpdates,
-}
-
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie> {
     /// Sender for proof results.
@@ -793,6 +783,16 @@ where
             );
         }
     }
+}
+
+/// Message type for the sparse trie task.
+enum SparseTrieTaskMessage {
+    /// A hashed state update ready to be processed.
+    HashedState(HashedPostState),
+    /// Prefetch proof targets (passed through directly).
+    PrefetchProofs(VersionedMultiProofTargets),
+    /// Signals that all state updates have been received.
+    FinishedStateUpdates,
 }
 
 /// Outcome of the state root computation, including the state root itself with
