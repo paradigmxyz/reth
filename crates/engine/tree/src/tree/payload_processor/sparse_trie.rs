@@ -585,7 +585,6 @@ where
     fn process_leaf_updates(&mut self, new: bool) -> SparseTrieResult<()> {
         let storage_updates =
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
-
         let account_updates =
             if new { &mut self.new_account_updates } else { &mut self.account_updates };
 
