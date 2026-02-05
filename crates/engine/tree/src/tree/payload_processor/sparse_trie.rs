@@ -585,51 +585,81 @@ where
     fn process_leaf_updates(&mut self, new: bool) -> SparseTrieResult<()> {
         let storage_updates =
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
+        let account_updates =
+            if new { &mut self.new_account_updates } else { &mut self.account_updates };
 
-        // Process all storage updates in parallel, skipping tries with no pending updates.
-        let storage_results = storage_updates
-            .iter_mut()
-            .filter(|(_, updates)| !updates.is_empty())
-            .map(|(address, updates)| {
-                let trie = self.trie.take_or_create_storage_trie(address);
-                let fetched = self.fetched_storage_targets.remove(address).unwrap_or_default();
+        let (account_trie, storage_tries) = self.trie.tries_mut();
 
-                (address, updates, fetched, trie)
-            })
-            .par_bridge_buffered()
-            .map(|(address, updates, mut fetched, mut trie)| {
-                let mut targets = Vec::new();
+        let num_account_updates = account_updates.len();
+        let num_storage_updates =
+            storage_updates.values().map(|updates| updates.len()).sum::<usize>();
 
-                trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                    Entry::Occupied(mut entry) => {
-                        if min_len < *entry.get() {
+        let parent_span = tracing::Span::current();
+        let (accounts_result, storages_result) = maybe_join(
+            num_storage_updates.min(num_account_updates) > 100,
+            || {
+                let _span =
+                    debug_span!(parent: &parent_span, "process_account_leaf_updates", num_updates = num_account_updates)
+                        .entered();
+
+                account_trie.update_leaves(account_updates, |target, min_len| {
+                    match self.fetched_account_targets.entry(target) {
+                        Entry::Occupied(mut entry) => {
+                            if min_len < *entry.get() {
+                                entry.insert(min_len);
+                                self.pending_targets
+                                    .account_targets
+                                    .push(Target::new(target).with_min_len(min_len));
+                            }
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(min_len);
+                            self.pending_targets
+                                .account_targets
+                                .push(Target::new(target).with_min_len(min_len));
+                        }
+                    }
+                })
+            },
+            || {
+                let _updates_span =
+                    debug_span!(parent: &parent_span, "process_storage_leaf_updates", num_updates = num_storage_updates)
+                        .entered();
+            
+                for (address, updates) in storage_updates {
+                    if updates.is_empty() {
+                        continue;
+                    }
+
+                    let _span = debug_span!(
+                        "process_storage_leaf_updates",
+                        num_updates = updates.len()
+                    )
+                    .entered();
+
+                    let trie = storage_tries.get_or_create_trie_mut(*address);
+                    let fetched = self.fetched_storage_targets.entry(*address).or_default();
+                    let targets = self.pending_targets.storage_targets.entry(*address).or_default();
+
+                    trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+                        Entry::Occupied(mut entry) => {
+                            if min_len < *entry.get() {
+                                entry.insert(min_len);
+                                targets.push(Target::new(path).with_min_len(min_len));
+                            }
+                        }
+                        Entry::Vacant(entry) => {
                             entry.insert(min_len);
                             targets.push(Target::new(path).with_min_len(min_len));
                         }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(min_len);
-                        targets.push(Target::new(path).with_min_len(min_len));
-                    }
-                })?;
+                    })?;
+                }
 
-                SparseTrieResult::Ok((address, targets, fetched, trie))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                Ok(())
+            },
+        );
 
-        for (address, targets, fetched, trie) in storage_results {
-            self.fetched_storage_targets.insert(*address, fetched);
-            self.trie.insert_storage_trie(*address, trie);
-
-            if !targets.is_empty() {
-                self.pending_targets.storage_targets.entry(*address).or_default().extend(targets);
-            }
-        }
-
-        // Process account trie updates and fill the account targets.
-        self.process_account_leaf_updates(new)?;
-
-        Ok(())
+        accounts_result.and(storages_result)
     }
 
     /// Invokes `update_leaves` for the accounts trie and collects any new targets.
@@ -971,4 +1001,18 @@ where
     );
 
     Ok(elapsed)
+}
+
+fn maybe_join<A, B, RA, RB>(should_parallelize: bool, a: A, b: B) -> (RA, RB)
+where
+    A: FnOnce() -> RA + Send,
+    B: FnOnce() -> RB + Send,
+    RA: Send,
+    RB: Send,
+{
+    if should_parallelize {
+        rayon::join(a, b)
+    } else {
+        (a(), b())
+    }
 }
