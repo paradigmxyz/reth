@@ -565,7 +565,7 @@ where
                     from_multi_proof,
                     proof_worker_handle,
                     trie_metrics.clone(),
-                    sparse_state_trie.with_skip_proof_node_filtering(true),
+                    sparse_state_trie,
                     chunk_size,
                 ))
             };
