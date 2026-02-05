@@ -85,18 +85,31 @@ where
             }
         }
 
+        // Check where transaction hash numbers are stored
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let use_rocksdb = provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb;
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let _use_rocksdb = false;
+
         let (start, end) = match input.get_next_tx_num_range(provider)? {
-            Some(range) => range,
+            Some(range) => range.into_inner(),
             None => {
+                // MDBX has no BlockBodyIndices for `to_block` (e.g., data only exists in static
+                // files, or indices not yet populated). For RocksDB with PruneMode::Full, we can
+                // still clear the TransactionHashNumbers table using static files for the
+                // checkpoint.
+                #[cfg(all(unix, feature = "rocksdb"))]
+                if use_rocksdb && self.mode.is_full() {
+                    return self.prune_rocksdb_full(provider, input.to_block);
+                }
+
                 trace!(target: "pruner", "No transaction lookup entries to prune");
                 return Ok(SegmentOutput::done())
             }
-        }
-        .into_inner();
+        };
 
-        // Check where transaction hash numbers are stored
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+        if use_rocksdb {
             return self.prune_rocksdb(provider, input, start, end);
         }
 
@@ -192,6 +205,54 @@ where
 }
 
 impl TransactionLookup {
+    /// Clears the entire `RocksDB` `TransactionHashNumbers` table for `PruneMode::Full`.
+    ///
+    /// This is called when MDBX has no `BlockBodyIndices` for `to_block` (e.g., data only
+    /// exists in static files) but `RocksDB` still contains transaction hash mappings that
+    /// need to be cleared. The checkpoint is derived from static files.
+    ///
+    /// Note: There's a similar MDBX `clear_table` call in the main `prune()` function (line ~115),
+    /// but that path is unreachable when using `RocksDB` storage because `get_next_tx_num_range()`
+    /// returns `None` and we return early. This method handles that case for `RocksDB`.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn prune_rocksdb_full<Provider>(
+        &self,
+        provider: &Provider,
+        to_block: alloy_primitives::BlockNumber,
+    ) -> Result<SegmentOutput, PrunerError>
+    where
+        Provider: StaticFileProviderFactory + RocksDBProviderFactory,
+    {
+        let rocksdb = provider.rocksdb_provider();
+        // Uses delete_range_cf which is O(1) to issue; actual deletion happens asynchronously
+        // during compaction. This mirrors MDBX's clear_table behavior for PruneMode::Full.
+        rocksdb.clear::<tables::TransactionHashNumbers>()?;
+        trace!(target: "pruner", "Cleared transaction lookup table (RocksDB, no MDBX range)");
+
+        // Get checkpoint from static files. Use the actual highest block/tx from static files
+        // to ensure consistency, clamped to to_block (we shouldn't report pruning beyond to_block).
+        let static_file_provider = provider.static_file_provider();
+        let highest_static_block =
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Transactions);
+        let highest_tx =
+            static_file_provider.get_highest_static_file_tx(StaticFileSegment::Transactions);
+
+        // Use the minimum of to_block and highest static block for consistency
+        let checkpoint_block = match highest_static_block {
+            Some(static_block) => Some(to_block.min(static_block)),
+            None => Some(to_block),
+        };
+
+        Ok(SegmentOutput {
+            progress: PruneProgress::Finished,
+            pruned: 0, // RocksDB clear doesn't return count
+            checkpoint: Some(SegmentOutputCheckpoint {
+                block_number: checkpoint_block,
+                tx_number: highest_tx,
+            }),
+        })
+    }
+
     /// Prunes transaction lookup when indices are stored in `RocksDB`.
     ///
     /// Reads transactions from static files and deletes corresponding entries
@@ -530,6 +591,113 @@ mod tests {
                 tx_hash_numbers_len - txs_up_to_block_6,
                 "Remaining RocksDB entries should match expected"
             );
+        }
+    }
+
+    /// Tests that `RocksDB` transaction lookup is pruned even when MDBX has no data to prune.
+    ///
+    /// This covers the case where:
+    /// 1. Transaction data only exists in static files (MDBX block indices missing)
+    /// 2. `TransactionHashNumbers` is stored in `RocksDB`
+    /// 3. `PruneMode::Full` is used
+    ///
+    /// Previously, `get_next_tx_num_range` returning `None` caused an early return,
+    /// which skipped the `RocksDB` pruning logic entirely.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    #[test]
+    fn prune_rocksdb_full_without_mdbx_range() {
+        use crate::db_ext::DbTxPruneExt;
+        use reth_db_api::models::StorageSettings;
+        use reth_provider::RocksDBProviderFactory;
+        use reth_storage_api::StorageSettingsCache;
+
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            1..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+        // Insert blocks into static files only
+        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
+
+        // Collect transaction hashes and their tx numbers
+        let mut tx_hash_numbers = Vec::new();
+        for block in &blocks {
+            tx_hash_numbers.reserve_exact(block.transaction_count());
+            for transaction in &block.body().transactions {
+                tx_hash_numbers.push((*transaction.tx_hash(), tx_hash_numbers.len() as u64));
+            }
+        }
+
+        // Insert into RocksDB
+        {
+            let rocksdb = db.factory.rocksdb_provider();
+            let mut batch = rocksdb.batch();
+            for (hash, tx_num) in &tx_hash_numbers {
+                batch.put::<tables::TransactionHashNumbers>(*hash, tx_num).unwrap();
+            }
+            batch.commit().expect("commit rocksdb batch");
+        }
+
+        // Enable RocksDB storage for transaction hash numbers
+        db.factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+        );
+
+        // Clear MDBX BlockBodyIndices to simulate the scenario where MDBX has been pruned
+        // but RocksDB still has data
+        {
+            let provider = db.factory.database_provider_rw().unwrap();
+            provider.tx_ref().clear_table::<tables::BlockBodyIndices>().unwrap();
+            provider.commit().expect("commit");
+        }
+
+        // Verify RocksDB still has entries
+        {
+            let rocksdb = db.factory.rocksdb_provider();
+            let count: Vec<_> = rocksdb.iter::<tables::TransactionHashNumbers>().unwrap().collect();
+            assert_eq!(count.len(), tx_hash_numbers.len(), "RocksDB should have all entries");
+        }
+
+        // Now prune with PruneMode::Full
+        let to_block: BlockNumber = 10;
+        let prune_mode = PruneMode::Full;
+        let input =
+            PruneInput { previous_checkpoint: None, to_block, limiter: PruneLimiter::default() };
+        let segment = TransactionLookup::new(prune_mode);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input).unwrap();
+        provider.commit().expect("commit");
+
+        // Verify pruning completed successfully with correct checkpoint
+        assert_matches!(
+            result,
+            SegmentOutput { progress: PruneProgress::Finished, checkpoint: Some(_), .. }
+        );
+
+        // Verify checkpoint values are consistent with static files
+        let checkpoint = result.checkpoint.unwrap();
+        let highest_tx = tx_hash_numbers.len() as u64 - 1; // 0-indexed
+        assert_eq!(
+            checkpoint.block_number,
+            Some(to_block),
+            "Checkpoint block should match to_block (which equals highest static block)"
+        );
+        assert_eq!(
+            checkpoint.tx_number,
+            Some(highest_tx),
+            "Checkpoint tx should match highest static file tx"
+        );
+
+        // Verify RocksDB is now empty
+        {
+            let rocksdb = db.factory.rocksdb_provider();
+            let remaining: Vec<_> =
+                rocksdb.iter::<tables::TransactionHashNumbers>().unwrap().collect();
+            assert_eq!(remaining.len(), 0, "RocksDB should be empty after PruneMode::Full");
         }
     }
 }
