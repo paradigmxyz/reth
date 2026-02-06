@@ -1423,9 +1423,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
                 .into_iter()
                 .map(|address| {
                     let hashed_address = keccak256(address);
-                    hashed_accounts
-                        .seek_exact(hashed_address)
-                        .map(|a| (address, a.map(|(_, v)| v)))
+                    hashed_accounts.seek_exact(hashed_address).map(|a| (address, a.map(|(_, v)| v)))
                 })
                 .collect::<Result<Vec<_>, _>>()?)
         } else {
@@ -1433,9 +1431,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
             Ok(iter
                 .into_iter()
                 .map(|address| {
-                    plain_accounts
-                        .seek_exact(address)
-                        .map(|a| (address, a.map(|(_, v)| v)))
+                    plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v)))
                 })
                 .collect::<Result<Vec<_>, _>>()?)
         }
@@ -2258,10 +2254,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
                             Ok(plain_storage
                                 .seek_by_key_subkey(address, key)?
                                 .filter(|v| v.key == key)
-                                .unwrap_or_else(|| StorageEntry {
-                                    key,
-                                    value: Default::default(),
-                                }))
+                                .unwrap_or_else(|| StorageEntry { key, value: Default::default() }))
                         })
                         .collect::<ProviderResult<Vec<_>>>()
                         .map(|storage| (address, storage))
@@ -2549,8 +2542,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         if !self.cached_storage_settings().use_hashed_state {
             // Write new account state
             tracing::trace!(len = changes.accounts.len(), "Writing new account state");
-            let mut accounts_cursor =
-                self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
+            let mut accounts_cursor = self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
             // write account to database.
             for (address, account) in changes.accounts {
                 if let Some(account) = account {
@@ -2703,10 +2695,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         };
 
         if self.cached_storage_settings().use_hashed_state {
-            let mut hashed_accounts_cursor =
-                self.tx.cursor_write::<tables::HashedAccounts>()?;
-            let mut hashed_storage_cursor =
-                self.tx.cursor_dup_write::<tables::HashedStorages>()?;
+            let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
+            let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
             let (state, _) = self.populate_bundle_state_hashed(
                 account_changeset,
@@ -2718,8 +2708,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             for (address, (old_account, new_account, storage)) in &state {
                 if old_account != new_account {
                     let hashed_address = keccak256(address);
-                    let existing_entry =
-                        hashed_accounts_cursor.seek_exact(hashed_address)?;
+                    let existing_entry = hashed_accounts_cursor.seek_exact(hashed_address)?;
                     if let Some(account) = old_account {
                         hashed_accounts_cursor.upsert(hashed_address, account)?;
                     } else if existing_entry.is_some() {
@@ -2750,8 +2739,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // state of end range. We should rename the functions or add support to access
             // History state. Accessing history state can be tricky but we are not gaining
             // anything.
-            let mut plain_accounts_cursor =
-                self.tx.cursor_write::<tables::PlainAccountState>()?;
+            let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
             let mut plain_storage_cursor =
                 self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
@@ -2872,10 +2860,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         };
 
         let (state, reverts) = if self.cached_storage_settings().use_hashed_state {
-            let mut hashed_accounts_cursor =
-                self.tx.cursor_write::<tables::HashedAccounts>()?;
-            let mut hashed_storage_cursor =
-                self.tx.cursor_dup_write::<tables::HashedStorages>()?;
+            let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
+            let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
             let (state, reverts) = self.populate_bundle_state_hashed(
                 account_changeset,
@@ -2887,8 +2873,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             for (address, (old_account, new_account, storage)) in &state {
                 if old_account != new_account {
                     let hashed_address = keccak256(address);
-                    let existing_entry =
-                        hashed_accounts_cursor.seek_exact(hashed_address)?;
+                    let existing_entry = hashed_accounts_cursor.seek_exact(hashed_address)?;
                     if let Some(account) = old_account {
                         hashed_accounts_cursor.upsert(hashed_address, account)?;
                     } else if existing_entry.is_some() {
@@ -2921,8 +2906,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // state of end range. We should rename the functions or add support to access
             // History state. Accessing history state can be tricky but we are not gaining
             // anything.
-            let mut plain_accounts_cursor =
-                self.tx.cursor_write::<tables::PlainAccountState>()?;
+            let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
             let mut plain_storage_cursor =
                 self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
