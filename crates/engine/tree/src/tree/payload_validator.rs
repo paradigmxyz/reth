@@ -734,10 +734,9 @@ where
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
         self.payload_processor.executor().spawn_blocking(move || task_handle.run(receipts_len));
 
-        // Wrap the state hook with metrics collection
+        // Wrap the state hook (metrics are recorded once per block in record_block_execution)
         let inner_hook = Box::new(handle.state_hook());
-        let state_hook =
-            MeteredStateHook { metrics: self.metrics.executor_metrics().clone(), inner_hook };
+        let state_hook = MeteredStateHook { inner_hook };
 
         let transaction_count = input.transaction_count();
         let executor = executor.with_state_hook(Some(Box::new(state_hook)));

@@ -222,29 +222,14 @@ pub enum TreeAction {
     },
 }
 
-/// Wrapper struct that combines metrics and state hook
+/// Wrapper struct for state hook pass-through.
+/// Metrics are now recorded once per block in `record_block_execution()`.
 struct MeteredStateHook {
-    metrics: reth_evm::metrics::ExecutorMetrics,
     inner_hook: Box<dyn OnStateHook>,
 }
 
 impl OnStateHook for MeteredStateHook {
     fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
-        // Update the metrics for the number of accounts, storage slots and bytecodes loaded
-        let accounts = state.len();
-        let (storage_slots, bytecodes) =
-            state.values().fold((0, 0), |(storage_slots, bytecodes), account| {
-                (
-                    storage_slots + account.storage.len(),
-                    bytecodes + usize::from(!account.info.is_empty_code_hash()),
-                )
-            });
-
-        self.metrics.accounts_loaded_histogram.record(accounts as f64);
-        self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
-        self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
-
-        // Call the original state hook
         self.inner_hook.on_state(source, state);
     }
 }
