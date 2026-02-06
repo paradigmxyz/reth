@@ -9,7 +9,7 @@ use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
     DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
 };
-use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
+use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
 use std::{
@@ -74,18 +74,6 @@ where
             pending_safe_block: None,
         }
     }
-
-    /// Prunes block data before the given block number according to the configured prune
-    /// configuration.
-    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_num))]
-    fn prune_before(&mut self, block_num: u64) -> Result<PrunerOutput, PrunerError> {
-        debug!(target: "engine::persistence", ?block_num, "Running pruner");
-        let start_time = Instant::now();
-        // TODO: doing this properly depends on pruner segment changes
-        let result = self.pruner.run(block_num);
-        self.metrics.prune_before_duration_seconds.record(start_time.elapsed());
-        result
-    }
 }
 
 impl<N> PersistenceService<N>
@@ -118,11 +106,6 @@ where
                         let _ = self
                             .sync_metrics_tx
                             .send(MetricEvent::SyncHeight { height: block_number });
-
-                        if self.pruner.is_pruning_needed(block_number) {
-                            // We log `PrunerOutput` inside the `Pruner`
-                            let _ = self.prune_before(block_number)?;
-                        }
                     }
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
@@ -181,6 +164,18 @@ where
             }
             if let Some(safe) = pending_safe {
                 provider_rw.save_safe_block_number(safe)?;
+            }
+
+            // Run pruning in the same write transaction to avoid a second fsync
+            if let Some(last) = last_block {
+                if self.pruner.is_pruning_needed(last.number) {
+                    debug!(target: "engine::persistence", block_num = last.number, "Running pruner in save_blocks transaction");
+                    let prune_start = Instant::now();
+                    if let Err(err) = self.pruner.run_with_provider(&provider_rw, last.number) {
+                        error!(target: "engine::persistence", %err, block_num = last.number, "Pruning failed; will still commit persisted blocks");
+                    }
+                    self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
+                }
             }
 
             provider_rw.commit()?;
