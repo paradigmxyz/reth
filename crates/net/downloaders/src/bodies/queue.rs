@@ -52,7 +52,7 @@ where
     pub(crate) fn clear(&mut self) {
         self.inner.clear();
         self.last_requested_block_number.take();
-        self.metrics = BodyDownloaderMetrics::default();
+        self.metrics.clear();
     }
     /// Add new request to the queue.
     /// Expects a sorted list of headers.
