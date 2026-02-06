@@ -696,7 +696,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut r_account_changesets = None;
         let mut r_storage_changesets = None;
 
-        STORAGE_POOL.scope(|s| {
+        STORAGE_POOL.in_place_scope(|s| {
             s.spawn(|_| {
                 r_headers =
                     Some(self.write_segment(StaticFileSegment::Headers, first_block_number, |w| {

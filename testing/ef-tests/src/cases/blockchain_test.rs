@@ -172,7 +172,7 @@ impl Case for BlockchainTestCase {
     ///
     /// # Errors
     /// Returns an error if the test is flagged for skipping or encounters issues during execution.
-    fn run(&self) -> Result<(), Error> {
+    fn run(self) -> Result<(), Error> {
         // If the test is marked for skipping, return a Skipped error immediately.
         if self.skip {
             return Err(Error::Skipped);

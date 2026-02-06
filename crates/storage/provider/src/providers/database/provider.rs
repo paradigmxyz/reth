@@ -551,12 +551,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_enabled = rocksdb_ctx.storage_settings.any_in_rocksdb();
 
+        // Results from spawned tasks (set before in_place_scope returns).
         let mut sf_result = None;
         #[cfg(all(unix, feature = "rocksdb"))]
         let mut rocksdb_result = None;
 
         // Write to all backends in parallel.
-        STORAGE_POOL.scope(|s| {
+        STORAGE_POOL.in_place_scope(|s| {
             // SF writes
             s.spawn(|_| {
                 let start = Instant::now();
