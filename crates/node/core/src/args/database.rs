@@ -9,7 +9,7 @@ use clap::{
     value_parser, Arg, Args, Command, Error,
 };
 use reth_db::{
-    mdbx::{MaxReadTransactionDuration, SyncMode},
+    mdbx::{DatabaseWarmupMode, MaxReadTransactionDuration, SyncMode},
     ClientVersion,
 };
 use reth_storage_errors::db::LogLevel;
@@ -60,6 +60,17 @@ pub struct DatabaseArgs {
         value_parser = value_parser!(SyncMode),
     )]
     pub sync_mode: Option<SyncMode>,
+    /// Warm up the database at startup by loading pages into the OS page cache.
+    ///
+    /// - `off`: No warmup (default).
+    /// - `madvise`: Async prefetch via madvise(MADV_WILLNEED).
+    /// - `force`: Synchronously fault in all pages (recommended only with ≥128GB RAM).
+    #[arg(
+        long = "db.warmup",
+        value_parser = value_parser!(DatabaseWarmupMode),
+        default_value_t = DatabaseWarmupMode::Off,
+    )]
+    pub warmup: DatabaseWarmupMode,
 }
 
 impl DatabaseArgs {
@@ -89,6 +100,7 @@ impl DatabaseArgs {
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
             .with_sync_mode(self.sync_mode)
+            .with_warmup(self.warmup)
     }
 }
 

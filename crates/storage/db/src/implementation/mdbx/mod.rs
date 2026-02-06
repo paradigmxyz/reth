@@ -52,6 +52,44 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 /// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
+/// Controls how the database is warmed up at startup to prime the OS page cache.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DatabaseWarmupMode {
+    /// No warmup — rely on natural page faults (default).
+    #[default]
+    Off,
+    /// Async prefetch via `madvise(MADV_WILLNEED)`. Low overhead, non-deterministic.
+    Madvise,
+    /// Synchronously fault in all allocated pages. Higher I/O but deterministic warmup.
+    /// Recommended only for nodes with sufficient RAM (≥128 GB).
+    Force,
+}
+
+impl std::fmt::Display for DatabaseWarmupMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Off => write!(f, "off"),
+            Self::Madvise => write!(f, "madvise"),
+            Self::Force => write!(f, "force"),
+        }
+    }
+}
+
+impl std::str::FromStr for DatabaseWarmupMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "off" => Ok(Self::Off),
+            "madvise" => Ok(Self::Madvise),
+            "force" => Ok(Self::Force),
+            _ => Err(format!(
+                "invalid value '{s}' for warmup mode. valid values: off, madvise, force"
+            )),
+        }
+    }
+}
+
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DatabaseEnvKind {
@@ -119,6 +157,8 @@ pub struct DatabaseArguments {
     /// environments). Choose `SafeNoSync` if performance is more important and occasional data
     /// loss is acceptable (e.g., testing or ephemeral data).
     sync_mode: SyncMode,
+    /// Controls database warmup at startup.
+    warmup_mode: DatabaseWarmupMode,
 }
 
 impl Default for DatabaseArguments {
@@ -143,6 +183,7 @@ impl DatabaseArguments {
             exclusive: None,
             max_readers: None,
             sync_mode: SyncMode::Durable,
+            warmup_mode: DatabaseWarmupMode::Off,
         }
     }
 
@@ -213,6 +254,17 @@ impl DatabaseArguments {
     pub const fn with_max_readers(mut self, max_readers: Option<u64>) -> Self {
         self.max_readers = max_readers;
         self
+    }
+
+    /// Sets the database warmup mode.
+    pub const fn with_warmup(mut self, warmup_mode: DatabaseWarmupMode) -> Self {
+        self.warmup_mode = warmup_mode;
+        self
+    }
+
+    /// Returns the configured warmup mode.
+    pub const fn warmup(&self) -> DatabaseWarmupMode {
+        self.warmup_mode
     }
 
     /// Returns the client version if any.
@@ -502,6 +554,39 @@ impl DatabaseEnv {
     pub fn with_metrics(mut self) -> Self {
         self.metrics = Some(DatabaseEnvMetrics::new().into());
         self
+    }
+
+    /// Spawns a background thread that warms up the database according to the given mode.
+    ///
+    /// Does nothing if `mode` is [`DatabaseWarmupMode::Off`].
+    pub fn start_warmup(&self, mode: DatabaseWarmupMode) {
+        let flags = match mode {
+            DatabaseWarmupMode::Off => return,
+            DatabaseWarmupMode::Madvise => ffi::MDBX_warmup_default,
+            DatabaseWarmupMode::Force => ffi::MDBX_warmup_force | ffi::MDBX_warmup_oomsafe,
+        };
+
+        let inner = self.inner.clone();
+        std::thread::Builder::new()
+            .name("reth-db-warmup".to_string())
+            .spawn(move || match inner.warmup(flags, 0) {
+                Ok(_) => {
+                    reth_tracing::tracing::info!(
+                        target: "reth::db",
+                        ?mode,
+                        "Database warmup completed"
+                    );
+                }
+                Err(err) => {
+                    reth_tracing::tracing::warn!(
+                        target: "reth::db",
+                        %err,
+                        ?mode,
+                        "Database warmup failed"
+                    );
+                }
+            })
+            .ok();
     }
 
     /// Creates all the tables defined in [`Tables`], if necessary.
