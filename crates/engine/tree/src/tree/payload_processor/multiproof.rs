@@ -128,7 +128,7 @@ pub enum MultiProofMessage {
 }
 
 /// Handle to track proof calculation ordering.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct ProofSequencer {
     /// The next proof sequence number to be produced.
     next_sequence: u64,
@@ -136,9 +136,30 @@ struct ProofSequencer {
     next_to_deliver: u64,
     /// Buffer for out-of-order proofs and corresponding state updates
     pending_proofs: BTreeMap<u64, SparseTrieUpdate>,
+    /// Maximum number of pending proofs before forcing a flush.
+    /// When exceeded, all buffered proofs are merged and delivered to avoid
+    /// head-of-line blocking from slow proofs.
+    max_pending: usize,
+}
+
+impl Default for ProofSequencer {
+    fn default() -> Self {
+        Self {
+            next_sequence: 0,
+            next_to_deliver: 0,
+            pending_proofs: BTreeMap::new(),
+            max_pending: 4,
+        }
+    }
 }
 
 impl ProofSequencer {
+    /// Creates a new sequencer with the given max pending threshold.
+    #[cfg(test)]
+    fn with_max_pending(max_pending: usize) -> Self {
+        Self { max_pending, ..Default::default() }
+    }
+
     /// Gets the next sequence number and increments the counter
     const fn next_sequence(&mut self) -> u64 {
         let seq = self.next_sequence;
@@ -147,16 +168,14 @@ impl ProofSequencer {
     }
 
     /// Adds a proof with the corresponding state update and returns all sequential proofs and state
-    /// updates if we have a continuous sequence
+    /// updates if we have a continuous sequence, or flushes all pending if the buffer exceeds
+    /// `max_pending` to avoid head-of-line blocking.
     fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
-        // Optimization: fast path for in-order delivery to avoid BTreeMap overhead.
-        // If this is the expected sequence, return it immediately without buffering.
         if sequence == self.next_to_deliver {
             let mut consecutive_proofs = Vec::with_capacity(1);
             consecutive_proofs.push(update);
             self.next_to_deliver += 1;
 
-            // Check if we have subsequent proofs in the pending buffer
             while let Some(pending) = self.pending_proofs.remove(&self.next_to_deliver) {
                 consecutive_proofs.push(pending);
                 self.next_to_deliver += 1;
@@ -165,11 +184,30 @@ impl ProofSequencer {
             return consecutive_proofs;
         }
 
-        if sequence > self.next_to_deliver {
-            self.pending_proofs.insert(sequence, update);
+        if sequence < self.next_to_deliver {
+            return vec![update];
+        }
+
+        self.pending_proofs.insert(sequence, update);
+
+        if self.pending_proofs.len() >= self.max_pending {
+            return self.flush_pending();
         }
 
         Vec::new()
+    }
+
+    /// Flushes all pending proofs, returning them as a vec.
+    /// Updates `next_to_deliver` to one past the highest flushed sequence.
+    fn flush_pending(&mut self) -> Vec<SparseTrieUpdate> {
+        if self.pending_proofs.is_empty() {
+            return Vec::new();
+        }
+
+        let max_seq = *self.pending_proofs.keys().next_back().unwrap();
+        self.next_to_deliver = max_seq + 1;
+
+        std::mem::take(&mut self.pending_proofs).into_values().collect()
     }
 
     /// Returns true if we still have pending proofs
@@ -1652,8 +1690,9 @@ mod tests {
         let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
         assert_eq!(ready.len(), 1);
 
+        // Late arrival: sequence 0 < next_to_deliver 1, delivered immediately
         let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof2).unwrap());
-        assert_eq!(ready.len(), 0);
+        assert_eq!(ready.len(), 1);
         assert!(!sequencer.has_pending());
     }
 
@@ -1663,15 +1702,59 @@ mod tests {
         let proofs: Vec<_> = (0..5).map(|_| MultiProof::default()).collect();
         sequencer.next_sequence = 5;
 
-        sequencer.add_proof(4, SparseTrieUpdate::from_multiproof(proofs[4].clone()).unwrap());
-        sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proofs[2].clone()).unwrap());
-        sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proofs[1].clone()).unwrap());
-        sequencer.add_proof(3, SparseTrieUpdate::from_multiproof(proofs[3].clone()).unwrap());
+        // With max_pending=4, the 4th out-of-order insert triggers a flush
+        let ready =
+            sequencer.add_proof(4, SparseTrieUpdate::from_multiproof(proofs[4].clone()).unwrap());
+        assert_eq!(ready.len(), 0);
 
         let ready =
-            sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proofs[0].clone()).unwrap());
-        assert_eq!(ready.len(), 5);
+            sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proofs[2].clone()).unwrap());
+        assert_eq!(ready.len(), 0);
+
+        let ready =
+            sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proofs[1].clone()).unwrap());
+        assert_eq!(ready.len(), 0);
+
+        // 4th pending proof triggers flush of all pending [1,2,3,4]
+        let ready =
+            sequencer.add_proof(3, SparseTrieUpdate::from_multiproof(proofs[3].clone()).unwrap());
+        assert_eq!(ready.len(), 4);
         assert!(!sequencer.has_pending());
+        assert_eq!(sequencer.next_to_deliver, 5);
+
+        // Proof 0 arrives late (sequence < next_to_deliver), delivered immediately
+        let ready =
+            sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proofs[0].clone()).unwrap());
+        assert_eq!(ready.len(), 1);
+        assert!(!sequencer.has_pending());
+    }
+
+    #[test]
+    fn test_add_proof_flush_threshold() {
+        let mut sequencer = ProofSequencer::with_max_pending(2);
+        sequencer.next_sequence = 4;
+
+        // Insert two out-of-order proofs to hit the threshold
+        let ready = sequencer
+            .add_proof(2, SparseTrieUpdate::from_multiproof(MultiProof::default()).unwrap());
+        assert_eq!(ready.len(), 0);
+        assert!(sequencer.has_pending());
+
+        // Second pending triggers flush
+        let ready = sequencer
+            .add_proof(3, SparseTrieUpdate::from_multiproof(MultiProof::default()).unwrap());
+        assert_eq!(ready.len(), 2);
+        assert!(!sequencer.has_pending());
+        assert_eq!(sequencer.next_to_deliver, 4);
+
+        // Skipped proofs arrive late, delivered immediately
+        let ready = sequencer
+            .add_proof(0, SparseTrieUpdate::from_multiproof(MultiProof::default()).unwrap());
+        assert_eq!(ready.len(), 1);
+
+        let ready = sequencer
+            .add_proof(1, SparseTrieUpdate::from_multiproof(MultiProof::default()).unwrap());
+        assert_eq!(ready.len(), 1);
     }
 
     fn create_get_proof_targets_state() -> HashedPostState {
