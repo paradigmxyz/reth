@@ -22,9 +22,6 @@ use tracing::{debug, info};
 const DEFAULT_WS_RPC_PORT: u16 = 8546;
 use url::Url;
 
-/// Default timeout for waiting on persistence.
-pub(crate) const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(60);
-
 /// Returns the websocket RPC URL used for the persistence subscription.
 ///
 /// Preference:
