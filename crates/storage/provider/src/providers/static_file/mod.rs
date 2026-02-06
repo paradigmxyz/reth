@@ -120,7 +120,7 @@ mod tests {
 
         let mut provider_rw = factory.provider_rw().unwrap();
         let tx = provider_rw.tx_mut();
-        for header in headers.clone() {
+        for header in &headers {
             let hash = header.hash();
 
             tx.put::<CanonicalHeaders>(header.number, hash).unwrap();
@@ -325,7 +325,7 @@ mod tests {
             let mut receipt = Receipt::default();
             let mut tx = TxLegacy::default();
 
-            for block in block_range.clone() {
+            for block in *block_range {
                 writer.increment_block(block).unwrap();
 
                 // Append transaction/receipt if there's still a transaction count to append
