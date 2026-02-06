@@ -226,7 +226,7 @@ pub(crate) fn write_benchmark_results(
     fs::create_dir_all(output_dir)?;
 
     let output_path = output_dir.join(COMBINED_OUTPUT_SUFFIX);
-    info!("Writing engine api call latency output to file: {:?}", output_path);
+    info!(target: "reth-bench", "Writing engine api call latency output to file: {:?}", output_path);
     let mut writer = Writer::from_path(&output_path)?;
     for result in combined_results {
         writer.serialize(result)?;
@@ -234,14 +234,14 @@ pub(crate) fn write_benchmark_results(
     writer.flush()?;
 
     let output_path = output_dir.join(GAS_OUTPUT_SUFFIX);
-    info!("Writing total gas output to file: {:?}", output_path);
+    info!(target: "reth-bench", "Writing total gas output to file: {:?}", output_path);
     let mut writer = Writer::from_path(&output_path)?;
     for row in gas_results {
         writer.serialize(row)?;
     }
     writer.flush()?;
 
-    info!("Finished writing benchmark output files to {:?}.", output_dir);
+    info!(target: "reth-bench", "Finished writing benchmark output files to {:?}.", output_dir);
     Ok(())
 }
 
