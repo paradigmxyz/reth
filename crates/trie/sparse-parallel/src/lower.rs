@@ -128,4 +128,16 @@ impl LowerSparseSubtrie {
             Self::Blind(None) => {}
         }
     }
+
+    /// Returns a heuristic for the in-memory size of this subtrie in bytes.
+    pub(crate) fn memory_size(&self) -> usize {
+        match self {
+            Self::Revealed(subtrie) | Self::Blind(Some(subtrie)) => subtrie.memory_size(),
+            Self::Blind(None) => 0,
+        }
+    }
+
+    pub(crate) fn wipe(&mut self) {
+        *self = Self::default();
+    }
 }

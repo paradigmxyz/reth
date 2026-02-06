@@ -11,6 +11,10 @@
 
 extern crate alloc;
 
+/// Lazy initialization wrapper for trie data.
+mod lazy;
+pub use lazy::{LazyTrieData, SortedTrieData};
+
 /// In-memory hashed state.
 mod hashed_state;
 pub use hashed_state::*;
@@ -36,7 +40,7 @@ mod nibbles;
 pub use nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey};
 
 mod storage;
-pub use storage::{StorageTrieEntry, TrieChangeSetsEntry};
+pub use storage::StorageTrieEntry;
 
 mod subnode;
 pub use subnode::StoredSubNode;
@@ -54,6 +58,9 @@ pub use proofs::triehash;
 pub use proofs::*;
 
 pub mod root;
+
+/// Incremental ordered trie root computation.
+pub mod ordered_root;
 
 /// Buffer for trie updates.
 pub mod updates;
@@ -78,4 +85,6 @@ pub mod serde_bincode_compat {
 }
 
 /// Re-export
-pub use alloy_trie::{nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH};
+pub use alloy_trie::{
+    nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, TrieMaskIter, EMPTY_ROOT_HASH,
+};

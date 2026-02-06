@@ -12,8 +12,9 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
-    keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
-    TxHash, TxNumber, B256, U256,
+    keccak256,
+    map::{AddressMap, B256Map, HashMap},
+    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
@@ -27,20 +28,19 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
-    SignerRecoverable,
+    SignerRecoverable, StorageEntry,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageRootProvider, TrieReader,
+    StorageChangeSetReader, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
-    updates::{TrieUpdates, TrieUpdatesSorted},
-    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
-    StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
     collections::BTreeMap,
@@ -55,13 +55,13 @@ use tokio::sync::broadcast;
 pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_chainspec::ChainSpec>
 {
     ///local block store
-    pub blocks: Arc<Mutex<HashMap<B256, T::Block>>>,
+    pub blocks: Arc<Mutex<B256Map<T::Block>>>,
     /// Local header store
-    pub headers: Arc<Mutex<HashMap<B256, <T::Block as Block>::Header>>>,
+    pub headers: Arc<Mutex<B256Map<<T::Block as Block>::Header>>>,
     /// Local receipt store indexed by block number
     pub receipts: Arc<Mutex<HashMap<BlockNumber, Vec<T::Receipt>>>>,
     /// Local account store
-    pub accounts: Arc<Mutex<HashMap<Address, ExtendedAccount>>>,
+    pub accounts: Arc<Mutex<AddressMap<ExtendedAccount>>>,
     /// Local chain spec
     pub chain_spec: Arc<ChainSpec>,
     /// Local state roots
@@ -189,6 +189,21 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             prune_modes: self.prune_modes,
         }
     }
+
+    /// Adds the genesis block from the chain spec to the provider.
+    ///
+    /// This is useful for tests that require a valid latest block (e.g., transaction validation).
+    pub fn with_genesis_block(self) -> Self
+    where
+        ChainSpec: EthChainSpec<Header = <T::Block as Block>::Header>,
+        <T::Block as Block>::Body: Default,
+    {
+        let genesis_hash = self.chain_spec.genesis_hash();
+        let genesis_header = self.chain_spec.genesis_header().clone();
+        let genesis_block = T::Block::new(genesis_header, Default::default());
+        self.add_block(genesis_hash, genesis_block);
+        self
+    }
 }
 
 impl Default for MockEthProvider {
@@ -267,7 +282,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
         self.tx
     }
 
-    fn commit(self) -> ProviderResult<bool> {
+    fn commit(self) -> ProviderResult<()> {
         Ok(self.tx.commit()?)
     }
 
@@ -990,6 +1005,37 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     }
 }
 
+impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
+    for MockEthProvider<T, ChainSpec>
+{
+    fn storage_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+        Ok(Vec::default())
+    }
+
+    fn get_storage_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+        _storage_key: B256,
+    ) -> ProviderResult<Option<StorageEntry>> {
+        Ok(None)
+    }
+
+    fn storage_changesets_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+        Ok(Vec::default())
+    }
+
+    fn storage_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
+    }
+}
+
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<T, ChainSpec> {
     type Receipt = T::Receipt;
 
@@ -998,19 +1044,6 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<
         _block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
         Ok(None)
-    }
-}
-
-impl<T: NodePrimitives, ChainSpec: Send + Sync> TrieReader for MockEthProvider<T, ChainSpec> {
-    fn trie_reverts(&self, _from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
-        Ok(TrieUpdatesSorted::default())
-    }
-
-    fn get_block_trie_updates(
-        &self,
-        _block_number: BlockNumber,
-    ) -> ProviderResult<TrieUpdatesSorted> {
-        Ok(TrieUpdatesSorted::default())
     }
 }
 

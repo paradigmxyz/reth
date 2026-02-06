@@ -100,10 +100,12 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
         ChainSpecBuilder::default().chain(MAINNET.chain).genesis(genesis).osaka_activated().build(),
     );
     let genesis_hash = chain_spec.genesis_hash();
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+    let node_config = NodeConfig::test().with_chain(chain_spec).with_unused_ports().with_rpc(
+        RpcServerArgs::default()
+            .with_unused_ports()
+            .with_http()
+            .with_force_blob_sidecar_upcasting(),
+    );
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
         .testing_node(exec.clone())
         .node(EthereumNode::default())
@@ -125,7 +127,7 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
     let blob_tx_hash = node.rpc.inject_tx(blob_tx).await?;
     // fetch it from rpc
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;
-    // assert that sidecar was converted to eip7594
+    // assert that sidecar was converted to eip7594 (force upcasting is enabled)
     assert!(envelope.as_eip4844().unwrap().tx().sidecar().unwrap().is_eip7594());
     // validate sidecar
     TransactionTestContext::validate_sidecar(envelope);
@@ -161,10 +163,12 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
             .build(),
     );
     let genesis_hash = chain_spec.genesis_hash();
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+    let node_config = NodeConfig::test().with_chain(chain_spec).with_unused_ports().with_rpc(
+        RpcServerArgs::default()
+            .with_unused_ports()
+            .with_http()
+            .with_force_blob_sidecar_upcasting(),
+    );
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
         .testing_node(exec.clone())
         .node(EthereumNode::default())

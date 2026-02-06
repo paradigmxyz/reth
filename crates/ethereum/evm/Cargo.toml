@@ -59,6 +59,7 @@ std = [
     "reth-storage-errors/std",
 ]
 test-utils = [
+    "std",
     "dep:parking_lot",
     "dep:derive_more",
     "reth-chainspec/test-utils",

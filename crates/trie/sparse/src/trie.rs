@@ -1,6 +1,7 @@
 use crate::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, SparseTrieInterface, SparseTrieUpdates,
+    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieExt,
+    SparseTrieUpdates,
 };
 use alloc::{
     borrow::Cow,
@@ -12,7 +13,7 @@ use alloc::{
 };
 use alloy_primitives::{
     hex, keccak256,
-    map::{Entry, HashMap, HashSet},
+    map::{B256Map, Entry, HashMap, HashSet},
     B256,
 };
 use alloy_rlp::Decodable;
@@ -20,10 +21,8 @@ use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeCompact, BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef,
-    LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask, TrieNode, CHILD_INDEX_RANGE,
-    EMPTY_ROOT_HASH,
+    LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask, TrieNode, EMPTY_ROOT_HASH,
 };
-use smallvec::SmallVec;
 use tracing::{debug, instrument, trace};
 
 /// The level below which the sparse trie hashes are calculated in
@@ -43,14 +42,15 @@ const SPARSE_TRIE_SUBTRIE_HASHES_LEVEL: usize = 2;
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum SparseTrie<T = SerialSparseTrie> {
+pub enum RevealableSparseTrie<T = SerialSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
     /// This is the default state. In this state, the trie cannot be directly queried or modified
     /// until nodes are revealed.
     ///
-    /// In this state the `SparseTrie` can optionally carry with it a cleared `SerialSparseTrie`.
-    /// This allows for reusing the trie's allocations between payload executions.
+    /// In this state the `RevealableSparseTrie` can optionally carry with it a cleared
+    /// `SerialSparseTrie`. This allows for reusing the trie's allocations between payload
+    /// executions.
     Blind(Option<Box<T>>),
     /// Some nodes in the Trie have been revealed.
     ///
@@ -60,21 +60,23 @@ pub enum SparseTrie<T = SerialSparseTrie> {
     Revealed(Box<T>),
 }
 
-impl<T: Default> Default for SparseTrie<T> {
+impl<T: Default> Default for RevealableSparseTrie<T> {
     fn default() -> Self {
         Self::Blind(None)
     }
 }
 
-impl<T: SparseTrieInterface + Default> SparseTrie<T> {
+impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// Creates a new revealed but empty sparse trie with `SparseNode::Empty` as root node.
     ///
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
+    /// use reth_trie_sparse::{
+    ///     provider::DefaultTrieNodeProvider, RevealableSparseTrie, SerialSparseTrie,
+    /// };
     ///
-    /// let trie = SparseTrie::<SerialSparseTrie>::revealed_empty();
+    /// let trie = RevealableSparseTrie::<SerialSparseTrie>::revealed_empty();
     /// assert!(!trie.is_blind());
     /// ```
     pub fn revealed_empty() -> Self {
@@ -91,7 +93,7 @@ impl<T: SparseTrieInterface + Default> SparseTrie<T> {
     ///
     /// # Returns
     ///
-    /// A mutable reference to the underlying [`SparseTrieInterface`].
+    /// A mutable reference to the underlying [`RevealableSparseTrie`](SparseTrieTrait).
     pub fn reveal_root(
         &mut self,
         root: TrieNode,
@@ -107,7 +109,7 @@ impl<T: SparseTrieInterface + Default> SparseTrie<T> {
                 Box::default()
             };
 
-            *revealed_trie = revealed_trie.with_root(root, masks, retain_updates)?;
+            revealed_trie.set_root(root, masks, retain_updates)?;
             *self = Self::Revealed(revealed_trie);
         }
 
@@ -115,17 +117,19 @@ impl<T: SparseTrieInterface + Default> SparseTrie<T> {
     }
 }
 
-impl<T: SparseTrieInterface> SparseTrie<T> {
+impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// Creates a new blind sparse trie.
     ///
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
+    /// use reth_trie_sparse::{
+    ///     provider::DefaultTrieNodeProvider, RevealableSparseTrie, SerialSparseTrie,
+    /// };
     ///
-    /// let trie = SparseTrie::<SerialSparseTrie>::blind();
+    /// let trie = RevealableSparseTrie::<SerialSparseTrie>::blind();
     /// assert!(trie.is_blind());
-    /// let trie = SparseTrie::<SerialSparseTrie>::default();
+    /// let trie = RevealableSparseTrie::<SerialSparseTrie>::default();
     /// assert!(trie.is_blind());
     /// ```
     pub const fn blind() -> Self {
@@ -133,7 +137,7 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     }
 
     /// Creates a new blind sparse trie, clearing and later reusing the given
-    /// [`SparseTrieInterface`].
+    /// [`RevealableSparseTrie`](SparseTrieTrait).
     pub fn blind_from(mut trie: T) -> Self {
         trie.clear();
         Self::Blind(Some(Box::new(trie)))
@@ -212,17 +216,20 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
         Some((revealed.root(), revealed.take_updates()))
     }
 
-    /// Returns a [`SparseTrie::Blind`] based on this one. If this instance was revealed, or was
-    /// itself a `Blind` with a pre-allocated [`SparseTrieInterface`], this will return
-    /// a `Blind` carrying a cleared pre-allocated [`SparseTrieInterface`].
-    pub fn clear(self) -> Self {
-        match self {
-            Self::Blind(_) => self,
+    /// Clears this trie, setting it to a blind state.
+    ///
+    /// If this instance was revealed, or was itself a `Blind` with a pre-allocated
+    /// [`RevealableSparseTrie`](SparseTrieTrait), this will set to `Blind` carrying a cleared
+    /// pre-allocated [`RevealableSparseTrie`](SparseTrieTrait).
+    #[inline]
+    pub fn clear(&mut self) {
+        *self = match core::mem::replace(self, Self::blind()) {
+            s @ Self::Blind(_) => s,
             Self::Revealed(mut trie) => {
                 trie.clear();
                 Self::Blind(Some(trie))
             }
-        }
+        };
     }
 
     /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
@@ -277,6 +284,35 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
                 trie.shrink_values_to(size);
             }
             _ => {}
+        }
+    }
+}
+
+impl<T: SparseTrieExt + Default> RevealableSparseTrie<T> {
+    /// Applies batch leaf updates to the sparse trie.
+    ///
+    /// For blind tries, all updates are kept in the map and proof targets are emitted
+    /// for every key (with `min_len = 0` since nothing is revealed).
+    ///
+    /// For revealed tries, delegates to the inner implementation which will:
+    /// - Apply updates where possible
+    /// - Keep blocked updates in the map
+    /// - Emit proof targets for blinded paths
+    pub fn update_leaves(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        mut proof_required_fn: impl FnMut(B256, u8),
+    ) -> SparseTrieResult<()> {
+        match self {
+            Self::Blind(_) => {
+                // Nothing is revealed - emit proof targets for all keys with min_len = 0
+                for key in updates.keys() {
+                    proof_required_fn(*key, 0);
+                }
+                // All updates remain in the map for retry after proofs are fetched
+                Ok(())
+            }
+            Self::Revealed(trie) => trie.update_leaves(updates, proof_required_fn),
         }
     }
 }
@@ -385,13 +421,11 @@ impl fmt::Display for SerialSparseTrie {
                 SparseNode::Branch { state_mask, .. } => {
                     writeln!(f, "{packed_path} -> {node:?}")?;
 
-                    for i in CHILD_INDEX_RANGE.rev() {
-                        if state_mask.is_bit_set(i) {
-                            let mut child_path = path;
-                            child_path.push_unchecked(i);
-                            if let Some(child_node) = self.nodes_ref().get(&child_path) {
-                                stack.push((child_path, child_node, depth + 1));
-                            }
+                    for i in state_mask.iter().rev() {
+                        let mut child_path = path;
+                        child_path.push_unchecked(i);
+                        if let Some(child_node) = self.nodes_ref().get(&child_path) {
+                            stack.push((child_path, child_node, depth + 1));
                         }
                     }
                 }
@@ -415,14 +449,14 @@ impl Default for SerialSparseTrie {
     }
 }
 
-impl SparseTrieInterface for SerialSparseTrie {
-    fn with_root(
-        mut self,
+impl SparseTrieTrait for SerialSparseTrie {
+    fn set_root(
+        &mut self,
         root: TrieNode,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
-    ) -> SparseTrieResult<Self> {
-        self = self.with_updates(retain_updates);
+    ) -> SparseTrieResult<()> {
+        self.set_updates(retain_updates);
 
         // A fresh/cleared `SerialSparseTrie` has a `SparseNode::Empty` at its root. Delete that
         // so we can reveal the new root node.
@@ -430,20 +464,19 @@ impl SparseTrieInterface for SerialSparseTrie {
         let _removed_root = self.nodes.remove(&path).expect("root node should exist");
         debug_assert_eq!(_removed_root, SparseNode::Empty);
 
-        self.reveal_node(path, root, masks)?;
-        Ok(self)
+        self.reveal_node(path, root, masks)
     }
 
-    fn with_updates(mut self, retain_updates: bool) -> Self {
+    fn set_updates(&mut self, retain_updates: bool) {
         if retain_updates {
             self.updates = Some(SparseTrieUpdates::default());
         }
-        self
     }
 
     fn reserve_nodes(&mut self, additional: usize) {
         self.nodes.reserve(additional);
     }
+
     fn reveal_node(
         &mut self,
         path: Nibbles,
@@ -468,16 +501,14 @@ impl SparseTrieInterface for SerialSparseTrie {
                 self.nodes.insert(path, SparseNode::Empty);
             }
             TrieNode::Branch(branch) => {
-                // For a branch node, iterate over all potential children
+                // For a branch node, iterate over all children
                 let mut stack_ptr = branch.as_ref().first_child_index();
-                for idx in CHILD_INDEX_RANGE {
-                    if branch.state_mask.is_bit_set(idx) {
-                        let mut child_path = path;
-                        child_path.push_unchecked(idx);
-                        // Reveal each child node or hash it has
-                        self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
-                        stack_ptr += 1;
-                    }
+                for idx in branch.state_mask.iter() {
+                    let mut child_path = path;
+                    child_path.push_unchecked(idx);
+                    // Reveal each child node or hash it has
+                    self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+                    stack_ptr += 1;
                 }
                 // Update the branch node entry in the nodes map, handling cases where a blinded
                 // node is now replaced with a revealed node.
@@ -588,10 +619,14 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
-    fn reveal_nodes(&mut self, mut nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()> {
+    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()> {
         nodes.sort_unstable_by_key(|node| node.path);
-        for node in nodes {
-            self.reveal_node(node.path, node.node, node.masks)?;
+        for node in nodes.iter_mut() {
+            self.reveal_node(
+                node.path,
+                core::mem::replace(&mut node.node, TrieNode::EmptyRoot),
+                node.masks.take(),
+            )?;
         }
         Ok(())
     }
@@ -943,7 +978,30 @@ impl SparseTrieInterface for SerialSparseTrie {
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        self.updates.take().unwrap_or_default()
+        match self.updates.take() {
+            Some(updates) => {
+                // Sync branch_node_masks with what's being committed to DB.
+                // This ensures that on subsequent root() calls, the masks reflect the actual
+                // DB state, which is needed for correct removal detection.
+                for (path, node) in &updates.updated_nodes {
+                    self.branch_node_masks.insert(
+                        *path,
+                        BranchNodeMasks { tree_mask: node.tree_mask, hash_mask: node.hash_mask },
+                    );
+                }
+                for path in &updates.removed_nodes {
+                    self.branch_node_masks.remove(path);
+                }
+
+                // NOTE: we need to preserve Some case
+                self.updates = Some(SparseTrieUpdates::with_capacity(
+                    updates.updated_nodes.len(),
+                    updates.removed_nodes.len(),
+                ));
+                updates
+            }
+            None => SparseTrieUpdates::default(),
+        }
     }
 
     fn wipe(&mut self) {
@@ -1442,12 +1500,10 @@ impl SerialSparseTrie {
                     } else {
                         unchanged_prefix_set.insert(path);
 
-                        for bit in CHILD_INDEX_RANGE.rev() {
-                            if state_mask.is_bit_set(bit) {
-                                let mut child_path = path;
-                                child_path.push_unchecked(bit);
-                                paths.push((child_path, level + 1));
-                            }
+                        for bit in state_mask.iter().rev() {
+                            let mut child_path = path;
+                            child_path.push_unchecked(bit);
+                            paths.push((child_path, level + 1));
                         }
                     }
                 }
@@ -1601,12 +1657,10 @@ impl SerialSparseTrie {
                     buffers.branch_child_buf.clear();
                     // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
                     // from the stack and keep walking in the sorted order.
-                    for bit in CHILD_INDEX_RANGE.rev() {
-                        if state_mask.is_bit_set(bit) {
-                            let mut child = path;
-                            child.push_unchecked(bit);
-                            buffers.branch_child_buf.push(child);
-                        }
+                    for bit in state_mask.iter().rev() {
+                        let mut child = path;
+                        child.push_unchecked(bit);
+                        buffers.branch_child_buf.push(child);
                     }
 
                     buffers
@@ -1926,6 +1980,16 @@ impl SparseNode {
             }
         }
     }
+
+    /// Returns the memory size of this node in bytes.
+    pub const fn memory_size(&self) -> usize {
+        match self {
+            Self::Empty | Self::Hash(_) | Self::Branch { .. } => core::mem::size_of::<Self>(),
+            Self::Leaf { key, .. } | Self::Extension { key, .. } => {
+                core::mem::size_of::<Self>() + key.len()
+            }
+        }
+    }
 }
 
 /// A helper struct used to store information about a node that has been removed
@@ -1957,9 +2021,9 @@ pub struct RlpNodeBuffers {
     /// Stack of RLP nodes
     rlp_node_stack: Vec<RlpNodeStackItem>,
     /// Reusable branch child path
-    branch_child_buf: SmallVec<[Nibbles; 16]>,
+    branch_child_buf: Vec<Nibbles>,
     /// Reusable branch value stack
-    branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
+    branch_value_stack_buf: Vec<RlpNode>,
 }
 
 impl RlpNodeBuffers {
@@ -1972,8 +2036,8 @@ impl RlpNodeBuffers {
                 is_in_prefix_set: None,
             }],
             rlp_node_stack: Vec::new(),
-            branch_child_buf: SmallVec::<[Nibbles; 16]>::new_const(),
-            branch_value_stack_buf: SmallVec::<[RlpNode; 16]>::new_const(),
+            branch_child_buf: Vec::new(),
+            branch_value_stack_buf: Vec::new(),
         }
     }
 }
@@ -2189,7 +2253,7 @@ mod find_leaf_tests {
         let blinded_hash = B256::repeat_byte(0xBB);
         let leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
-        let mut nodes = alloy_primitives::map::HashMap::default();
+        let mut nodes = HashMap::default();
         // Create path to the blinded node
         nodes.insert(
             Nibbles::default(),
@@ -2486,8 +2550,8 @@ mod tests {
 
     #[test]
     fn sparse_trie_is_blind() {
-        assert!(SparseTrie::<SerialSparseTrie>::blind().is_blind());
-        assert!(!SparseTrie::<SerialSparseTrie>::revealed_empty().is_blind());
+        assert!(RevealableSparseTrie::<SerialSparseTrie>::blind().is_blind());
+        assert!(!RevealableSparseTrie::<SerialSparseTrie>::revealed_empty().is_blind());
     }
 
     #[test]

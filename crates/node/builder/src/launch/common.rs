@@ -66,8 +66,8 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
-    ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
+    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
+    RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
     StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
@@ -84,6 +84,7 @@ use reth_tracing::{
     tracing::{debug, error, info, warn},
 };
 use reth_transaction_pool::TransactionPool;
+use reth_trie_db::ChangesetCache;
 use std::{sync::Arc, thread::available_parallelism, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
@@ -235,7 +236,7 @@ impl LaunchContext {
             .map_or(0, |num| num.get().saturating_sub(reserved_cpu_cores).max(1));
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
-            .thread_name(|i| format!("reth-rayon-{i}"))
+            .thread_name(|i| format!("rayon-{i}"))
             .build_global()
         {
             warn!(%err, "Failed to build global thread pool")
@@ -470,7 +471,10 @@ where
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
-    pub async fn create_provider_factory<N, Evm>(&self) -> eyre::Result<ProviderFactory<N>>
+    pub async fn create_provider_factory<N, Evm>(
+        &self,
+        changeset_cache: ChangesetCache,
+    ) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
@@ -500,34 +504,13 @@ where
             static_file_provider,
             rocksdb_provider,
         )?
-        .with_prune_modes(self.prune_modes());
+        .with_prune_modes(self.prune_modes())
+        .with_changeset_cache(changeset_cache);
 
-        // Keep MDBX, static files, and RocksDB aligned. If any check fails, unwind to the
-        // earliest consistent block.
-        //
-        // Order matters:
-        // 1) heal static files (no pruning)
-        // 2) check RocksDB (needs static-file tx data)
-        // 3) check static-file checkpoints vs MDBX (may prune)
-        //
-        // Compute one unwind target and run a single unwind.
-
-        let provider_ro = factory.database_provider_ro()?;
-
-        // Step 1: heal file-level inconsistencies (no pruning)
-        factory.static_file_provider().check_file_consistency(&provider_ro)?;
-
-        // Step 2: RocksDB consistency check (needs static files tx data)
-        let rocksdb_unwind = factory.rocksdb_provider().check_consistency(&provider_ro)?;
-
-        // Step 3: Static file checkpoint consistency (may prune)
-        let static_file_unwind = factory
-            .static_file_provider()
-            .check_consistency(&provider_ro)?
-            .map(|target| match target {
-                PipelineTarget::Unwind(block) => block,
-                PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
-            });
+        // Check consistency between the database and static files, returning
+        // the unwind targets for each storage layer if inconsistencies are
+        // found.
+        let (rocksdb_unwind, static_file_unwind) = factory.check_consistency()?;
 
         // Take the minimum block number to ensure all storage layers are consistent.
         let unwind_target = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
@@ -593,12 +576,13 @@ where
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
     pub async fn with_provider_factory<N, Evm>(
         self,
+        changeset_cache: ChangesetCache,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory = self.create_provider_factory::<N, Evm>().await?;
+        let factory = self.create_provider_factory::<N, Evm>(changeset_cache).await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
             attachment: self.attachment.map_right(|_| factory),
@@ -670,19 +654,13 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        init_genesis_with_settings(
-            self.provider_factory(),
-            self.node_config().static_files.to_settings(),
-        )?;
+        init_genesis_with_settings(self.provider_factory(), self.node_config().storage_settings())?;
         Ok(self)
     }
 
     /// Write the genesis block and state if it has not already been written
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
-        init_genesis_with_settings(
-            self.provider_factory(),
-            self.node_config().static_files.to_settings(),
-        )
+        init_genesis_with_settings(self.provider_factory(), self.node_config().storage_settings())
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the
@@ -1276,6 +1254,10 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
                     }
                 })
             }
+        })
+        .with_hook({
+            let rocksdb = provider_factory.rocksdb_provider();
+            move || throttle!(Duration::from_secs(5 * 60), || rocksdb.report_metrics())
         })
         .build()
 }

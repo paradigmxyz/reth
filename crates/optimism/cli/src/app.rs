@@ -3,7 +3,7 @@ use eyre::{eyre, Result};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::launcher::Launcher;
 use reth_cli_runner::CliRunner;
-use reth_node_core::args::OtlpInitStatus;
+use reth_node_core::args::{OtlpInitStatus, OtlpLogsStatus};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
@@ -106,7 +106,9 @@ where
             }
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
+            Commands::Prune(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
+            }
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::ReExecute(command) => {
@@ -124,9 +126,11 @@ where
             let mut layers = self.layers.take().unwrap_or_default();
 
             let otlp_status = runner.block_on(self.cli.traces.init_otlp_tracing(&mut layers))?;
+            let otlp_logs_status = runner.block_on(self.cli.traces.init_otlp_logs(&mut layers))?;
 
             self.guard = self.cli.logs.init_tracing_with_layers(layers)?;
             info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
+
             match otlp_status {
                 OtlpInitStatus::Started(endpoint) => {
                     info!(target: "reth::cli", "Started OTLP {:?} tracing export to {endpoint}", self.cli.traces.protocol);
@@ -135,6 +139,16 @@ where
                     warn!(target: "reth::cli", "Provided OTLP tracing arguments do not have effect, compile with the `otlp` feature")
                 }
                 OtlpInitStatus::Disabled => {}
+            }
+
+            match otlp_logs_status {
+                OtlpLogsStatus::Started(endpoint) => {
+                    info!(target: "reth::cli", "Started OTLP {:?} logs export to {endpoint}", self.cli.traces.protocol);
+                }
+                OtlpLogsStatus::NoFeature => {
+                    warn!(target: "reth::cli", "Provided OTLP logs arguments do not have effect, compile with the `otlp-logs` feature")
+                }
+                OtlpLogsStatus::Disabled => {}
             }
         }
         Ok(())

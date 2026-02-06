@@ -7,10 +7,11 @@ use crate::{
         PersistTarget, TreeConfig,
     },
 };
+use reth_trie_db::ChangesetCache;
 
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256Map, B256Set},
     Bytes, B256,
 };
 use alloy_rlp::Decodable;
@@ -26,7 +27,8 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
-use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
+use reth_provider::test_utils::MockEthProvider;
+use reth_tasks::spawn_os_thread;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -192,6 +194,7 @@ impl TestHarness {
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
+        let changeset_cache = ChangesetCache::new();
         let engine_validator = BasicEngineValidator::new(
             provider.clone(),
             consensus.clone(),
@@ -199,6 +202,7 @@ impl TestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            changeset_cache.clone(),
         );
 
         let tree = EngineApiTreeHandler::new(
@@ -215,6 +219,7 @@ impl TestHarness {
             TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
             EngineApiKind::Ethereum,
             evm_config,
+            changeset_cache,
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
@@ -230,11 +235,11 @@ impl TestHarness {
     }
 
     fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
-        let mut blocks_by_hash = HashMap::default();
+        let mut blocks_by_hash = B256Map::default();
         let mut blocks_by_number = BTreeMap::new();
-        let mut state_by_hash = HashMap::default();
+        let mut state_by_hash = B256Map::default();
         let mut hash_by_number = BTreeMap::new();
-        let mut parent_to_child: HashMap<B256, HashSet<B256>> = HashMap::default();
+        let mut parent_to_child: B256Map<B256Set> = B256Map::default();
         let mut parent_hash = B256::ZERO;
 
         for block in &blocks {
@@ -255,6 +260,7 @@ impl TestHarness {
             current_canonical_head: blocks.last().unwrap().recovered_block().num_hash(),
             parent_to_child,
             engine_kind: EngineApiKind::Ethereum,
+            cached_canonical_overlay: None,
         };
 
         let last_executed_block = blocks.last().unwrap().clone();
@@ -388,6 +394,7 @@ impl ValidatorTestHarness {
         let provider = harness.provider.clone();
         let payload_validator = MockEngineValidator;
         let evm_config = MockEvmConfig::default();
+        let changeset_cache = ChangesetCache::new();
 
         let validator = BasicEngineValidator::new(
             provider,
@@ -396,6 +403,7 @@ impl ValidatorTestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            changeset_cache,
         );
 
         Self { harness, validator, metrics: TestMetrics::default() }
@@ -531,10 +539,7 @@ async fn test_tree_persist_blocks() {
         .get_executed_blocks(1..tree_config.persistence_threshold() + 2)
         .collect();
     let test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
-    std::thread::Builder::new()
-        .name("Engine Task".to_string())
-        .spawn(|| test_harness.tree.run())
-        .unwrap();
+    spawn_os_thread("engine", || test_harness.tree.run());
 
     // send a message to the tree to enter the main loop.
     test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
@@ -832,7 +837,7 @@ fn test_tree_state_on_new_head_deep_fork() {
     for block in &chain_a {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
-            Arc::new(ExecutionOutcome::default()),
+            Arc::new(BlockExecutionOutput::default()),
             empty_trie_data(),
         ));
     }
@@ -841,7 +846,7 @@ fn test_tree_state_on_new_head_deep_fork() {
     for block in &chain_b {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
-            Arc::new(ExecutionOutcome::default()),
+            Arc::new(BlockExecutionOutput::default()),
             empty_trie_data(),
         ));
     }
@@ -952,7 +957,7 @@ async fn test_engine_tree_fcu_missing_head() {
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
         EngineApiEvent::Download(DownloadRequest::BlockSet(actual_block_set)) => {
-            let expected_block_set = HashSet::from_iter([missing_block.hash()]);
+            let expected_block_set = B256Set::from_iter([missing_block.hash()]);
             assert_eq!(actual_block_set, expected_block_set);
         }
         _ => panic!("Unexpected event: {event:#?}"),
@@ -997,7 +1002,16 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
         EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
-            assert_eq!(hash_set, HashSet::from_iter([main_chain_last_hash]));
+            assert_eq!(hash_set, B256Set::from_iter([main_chain_last_hash]));
+        }
+        _ => panic!("Unexpected event: {event:#?}"),
+    }
+
+    // After backfill completes with head not buffered, we also request head download
+    let event = test_harness.from_tree_rx.recv().await.unwrap();
+    match event {
+        EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
+            assert_eq!(hash_set, B256Set::from_iter([main_chain_last_hash]));
         }
         _ => panic!("Unexpected event: {event:#?}"),
     }
@@ -1973,10 +1987,7 @@ mod forkchoice_updated_tests {
         let action_rx = test_harness.action_rx;
 
         // Spawn tree in background thread
-        std::thread::Builder::new()
-            .name("Engine Task".to_string())
-            .spawn(|| test_harness.tree.run())
-            .unwrap();
+        spawn_os_thread("engine", || test_harness.tree.run());
 
         // Send terminate request
         to_tree_tx

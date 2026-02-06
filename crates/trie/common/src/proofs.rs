@@ -1,6 +1,6 @@
 //! Merkle trie proofs.
 
-use crate::{BranchNodeMasksMap, Nibbles, TrieAccount};
+use crate::{BranchNodeMasksMap, Nibbles, ProofTrieNode, TrieAccount};
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
@@ -267,6 +267,12 @@ impl MultiProof {
         self.account_subtree.extend_from(other.account_subtree);
         self.branch_node_masks.extend(other.branch_node_masks);
 
+        let reserve = if self.storages.is_empty() {
+            other.storages.len()
+        } else {
+            other.storages.len().div_ceil(2)
+        };
+        self.storages.reserve(reserve);
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
                 hash_map::Entry::Occupied(mut entry) => {
@@ -390,6 +396,12 @@ impl DecodedMultiProof {
         self.account_subtree.extend_from(other.account_subtree);
         self.branch_node_masks.extend(other.branch_node_masks);
 
+        let reserve = if self.storages.is_empty() {
+            other.storages.len()
+        } else {
+            other.storages.len().div_ceil(2)
+        };
+        self.storages.reserve(reserve);
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
                 hash_map::Entry::Occupied(mut entry) => {
@@ -428,6 +440,40 @@ impl TryFrom<MultiProof> for DecodedMultiProof {
             .map(|(address, storage)| Ok((address, storage.try_into()?)))
             .collect::<Result<B256Map<_>, alloy_rlp::Error>>()?;
         Ok(Self { account_subtree, branch_node_masks: multi_proof.branch_node_masks, storages })
+    }
+}
+
+/// V2 decoded multiproof which contains the results of both account and storage V2 proof
+/// calculations.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct DecodedMultiProofV2 {
+    /// Account trie proof nodes
+    pub account_proofs: Vec<ProofTrieNode>,
+    /// Storage trie proof nodes indexed by account
+    pub storage_proofs: B256Map<Vec<ProofTrieNode>>,
+}
+
+impl DecodedMultiProofV2 {
+    /// Returns true if there are no proofs
+    pub fn is_empty(&self) -> bool {
+        self.account_proofs.is_empty() && self.storage_proofs.is_empty()
+    }
+
+    /// Appends the given multiproof's data to this one.
+    ///
+    /// This implementation does not deduplicate redundant proofs.
+    pub fn extend(&mut self, other: Self) {
+        self.account_proofs.extend(other.account_proofs);
+        for (hashed_address, other_storage_proofs) in other.storage_proofs {
+            match self.storage_proofs.entry(hashed_address) {
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(other_storage_proofs);
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().extend(other_storage_proofs);
+                }
+            }
+        }
     }
 }
 

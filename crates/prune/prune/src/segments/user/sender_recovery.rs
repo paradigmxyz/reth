@@ -1,14 +1,18 @@
 use crate::{
     db_ext::DbTxPruneExt,
-    segments::{PruneInput, Segment},
+    segments::{self, PruneInput, Segment},
     PrunerError,
 };
 use reth_db_api::{tables, transaction::DbTxMut};
-use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
-use reth_prune_types::{
-    PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+use reth_provider::{
+    BlockReader, DBProvider, EitherWriterDestination, StaticFileProviderFactory,
+    StorageSettingsCache, TransactionsProvider,
 };
-use tracing::{instrument, trace};
+use reth_prune_types::{
+    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+};
+use reth_static_file_types::StaticFileSegment;
+use tracing::{debug, instrument, trace};
 
 #[derive(Debug)]
 pub struct SenderRecovery {
@@ -23,7 +27,11 @@ impl SenderRecovery {
 
 impl<Provider> Segment<Provider> for SenderRecovery
 where
-    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + TransactionsProvider
+        + BlockReader
+        + StorageSettingsCache
+        + StaticFileProviderFactory,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::SenderRecovery
@@ -37,8 +45,33 @@ where
         PrunePurpose::User
     }
 
-    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
+    #[instrument(
+        name = "SenderRecovery::prune",
+        target = "pruner",
+        skip(self, provider),
+        ret(level = "trace")
+    )]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+        if EitherWriterDestination::senders(provider).is_static_file() {
+            debug!(target: "pruner", "Pruning transaction senders from static files.");
+
+            if self.mode.is_full() {
+                debug!(target: "pruner", "PruneMode::Full: deleting all transaction senders static files.");
+                return segments::delete_static_files_segment(
+                    provider,
+                    input,
+                    StaticFileSegment::TransactionSenders,
+                )
+            }
+
+            return segments::prune_static_files(
+                provider,
+                input,
+                StaticFileSegment::TransactionSenders,
+            )
+        }
+        debug!(target: "pruner", "Pruning transaction senders from database.");
+
         let tx_range = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {
@@ -47,6 +80,25 @@ where
             }
         };
         let tx_range_end = *tx_range.end();
+
+        // For PruneMode::Full, clear the entire table in one operation
+        if self.mode.is_full() {
+            let pruned = provider.tx_ref().clear_table::<tables::TransactionSenders>()?;
+            trace!(target: "pruner", %pruned, "Cleared transaction senders table");
+
+            let last_pruned_block = provider
+                .block_by_transaction_id(tx_range_end)?
+                .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?;
+
+            return Ok(SegmentOutput {
+                progress: PruneProgress::Finished,
+                pruned,
+                checkpoint: Some(SegmentOutputCheckpoint {
+                    block_number: Some(last_pruned_block),
+                    tx_number: Some(tx_range_end),
+                }),
+            });
+        }
 
         let mut limiter = input.limiter;
 

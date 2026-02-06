@@ -1,4 +1,7 @@
-use crate::{utils::extend_sorted_vec, BranchNodeCompact, HashBuilder, Nibbles};
+use crate::{
+    utils::{extend_sorted_vec, kway_merge_sorted},
+    BranchNodeCompact, HashBuilder, Nibbles,
+};
 use alloc::{
     collections::{btree_map::BTreeMap, btree_set::BTreeSet},
     vec::Vec,
@@ -23,6 +26,15 @@ pub struct TrieUpdates {
 }
 
 impl TrieUpdates {
+    /// Creates a new `TrieUpdates` with pre-allocated capacity.
+    pub fn with_capacity(account_nodes: usize, storage_tries: usize) -> Self {
+        Self {
+            account_nodes: HashMap::with_capacity_and_hasher(account_nodes, Default::default()),
+            removed_nodes: HashSet::with_capacity_and_hasher(account_nodes / 4, Default::default()),
+            storage_tries: B256Map::with_capacity_and_hasher(storage_tries, Default::default()),
+        }
+    }
+
     /// Returns `true` if the updates are empty.
     pub fn is_empty(&self) -> bool {
         self.account_nodes.is_empty() &&
@@ -157,7 +169,7 @@ impl TrieUpdates {
             .collect::<Vec<_>>();
 
         account_nodes.extend(self.removed_nodes.drain().map(|path| (path, None)));
-        account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        account_nodes.sort_unstable_by_key(|a| a.0);
 
         let storage_tries = self
             .storage_tries
@@ -183,7 +195,7 @@ impl TrieUpdates {
                 .filter(|path| !self.account_nodes.contains_key(*path))
                 .map(|path| (*path, None)),
         );
-        account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        account_nodes.sort_unstable_by_key(|a| a.0);
 
         let storage_tries = self
             .storage_tries
@@ -194,7 +206,7 @@ impl TrieUpdates {
     }
 
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
-    pub fn into_sorted_ref<'a>(&'a self) -> TrieUpdatesSortedRef<'a> {
+    pub fn into_sorted_ref(&self) -> TrieUpdatesSortedRef<'_> {
         let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
@@ -204,7 +216,7 @@ impl TrieUpdates {
             storage_tries: self
                 .storage_tries
                 .iter()
-                .map(|m| (*m.0, m.1.into_sorted_ref().clone()))
+                .map(|m| (*m.0, m.1.into_sorted_ref()))
                 .collect(),
         }
     }
@@ -361,7 +373,7 @@ impl StorageTrieUpdates {
             .collect::<Vec<_>>();
 
         storage_nodes.extend(self.removed_nodes.into_iter().map(|path| (path, None)));
-        storage_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        storage_nodes.sort_unstable_by_key(|a| a.0);
 
         StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }
     }
@@ -382,7 +394,7 @@ impl StorageTrieUpdates {
                 .filter(|path| !self.storage_nodes.contains_key(*path))
                 .map(|path| (*path, None)),
         );
-        storage_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        storage_nodes.sort_unstable_by_key(|a| a.0);
 
         StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }
     }
@@ -593,7 +605,10 @@ impl TrieUpdatesSorted {
     /// This merges the account nodes and storage tries from `other` into `self`.
     /// Account nodes are merged and re-sorted, with `other`'s values taking precedence
     /// for duplicate keys.
-    pub fn extend_ref(&mut self, other: &Self) {
+    ///
+    /// Sorts the account nodes after extending. Sorts the storage tries after extending, for each
+    /// storage trie.
+    pub fn extend_ref_and_sort(&mut self, other: &Self) {
         // Extend account nodes
         extend_sorted_vec(&mut self.account_nodes, &other.account_nodes);
 
@@ -610,6 +625,77 @@ impl TrieUpdatesSorted {
     pub fn clear(&mut self) {
         self.account_nodes.clear();
         self.storage_tries.clear();
+    }
+
+    /// Batch-merge sorted trie updates. Iterator yields **newest to oldest**.
+    ///
+    /// For small batches, uses `extend_ref_and_sort` loop.
+    /// For large batches, uses k-way merge for O(n log k) complexity.
+    pub fn merge_batch<T: AsRef<Self> + From<Self>>(iter: impl IntoIterator<Item = T>) -> T {
+        const THRESHOLD: usize = 30;
+
+        let items: alloc::vec::Vec<_> = iter.into_iter().collect();
+        let k = items.len();
+
+        if k == 0 {
+            return Self::default().into();
+        }
+        if k == 1 {
+            return items.into_iter().next().expect("k == 1");
+        }
+
+        if k < THRESHOLD {
+            // Small k: extend loop, oldest-to-newest so newer overrides older.
+            let mut iter = items.iter().rev();
+            let mut acc = iter.next().expect("k > 0").as_ref().clone();
+            for next in iter {
+                acc.extend_ref_and_sort(next.as_ref());
+            }
+            return acc.into();
+        }
+
+        // Large k: k-way merge.
+        let account_nodes =
+            kway_merge_sorted(items.iter().map(|i| i.as_ref().account_nodes.as_slice()));
+
+        struct StorageAcc<'a> {
+            is_deleted: bool,
+            sealed: bool,
+            slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
+        }
+
+        let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
+
+        for item in &items {
+            for (addr, storage) in &item.as_ref().storage_tries {
+                let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
+                    is_deleted: false,
+                    sealed: false,
+                    slices: Vec::new(),
+                });
+
+                if entry.sealed {
+                    continue;
+                }
+
+                entry.slices.push(storage.storage_nodes.as_slice());
+
+                if storage.is_deleted {
+                    entry.is_deleted = true;
+                    entry.sealed = true;
+                }
+            }
+        }
+
+        let storage_tries = acc
+            .into_iter()
+            .map(|(addr, entry)| {
+                let storage_nodes = kway_merge_sorted(entry.slices);
+                (addr, StorageTrieUpdatesSorted { is_deleted: entry.is_deleted, storage_nodes })
+            })
+            .collect();
+
+        Self { account_nodes, storage_tries }.into()
     }
 }
 
@@ -702,6 +788,22 @@ impl StorageTrieUpdatesSorted {
         extend_sorted_vec(&mut self.storage_nodes, &other.storage_nodes);
         self.is_deleted = self.is_deleted || other.is_deleted;
     }
+
+    /// Batch-merge sorted storage trie updates. Iterator yields **newest to oldest**.
+    /// If any update is deleted, older data is discarded.
+    pub fn merge_batch<'a>(updates: impl IntoIterator<Item = &'a Self>) -> Self {
+        let updates: Vec<_> = updates.into_iter().collect();
+        if updates.is_empty() {
+            return Self::default();
+        }
+
+        // Discard updates older than the first deletion since the trie was wiped at that point.
+        let del_idx = updates.iter().position(|u| u.is_deleted);
+        let relevant = del_idx.map_or(&updates[..], |idx| &updates[..=idx]);
+        let storage_nodes = kway_merge_sorted(relevant.iter().map(|u| u.storage_nodes.as_slice()));
+
+        Self { is_deleted: del_idx.is_some(), storage_nodes }
+    }
 }
 
 /// Excludes empty nibbles from the given iterator.
@@ -743,7 +845,7 @@ mod tests {
         // Test extending with empty updates
         let mut updates1 = TrieUpdatesSorted::default();
         let updates2 = TrieUpdatesSorted::default();
-        updates1.extend_ref(&updates2);
+        updates1.extend_ref_and_sort(&updates2);
         assert_eq!(updates1.account_nodes.len(), 0);
         assert_eq!(updates1.storage_tries.len(), 0);
 
@@ -762,7 +864,7 @@ mod tests {
             ],
             storage_tries: B256Map::default(),
         };
-        updates1.extend_ref(&updates2);
+        updates1.extend_ref_and_sort(&updates2);
         assert_eq!(updates1.account_nodes.len(), 3);
         // Should be sorted: 0x01, 0x02, 0x03
         assert_eq!(updates1.account_nodes[0].0, Nibbles::from_nibbles_unchecked([0x01]));
@@ -798,7 +900,7 @@ mod tests {
                 (hashed_address2, storage_trie1),
             ]),
         };
-        updates1.extend_ref(&updates2);
+        updates1.extend_ref_and_sort(&updates2);
         assert_eq!(updates1.storage_tries.len(), 2);
         assert!(updates1.storage_tries.contains_key(&hashed_address1));
         assert!(updates1.storage_tries.contains_key(&hashed_address2));

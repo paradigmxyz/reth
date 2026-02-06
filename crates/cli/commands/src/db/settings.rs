@@ -54,6 +54,26 @@ pub enum SetCommand {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
+    /// Store storage history in rocksdb instead of MDBX
+    StoragesHistory {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
+    /// Store transaction hash to number mapping in rocksdb instead of MDBX
+    TransactionHashNumbers {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
+    /// Store account history in rocksdb instead of MDBX
+    AccountHistory {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
+    /// Store storage changesets in static files instead of the database
+    StorageChangesets {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
 }
 
 impl Command {
@@ -100,6 +120,7 @@ impl Command {
             transaction_hash_numbers_in_rocksdb: _,
             account_history_in_rocksdb: _,
             account_changesets_in_static_files: _,
+            storage_changesets_in_static_files: _,
         } = settings.unwrap_or_else(StorageSettings::legacy);
 
         // Update the setting based on the key
@@ -127,6 +148,38 @@ impl Command {
                 }
                 settings.account_changesets_in_static_files = value;
                 println!("Set account_changesets_in_static_files = {}", value);
+            }
+            SetCommand::StoragesHistory { value } => {
+                if settings.storages_history_in_rocksdb == value {
+                    println!("storages_history_in_rocksdb is already set to {}", value);
+                    return Ok(());
+                }
+                settings.storages_history_in_rocksdb = value;
+                println!("Set storages_history_in_rocksdb = {}", value);
+            }
+            SetCommand::TransactionHashNumbers { value } => {
+                if settings.transaction_hash_numbers_in_rocksdb == value {
+                    println!("transaction_hash_numbers_in_rocksdb is already set to {}", value);
+                    return Ok(());
+                }
+                settings.transaction_hash_numbers_in_rocksdb = value;
+                println!("Set transaction_hash_numbers_in_rocksdb = {}", value);
+            }
+            SetCommand::AccountHistory { value } => {
+                if settings.account_history_in_rocksdb == value {
+                    println!("account_history_in_rocksdb is already set to {}", value);
+                    return Ok(());
+                }
+                settings.account_history_in_rocksdb = value;
+                println!("Set account_history_in_rocksdb = {}", value);
+            }
+            SetCommand::StorageChangesets { value } => {
+                if settings.storage_changesets_in_static_files == value {
+                    println!("storage_changesets_in_static_files is already set to {}", value);
+                    return Ok(());
+                }
+                settings.storage_changesets_in_static_files = value;
+                println!("Set storage_changesets_in_static_files = {}", value);
             }
         }
 

@@ -137,7 +137,8 @@ where
                 for (k, _, v, _) in input {
                     crsr.append(k, &v).expect("submit");
                 }
-                tx.inner.commit().unwrap()
+                drop(crsr);
+                tx.commit().unwrap()
             },
         )
     });
@@ -157,8 +158,8 @@ where
                     let (k, _, v, _) = input.get(index).unwrap().clone();
                     crsr.insert(k, &v).expect("submit");
                 }
-
-                tx.inner.commit().unwrap()
+                drop(crsr);
+                tx.commit().unwrap()
             },
         )
     });
@@ -219,7 +220,8 @@ where
                 for (k, _, v, _) in input {
                     crsr.append_dup(k, v).expect("submit");
                 }
-                tx.inner.commit().unwrap()
+                drop(crsr);
+                tx.commit().unwrap()
             },
         )
     });
@@ -239,7 +241,7 @@ where
                     let (k, _, v, _) = input.get(index).unwrap().clone();
                     tx.put::<T>(k, v).unwrap();
                 }
-                tx.inner.commit().unwrap();
+                tx.commit().unwrap()
             },
         )
     });

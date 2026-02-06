@@ -6,7 +6,8 @@ use derive_more::Display;
 use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
 use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
-use revm_database_interface::DBErrorMarker;
+use revm_database_interface::{bal::EvmDatabaseError, DBErrorMarker};
+use revm_state::bal::BalError;
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
@@ -17,6 +18,9 @@ pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
+    /// BAL error.
+    #[error("BAL error:{_0}")]
+    Bal(BalError),
     /// Pruning error.
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
@@ -100,6 +104,24 @@ pub enum ProviderError {
     /// State is not available for the given block number because it is pruned.
     #[error("state at block #{_0} is pruned")]
     StateAtBlockPruned(BlockNumber),
+    /// State is not available because the block has not been executed yet.
+    #[error("state at block #{requested} is not available, block has not been executed yet (latest executed: #{executed})")]
+    BlockNotExecuted {
+        /// The block number that was requested.
+        requested: BlockNumber,
+        /// The latest executed block number.
+        executed: BlockNumber,
+    },
+    /// Block data is not available because history has expired.
+    ///
+    /// The requested block number is below the earliest available block.
+    #[error("block #{requested} is not available, history has expired (earliest available: #{earliest_available})")]
+    BlockExpired {
+        /// The block number that was requested.
+        requested: BlockNumber,
+        /// The earliest available block number.
+        earliest_available: BlockNumber,
+    },
     /// Provider does not support this particular request.
     #[error("this provider does not support this request")]
     UnsupportedProvider,
@@ -155,6 +177,16 @@ pub enum ProviderError {
         /// The available range of blocks with changesets
         available: core::ops::RangeInclusive<BlockNumber>,
     },
+    /// Inconsistency detected between static files/rocksdb and the DB during
+    /// `ProviderFactory::check_consistency`. The database must be unwound to
+    /// the specified block number to restore consistency.
+    #[error("consistency check failed for {data_source}. Db must be unwound to {unwind_to}")]
+    MustUnwind {
+        /// The inconsistent data source(s).
+        data_source: &'static str,
+        /// The block number to which the database must be unwound.
+        unwind_to: BlockNumber,
+    },
     /// Any other error type wrapped into a cloneable [`AnyError`].
     #[error(transparent)]
     Other(#[from] AnyError),
@@ -207,6 +239,12 @@ impl From<RecoveryError> for ProviderError {
     }
 }
 
+impl From<ProviderError> for EvmDatabaseError<ProviderError> {
+    fn from(error: ProviderError) -> Self {
+        Self::Database(error)
+    }
+}
+
 /// A root mismatch error at a given block height.
 #[derive(Clone, Debug, PartialEq, Eq, Display)]
 #[display("root mismatch at #{block_number} ({block_hash}): {root}")]
@@ -225,6 +263,9 @@ pub enum StaticFileWriterError {
     /// Cannot call `sync_all` or `finalize` when prune is queued.
     #[error("cannot call sync_all or finalize when prune is queued, use commit() instead")]
     FinalizeWithPruneQueued,
+    /// Thread panicked during execution.
+    #[error("thread panicked: {_0}")]
+    ThreadPanic(&'static str),
     /// Other error with message.
     #[error("{0}")]
     Other(String),

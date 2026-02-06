@@ -5,7 +5,7 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_rlp::{Decodable, Encodable};
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::iter::ParallelIterator;
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
@@ -13,11 +13,13 @@ use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus}
 use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{Block as BlockTrait, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{
+    Block as BlockTrait, ParallelBridgeBuffered, RecoveredBlock, SealedBlock,
+};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown, StateProofProvider,
-    StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use reth_stateless::{
@@ -180,7 +182,7 @@ impl Case for BlockchainTestCase {
         self.tests
             .iter()
             .filter(|(_, case)| !Self::excluded_fork(case.network))
-            .par_bridge()
+            .par_bridge_buffered()
             .try_for_each(|(name, case)| Self::run_single_case(name, case).map(|_| ()))?;
 
         Ok(())
@@ -277,7 +279,7 @@ fn run_case(
             .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
         // Consensus checks after block execution
-        validate_block_post_execution(block, &chain_spec, &output.receipts, &output.requests)
+        validate_block_post_execution(block, &chain_spec, &output.receipts, &output.requests, None)
             .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
         // Generate the stateless witness
@@ -325,7 +327,11 @@ fn run_case(
 
         // Commit the post state/state diff to the database
         provider
-            .write_state(&ExecutionOutcome::single(block.number, output), OriginalValuesKnown::Yes)
+            .write_state(
+                &ExecutionOutcome::single(block.number, output),
+                OriginalValuesKnown::Yes,
+                StateWriteConfig::default(),
+            )
             .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
         provider

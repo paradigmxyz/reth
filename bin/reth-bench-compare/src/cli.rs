@@ -116,9 +116,9 @@ pub(crate) struct Args {
 
     /// Optional fixed delay between engine API calls (passed to reth-bench).
     ///
-    /// When set, reth-bench uses wait-time mode and disables persistence-based flow.
-    /// This flag remains for compatibility with older scripts.
-    #[arg(long, value_name = "DURATION", hide = true)]
+    /// Can be combined with `--wait-for-persistence`: when both are set,
+    /// waits at least this duration, and also waits for persistence if needed.
+    #[arg(long, value_name = "DURATION")]
     pub wait_time: Option<String>,
 
     /// Wait for blocks to be persisted before sending the next batch (passed to reth-bench).
@@ -126,6 +126,9 @@ pub(crate) struct Args {
     /// When enabled, waits for every Nth block to be persisted using the
     /// `reth_subscribePersistedBlock` subscription. This ensures the benchmark
     /// doesn't outpace persistence.
+    ///
+    /// Can be combined with `--wait-time`: when both are set, waits at least
+    /// wait-time, and also waits for persistence if the block hasn't been persisted yet.
     #[arg(long)]
     pub wait_for_persistence: bool,
 
@@ -146,6 +149,11 @@ pub(crate) struct Args {
     /// By default, filesystem caches are cleared before warmup to ensure consistent benchmarks.
     #[arg(long)]
     pub no_clear_cache: bool,
+
+    /// Skip waiting for the node to sync before starting benchmarks.
+    /// When enabled, assumes the node is already synced and skips the initial tip check.
+    #[arg(long)]
+    pub skip_wait_syncing: bool,
 
     #[command(flatten)]
     pub logs: LogArgs,
@@ -269,10 +277,10 @@ impl Args {
     /// Get the default RPC URL for a given chain
     const fn get_default_rpc_url(chain: &Chain) -> &'static str {
         match chain.id() {
-            8453 => "https://base-mainnet.rpc.ithaca.xyz",  // base
+            8453 => "https://base.reth.rs/rpc",             // base
             84532 => "https://base-sepolia.rpc.ithaca.xyz", // base-sepolia
             27082 => "https://rpc.hoodi.ethpandaops.io",    // hoodi
-            _ => "https://reth-ethereum.ithaca.xyz/rpc",    // mainnet and fallback
+            _ => "https://ethereum.reth.rs/rpc",            // mainnet and fallback
         }
     }
 
@@ -578,7 +586,11 @@ async fn run_warmup_phase(
         node_manager.start_node(&binary_path, warmup_ref, "warmup", &additional_args).await?;
 
     // Wait for node to be ready and get its current tip
-    let current_tip = node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?;
+    let current_tip = if args.skip_wait_syncing {
+        node_manager.wait_for_rpc_and_get_tip(&mut node_process).await?
+    } else {
+        node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?
+    };
     info!("Warmup node is ready at tip: {}", current_tip);
 
     // Clear filesystem caches before warmup run only (unless disabled)
@@ -632,7 +644,11 @@ async fn run_benchmark_workflow(
     let (mut node_process, _) = node_manager
         .start_node(&binary_path, &args.baseline_ref, "baseline", &additional_args)
         .await?;
-    let starting_tip = node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?;
+    let starting_tip = if args.skip_wait_syncing {
+        node_manager.wait_for_rpc_and_get_tip(&mut node_process).await?
+    } else {
+        node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?
+    };
     info!("Node starting tip: {}", starting_tip);
     node_manager.stop_node(&mut node_process).await?;
 
@@ -699,7 +715,11 @@ async fn run_benchmark_workflow(
             node_manager.start_node(&binary_path, git_ref, ref_type, &additional_args).await?;
 
         // Wait for node to be ready and get its current tip (wherever it is)
-        let current_tip = node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?;
+        let current_tip = if args.skip_wait_syncing {
+            node_manager.wait_for_rpc_and_get_tip(&mut node_process).await?
+        } else {
+            node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?
+        };
         info!("Node is ready at tip: {}", current_tip);
 
         // Calculate benchmark range

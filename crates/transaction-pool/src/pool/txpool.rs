@@ -30,7 +30,9 @@ use alloy_eips::{
     eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
     Typed2718,
 };
-use alloy_primitives::{Address, TxHash, B256};
+#[cfg(test)]
+use alloy_primitives::Address;
+use alloy_primitives::{map::AddressSet, TxHash, B256};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
@@ -184,7 +186,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Returns all senders in the pool
-    pub(crate) fn unique_senders(&self) -> HashSet<Address> {
+    pub(crate) fn unique_senders(&self) -> AddressSet {
         self.all_transactions.txs.values().map(|tx| tx.transaction.sender()).collect()
     }
 
@@ -558,6 +560,18 @@ impl<T: TransactionOrdering> TxPool<T> {
         sender: SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.all_transactions.txs_iter(sender).map(|(_, tx)| Arc::clone(&tx.transaction)).collect()
+    }
+
+    /// Returns a pending transaction sent by the given sender with the given nonce.
+    pub(crate) fn get_pending_transaction_by_sender_and_nonce(
+        &self,
+        sender: SenderId,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.all_transactions
+            .txs_iter(sender)
+            .find(|(id, tx)| id.nonce == nonce && tx.subpool == SubPool::Pending)
+            .map(|(_, tx)| Arc::clone(&tx.transaction))
     }
 
     /// Updates only the pending fees without triggering subpool updates.

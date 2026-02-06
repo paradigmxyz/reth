@@ -3,9 +3,9 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Map, B256};
 use parking_lot::RwLock;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 /// An in-memory blob store.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -50,13 +50,13 @@ impl InMemoryBlobStore {
 #[derive(Debug, Default)]
 struct InMemoryBlobStoreInner {
     /// Storage for all blob data.
-    store: RwLock<HashMap<B256, Arc<BlobTransactionSidecarVariant>>>,
+    store: RwLock<B256Map<Arc<BlobTransactionSidecarVariant>>>,
     size_tracker: BlobStoreSize,
 }
 
 impl PartialEq for InMemoryBlobStoreInner {
     fn eq(&self, other: &Self) -> bool {
-        self.store.read().eq(&other.store.read())
+        self.store.read().eq(&*other.store.read())
     }
 }
 
@@ -194,7 +194,7 @@ impl BlobStore for InMemoryBlobStore {
 
 /// Removes the given blob from the store and returns the size of the blob that was removed.
 #[inline]
-fn remove_size(store: &mut HashMap<B256, Arc<BlobTransactionSidecarVariant>>, tx: &B256) -> usize {
+fn remove_size(store: &mut B256Map<Arc<BlobTransactionSidecarVariant>>, tx: &B256) -> usize {
     store.remove(tx).map(|rem| rem.size()).unwrap_or_default()
 }
 
@@ -203,7 +203,7 @@ fn remove_size(store: &mut HashMap<B256, Arc<BlobTransactionSidecarVariant>>, tx
 /// We don't need to handle the size updates for replacements because transactions are unique.
 #[inline]
 fn insert_size(
-    store: &mut HashMap<B256, Arc<BlobTransactionSidecarVariant>>,
+    store: &mut B256Map<Arc<BlobTransactionSidecarVariant>>,
     tx: B256,
     blob: BlobTransactionSidecarVariant,
 ) -> usize {
