@@ -371,7 +371,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     /// - Otherwise: uses [`StorageSettings::v1()`] defaults
     ///
     /// Individual `--static-files.*` and `--rocksdb.*` flags override the base when explicitly set.
-    pub fn storage_settings(&self) -> StorageSettings {
+    pub const fn storage_settings(&self) -> StorageSettings {
         let mut s = if self.storage.v2 { StorageSettings::v2() } else { StorageSettings::base() };
 
         // Apply static files overrides (only when explicitly set)

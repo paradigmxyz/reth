@@ -4,16 +4,16 @@ use clap::{ArgAction, Args};
 
 /// Parameters for storage mode configuration.
 ///
-/// This controls whether the node uses v2 storage defaults (with RocksDB and static file
+/// This controls whether the node uses v2 storage defaults (with `RocksDB` and static file
 /// optimizations) or v1/legacy storage defaults.
 #[derive(Debug, Args, PartialEq, Eq, Clone, Copy, Default)]
 #[command(next_help_heading = "Storage")]
 pub struct StorageArgs {
-    /// Enable v2 storage defaults (static files + RocksDB routing).
+    /// Enable v2 storage defaults (static files + `RocksDB` routing).
     ///
     /// When enabled, the node uses optimized storage settings:
     /// - Receipts and transaction senders in static files
-    /// - History indices in RocksDB (accounts, storages, transaction hashes)
+    /// - History indices in `RocksDB` (accounts, storages, transaction hashes)
     /// - Account and storage changesets in static files
     ///
     /// This is a genesis-initialization-only setting: changing it after genesis requires a

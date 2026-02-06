@@ -7,7 +7,7 @@ use clap::{ArgAction, Args};
 /// These flags control which database tables are stored in `RocksDB` instead of MDBX.
 /// All flags are genesis-initialization-only: changing them after genesis requires a re-sync.
 ///
-/// When `--storage.v2` is used, the defaults for these flags change to enable RocksDB routing.
+/// When `--storage.v2` is used, the defaults for these flags change to enable `RocksDB` routing.
 /// Individual flags can still override those defaults when explicitly set.
 #[derive(Debug, Args, PartialEq, Eq, Clone, Copy, Default)]
 #[command(next_help_heading = "RocksDB")]
