@@ -1160,16 +1160,21 @@ where
         fields(max_depth, max_storage_tries)
     )]
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        // Prune state and storage tries in parallel
+        let skip_filtering = self.skip_proof_node_filtering;
         rayon::join(
             || {
-                if let Some(trie) = self.state.as_revealed_mut() {
+                const MIN_ACCOUNT_NODES_TO_PRUNE: usize = 1000;
+                if let Some(trie) = self.state.as_revealed_mut() &&
+                    trie.size_hint() >= MIN_ACCOUNT_NODES_TO_PRUNE
+                {
                     trie.prune(max_depth);
                 }
-                self.revealed_account_paths.clear();
+                if !skip_filtering {
+                    self.revealed_account_paths.clear();
+                }
             },
             || {
-                self.storage.prune(max_depth, max_storage_tries);
+                self.storage.prune(max_depth, max_storage_tries, skip_filtering);
             },
         );
     }
@@ -1200,7 +1205,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
     ///
     /// Keeps the top `max_storage_tries` by a score combining size and heat.
     /// Evicts lower-scored tries entirely, prunes kept tries to `max_depth`.
-    fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
+    fn prune(&mut self, max_depth: usize, max_storage_tries: usize, skip_filtering: bool) {
         let fn_start = std::time::Instant::now();
         let mut stats =
             StorageTriesPruneStats { total_tries_before: self.tries.len(), ..Default::default() };
@@ -1280,10 +1285,11 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
         }
         stats.prune_elapsed = prune_start.elapsed();
 
-        // Clear revealed_paths for kept tries
-        for hash in tries_to_keep.keys() {
-            if let Some(paths) = self.revealed_paths.get_mut(hash) {
-                paths.clear();
+        if !skip_filtering {
+            for hash in tries_to_keep.keys() {
+                if let Some(paths) = self.revealed_paths.get_mut(hash) {
+                    paths.clear();
+                }
             }
         }
 

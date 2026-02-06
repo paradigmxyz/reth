@@ -357,12 +357,11 @@ where
         self,
         prune_depth: usize,
         max_storage_tries: usize,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
+        _max_nodes_capacity: usize,
+        _max_values_capacity: usize,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         let Self { mut trie, .. } = self;
         trie.prune(prune_depth, max_storage_tries);
-        trie.shrink_to(max_nodes_capacity, max_values_capacity);
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
     }
