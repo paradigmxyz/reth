@@ -748,6 +748,15 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 }
 
+/// Timing information for block validation.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BlockValidationTiming {
+    /// Time spent executing the block (transaction execution).
+    pub execution_elapsed: core::time::Duration,
+    /// Time spent computing the state root.
+    pub state_root_elapsed: core::time::Duration,
+}
+
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
@@ -760,6 +769,8 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// This allows deferring the computation of the trie data which can be expensive.
     /// The data can be populated asynchronously after the block was validated.
     pub trie_data: DeferredTrieData,
+    /// Timing information from block validation.
+    pub validation_timing: BlockValidationTiming,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -776,6 +787,7 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                 state: Default::default(),
             }),
             trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
+            validation_timing: BlockValidationTiming::default(),
         }
     }
 }
@@ -798,7 +810,12 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: ComputedTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data: DeferredTrieData::ready(trie_data) }
+        Self {
+            recovered_block,
+            execution_output,
+            trie_data: DeferredTrieData::ready(trie_data),
+            validation_timing: BlockValidationTiming::default(),
+        }
     }
 
     /// Create a new [`ExecutedBlock`] with deferred trie data.
@@ -815,12 +832,27 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// occurs synchronously from stored inputs, so there is no blocking or deadlock risk.
     ///
     /// Use [`Self::new()`] instead when trie data is already computed and available immediately.
-    pub const fn with_deferred_trie_data(
+    pub fn with_deferred_trie_data(
         recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: DeferredTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data }
+        Self {
+            recovered_block,
+            execution_output,
+            trie_data,
+            validation_timing: BlockValidationTiming::default(),
+        }
+    }
+
+    /// Create a new [`ExecutedBlock`] with deferred trie data and timing information.
+    pub fn with_deferred_trie_data_and_timing(
+        recovered_block: Arc<RecoveredBlock<N::Block>>,
+        execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
+        trie_data: DeferredTrieData,
+        validation_timing: BlockValidationTiming,
+    ) -> Self {
+        Self { recovered_block, execution_output, trie_data, validation_timing }
     }
 
     /// Returns a reference to an inner [`SealedBlock`]
