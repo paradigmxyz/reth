@@ -528,13 +528,6 @@ where
             panic!("compute_v2_storage_proof only accepts StorageProofInput::V2")
         };
 
-        // If targets is empty it means the caller only wants the root hash. The V2 proof calculator
-        // will do nothing given no targets, so instead we give it a fake target so it always
-        // returns at least the root.
-        if targets.is_empty() {
-            targets.push(proof_v2::Target::new(B256::ZERO));
-        }
-
         let span = debug_span!(
             target: "trie::proof_task",
             "V2 Storage proof calculation",
@@ -545,8 +538,15 @@ where
         let _span_guard = span.enter();
 
         let proof_start = Instant::now();
-        let proof = calculator.storage_proof(hashed_address, &mut targets)?;
-        let root = calculator.compute_root_hash(&proof)?;
+
+        // If targets is empty it means the caller only wants the root hash.
+        let (proof, root) = if targets.is_empty() {
+            (Vec::new(), Some(calculator.storage_root(hashed_address)?))
+        } else {
+            let proof = calculator.storage_proof(hashed_address, &mut targets)?;
+            let root = calculator.compute_root_hash(&proof)?;
+            (proof, root)
+        };
 
         trace!(
             target: "trie::proof_task",

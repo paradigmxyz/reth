@@ -115,12 +115,7 @@ where
             self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
 
         let mut storage_proof_calculator = ProofCalculator::new_storage(trie_cursor, hashed_cursor);
-
-        let proof = storage_proof_calculator
-            .storage_proof(self.hashed_address, &mut [B256::ZERO.into()])?;
-        let storage_root = storage_proof_calculator
-            .compute_root_hash(&proof)?
-            .expect("storage_proof with dummy target always returns root");
+        let storage_root = storage_proof_calculator.storage_root(self.hashed_address)?;
 
         let trie_account = self.account.into_trie_account(storage_root);
         trie_account.encode(buf);
