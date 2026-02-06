@@ -437,6 +437,11 @@ where
                 self.process_new_updates()?;
                 self.promote_pending_account_updates()?;
                 self.dispatch_pending_targets();
+
+                // Pre-compute subtrie hashes for storage tries during idle time.
+                // This spreads out hash computation, reducing latency spikes when computing
+                // final state roots.
+                self.trie.calculate_storage_subtries();
             } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
                 // If we don't have any pending updates OR we've accumulated a lot already, apply
                 // them to the trie,
