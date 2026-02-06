@@ -2234,7 +2234,7 @@ impl ParallelSparseTrie {
                     for idx in state_mask.iter() {
                         let mut next = current;
                         next.push_unchecked(idx);
-                        if next.len() == UPPER_TRIE_MAX_DEPTH {
+                        if next.len() >= UPPER_TRIE_MAX_DEPTH {
                             reachable.set(path_subtrie_index_unchecked(&next));
                         } else {
                             stack.push(next);
