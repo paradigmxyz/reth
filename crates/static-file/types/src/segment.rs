@@ -595,7 +595,8 @@ impl SegmentHeader {
     /// Returns the index into the sidecar file for a given block's changeset offset.
     ///
     /// Returns `None` if the block is not in the block range.
-    /// To get the changeset offset, the caller must read the offset from the sidecar file at this index.
+    /// To get the changeset offset, the caller must read the offset from the sidecar file at this
+    /// index.
     pub fn changeset_offset_index(&self, block: BlockNumber) -> Option<u64> {
         let block_range = self.block_range()?;
         if !block_range.contains(block) {
