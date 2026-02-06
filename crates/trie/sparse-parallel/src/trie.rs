@@ -326,6 +326,13 @@ impl SparseTrie for ParallelSparseTrie {
         value: Vec<u8>,
         provider: P,
     ) -> SparseTrieResult<()> {
+        trace!(
+            target: "trie::parallel_sparse",
+            ?full_path,
+            value_len = value.len(),
+            "Updating leaf",
+        );
+
         // Check if the value already exists - if so, just update it (no structural changes needed)
         if self.upper_subtrie.inner.values.contains_key(&full_path) {
             self.prefix_set.insert(full_path);
@@ -577,6 +584,12 @@ impl SparseTrie for ParallelSparseTrie {
         full_path: &Nibbles,
         provider: P,
     ) -> SparseTrieResult<()> {
+        trace!(
+            target: "trie::parallel_sparse",
+            ?full_path,
+            "Removing leaf",
+        );
+
         // When removing a leaf node it's possibly necessary to modify its parent node, and possibly
         // the parent's parent node. It is not ever necessary to descend further than that; once an
         // extension node is hit it must terminate in a branch or the root, which won't need further
@@ -2705,6 +2718,14 @@ impl SparseSubtrie {
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
             return Ok(false)
         }
+
+        trace!(
+            target: "trie::parallel_sparse",
+            ?path,
+            ?node,
+            ?masks,
+            "Revealing node",
+        );
 
         match node {
             TrieNode::EmptyRoot => {
