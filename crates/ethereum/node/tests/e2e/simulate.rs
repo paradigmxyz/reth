@@ -17,6 +17,7 @@ use std::sync::Arc;
 ///
 /// Reproduces <https://github.com/paradigmxyz/reth/issues/21809>
 #[tokio::test]
+#[ignore = "depends on alloy-rs/alloy#3651"]
 async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -62,10 +63,7 @@ async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
         StateOverridesBuilder::default().with_balance(from, U256::from(0x334500u64)).build();
 
     let sim_block = SimBlock::default()
-        .with_block_overrides(BlockOverrides {
-            base_fee: Some(U256::ZERO),
-            ..Default::default()
-        })
+        .with_block_overrides(BlockOverrides { base_fee: Some(U256::ZERO), ..Default::default() })
         .with_state_overrides(state_overrides)
         .call(tx);
 
