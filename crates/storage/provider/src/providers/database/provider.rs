@@ -557,7 +557,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut rocksdb_result = None;
 
         // Write to all backends in parallel.
-        STORAGE_POOL.in_place_scope(|s| {
+        STORAGE_POOL.scope(|s| {
             // SF writes
             s.spawn(|_| {
                 let start = Instant::now();
