@@ -37,7 +37,6 @@ impl<T: Case> Cases<T> {
     pub fn run(self) -> Vec<CaseResult> {
         self.test_cases
             .into_par_iter()
-            .with_min_len(64)
             .map(|(path, case)| {
                 std::thread::spawn(move || {
                     let desc = case.description();
