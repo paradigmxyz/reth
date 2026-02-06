@@ -2072,6 +2072,13 @@ impl ParallelSparseTrie {
         node: &TrieNode,
         masks: Option<BranchNodeMasks>,
     ) -> SparseTrieResult<()> {
+        // If the node is already revealed in the upper subtrie, skip revealing it and its
+        // children entirely. This avoids redundant work when proof nodes are re-revealed
+        // (e.g., when skip_proof_node_filtering is enabled for sparse trie cache reuse).
+        if self.upper_subtrie.nodes.get(&path).is_some_and(|n| !n.is_hash()) {
+            return Ok(())
+        }
+
         // If there is no subtrie for the path it means the path is UPPER_TRIE_MAX_DEPTH or less
         // nibbles, and so belongs to the upper trie.
         self.upper_subtrie.reveal_node(path, node, masks)?;
