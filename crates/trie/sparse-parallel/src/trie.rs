@@ -892,26 +892,21 @@ impl SparseTrie for ParallelSparseTrie {
         #[cfg(feature = "std")]
         // Update subtrie hashes in parallel
         {
-            use rayon::iter::{IntoParallelIterator, ParallelIterator};
+            use rayon::prelude::*;
 
-            let branch_node_masks = &self.branch_node_masks;
-            let updated_subtries: Vec<_> = changed_subtries
-                .into_par_iter()
-                .map(|mut changed_subtrie| {
-                    #[cfg(feature = "metrics")]
-                    let start = std::time::Instant::now();
-                    changed_subtrie.subtrie.update_hashes(
-                        &mut changed_subtrie.prefix_set,
-                        &mut changed_subtrie.update_actions_buf,
-                        branch_node_masks,
-                    );
-                    #[cfg(feature = "metrics")]
-                    self.metrics.subtrie_hash_update_latency.record(start.elapsed());
-                    changed_subtrie
-                })
-                .collect();
+            changed_subtries.par_iter_mut().for_each(|changed_subtrie| {
+                #[cfg(feature = "metrics")]
+                let start = std::time::Instant::now();
+                changed_subtrie.subtrie.update_hashes(
+                    &mut changed_subtrie.prefix_set,
+                    &mut changed_subtrie.update_actions_buf,
+                    &self.branch_node_masks,
+                );
+                #[cfg(feature = "metrics")]
+                self.metrics.subtrie_hash_update_latency.record(start.elapsed());
+            });
 
-            self.insert_changed_subtries(updated_subtries);
+            self.insert_changed_subtries(changed_subtries);
         }
     }
 
@@ -2876,7 +2871,7 @@ impl SparseSubtrie {
     /// # Panics
     ///
     /// If the node at the root path does not exist.
-    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all, fields(root = ?self.path), ret)]
+    #[instrument(level = "debug", target = "trie::parallel_sparse", skip_all, fields(root = ?self.path), ret)]
     fn update_hashes(
         &mut self,
         prefix_set: &mut PrefixSet,

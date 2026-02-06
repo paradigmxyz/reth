@@ -94,4 +94,5 @@ op = [
     "reth-primitives-traits/op",
 ]
 bench = []
-edge = []
+rocksdb = []
+edge = ["rocksdb"]

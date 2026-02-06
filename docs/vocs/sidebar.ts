@@ -63,6 +63,10 @@ export const sidebar: SidebarItem[] = [
                         link: "/run/overview",
                     },
                     {
+                        text: "Signature Verification",
+                        link: "/installation/binaries#signature-verification",
+                    },
+                    {
                         text: "Networks",
                         // link: "/run/networks",
                         items: [
