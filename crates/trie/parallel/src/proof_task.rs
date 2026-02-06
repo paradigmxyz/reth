@@ -944,7 +944,7 @@ where
 
             // Apply debug jitter if configured (helps trigger timing-related bugs)
             #[cfg(feature = "debug-jitter")]
-            crate::jitter::maybe_apply_jitter(self.worker_id, "storage");
+            crate::jitter::maybe_apply_jitter("proof_task::storage_worker");
 
             // Mark worker as available again.
             self.available_workers.fetch_add(1, Ordering::Relaxed);
@@ -1278,7 +1278,7 @@ where
 
             // Apply debug jitter if configured (helps trigger timing-related bugs)
             #[cfg(feature = "debug-jitter")]
-            crate::jitter::maybe_apply_jitter(self.worker_id, "account");
+            crate::jitter::maybe_apply_jitter("proof_task::account_worker");
 
             // Mark worker as available again.
             self.available_workers.fetch_add(1, Ordering::Relaxed);

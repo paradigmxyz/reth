@@ -36,6 +36,8 @@ futures = { workspace = true, optional = true }
 auto_impl.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+rand = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
@@ -54,3 +56,4 @@ std = [
     "thiserror/std",
     "reth-evm/std",
 ]
+debug-jitter = ["dep:rand", "dep:tracing"]
