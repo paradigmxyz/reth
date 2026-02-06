@@ -9,6 +9,27 @@ use reth_static_file_types::StaticFileSegment;
 use thiserror::Error;
 use tokio::sync::broadcast::error::SendError;
 
+/// A suggestion message that guides users to run the `reth report` command for generating
+/// debug reports when block validation or execution errors occur.
+///
+/// This message is included in error logs to help users collect necessary debugging information
+/// for bug reports.
+pub const DEBUG_REPORT_SUGGESTION: &str = r#"
+This is an error that likely requires a report to the reth team with additional information.
+
+To generate a debug report archive, run:
+  reth report --block <BLOCK_NUMBER> [--checksum] [-y]
+
+This will collect:
+ * Block header information (state root, parent hash, etc.)
+ * Database statistics and version history
+ * Log files and invalid block hook outputs
+ * Optional: database checksums (--checksum flag, takes a long time!)
+
+The command will generate a .tar.gz archive and provide a link to create a GitHub issue.
+Once you have the report, please submit it at https://github.com/paradigmxyz/reth/issues/new
+"#;
+
 /// Represents the specific error type within a block error.
 #[derive(Error, Debug)]
 pub enum BlockErrorKind {

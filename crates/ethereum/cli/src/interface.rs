@@ -12,7 +12,7 @@ use reth_cli_commands::{
     config_cmd, db, download, dump_genesis, export_era, import, import_era, init_cmd, init_state,
     launcher::FnLauncher,
     node::{self, NoArgs},
-    p2p, prune, re_execute, stage,
+    p2p, prune, re_execute, report, stage,
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
@@ -312,6 +312,9 @@ pub enum Commands<
     /// Re-execute blocks in parallel to verify historical sync correctness.
     #[command(name = "re-execute")]
     ReExecute(re_execute::Command<C>),
+    /// Generate a debug report archive for bug reports.
+    #[command(name = "report")]
+    Report(report::Command<C>),
     /// Extension subcommands provided by consumers.
     #[command(flatten)]
     Ext(SubCmd),
@@ -352,6 +355,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, SubCmd: Subcommand + fmt:
             Self::Config(_) => None,
             Self::Prune(cmd) => cmd.chain_spec(),
             Self::ReExecute(cmd) => cmd.chain_spec(),
+            Self::Report(_) => None,
             Self::Ext(_) => None,
         }
     }

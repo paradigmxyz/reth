@@ -20,22 +20,24 @@ use reth_trie_db::DatabaseStateRoot;
 use std::fmt::Debug;
 use tracing::*;
 
-// TODO: automate the process outlined below so the user can just send in a debugging package
-/// The error message that we include in invalid state root errors to tell users what information
-/// they should include in a bug report, since true state root errors can be impossible to debug
+/// The error message that we include in invalid state root errors to guide users on how to
+/// generate a debug report for bug reports, since true state root errors can be impossible to debug
 /// with just basic logs.
 pub const INVALID_STATE_ROOT_ERROR_MESSAGE: &str = r#"
 Invalid state root error on stage verification!
 This is an error that likely requires a report to the reth team with additional information.
-Please include the following information in your report:
- * This error message
- * The state root of the block that was rejected
- * The output of `reth db stats --checksum` from the database that was being used. This will take a long time to run!
- * 50-100 lines of logs before and after the first occurrence of the log message with the state root of the block that was rejected.
- * The debug logs from __the same time period__. To find the default location for these logs, run:
-   `reth --help | grep -A 4 'log.file.directory'`
 
-Once you have this information, please submit a github issue at https://github.com/paradigmxyz/reth/issues/new
+To generate a debug report archive, run:
+  reth report --block <BLOCK_NUMBER> [--checksum] [-y]
+
+This will collect:
+ * Block header information (state root, parent hash, etc.)
+ * Database statistics and version history
+ * Log files and invalid block hook outputs
+ * Optional: database checksums (--checksum flag, takes a long time!)
+
+The command will generate a .tar.gz archive and provide a link to create a GitHub issue.
+Once you have the report, please submit it at https://github.com/paradigmxyz/reth/issues/new
 "#;
 
 /// The default threshold (in number of blocks) for switching from incremental trie building

@@ -276,6 +276,10 @@ export const opRethCliSidebar: SidebarItem = {
         {
             text: "op-reth re-execute",
             link: "/cli/op-reth/re-execute"
+        },
+        {
+            text: "op-reth report",
+            link: "/cli/op-reth/report"
         }
     ]
 };

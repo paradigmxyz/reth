@@ -284,6 +284,10 @@ export const rethCliSidebar: SidebarItem = {
         {
             text: "reth re-execute",
             link: "/cli/reth/re-execute"
+        },
+        {
+            text: "reth report",
+            link: "/cli/reth/report"
         }
     ]
 };
