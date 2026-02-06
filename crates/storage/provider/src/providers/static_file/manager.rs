@@ -872,7 +872,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         // Return cached `LoadedJar` or insert it for the first time, and then, return it.
         if let Some(block_range) = block_range {
-            return Ok(self.get_or_create_jar_provider(segment, &block_range)?);
+            return self.get_or_create_jar_provider(segment, &block_range);
         }
 
         Ok(None)
@@ -2049,10 +2049,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         {
             // Iterate through all ranges in reverse order (highest to lowest)
             for range in ranges.values().rev() {
-                if let Some(provider) = self.get_or_create_jar_provider(segment, range)? {
-                    if let Some(res) = func(provider)? {
-                        return Ok(Some(res));
-                    }
+                if let Some(provider) = self.get_or_create_jar_provider(segment, range)?
+                    && let Some(res) = func(provider)?
+                {
+                    return Ok(Some(res));
                 }
             }
         }

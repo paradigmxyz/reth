@@ -215,7 +215,7 @@ impl FsPathError {
     }
 
     /// Returns the underlying [`io::Error`] if this is an I/O-based variant.
-    pub fn as_io_error(&self) -> Option<&io::Error> {
+    pub const fn as_io_error(&self) -> Option<&io::Error> {
         match self {
             Self::Write { source, .. } |
             Self::Read { source, .. } |
@@ -227,7 +227,7 @@ impl FsPathError {
             Self::ReadDir { source, .. } |
             Self::Open { source, .. } |
             Self::Metadata { source, .. } |
-            Self::Fsync { source, .. } => Some(source),
+            Self::Fsync { source, .. } |
             Self::Rename { source, .. } => Some(source),
             Self::ReadJson { .. } | Self::WriteJson { .. } => None,
         }
