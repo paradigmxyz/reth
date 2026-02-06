@@ -201,9 +201,9 @@ RocksDB:
 
 Storage:
       --storage.v2
-          Enable v2 storage defaults (static files + RocksDB routing).
+          Enable v2 storage defaults (static files + `RocksDB` routing).
 
-          When enabled, the node uses optimized storage settings: - Receipts and transaction senders in static files - History indices in RocksDB (accounts, storages, transaction hashes) - Account and storage changesets in static files
+          When enabled, the node uses optimized storage settings: - Receipts and transaction senders in static files - History indices in `RocksDB` (accounts, storages, transaction hashes) - Account and storage changesets in static files
 
           This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
 
