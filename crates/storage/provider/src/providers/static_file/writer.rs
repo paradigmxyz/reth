@@ -188,6 +188,18 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
         debug!(target: "providers::static_file", "Finalized all static file segments into disk");
         Ok(())
     }
+
+    pub(crate) fn reset(&self, segment: StaticFileSegment) {
+        let mut writer = match segment {
+            StaticFileSegment::Headers => self.headers.write(),
+            StaticFileSegment::Transactions => self.transactions.write(),
+            StaticFileSegment::Receipts => self.receipts.write(),
+            StaticFileSegment::TransactionSenders => self.transaction_senders.write(),
+            StaticFileSegment::AccountChangeSets => self.account_change_sets.write(),
+            StaticFileSegment::StorageChangeSets => self.storage_change_sets.write(),
+        };
+        *writer = None;
+    }
 }
 
 /// Mutable reference to a [`StaticFileProviderRW`] behind a [`RwLockWriteGuard`].

@@ -12,7 +12,7 @@ use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, NamedChain};
 use reth_db::{
@@ -395,6 +395,8 @@ pub struct StaticFileProviderInner<N> {
     _lock_file: Option<StorageLock>,
     /// Genesis block number, default is 0;
     genesis_block_number: u64,
+    /// Queued jar deletions to execute on commit.
+    delete_queue: Mutex<Vec<(StaticFileSegment, Vec<BlockNumber>)>>,
 }
 
 impl<N: NodePrimitives> StaticFileProviderInner<N> {
@@ -422,6 +424,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             blocks_per_file,
             _lock_file,
             genesis_block_number: 0,
+            delete_queue: Default::default(),
         };
 
         Ok(provider)
@@ -429,6 +432,20 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
 
     pub const fn is_read_only(&self) -> bool {
         self.access.is_read_only()
+    }
+
+    fn queue_delete(&self, segment: StaticFileSegment, fixed_range_ends: Vec<BlockNumber>) {
+        if !fixed_range_ends.is_empty() {
+            self.delete_queue.lock().push((segment, fixed_range_ends));
+        }
+    }
+
+    fn has_delete_queued(&self) -> bool {
+        !self.delete_queue.lock().is_empty()
+    }
+
+    fn take_delete_queue(&self) -> Vec<(StaticFileSegment, Vec<BlockNumber>)> {
+        std::mem::take(&mut *self.delete_queue.lock())
     }
 
     /// Each static file has a fixed number of blocks. This gives out the range where the requested
@@ -892,11 +909,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.map.remove(&(fixed_block_range_end, segment));
     }
 
-    /// This handles history expiry by deleting all static files for the given segment below the
-    /// given block.
+    /// Queues static files for the given segment below the given block for deletion.
     ///
-    /// For example if block is 1M and the blocks per file are 500K this will delete all individual
-    /// files below 1M, so 0-499K and 500K-999K.
+    /// Files are removed from disk when [`StaticFileWriter::commit`] is called. Until then the
+    /// index and on-disk data remain unchanged.
+    ///
+    /// For example if block is 1M and the blocks per file are 500K this will queue files 0-499K
+    /// and 500K-999K for deletion.
     ///
     /// This will not delete the file that contains the block itself, because files can only be
     /// removed entirely.
@@ -907,45 +926,56 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// requested block is higher than the highest block in static files. This ensures we always
     /// maintain at least one static file if any exist.
     ///
-    /// Returns a list of `SegmentHeader`s from the deleted jars.
+    /// Returns a list of `SegmentHeader`s from the jars that will be deleted.
     pub fn delete_segment_below_block(
         &self,
         segment: StaticFileSegment,
         block: BlockNumber,
     ) -> ProviderResult<Vec<SegmentHeader>> {
-        // Nothing to delete if block is 0.
         if block == 0 {
             return Ok(Vec::new());
         }
 
         let highest_block = self.get_highest_static_file_block(segment);
         let mut deleted_headers = Vec::new();
+        let mut range_ends_to_delete = Vec::new();
 
-        loop {
-            let Some(block_height) = self.get_lowest_range_end(segment) else {
-                return Ok(deleted_headers);
-            };
-
-            // Stop if we've reached the target block or the highest static file
-            if block_height >= block || Some(block_height) == highest_block {
-                return Ok(deleted_headers);
+        let indexes = self.indexes.read();
+        if let Some(index) = indexes.get(segment) {
+            for &max_block in index.expected_block_ranges_by_max_block.keys() {
+                if max_block >= block || Some(max_block) == highest_block {
+                    break;
+                }
+                range_ends_to_delete.push(max_block);
             }
+        }
+        drop(indexes);
+
+        for &range_end in &range_ends_to_delete {
+            let fixed_block_range = self.find_fixed_range(segment, range_end);
+            let key = (fixed_block_range.end(), segment);
+
+            let header = if let Some(jar) = self.map.get(&key) {
+                jar.jar.user_header().clone()
+            } else {
+                let file = self.path.join(segment.filename(&fixed_block_range));
+                let jar = NippyJar::<SegmentHeader>::load(&file).map_err(ProviderError::other)?;
+                jar.user_header().clone()
+            };
 
             debug!(
                 target: "providers::static_file",
                 ?segment,
-                ?block_height,
-                "Deleting static file below block"
+                ?range_end,
+                "Queuing static file below block for deletion"
             );
-
-            // now we need to wipe the static file, this will take care of updating the index and
-            // advance the lowest tracked block height for the segment.
-            let header = self.delete_jar(segment, block_height).inspect_err(|err| {
-                warn!( target: "providers::static_file", ?segment, %block_height, ?err, "Failed to delete static file below block")
-            })?;
 
             deleted_headers.push(header);
         }
+
+        self.queue_delete(segment, range_ends_to_delete);
+
+        Ok(deleted_headers)
     }
 
     /// Given a segment and block, it deletes the jar and all files from the respective block range.
@@ -956,6 +986,17 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// Returns the `SegmentHeader` of the deleted jar.
     pub fn delete_jar(
+        &self,
+        segment: StaticFileSegment,
+        block: BlockNumber,
+    ) -> ProviderResult<SegmentHeader> {
+        let header = self.delete_jar_no_reindex(segment, block)?;
+        self.initialize_index()?;
+        Ok(header)
+    }
+
+    /// Deletes a jar without re-initializing the index afterwards.
+    fn delete_jar_no_reindex(
         &self,
         segment: StaticFileSegment,
         block: BlockNumber,
@@ -979,37 +1020,52 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let header = jar.user_header().clone();
         jar.delete().map_err(ProviderError::other)?;
 
-        // SAFETY: this is currently necessary to ensure that certain indexes like
-        // `static_files_min_block` have the correct values after pruning.
-        self.initialize_index()?;
-
         Ok(header)
     }
 
-    /// Deletes ALL static file jars for the given segment, including the highest one.
+    /// Queues ALL static file jars for the given segment for deletion, including the highest one.
     ///
-    /// CAUTION: destructive. Deletes all files on disk for this segment.
+    /// CAUTION: destructive. Files are removed from disk when [`StaticFileWriter::commit`] is
+    /// called. Until then the index and on-disk data remain unchanged.
     ///
     /// This is used for `PruneMode::Full` where all data should be removed.
     ///
-    /// Returns a list of `SegmentHeader`s from the deleted jars.
+    /// Returns a list of `SegmentHeader`s from the jars that will be deleted.
     pub fn delete_segment(&self, segment: StaticFileSegment) -> ProviderResult<Vec<SegmentHeader>> {
         let mut deleted_headers = Vec::new();
+        let mut range_ends_to_delete = Vec::new();
 
-        while let Some(block_height) = self.get_highest_static_file_block(segment) {
+        let indexes = self.indexes.read();
+        if let Some(index) = indexes.get(segment) {
+            for &max_block in index.expected_block_ranges_by_max_block.keys() {
+                range_ends_to_delete.push(max_block);
+            }
+        }
+        drop(indexes);
+
+        for &range_end in &range_ends_to_delete {
+            let fixed_block_range = self.find_fixed_range(segment, range_end);
+            let key = (fixed_block_range.end(), segment);
+
+            let header = if let Some(jar) = self.map.get(&key) {
+                jar.jar.user_header().clone()
+            } else {
+                let file = self.path.join(segment.filename(&fixed_block_range));
+                let jar = NippyJar::<SegmentHeader>::load(&file).map_err(ProviderError::other)?;
+                jar.user_header().clone()
+            };
+
             debug!(
                 target: "providers::static_file",
                 ?segment,
-                ?block_height,
-                "Deleting static file jar"
+                ?range_end,
+                "Queuing static file jar for deletion"
             );
-
-            let header = self.delete_jar(segment, block_height).inspect_err(|err| {
-                warn!(target: "providers::static_file", ?segment, %block_height, ?err, "Failed to delete static file jar")
-            })?;
 
             deleted_headers.push(header);
         }
+
+        self.queue_delete(segment, range_ends_to_delete);
 
         Ok(deleted_headers)
     }
@@ -2353,14 +2409,44 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
     }
 
     fn commit(&self) -> ProviderResult<()> {
-        self.writers.commit()
+        self.writers.commit()?;
+
+        let ops = self.take_delete_queue();
+        if ops.is_empty() {
+            return Ok(());
+        }
+
+        let mut segments_seen = Vec::new();
+        for (seg, _) in &ops {
+            if !segments_seen.contains(seg) {
+                segments_seen.push(*seg);
+            }
+        }
+        for segment in &segments_seen {
+            self.writers.reset(*segment);
+        }
+
+        for (segment, range_ends) in ops {
+            for range_end in range_ends {
+                self.delete_jar_no_reindex(segment, range_end)?;
+            }
+        }
+
+        self.initialize_index()?;
+
+        Ok(())
     }
 
     fn has_unwind_queued(&self) -> bool {
-        self.writers.has_unwind_queued()
+        self.writers.has_unwind_queued() || self.has_delete_queued()
     }
 
     fn finalize(&self) -> ProviderResult<()> {
+        if self.has_delete_queued() {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "Cannot finalize with pending jar deletions. Call commit() first.",
+            )));
+        }
         self.writers.finalize()
     }
 }
@@ -3125,7 +3211,10 @@ mod tests {
     use reth_db::test_utils::create_test_static_files_dir;
     use reth_static_file_types::{SegmentRangeInclusive, StaticFileSegment};
 
-    use crate::{providers::StaticFileProvider, StaticFileProviderBuilder};
+    use crate::{
+        providers::{static_file::manager::StaticFileWriter, StaticFileProvider},
+        StaticFileProviderBuilder,
+    };
 
     #[test]
     fn test_find_fixed_range_with_block_index() -> eyre::Result<()> {
@@ -3245,5 +3334,88 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    fn count_files(path: impl AsRef<std::path::Path>) -> usize {
+        std::fs::read_dir(path)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().file_name().map(|n| n != "lock").unwrap_or(false))
+            .count()
+    }
+
+    fn create_test_headers(
+        static_dir: impl AsRef<std::path::Path>,
+        count: u64,
+        blocks_per_file: u64,
+    ) -> StaticFileProvider<EthPrimitives> {
+        let sf_rw: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(static_dir.as_ref())
+                .with_blocks_per_file(blocks_per_file)
+                .build()
+                .unwrap();
+        let mut writer = sf_rw.latest_writer(StaticFileSegment::Headers).unwrap();
+        let mut header = alloy_consensus::Header::default();
+        for num in 0..count {
+            header.number = num;
+            writer.append_header(&header, &alloy_primitives::BlockHash::default()).unwrap();
+        }
+        writer.commit().unwrap();
+        drop(writer);
+        sf_rw
+    }
+
+    #[test]
+    fn test_delete_segment_deferred_until_commit() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let sf_rw = create_test_headers(&static_dir, 30, 10);
+
+        assert_eq!(count_files(&static_dir), 9);
+        assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Headers), Some(29));
+
+        sf_rw.delete_segment(StaticFileSegment::Headers).unwrap();
+
+        assert_eq!(count_files(&static_dir), 9);
+        assert!(StaticFileWriter::has_unwind_queued(&sf_rw));
+        assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Headers), Some(29));
+
+        StaticFileWriter::commit(&sf_rw).unwrap();
+
+        assert_eq!(count_files(&static_dir), 0);
+        assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Headers), None);
+        assert!(!StaticFileWriter::has_unwind_queued(&sf_rw));
+    }
+
+    #[test]
+    fn test_delete_segment_below_block_deferred() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let sf_rw = create_test_headers(&static_dir, 30, 10);
+
+        assert_eq!(count_files(&static_dir), 9);
+
+        sf_rw.delete_segment_below_block(StaticFileSegment::Headers, 20).unwrap();
+
+        assert_eq!(count_files(&static_dir), 9);
+        assert!(StaticFileWriter::has_unwind_queued(&sf_rw));
+
+        StaticFileWriter::commit(&sf_rw).unwrap();
+
+        assert_eq!(count_files(&static_dir), 3);
+        assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Headers), Some(29));
+        assert_eq!(sf_rw.get_lowest_range_end(StaticFileSegment::Headers), Some(29));
+        assert!(!StaticFileWriter::has_unwind_queued(&sf_rw));
+    }
+
+    #[test]
+    fn test_delete_segment_returns_headers() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let sf_rw = create_test_headers(&static_dir, 30, 10);
+
+        let headers = sf_rw.delete_segment(StaticFileSegment::Headers).unwrap();
+
+        assert_eq!(headers.len(), 3);
+        assert_eq!(headers[0].expected_block_range(), SegmentRangeInclusive::new(0, 9));
+        assert_eq!(headers[1].expected_block_range(), SegmentRangeInclusive::new(10, 19));
+        assert_eq!(headers[2].expected_block_range(), SegmentRangeInclusive::new(20, 29));
     }
 }
