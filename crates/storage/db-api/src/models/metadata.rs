@@ -37,19 +37,13 @@ pub struct StorageSettings {
 }
 
 impl StorageSettings {
-    /// Returns the default base `StorageSettings` for this build.
+    /// Returns the default base `StorageSettings`.
     ///
-    /// When the `rocksdb` feature is enabled, returns `Self::v2()`.
-    /// Otherwise, returns [`Self::v1()`]. Use `--storage.v2` CLI flag for runtime override.
+    /// Always returns [`Self::v1()`]. Use the `--storage.v2` CLI flag to opt into
+    /// [`Self::v2()`] at runtime. The `rocksdb` feature only makes the v2 backend
+    /// *available*; it does not activate it by default.
     pub const fn base() -> Self {
-        #[cfg(feature = "rocksdb")]
-        {
-            Self::v2()
-        }
-        #[cfg(not(feature = "rocksdb"))]
-        {
-            Self::v1()
-        }
+        Self::v1()
     }
 
     /// Creates `StorageSettings` for v2 nodes with all storage features enabled:
