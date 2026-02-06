@@ -1,5 +1,8 @@
 use crate::value_encoder::ValueEncoderStats;
-use reth_metrics::{metrics::Histogram, Metrics};
+use reth_metrics::{
+    metrics::{Counter, Histogram},
+    Metrics,
+};
 use reth_trie::{
     hashed_cursor::{HashedCursorMetrics, HashedCursorMetricsCache},
     trie_cursor::{TrieCursorMetrics, TrieCursorMetricsCache},
@@ -28,6 +31,8 @@ pub struct ProofTaskTrieMetrics {
     deferred_encoder_sync: Histogram,
     /// Histogram for dispatched storage proofs that fell back to sync due to missing root.
     deferred_encoder_dispatched_missing_root: Histogram,
+    /// Counter for empty storage proofs that we skipped the calculation of.
+    empty_storage_proofs: Counter,
 }
 
 impl ProofTaskTrieMetrics {
@@ -58,6 +63,11 @@ impl ProofTaskTrieMetrics {
         self.deferred_encoder_sync.record(stats.sync_count as f64);
         self.deferred_encoder_dispatched_missing_root
             .record(stats.dispatched_missing_root_count as f64);
+    }
+
+    /// Increment the count of empty storage proofs.
+    pub fn increment_empty_storage_proofs(&self, count: u64) {
+        self.empty_storage_proofs.increment(count);
     }
 }
 

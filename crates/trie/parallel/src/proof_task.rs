@@ -42,6 +42,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use parking_lot::RwLock;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofError};
 use reth_primitives_traits::dashmap::{self, DashMap};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
@@ -61,7 +62,7 @@ use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSet, PrefixSetMut},
     proof::{DecodedProofNodes, ProofRetainer},
-    BranchNodeMasks, BranchNodeMasksMap,
+    BranchNodeMasks, BranchNodeMasksMap, StorageAccountFilter,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
@@ -137,12 +138,14 @@ impl ProofWorkerHandle {
     /// - `storage_worker_count`: Number of storage workers to spawn
     /// - `account_worker_count`: Number of account workers to spawn
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
+    /// - `storage_filter`: Optional filter to skip storage proofs for accounts without storage
     pub fn new<Factory>(
         executor: Handle,
         task_ctx: ProofTaskCtx<Factory>,
         storage_worker_count: usize,
         account_worker_count: usize,
         v2_proofs_enabled: bool,
+        storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -239,6 +242,7 @@ impl ProofWorkerHandle {
                 let storage_work_tx_clone = storage_work_tx.clone();
                 let account_available_workers_clone = account_available_workers.clone();
                 let cached_storage_roots = cached_storage_roots.clone();
+                let storage_filter_clone = storage_filter.clone();
 
                 executor.spawn_blocking(move || {
                     #[cfg(feature = "metrics")]
@@ -254,6 +258,7 @@ impl ProofWorkerHandle {
                         storage_work_tx_clone,
                         account_available_workers_clone,
                         cached_storage_roots,
+                        storage_filter_clone,
                         #[cfg(feature = "metrics")]
                         metrics,
                         #[cfg(feature = "metrics")]
@@ -1129,6 +1134,8 @@ struct AccountProofWorker<Factory> {
     available_workers: Arc<AtomicUsize>,
     /// Cached storage roots
     cached_storage_roots: Arc<DashMap<B256, B256>>,
+    /// Optional storage filter for skipping storage proofs of accounts without storage
+    storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
@@ -1152,6 +1159,7 @@ where
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         available_workers: Arc<AtomicUsize>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
+        storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
         #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
@@ -1162,6 +1170,7 @@ where
             storage_work_tx,
             available_workers,
             cached_storage_roots,
+            storage_filter,
             #[cfg(feature = "metrics")]
             metrics,
             #[cfg(feature = "metrics")]
@@ -1327,18 +1336,58 @@ where
 
         let mut storage_prefix_sets = std::mem::take(&mut prefix_sets.storage_prefix_sets);
 
+        // Early filter: identify accounts with empty storage before dispatching.
+        // This avoids chunking/dispatching work for accounts known to have no storage.
+        let (targets_to_dispatch, empty_storage_receivers) =
+            if let Some(storage_filter) = self.storage_filter.as_ref() {
+                let filter = storage_filter.read();
+                let mut filtered_targets = MultiProofTargets::default();
+                let mut empty_receivers =
+                    B256Map::<CrossbeamReceiver<StorageProofResultMessage>>::default();
+
+                for (hashed_address, slots) in targets.iter() {
+                    if filter.may_have_storage(*hashed_address) {
+                        filtered_targets.insert(*hashed_address, slots.clone());
+                    } else {
+                        // Create immediate response for accounts with no storage
+                        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+                        let empty_proof = DecodedStorageMultiProof::empty();
+                        let _ = result_tx.send(StorageProofResultMessage {
+                            hashed_address: *hashed_address,
+                            result: Ok(StorageProofResult::Legacy { proof: empty_proof }),
+                        });
+                        empty_receivers.insert(*hashed_address, result_rx);
+                    }
+                }
+
+                #[cfg(feature = "metrics")]
+                {
+                    let empty = empty_receivers.len() as u64;
+                    if empty > 0 {
+                        self.metrics.increment_empty_storage_proofs(empty);
+                    }
+                }
+
+                (filtered_targets, empty_receivers)
+            } else {
+                (targets.clone(), B256Map::default())
+            };
+
         let storage_root_targets_len =
             StorageRootTargets::count(&prefix_sets.account_prefix_set, &storage_prefix_sets);
 
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
-        let storage_proof_receivers = dispatch_storage_proofs(
+        let mut storage_proof_receivers = dispatch_storage_proofs(
             &self.storage_work_tx,
-            &targets,
+            &targets_to_dispatch,
             &mut storage_prefix_sets,
             collect_branch_node_masks,
             multi_added_removed_keys.as_ref(),
         )?;
+
+        // Merge in the empty storage receivers
+        storage_proof_receivers.extend(empty_storage_receivers);
 
         let account_prefix_set = std::mem::take(&mut prefix_sets.account_prefix_set);
 
@@ -1765,6 +1814,9 @@ where
 /// with receivers, allowing the account trie walk to proceed in parallel with storage proof
 /// computation. This enables interleaved parallelism for better performance.
 ///
+/// If a storage filter is provided, accounts that are definitely known to have no storage
+/// (not in the filter) will be skipped and an empty storage proof will be returned directly.
+///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn dispatch_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
@@ -1784,7 +1836,7 @@ fn dispatch_storage_proofs(
         // Create channel for receiving ProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
-        // Create computation input based on V2 flag
+        // Create computation input and dispatch to worker
         let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
         let input = StorageProofInput::legacy(
             *hashed_address,
@@ -1794,8 +1846,6 @@ fn dispatch_storage_proofs(
             multi_added_removed_keys.cloned(),
         );
 
-        // Always dispatch a storage proof so we obtain the storage root even when no slots are
-        // requested.
         storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
             .map_err(|_| {
@@ -2040,7 +2090,7 @@ mod tests {
             );
             let ctx = test_ctx(factory);
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false);
+            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false, None);
 
             // Verify handle can be cloned
             let _cloned_handle = proof_handle.clone();
