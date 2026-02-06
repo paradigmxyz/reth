@@ -208,6 +208,30 @@ impl FsPathError {
     pub fn fsync(source: io::Error, path: impl Into<PathBuf>) -> Self {
         Self::Fsync { source, path: path.into() }
     }
+
+    /// Returns `true` if the underlying error is a "not found" error.
+    pub fn is_not_found(&self) -> bool {
+        self.as_io_error().is_some_and(|err| err.kind() == io::ErrorKind::NotFound)
+    }
+
+    /// Returns the underlying [`io::Error`] if this is an I/O-based variant.
+    pub fn as_io_error(&self) -> Option<&io::Error> {
+        match self {
+            Self::Write { source, .. } |
+            Self::Read { source, .. } |
+            Self::ReadLink { source, .. } |
+            Self::CreateFile { source, .. } |
+            Self::RemoveFile { source, .. } |
+            Self::CreateDir { source, .. } |
+            Self::RemoveDir { source, .. } |
+            Self::ReadDir { source, .. } |
+            Self::Open { source, .. } |
+            Self::Metadata { source, .. } |
+            Self::Fsync { source, .. } => Some(source),
+            Self::Rename { source, .. } => Some(source),
+            Self::ReadJson { .. } | Self::WriteJson { .. } => None,
+        }
+    }
 }
 
 /// Wrapper for [`File::open`].

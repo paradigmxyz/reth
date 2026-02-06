@@ -872,7 +872,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         // Return cached `LoadedJar` or insert it for the first time, and then, return it.
         if let Some(block_range) = block_range {
-            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range)?));
+            return Ok(self.get_or_create_jar_provider(segment, &block_range)?);
         }
 
         Ok(None)
@@ -883,14 +883,17 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         &self,
         path: &Path,
     ) -> ProviderResult<Option<StaticFileJarProvider<'_, N>>> {
-        StaticFileSegment::parse_filename(
+        match StaticFileSegment::parse_filename(
             &path
                 .file_name()
                 .ok_or_else(|| ProviderError::MissingStaticFilePath(path.to_path_buf()))?
                 .to_string_lossy(),
-        )
-        .map(|(segment, block_range)| self.get_or_create_jar_provider(segment, &block_range))
-        .transpose()
+        ) {
+            Some((segment, block_range)) => {
+                self.get_or_create_jar_provider(segment, &block_range)
+            }
+            None => Ok(None),
+        }
     }
 
     /// Given a segment and block range it removes the cached provider from the map.
@@ -1042,7 +1045,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         &self,
         segment: StaticFileSegment,
         fixed_block_range: &SegmentRangeInclusive,
-    ) -> ProviderResult<StaticFileJarProvider<'_, N>> {
+    ) -> ProviderResult<Option<StaticFileJarProvider<'_, N>>> {
         let key = (fixed_block_range.end(), segment);
 
         // Avoid using `entry` directly to avoid a write lock in the common case.
@@ -1053,14 +1056,18 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         } else {
             trace!(target: "providers::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
-            let jar = NippyJar::load(&path).map_err(ProviderError::other)?;
+            let jar = match NippyJar::load(&path) {
+                Ok(jar) => jar,
+                Err(err) if err.is_not_found() => return Ok(None),
+                Err(err) => return Err(ProviderError::other(err)),
+            };
             self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
         };
 
         if let Some(metrics) = &self.metrics {
             provider = provider.with_metrics(metrics.clone());
         }
-        Ok(provider)
+        Ok(Some(provider))
     }
 
     /// Gets a static file segment's block range from the provider inner block
@@ -2042,8 +2049,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         {
             // Iterate through all ranges in reverse order (highest to lowest)
             for range in ranges.values().rev() {
-                if let Some(res) = func(self.get_or_create_jar_provider(segment, range)?)? {
-                    return Ok(Some(res));
+                if let Some(provider) = self.get_or_create_jar_provider(segment, range)? {
+                    if let Some(res) = func(provider)? {
+                        return Ok(Some(res));
+                    }
                 }
             }
         }
