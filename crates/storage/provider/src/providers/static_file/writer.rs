@@ -115,11 +115,11 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     #[instrument(
         name = "StaticFileWriters::commit",
         level = "debug",
-        target = "provider::static_file",
+        target = "providers::static_file",
         skip_all
     )]
     pub(crate) fn commit(&self) -> ProviderResult<()> {
-        debug!(target: "provider::static_file", "Committing all static file segments");
+        debug!(target: "providers::static_file", "Committing all static file segments");
 
         for writer_lock in [
             &self.headers,
@@ -135,7 +135,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             }
         }
 
-        debug!(target: "provider::static_file", "Committed all static file segments");
+        debug!(target: "providers::static_file", "Committed all static file segments");
         Ok(())
     }
 
@@ -165,11 +165,11 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     #[instrument(
         name = "StaticFileWriters::finalize",
         level = "debug",
-        target = "provider::static_file",
+        target = "providers::static_file",
         skip_all
     )]
     pub(crate) fn finalize(&self) -> ProviderResult<()> {
-        debug!(target: "provider::static_file", "Finalizing all static file segments into disk");
+        debug!(target: "providers::static_file", "Finalizing all static file segments into disk");
 
         for writer_lock in [
             &self.headers,
@@ -185,7 +185,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             }
         }
 
-        debug!(target: "provider::static_file", "Finalized all static file segments into disk");
+        debug!(target: "providers::static_file", "Finalized all static file segments into disk");
         Ok(())
     }
 }
@@ -330,7 +330,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         debug!(
-            target: "provider::static_file",
+            target: "providers::static_file",
             segment = ?self.writer.user_header().segment(),
             path = ?self.data_path,
             pruned_rows,
@@ -374,7 +374,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     #[instrument(
         name = "StaticFileProviderRW::finalize",
         level = "debug",
-        target = "provider::static_file",
+        target = "providers::static_file",
         skip_all
     )]
     pub fn finalize(&mut self) -> ProviderResult<()> {
@@ -397,7 +397,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     #[instrument(
         name = "StaticFileProviderRW::commit",
         level = "debug",
-        target = "provider::static_file",
+        target = "providers::static_file",
         skip_all
     )]
     pub fn commit(&mut self) -> ProviderResult<()> {
@@ -406,7 +406,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         // Truncates the data file if instructed to.
         if let Some(strategy) = self.prune_on_commit.take() {
             debug!(
-                target: "provider::static_file",
+                target: "providers::static_file",
                 segment = ?self.writer.user_header().segment(),
                 "Pruning data on commit"
             );
@@ -432,7 +432,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         if self.writer.is_dirty() {
             debug!(
-                target: "provider::static_file",
+                target: "providers::static_file",
                 segment = ?self.writer.user_header().segment(),
                 "Committing writer to disk"
             );
@@ -449,7 +449,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             }
 
             debug!(
-                target: "provider::static_file",
+                target: "providers::static_file",
                 segment = ?self.writer.user_header().segment(),
                 path = ?self.data_path,
                 duration = ?start.elapsed(),
@@ -470,7 +470,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let start = Instant::now();
 
         debug!(
-            target: "provider::static_file",
+            target: "providers::static_file",
             segment = ?self.writer.user_header().segment(),
             "Committing writer to disk (without sync)"
         );
@@ -487,7 +487,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         debug!(
-            target: "provider::static_file",
+            target: "providers::static_file",
             segment = ?self.writer.user_header().segment(),
             path = ?self.data_path,
             duration = ?start.elapsed(),
