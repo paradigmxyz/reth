@@ -708,6 +708,7 @@ impl ExecutionCache {
                 }
 
                 self.account_cache.remove(addr);
+                self.account_stats.decrement_size();
                 continue
             }
 

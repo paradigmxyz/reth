@@ -286,6 +286,12 @@ where
                     } else {
                         *cached = None;
                     }
+                } else {
+                    debug!(
+                        target: "engine::caching",
+                        expected=?expected_parent_hash,
+                        "Skipped cache save due to parent-hash mismatch"
+                    );
                 }
             });
 
