@@ -4145,9 +4145,14 @@ mod tests {
 
     #[test]
     fn test_reveal_node_leaves() {
-        let mut trie = ParallelSparseTrie::default();
+        // Reveal leaf in the upper trie. A root branch with child 0x1 makes path [0x1]
+        // reachable for the subsequent reveal_nodes call.
+        let root_branch = create_branch_node_with_children(
+            &[0x1],
+            [RlpNode::word_rlp(&B256::repeat_byte(0xAA))],
+        );
+        let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
 
-        // Reveal leaf in the upper trie
         {
             let path = Nibbles::from_nibbles([0x1]);
             let node = create_leaf_node([0x2, 0x3], 42);
@@ -4157,7 +4162,7 @@ mod tests {
 
             assert_matches!(
                 trie.upper_subtrie.nodes.get(&path),
-                Some(SparseNode::Leaf { key, hash: None })
+                Some(SparseNode::Leaf { key, hash: Some(_) })
                 if key == &Nibbles::from_nibbles([0x2, 0x3])
             );
 
@@ -4168,7 +4173,26 @@ mod tests {
             );
         }
 
-        // Reveal leaf in a lower trie
+        // Reveal leaf in a lower trie. A separate trie is needed because the structure at
+        // [0x1] conflicts: the upper trie test placed a leaf there, but reaching [0x1, 0x2]
+        // requires a branch at [0x1]. A root branch → branch at [0x1] with child 0x2
+        // makes path [0x1, 0x2] reachable.
+        let root_branch = create_branch_node_with_children(
+            &[0x1],
+            [RlpNode::word_rlp(&B256::repeat_byte(0xAA))],
+        );
+        let branch_at_1 = create_branch_node_with_children(
+            &[0x2],
+            [RlpNode::word_rlp(&B256::repeat_byte(0xBB))],
+        );
+        let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
+        trie.reveal_nodes(&mut [ProofTrieNode {
+            path: Nibbles::from_nibbles([0x1]),
+            node: branch_at_1,
+            masks: None,
+        }])
+        .unwrap();
+
         {
             let path = Nibbles::from_nibbles([0x1, 0x2]);
             let node = create_leaf_node([0x3, 0x4], 42);
@@ -4186,7 +4210,7 @@ mod tests {
 
             assert_matches!(
                 lower_subtrie.nodes.get(&path),
-                Some(SparseNode::Leaf { key, hash: None })
+                Some(SparseNode::Leaf { key, hash: Some(_) })
                 if key == &Nibbles::from_nibbles([0x3, 0x4])
             );
         }
@@ -4253,7 +4277,13 @@ mod tests {
 
     #[test]
     fn test_reveal_node_extension_cross_level_boundary() {
-        let mut trie = ParallelSparseTrie::default();
+        // Set up root branch with nibble 0x1 so path [0x1] is reachable.
+        let root_branch = create_branch_node_with_children(
+            &[0x1],
+            [RlpNode::word_rlp(&B256::repeat_byte(0xAA))],
+        );
+        let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
+
         let path = Nibbles::from_nibbles([0x1]);
         let child_hash = B256::repeat_byte(0xcd);
         let node = create_extension_node([0x2], child_hash);
@@ -4261,10 +4291,10 @@ mod tests {
 
         trie.reveal_nodes(&mut [ProofTrieNode { path, node, masks }]).unwrap();
 
-        // Extension node should be in upper trie
+        // Extension node should be in upper trie, hash is memoized from the previous Hash node
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
-            Some(SparseNode::Extension { key, hash: None, .. })
+            Some(SparseNode::Extension { key, hash: Some(_), .. })
             if key == &Nibbles::from_nibbles([0x2])
         );
 
@@ -4311,7 +4341,13 @@ mod tests {
 
     #[test]
     fn test_reveal_node_branch_cross_level() {
-        let mut trie = ParallelSparseTrie::default();
+        // Set up root branch with nibble 0x1 so path [0x1] is reachable.
+        let root_branch = create_branch_node_with_children(
+            &[0x1],
+            [RlpNode::word_rlp(&B256::repeat_byte(0xAA))],
+        );
+        let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
+
         let path = Nibbles::from_nibbles([0x1]); // Exactly 1 nibbles - boundary case
         let child_hashes = [
             RlpNode::word_rlp(&B256::repeat_byte(0x33)),
@@ -4323,10 +4359,10 @@ mod tests {
 
         trie.reveal_nodes(&mut [ProofTrieNode { path, node, masks }]).unwrap();
 
-        // Branch node should be in upper trie
+        // Branch node should be in upper trie, hash is memoized from the previous Hash node
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
-            Some(SparseNode::Branch { state_mask, hash: None, .. })
+            Some(SparseNode::Branch { state_mask, hash: Some(_), .. })
             if *state_mask == 0b1000000010000001.into()
         );
 
@@ -4350,10 +4386,18 @@ mod tests {
 
     #[test]
     fn test_update_subtrie_hashes_prefix_set_matching() {
-        // Create a trie and reveal leaf nodes using reveal_nodes
-        let mut trie = ParallelSparseTrie::default();
+        // Create a trie with a root branch that makes paths [0x0, ...] and [0x3, ...]
+        // reachable from the upper trie.
+        let root_branch = create_branch_node_with_children(
+            &[0x0, 0x3],
+            [
+                RlpNode::word_rlp(&B256::repeat_byte(0xAA)),
+                RlpNode::word_rlp(&B256::repeat_byte(0xBB)),
+            ],
+        );
+        let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
 
-        // Create dummy leaf nodes.
+        // Create leaf paths.
         let leaf_1_full_path = Nibbles::from_nibbles([0; 64]);
         let leaf_1_path = leaf_1_full_path.slice(..2);
         let leaf_1_key = leaf_1_full_path.slice(2..);
@@ -4361,33 +4405,36 @@ mod tests {
         let leaf_2_path = leaf_2_full_path.slice(..2);
         let leaf_2_key = leaf_2_full_path.slice(2..);
         let leaf_3_full_path = Nibbles::from_nibbles([vec![0, 2], vec![0; 62]].concat());
-        let leaf_3_path = leaf_3_full_path.slice(..2);
-        let leaf_3_key = leaf_3_full_path.slice(2..);
         let leaf_1 = create_leaf_node(leaf_1_key.to_vec(), 1);
         let leaf_2 = create_leaf_node(leaf_2_key.to_vec(), 2);
-        let leaf_3 = create_leaf_node(leaf_3_key.to_vec(), 3);
 
-        // Create branch node with hashes for each leaf.
+        // Create branch node at [0x0] with only children 0x0 and 0x1.
+        // Child 0x2 (leaf_3) will be inserted via update_leaf to create a fresh node
+        // with hash: None.
         let child_hashes = [
             RlpNode::word_rlp(&B256::repeat_byte(0x00)),
             RlpNode::word_rlp(&B256::repeat_byte(0x11)),
-            // deliberately omit hash for leaf_3
         ];
         let branch_path = Nibbles::from_nibbles([0x0]);
-        let branch_node = create_branch_node_with_children(&[0x0, 0x1, 0x2], child_hashes);
+        let branch_node = create_branch_node_with_children(&[0x0, 0x1], child_hashes);
 
-        // Reveal nodes using reveal_nodes
+        // Reveal the existing nodes
         trie.reveal_nodes(&mut [
             ProofTrieNode { path: branch_path, node: branch_node, masks: None },
             ProofTrieNode { path: leaf_1_path, node: leaf_1, masks: None },
             ProofTrieNode { path: leaf_2_path, node: leaf_2, masks: None },
-            ProofTrieNode { path: leaf_3_path, node: leaf_3, masks: None },
         ])
         .unwrap();
+
+        // Insert leaf_3 via update_leaf. This modifies the branch at [0x0] to add child
+        // 0x2 and creates a fresh leaf node with hash: None in the lower subtrie.
+        let provider = MockTrieNodeProvider::new();
+        trie.update_leaf(leaf_3_full_path, encode_account_value(3), provider).unwrap();
 
         // Calculate subtrie indexes
         let subtrie_1_index = SparseSubtrieType::from_path(&leaf_1_path).lower_index().unwrap();
         let subtrie_2_index = SparseSubtrieType::from_path(&leaf_2_path).lower_index().unwrap();
+        let leaf_3_path = leaf_3_full_path.slice(..2);
         let subtrie_3_index = SparseSubtrieType::from_path(&leaf_3_path).lower_index().unwrap();
 
         let mut unchanged_prefix_set = PrefixSetMut::from([
@@ -7861,7 +7908,23 @@ mod tests {
         // This test demonstrates that get_leaf_value must look in the correct subtrie,
         // not always in upper_subtrie.
 
-        let mut trie = ParallelSparseTrie::default();
+        // Set up a root branch pointing to nibble 0x1, and a branch at [0x1] pointing to
+        // nibble 0x2, so that the lower subtrie at [0x1, 0x2] is reachable.
+        let root_branch = create_branch_node_with_children(
+            &[0x1],
+            [RlpNode::word_rlp(&B256::repeat_byte(0xAA))],
+        );
+        let branch_at_1 = create_branch_node_with_children(
+            &[0x2],
+            [RlpNode::word_rlp(&B256::repeat_byte(0xBB))],
+        );
+        let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
+        trie.reveal_nodes(&mut [ProofTrieNode {
+            path: Nibbles::from_nibbles([0x1]),
+            node: branch_at_1,
+            masks: None,
+        }])
+        .unwrap();
 
         // Create a leaf node with path >= 2 nibbles (will go to lower subtrie)
         let leaf_path = Nibbles::from_nibbles([0x1, 0x2]);
@@ -9055,8 +9118,40 @@ mod tests {
         // Should at least be the size of the struct itself
         assert!(empty_size >= core::mem::size_of::<ParallelSparseTrie>());
 
-        // Create a trie with some data
-        let mut trie = ParallelSparseTrie::default();
+        // Create a trie with some data. Set up a root branch with children at 0x1 and
+        // 0x5, and branches at [0x1] and [0x5] pointing to 0x2 and 0x6 respectively,
+        // so the lower subtries at [0x1, 0x2] and [0x5, 0x6] are reachable.
+        let root_branch = create_branch_node_with_children(
+            &[0x1, 0x5],
+            [
+                RlpNode::word_rlp(&B256::repeat_byte(0xAA)),
+                RlpNode::word_rlp(&B256::repeat_byte(0xBB)),
+            ],
+        );
+        let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
+
+        let branch_at_1 = create_branch_node_with_children(
+            &[0x2],
+            [RlpNode::word_rlp(&B256::repeat_byte(0xCC))],
+        );
+        let branch_at_5 = create_branch_node_with_children(
+            &[0x6],
+            [RlpNode::word_rlp(&B256::repeat_byte(0xDD))],
+        );
+        trie.reveal_nodes(&mut [
+            ProofTrieNode {
+                path: Nibbles::from_nibbles_unchecked([0x1]),
+                node: branch_at_1,
+                masks: None,
+            },
+            ProofTrieNode {
+                path: Nibbles::from_nibbles_unchecked([0x5]),
+                node: branch_at_5,
+                masks: None,
+            },
+        ])
+        .unwrap();
+
         let mut nodes = vec![
             ProofTrieNode {
                 path: Nibbles::from_nibbles_unchecked([0x1, 0x2]),
