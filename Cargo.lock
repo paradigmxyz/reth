@@ -7961,6 +7961,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -10294,7 +10295,6 @@ dependencies = [
  "alloy-rpc-types-debug",
  "alloy-trie",
  "itertools 0.14.0",
- "k256",
  "reth-chainspec",
  "reth-consensus",
  "reth-errors",
@@ -10305,7 +10305,6 @@ dependencies = [
  "reth-revm",
  "reth-trie-common",
  "reth-trie-sparse",
- "secp256k1 0.30.0",
  "serde",
  "serde_with",
  "thiserror 2.0.18",

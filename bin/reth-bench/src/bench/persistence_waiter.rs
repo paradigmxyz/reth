@@ -160,7 +160,7 @@ impl PersistenceSubscription {
 pub(crate) async fn setup_persistence_subscription(
     ws_url: Url,
 ) -> eyre::Result<PersistenceSubscription> {
-    info!("Connecting to WebSocket at {} for persistence subscription", ws_url);
+    info!(target: "reth-bench", "Connecting to WebSocket at {} for persistence subscription", ws_url);
 
     let ws_connect = WsConnect::new(ws_url.to_string());
     let client = RpcClient::connect_pubsub(ws_connect)
@@ -173,7 +173,7 @@ pub(crate) async fn setup_persistence_subscription(
         .await
         .wrap_err("Failed to subscribe to persistence notifications")?;
 
-    info!("Subscribed to persistence notifications");
+    info!(target: "reth-bench", "Subscribed to persistence notifications");
 
     Ok(PersistenceSubscription::new(provider, subscription.into_stream()))
 }
