@@ -121,6 +121,7 @@ async fn test_rocksdb_node_startup() -> Result<()> {
 
     let (nodes, _tasks, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
+            .with_storage_v2()
             .build()
             .await?;
 
@@ -148,6 +149,7 @@ async fn test_rocksdb_block_mining() -> Result<()> {
 
     let (mut nodes, _tasks, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
+            .with_storage_v2()
             .build()
             .await?;
 
@@ -204,6 +206,7 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
+    .with_storage_v2()
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -270,6 +273,7 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
+    .with_storage_v2()
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -337,6 +341,7 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
+    .with_storage_v2()
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -421,6 +426,7 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
+    .with_storage_v2()
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -484,6 +490,7 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
+    .with_storage_v2()
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
