@@ -2,7 +2,7 @@
 # Verifies that Docker images have the expected architectures.
 #
 # Usage:
-#   ./verify_image_arch.sh <targets> <registry> <ethereum_tags> <optimism_tags>
+#   ./verify_image_arch.sh <targets> <registry> <ethereum_tags>
 #
 # Environment:
 #   DRY_RUN=true  - Skip actual verification, just print what would be checked.
@@ -12,7 +12,6 @@ set -euo pipefail
 TARGETS="${1:-}"
 REGISTRY="${2:-}"
 ETHEREUM_TAGS="${3:-}"
-OPTIMISM_TAGS="${4:-}"
 DRY_RUN="${DRY_RUN:-false}"
 
 verify_image() {
@@ -43,15 +42,10 @@ verify_image() {
 
 if [[ "$TARGETS" == *"nightly"* ]]; then
     verify_image "${REGISTRY}/reth:nightly" amd64 arm64
-    verify_image "${REGISTRY}/op-reth:nightly" amd64 arm64
     verify_image "${REGISTRY}/reth:nightly-profiling" amd64
     verify_image "${REGISTRY}/reth:nightly-edge-profiling" amd64
-    verify_image "${REGISTRY}/op-reth:nightly-profiling" amd64
 else
     for tag in $(echo "$ETHEREUM_TAGS" | tr ',' ' '); do
-        verify_image "$tag" amd64 arm64
-    done
-    for tag in $(echo "$OPTIMISM_TAGS" | tr ',' ' '); do
         verify_image "$tag" amd64 arm64
     done
 fi

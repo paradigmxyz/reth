@@ -50,13 +50,6 @@ install: ## Build and install the reth binary under `$(CARGO_HOME)/bin`.
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
 
-.PHONY: install-op
-install-op: ## Build and install the op-reth binary under `$(CARGO_HOME)/bin`.
-	cargo install --path crates/optimism/bin --bin op-reth --force --locked \
-		--features "$(FEATURES)" \
-		--profile "$(PROFILE)" \
-		$(CARGO_INSTALL_EXTRA_FLAGS)
-
 .PHONY: build
 build: ## Build the reth binary into `target` directory.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
@@ -84,20 +77,9 @@ build-%-reproducible:
 .PHONY: build-debug
 build-debug: ## Build the reth binary into `target/debug` directory.
 	cargo build --bin reth --features "$(FEATURES)"
-.PHONY: build-debug-op
-build-debug-op: ## Build the op-reth binary into `target/debug` directory.
-	cargo build --bin op-reth --features "$(FEATURES)" --manifest-path crates/optimism/bin/Cargo.toml
-
-.PHONY: build-op
-build-op: ## Build the op-reth binary into `target` directory.
-	cargo build --bin op-reth --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
-
 # Builds the reth binary natively.
 build-native-%:
 	cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
-
-op-build-native-%:
-	cargo build --bin op-reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
 # The following commands use `cross` to build a cross-compile.
 #
@@ -115,21 +97,15 @@ op-build-native-%:
 # on other systems. JEMALLOC_SYS_WITH_LG_PAGE=16 tells jemalloc to use 64-KiB
 # pages. See: https://github.com/paradigmxyz/reth/issues/6742
 build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
-op-build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 
 # No jemalloc on Windows
 build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
-op-build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
 build-%:
 	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
 		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
-
-op-build-%:
-	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
-		cross build --bin op-reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.
@@ -141,11 +117,6 @@ build-x86_64-apple-darwin:
 	$(MAKE) build-native-x86_64-apple-darwin
 build-aarch64-apple-darwin:
 	$(MAKE) build-native-aarch64-apple-darwin
-op-build-x86_64-apple-darwin:
-	$(MAKE) op-build-native-x86_64-apple-darwin
-op-build-aarch64-apple-darwin:
-	$(MAKE) op-build-native-aarch64-apple-darwin
-
 build-deb-%:
 	@case "$*" in \
 		x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|riscv64gc-unknown-linux-gnu) \
@@ -266,25 +237,17 @@ db-tools: ## Compile MDBX debugging tools.
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
 
 .PHONY: update-book-cli
-update-book-cli: build-debug build-debug-op## Update book cli documentation.
+update-book-cli: build-debug ## Update book cli documentation.
 	@echo "Updating book cli doc..."
-	@./docs/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth $(CARGO_TARGET_DIR)/debug/op-reth
+	@./docs/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth
 
 .PHONY: profiling
 profiling: ## Builds `reth` with optimisations, but also symbols.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features jemalloc,asm-keccak
 
-.PHONY: profiling-op
-profiling-op: ## Builds `op-reth` with optimisations, but also symbols.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features jemalloc,asm-keccak --bin op-reth --manifest-path crates/optimism/bin/Cargo.toml
-
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
-
-.PHONY: maxperf-op
-maxperf-op: ## Builds `op-reth` with the most aggressive optimisations.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak --bin op-reth --manifest-path crates/optimism/bin/Cargo.toml
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
@@ -303,17 +266,6 @@ clippy:
 	--benches \
 	--all-features \
 	-- -D warnings
-
-clippy-op-dev:
-	cargo +nightly clippy \
-	--bin op-reth \
-	--workspace \
-	--lib \
-	--examples \
-	--tests \
-	--benches \
-	--locked \
-	--all-features
 
 lint-typos: ensure-typos
 	typos
@@ -379,7 +331,6 @@ rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc
 cargo-test:
 	cargo test \
 	--workspace \
-	--bin "op-reth" \
 	--lib --examples \
 	--tests \
 	--benches \

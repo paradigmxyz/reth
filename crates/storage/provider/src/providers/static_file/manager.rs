@@ -39,8 +39,8 @@ use reth_primitives_traits::{
 use reth_prune_types::PruneSegment;
 use reth_stages_types::PipelineTarget;
 use reth_static_file_types::{
-    find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileMap,
-    StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
+    find_fixed_range, ChangesetOffsetReader, HighestStaticFiles, SegmentHeader,
+    SegmentRangeInclusive, StaticFileMap, StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChangeSetReader, DBProvider, PruneCheckpointReader,
@@ -974,10 +974,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<SegmentHeader> {
         let fixed_block_range = self.find_fixed_range(segment, block);
         let key = (fixed_block_range.end(), segment);
+        let file = self.path.join(segment.filename(&fixed_block_range));
         let jar = if let Some((_, jar)) = self.map.remove(&key) {
             jar.jar
         } else {
-            let file = self.path.join(segment.filename(&fixed_block_range));
             debug!(
                 target: "providers::static_file",
                 ?file,
@@ -989,6 +989,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         let header = jar.user_header().clone();
+
+        // Delete the sidecar file for changeset segments before deleting the main jar
+        if segment.is_change_based() {
+            let csoff_path = file.with_extension("csoff");
+            if csoff_path.exists() {
+                std::fs::remove_file(&csoff_path).map_err(ProviderError::other)?;
+            }
+        }
+
         jar.delete().map_err(ProviderError::other)?;
 
         // SAFETY: this is currently necessary to ensure that certain indexes like
@@ -2392,7 +2401,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             Err(err) => return Err(err),
         };
 
-        if let Some(offset) = provider.user_header().changeset_offset(block_number) {
+        if let Some(offset) = provider.read_changeset_offset(block_number)? {
             let mut cursor = provider.cursor()?;
             let mut changeset = Vec::with_capacity(offset.num_changes() as usize);
 
@@ -2424,9 +2433,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             Err(err) => return Err(err),
         };
 
-        let user_header = provider.user_header();
-
-        let Some(offset) = user_header.changeset_offset(block_number) else {
+        let Some(offset) = provider.read_changeset_offset(block_number)? else {
             return Ok(None);
         };
 
@@ -2485,12 +2492,19 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
     fn account_changeset_count(&self) -> ProviderResult<usize> {
         let mut count = 0;
 
-        // iterate through static files and sum changeset metadata via each static file header
         let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
         if let Some(changeset_segments) = static_files.get(StaticFileSegment::AccountChangeSets) {
-            for (_, header) in changeset_segments {
-                if let Some(changeset_offsets) = header.changeset_offsets() {
-                    for offset in changeset_offsets {
+            for (block_range, header) in changeset_segments {
+                let csoff_path = self
+                    .path
+                    .join(StaticFileSegment::AccountChangeSets.filename(block_range))
+                    .with_extension("csoff");
+                if csoff_path.exists() {
+                    let len = header.changeset_offsets_len();
+                    let mut reader = ChangesetOffsetReader::new(&csoff_path, len)
+                        .map_err(ProviderError::other)?;
+                    let offsets = reader.get_range(0, len).map_err(ProviderError::other)?;
+                    for offset in offsets {
                         count += offset.num_changes() as usize;
                     }
                 }
@@ -2516,7 +2530,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
             Err(err) => return Err(err),
         };
 
-        if let Some(offset) = provider.user_header().changeset_offset(block_number) {
+        if let Some(offset) = provider.read_changeset_offset(block_number)? {
             let mut cursor = provider.cursor()?;
             let mut changeset = Vec::with_capacity(offset.num_changes() as usize);
 
@@ -2549,8 +2563,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
             Err(err) => return Err(err),
         };
 
-        let user_header = provider.user_header();
-        let Some(offset) = user_header.changeset_offset(block_number) else {
+        let Some(offset) = provider.read_changeset_offset(block_number)? else {
             return Ok(None);
         };
 
@@ -2607,9 +2620,17 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
 
         let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
         if let Some(changeset_segments) = static_files.get(StaticFileSegment::StorageChangeSets) {
-            for (_, header) in changeset_segments {
-                if let Some(changeset_offsets) = header.changeset_offsets() {
-                    for offset in changeset_offsets {
+            for (block_range, header) in changeset_segments {
+                let csoff_path = self
+                    .path
+                    .join(StaticFileSegment::StorageChangeSets.filename(block_range))
+                    .with_extension("csoff");
+                if csoff_path.exists() {
+                    let len = header.changeset_offsets_len();
+                    let mut reader = ChangesetOffsetReader::new(&csoff_path, len)
+                        .map_err(ProviderError::other)?;
+                    let offsets = reader.get_range(0, len).map_err(ProviderError::other)?;
+                    for offset in offsets {
                         count += offset.num_changes() as usize;
                     }
                 }
