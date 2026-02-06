@@ -25,6 +25,7 @@ use reth_storage_errors::{
     provider::{ProviderError, ProviderResult},
 };
 use reth_tasks::spawn_scoped_os_thread;
+use revm_database::states::reverts::AccountInfoRevert;
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
@@ -1258,6 +1259,7 @@ impl RocksDBProvider {
     /// Writes account history indices for the given blocks.
     ///
     /// Derives history indices from reverts (same source as changesets) to ensure consistency.
+    /// Iterates raw reverts directly to avoid expensive `to_plain_state_reverts()` conversion.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_account_history<N: reth_node_types::NodePrimitives>(
         &self,
@@ -1269,13 +1271,19 @@ impl RocksDBProvider {
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let reverts = &block.execution_outcome().state.reverts;
 
-            // Iterate through account reverts - these are exactly the accounts that have
-            // changesets written, ensuring history indices match changeset entries.
-            for account_block_reverts in reverts.accounts {
-                for (address, _) in account_block_reverts {
-                    account_history.entry(address).or_default().push(block_number);
+            // Skip DoNothing (storage-only) - only index accounts with actual info changes
+            for tx_reverts in reverts.iter() {
+                for (address, account_revert) in tx_reverts {
+                    if matches!(account_revert.account, AccountInfoRevert::DoNothing) {
+                        continue;
+                    }
+                    let v = account_history.entry(*address).or_default();
+                    // Deduplicate: same account may appear multiple times in a block
+                    if v.last().copied() != Some(block_number) {
+                        v.push(block_number);
+                    }
                 }
             }
         }
@@ -1302,18 +1310,18 @@ impl RocksDBProvider {
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let reverts = &block.execution_outcome().state.reverts;
 
-            // Iterate through storage reverts - these are exactly the slots that have
-            // changesets written, ensuring history indices match changeset entries.
-            for storage_block_reverts in reverts.storage {
-                for revert in storage_block_reverts {
-                    for (slot, _) in revert.storage_revert {
+            // Index all modified storage slots
+            for tx_reverts in reverts.iter() {
+                for (address, account_revert) in tx_reverts {
+                    for slot in account_revert.storage.keys() {
                         let key = B256::new(slot.to_be_bytes());
-                        storage_history
-                            .entry((revert.address, key))
-                            .or_default()
-                            .push(block_number);
+                        let v = storage_history.entry((*address, key)).or_default();
+                        // Deduplicate: same slot may appear multiple times in a block
+                        if v.last().copied() != Some(block_number) {
+                            v.push(block_number);
+                        }
                     }
                 }
             }
