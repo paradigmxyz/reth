@@ -93,3 +93,15 @@ pub enum NippyJarError {
     #[error("Missing file: {}", .0.display())]
     MissingFile(PathBuf),
 }
+
+impl NippyJarError {
+    /// Returns `true` if the error is caused by a missing file (not found on disk).
+    pub fn is_not_found(&self) -> bool {
+        match self {
+            Self::FileSystem(fs_err) => fs_err.is_not_found(),
+            Self::Disconnect(io_err) => io_err.kind() == std::io::ErrorKind::NotFound,
+            Self::MissingFile(_) => true,
+            _ => false,
+        }
+    }
+}

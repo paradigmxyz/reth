@@ -35,7 +35,11 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
             let Some((segment, _)) =
                 StaticFileSegment::parse_filename(&entry.file_name().to_string_lossy())
         {
-            let jar = NippyJar::<SegmentHeader>::load(&entry.path())?;
+            let jar = match NippyJar::<SegmentHeader>::load(&entry.path()) {
+                Ok(jar) => jar,
+                Err(e) if e.is_not_found() => continue,
+                Err(e) => return Err(e),
+            };
 
             if let Some(block_range) = jar.user_header().block_range() {
                 static_files
