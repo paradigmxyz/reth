@@ -988,6 +988,12 @@ where
         let mut hashed_cursor_metrics = HashedCursorMetricsCache::default();
         let hashed_address = input.hashed_address();
         let proof_start = Instant::now();
+        let _span = debug_span!(
+            target: "trie::proof_task",
+            "storage_proof",
+            worker_id = self.worker_id,
+            ?hashed_address,
+        ).entered();
 
         let result = match &input {
             StorageProofInput::Legacy { hashed_address, prefix_set, target_slots, .. } => {
@@ -1085,6 +1091,12 @@ where
         );
 
         let start = Instant::now();
+        let _span = debug_span!(
+            target: "trie::proof_task",
+            "blinded_storage_node",
+            worker_id,
+            ?account,
+        ).entered();
         let result = proof_tx.process_blinded_storage_node(account, &path);
         let elapsed = start.elapsed();
 
@@ -1423,6 +1435,11 @@ where
     {
         let mut proof_cursor_metrics = ProofTaskCursorMetricsCache::default();
         let proof_start = Instant::now();
+        let _span = debug_span!(
+            target: "trie::proof_task",
+            "account_multiproof",
+            worker_id = self.worker_id,
+        ).entered();
 
         let (proof_result_sender, result, value_encoder_stats) = match input {
             AccountMultiproofInput::Legacy {
