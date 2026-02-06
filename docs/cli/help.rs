@@ -460,7 +460,6 @@ fn preprocess_help(s: &str) -> Cow<'_, str> {
             //  rustup available targets:
             //    aarch64-apple-darwin
             //    x86_64-unknown-linux-gnu
-            //    x86_64-pc-windows-gnu
             (
                 r"default: reth/.*-[0-9A-Fa-f]{6,10}/([_\w]+)-(\w+)-(\w+)(-\w+)?",
                 "default: reth/<VERSION>-<SHA>/<ARCH>",

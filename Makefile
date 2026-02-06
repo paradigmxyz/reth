@@ -98,9 +98,6 @@ build-native-%:
 # pages. See: https://github.com/paradigmxyz/reth/issues/6742
 build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 
-# No jemalloc on Windows
-build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
-
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
 build-%:
@@ -152,8 +149,6 @@ build-release-tarballs: ## Create a series of `.tar.gz` files in the BIN_DIR dir
 	$(call tarball_release_binary,"x86_64-unknown-linux-gnu","reth","")
 	$(MAKE) build-aarch64-unknown-linux-gnu
 	$(call tarball_release_binary,"aarch64-unknown-linux-gnu","reth","")
-	$(MAKE) build-x86_64-pc-windows-gnu
-	$(call tarball_release_binary,"x86_64-pc-windows-gnu","reth.exe","")
 
 ##@ Test
 
