@@ -180,12 +180,16 @@ impl Case for BlockchainTestCase {
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
         self.tests
-            .iter()
+            .into_iter()
             .filter(|(_, case)| !Self::excluded_fork(case.network))
             .par_bridge_buffered()
-            .try_for_each(|(name, case)| Self::run_single_case(name, case).map(|_| ()))?;
-
-        Ok(())
+            .try_for_each(|(name, case)| {
+                // HACK: If this runs in a rayon thread we get infinite rayon recursion with
+                // save_blocks.
+                std::thread::spawn(move || Self::run_single_case(&name, &case).map(|_| ()))
+                    .join()
+                    .unwrap()
+            })
     }
 }
 

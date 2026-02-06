@@ -37,15 +37,7 @@ impl<T: Case> Cases<T> {
     pub fn run(self) -> Vec<CaseResult> {
         self.test_cases
             .into_par_iter()
-            .map(|(path, case)| {
-                std::thread::spawn(move || {
-                    let desc = case.description();
-                    let result = case.run();
-                    CaseResult::new(&path, desc, result)
-                })
-                .join()
-                .unwrap()
-            })
+            .map(|(path, case)| CaseResult::new(&path, case.description(), case.run()))
             .collect()
     }
 }
