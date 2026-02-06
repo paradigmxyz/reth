@@ -928,17 +928,19 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Files are removed from disk when [`StaticFileWriter::commit`] is called. Until then the
     /// index and on-disk data remain unchanged.
     ///
-    /// For example if block is 1M and the blocks per file are 500K this will queue files 0-499K
-    /// and 500K-999K for deletion.
+    /// Only **full jars whose expected block range ends strictly below `block`** are queued.
+    /// The jar that *contains* `block` is never deleted because jars can only be removed
+    /// entirely.
     ///
-    /// This will not delete the file that contains the block itself, because files can only be
-    /// removed entirely.
+    /// For example, with 500K blocks per file and `block = 1_000_000`, jars 0-499K and
+    /// 500K-999K are queued while the 1M-1.499M jar is kept.
     ///
-    /// # Safety
+    /// # Highest-jar preservation
     ///
-    /// This method will never delete the highest static file for the segment, even if the
-    /// requested block is higher than the highest block in static files. This ensures we always
-    /// maintain at least one static file if any exist.
+    /// The highest jar for the segment is **always preserved**, even when its blocks are
+    /// entirely below the requested threshold. This means that if only one jar exists, or
+    /// if `block` is higher than every block in static files, no jars are deleted. Use
+    /// [`Self::delete_segment`] to remove all jars including the highest.
     ///
     /// Returns a list of `SegmentHeader`s from the jars that will be deleted.
     pub fn delete_segment_below_block(
@@ -2420,6 +2422,15 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
     ///
     /// If a deletion fails mid-way, unprocessed operations are re-queued so a
     /// subsequent `commit()` can retry them.
+    ///
+    /// # Error semantics
+    ///
+    /// When used through [`DatabaseProvider::commit`](crate::providers::DatabaseProvider),
+    /// the database transaction is committed **before** this method runs. An error
+    /// returned here therefore means the DB changes are already durable but some
+    /// static-file jar deletions did not complete. Callers must **not** attempt to
+    /// roll back the database in response to this error — the unprocessed deletions
+    /// are re-queued and will be retried on the next `commit()` call.
     fn commit(&self) -> ProviderResult<()> {
         // Flush pending writer data.
         self.writers.commit()?;
@@ -3642,6 +3653,57 @@ mod tests {
 
         assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Headers), Some(4));
         assert_eq!(count_files(&static_dir), 3);
+    }
+
+    #[test]
+    fn test_commit_requeues_on_deletion_failure() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let sf_rw = create_test_headers(&static_dir, 30, 10);
+
+        // 3 jars: 0-9, 10-19, 20-29
+        assert_eq!(count_files(&static_dir), 9); // 3 jars × 3 files each
+
+        sf_rw.delete_segment(StaticFileSegment::Headers).unwrap();
+        assert!(StaticFileWriter::has_unwind_queued(&sf_rw));
+
+        // Sabotage the first jar (range_end=9) so delete_jar_no_reindex fails on load:
+        // remove it from the in-memory map and delete its .conf file from disk.
+        let first_range = sf_rw.find_fixed_range(StaticFileSegment::Headers, 0);
+        let key = (first_range.end(), StaticFileSegment::Headers);
+        sf_rw.map.remove(&key);
+
+        let conf_path = static_dir
+            .as_ref()
+            .join(StaticFileSegment::Headers.filename(&first_range))
+            .with_extension("conf");
+        std::fs::remove_file(&conf_path).unwrap();
+
+        // commit() should fail because NippyJar::load can't find the .conf file.
+        let err = StaticFileWriter::commit(&sf_rw);
+        assert!(err.is_err(), "commit should fail when a jar's config file is missing");
+
+        // The failed jar (0-9) plus all subsequent jars (10-19, 20-29) should be requeued.
+        assert!(StaticFileWriter::has_unwind_queued(&sf_rw));
+
+        // The jars that were never attempted should still exist on disk.
+        // Jar 0-9 lost its .conf so has 2 remaining files; jars 10-19 and 20-29 are intact (3
+        // each).
+        assert_eq!(count_files(&static_dir), 8); // 2 + 3 + 3
+
+        // Now remove the sabotaged jar's remaining files so it won't block again,
+        // and also remove it from the requeue (simulate "already cleaned up").
+        // The simplest way: just delete the leftover files for jar 0-9 manually.
+        let data_path = static_dir.as_ref().join(StaticFileSegment::Headers.filename(&first_range));
+        let offsets_path = data_path.with_extension("off");
+        let _ = std::fs::remove_file(&data_path);
+        let _ = std::fs::remove_file(&offsets_path);
+
+        // Second commit will still fail on the same queued (Headers, 9) entry since its
+        // files are gone, but the remaining jars (10-19, 20-29) also get requeued.
+        // This confirms the requeue mechanism preserves unprocessed operations across retries.
+        let err2 = StaticFileWriter::commit(&sf_rw);
+        assert!(err2.is_err());
+        assert!(StaticFileWriter::has_unwind_queued(&sf_rw));
     }
 
     #[test]
