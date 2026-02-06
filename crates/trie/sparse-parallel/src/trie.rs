@@ -4147,10 +4147,8 @@ mod tests {
     fn test_reveal_node_leaves() {
         // Reveal leaf in the upper trie. A root branch with child 0x1 makes path [0x1]
         // reachable for the subsequent reveal_nodes call.
-        let root_branch = create_branch_node_with_children(
-            &[0x1],
-            [RlpNode::word_rlp(&B256::repeat_byte(0xAA))],
-        );
+        let root_branch =
+            create_branch_node_with_children(&[0x1], [RlpNode::word_rlp(&B256::repeat_byte(0xAA))]);
         let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
 
         {
@@ -4177,14 +4175,10 @@ mod tests {
         // [0x1] conflicts: the upper trie test placed a leaf there, but reaching [0x1, 0x2]
         // requires a branch at [0x1]. A root branch → branch at [0x1] with child 0x2
         // makes path [0x1, 0x2] reachable.
-        let root_branch = create_branch_node_with_children(
-            &[0x1],
-            [RlpNode::word_rlp(&B256::repeat_byte(0xAA))],
-        );
-        let branch_at_1 = create_branch_node_with_children(
-            &[0x2],
-            [RlpNode::word_rlp(&B256::repeat_byte(0xBB))],
-        );
+        let root_branch =
+            create_branch_node_with_children(&[0x1], [RlpNode::word_rlp(&B256::repeat_byte(0xAA))]);
+        let branch_at_1 =
+            create_branch_node_with_children(&[0x2], [RlpNode::word_rlp(&B256::repeat_byte(0xBB))]);
         let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
         trie.reveal_nodes(&mut [ProofTrieNode {
             path: Nibbles::from_nibbles([0x1]),
@@ -4278,10 +4272,8 @@ mod tests {
     #[test]
     fn test_reveal_node_extension_cross_level_boundary() {
         // Set up root branch with nibble 0x1 so path [0x1] is reachable.
-        let root_branch = create_branch_node_with_children(
-            &[0x1],
-            [RlpNode::word_rlp(&B256::repeat_byte(0xAA))],
-        );
+        let root_branch =
+            create_branch_node_with_children(&[0x1], [RlpNode::word_rlp(&B256::repeat_byte(0xAA))]);
         let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
 
         let path = Nibbles::from_nibbles([0x1]);
@@ -4342,10 +4334,8 @@ mod tests {
     #[test]
     fn test_reveal_node_branch_cross_level() {
         // Set up root branch with nibble 0x1 so path [0x1] is reachable.
-        let root_branch = create_branch_node_with_children(
-            &[0x1],
-            [RlpNode::word_rlp(&B256::repeat_byte(0xAA))],
-        );
+        let root_branch =
+            create_branch_node_with_children(&[0x1], [RlpNode::word_rlp(&B256::repeat_byte(0xAA))]);
         let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
 
         let path = Nibbles::from_nibbles([0x1]); // Exactly 1 nibbles - boundary case
@@ -7910,14 +7900,10 @@ mod tests {
 
         // Set up a root branch pointing to nibble 0x1, and a branch at [0x1] pointing to
         // nibble 0x2, so that the lower subtrie at [0x1, 0x2] is reachable.
-        let root_branch = create_branch_node_with_children(
-            &[0x1],
-            [RlpNode::word_rlp(&B256::repeat_byte(0xAA))],
-        );
-        let branch_at_1 = create_branch_node_with_children(
-            &[0x2],
-            [RlpNode::word_rlp(&B256::repeat_byte(0xBB))],
-        );
+        let root_branch =
+            create_branch_node_with_children(&[0x1], [RlpNode::word_rlp(&B256::repeat_byte(0xAA))]);
+        let branch_at_1 =
+            create_branch_node_with_children(&[0x2], [RlpNode::word_rlp(&B256::repeat_byte(0xBB))]);
         let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
         trie.reveal_nodes(&mut [ProofTrieNode {
             path: Nibbles::from_nibbles([0x1]),
@@ -9130,14 +9116,10 @@ mod tests {
         );
         let mut trie = ParallelSparseTrie::from_root(root_branch, None, false).unwrap();
 
-        let branch_at_1 = create_branch_node_with_children(
-            &[0x2],
-            [RlpNode::word_rlp(&B256::repeat_byte(0xCC))],
-        );
-        let branch_at_5 = create_branch_node_with_children(
-            &[0x6],
-            [RlpNode::word_rlp(&B256::repeat_byte(0xDD))],
-        );
+        let branch_at_1 =
+            create_branch_node_with_children(&[0x2], [RlpNode::word_rlp(&B256::repeat_byte(0xCC))]);
+        let branch_at_5 =
+            create_branch_node_with_children(&[0x6], [RlpNode::word_rlp(&B256::repeat_byte(0xDD))]);
         trie.reveal_nodes(&mut [
             ProofTrieNode {
                 path: Nibbles::from_nibbles_unchecked([0x1]),
