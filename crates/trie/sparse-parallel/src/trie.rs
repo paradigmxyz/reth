@@ -277,7 +277,7 @@ impl SparseTrie for ParallelSparseTrie {
                         // Reveal each node in the subtrie, returning early on any errors
                         let res = subtrie.reveal_node(node.path, &node.node, node.masks);
                         if res.is_err() {
-                            return (subtrie_idx, subtrie, res)
+                            return (subtrie_idx, subtrie, res.map(|_| ()))
                         }
                     }
                     (subtrie_idx, subtrie, Ok(()))
@@ -2072,9 +2072,48 @@ impl ParallelSparseTrie {
         node: &TrieNode,
         masks: Option<BranchNodeMasks>,
     ) -> SparseTrieResult<()> {
-        // If there is no subtrie for the path it means the path is UPPER_TRIE_MAX_DEPTH or less
-        // nibbles, and so belongs to the upper trie.
-        self.upper_subtrie.reveal_node(path, node, masks)?;
+        // For upper subtrie ensure that the node was not removed before by finding its parent and
+        // making sure it knows about the child we are revealing.
+        if !self.upper_subtrie.nodes.contains_key(&path) && !path.is_empty() {
+            // Find the closest parent node walking up the path.
+            let mut parent = path.slice(..path.len() - 1);
+            while !self.upper_subtrie.nodes.contains_key(&parent) && !parent.is_empty() {
+                parent = parent.slice(..parent.len() - 1);
+            }
+
+            match self.upper_subtrie.nodes.get(&parent) {
+                Some(SparseNode::Branch { state_mask, .. }) => {
+                    // If the parent is a branch node more than 1 nibble away from the path, it
+                    // means that path was removed from the trie.
+                    if !parent.len() + 1 == path.len() {
+                        return Ok(())
+                    }
+
+                    // If the path is not set in state mask of the branch node, it means that it was
+                    // removed.
+                    if !state_mask.is_bit_set(path.last().unwrap()) {
+                        return Ok(())
+                    }
+                }
+                Some(SparseNode::Extension { key: remainder, .. }) => {
+                    // If the closest parent is extension node pointing to a different path, it
+                    // means that the current node was removed.
+                    if *remainder != path.slice(parent.len() + 1..) {
+                        return Ok(())
+                    }
+                }
+                // If the parent is a leaf node, it means that the current node was removed.
+                None | Some(SparseNode::Empty | SparseNode::Leaf { .. }) => return Ok(()),
+                Some(SparseNode::Hash(hash)) => {
+                    return Err(SparseTrieErrorKind::BlindedNode { path: parent, hash: *hash }.into())
+                }
+            }
+        }
+
+        // Exit early if the node was already revealed before.
+        if !self.upper_subtrie.reveal_node(path, node, masks)? {
+            return Ok(())
+        }
 
         // The previous upper_trie.reveal_node call will not have revealed any child nodes via
         // reveal_node_or_hash if the child node would be found on a lower subtrie. We handle that
@@ -2611,12 +2650,12 @@ impl SparseSubtrie {
         path: Nibbles,
         node: &TrieNode,
         masks: Option<BranchNodeMasks>,
-    ) -> SparseTrieResult<()> {
+    ) -> SparseTrieResult<bool> {
         debug_assert!(path.starts_with(&self.path));
 
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
-            return Ok(())
+            return Ok(false)
         }
 
         match node {
@@ -2655,17 +2694,7 @@ impl SparseSubtrie {
                                 })),
                             });
                         }
-                        // Branch node already exists, or an extension node was placed where a
-                        // branch node was before.
-                        SparseNode::Branch { .. } | SparseNode::Extension { .. } => {}
-                        // All other node types can't be handled.
-                        node @ (SparseNode::Empty | SparseNode::Leaf { .. }) => {
-                            return Err(SparseTrieErrorKind::Reveal {
-                                path: *entry.key(),
-                                node: Box::new(node.clone()),
-                            }
-                            .into())
-                        }
+                        _ => unreachable!("checked that node is either a hash or non-existent"),
                     },
                     Entry::Vacant(entry) => {
                         entry.insert(SparseNode::new_branch(branch.state_mask));
@@ -2689,17 +2718,7 @@ impl SparseSubtrie {
                             self.reveal_node_or_hash(child_path, &ext.child)?;
                         }
                     }
-                    // Extension node already exists, or an extension node was placed where a branch
-                    // node was before.
-                    SparseNode::Extension { .. } | SparseNode::Branch { .. } => {}
-                    // All other node types can't be handled.
-                    node @ (SparseNode::Empty | SparseNode::Leaf { .. }) => {
-                        return Err(SparseTrieErrorKind::Reveal {
-                            path: *entry.key(),
-                            node: Box::new(node.clone()),
-                        }
-                        .into())
-                    }
+                    _ => unreachable!("checked that node is either a hash or non-existent"),
                 },
                 Entry::Vacant(entry) => {
                     let mut child_path = *entry.key();
@@ -2724,18 +2743,7 @@ impl SparseSubtrie {
                             hash: Some(*hash),
                         });
                     }
-                    // Leaf node already exists.
-                    SparseNode::Leaf { .. } => {}
-                    // All other node types can't be handled.
-                    node @ (SparseNode::Empty |
-                    SparseNode::Extension { .. } |
-                    SparseNode::Branch { .. }) => {
-                        return Err(SparseTrieErrorKind::Reveal {
-                            path: *entry.key(),
-                            node: Box::new(node.clone()),
-                        }
-                        .into())
-                    }
+                    _ => unreachable!("checked that node is either a hash or non-existent"),
                 },
                 Entry::Vacant(entry) => {
                     let mut full = *entry.key();
@@ -2746,7 +2754,7 @@ impl SparseSubtrie {
             },
         }
 
-        Ok(())
+        Ok(true)
     }
 
     /// Reveals either a node or its hash placeholder based on the provided child data.
@@ -2789,7 +2797,9 @@ impl SparseSubtrie {
             return Ok(())
         }
 
-        self.reveal_node(path, &TrieNode::decode(&mut &child[..])?, None)
+        self.reveal_node(path, &TrieNode::decode(&mut &child[..])?, None)?;
+
+        Ok(())
     }
 
     /// Recalculates and updates the RLP hashes for the changed nodes in this subtrie.
