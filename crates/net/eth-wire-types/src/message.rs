@@ -36,7 +36,7 @@ pub enum MessageError {
     Invalid(EthVersion, EthMessageID),
     /// Expected a Status message but received a different message type.
     #[error("expected status message but received {0:?}")]
-    UnexpectedStatusMessage(EthMessageID),
+    ExpectedStatusMessage(EthMessageID),
     /// Thrown when rlp decoding a message failed.
     #[error("RLP error: {0}")]
     RlpError(#[from] alloy_rlp::Error),
@@ -71,7 +71,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         let message_type = EthMessageID::decode(buf)?;
 
         if message_type != EthMessageID::Status {
-            return Err(MessageError::UnexpectedStatusMessage(message_type))
+            return Err(MessageError::ExpectedStatusMessage(message_type))
         }
 
         let status = if version < EthVersion::Eth69 {
@@ -954,7 +954,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(MessageError::UnexpectedStatusMessage(EthMessageID::GetBlockBodies))
+            Err(MessageError::ExpectedStatusMessage(EthMessageID::GetBlockBodies))
         ));
     }
 }
