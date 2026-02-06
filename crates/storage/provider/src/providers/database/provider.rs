@@ -556,9 +556,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         #[cfg(all(unix, feature = "rocksdb"))]
         let mut rocksdb_result = None;
 
-        // Spawn SF and RocksDB writes on the storage pool.
-        // MDBX writes happen on the calling thread (within this scope) because &self isn't Sync.
-        STORAGE_POOL.scope(|s| {
+        // Write to all backends in parallel.
+        STORAGE_POOL.in_place_scope(|s| {
             // SF writes
             s.spawn(|_| {
                 let start = Instant::now();
