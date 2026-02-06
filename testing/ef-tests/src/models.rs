@@ -327,7 +327,7 @@ pub enum ForkSpec {
 }
 
 impl ForkSpec {
-    /// Converts this fork spec to a Reth ChainSpec.
+    /// Converts this EF fork spec to a Reth [`ChainSpec`].
     pub fn to_chain_spec(self) -> Arc<ChainSpec> {
         static MAP: OnceLock<RwLock<HashMap<ForkSpec, Arc<ChainSpec>>>> = OnceLock::new();
         let map = MAP.get_or_init(Default::default);
