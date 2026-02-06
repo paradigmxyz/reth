@@ -123,7 +123,7 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
 ]
 rocksdb = ["reth-provider/rocksdb"]
-edge = ["reth-provider/edge", "reth-db-common/edge", "rocksdb"]
+edge = ["reth-provider/edge", "reth-db-common/edge", "rocksdb", "reth-prune/rocksdb"]
 
 [[bench]]
 name = "criterion"
