@@ -117,7 +117,7 @@ where
         let mut storage_proof_calculator = ProofCalculator::new_storage(trie_cursor, hashed_cursor);
         let root_node = storage_proof_calculator.storage_root_node(self.hashed_address)?;
         let storage_root = storage_proof_calculator
-            .compute_root_hash(std::slice::from_ref(&root_node))?
+            .compute_root_hash(&[root_node])?
             .expect("storage_root_node returns a node at empty path");
 
         let trie_account = self.account.into_trie_account(storage_root);

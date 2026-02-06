@@ -1807,7 +1807,7 @@ mod tests {
 
             // The hash of the root node should match the expected root from legacy StateRoot
             let root_hash = proof_calculator
-                .compute_root_hash(std::slice::from_ref(&root_node))?
+                .compute_root_hash(&[root_node])?
                 .expect("root_node returns a node at empty path");
             pretty_assertions::assert_eq!(self.expected_root, root_hash);
 
