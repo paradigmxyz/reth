@@ -5,6 +5,7 @@ use reth_static_file_types::{
     SegmentHeader, SegmentRangeInclusive, StaticFileMap, StaticFileSegment,
 };
 use std::path::Path;
+use tracing::warn;
 
 mod cursor;
 pub use cursor::StaticFileCursor;
@@ -37,7 +38,14 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
         {
             let jar = match NippyJar::<SegmentHeader>::load(&entry.path()) {
                 Ok(jar) => jar,
-                Err(e) if e.is_not_found() => continue,
+                Err(e) if e.is_not_found() => {
+                    warn!(target: "providers::static_file",
+                        path = ?entry.path(),
+                        ?segment,
+                        "iter_static_files: skipping file with missing .conf"
+                    );
+                    continue
+                }
                 Err(e) => return Err(e),
             };
 

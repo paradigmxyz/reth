@@ -140,7 +140,12 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
     {
-        if EitherWriterDestination::senders(provider).is_static_file() {
+        let dest = EitherWriterDestination::senders(provider);
+        tracing::debug!(target: "providers::static_file",
+            block_number, ?dest,
+            "EitherWriter::new_senders: creating writer"
+        );
+        if dest.is_static_file() {
             Ok(EitherWriter::StaticFile(
                 provider
                     .get_static_file_writer(block_number, StaticFileSegment::TransactionSenders)?,

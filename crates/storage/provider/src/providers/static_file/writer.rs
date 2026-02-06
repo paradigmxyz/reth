@@ -290,20 +290,40 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
 
         let block_range = static_file_provider.find_fixed_range(segment, block);
+        debug!(target: "providers::static_file",
+            ?segment, block, ?block_range,
+            "StaticFileProviderRW::open: looking up segment provider"
+        );
         let (jar, path) = match static_file_provider.get_segment_provider_for_block(
             segment,
             block_range.start(),
             None,
         ) {
-            Ok(provider) => (
-                NippyJar::load(provider.data_path()).map_err(ProviderError::other)?,
-                provider.data_path().into(),
-            ),
+            Ok(provider) => {
+                debug!(target: "providers::static_file",
+                    ?segment, block, data_path = ?provider.data_path(),
+                    "StaticFileProviderRW::open: found existing provider, re-loading jar"
+                );
+                (
+                    NippyJar::load(provider.data_path()).map_err(ProviderError::other)?,
+                    provider.data_path().into(),
+                )
+            }
             Err(ProviderError::MissingStaticFileBlock(_, _)) => {
                 let path = static_file_provider.directory().join(segment.filename(&block_range));
+                debug!(target: "providers::static_file",
+                    ?segment, block, ?path,
+                    "StaticFileProviderRW::open: no existing provider, creating new jar"
+                );
                 (create_jar(segment, &path, block_range), path)
             }
-            Err(err) => return Err(err),
+            Err(err) => {
+                debug!(target: "providers::static_file",
+                    ?segment, block, %err,
+                    "StaticFileProviderRW::open: unexpected error from get_segment_provider_for_block"
+                );
+                return Err(err)
+            }
         };
 
         let result = match NippyJarWriter::new(jar) {

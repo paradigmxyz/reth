@@ -818,12 +818,23 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         block: BlockNumber,
         path: Option<&Path>,
     ) -> ProviderResult<StaticFileJarProvider<'_, N>> {
+        let range_from_index = self.get_segment_ranges_from_block(segment, block);
+        debug!(target: "providers::static_file",
+            ?segment, block, ?range_from_index,
+            "get_segment_provider_for_block: index lookup result"
+        );
         self.get_segment_provider_for_range(
             segment,
-            || self.get_segment_ranges_from_block(segment, block),
+            || range_from_index,
             path,
         )?
-        .ok_or(ProviderError::MissingStaticFileBlock(segment, block))
+        .ok_or_else(|| {
+            debug!(target: "providers::static_file",
+                ?segment, block,
+                "get_segment_provider_for_block: returning MissingStaticFileBlock"
+            );
+            ProviderError::MissingStaticFileBlock(segment, block)
+        })
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and transaction.
@@ -1056,8 +1067,20 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let path = self.path.join(segment.filename(fixed_block_range));
             let jar = match NippyJar::load(&path) {
                 Ok(jar) => jar,
-                Err(e) if e.is_not_found() => return Ok(None),
-                Err(e) => return Err(ProviderError::other(e)),
+                Err(e) if e.is_not_found() => {
+                    debug!(target: "providers::static_file",
+                        ?segment, ?fixed_block_range, ?path,
+                        "get_or_create_jar_provider: jar not found, returning None"
+                    );
+                    return Ok(None)
+                }
+                Err(e) => {
+                    warn!(target: "providers::static_file",
+                        ?segment, ?fixed_block_range, ?path, %e,
+                        "get_or_create_jar_provider: jar load failed (not a not-found error)"
+                    );
+                    return Err(ProviderError::other(e))
+                }
             };
             self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
         };
@@ -1146,10 +1169,19 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     segment_max_block,
                 );
 
-                let jar = NippyJar::<SegmentHeader>::load(
+                let jar = match NippyJar::<SegmentHeader>::load(
                     &self.path.join(segment.filename(&fixed_range)),
-                )
-                .map_err(ProviderError::other)?;
+                ) {
+                    Ok(jar) => Some(jar),
+                    Err(e) if e.is_not_found() => {
+                        debug!(target: "providers::static_file",
+                            ?segment, ?fixed_range,
+                            "update_index: jar not found on disk, updating index without jar data"
+                        );
+                        None
+                    }
+                    Err(e) => return Err(ProviderError::other(e)),
+                };
 
                 let index = indexes
                     .entry(segment)
@@ -1178,73 +1210,80 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         available_block_ranges_by_max_tx: None,
                     });
 
-                // Update min_block to track the lowest block range of the segment.
-                // This is initially set by initialize_index() on node startup, but must be updated
-                // as the file grows to prevent stale values.
-                //
-                // Without this update, min_block can remain at genesis (e.g. Some([0..=0]) or None)
-                // even after syncing to higher blocks (e.g. [0..=100]). A stale
-                // min_block causes get_lowest_static_file_block() to return the
-                // wrong end value, which breaks pruning logic that relies on it for
-                // safety checks.
-                //
-                // Example progression:
-                // 1. Node starts, initialize_index() sets min_block = [0..=0]
-                // 2. Sync to block 100, this update sets min_block = [0..=100]
-                // 3. Pruner calls get_lowest_static_file_block() -> returns 100 (correct). Without
-                //    this update, it would incorrectly return 0 (stale)
-                if let Some(current_block_range) = jar.user_header().block_range() {
-                    if let Some(min_block_range) = index.min_block_range.as_mut() {
-                        // delete_jar WILL ALWAYS re-initialize all indexes, so we are always
-                        // sure that current_min is always the lowest.
-                        if current_block_range.start() == min_block_range.start() {
-                            *min_block_range = current_block_range;
-                        }
-                    } else {
-                        index.min_block_range = Some(current_block_range);
-                    }
-                }
-
-                // Updates the tx index by first removing all entries which have a higher
-                // block_start than our current static file.
-                if let Some(tx_range) = jar.user_header().tx_range() {
-                    // Current block range has the same block start as `fixed_range``, but block end
-                    // might be different if we are still filling this static file.
+                if let Some(jar) = jar {
+                    // Update min_block to track the lowest block range of the segment.
+                    // This is initially set by initialize_index() on node startup, but must be
+                    // updated as the file grows to prevent stale values.
+                    //
+                    // Without this update, min_block can remain at genesis (e.g. Some([0..=0]) or
+                    // None) even after syncing to higher blocks (e.g. [0..=100]). A stale
+                    // min_block causes get_lowest_static_file_block() to return the
+                    // wrong end value, which breaks pruning logic that relies on it for
+                    // safety checks.
+                    //
+                    // Example progression:
+                    // 1. Node starts, initialize_index() sets min_block = [0..=0]
+                    // 2. Sync to block 100, this update sets min_block = [0..=100]
+                    // 3. Pruner calls get_lowest_static_file_block() -> returns 100 (correct).
+                    //    Without this update, it would incorrectly return 0 (stale)
                     if let Some(current_block_range) = jar.user_header().block_range() {
-                        let tx_end = tx_range.end();
+                        if let Some(min_block_range) = index.min_block_range.as_mut() {
+                            // delete_jar WILL ALWAYS re-initialize all indexes, so we are always
+                            // sure that current_min is always the lowest.
+                            if current_block_range.start() == min_block_range.start() {
+                                *min_block_range = current_block_range;
+                            }
+                        } else {
+                            index.min_block_range = Some(current_block_range);
+                        }
+                    }
 
-                        // Considering that `update_index` is called when we either append/truncate,
-                        // we are sure that we are handling the latest data
-                        // points.
-                        //
-                        // Here we remove every entry of the index that has a block start higher or
-                        // equal than our current one. This is important in the case
-                        // that we prune a lot of rows resulting in a file (and thus
-                        // a higher block range) deletion.
+                    // Updates the tx index by first removing all entries which have a higher
+                    // block_start than our current static file.
+                    if let Some(tx_range) = jar.user_header().tx_range() {
+                        // Current block range has the same block start as `fixed_range`, but block
+                        // end might be different if we are still filling this
+                        // static file.
+                        if let Some(current_block_range) = jar.user_header().block_range() {
+                            let tx_end = tx_range.end();
+
+                            // Considering that `update_index` is called when we either
+                            // append/truncate, we are sure that we are handling the latest data
+                            // points.
+                            //
+                            // Here we remove every entry of the index that has a block start higher
+                            // or equal than our current one. This is important in
+                            // the case that we prune a lot of rows resulting in a
+                            // file (and thus a higher block range) deletion.
+                            if let Some(index) =
+                                index.available_block_ranges_by_max_tx.as_mut()
+                            {
+                                index.retain(|_, block_range| {
+                                    block_range.start() < fixed_range.start()
+                                });
+                                index.insert(tx_end, current_block_range);
+                            } else {
+                                index.available_block_ranges_by_max_tx =
+                                    Some(BTreeMap::from([(tx_end, current_block_range)]));
+                            }
+                        }
+                    } else if segment.is_tx_based() {
+                        // The unwinded file has no more transactions/receipts. However, the highest
+                        // block is within this files' block range. We only retain
+                        // entries with block ranges before the current one.
                         if let Some(index) = index.available_block_ranges_by_max_tx.as_mut() {
                             index
                                 .retain(|_, block_range| block_range.start() < fixed_range.start());
-                            index.insert(tx_end, current_block_range);
-                        } else {
-                            index.available_block_ranges_by_max_tx =
-                                Some(BTreeMap::from([(tx_end, current_block_range)]));
                         }
-                    }
-                } else if segment.is_tx_based() {
-                    // The unwinded file has no more transactions/receipts. However, the highest
-                    // block is within this files' block range. We only retain
-                    // entries with block ranges before the current one.
-                    if let Some(index) = index.available_block_ranges_by_max_tx.as_mut() {
-                        index.retain(|_, block_range| block_range.start() < fixed_range.start());
+
+                        // If the index is empty, just remove it.
+                        index.available_block_ranges_by_max_tx.take_if(|index| index.is_empty());
                     }
 
-                    // If the index is empty, just remove it.
-                    index.available_block_ranges_by_max_tx.take_if(|index| index.is_empty());
+                    // Update the cached provider.
+                    debug!(target: "providers::static_file", ?segment, "Inserting updated jar into cache");
+                    self.map.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
                 }
-
-                // Update the cached provider.
-                debug!(target: "providers::static_file", ?segment, "Inserting updated jar into cache");
-                self.map.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
 
                 // Delete any cached provider that no longer has an associated jar.
                 debug!(target: "providers::static_file", ?segment, "Cleaning up jar map");
@@ -1265,7 +1304,23 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut indexes = self.indexes.write();
         indexes.clear();
 
-        for (segment, headers) in &*iter_static_files(&self.path).map_err(ProviderError::other)? {
+        let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
+        for segment in StaticFileSegment::iter() {
+            if !static_files.contains_key(segment) {
+                info!(target: "providers::static_file",
+                    ?segment,
+                    "initialize_index: no static files found for segment"
+                );
+            }
+        }
+        for (segment, headers) in &*static_files {
+            info!(target: "providers::static_file",
+                ?segment,
+                num_files = headers.len(),
+                first_range = ?headers.first().map(|(r, _)| r),
+                last_range = ?headers.last().map(|(r, _)| r),
+                "initialize_index: found static files for segment"
+            );
             // Update first and last block for each segment
             //
             // It's safe to call `expect` here, because every segment has at least one header
