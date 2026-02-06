@@ -5,7 +5,7 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_rlp::{Decodable, Encodable};
-use rayon::iter::ParallelIterator;
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
@@ -183,13 +183,8 @@ impl Case for BlockchainTestCase {
             .into_iter()
             .filter(|(_, case)| !Self::excluded_fork(case.network))
             .par_bridge_buffered()
-            .try_for_each(|(name, case)| {
-                // HACK: If this runs in a rayon thread we get infinite rayon recursion with
-                // save_blocks.
-                std::thread::spawn(move || Self::run_single_case(&name, &case).map(|_| ()))
-                    .join()
-                    .unwrap()
-            })
+            .with_min_len(64)
+            .try_for_each(|(name, case)| Self::run_single_case(&name, &case).map(|_| ()))
     }
 }
 
