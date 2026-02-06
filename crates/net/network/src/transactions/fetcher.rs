@@ -1563,7 +1563,7 @@ mod test {
 
         // re-buffer hash1 (simulating retry after failed request)
         // this should NOT promote hash1 to MRU position
-        let retry_hashes = RequestTxHashes::new([hash1].into_iter().collect());
+        let retry_hashes = RequestTxHashes::new(std::iter::once(hash1).collect());
         tx_fetcher.buffer_hashes(retry_hashes, None);
 
         // hash1 should still be at the end (not promoted to MRU)
