@@ -31,11 +31,11 @@ variable "VERGEN_GIT_DIRTY" {
 
 // Common settings for all targets
 group "default" {
-  targets = ["ethereum", "optimism"]
+  targets = ["ethereum"]
 }
 
 group "nightly" {
-  targets = ["ethereum", "ethereum-profiling", "ethereum-edge-profiling", "optimism", "optimism-profiling"]
+  targets = ["ethereum", "ethereum-profiling", "ethereum-edge-profiling"]
 }
 
 // Base target with shared configuration
@@ -93,34 +93,3 @@ target "ethereum-edge-profiling" {
   tags = ["${REGISTRY}/reth:nightly-edge-profiling"]
 }
 
-// Optimism (op-reth)
-target "optimism" {
-  inherits = ["_base"]
-  args = {
-    BINARY        = "op-reth"
-    MANIFEST_PATH = "crates/optimism/bin"
-  }
-  tags = ["${REGISTRY}/op-reth:${TAG}"]
-}
-
-target "optimism-profiling" {
-  inherits = ["_base_profiling"]
-  args = {
-    BINARY        = "op-reth"
-    MANIFEST_PATH = "crates/optimism/bin"
-    BUILD_PROFILE = "profiling"
-    FEATURES      = "jemalloc jemalloc-prof asm-keccak min-debug-logs"
-  }
-  tags = ["${REGISTRY}/op-reth:nightly-profiling"]
-}
-
-target "optimism-edge-profiling" {
-  inherits = ["_base_profiling"]
-  args = {
-    BINARY        = "op-reth"
-    MANIFEST_PATH = "crates/optimism/bin"
-    BUILD_PROFILE = "profiling"
-    FEATURES      = "jemalloc jemalloc-prof asm-keccak min-debug-logs edge"
-  }
-  tags = ["${REGISTRY}/op-reth:nightly-edge-profiling"]
-}
