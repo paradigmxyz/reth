@@ -49,7 +49,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
 use reth_tasks::spawn_scoped_os_thread;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     fmt::Debug,
     ops::{Bound, Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
@@ -395,8 +395,8 @@ pub struct StaticFileProviderInner<N> {
     _lock_file: Option<StorageLock>,
     /// Genesis block number, default is 0;
     genesis_block_number: u64,
-    /// Queued jar deletions (keyed by segment) to execute on commit.
-    delete_queue: Mutex<BTreeMap<StaticFileSegment, BTreeSet<BlockNumber>>>,
+    /// Queued jar deletions to execute on commit. Each entry is a `(segment, range_end)` pair.
+    delete_queue: Mutex<Vec<(StaticFileSegment, BlockNumber)>>,
 }
 
 impl<N: NodePrimitives> StaticFileProviderInner<N> {
@@ -437,7 +437,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     fn queue_delete(&self, segment: StaticFileSegment, range_ends: Vec<BlockNumber>) {
         if !range_ends.is_empty() {
             let mut queue = self.delete_queue.lock();
-            queue.entry(segment).or_default().extend(range_ends);
+            queue.extend(range_ends.into_iter().map(|r| (segment, r)));
         }
     }
 
@@ -445,8 +445,11 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
         !self.delete_queue.lock().is_empty()
     }
 
-    fn take_delete_queue(&self) -> BTreeMap<StaticFileSegment, BTreeSet<BlockNumber>> {
-        std::mem::take(&mut *self.delete_queue.lock())
+    fn take_delete_queue(&self) -> Vec<(StaticFileSegment, BlockNumber)> {
+        let mut queue = std::mem::take(&mut *self.delete_queue.lock());
+        queue.sort_unstable();
+        queue.dedup();
+        queue
     }
 
     /// Each static file has a fixed number of blocks. This gives out the range where the requested
@@ -2398,40 +2401,19 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
             return Ok(());
         }
 
-        for &segment in ops.keys() {
-            self.writers.reset(segment);
-        }
-
-        let mut first_err: Option<ProviderError> = None;
-        let mut failed: BTreeMap<StaticFileSegment, BTreeSet<BlockNumber>> = BTreeMap::new();
-        for (segment, range_ends) in ops {
-            for range_end in range_ends {
-                if let Err(err) = self.delete_jar_no_reindex(segment, range_end) {
-                    warn!(
-                        target: "providers::static_file",
-                        ?segment,
-                        ?range_end,
-                        ?err,
-                        "Failed to delete static file jar during commit"
-                    );
-                    if first_err.is_none() {
-                        first_err = Some(err);
-                    }
-                    failed.entry(segment).or_default().insert(range_end);
-                }
+        let mut last_reset = None;
+        for &(segment, _) in &ops {
+            if last_reset != Some(segment) {
+                last_reset = Some(segment);
+                self.writers.reset(segment);
             }
         }
 
-        // Re-enqueue failed deletions so the next commit can retry them.
-        if !failed.is_empty() {
-            self.delete_queue.lock().extend(failed);
+        for (segment, range_end) in ops {
+            self.delete_jar_no_reindex(segment, range_end)?;
         }
 
-        // Reindex to match what's on disk. A reindex failure takes priority
-        // since it leaves the provider in an unknown state.
-        self.initialize_index()?;
-
-        first_err.map_or(Ok(()), Err)
+        self.initialize_index()
     }
 
     fn has_unwind_queued(&self) -> bool {
