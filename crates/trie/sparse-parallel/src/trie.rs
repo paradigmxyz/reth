@@ -244,6 +244,10 @@ impl SparseTrie for ParallelSparseTrie {
         // Reveal lower subtrie nodes in parallel
         {
             use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+            use tracing::Span;
+
+            // Capture the current span so it can be propagated to rayon worker threads
+            let parent_span = Span::current();
 
             // Group the nodes by lower subtrie. This must be collected into a Vec in order for
             // rayon's `zip` to be happy.
@@ -291,6 +295,10 @@ impl SparseTrie for ParallelSparseTrie {
                 .into_par_iter()
                 .zip(node_groups.into_par_iter())
                 .map(|((subtrie_idx, mut subtrie), nodes)| {
+                    // Enter the parent span to propagate context (e.g., hashed_address for storage
+                    // tries) to the worker thread
+                    let _guard = parent_span.enter();
+
                     // reserve space in the HashMap ahead of time; doing it on a node-by-node basis
                     // can cause multiple re-allocations as the hashmap grows.
                     subtrie.nodes.reserve(nodes.len());
@@ -3057,6 +3065,14 @@ impl SparseSubtrieInner {
                     self.buffers.rlp_buf.clear();
                     let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.buffers.rlp_buf);
                     *hash = rlp_node.as_hash();
+                    trace!(
+                        target: "trie::parallel_sparse",
+                        ?path,
+                        ?key,
+                        value = %alloy_primitives::hex::encode(value),
+                        ?hash,
+                        "Calculated leaf hash",
+                    );
                     (rlp_node, SparseNodeType::Leaf)
                 }
             }
