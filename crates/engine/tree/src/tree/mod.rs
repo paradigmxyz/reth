@@ -299,6 +299,9 @@ where
     evm_config: C,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Pre-collected blocks ready to be dispatched for persistence once the current
+    /// in-progress persistence completes. This allows batch preparation to overlap with I/O.
+    queued_persist_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -324,6 +327,7 @@ where
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
+            .field("queued_persist_blocks", &self.queued_persist_blocks.as_ref().map(|b| b.len()))
             .finish()
     }
 }
@@ -383,6 +387,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
+            queued_persist_blocks: None,
         }
     }
 
@@ -411,6 +416,7 @@ where
         let persistence_state = PersistenceState {
             last_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
             rx: None,
+            queued_save: None,
         };
 
         let (tx, outgoing) = unbounded_channel();
@@ -1300,18 +1306,96 @@ where
         self.persistence_state.start_save(highest_num_hash, rx);
     }
 
-    /// Triggers new persistence actions if no persistence task is currently in progress.
+    /// Prepares a batch of blocks for persistence without dispatching it.
+    fn prepare_persist_batch(&self) -> Result<Vec<ExecutedBlock<N>>, AdvancePersistenceError> {
+        let above = self.persistence_state.effective_persisted_block_number();
+        let canonical_head_number = self.state.tree_state.canonical_block_number();
+        let target_number =
+            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
+
+        let mut blocks = Vec::new();
+        let mut current_hash = self.state.tree_state.canonical_block_hash();
+
+        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
+            if block.recovered_block().number() <= above {
+                break;
+            }
+            if block.recovered_block().number() <= target_number {
+                blocks.push(block.clone());
+            }
+            current_hash = block.recovered_block().parent_hash();
+        }
+
+        blocks.reverse();
+        Ok(blocks)
+    }
+
+    /// Triggers new persistence actions if no persistence task is currently in progress,
+    /// or prepares the next batch while persistence is running.
     ///
-    /// This checks if we need to remove blocks (disk reorg) or save new blocks to disk.
-    /// Persistence completion is handled separately via the `wait_for_event` method.
+    /// When persistence is idle:
+    /// - Dispatches a queued batch if one was pre-prepared
+    /// - Otherwise checks if we need to remove blocks (disk reorg) or save new blocks
+    ///
+    /// When persistence is in progress:
+    /// - Pre-prepares the next batch so it can be dispatched immediately on completion
     fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
+                self.queued_persist_blocks = None;
+                self.persistence_state.take_queued();
                 self.remove_blocks(new_tip_num)
+            } else if let Some(blocks) = self.queued_persist_blocks.take() {
+                self.persistence_state.take_queued();
+                let expected_start = self.persistence_state.last_persisted_block.number + 1;
+                let canonical_hash = self.state.tree_state.canonical_block_hash();
+
+                let valid = blocks.first().is_some_and(|b| {
+                    b.recovered_block().number() == expected_start
+                }) && blocks.last().is_some_and(|b| {
+                    let mut hash = canonical_hash;
+                    loop {
+                        if hash == b.recovered_block().hash() {
+                            break true;
+                        }
+                        match self.state.tree_state.blocks_by_hash.get(&hash) {
+                            Some(block)
+                                if block.recovered_block().number()
+                                    > b.recovered_block().number() =>
+                            {
+                                hash = block.recovered_block().parent_hash();
+                            }
+                            _ => break false,
+                        }
+                    }
+                });
+
+                if valid {
+                    self.persist_blocks(blocks);
+                } else {
+                    debug!(target: "engine::tree", "Queued persistence batch invalidated, re-evaluating");
+                    if self.should_persist() {
+                        let blocks_to_persist =
+                            self.get_canonical_blocks_to_persist(PersistTarget::Threshold)?;
+                        self.persist_blocks(blocks_to_persist);
+                    }
+                }
             } else if self.should_persist() {
                 let blocks_to_persist =
                     self.get_canonical_blocks_to_persist(PersistTarget::Threshold)?;
                 self.persist_blocks(blocks_to_persist);
+            }
+        } else if !self.persistence_state.has_queued() && self.should_persist() {
+            let blocks = self.prepare_persist_batch()?;
+            if !blocks.is_empty() {
+                let highest = blocks
+                    .iter()
+                    .max_by_key(|b| b.recovered_block().number())
+                    .map(|b| b.recovered_block().num_hash())
+                    .expect("checked non-empty");
+                debug!(target: "engine::tree", count=blocks.len(), ?highest, "Pre-prepared persistence batch");
+                self.persistence_state.queue_save(highest);
+                self.queued_persist_blocks = Some(blocks);
             }
         }
 
@@ -1334,6 +1418,8 @@ where
 
     /// Persists all remaining blocks until none are left.
     fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
+        self.queued_persist_blocks = None;
+        self.persistence_state.take_queued();
         loop {
             // Wait for any in-progress persistence to complete (blocking)
             if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
@@ -1886,6 +1972,8 @@ where
         // If we have an on-disk reorg, we need to handle it first before touching the in-memory
         // state.
         if let Some(remove_above) = self.find_disk_reorg()? {
+            self.queued_persist_blocks = None;
+            self.persistence_state.take_queued();
             self.remove_blocks(remove_above);
             return Ok(())
         }
