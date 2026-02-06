@@ -71,7 +71,7 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     #[command(flatten)]
     pub rocksdb: RocksDbArgs,
 
-    /// Storage mode configuration (edge vs legacy)
+    /// Storage mode configuration (v2 vs v1/legacy)
     #[command(flatten)]
     pub storage: StorageArgs,
 }

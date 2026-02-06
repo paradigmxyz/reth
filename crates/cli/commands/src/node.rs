@@ -119,7 +119,7 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[command(flatten, next_help_heading = "Static Files")]
     pub static_files: StaticFilesArgs,
 
-    /// Storage mode configuration (edge vs legacy)
+    /// Storage mode configuration (v2 vs v1/legacy)
     #[command(flatten)]
     pub storage: StorageArgs,
 
