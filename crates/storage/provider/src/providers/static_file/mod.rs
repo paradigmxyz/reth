@@ -1398,4 +1398,115 @@ mod tests {
         let entry = result.unwrap();
         assert_eq!(entry.value, U256::from(42));
     }
+
+    /// Tests that the static file provider gracefully handles missing static files
+    /// instead of crashing with a fatal error.
+    ///
+    /// This reproduces the scenario from <https://github.com/paradigmxyz/reth/issues/21914>
+    /// where `--minimal` with senders in static files crashes because the sender static
+    /// files are deleted by the pruner but the provider's indexes still reference them.
+    #[test]
+    fn test_missing_sender_static_files_no_crash() -> eyre::Result<()> {
+        let (static_dir, _) = create_test_static_files_dir();
+        let blocks_per_file = 10u64;
+
+        let sf_rw: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir)
+                .with_blocks_per_file(blocks_per_file)
+                .build()?;
+
+        let segment = StaticFileSegment::TransactionSenders;
+
+        // Step 1: Write sender data for blocks 0-9
+        {
+            let mut writer = sf_rw.latest_writer(segment)?;
+            for block in 0..blocks_per_file {
+                writer.increment_block(block)?;
+                if block > 0 {
+                    let sender = Address::from(U160::from(block));
+                    writer.append_transaction_sender(block - 1, &sender)?;
+                }
+            }
+            writer.commit()?;
+        }
+
+        // Step 2: Verify data is readable (sanity check)
+        assert_eq!(
+            sf_rw.get_highest_static_file_block(segment),
+            Some(blocks_per_file - 1)
+        );
+        let sender = sf_rw.transaction_sender(0)?;
+        assert!(sender.is_some(), "sender should be readable before deletion");
+
+        // Step 3: Physically delete the static files from disk, simulating what the
+        // pruner does via `delete_static_files_segment()`. We intentionally do NOT
+        // re-initialize the provider's indexes, so they become stale and still
+        // reference the now-deleted files. This is the exact scenario that causes
+        // the crash in the issue.
+        let range = SegmentRangeInclusive::new(0, blocks_per_file - 1);
+        let base_name = segment.filename(&range);
+        let data_file = static_dir.as_ref().join(&base_name);
+        let conf_file = static_dir.as_ref().join(format!("{base_name}.conf"));
+        let off_file = static_dir.as_ref().join(format!("{base_name}.off"));
+
+        // Remove cached jar so the provider must reload from disk
+        sf_rw.remove_cached_provider(segment, range.end());
+
+        // Delete all three files
+        for file in [&data_file, &conf_file, &off_file] {
+            if file.exists() {
+                fs::remove_file(file)?;
+            }
+        }
+
+        // Step 4: Now try to read senders. The provider's indexes still reference the
+        // deleted block range, but the files are gone. Before the fix, this would crash
+        // with: ProviderError::Other("NippyJar error: failed to open file ... No such
+        // file or directory"). After the fix, it should gracefully return None.
+        let result = sf_rw.transaction_sender(0)?;
+        assert!(
+            result.is_none(),
+            "should return None for missing sender file, not crash"
+        );
+
+        // Step 5: Also verify find_static_file handles missing files gracefully.
+        // This path iterates all ranges from the index and calls
+        // get_or_create_jar_provider for each.
+        let find_result = sf_rw.find_static_file(
+            segment,
+            |provider| provider.transaction_sender(0),
+        )?;
+        assert!(
+            find_result.is_none(),
+            "find_static_file should return None for missing files, not crash"
+        );
+
+        // Step 6: After re-initializing the index (so the provider knows the files
+        // are gone), verify that a fresh provider can write new sender data. This
+        // simulates what happens when the SenderRecoveryStage writes new senders
+        // after the pruner deleted the old files.
+        {
+            let sf_rw2: StaticFileProvider<EthPrimitives> =
+                StaticFileProviderBuilder::read_write(&static_dir)
+                    .with_blocks_per_file(blocks_per_file)
+                    .build()?;
+
+            let mut writer = sf_rw2.latest_writer(segment)?;
+            writer.increment_block(0)?;
+            let sender = Address::from(U160::from(42u64));
+            writer.append_transaction_sender(0, &sender)?;
+            writer.commit()?;
+
+            // Verify the new data is readable
+            let new_sender = sf_rw2.transaction_sender(0)?;
+            assert!(new_sender.is_some(), "newly written sender should be readable");
+            assert_eq!(
+                new_sender.unwrap(),
+                Address::from(U160::from(42u64)),
+                "newly written sender should match"
+            );
+        }
+
+        Ok(())
+    }
 }
