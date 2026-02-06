@@ -7,6 +7,8 @@ extern crate alloc;
 mod trie;
 pub use trie::*;
 
+mod node;
+
 mod lower;
 use lower::*;
 
