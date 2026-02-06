@@ -494,7 +494,7 @@ mod tests {
 
         let runner = SenderRecoveryTestRunner::default();
         runner.db.factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_senders_in_static_files(true),
+            StorageSettings::v1().with_transaction_senders_in_static_files(true),
         );
         let input = ExecInput {
             target: Some(target),
