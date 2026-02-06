@@ -86,10 +86,11 @@ impl Command {
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!("Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+            info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
         }
         if self.wait_for_persistence {
             info!(
+                target: "reth-bench",
                 "Persistence waiting enabled (waits after every {} blocks to match engine gap > {} behavior)",
                 self.persistence_threshold + 1,
                 self.persistence_threshold
@@ -153,7 +154,7 @@ impl Command {
                 let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
                     Ok(block) => block,
                     Err(e) => {
-                        tracing::error!("Failed to fetch block {next_block}: {e}");
+                        tracing::error!(target: "reth-bench", "Failed to fetch block {next_block}: {e}");
                         let _ = error_sender.send(e);
                         break;
                     }
@@ -183,7 +184,7 @@ impl Command {
                     .send((block, head_block_hash, safe_block_hash, finalized_block_hash))
                     .await
                 {
-                    tracing::error!("Failed to send block data: {e}");
+                    tracing::error!(target: "reth-bench", "Failed to send block data: {e}");
                     break;
                 }
             }
@@ -234,7 +235,7 @@ impl Command {
             // Exclude time spent waiting on the block prefetch channel from the benchmark duration.
             // We want to measure engine throughput, not RPC fetch latency.
             let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
-            info!(%combined_result);
+            info!(target: "reth-bench", %combined_result);
 
             if let Some(w) = &mut waiter {
                 w.on_block(block_number).await?;
@@ -265,6 +266,7 @@ impl Command {
             TotalGasOutput::with_combined_results(gas_output_results, &combined_results)?;
 
         info!(
+            target: "reth-bench",
             total_gas_used = gas_output.total_gas_used,
             total_duration = ?gas_output.total_duration,
             execution_duration = ?gas_output.execution_duration,
