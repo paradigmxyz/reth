@@ -2411,7 +2411,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
 
     /// Commits all pending writes and executes any queued jar deletions.
     ///
-    /// 1. Flush pending writer data via [`StaticFileWriters::commit`].
+    /// 1. Flush pending writer data.
     /// 2. Drain the deferred delete queue (populated by [`Self::delete_segment`] /
     ///    [`Self::delete_segment_below_block`]).
     /// 3. Reset writers for affected segments so they release file handles.
