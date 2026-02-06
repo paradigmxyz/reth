@@ -1,9 +1,8 @@
 # syntax=docker/dockerfile:1
 
-# Unified Dockerfile for reth and op-reth, optimized for Depot builds
+# Dockerfile for reth, optimized for Depot builds
 # Usage:
-#   reth:    --build-arg BINARY=reth
-#   op-reth: --build-arg BINARY=op-reth --build-arg MANIFEST_PATH=crates/optimism/bin
+#   reth: --build-arg BINARY=reth
 
 FROM rust:1 AS builder
 WORKDIR /app
@@ -19,7 +18,7 @@ ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_DIR=/sccache
 ENV SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev
 
-# Binary to build (reth or op-reth)
+# Binary to build
 ARG BINARY=reth
 
 # Manifest path for the binary

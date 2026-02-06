@@ -30,8 +30,10 @@ reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-chain-state.workspace = true
 reth-node-types.workspace = true
-reth-static-file-types.workspace = true
+reth-static-file-types = { workspace = true, features = ["std"] }
+reth-fs-util.workspace = true
 reth-tasks.workspace = true
+
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
