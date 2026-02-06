@@ -18,7 +18,7 @@ use reth_network_p2p::{
 use reth_node_api::HeaderTy;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{
-    prelude::DefaultStages,
+    prelude::ParallelDefaultStages,
     stages::{EraImportSource, ExecutionStage},
     Pipeline, StageSet,
 };
@@ -110,7 +110,7 @@ where
         .with_tip_sender(tip_tx)
         .with_metrics_tx(metrics_tx)
         .add_stages(
-            DefaultStages::new(
+            ParallelDefaultStages::new(
                 provider_factory.clone(),
                 tip_rx,
                 Arc::clone(&consensus),
@@ -120,6 +120,7 @@ where
                 stage_config.clone(),
                 prune_config.segments,
                 era_import_source,
+                provider_factory.clone(),
             )
             .set(ExecutionStage::new(
                 evm_config,

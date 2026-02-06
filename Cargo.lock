@@ -10833,6 +10833,7 @@ dependencies = [
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",
+ "reth-trie-parallel",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

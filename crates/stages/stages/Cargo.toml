@@ -41,6 +41,7 @@ reth-static-file-types.workspace = true
 reth-tasks.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
+reth-trie-parallel = { workspace = true, features = ["metrics"] }
 
 reth-testing-utils = { workspace = true, optional = true }
 
@@ -117,6 +118,7 @@ test-utils = [
     "reth-db-api/test-utils",
     "reth-trie-db/test-utils",
     "reth-trie/test-utils",
+    "reth-trie-parallel/test-utils",
     "reth-prune-types/test-utils",
     "dep:reth-ethereum-primitives",
     "reth-ethereum-primitives?/test-utils",

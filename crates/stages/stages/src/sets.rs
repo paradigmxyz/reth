@@ -40,8 +40,8 @@ use crate::{
     stages::{
         AccountHashingStage, BodyStage, EraImportSource, EraStage, ExecutionStage, FinishStage,
         HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-        PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage, StorageHashingStage,
-        TransactionLookupStage,
+        ParallelMerkleStage, ParallelMerkleUnwindStage, PruneSenderRecoveryStage, PruneStage,
+        SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -177,6 +177,99 @@ where
             self.stages_config.clone(),
             self.prune_modes,
         )
+    }
+}
+
+/// Default stages with parallel merkle stage support.
+///
+/// This is identical to [`DefaultStages`] but uses [`ParallelMerkleStage`] for incremental
+/// state root computation, providing better performance by computing storage roots in parallel.
+#[derive(Debug)]
+pub struct ParallelDefaultStages<Provider, H, B, E, F>
+where
+    H: HeaderDownloader,
+    B: BodyDownloader,
+    E: ConfigureEvm,
+{
+    /// Configuration for the online stages
+    online: OnlineStages<Provider, H, B>,
+    /// Executor factory needs for execution stage
+    evm_config: E,
+    /// Consensus instance
+    consensus: Arc<dyn FullConsensus<E::Primitives>>,
+    /// Configuration for each stage in the pipeline
+    stages_config: StageConfig,
+    /// Prune configuration for every segment that can be pruned
+    prune_modes: PruneModes,
+    /// Provider factory for parallel merkle stage
+    provider_factory: F,
+}
+
+impl<Provider, H, B, E, F: Clone> ParallelDefaultStages<Provider, H, B, E, F>
+where
+    H: HeaderDownloader,
+    B: BodyDownloader,
+    E: ConfigureEvm<Primitives: NodePrimitives<BlockHeader = H::Header, Block = B::Block>>,
+{
+    /// Create a new set of default stages with parallel merkle support.
+    #[expect(clippy::too_many_arguments)]
+    pub fn new(
+        provider: Provider,
+        tip: watch::Receiver<B256>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
+        header_downloader: H,
+        body_downloader: B,
+        evm_config: E,
+        stages_config: StageConfig,
+        prune_modes: PruneModes,
+        era_import_source: Option<EraImportSource>,
+        provider_factory: F,
+    ) -> Self {
+        Self {
+            online: OnlineStages::new(
+                provider,
+                tip,
+                header_downloader,
+                body_downloader,
+                stages_config.clone(),
+                era_import_source,
+            ),
+            evm_config,
+            consensus,
+            stages_config,
+            prune_modes,
+            provider_factory,
+        }
+    }
+}
+
+impl<P, H, B, E, F, StageProvider> StageSet<StageProvider> for ParallelDefaultStages<P, H, B, E, F>
+where
+    P: HeaderSyncGapProvider + 'static,
+    H: HeaderDownloader + 'static,
+    B: BodyDownloader + 'static,
+    E: ConfigureEvm,
+    F: reth_provider::DatabaseProviderFactory + Clone + Send + Sync + 'static,
+    F::Provider: reth_provider::StageCheckpointReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::BlockNumReader
+        + reth_provider::ChangeSetReader
+        + reth_provider::StorageChangeSetReader
+        + reth_provider::DBProvider,
+    OnlineStages<P, H, B>: StageSet<StageProvider>,
+    ParallelOfflineStages<E, F>: StageSet<StageProvider>,
+{
+    fn builder(self) -> StageSetBuilder<StageProvider> {
+        StageSetBuilder::default()
+            .add_set(self.online)
+            .add_set(ParallelOfflineStages::new(
+                self.evm_config,
+                self.consensus,
+                self.stages_config,
+                self.prune_modes,
+                self.provider_factory,
+            ))
+            .add_stage(FinishStage)
     }
 }
 
@@ -334,7 +427,6 @@ where
     fn builder(self) -> StageSetBuilder<Provider> {
         ExecutionStages::new(self.evm_config, self.consensus, self.stages_config.clone())
             .builder()
-            // If sender recovery prune mode is set, add the prune sender recovery stage.
             .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
                 PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
             }))
@@ -343,8 +435,72 @@ where
                 stages_config: self.stages_config.clone(),
                 prune_modes: self.prune_modes.clone(),
             })
-            // Prune stage should be added after all hashing stages, because otherwise it will
-            // delete
+            .add_stage(PruneStage::new(
+                self.prune_modes.clone(),
+                self.stages_config.prune.commit_threshold,
+            ))
+    }
+}
+
+/// Offline stages with parallel merkle stage support.
+///
+/// This is the same as [`OfflineStages`] but uses [`ParallelMerkleStage`] for incremental
+/// state root computation, providing better performance by computing storage roots in parallel.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct ParallelOfflineStages<E: ConfigureEvm, F> {
+    /// Executor factory needs for execution stage
+    evm_config: E,
+    /// Consensus instance for validating blocks.
+    consensus: Arc<dyn FullConsensus<E::Primitives>>,
+    /// Configuration for each stage in the pipeline
+    stages_config: StageConfig,
+    /// Prune configuration for every segment that can be pruned
+    prune_modes: PruneModes,
+    /// Provider factory for parallel merkle stage
+    provider_factory: F,
+}
+
+impl<E: ConfigureEvm, F: Clone> ParallelOfflineStages<E, F> {
+    /// Create a new set of offline stages with parallel merkle support.
+    pub fn new(
+        evm_config: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
+        stages_config: StageConfig,
+        prune_modes: PruneModes,
+        provider_factory: F,
+    ) -> Self {
+        Self { evm_config, consensus, stages_config, prune_modes, provider_factory }
+    }
+}
+
+impl<E, F, Provider> StageSet<Provider> for ParallelOfflineStages<E, F>
+where
+    E: ConfigureEvm,
+    F: reth_provider::DatabaseProviderFactory + Clone + Send + Sync + 'static,
+    F::Provider: reth_provider::StageCheckpointReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::BlockNumReader
+        + reth_provider::ChangeSetReader
+        + reth_provider::StorageChangeSetReader
+        + reth_provider::DBProvider,
+    ExecutionStages<E>: StageSet<Provider>,
+    PruneSenderRecoveryStage: Stage<Provider>,
+    ParallelHashingStages<F>: StageSet<Provider>,
+    HistoryIndexingStages: StageSet<Provider>,
+    PruneStage: Stage<Provider>,
+{
+    fn builder(self) -> StageSetBuilder<Provider> {
+        ExecutionStages::new(self.evm_config, self.consensus, self.stages_config.clone())
+            .builder()
+            .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
+                PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
+            }))
+            .add_set(ParallelHashingStages::new(self.stages_config.clone(), self.provider_factory))
+            .add_set(HistoryIndexingStages {
+                stages_config: self.stages_config.clone(),
+                prune_modes: self.prune_modes.clone(),
+            })
             .add_stage(PruneStage::new(
                 self.prune_modes.clone(),
                 self.stages_config.prune.commit_threshold,
@@ -400,11 +556,20 @@ where
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
 /// - [`MerkleStage`] (execute)
+///
+/// For parallel state root computation, use [`ParallelHashingStages`] instead.
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct HashingStages {
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
+}
+
+impl HashingStages {
+    /// Creates a new `HashingStages` with the given configuration.
+    pub const fn new(stages_config: StageConfig) -> Self {
+        Self { stages_config }
+    }
 }
 
 impl<Provider> StageSet<Provider> for HashingStages
@@ -425,6 +590,59 @@ where
                 self.stages_config.etl.clone(),
             ))
             .add_stage(MerkleStage::new_execution(
+                self.stages_config.merkle.rebuild_threshold,
+                self.stages_config.merkle.incremental_threshold,
+            ))
+    }
+}
+
+/// A set containing all stages that hash account state with parallel merkle stage support.
+///
+/// This is similar to [`HashingStages`] but uses [`ParallelMerkleStage`] for incremental state
+/// root computation, which provides better performance by computing storage roots in parallel.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct ParallelHashingStages<F> {
+    /// Configuration for each stage in the pipeline
+    stages_config: StageConfig,
+    /// The provider factory for parallel state root computation
+    provider_factory: F,
+}
+
+impl<F> ParallelHashingStages<F> {
+    /// Creates a new `ParallelHashingStages` with parallel merkle stage support.
+    pub const fn new(stages_config: StageConfig, provider_factory: F) -> Self {
+        Self { stages_config, provider_factory }
+    }
+}
+
+impl<F, Provider> StageSet<Provider> for ParallelHashingStages<F>
+where
+    F: reth_provider::DatabaseProviderFactory + Clone + Send + Sync + 'static,
+    F::Provider: reth_provider::StageCheckpointReader
+        + reth_provider::PruneCheckpointReader
+        + reth_provider::BlockNumReader
+        + reth_provider::ChangeSetReader
+        + reth_provider::StorageChangeSetReader
+        + reth_provider::DBProvider,
+    ParallelMerkleStage<F>: Stage<Provider>,
+    ParallelMerkleUnwindStage<F>: Stage<Provider>,
+    AccountHashingStage: Stage<Provider>,
+    StorageHashingStage: Stage<Provider>,
+{
+    fn builder(self) -> StageSetBuilder<Provider> {
+        StageSetBuilder::default()
+            .add_stage(ParallelMerkleUnwindStage::new(self.provider_factory.clone()))
+            .add_stage(AccountHashingStage::new(
+                self.stages_config.account_hashing,
+                self.stages_config.etl.clone(),
+            ))
+            .add_stage(StorageHashingStage::new(
+                self.stages_config.storage_hashing,
+                self.stages_config.etl.clone(),
+            ))
+            .add_stage(ParallelMerkleStage::with_thresholds(
+                self.provider_factory,
                 self.stages_config.merkle.rebuild_threshold,
                 self.stages_config.merkle.incremental_threshold,
             ))
