@@ -733,7 +733,10 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
+                let _ = sender.send(MultiProofMessage::StateUpdate(
+                    source.into(),
+                    extract_dirty_state(state),
+                ));
             }
         }
     }
