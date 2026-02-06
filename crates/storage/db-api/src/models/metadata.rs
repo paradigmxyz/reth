@@ -39,14 +39,14 @@ pub struct StorageSettings {
 impl StorageSettings {
     /// Returns the default base `StorageSettings` for this build.
     ///
-    /// When the `edge` feature is enabled, returns `Self::v2()`.
+    /// When the `rocksdb` feature is enabled, returns `Self::v2()`.
     /// Otherwise, returns [`Self::v1()`]. Use `--storage.v2` CLI flag for runtime override.
     pub const fn base() -> Self {
-        #[cfg(feature = "edge")]
+        #[cfg(feature = "rocksdb")]
         {
             Self::v2()
         }
-        #[cfg(not(feature = "edge"))]
+        #[cfg(not(feature = "rocksdb"))]
         {
             Self::v1()
         }
