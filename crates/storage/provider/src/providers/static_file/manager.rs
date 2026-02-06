@@ -2421,16 +2421,16 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
     /// If a deletion fails mid-way, unprocessed operations are re-queued so a
     /// subsequent `commit()` can retry them.
     fn commit(&self) -> ProviderResult<()> {
-        // Step 1: flush pending writer data.
+        // Flush pending writer data.
         self.writers.commit()?;
 
-        // Step 2: drain the delete queue (sorted + deduped).
+        // Drain the delete queue (sorted + deduped).
         let mut ops = self.take_delete_queue();
         if ops.is_empty() {
             return Ok(());
         }
 
-        // Step 3: reset writers for segments about to be deleted so file handles are released.
+        // Reset writers for segments about to be deleted so file handles are released.
         let mut last_reset = None;
         for &(segment, _) in &ops {
             if last_reset != Some(segment) {
@@ -2439,7 +2439,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
             }
         }
 
-        // Step 4: delete jar files from disk.
+        // Delete jar files from disk.
         let mut delete_err = None;
         let mut completed = 0;
         for &(segment, range_end) in &ops {
@@ -2456,7 +2456,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
             self.0.queue_delete_raw(remaining);
         }
 
-        // Step 5: rebuild the index once after all deletions.
+        // Rebuild the index once after all deletions.
         self.initialize_index()?;
 
         if let Some(err) = delete_err {
