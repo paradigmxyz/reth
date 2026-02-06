@@ -7,8 +7,9 @@ use crate::{
     Cursor, Error, Stat, TableObject,
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::{Mutex, MutexGuard, RwLock};
 use std::{
+    collections::HashMap,
     ffi::{c_uint, c_void},
     fmt::{self, Debug},
     mem::size_of,
@@ -63,6 +64,104 @@ where
     K: TransactionKind,
 {
     inner: Arc<TransactionInner<K>>,
+    /// Map of DBI to subtransaction pointer for parallel writes.
+    /// Only used for RW transactions with parallel writes enabled.
+    subtxns: Arc<RwLock<HashMap<ffi::MDBX_dbi, SubTransaction>>>,
+    /// Whether parallel writes mode is enabled.
+    parallel_writes_enabled: AtomicBool,
+}
+
+/// Statistics for a parallel subtransaction.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SubTransactionStats {
+    /// Pages allocated from pre-distributed arena.
+    pub arena_page_allocations: usize,
+    /// Times fallback to parent was needed (arena refill events).
+    pub arena_refill_events: usize,
+    /// Initial pages distributed to this subtxn.
+    pub arena_initial_pages: usize,
+    /// Additional pages acquired from parent during fallback.
+    pub arena_refill_pages: usize,
+    /// Pages returned to parent on commit (not consumed).
+    pub pages_unused: usize,
+    /// Original arena hint for this subtxn.
+    pub arena_hint: usize,
+    /// DBI this subtxn is bound to.
+    pub assigned_dbi: ffi::MDBX_dbi,
+    /// Pages reclaimed from GC (garbage collector / freeDB).
+    pub pages_from_gc: usize,
+    /// Pages allocated from end-of-file (extending the database).
+    pub pages_from_eof: usize,
+}
+
+/// A subtransaction for parallel writes.
+/// Each subtransaction is bound to a single DBI.
+#[derive(Debug)]
+pub struct SubTransaction {
+    /// Transaction pointer with mutex locking for thread-safety.
+    txn_ptr: TransactionPtr,
+    /// The DBI this subtransaction is bound to.
+    dbi: ffi::MDBX_dbi,
+    /// Whether this subtransaction has been committed.
+    committed: AtomicBool,
+}
+
+impl SubTransaction {
+    /// Creates a new subtransaction wrapper.
+    fn new(ptr: *mut ffi::MDBX_txn, dbi: ffi::MDBX_dbi) -> Self {
+        Self { txn_ptr: TransactionPtr::new(ptr), dbi, committed: AtomicBool::new(false) }
+    }
+
+    /// Returns a clone of the transaction pointer.
+    pub(crate) fn txn_ptr(&self) -> TransactionPtr {
+        self.txn_ptr.clone()
+    }
+
+    /// Returns the DBI this subtransaction is bound to.
+    pub fn dbi(&self) -> ffi::MDBX_dbi {
+        self.dbi
+    }
+
+    /// Commits this subtransaction, merging changes to parent.
+    pub fn commit(&self) -> Result<()> {
+        if self.committed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Ok(());
+        }
+        self.txn_ptr.txn_execute_fail_on_timeout(|ptr| {
+            mdbx_result(unsafe { ffi::mdbx_subtx_commit(ptr) })
+        })??;
+        Ok(())
+    }
+
+    /// Aborts this subtransaction.
+    pub fn abort(&self) -> Result<()> {
+        if self.committed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Ok(());
+        }
+        self.txn_ptr.txn_execute_fail_on_timeout(|ptr| {
+            mdbx_result(unsafe { ffi::mdbx_subtx_abort(ptr) })
+        })??;
+        Ok(())
+    }
+
+    /// Returns statistics for this subtransaction.
+    pub fn get_stats(&self) -> Result<SubTransactionStats> {
+        self.txn_ptr.txn_execute_fail_on_timeout(|ptr| {
+            let mut stats: ffi::MDBX_subtxn_stats = unsafe { std::mem::zeroed() };
+            mdbx_result(unsafe { ffi::mdbx_subtxn_get_stats(ptr, &mut stats) })?;
+            Ok(SubTransactionStats {
+                arena_page_allocations: stats.arena_page_allocations,
+                arena_refill_events: stats.arena_refill_events,
+                arena_initial_pages: stats.arena_initial_pages,
+                arena_refill_pages: stats.arena_refill_pages,
+                pages_unused: stats.pages_unused,
+                arena_hint: stats.arena_hint,
+                assigned_dbi: stats.assigned_dbi,
+                pages_from_gc: stats.pages_from_gc,
+                pages_from_eof: stats.pages_from_eof,
+            })
+        })?
+    }
 }
 
 impl<K> Transaction<K>
@@ -98,7 +197,11 @@ where
             _marker: Default::default(),
         };
 
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(inner),
+            subtxns: Arc::new(RwLock::new(HashMap::new())),
+            parallel_writes_enabled: AtomicBool::new(false),
+        }
     }
 
     /// Executes the given closure once the lock on the transaction is acquired.
@@ -269,6 +372,93 @@ where
             self.env().txn_manager().remove_active_read_transaction(self.inner.txn.txn);
         }
     }
+
+    /// Returns whether parallel writes mode is enabled.
+    ///
+    /// Always returns false for read-only transactions.
+    pub fn is_parallel_writes_enabled(&self) -> bool {
+        if K::IS_READ_ONLY {
+            false
+        } else {
+            self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    /// Commits all subtransactions serially.
+    ///
+    /// This is a no-op for read-only transactions or if subtxns already committed.
+    /// After calling this, `parallel_writes_enabled` is set to false to prevent
+    /// double-commit attempts.
+    pub fn commit_subtxns(&self) -> Result<()> {
+        if K::IS_READ_ONLY ||
+            !self.parallel_writes_enabled.swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Ok(());
+        }
+
+        let subtxns = self.subtxns.read();
+        for subtxn in subtxns.values() {
+            subtxn.commit()?;
+        }
+        Ok(())
+    }
+
+    /// Commits all subtransactions serially and returns their stats.
+    ///
+    /// Stats are collected BEFORE commit (commit invalidates the subtxn pointer).
+    /// Returns a vector of (dbi, stats) pairs for each subtransaction.
+    ///
+    /// This is a no-op for read-only transactions, returning an empty vector.
+    /// After calling this, `parallel_writes_enabled` is set to false to prevent
+    /// double-commit attempts.
+    pub fn commit_subtxns_with_stats(&self) -> Result<Vec<(ffi::MDBX_dbi, SubTransactionStats)>> {
+        if K::IS_READ_ONLY ||
+            !self.parallel_writes_enabled.swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Ok(Vec::new());
+        }
+
+        let subtxns = self.subtxns.read();
+        let mut stats_vec = Vec::with_capacity(subtxns.len());
+
+        let mut total_page_allocations = 0usize;
+        let mut total_refill_events = 0usize;
+        let mut total_initial_pages = 0usize;
+        let mut total_refill_pages = 0usize;
+        let mut total_unused = 0usize;
+        let mut total_from_gc = 0usize;
+        let mut total_from_eof = 0usize;
+
+        for subtxn in subtxns.values() {
+            let stats = subtxn.get_stats()?;
+            total_page_allocations += stats.arena_page_allocations;
+            total_refill_events += stats.arena_refill_events;
+            total_initial_pages += stats.arena_initial_pages;
+            total_refill_pages += stats.arena_refill_pages;
+            total_unused += stats.pages_unused;
+            total_from_gc += stats.pages_from_gc;
+            total_from_eof += stats.pages_from_eof;
+            subtxn.commit()?;
+            stats_vec.push((subtxn.dbi(), stats));
+        }
+
+        // Temporary debug output for stress testing
+        if !stats_vec.is_empty() {
+            let hit_rate = if total_page_allocations + total_refill_events > 0 {
+                (total_page_allocations as f64 /
+                    (total_page_allocations + total_refill_events) as f64) *
+                    100.0
+            } else {
+                0.0
+            };
+            eprintln!(
+                "[ARENA] subtxns={} page_allocations={} refill_events={} hit_rate={:.1}% initial_pages={} refill_pages={} unused={} from_gc={} from_eof={}",
+                stats_vec.len(), total_page_allocations, total_refill_events, hit_rate, total_initial_pages, total_refill_pages, total_unused, total_from_gc, total_from_eof
+            );
+        }
+
+        Ok(stats_vec)
+    }
 }
 
 impl<K> Clone for Transaction<K>
@@ -276,7 +466,13 @@ where
     K: TransactionKind,
 {
     fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
+        Self {
+            inner: Arc::clone(&self.inner),
+            subtxns: Arc::clone(&self.subtxns),
+            parallel_writes_enabled: AtomicBool::new(
+                self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst),
+            ),
+        }
     }
 }
 
@@ -534,6 +730,232 @@ impl Transaction<RW> {
             rx.recv().unwrap().map(|ptr| Self::new_from_ptr(self.env().clone(), ptr.0))
         })?
     }
+
+    /// Enables parallel writes mode by creating subtransactions for the given DBIs.
+    ///
+    /// Each DBI gets its own subtransaction that can be written to from a different thread.
+    /// Cursor operations on these DBIs will automatically use the corresponding subtransaction.
+    ///
+    /// This requires WRITEMAP mode to be enabled on the environment.
+    ///
+    /// # Arguments
+    /// * `dbis` - Slice of DBI handles to create subtransactions for.
+    ///
+    /// # Returns
+    /// Ok(()) on success, or an error if subtransaction creation fails.
+    pub fn enable_parallel_writes(&self, dbis: &[ffi::MDBX_dbi]) -> Result<()> {
+        let specs_with_hints: Vec<_> = dbis.iter().map(|&dbi| (dbi, 0usize)).collect();
+        self.enable_parallel_writes_with_hints(&specs_with_hints)
+    }
+
+    /// Enables parallel writes mode with arena size hints for specified DBIs.
+    ///
+    /// Similar to [`enable_parallel_writes`], but allows specifying an arena_hint
+    /// for each DBI to guide page pre-allocation. An arena_hint of 0 means use
+    /// equal distribution among all subtransactions.
+    ///
+    /// # Arguments
+    /// * `specs_input` - Slice of (DBI, arena_hint) tuples.
+    ///
+    /// # Returns
+    /// Ok(()) on success, or an error if subtransaction creation fails.
+    pub fn enable_parallel_writes_with_hints(
+        &self,
+        specs_input: &[(ffi::MDBX_dbi, usize)],
+    ) -> Result<()> {
+        if specs_input.is_empty() {
+            return Ok(());
+        }
+
+        // Check if already enabled
+        if self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::Incompatible);
+        }
+
+        // Debug: verify parent can read BEFORE subtxn creation
+        for &(dbi, _) in specs_input {
+            self.txn_execute(|txn| unsafe {
+                let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
+                let rc = ffi::mdbx_cursor_open(txn, dbi, &mut cursor);
+                if rc == 0 {
+                    ffi::mdbx_cursor_close(cursor);
+                }
+            })?;
+        }
+
+        // Pre-touch each DBI to ensure MAIN_DBI is dirty in parent.
+        // This prevents races in subtxns when they try to modify the B-tree.
+        // We do this by performing a put+delete operation which triggers cursor_touch/touch_dbi.
+        for &(dbi, _) in specs_input {
+            // Check if this is a DupSort table - they need special handling
+            let db_flags = self.db_flags(dbi)?;
+            let is_dupsort = db_flags.contains(DatabaseFlags::DUP_SORT);
+
+            self.txn_execute(|txn| unsafe {
+                let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
+                let rc = ffi::mdbx_cursor_open(txn, dbi, &mut cursor);
+                if rc != 0 {
+                    return;
+                }
+
+                // Use a max key to touch the DBI - this won't conflict with real data
+                // since it's well beyond any reasonable tx_num
+                let temp_key: [u8; 8] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+                let temp_data: [u8; 1] = [0];
+                let mut key = ffi::MDBX_val {
+                    iov_len: temp_key.len(),
+                    iov_base: temp_key.as_ptr() as *mut c_void,
+                };
+                let mut data = ffi::MDBX_val {
+                    iov_len: temp_data.len(),
+                    iov_base: temp_data.as_ptr() as *mut c_void,
+                };
+
+                // Put triggers cursor_touch which marks MAIN_DBI as dirty.
+                // For DupSort tables, use NODUPDATA to avoid adding duplicate entries
+                // and properly handle the case where the key+value already exists.
+                let put_flags = if is_dupsort { ffi::MDBX_NODUPDATA } else { 0 };
+                let put_rc = ffi::mdbx_cursor_put(cursor, &mut key, &mut data, put_flags);
+
+                // Delete the temp entry we just inserted (put_rc == 0 means success).
+                // MDBX_KEYEXIST (-30799) means the key (or key+value for DupSort) already
+                // exists, which still triggers the touch - no cleanup needed.
+                if put_rc == 0 {
+                    ffi::mdbx_cursor_del(cursor, 0);
+                }
+
+                ffi::mdbx_cursor_close(cursor);
+            })?;
+        }
+
+        // Create specs array for the C API
+        let specs: Vec<ffi::MDBX_subtxn_spec_t> = specs_input
+            .iter()
+            .map(|&(dbi, arena_hint)| ffi::MDBX_subtxn_spec_t { dbi, arena_hint })
+            .collect();
+
+        // Allocate space for subtransaction pointers
+        let mut subtxn_ptrs: Vec<*mut ffi::MDBX_txn> = vec![ptr::null_mut(); specs_input.len()];
+
+        // Create all subtransactions atomically
+        let create_result = self.txn_execute(|parent_txn| unsafe {
+            let rc = ffi::mdbx_txn_create_subtxns(
+                parent_txn,
+                specs.as_ptr(),
+                specs.len(),
+                subtxn_ptrs.as_mut_ptr(),
+            );
+            mdbx_result(rc)
+        });
+        create_result??;
+
+        // Store subtransactions in the map
+        {
+            let mut subtxns = self.subtxns.write();
+            for (i, &(dbi, _)) in specs_input.iter().enumerate() {
+                subtxns.insert(dbi, SubTransaction::new(subtxn_ptrs[i], dbi));
+            }
+        }
+
+        self.parallel_writes_enabled.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Gets the subtransaction pointer for the given DBI, if parallel writes is enabled.
+    ///
+    /// Returns the subtransaction pointer if one exists for this DBI, otherwise returns
+    /// a clone of the parent transaction pointer.
+    pub(crate) fn get_txn_ptr_for_dbi(&self, dbi: ffi::MDBX_dbi) -> TransactionPtr {
+        let parallel_enabled =
+            self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst);
+        if parallel_enabled {
+            let subtxns = self.subtxns.read();
+            if let Some(subtxn) = subtxns.get(&dbi) {
+                return subtxn.txn_ptr();
+            }
+        }
+        self.inner.txn.clone()
+    }
+
+    /// Aborts all subtransactions.
+    ///
+    /// This discards all changes made through subtransactions.
+    pub fn abort_subtxns(&self) -> Result<()> {
+        if !self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        let subtxns = self.subtxns.read();
+        for subtxn in subtxns.values() {
+            subtxn.abort()?;
+        }
+        Ok(())
+    }
+
+    /// Stores an item into a database, using the subtransaction if parallel writes is enabled.
+    ///
+    /// This is the parallel-writes-aware version of `put`.
+    pub fn put_parallel(
+        &self,
+        dbi: ffi::MDBX_dbi,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+        flags: WriteFlags,
+    ) -> Result<()> {
+        let key = key.as_ref();
+        let data = data.as_ref();
+        let key_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let mut data_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
+
+        let txn_ptr = self.get_txn_ptr_for_dbi(dbi);
+        mdbx_result(txn_ptr.txn_execute_fail_on_timeout(|txn| unsafe {
+            ffi::mdbx_put(txn, dbi, &key_val, &mut data_val, flags.bits())
+        })?)?;
+
+        Ok(())
+    }
+
+    /// Deletes an item from a database, using the subtransaction if parallel writes is enabled.
+    ///
+    /// This is the parallel-writes-aware version of `del`.
+    pub fn del_parallel(
+        &self,
+        dbi: ffi::MDBX_dbi,
+        key: impl AsRef<[u8]>,
+        data: Option<&[u8]>,
+    ) -> Result<bool> {
+        let key = key.as_ref();
+        let key_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let data_val: Option<ffi::MDBX_val> = data.map(|data| ffi::MDBX_val {
+            iov_len: data.len(),
+            iov_base: data.as_ptr() as *mut c_void,
+        });
+
+        let txn_ptr = self.get_txn_ptr_for_dbi(dbi);
+        mdbx_result(txn_ptr.txn_execute_fail_on_timeout(|txn| {
+            if let Some(d) = data_val {
+                unsafe { ffi::mdbx_del(txn, dbi, &key_val, &d) }
+            } else {
+                unsafe { ffi::mdbx_del(txn, dbi, &key_val, ptr::null()) }
+            }
+        })?)
+        .map(|_| true)
+        .or_else(|e| match e {
+            Error::NotFound => Ok(false),
+            other => Err(other),
+        })
+    }
+
+    /// Opens a cursor on the given DBI, using the subtransaction if parallel writes is enabled.
+    ///
+    /// This is the parallel-writes-aware version of `cursor_with_dbi`.
+    pub fn cursor_with_dbi_parallel(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<RW>> {
+        let txn_ptr = self.get_txn_ptr_for_dbi(dbi);
+        Cursor::new_with_ptr(self.clone(), dbi, txn_ptr)
+    }
 }
 
 /// A shareable pointer to an MDBX transaction.
@@ -553,6 +975,11 @@ impl TransactionPtr {
             timed_out: Arc::new(AtomicBool::new(false)),
             lock: Arc::new(Mutex::new(())),
         }
+    }
+
+    /// Returns the raw transaction pointer.
+    pub(crate) fn as_ptr(&self) -> *mut ffi::MDBX_txn {
+        self.txn
     }
 
     /// Returns `true` if the transaction is timed out.
