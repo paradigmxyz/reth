@@ -644,6 +644,8 @@ where
             .with_push_gateway(
                 self.node_config().metrics.push_gateway_url.clone(),
                 self.node_config().metrics.push_gateway_interval,
+                self.node_config().metrics.push_gateway_username.clone(),
+                self.node_config().metrics.push_gateway_password.clone(),
             );
 
             MetricServer::new(config).serve().await?;
