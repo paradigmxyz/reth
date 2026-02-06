@@ -968,14 +968,16 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn flush_and_compact(&self) -> ProviderResult<()> {
-        self.flush(ROCKSDB_TABLES)?;
-
         let db = self.0.db_rw();
 
-        for cf_name in ROCKSDB_TABLES {
-            if let Some(cf) = db.cf_handle(cf_name) {
-                db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
-            }
+        for cf in db.cf_handles() {
+            db.flush_cf(cf)?;
+        }
+
+        db.sync_wal()?;
+
+        for cf in db.cf_handles() {
+            db.compact_range_cf(cf, None::<&[u8]>, None::<&[u8]>)?;
         }
 
         Ok(())
@@ -4028,5 +4030,8 @@ mod tests {
 
         let shards2 = provider.storage_history_shards(addr, slot2).unwrap();
         assert_eq!(shards2[0].1.iter().collect::<Vec<_>>(), vec![15, 25]);
+    }
+}
+]);
     }
 }
