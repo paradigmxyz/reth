@@ -2871,7 +2871,7 @@ impl SparseSubtrie {
     /// # Panics
     ///
     /// If the node at the root path does not exist.
-    #[instrument(level = "debug", target = "trie::parallel_sparse", skip_all, fields(root = ?self.path), ret)]
+    #[instrument(level = "trace", target = "trie::parallel_sparse", skip_all, fields(root = ?self.path), ret)]
     fn update_hashes(
         &mut self,
         prefix_set: &mut PrefixSet,
