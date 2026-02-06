@@ -14,12 +14,6 @@ on:
         required: false
         type: boolean
         default: true
-      tag_op_reth:
-        description: 'Tag op-reth image as latest'
-        required: false
-        type: boolean
-        default: false
-
 env:
   DOCKER_USERNAME: ${{ github.actor }}
 
@@ -47,27 +41,3 @@ jobs:
       - name: Push reth latest tag
         run: |
           docker push ghcr.io/${{ github.repository_owner }}/reth:latest
-
-  tag-op-reth-latest:
-    name: Tag op-reth as latest
-    runs-on: ubuntu-24.04
-    if: ${{ inputs.tag_op_reth }}
-    permissions:
-      packages: write
-      contents: read
-    steps:
-      - name: Log in to Docker
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username ${DOCKER_USERNAME} --password-stdin
-
-      - name: Pull op-reth release image
-        run: |
-          docker pull ghcr.io/${{ github.repository_owner }}/op-reth:${{ inputs.version }}
-
-      - name: Tag op-reth as latest
-        run: |
-          docker tag ghcr.io/${{ github.repository_owner }}/op-reth:${{ inputs.version }} ghcr.io/${{ github.repository_owner }}/op-reth:latest
-
-      - name: Push op-reth latest tag
-        run: |
-          docker push ghcr.io/${{ github.repository_owner }}/op-reth:latest
