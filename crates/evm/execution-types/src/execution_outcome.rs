@@ -320,6 +320,14 @@ impl<T> ExecutionOutcome<T> {
             return (None, self)
         }
 
+        let last_block = self.last_block();
+        if at < self.first_block || at > last_block {
+            panic!(
+                "target block number {} is not included in the state block range [{}, {}]",
+                at, self.first_block, last_block
+            );
+        }
+
         let (mut lower_state, mut higher_state) = (self.clone(), self);
 
         // Revert lower state to [..at].
