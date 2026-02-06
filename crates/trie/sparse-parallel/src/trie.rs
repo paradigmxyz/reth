@@ -1169,7 +1169,7 @@ impl SparseTrieExt for ParallelSparseTrie {
             .unwrap_or(effective_pruned_roots.len());
 
         let roots_upper = &effective_pruned_roots[..num_upper_roots];
-        let roots_lower = &effective_pruned_roots[num_upper_roots..];
+        let _roots_lower = &effective_pruned_roots[num_upper_roots..];
 
         debug_assert!(
             {
@@ -1194,36 +1194,51 @@ impl SparseTrieExt for ParallelSparseTrie {
             }
         }
 
-        // Upper subtrie: prune nodes and values
-        self.upper_subtrie.nodes.retain(|p, _| !is_strict_descendant_in(roots_upper, p));
-        self.upper_subtrie.inner.values.retain(|p, _| {
-            !starts_with_pruned_in(roots_upper, p) && !starts_with_pruned_in(roots_lower, p)
-        });
+        // Targeted subtree deletion via trie-structure DFS.
+        // Instead of scanning entire HashMaps with retain(), we walk the trie structure
+        // from each pruned root to collect only the descendant paths, then remove them.
+        // Cost is O(pruned_nodes) instead of O(total_nodes).
+        let mut node_paths: SmallVec<[Nibbles; 64]> = SmallVec::new();
+        let mut value_paths: SmallVec<[Nibbles; 64]> = SmallVec::new();
 
-        // Process lower subtries using chunk_by to group roots by subtrie
-        for roots_group in roots_lower.chunk_by(|(path_a, _), (path_b, _)| {
-            SparseSubtrieType::from_path(path_a) == SparseSubtrieType::from_path(path_b)
-        }) {
-            let subtrie_idx = path_subtrie_index_unchecked(&roots_group[0].0);
+        for (root_path, _) in &effective_pruned_roots {
+            let is_upper_root = SparseSubtrieType::path_len_is_upper(root_path.len());
 
-            // Skip unrevealed/blinded subtries - nothing to prune
-            let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() else {
-                continue;
-            };
-
-            // Retain only nodes/values not descended from any pruned root.
-            subtrie.nodes.retain(|p, _| !is_strict_descendant_in(roots_group, p));
-            subtrie.inner.values.retain(|p, _| !starts_with_pruned_in(roots_group, p));
-        }
-
-        // Branch node masks pruning
-        self.branch_node_masks.retain(|p, _| {
-            if SparseSubtrieType::path_len_is_upper(p.len()) {
-                !starts_with_pruned_in(roots_upper, p)
+            if is_upper_root {
+                // DFS through upper subtrie nodes to find all descendants
+                collect_subtree_descendants_via_dfs(
+                    &self.upper_subtrie.nodes,
+                    root_path,
+                    &mut node_paths,
+                    &mut value_paths,
+                );
+                for p in node_paths.drain(..) {
+                    self.upper_subtrie.nodes.remove(&p);
+                }
+                for p in value_paths.drain(..) {
+                    self.upper_subtrie.inner.values.remove(&p);
+                    self.branch_node_masks.remove(&p);
+                }
             } else {
-                !starts_with_pruned_in(roots_lower, p) && !starts_with_pruned_in(roots_upper, p)
+                let subtrie_idx = path_subtrie_index_unchecked(root_path);
+                if let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() {
+                    collect_subtree_descendants_via_dfs(
+                        &subtrie.nodes,
+                        root_path,
+                        &mut node_paths,
+                        &mut value_paths,
+                    );
+                    for p in node_paths.drain(..) {
+                        subtrie.nodes.remove(&p);
+                    }
+                    for p in value_paths.drain(..) {
+                        subtrie.inner.values.remove(&p);
+                        self.upper_subtrie.inner.values.remove(&p);
+                        self.branch_node_masks.remove(&p);
+                    }
+                }
             }
-        });
+        }
 
         nodes_converted
     }
@@ -3420,42 +3435,46 @@ fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
     idx
 }
 
-/// Checks if `path` is a strict descendant of any root in a sorted slice.
-///
-/// Uses binary search to find the candidate root that could be an ancestor.
-/// Returns `true` if `path` starts with a root and is longer (strict descendant).
-fn is_strict_descendant_in(roots: &[(Nibbles, B256)], path: &Nibbles) -> bool {
-    if roots.is_empty() {
-        return false;
-    }
-    debug_assert!(roots.windows(2).all(|w| w[0].0 <= w[1].0), "roots must be sorted by path");
-    let idx = roots.partition_point(|(root, _)| root <= path);
-    if idx > 0 {
-        let candidate = &roots[idx - 1].0;
-        if path.starts_with(candidate) && path.len() > candidate.len() {
-            return true;
-        }
-    }
-    false
-}
+/// Walks the trie structure from `root` to collect all descendant node paths and value
+/// (leaf) paths. Uses DFS through the node graph rather than scanning the entire map.
+fn collect_subtree_descendants_via_dfs(
+    nodes: &HashMap<Nibbles, SparseNode>,
+    root: &Nibbles,
+    node_paths: &mut SmallVec<[Nibbles; 64]>,
+    value_paths: &mut SmallVec<[Nibbles; 64]>,
+) {
+    let mut stack: SmallVec<[Nibbles; 32]> = SmallVec::new();
+    stack.push(*root);
 
-/// Checks if `path` starts with any root in a sorted slice (inclusive).
-///
-/// Uses binary search to find the candidate root that could be a prefix.
-/// Returns `true` if `path` starts with a root (including exact match).
-fn starts_with_pruned_in(roots: &[(Nibbles, B256)], path: &Nibbles) -> bool {
-    if roots.is_empty() {
-        return false;
-    }
-    debug_assert!(roots.windows(2).all(|w| w[0].0 <= w[1].0), "roots must be sorted by path");
-    let idx = roots.partition_point(|(root, _)| root <= path);
-    if idx > 0 {
-        let candidate = &roots[idx - 1].0;
-        if path.starts_with(candidate) {
-            return true;
+    while let Some(path) = stack.pop() {
+        let Some(node) = nodes.get(&path) else { continue };
+        if path != *root {
+            node_paths.push(path);
+        }
+        match node {
+            SparseNode::Leaf { key, .. } => {
+                let mut leaf_path = path;
+                leaf_path.extend(key);
+                value_paths.push(leaf_path);
+            }
+            SparseNode::Extension { key, .. } => {
+                let mut child = path;
+                child.extend(key);
+                stack.push(child);
+            }
+            SparseNode::Branch { state_mask, .. } => {
+                let mut mask = state_mask.get();
+                while mask != 0 {
+                    let nibble = mask.trailing_zeros() as u8;
+                    mask &= mask - 1;
+                    let mut child = path;
+                    child.push_unchecked(nibble);
+                    stack.push(child);
+                }
+            }
+            SparseNode::Empty | SparseNode::Hash(_) => {}
         }
     }
-    false
 }
 
 /// Used by lower subtries to communicate updates to the top-level [`SparseTrieUpdates`] set.
