@@ -239,32 +239,39 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            // Perform all cache operations atomically under the lock
-            execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its usage
-                // guard
-                let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
-                let new_cache = SavedCache::new(hash, caches, cache_metrics)
-                    .with_disable_cache_metrics(disable_cache_metrics);
 
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
-                    // Clear the cache on error to prevent having a polluted cache
+            // Phase 1: Prepare the new cache outside the write lock.
+            //
+            // `insert_state` and `update_metrics` use interior mutability on
+            // Arc-wrapped fixed-caches and atomic metric handles, so they do not
+            // require the PayloadExecutionCache write lock. Performing them here
+            // avoids blocking `get_cache_for` readers and other tasks that need
+            // concurrent cache access.
+            let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
+            let new_cache = SavedCache::new(hash, caches, cache_metrics)
+                .with_disable_cache_metrics(disable_cache_metrics);
+
+            if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                execution_cache.update_with_guard(|cached| {
                     *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
-                }
+                });
+                debug!(target: "engine::caching", "cleared execution cache on update error");
 
-                new_cache.update_metrics();
+                metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
+                return;
+            }
 
-                if valid_block_rx.recv().is_ok() {
-                    // Replace the shared cache with the new one; the previous cache (if any) is
-                    // dropped.
+            new_cache.update_metrics();
+
+            // Wait for block validation outside the lock so readers are not
+            // blocked while the state root is being computed.
+            let is_valid = valid_block_rx.recv().is_ok();
+
+            // Phase 2: Swap the cache pointer under the write lock.
+            execution_cache.update_with_guard(|cached| {
+                if is_valid {
                     *cached = Some(new_cache);
                 } else {
-                    // Block was invalid; caches were already mutated by insert_state above,
-                    // so we must clear to prevent using polluted state
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on invalid block");
                 }
