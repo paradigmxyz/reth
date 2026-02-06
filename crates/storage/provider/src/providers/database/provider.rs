@@ -1025,10 +1025,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 
         let tx_range = body.tx_num_range();
 
-        let (transactions, senders) = if tx_range.is_empty() {
-            (vec![], vec![])
+        let transactions = if tx_range.is_empty() {
+            vec![]
         } else {
-            (self.transactions_by_tx_range(tx_range.clone())?, self.senders_by_tx_range(tx_range)?)
+            self.transactions_by_tx_range(tx_range.clone())?
         };
 
         let body = self
@@ -1037,6 +1037,25 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             .read_block_bodies(self, vec![(header.as_ref(), transactions)])?
             .pop()
             .ok_or(ProviderError::InvalidStorageOutput)?;
+
+        let senders = if tx_range.is_empty() {
+            vec![]
+        } else {
+            let known_senders: HashMap<TxNumber, Address> =
+                EitherReader::new_senders(self)?.senders_by_tx_range(tx_range.clone())?;
+
+            let mut senders = Vec::with_capacity(body.transactions().len());
+            for (tx_num, tx) in tx_range.zip(body.transactions()) {
+                match known_senders.get(&tx_num) {
+                    None => {
+                        let sender = tx.recover_signer_unchecked()?;
+                        senders.push(sender);
+                    }
+                    Some(sender) => senders.push(*sender),
+                }
+            }
+            senders
+        };
 
         construct_block(header, body, senders)
     }
