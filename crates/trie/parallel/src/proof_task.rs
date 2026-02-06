@@ -539,9 +539,11 @@ where
 
         let proof_start = Instant::now();
 
-        // If targets is empty it means the caller only wants the root hash.
+        // If targets is empty it means the caller only wants the root node.
         let (proof, root) = if targets.is_empty() {
-            (Vec::new(), Some(calculator.storage_root(hashed_address)?))
+            let root_node = calculator.storage_root_node(hashed_address)?;
+            let root = calculator.compute_root_hash(std::slice::from_ref(&root_node))?;
+            (vec![root_node], root)
         } else {
             let proof = calculator.storage_proof(hashed_address, &mut targets)?;
             let root = calculator.compute_root_hash(&proof)?;

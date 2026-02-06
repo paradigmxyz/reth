@@ -13,7 +13,7 @@ use crate::{
 };
 use alloy_primitives::{keccak256, B256, U256};
 use alloy_rlp::Encodable;
-use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
+use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{BranchNode, BranchNodeMasks, Nibbles, ProofTrieNode, RlpNode, TrieNode};
 use std::cmp::Ordering;
@@ -1363,11 +1363,12 @@ where
         Ok(Some(root_hash))
     }
 
-    /// Calculates the hash of the root node of the trie.
+    /// Calculates the root node of the trie.
     ///
-    /// This method does not accept targets nor retain proofs.
+    /// This method does not accept targets nor retain proofs. Returns the root node which can
+    /// be used to compute the root hash via [`Self::compute_root_hash`].
     #[instrument(target = TRACE_TARGET, level = "trace", skip(self, value_encoder))]
-    pub fn root(&mut self, value_encoder: &mut VE) -> Result<B256, StateProofError> {
+    pub fn root_node(&mut self, value_encoder: &mut VE) -> Result<ProofTrieNode, StateProofError> {
         // Initialize the variables which track the state of the two cursors. Both indicate the
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
@@ -1386,16 +1387,24 @@ where
 
         // proof_subtrie will retain the root node if retain_proof is true, regardless of if there
         // are any targets.
-        let proofs = core::mem::take(&mut self.retained_proofs);
+        let mut proofs = core::mem::take(&mut self.retained_proofs);
         trace!(
             target: TRACE_TARGET,
             proofs_len = ?proofs.len(),
-            "root: calculating root",
+            "root_node: extracting root",
         );
 
-        Ok(self
-            .compute_root_hash(&proofs)?
-            .expect("prefix is empty and retain_root is true, so there must be a root node"))
+        // The root node is at the empty path - it must exist since retain_root is true. Otherwise
+        // targets was empty, so there should be no other retained proofs.
+        debug_assert_eq!(
+            proofs.len(), 1,
+            "prefix is empty, retain_root is true, and targets is empty, so there must be only the root node"
+        );
+
+        // Find and remove the root node (node at empty path)
+        let root_node = proofs.pop().expect("prefix is empty, retain_root is true, and targets is empty, so there must be only the root node");
+
+        Ok(root_node)
     }
 }
 
@@ -1447,15 +1456,23 @@ where
         self.proof_inner(&mut storage_value_encoder, targets)
     }
 
-    /// Calculates the hash of the root node of a storage trie.
+    /// Calculates the root node of a storage trie.
     ///
-    /// This method does not accept targets nor retain proofs.
+    /// This method does not accept targets nor retain proofs. Returns the root node which can
+    /// be used to compute the root hash via [`Self::compute_root_hash`].
     #[instrument(target = TRACE_TARGET, level = "trace", skip(self))]
-    pub fn storage_root(&mut self, hashed_address: B256) -> Result<B256, StateProofError> {
+    pub fn storage_root_node(
+        &mut self,
+        hashed_address: B256,
+    ) -> Result<ProofTrieNode, StateProofError> {
         self.hashed_cursor.set_hashed_address(hashed_address);
 
         if self.hashed_cursor.is_storage_empty()? {
-            return Ok(EMPTY_ROOT_HASH)
+            return Ok(ProofTrieNode {
+                path: Nibbles::default(),
+                node: TrieNode::EmptyRoot,
+                masks: None,
+            })
         }
 
         // Don't call `set_hashed_address` on the trie cursor until after the previous shortcut has
@@ -1464,7 +1481,7 @@ where
 
         // Create a mutable storage value encoder
         let mut storage_value_encoder = StorageValueEncoder;
-        self.root(&mut storage_value_encoder)
+        self.root_node(&mut storage_value_encoder)
     }
 }
 
@@ -1774,22 +1791,25 @@ mod tests {
             // Basic comparison: both should succeed and produce identical results
             pretty_assertions::assert_eq!(proof_legacy_nodes, proof_v2_result);
 
-            Ok(())
-        }
-
-        /// Asserts that `ProofCalculator::root` produces the same root as `StateRoot`.
-        fn assert_root(&self) -> Result<(), StateProofError> {
+            // Also test root_node - get a fresh calculator and verify it returns the root node
+            // that hashes to the expected root
             let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
             let hashed_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
-
             let mut value_encoder = SyncAccountValueEncoder::new(
                 self.trie_cursor_factory.clone(),
                 self.hashed_cursor_factory.clone(),
             );
             let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
-            let root = proof_calculator.root(&mut value_encoder)?;
+            let root_node = proof_calculator.root_node(&mut value_encoder)?;
 
-            pretty_assertions::assert_eq!(self.expected_root, root);
+            // The root node should be at the empty path
+            assert!(root_node.path.is_empty(), "root_node should return node at empty path");
+
+            // The hash of the root node should match the expected root from legacy StateRoot
+            let root_hash = proof_calculator
+                .compute_root_hash(std::slice::from_ref(&root_node))?
+                .expect("root_node returns a node at empty path");
+            pretty_assertions::assert_eq!(self.expected_root, root_hash);
 
             Ok(())
         }
@@ -1880,7 +1900,6 @@ mod tests {
                 reth_tracing::init_test_tracing();
                 let harness = ProofTestHarness::new(post_state);
 
-                harness.assert_root().expect("Root calculation failed");
                 harness.assert_proof(targets).expect("Proof generation failed");
             }
         }
