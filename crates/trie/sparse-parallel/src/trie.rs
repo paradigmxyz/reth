@@ -220,6 +220,11 @@ impl SparseTrie for ParallelSparseTrie {
             for node in lower_nodes {
                 let idx = path_subtrie_index_unchecked(&node.path);
                 if !reachable_subtries.get(idx) {
+                    trace!(
+                        target: "trie::parallel_sparse",
+                        reveal_path = ?node.path,
+                        "Node's lower subtrie is not reachable, skipping",
+                    );
                     continue;
                 }
                 self.lower_subtries[idx].reveal(&node.path);
@@ -263,6 +268,11 @@ impl SparseTrie for ParallelSparseTrie {
                         );
 
                     if !reachable_subtries.get(idx) {
+                        trace!(
+                            target: "trie::parallel_sparse",
+                            nodes = ?nodes,
+                            "Lower subtrie is not reachable, skipping reveal",
+                        );
                         return None;
                     }
 
