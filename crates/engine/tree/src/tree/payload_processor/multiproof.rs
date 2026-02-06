@@ -982,6 +982,39 @@ impl MultiProofTask {
             .filter(|proof| !proof.is_empty())
     }
 
+    /// Processes a single proof result message.
+    /// Returns `Err` if the proof calculation failed.
+    fn process_proof_result(
+        &mut self,
+        proof_result: ProofResultMessage,
+        batch_metrics: &mut MultiproofBatchMetrics,
+    ) -> Result<(), ()> {
+        batch_metrics.proofs_processed += 1;
+        self.metrics.proof_calculation_duration_histogram.record(proof_result.elapsed);
+        self.multiproof_manager.on_calculation_complete();
+
+        match proof_result.result {
+            Ok(proof_result_data) => {
+                trace!(
+                    target: "engine::tree::payload_processor::multiproof",
+                    sequence = proof_result.sequence_number,
+                    total_proofs = batch_metrics.proofs_processed,
+                    "Processing calculated proof from worker"
+                );
+                let update =
+                    SparseTrieUpdate { state: proof_result.state, multiproof: proof_result_data };
+                if let Some(combined_update) = self.on_proof(proof_result.sequence_number, update) {
+                    let _ = self.to_sparse_trie.send(combined_update);
+                }
+                Ok(())
+            }
+            Err(error) => {
+                error!(target: "engine::tree::payload_processor::multiproof", ?error, "proof calculation error from worker");
+                Err(())
+            }
+        }
+    }
+
     /// Processes a multiproof message, batching consecutive prefetch messages.
     ///
     /// For prefetch messages, drains queued prefetch messages and merges them into one batch before
@@ -1257,39 +1290,20 @@ impl MultiProofTask {
             crossbeam_channel::select_biased! {
                 recv(self.proof_result_rx) -> proof_msg => {
                     match proof_msg {
-                        Ok(proof_result) => {
-                            batch_metrics.proofs_processed += 1;
+                        Ok(first_result) => {
+                            if self.process_proof_result(first_result, &mut batch_metrics).is_err() {
+                                return
+                            }
 
-                            self.metrics
-                                .proof_calculation_duration_histogram
-                                .record(proof_result.elapsed);
-
-                            self.multiproof_manager.on_calculation_complete();
-
-                            // Convert ProofResultMessage to SparseTrieUpdate
-                            match proof_result.result {
-                                Ok(proof_result_data) => {
-                                    trace!(
-                                        target: "engine::tree::payload_processor::multiproof",
-                                        sequence = proof_result.sequence_number,
-                                        total_proofs = batch_metrics.proofs_processed,
-                                        "Processing calculated proof from worker"
-                                    );
-
-                                    let update = SparseTrieUpdate {
-                                        state: proof_result.state,
-                                        multiproof: proof_result_data,
-                                    };
-
-                                    if let Some(combined_update) =
-                                        self.on_proof(proof_result.sequence_number, update)
-                                    {
-                                        let _ = self.to_sparse_trie.send(combined_update);
+                            const MAX_PROOF_BATCH: usize = 64;
+                            for _ in 1..MAX_PROOF_BATCH {
+                                match self.proof_result_rx.try_recv() {
+                                    Ok(proof_result) => {
+                                        if self.process_proof_result(proof_result, &mut batch_metrics).is_err() {
+                                            return
+                                        }
                                     }
-                                }
-                                Err(error) => {
-                                    error!(target: "engine::tree::payload_processor::multiproof", ?error, "proof calculation error from worker");
-                                    return
+                                    Err(_) => break,
                                 }
                             }
 
