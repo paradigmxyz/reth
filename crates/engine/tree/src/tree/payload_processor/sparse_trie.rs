@@ -413,6 +413,14 @@ where
                 self.account_updates.is_empty() &&
                 self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
             {
+                debug!(
+                    target: "engine::root",
+                    updates = self.updates.len(),
+                    pending_account_updates = self.pending_account_updates.len(),
+                    new_account_updates = self.new_account_updates.len(),
+                    new_storage_updates = self.new_storage_updates.values().flatten().count(),
+                    "All updates processed, ending calculation"
+                );
                 break;
             }
         }
