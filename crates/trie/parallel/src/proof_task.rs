@@ -942,6 +942,10 @@ where
                 }
             }
 
+            // Apply debug jitter if configured (helps trigger timing-related bugs)
+            #[cfg(feature = "debug-jitter")]
+            crate::jitter::maybe_apply_jitter(self.worker_id, "storage");
+
             // Mark worker as available again.
             self.available_workers.fetch_add(1, Ordering::Relaxed);
 
@@ -1271,6 +1275,10 @@ where
                     );
                 }
             }
+
+            // Apply debug jitter if configured (helps trigger timing-related bugs)
+            #[cfg(feature = "debug-jitter")]
+            crate::jitter::maybe_apply_jitter(self.worker_id, "account");
 
             // Mark worker as available again.
             self.available_workers.fetch_add(1, Ordering::Relaxed);
