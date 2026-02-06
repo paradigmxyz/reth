@@ -1005,10 +1005,13 @@ impl SparseTrieTrait for SerialSparseTrie {
     }
 
     fn wipe(&mut self) {
-        self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
-        self.values = HashMap::default();
+        self.nodes.clear();
+        self.nodes.insert(Nibbles::default(), SparseNode::Empty);
+        self.values.clear();
+        self.branch_node_masks.clear();
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
+        self.rlp_buf.clear();
     }
 
     fn clear(&mut self) {
@@ -1670,7 +1673,7 @@ impl SerialSparseTrie {
 
                     let mut tree_mask = TrieMask::default();
                     let mut hash_mask = TrieMask::default();
-                    let mut hashes = Vec::new();
+                    buffers.branch_hashes_buf.clear();
 
                     // Lazy lookup for branch node masks - shared across loop iterations
                     let mut path_masks_storage = None;
@@ -1721,7 +1724,7 @@ impl SerialSparseTrie {
                                 });
                                 if let Some(hash) = hash {
                                     hash_mask.set_bit(last_child_nibble);
-                                    hashes.push(hash);
+                                    buffers.branch_hashes_buf.push(hash);
                                 }
                             }
 
@@ -1772,12 +1775,12 @@ impl SerialSparseTrie {
                         if store_in_db_trie {
                             // Store in DB trie if there are either any children that are stored in
                             // the DB trie, or any children represent hashed values
-                            hashes.reverse();
+                            buffers.branch_hashes_buf.reverse();
                             let branch_node = BranchNodeCompact::new(
                                 *state_mask,
                                 tree_mask,
                                 hash_mask,
-                                hashes,
+                                core::mem::take(&mut buffers.branch_hashes_buf),
                                 hash.filter(|_| path.is_empty()),
                             );
                             updates.updated_nodes.insert(path, branch_node);
@@ -2024,6 +2027,8 @@ pub struct RlpNodeBuffers {
     branch_child_buf: Vec<Nibbles>,
     /// Reusable branch value stack
     branch_value_stack_buf: Vec<RlpNode>,
+    /// Reusable buffer for branch node hashes during update retention
+    branch_hashes_buf: Vec<B256>,
 }
 
 impl RlpNodeBuffers {
@@ -2038,6 +2043,7 @@ impl RlpNodeBuffers {
             rlp_node_stack: Vec::new(),
             branch_child_buf: Vec::new(),
             branch_value_stack_buf: Vec::new(),
+            branch_hashes_buf: Vec::new(),
         }
     }
 }

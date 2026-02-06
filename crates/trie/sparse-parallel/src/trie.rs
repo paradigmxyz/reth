@@ -945,6 +945,7 @@ impl SparseTrie for ParallelSparseTrie {
         }
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
+        self.branch_node_masks.clear();
         self.subtrie_heat.clear();
     }
 
@@ -2072,6 +2073,13 @@ impl ParallelSparseTrie {
         node: &TrieNode,
         masks: Option<BranchNodeMasks>,
     ) -> SparseTrieResult<()> {
+        // If the node is already revealed in the upper subtrie, skip revealing it and its
+        // children entirely. This avoids redundant work when proof nodes are re-revealed
+        // (e.g., when skip_proof_node_filtering is enabled for sparse trie cache reuse).
+        if self.upper_subtrie.nodes.get(&path).is_some_and(|n| !n.is_hash()) {
+            return Ok(())
+        }
+
         // If there is no subtrie for the path it means the path is UPPER_TRIE_MAX_DEPTH or less
         // nibbles, and so belongs to the upper trie.
         self.upper_subtrie.reveal_node(path, node, masks)?;
@@ -2847,7 +2855,8 @@ impl SparseSubtrie {
     /// Removes all nodes and values from the subtrie, resetting it to a blank state
     /// with only an empty root node. This is used when a storage root is deleted.
     fn wipe(&mut self) {
-        self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
+        self.nodes.clear();
+        self.nodes.insert(Nibbles::default(), SparseNode::Empty);
         self.inner.clear();
     }
 
