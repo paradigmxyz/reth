@@ -960,11 +960,10 @@ mod tests {
         provider.canonical_in_memory_state.update_chain(chain);
 
         // Get canonical, safe, and finalized blocks
-        let blocks = database_blocks.iter().chain(in_memory_blocks.iter()).collect::<Vec<_>>();
-        let block_count = blocks.len();
-        let canonical_block = blocks.get(block_count - 1).unwrap();
-        let safe_block = blocks.get(block_count - 2).unwrap();
-        let finalized_block = blocks.get(block_count - 3).unwrap();
+        let mut iter = &mut database_blocks.iter().chain(in_memory_blocks.iter()).rev();
+        let canonical_block = iter.next().unwrap();
+        let safe_block = iter.next().unwrap();
+        let finalized_block = iter.next().unwrap();
 
         // Set the canonical head, safe, and finalized blocks
         provider.set_canonical_head(canonical_block.clone_sealed_header());
