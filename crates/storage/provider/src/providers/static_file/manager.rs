@@ -944,7 +944,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
 
             debug!(
-                target: "provider::static_file",
+                target: "providers::static_file",
                 ?segment,
                 ?block_height,
                 "Deleting static file below block"
@@ -953,7 +953,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             // now we need to wipe the static file, this will take care of updating the index and
             // advance the lowest tracked block height for the segment.
             let header = self.delete_jar(segment, block_height).inspect_err(|err| {
-                warn!( target: "provider::static_file", ?segment, %block_height, ?err, "Failed to delete static file below block")
+                warn!( target: "providers::static_file", ?segment, %block_height, ?err, "Failed to delete static file below block")
             })?;
 
             deleted_headers.push(header);
@@ -979,7 +979,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         } else {
             let file = self.path.join(segment.filename(&fixed_block_range));
             debug!(
-                target: "provider::static_file",
+                target: "providers::static_file",
                 ?file,
                 ?fixed_block_range,
                 ?block,
@@ -1010,14 +1010,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         while let Some(block_height) = self.get_highest_static_file_block(segment) {
             debug!(
-                target: "provider::static_file",
+                target: "providers::static_file",
                 ?segment,
                 ?block_height,
                 "Deleting static file jar"
             );
 
             let header = self.delete_jar(segment, block_height).inspect_err(|err| {
-                warn!(target: "provider::static_file", ?segment, %block_height, ?err, "Failed to delete static file jar")
+                warn!(target: "providers::static_file", ?segment, %block_height, ?err, "Failed to delete static file jar")
             })?;
 
             deleted_headers.push(header);
@@ -1037,12 +1037,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let key = (fixed_block_range.end(), segment);
 
         // Avoid using `entry` directly to avoid a write lock in the common case.
-        trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Getting provider");
+        trace!(target: "providers::static_file", ?segment, ?fixed_block_range, "Getting provider");
         let mut provider: StaticFileJarProvider<'_, N> = if let Some(jar) = self.map.get(&key) {
-            trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Jar found in cache");
+            trace!(target: "providers::static_file", ?segment, ?fixed_block_range, "Jar found in cache");
             jar.into()
         } else {
-            trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
+            trace!(target: "providers::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
             let jar = NippyJar::load(&path).map_err(ProviderError::other)?;
             self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
@@ -1117,7 +1117,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment_max_block: Option<BlockNumber>,
     ) -> ProviderResult<()> {
         debug!(
-            target: "provider::static_file",
+            target: "providers::static_file",
             ?segment,
             ?segment_max_block,
             "Updating provider index"
@@ -1229,20 +1229,20 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 }
 
                 // Update the cached provider.
-                debug!(target: "provider::static_file", ?segment, "Inserting updated jar into cache");
+                debug!(target: "providers::static_file", ?segment, "Inserting updated jar into cache");
                 self.map.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
 
                 // Delete any cached provider that no longer has an associated jar.
-                debug!(target: "provider::static_file", ?segment, "Cleaning up jar map");
+                debug!(target: "providers::static_file", ?segment, "Cleaning up jar map");
                 self.map.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
             }
             None => {
-                debug!(target: "provider::static_file", ?segment, "Removing segment from index");
+                debug!(target: "providers::static_file", ?segment, "Removing segment from index");
                 indexes.remove(segment);
             }
         };
 
-        debug!(target: "provider::static_file", ?segment, "Updated provider index");
+        debug!(target: "providers::static_file", ?segment, "Updated provider index");
         Ok(())
     }
 
@@ -2347,7 +2347,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
             return Err(ProviderError::ReadOnlyStaticFileAccess);
         }
 
-        trace!(target: "provider::static_file", ?block, ?segment, "Getting static file writer.");
+        trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
         self.writers.get_or_create(segment, || {
             StaticFileProviderRW::new(segment, block, Arc::downgrade(&self.0), self.metrics.clone())
         })
@@ -2449,7 +2449,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
                 // This is not expected but means we are out of the range / file somehow, and can't
                 // continue
                 debug!(
-                    target: "provider::static_file",
+                    target: "providers::static_file",
                     ?low,
                     ?mid,
                     ?high,
@@ -2568,7 +2568,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
                 }
             } else {
                 debug!(
-                    target: "provider::static_file",
+                    target: "providers::static_file",
                     ?low,
                     ?mid,
                     ?high,

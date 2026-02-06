@@ -3529,6 +3529,12 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
     }
 
     /// Commit database transaction, static files, and pending `RocksDB` batches.
+    #[instrument(
+        name = "DatabaseProvider::commit",
+        level = "debug",
+        target = "providers::db",
+        skip_all
+    )]
     fn commit(self) -> ProviderResult<()> {
         // For unwinding it makes more sense to commit the database first, since if
         // it is interrupted before the static files commit, we can just
