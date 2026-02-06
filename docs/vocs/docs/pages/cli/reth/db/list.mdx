@@ -55,6 +55,12 @@ Options:
       --raw
           Output bytes instead of human-readable decoded value
 
+      --start-key <START_KEY>
+          Start key for range query (inclusive). The query will start from this key using O(log n) seek instead of scanning from the beginning. Format: JSON value matching the table's key type. Examples: `123` for numeric keys, `"0xabc..."` for hash keys
+
+      --end-key <END_KEY>
+          End key for range query (exclusive). The query will stop before this key. Format: JSON value matching the table's key type
+
   -h, --help
           Print help (see a summary with '-h')
 
