@@ -436,7 +436,9 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
 
     fn queue_delete(&self, segment: StaticFileSegment, fixed_range_ends: Vec<BlockNumber>) {
         if !fixed_range_ends.is_empty() {
-            self.delete_queue.lock().push((segment, fixed_range_ends));
+            let mut queue = self.delete_queue.lock();
+            queue.retain(|(seg, _)| *seg != segment);
+            queue.push((segment, fixed_range_ends));
         }
     }
 
@@ -936,14 +938,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             return Ok(Vec::new());
         }
 
-        let highest_block = self.get_highest_static_file_block(segment);
         let mut deleted_headers = Vec::new();
         let mut range_ends_to_delete = Vec::new();
 
         let indexes = self.indexes.read();
         if let Some(index) = indexes.get(segment) {
+            let highest_expected_end =
+                index.expected_block_ranges_by_max_block.keys().next_back().copied();
             for &max_block in index.expected_block_ranges_by_max_block.keys() {
-                if max_block >= block || Some(max_block) == highest_block {
+                if max_block >= block || Some(max_block) == highest_expected_end {
                     break;
                 }
                 range_ends_to_delete.push(max_block);
