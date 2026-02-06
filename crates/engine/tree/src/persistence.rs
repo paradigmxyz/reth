@@ -154,11 +154,10 @@ where
 
         let start_time = Instant::now();
 
-        if last_block.is_some() {
+        if let Some(last) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
-            // Commit pending finalized/safe block updates in the same transaction
             if let Some(finalized) = pending_finalized {
                 provider_rw.save_finalized_block_number(finalized)?;
             }
@@ -166,16 +165,13 @@ where
                 provider_rw.save_safe_block_number(safe)?;
             }
 
-            // Run pruning in the same write transaction to avoid a second fsync
-            if let Some(last) = last_block {
-                if self.pruner.is_pruning_needed(last.number) {
-                    debug!(target: "engine::persistence", block_num = last.number, "Running pruner in save_blocks transaction");
-                    let prune_start = Instant::now();
-                    if let Err(err) = self.pruner.run_with_provider(&provider_rw, last.number) {
-                        error!(target: "engine::persistence", %err, block_num = last.number, "Pruning failed; will still commit persisted blocks");
-                    }
-                    self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
+            if self.pruner.is_pruning_needed(last.number) {
+                debug!(target: "engine::persistence", block_num = last.number, "Running pruner in save_blocks transaction");
+                let prune_start = Instant::now();
+                if let Err(err) = self.pruner.run_with_provider(&provider_rw, last.number) {
+                    error!(target: "engine::persistence", %err, block_num = last.number, "Pruning failed; will still commit persisted blocks");
                 }
+                self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
             }
 
             provider_rw.commit()?;
