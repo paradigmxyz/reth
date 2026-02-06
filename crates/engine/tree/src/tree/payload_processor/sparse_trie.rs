@@ -670,6 +670,11 @@ where
     /// Invokes `update_leaves` for the accounts trie and collects any new targets.
     ///
     /// Returns whether any updates were drained (applied to the trie).
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
     fn process_account_leaf_updates(&mut self, new: bool) -> SparseTrieResult<bool> {
         let account_updates =
             if new { &mut self.new_account_updates } else { &mut self.account_updates };
@@ -752,6 +757,7 @@ where
         }
 
         loop {
+            let span = debug_span!("promote_pending_updates").entered();
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
             self.pending_account_updates.retain(|addr, account| {
@@ -795,6 +801,7 @@ where
 
                 false
             });
+            drop(span);
 
             // Only exit when no new updates are processed.
             //
