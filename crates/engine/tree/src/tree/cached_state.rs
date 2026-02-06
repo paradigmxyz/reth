@@ -708,6 +708,7 @@ impl ExecutionCache {
                 }
 
                 self.account_cache.remove(addr);
+                self.account_stats.decrement_size();
                 continue
             }
 
@@ -825,6 +826,11 @@ impl SavedCache {
     /// Returns the metrics associated with this cache.
     pub const fn metrics(&self) -> &CachedStateMetrics {
         &self.metrics
+    }
+
+    /// Returns whether cache metrics recording is disabled.
+    pub const fn disable_cache_metrics(&self) -> bool {
+        self.disable_cache_metrics
     }
 
     /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.
