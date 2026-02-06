@@ -207,7 +207,7 @@ fn run_case(
     case: &BlockchainTest,
 ) -> Result<Vec<(RecoveredBlock<Block>, ExecutionWitness)>, Error> {
     // Create a new test database and initialize a provider for the test case.
-    let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
+    let chain_spec = case.network.to_chain_spec();
     let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
     let provider = factory.database_provider_rw().unwrap();
 
