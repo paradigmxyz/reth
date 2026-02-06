@@ -597,8 +597,9 @@ where
                 metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_multi_proof) = &to_multi_proof {
                     // Apply debug jitter before sending result (helps trigger timing-related bugs)
-                    #[cfg(feature = "debug-jitter")]
-                    reth_engine_primitives::jitter::maybe_apply_jitter("prewarm::worker_outcome");
+                    //#[cfg(feature = "debug-jitter")]
+                    //reth_engine_primitives::jitter::maybe_apply_jitter("prewarm::worker_outcome"
+                    // );
                     let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
                 }
                 drop(_enter);
