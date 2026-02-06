@@ -239,36 +239,59 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            // Perform all cache operations atomically under the lock
+
+            // Get the parent hash we expect the cache to have for conditional swap
+            let expected_parent_hash = saved_cache.executed_block_hash();
+
+            // Clone internals WITHOUT dropping usage guard (keep saved_cache alive).
+            // This prevents another thread from clearing the cache we're still using.
+            let caches = saved_cache.cache().clone();
+            let cache_metrics = saved_cache.metrics().clone();
+            let disable_cache_metrics = saved_cache.disable_cache_metrics();
+
+            // Build new cache outside the lock
+            let new_cache = SavedCache::new(hash, caches, cache_metrics)
+                .with_disable_cache_metrics(disable_cache_metrics);
+
+            // Insert state outside the lock
+            if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                // Only clear if cache still matches our expected parent (prevents lost update)
+                execution_cache.update_with_guard(|cached| {
+                    if cached
+                        .as_ref()
+                        .is_some_and(|c| c.executed_block_hash() == expected_parent_hash)
+                    {
+                        *cached = None;
+                    }
+                });
+                debug!(target: "engine::caching", "cleared execution cache on update error");
+                return
+            }
+
+            new_cache.update_metrics();
+
+            // Wait for block validity OUTSIDE the lock (this can block indefinitely)
+            let is_valid = valid_block_rx.recv().is_ok();
+
+            // Drop saved_cache now (releases usage guard) since we're done with it
+            drop(saved_cache);
+
+            // Conditional swap: only update if cache still matches our expected parent.
+            // This prevents clobbering updates from another thread that ran while we blocked.
             execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its usage
-                // guard
-                let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
-                let new_cache = SavedCache::new(hash, caches, cache_metrics)
-                    .with_disable_cache_metrics(disable_cache_metrics);
-
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
-                    // Clear the cache on error to prevent having a polluted cache
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
-                }
-
-                new_cache.update_metrics();
-
-                if valid_block_rx.recv().is_ok() {
-                    // Replace the shared cache with the new one; the previous cache (if any) is
-                    // dropped.
-                    *cached = Some(new_cache);
-                } else {
-                    // Block was invalid; caches were already mutated by insert_state above,
-                    // so we must clear to prevent using polluted state
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on invalid block");
+                if cached.as_ref().is_some_and(|c| c.executed_block_hash() == expected_parent_hash)
+                {
+                    if is_valid {
+                        *cached = Some(new_cache);
+                    } else {
+                        *cached = None;
+                    }
                 }
             });
+
+            if !is_valid {
+                debug!(target: "engine::caching", "cleared execution cache on invalid block");
+            }
 
             let elapsed = start.elapsed();
             debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");

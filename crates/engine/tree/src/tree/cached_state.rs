@@ -827,6 +827,11 @@ impl SavedCache {
         &self.metrics
     }
 
+    /// Returns whether cache metrics recording is disabled.
+    pub const fn disable_cache_metrics(&self) -> bool {
+        self.disable_cache_metrics
+    }
+
     /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.
     ///
     /// Note: This can be expensive with large cached state. Use
