@@ -63,7 +63,7 @@ pub struct ParallelismThresholds {
 /// ## Node Revealing
 ///
 /// The trie uses lazy loading to efficiently handle large state tries. Nodes can be:
-/// - **Blind nodes**: Stored as hashes ([`SparseNode::Hash`]), representing unloaded trie parts
+/// - **Blind nodes**: Stored as hashes, representing unloaded trie parts
 /// - **Revealed nodes**: Fully loaded nodes (Branch, Extension, Leaf) with complete structure
 ///
 /// Note: An empty trie contains an `EmptyRoot` node at the root path, rather than no nodes at all.
