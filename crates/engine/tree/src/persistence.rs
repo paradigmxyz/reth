@@ -51,6 +51,10 @@ where
     /// Pending safe block number to be committed with the next block save.
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
+    /// Deferred prune target. When a `SaveBlocks` completes and pruning is needed,
+    /// but new work is already waiting in the channel, we defer pruning and process
+    /// the save first. Pruning runs when the persistence thread would otherwise be idle.
+    pending_prune_target: Option<u64>,
 }
 
 impl<N> PersistenceService<N>
@@ -72,6 +76,7 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
+            pending_prune_target: None,
         }
     }
 
@@ -95,43 +100,92 @@ where
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
-        // If the receiver errors then senders have disconnected, so the loop should then end.
-        while let Ok(action) = self.incoming.recv() {
-            match action {
-                PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let result = self.on_remove_blocks_above(new_tip_num)?;
-                    // send new sync metrics based on removed blocks
-                    let _ =
-                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(result);
+        let mut buffered: Option<PersistenceAction<N::Primitives>> = None;
+
+        loop {
+            let action = if let Some(a) = buffered.take() {
+                a
+            } else {
+                match self.incoming.recv() {
+                    Ok(a) => a,
+                    Err(_) => break,
                 }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
-                    let result_number = result.map(|r| r.number);
+            };
 
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(result);
+            self.handle_action(action, &mut buffered)?;
 
-                    if let Some(block_number) = result_number {
-                        // send new sync metrics based on saved blocks
-                        let _ = self
-                            .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: block_number });
+            // If a prune was deferred by handle_action (buffered will be Some),
+            // skip pruning this iteration — we'll process the buffered action next,
+            // then prune. This allows at most one save to be processed before pruning.
+            if buffered.is_none() {
+                self.run_pending_prune()?;
+            }
+        }
+        Ok(())
+    }
 
-                        if self.pruner.is_pruning_needed(block_number) {
-                            // We log `PrunerOutput` inside the `Pruner`
-                            let _ = self.prune_before(block_number)?;
+    /// Handles a single persistence action. May buffer one lookahead action
+    /// to allow a single save to be processed before a pending prune.
+    fn handle_action(
+        &mut self,
+        action: PersistenceAction<N::Primitives>,
+        buffered: &mut Option<PersistenceAction<N::Primitives>>,
+    ) -> Result<(), PersistenceError> {
+        match action {
+            PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
+                let result = self.on_remove_blocks_above(new_tip_num)?;
+                let _ = self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
+                let _ = sender.send(result);
+            }
+            PersistenceAction::SaveBlocks(blocks, sender) => {
+                let result = self.on_save_blocks(blocks)?;
+                let result_number = result.map(|r| r.number);
+
+                let _ = sender.send(result);
+
+                if let Some(block_number) = result_number {
+                    let _ =
+                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: block_number });
+
+                    if self.pruner.is_pruning_needed(block_number) {
+                        if self.pending_prune_target.is_some() {
+                            // Already deferred once — coalesce to latest and prune
+                            // immediately. This bounds deferral to at most one save.
+                            self.pending_prune_target = Some(block_number);
+                            self.run_pending_prune()?;
+                        } else {
+                            // First deferral — check if another action is already
+                            // queued. If so, buffer it and defer pruning so the next
+                            // save doesn't wait behind a prune.
+                            match self.incoming.try_recv() {
+                                Ok(next) => {
+                                    self.pending_prune_target = Some(block_number);
+                                    *buffered = Some(next);
+                                }
+                                Err(_) => {
+                                    let _ = self.prune_before(block_number)?;
+                                }
+                            }
                         }
                     }
                 }
-                PersistenceAction::SaveFinalizedBlock(finalized_block) => {
-                    self.pending_finalized_block = Some(finalized_block);
-                }
-                PersistenceAction::SaveSafeBlock(safe_block) => {
-                    self.pending_safe_block = Some(safe_block);
-                }
             }
+            PersistenceAction::SaveFinalizedBlock(finalized_block) => {
+                self.pending_finalized_block = Some(finalized_block);
+            }
+            PersistenceAction::SaveSafeBlock(safe_block) => {
+                self.pending_safe_block = Some(safe_block);
+            }
+        }
+        Ok(())
+    }
+
+    /// Runs any pending deferred prune operation.
+    fn run_pending_prune(&mut self) -> Result<(), PersistenceError> {
+        if let Some(target) = self.pending_prune_target.take() &&
+            self.pruner.is_pruning_needed(target)
+        {
+            let _ = self.prune_before(target)?;
         }
         Ok(())
     }
