@@ -704,7 +704,7 @@ mod tests {
             let db = TestStageDB::default();
 
             db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+                StorageSettings::v1().with_storages_history_in_rocksdb(true),
             );
 
             db.commit(|tx| {
@@ -750,7 +750,7 @@ mod tests {
             let db = TestStageDB::default();
 
             db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+                StorageSettings::v1().with_storages_history_in_rocksdb(true),
             );
 
             db.commit(|tx| {
@@ -805,7 +805,7 @@ mod tests {
             let db = TestStageDB::default();
 
             db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+                StorageSettings::v1().with_storages_history_in_rocksdb(true),
             );
 
             db.commit(|tx| {
@@ -854,7 +854,7 @@ mod tests {
             let db = TestStageDB::default();
 
             db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+                StorageSettings::v1().with_storages_history_in_rocksdb(true),
             );
 
             db.commit(|tx| {
@@ -921,7 +921,7 @@ mod tests {
             let db = TestStageDB::default();
 
             db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+                StorageSettings::v1().with_storages_history_in_rocksdb(true),
             );
 
             let num_blocks = (NUM_OF_INDICES_IN_SHARD * 2 + 100) as u64;

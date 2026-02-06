@@ -518,16 +518,18 @@ where
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
                         let elapsed = root_time.elapsed();
                         info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
+
+                        // Compare trie updates with serial computation if configured
+                        if self.config.always_compare_trie_updates() {
+                            self.compare_trie_updates_with_serial(
+                                overlay_factory.clone(),
+                                &hashed_state,
+                                trie_updates.clone(),
+                            );
+                        }
+
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
-                            // Compare trie updates with serial computation if configured
-                            if self.config.always_compare_trie_updates() {
-                                self.compare_trie_updates_with_serial(
-                                    overlay_factory.clone(),
-                                    &hashed_state,
-                                    trie_updates.clone(),
-                                );
-                            }
                             maybe_state_root = Some((state_root, trie_updates, elapsed))
                         } else {
                             warn!(

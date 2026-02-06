@@ -11,7 +11,7 @@ on:
         required: false
         type: string
         default: "reth"
-        description: "Binary name to build (reth or op-reth)"
+        description: "Binary name to build"
       cargo_features:
         required: false
         type: string
