@@ -6,16 +6,16 @@ use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
-    DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
+    providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, BlockNumReader,
+    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
 };
-use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
+use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
         mpsc::{Receiver, SendError, Sender},
-        Arc,
+        Arc, Mutex,
     },
     thread::JoinHandle,
     time::Instant,
@@ -39,8 +39,10 @@ where
     provider: ProviderFactory<N>,
     /// Incoming requests
     incoming: Receiver<PersistenceAction<N::Primitives>>,
-    /// The pruner
-    pruner: PrunerWithFactory<ProviderFactory<N>>,
+    /// Shared gate ensuring MDBX single-writer safety with the prune worker
+    writer_gate: Arc<Mutex<()>>,
+    /// Channel to send prune requests to the background prune worker
+    prune_tx: Sender<u64>,
     /// metrics
     metrics: PersistenceMetrics,
     /// Sender for sync metrics - we only submit sync metrics for persisted blocks
@@ -58,33 +60,23 @@ where
     N: ProviderNodeTypes,
 {
     /// Create a new persistence service
-    pub fn new(
+    fn new(
         provider: ProviderFactory<N>,
         incoming: Receiver<PersistenceAction<N::Primitives>>,
-        pruner: PrunerWithFactory<ProviderFactory<N>>,
+        writer_gate: Arc<Mutex<()>>,
+        prune_tx: Sender<u64>,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
         Self {
             provider,
             incoming,
-            pruner,
+            writer_gate,
+            prune_tx,
             metrics: PersistenceMetrics::default(),
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
         }
-    }
-
-    /// Prunes block data before the given block number according to the configured prune
-    /// configuration.
-    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_num))]
-    fn prune_before(&mut self, block_num: u64) -> Result<PrunerOutput, PrunerError> {
-        debug!(target: "engine::persistence", ?block_num, "Running pruner");
-        let start_time = Instant::now();
-        // TODO: doing this properly depends on pruner segment changes
-        let result = self.pruner.run(block_num);
-        self.metrics.prune_before_duration_seconds.record(start_time.elapsed());
-        result
     }
 }
 
@@ -119,10 +111,7 @@ where
                             .sync_metrics_tx
                             .send(MetricEvent::SyncHeight { height: block_number });
 
-                        if self.pruner.is_pruning_needed(block_number) {
-                            // We log `PrunerOutput` inside the `Pruner`
-                            let _ = self.prune_before(block_number)?;
-                        }
+                        let _ = self.prune_tx.send(block_number);
                     }
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
@@ -143,6 +132,7 @@ where
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
+        let _guard = self.writer_gate.lock().unwrap_or_else(|e| e.into_inner());
         let provider_rw = self.provider.database_provider_rw()?;
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
@@ -163,7 +153,6 @@ where
         let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
         let block_count = blocks.len();
 
-        // Take any pending finalized/safe block updates to commit together
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
 
@@ -172,10 +161,10 @@ where
         let start_time = Instant::now();
 
         if last_block.is_some() {
+            let _guard = self.writer_gate.lock().unwrap_or_else(|e| e.into_inner());
             let provider_rw = self.provider.database_provider_rw()?;
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
-            // Commit pending finalized/safe block updates in the same transaction
             if let Some(finalized) = pending_finalized {
                 provider_rw.save_finalized_block_number(finalized)?;
             }
@@ -192,6 +181,57 @@ where
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
 
         Ok(last_block)
+    }
+}
+
+/// Background worker that runs pruning on a dedicated OS thread.
+///
+/// Receives block numbers from the persistence service and runs the pruner.
+/// Coalesces multiple pending requests to avoid a backlog. Uses a shared
+/// writer gate to ensure MDBX single-writer safety with the persistence thread.
+struct PruneWorker<N: ProviderNodeTypes> {
+    pruner: PrunerWithFactory<ProviderFactory<N>>,
+    provider: ProviderFactory<N>,
+    rx: Receiver<u64>,
+    writer_gate: Arc<Mutex<()>>,
+}
+
+impl<N: ProviderNodeTypes> PruneWorker<N> {
+    const fn new(
+        pruner: PrunerWithFactory<ProviderFactory<N>>,
+        rx: Receiver<u64>,
+        writer_gate: Arc<Mutex<()>>,
+        provider: ProviderFactory<N>,
+    ) -> Self {
+        Self { pruner, provider, rx, writer_gate }
+    }
+
+    fn run(mut self) {
+        while let Ok(mut block_number) = self.rx.recv() {
+            while let Ok(newer) = self.rx.try_recv() {
+                block_number = newer;
+            }
+
+            let _guard = self.writer_gate.lock().unwrap_or_else(|e| e.into_inner());
+
+            // Clamp to actual DB tip to handle reorgs that may have occurred
+            let db_tip = match self.provider.best_block_number() {
+                Ok(tip) => tip,
+                Err(err) => {
+                    error!(target: "engine::persistence", %err, "Failed to read best block number for pruning");
+                    continue;
+                }
+            };
+            block_number = block_number.min(db_tip);
+
+            if !self.pruner.is_pruning_needed(block_number) {
+                continue;
+            }
+
+            if let Err(err) = self.pruner.run(block_number) {
+                error!(target: "engine::persistence", %err, ?block_number, "Pruner failed");
+            }
+        }
     }
 }
 
@@ -246,7 +286,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     /// This is intended for testing purposes where you want to mock the persistence service.
     /// For production use, prefer [`spawn_service`](Self::spawn_service).
     pub fn new(sender: Sender<PersistenceAction<T>>) -> Self {
-        Self { sender, _service_guard: Arc::new(ServiceGuard(None)) }
+        Self { sender, _service_guard: Arc::new(ServiceGuard(Vec::new())) }
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
@@ -262,13 +302,21 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     where
         N: ProviderNodeTypes,
     {
-        // create the initial channels
         let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (prune_tx, prune_rx) = std::sync::mpsc::channel();
+        let writer_gate = Arc::new(Mutex::new(()));
 
-        // spawn the persistence service
-        let db_service =
-            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
-        let join_handle = spawn_os_thread("persistence", || {
+        let prune_worker = PruneWorker::new(pruner, prune_rx, Arc::clone(&writer_gate), provider_factory.clone());
+        let prune_handle = spawn_os_thread("pruner", || prune_worker.run());
+
+        let db_service = PersistenceService::new(
+            provider_factory,
+            db_service_rx,
+            writer_gate,
+            prune_tx,
+            sync_metrics_tx,
+        );
+        let persist_handle = spawn_os_thread("persistence", || {
             if let Err(err) = db_service.run() {
                 error!(target: "engine::persistence", ?err, "Persistence service failed");
             }
@@ -276,7 +324,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
 
         PersistenceHandle {
             sender: db_service_tx,
-            _service_guard: Arc::new(ServiceGuard(Some(join_handle))),
+            _service_guard: Arc::new(ServiceGuard(vec![persist_handle, prune_handle])),
         }
     }
 
@@ -341,22 +389,22 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     }
 }
 
-/// Guard that joins the persistence service thread when dropped.
+/// Guard that joins service threads when dropped.
 ///
-/// This ensures graceful shutdown - the service thread completes before resources like
+/// This ensures graceful shutdown - service threads complete before resources like
 /// `RocksDB` are released. Stored in an `Arc` inside [`PersistenceHandle`] so the handle
 /// can be cloned while sharing the same guard.
-struct ServiceGuard(Option<JoinHandle<()>>);
+struct ServiceGuard(Vec<JoinHandle<()>>);
 
 impl std::fmt::Debug for ServiceGuard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ServiceGuard").field(&self.0.as_ref().map(|_| "...")).finish()
+        f.debug_tuple("ServiceGuard").field(&self.0.len()).finish()
     }
 }
 
 impl Drop for ServiceGuard {
     fn drop(&mut self) {
-        if let Some(join_handle) = self.0.take() {
+        for join_handle in self.0.drain(..) {
             let _ = join_handle.join();
         }
     }
