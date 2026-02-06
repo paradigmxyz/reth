@@ -85,7 +85,6 @@ jobs:
             os: macos-14
             profile: maxperf
             allow_fail: false
-
           - target: riscv64gc-unknown-linux-gnu
             os: ubuntu-24.04
             profile: maxperf
