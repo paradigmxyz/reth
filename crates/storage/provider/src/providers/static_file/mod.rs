@@ -1431,10 +1431,7 @@ mod tests {
         }
 
         // Step 2: Verify data is readable (sanity check)
-        assert_eq!(
-            sf_rw.get_highest_static_file_block(segment),
-            Some(blocks_per_file - 1)
-        );
+        assert_eq!(sf_rw.get_highest_static_file_block(segment), Some(blocks_per_file - 1));
         let sender = sf_rw.transaction_sender(0)?;
         assert!(sender.is_some(), "sender should be readable before deletion");
 
@@ -1464,18 +1461,13 @@ mod tests {
         // with: ProviderError::Other("NippyJar error: failed to open file ... No such
         // file or directory"). After the fix, it should gracefully return None.
         let result = sf_rw.transaction_sender(0)?;
-        assert!(
-            result.is_none(),
-            "should return None for missing sender file, not crash"
-        );
+        assert!(result.is_none(), "should return None for missing sender file, not crash");
 
         // Step 5: Also verify find_static_file handles missing files gracefully.
         // This path iterates all ranges from the index and calls
         // get_or_create_jar_provider for each.
-        let find_result = sf_rw.find_static_file(
-            segment,
-            |provider| provider.transaction_sender(0),
-        )?;
+        let find_result =
+            sf_rw.find_static_file(segment, |provider| provider.transaction_sender(0))?;
         assert!(
             find_result.is_none(),
             "find_static_file should return None for missing files, not crash"
