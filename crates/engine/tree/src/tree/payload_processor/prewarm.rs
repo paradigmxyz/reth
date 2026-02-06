@@ -551,8 +551,7 @@ where
             // create the tx env
             let start = Instant::now();
 
-            // If the task was cancelled, stop execution, send an empty result to notify the task,
-            // and exit.
+            // If the task was cancelled, stop execution, and exit.
             if terminate_execution.load(Ordering::Relaxed) {
                 break
             }
@@ -582,8 +581,7 @@ where
 
             drop(enter);
 
-            // If the task was cancelled, stop execution, send an empty result to notify the task,
-            // and exit.
+            // If the task was cancelled, stop execution, and exit.
             if terminate_execution.load(Ordering::Relaxed) {
                 break
             }
