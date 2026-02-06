@@ -834,6 +834,10 @@ where
             let gas_used = executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
+            // Apply debug jitter before sending result (helps trigger timing-related bugs)
+            #[cfg(feature = "debug-jitter")]
+            reth_engine_primitives::jitter::maybe_apply_jitter("payload_validator::main_execution");
+
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
                 last_sent_len = current_len;
