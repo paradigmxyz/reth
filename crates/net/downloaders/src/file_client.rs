@@ -704,7 +704,7 @@ mod tests {
             FileClient::from_file(file.into(), NoopConsensus::arc())
                 .await
                 .unwrap()
-                .with_bodies(bodies.clone()),
+                .with_bodies(bodies.clone().into_iter().collect()),
         );
         let mut downloader = BodiesDownloaderBuilder::default().build::<Block, _, _>(
             client.clone(),

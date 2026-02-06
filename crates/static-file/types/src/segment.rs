@@ -1,5 +1,5 @@
 use crate::{find_fixed_range, BlockNumber, Compression};
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, string::String};
 use alloy_primitives::TxNumber;
 use core::{
     ops::{Range, RangeInclusive},
@@ -238,6 +238,11 @@ pub struct ChangesetOffset {
 }
 
 impl ChangesetOffset {
+    /// Creates a new changeset offset.
+    pub const fn new(offset: u64, num_changes: u64) -> Self {
+        Self { offset, num_changes }
+    }
+
     /// Returns the start offset for the row for this block
     pub const fn offset(&self) -> u64 {
         self.offset
@@ -251,6 +256,11 @@ impl ChangesetOffset {
     /// Returns a range corresponding to the changes.
     pub const fn changeset_range(&self) -> Range<u64> {
         self.offset..(self.offset + self.num_changes)
+    }
+
+    /// Increments the number of changes by 1.
+    pub const fn increment_num_changes(&mut self) {
+        self.num_changes += 1;
     }
 }
 
@@ -269,7 +279,7 @@ pub struct SegmentHeader {
     /// Segment type
     segment: StaticFileSegment,
     /// List of offsets, for where each block's changeset starts.
-    changeset_offsets: Option<Vec<ChangesetOffset>>,
+    changeset_offsets_len: u64,
 }
 
 struct SegmentHeaderVisitor;
@@ -298,21 +308,18 @@ impl<'de> Visitor<'de> for SegmentHeaderVisitor {
         let segment: StaticFileSegment =
             seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
 
-        let changeset_offsets = if segment.is_change_based() {
-            // Try to read the 5th field (changeset_offsets)
-            // If it doesn't exist (old format), this will return None
-            match seq.next_element()? {
-                Some(Some(offsets)) => Some(offsets),
-                // Changesets should have offsets
-                Some(None) => None,
+        let changeset_offsets_len = if segment.is_change_based() {
+            // Try to read the 5th field (changeset_offsets_len)
+            match seq.next_element::<u64>()? {
+                Some(len) => len,
                 None => {
                     return Err(serde::de::Error::custom(
-                        "changeset_offsets should exist for static files",
+                        "changeset_offsets_len should exist for changeset static files",
                     ))
                 }
             }
         } else {
-            None
+            0
         };
 
         Ok(SegmentHeader {
@@ -320,7 +327,7 @@ impl<'de> Visitor<'de> for SegmentHeaderVisitor {
             block_range,
             tx_range,
             segment,
-            changeset_offsets,
+            changeset_offsets_len,
         })
     }
 }
@@ -355,7 +362,7 @@ impl Serialize for SegmentHeader {
         state.serialize_field("segment", &self.segment)?;
 
         if self.segment.is_change_based() {
-            state.serialize_field("changeset_offsets", &self.changeset_offsets)?;
+            state.serialize_field("changeset_offsets", &self.changeset_offsets_len)?;
         }
 
         state.end()
@@ -370,7 +377,7 @@ impl SegmentHeader {
         tx_range: Option<SegmentRangeInclusive>,
         segment: StaticFileSegment,
     ) -> Self {
-        Self { expected_block_range, block_range, tx_range, segment, changeset_offsets: None }
+        Self { expected_block_range, block_range, tx_range, segment, changeset_offsets_len: 0 }
     }
 
     /// Returns the static file segment kind.
@@ -393,9 +400,20 @@ impl SegmentHeader {
         self.tx_range
     }
 
-    /// Returns the changeset offsets.
-    pub const fn changeset_offsets(&self) -> Option<&Vec<ChangesetOffset>> {
-        self.changeset_offsets.as_ref()
+    /// Returns the number of changeset offset entries.
+    /// The actual offsets are stored in the `.csoff` sidecar file.
+    pub const fn changeset_offsets_len(&self) -> u64 {
+        self.changeset_offsets_len
+    }
+
+    /// Sets the changeset offsets length.
+    pub const fn set_changeset_offsets_len(&mut self, len: u64) {
+        self.changeset_offsets_len = len;
+    }
+
+    /// Increments the changeset offsets length by 1.
+    pub const fn increment_changeset_offsets_len(&mut self) {
+        self.changeset_offsets_len += 1;
     }
 
     /// The expected block start of the segment.
@@ -453,7 +471,7 @@ impl SegmentHeader {
     }
 
     /// Increments block end range depending on segment
-    pub fn increment_block(&mut self) -> BlockNumber {
+    pub const fn increment_block(&mut self) -> BlockNumber {
         let block_num = if let Some(block_range) = &mut self.block_range {
             block_range.end += 1;
             block_range.end
@@ -465,20 +483,10 @@ impl SegmentHeader {
             self.expected_block_start()
         };
 
-        // For changeset segments, initialize an offset entry for the new block
+        // For changeset segments, increment the offsets length.
+        // The actual offset entry is written to the sidecar file by the caller.
         if self.segment.is_change_based() {
-            let offsets = self.changeset_offsets.get_or_insert_default();
-            // Calculate the offset for the new block
-            let new_offset = if let Some(last_offset) = offsets.last() {
-                // The new block starts after the last block's changes
-                last_offset.offset + last_offset.num_changes
-            } else {
-                // First block starts at offset 0
-                0
-            };
-
-            // Add a new offset entry with 0 changes initially
-            offsets.push(ChangesetOffset { offset: new_offset, num_changes: 0 });
+            self.changeset_offsets_len += 1;
         }
 
         block_num
@@ -495,23 +503,11 @@ impl SegmentHeader {
         }
     }
 
-    /// Increments the latest block's number of changes.
-    pub fn increment_block_changes(&mut self) {
-        debug_assert!(self.segment().is_change_based());
-        if self.segment.is_change_based() {
-            let offsets = self.changeset_offsets.get_or_insert_with(Default::default);
-            if let Some(last_offset) = offsets.last_mut() {
-                last_offset.num_changes += 1;
-            } else {
-                // If offsets is empty, we are adding the first change for a block
-                // The offset for the first block is 0
-                offsets.push(ChangesetOffset { offset: 0, num_changes: 1 });
-            }
-        }
-    }
-
     /// Removes `num` elements from end of tx or block range.
-    pub fn prune(&mut self, num: u64) {
+    ///
+    /// For changeset segments, also decrements the changeset offsets length.
+    /// The caller must truncate the sidecar file accordingly.
+    pub const fn prune(&mut self, num: u64) {
         // Changesets also contain a block range, but are not strictly block-based
         if self.segment.is_block_or_change_based() {
             if let Some(range) = &mut self.block_range {
@@ -519,26 +515,18 @@ impl SegmentHeader {
                     self.block_range = None;
                     // Clear all changeset offsets if we're clearing all blocks
                     if self.segment.is_change_based() {
-                        self.changeset_offsets = None;
+                        self.changeset_offsets_len = 0;
                     }
                 } else {
                     let old_end = range.end;
                     range.end = range.end.saturating_sub(num);
 
-                    // Update changeset offsets for account changesets
-                    if self.segment.is_change_based() &&
-                        let Some(offsets) = &mut self.changeset_offsets
-                    {
+                    // Update changeset offsets length for changeset segments
+                    if self.segment.is_change_based() {
                         // Calculate how many blocks we're removing
                         let blocks_to_remove = old_end - range.end;
-                        // Remove the last `blocks_to_remove` entries from offsets
-                        let new_len = offsets.len().saturating_sub(blocks_to_remove as usize);
-                        offsets.truncate(new_len);
-
-                        // If we removed all offsets, set to None
-                        if offsets.is_empty() {
-                            self.changeset_offsets = None;
-                        }
+                        self.changeset_offsets_len =
+                            self.changeset_offsets_len.saturating_sub(blocks_to_remove);
                     }
                 }
             };
@@ -561,28 +549,24 @@ impl SegmentHeader {
         }
     }
 
-    /// Synchronizes changeset offsets with the current block range for account changeset segments.
+    /// Synchronizes changeset offsets length with the current block range for changeset segments.
     ///
     /// This should be called after modifying the block range when dealing with changeset segments
-    /// to ensure the offsets vector matches the block range size.
-    pub fn sync_changeset_offsets(&mut self) {
+    /// to ensure the offsets length matches the block range size.
+    /// The caller must also truncate the sidecar file accordingly.
+    pub const fn sync_changeset_offsets(&mut self) {
         if !self.segment.is_change_based() {
             return;
         }
 
         if let Some(block_range) = &self.block_range {
-            if let Some(offsets) = &mut self.changeset_offsets {
-                let expected_len = (block_range.end - block_range.start + 1) as usize;
-                if offsets.len() > expected_len {
-                    offsets.truncate(expected_len);
-                    if offsets.is_empty() {
-                        self.changeset_offsets = None;
-                    }
-                }
+            let expected_len = block_range.end - block_range.start + 1;
+            if self.changeset_offsets_len > expected_len {
+                self.changeset_offsets_len = expected_len;
             }
         } else {
             // No block range means no offsets
-            self.changeset_offsets = None;
+            self.changeset_offsets_len = 0;
         }
     }
 
@@ -608,21 +592,23 @@ impl SegmentHeader {
         self.tx_start()
     }
 
-    /// Returns the `ChangesetOffset` corresponding for the given block, if it's in the block
-    /// range.
+    /// Returns the index into the sidecar file for a given block's changeset offset.
     ///
-    /// If it is not in the block range or the changeset list in the header does not contain a
-    /// value for the block, this returns `None`.
-    pub fn changeset_offset(&self, block: BlockNumber) -> Option<&ChangesetOffset> {
+    /// Returns `None` if the block is not in the block range.
+    /// To get the changeset offset, the caller must read the offset from the sidecar file at this
+    /// index.
+    pub fn changeset_offset_index(&self, block: BlockNumber) -> Option<u64> {
         let block_range = self.block_range()?;
         if !block_range.contains(block) {
-            return None
+            return None;
         }
 
-        let offsets = self.changeset_offsets.as_ref()?;
-        let index = (block - block_range.start()) as usize;
+        let index = block - block_range.start();
+        if index >= self.changeset_offsets_len {
+            return None;
+        }
 
-        offsets.get(index)
+        Some(index)
     }
 }
 
@@ -781,42 +767,42 @@ mod tests {
                 block_range: Some(SegmentRangeInclusive::new(0, 100)),
                 tx_range: None,
                 segment: StaticFileSegment::Headers,
-                changeset_offsets: None,
+                changeset_offsets_len: 0,
             },
             SegmentHeader {
                 expected_block_range: SegmentRangeInclusive::new(0, 200),
                 block_range: None,
                 tx_range: Some(SegmentRangeInclusive::new(0, 300)),
                 segment: StaticFileSegment::Transactions,
-                changeset_offsets: None,
+                changeset_offsets_len: 0,
             },
             SegmentHeader {
                 expected_block_range: SegmentRangeInclusive::new(0, 200),
                 block_range: Some(SegmentRangeInclusive::new(0, 100)),
                 tx_range: Some(SegmentRangeInclusive::new(0, 300)),
                 segment: StaticFileSegment::Receipts,
-                changeset_offsets: None,
+                changeset_offsets_len: 0,
             },
             SegmentHeader {
                 expected_block_range: SegmentRangeInclusive::new(0, 200),
                 block_range: Some(SegmentRangeInclusive::new(0, 100)),
                 tx_range: Some(SegmentRangeInclusive::new(0, 300)),
                 segment: StaticFileSegment::TransactionSenders,
-                changeset_offsets: None,
+                changeset_offsets_len: 0,
             },
             SegmentHeader {
                 expected_block_range: SegmentRangeInclusive::new(0, 200),
                 block_range: Some(SegmentRangeInclusive::new(0, 100)),
                 tx_range: Some(SegmentRangeInclusive::new(0, 300)),
                 segment: StaticFileSegment::AccountChangeSets,
-                changeset_offsets: Some(vec![ChangesetOffset { offset: 1, num_changes: 1 }; 100]),
+                changeset_offsets_len: 100,
             },
             SegmentHeader {
                 expected_block_range: SegmentRangeInclusive::new(0, 200),
                 block_range: Some(SegmentRangeInclusive::new(0, 100)),
                 tx_range: None,
                 segment: StaticFileSegment::StorageChangeSets,
-                changeset_offsets: Some(vec![ChangesetOffset { offset: 1, num_changes: 1 }; 100]),
+                changeset_offsets_len: 100,
             },
         ];
         // Check that we test all segments

@@ -19,7 +19,6 @@ crates/metrics/             @mattsse @Rjected
 crates/net/                 @mattsse @Rjected
 crates/net/downloaders/     @Rjected
 crates/node/                @mattsse @Rjected @klkvr
-crates/optimism/            @mattsse @Rjected
 crates/payload/             @mattsse @Rjected
 crates/primitives-traits/   @Rjected @mattsse @klkvr
 crates/primitives/          @Rjected @mattsse @klkvr

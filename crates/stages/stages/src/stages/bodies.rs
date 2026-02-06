@@ -476,7 +476,7 @@ mod tests {
             },
         };
         use alloy_consensus::{BlockHeader, Header};
-        use alloy_primitives::{BlockNumber, TxNumber, B256};
+        use alloy_primitives::{map::B256Map, BlockNumber, TxNumber, B256};
         use futures_util::Stream;
         use reth_db::{static_file::HeaderWithHashMask, tables};
         use reth_db_api::{
@@ -503,7 +503,7 @@ mod tests {
             self, random_block_range, random_signed_tx, BlockRangeParams,
         };
         use std::{
-            collections::{HashMap, VecDeque},
+            collections::VecDeque,
             ops::RangeInclusive,
             pin::Pin,
             task::{Context, Poll},
@@ -519,14 +519,14 @@ mod tests {
 
         /// A helper struct for running the [`BodyStage`].
         pub(crate) struct BodyTestRunner {
-            responses: HashMap<B256, BlockBody>,
+            responses: B256Map<BlockBody>,
             db: TestStageDB,
             batch_size: u64,
         }
 
         impl Default for BodyTestRunner {
             fn default() -> Self {
-                Self { responses: HashMap::default(), db: TestStageDB::default(), batch_size: 1000 }
+                Self { responses: B256Map::default(), db: TestStageDB::default(), batch_size: 1000 }
             }
         }
 
@@ -535,7 +535,7 @@ mod tests {
                 self.batch_size = batch_size;
             }
 
-            pub(crate) fn set_responses(&mut self, responses: HashMap<B256, BlockBody>) {
+            pub(crate) fn set_responses(&mut self, responses: B256Map<BlockBody>) {
                 self.responses = responses;
             }
         }
@@ -736,11 +736,11 @@ mod tests {
             }
         }
 
-        /// A [`BodyDownloader`] that is backed by an internal [`HashMap`] for testing.
+        /// A [`BodyDownloader`] that is backed by an internal [`B256Map`] for testing.
         #[derive(Debug)]
         pub(crate) struct TestBodyDownloader {
             provider_factory: ProviderFactory<MockNodeTypesWithDB>,
-            responses: HashMap<B256, BlockBody>,
+            responses: B256Map<BlockBody>,
             headers: VecDeque<SealedHeader>,
             batch_size: u64,
         }
@@ -748,7 +748,7 @@ mod tests {
         impl TestBodyDownloader {
             pub(crate) fn new(
                 provider_factory: ProviderFactory<MockNodeTypesWithDB>,
-                responses: HashMap<B256, BlockBody>,
+                responses: B256Map<BlockBody>,
                 batch_size: u64,
             ) -> Self {
                 Self { provider_factory, responses, headers: VecDeque::default(), batch_size }

@@ -1002,7 +1002,7 @@ where
                 };
 
                 let start = *range.start();
-                let static_end = (*range.end()).min(highest + 1);
+                let static_end = (*range.end()).min(highest);
 
                 let mut changed_accounts = BTreeSet::default();
                 if start <= static_end {
@@ -1082,11 +1082,71 @@ impl EitherWriterDestination {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::create_test_provider_factory;
+    use crate::{test_utils::create_test_provider_factory, StaticFileWriter};
 
     use super::*;
     use alloy_primitives::Address;
+    use reth_db::models::AccountBeforeTx;
+    use reth_static_file_types::StaticFileSegment;
     use reth_storage_api::{DatabaseProviderFactory, StorageSettings};
+
+    /// Verifies that `changed_accounts_with_range` correctly caps the query range to the
+    /// static file tip when the requested range extends beyond it.
+    ///
+    /// This test documents the fix for an off-by-one bug where the code computed
+    /// `static_end = range.end().min(highest + 1)` instead of `min(highest)`.
+    /// The bug allowed iteration to attempt reading block `highest + 1` which doesn't
+    /// exist (silently returning empty results due to `MissingStaticFileBlock` handling).
+    ///
+    /// While the bug was masked by error handling, it caused:
+    /// 1. Unnecessary iteration/lookup for non-existent blocks
+    /// 2. Potential overflow when `highest == u64::MAX`
+    #[test]
+    fn test_changed_accounts_with_range_caps_at_static_file_tip() {
+        let factory = create_test_provider_factory();
+        let highest_block = 5u64;
+
+        let addresses: Vec<Address> = (0..=highest_block)
+            .map(|i| {
+                let mut addr = Address::ZERO;
+                addr.0[0] = i as u8;
+                addr
+            })
+            .collect();
+
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            for block_num in 0..=highest_block {
+                let changeset =
+                    vec![AccountBeforeTx { address: addresses[block_num as usize], info: None }];
+                writer.append_account_changeset(changeset, block_num).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        factory.set_storage_settings_cache(
+            StorageSettings::default().with_account_changesets_in_static_files(true),
+        );
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+        assert_eq!(sf_tip, Some(highest_block));
+
+        let mut reader = EitherReader::new_account_changesets(&provider).unwrap();
+        assert!(matches!(reader, EitherReader::StaticFile(_, _)));
+
+        // Query range 0..=10 when tip is 5 - should return only accounts from blocks 0-5
+        let result = reader.changed_accounts_with_range(0..=10).unwrap();
+
+        let expected: BTreeSet<Address> = addresses.into_iter().collect();
+        assert_eq!(result, expected);
+    }
 
     #[test]
     fn test_reader_senders_by_tx_range() {

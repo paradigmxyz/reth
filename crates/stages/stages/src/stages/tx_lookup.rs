@@ -236,10 +236,10 @@ where
                 }
 
                 // Delete all transactions that belong to this block
-                for tx_id in body.tx_num_range() {
-                    if let Some(transaction) = static_file_provider.transaction_by_id(tx_id)? {
-                        writer.delete_transaction_hash_number(transaction.trie_hash())?;
-                    }
+                for transaction in
+                    static_file_provider.transactions_by_tx_range(body.tx_num_range())?
+                {
+                    writer.delete_transaction_hash_number(transaction.trie_hash())?;
                 }
             }
 

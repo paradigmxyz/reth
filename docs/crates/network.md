@@ -177,7 +177,7 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
 ```
 The `NetworkConfig` struct is generic over two parameters:
 - `C`: The client type that provides access to blockchain data (headers, blocks, etc.)
-- `N`: The network primitives type that defines block and transaction types for the network. Defaults to `EthNetworkPrimitives` for standard Ethereum networks, but can be customized for other chains (e.g., Optimism).
+- `N`: The network primitives type that defines block and transaction types for the network. Defaults to `EthNetworkPrimitives` for standard Ethereum networks, but can be customized for other chains.
 
 The discovery task progresses as the network management task is polled, handling events regarding peer management through the `Swarm` struct which is stored as a field on the `NetworkManager`:
 

@@ -540,7 +540,11 @@ where
             max_simulate_blocks,
             eth_proof_window,
             blocking_task_pool.unwrap_or_else(|| {
-                BlockingTaskPool::build().expect("failed to build blocking task pool")
+                BlockingTaskPool::builder()
+                    .thread_name(|i| format!("blocking-{i}"))
+                    .build()
+                    .map(BlockingTaskPool::new)
+                    .expect("failed to build blocking task pool")
             }),
             fee_history_cache,
             task_spawner,

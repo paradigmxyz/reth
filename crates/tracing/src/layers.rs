@@ -146,10 +146,20 @@ impl Layers {
 
     #[cfg(feature = "tracy")]
     pub(crate) fn tracy(&mut self, config: LayerInfo) -> eyre::Result<()> {
-        self.add_layer(tracing_tracy::TracyLayer::default().with_filter(build_env_filter(
-            Some(config.default_directive.parse()?),
-            &config.filters,
-        )?));
+        struct Config(tracing_subscriber::fmt::format::DefaultFields);
+        impl tracing_tracy::Config for Config {
+            type Formatter = tracing_subscriber::fmt::format::DefaultFields;
+            fn formatter(&self) -> &Self::Formatter {
+                &self.0
+            }
+            fn format_fields_in_zone_name(&self) -> bool {
+                false
+            }
+        }
+
+        self.add_layer(tracing_tracy::TracyLayer::new(Config(Default::default())).with_filter(
+            build_env_filter(Some(config.default_directive.parse()?), &config.filters)?,
+        ));
         Ok(())
     }
 

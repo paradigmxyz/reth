@@ -583,6 +583,8 @@ pub(crate) struct MultiProofTaskMetrics {
     pub last_proof_wait_time_histogram: Histogram,
     /// Time spent preparing the sparse trie for reuse after state root computation.
     pub into_trie_for_reuse_duration_histogram: Histogram,
+    /// Time spent waiting for preserved sparse trie cache to become available.
+    pub sparse_trie_cache_wait_duration_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant

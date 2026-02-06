@@ -1,7 +1,7 @@
-use std::{collections::HashMap, future::Future, sync::Arc};
+use std::{future::Future, sync::Arc};
 
 use alloy_eips::BlockId;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{map::AddressMap, U256};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
@@ -58,15 +58,12 @@ where
     }
 
     /// Returns a map of addresses to changed account balanced for a particular block.
-    pub async fn balance_changes_in_block(
-        &self,
-        block_id: BlockId,
-    ) -> EthResult<HashMap<Address, U256>> {
+    pub async fn balance_changes_in_block(&self, block_id: BlockId) -> EthResult<AddressMap<U256>> {
         self.on_blocking_task(|this| async move { this.try_balance_changes_in_block(block_id) })
             .await
     }
 
-    fn try_balance_changes_in_block(&self, block_id: BlockId) -> EthResult<HashMap<Address, U256>> {
+    fn try_balance_changes_in_block(&self, block_id: BlockId) -> EthResult<AddressMap<U256>> {
         let Some(block_number) = self.provider().block_number_for_id(block_id)? else {
             return Err(EthApiError::HeaderNotFound(block_id))
         };
@@ -74,7 +71,7 @@ where
         let state = self.provider().state_by_block_id(block_id)?;
         let accounts_before = self.provider().account_block_changeset(block_number)?;
         let hash_map = accounts_before.iter().try_fold(
-            HashMap::default(),
+            AddressMap::default(),
             |mut hash_map, account_before| -> RethResult<_> {
                 let current_balance = state.account_balance(&account_before.address)?;
                 let prev_balance = account_before.info.map(|info| info.balance);
@@ -102,7 +99,7 @@ where
     async fn reth_get_balance_changes_in_block(
         &self,
         block_id: BlockId,
-    ) -> RpcResult<HashMap<Address, U256>> {
+    ) -> RpcResult<AddressMap<U256>> {
         Ok(Self::balance_changes_in_block(self, block_id).await?)
     }
 

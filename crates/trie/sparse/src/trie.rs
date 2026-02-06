@@ -21,8 +21,7 @@ use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeCompact, BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef,
-    LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask, TrieNode, CHILD_INDEX_RANGE,
-    EMPTY_ROOT_HASH,
+    LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask, TrieNode, EMPTY_ROOT_HASH,
 };
 use tracing::{debug, instrument, trace};
 
@@ -422,13 +421,11 @@ impl fmt::Display for SerialSparseTrie {
                 SparseNode::Branch { state_mask, .. } => {
                     writeln!(f, "{packed_path} -> {node:?}")?;
 
-                    for i in CHILD_INDEX_RANGE.rev() {
-                        if state_mask.is_bit_set(i) {
-                            let mut child_path = path;
-                            child_path.push_unchecked(i);
-                            if let Some(child_node) = self.nodes_ref().get(&child_path) {
-                                stack.push((child_path, child_node, depth + 1));
-                            }
+                    for i in state_mask.iter().rev() {
+                        let mut child_path = path;
+                        child_path.push_unchecked(i);
+                        if let Some(child_node) = self.nodes_ref().get(&child_path) {
+                            stack.push((child_path, child_node, depth + 1));
                         }
                     }
                 }
@@ -479,6 +476,7 @@ impl SparseTrieTrait for SerialSparseTrie {
     fn reserve_nodes(&mut self, additional: usize) {
         self.nodes.reserve(additional);
     }
+
     fn reveal_node(
         &mut self,
         path: Nibbles,
@@ -503,16 +501,14 @@ impl SparseTrieTrait for SerialSparseTrie {
                 self.nodes.insert(path, SparseNode::Empty);
             }
             TrieNode::Branch(branch) => {
-                // For a branch node, iterate over all potential children
+                // For a branch node, iterate over all children
                 let mut stack_ptr = branch.as_ref().first_child_index();
-                for idx in CHILD_INDEX_RANGE {
-                    if branch.state_mask.is_bit_set(idx) {
-                        let mut child_path = path;
-                        child_path.push_unchecked(idx);
-                        // Reveal each child node or hash it has
-                        self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
-                        stack_ptr += 1;
-                    }
+                for idx in branch.state_mask.iter() {
+                    let mut child_path = path;
+                    child_path.push_unchecked(idx);
+                    // Reveal each child node or hash it has
+                    self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+                    stack_ptr += 1;
                 }
                 // Update the branch node entry in the nodes map, handling cases where a blinded
                 // node is now replaced with a revealed node.
@@ -623,10 +619,14 @@ impl SparseTrieTrait for SerialSparseTrie {
         Ok(())
     }
 
-    fn reveal_nodes(&mut self, mut nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()> {
+    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()> {
         nodes.sort_unstable_by_key(|node| node.path);
-        for node in nodes {
-            self.reveal_node(node.path, node.node, node.masks)?;
+        for node in nodes.iter_mut() {
+            self.reveal_node(
+                node.path,
+                core::mem::replace(&mut node.node, TrieNode::EmptyRoot),
+                node.masks.take(),
+            )?;
         }
         Ok(())
     }
@@ -1500,12 +1500,10 @@ impl SerialSparseTrie {
                     } else {
                         unchanged_prefix_set.insert(path);
 
-                        for bit in CHILD_INDEX_RANGE.rev() {
-                            if state_mask.is_bit_set(bit) {
-                                let mut child_path = path;
-                                child_path.push_unchecked(bit);
-                                paths.push((child_path, level + 1));
-                            }
+                        for bit in state_mask.iter().rev() {
+                            let mut child_path = path;
+                            child_path.push_unchecked(bit);
+                            paths.push((child_path, level + 1));
                         }
                     }
                 }
@@ -1659,12 +1657,10 @@ impl SerialSparseTrie {
                     buffers.branch_child_buf.clear();
                     // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
                     // from the stack and keep walking in the sorted order.
-                    for bit in CHILD_INDEX_RANGE.rev() {
-                        if state_mask.is_bit_set(bit) {
-                            let mut child = path;
-                            child.push_unchecked(bit);
-                            buffers.branch_child_buf.push(child);
-                        }
+                    for bit in state_mask.iter().rev() {
+                        let mut child = path;
+                        child.push_unchecked(bit);
+                        buffers.branch_child_buf.push(child);
                     }
 
                     buffers
@@ -2257,7 +2253,7 @@ mod find_leaf_tests {
         let blinded_hash = B256::repeat_byte(0xBB);
         let leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
-        let mut nodes = alloy_primitives::map::HashMap::default();
+        let mut nodes = HashMap::default();
         // Create path to the blinded node
         nodes.insert(
             Nibbles::default(),

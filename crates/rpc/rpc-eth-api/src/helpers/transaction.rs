@@ -494,7 +494,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 request.as_mut().set_max_fee_per_blob_gas(blob_fee.to());
             }
 
-            if request.as_ref().blob_sidecar().is_some() &&
+            // Use `sidecar.is_some()` instead of `blob_sidecar().is_some()` to handle
+            // both EIP-4844 (v0) and EIP-7594 (v1) sidecar formats
+            if request.as_ref().sidecar.is_some() &&
                 request.as_ref().blob_versioned_hashes.is_none()
             {
                 request.as_mut().populate_blob_hashes();

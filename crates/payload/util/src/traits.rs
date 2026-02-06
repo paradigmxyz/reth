@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use alloy_primitives::{map::HashSet, Address};
+use alloy_primitives::{map::AddressSet, Address};
 use reth_transaction_pool::{PoolTransaction, ValidPoolTransaction};
 
 /// Iterator that returns transactions for the block building process in the order they should be
@@ -58,7 +58,7 @@ where
     T: PoolTransaction,
     I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
-    invalid: HashSet<Address>,
+    invalid: AddressSet,
     best: I,
 }
 
@@ -103,7 +103,7 @@ mod tests {
         BestPayloadTransactions, PayloadTransactions, PayloadTransactionsChain,
         PayloadTransactionsFixed,
     };
-    use alloy_primitives::{map::HashSet, Address};
+    use alloy_primitives::{map::AddressSet, Address};
     use reth_transaction_pool::{
         pool::{BestTransactionsWithPrioritizedSenders, PendingPool},
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
@@ -169,10 +169,10 @@ mod tests {
                 BestPayloadTransactions::new(priority_pool.best()),
                 Some(100),
                 BestPayloadTransactions::new(BestTransactionsWithPrioritizedSenders::new(
-                    HashSet::from([address_a]),
+                    AddressSet::from_iter([address_a]),
                     200,
                     BestTransactionsWithPrioritizedSenders::new(
-                        HashSet::from([address_b]),
+                        AddressSet::from_iter([address_b]),
                         200,
                         pool.best(),
                     ),

@@ -1,16 +1,13 @@
 use crate::validation::StatelessValidationError;
 use alloc::vec::Vec;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{Address, Signature, B256};
+use alloy_primitives::Address;
 use core::ops::Deref;
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, Bytes};
-
-#[cfg(all(feature = "k256", feature = "secp256k1"))]
-use k256 as _;
 
 /// Serialized uncompressed public key
 #[serde_as]
@@ -76,68 +73,6 @@ fn verify_and_compute_sender(
         return Err(StatelessValidationError::HomesteadSignatureNotNormalized);
     }
     let sig_hash = tx.signature_hash();
-    #[cfg(all(feature = "k256", feature = "secp256k1"))]
-    {
-        let _ = verify_and_compute_sender_unchecked_k256;
-    }
-    #[cfg(feature = "secp256k1")]
-    {
-        verify_and_compute_sender_unchecked_secp256k1(vk, sig, sig_hash)
-    }
-    #[cfg(all(feature = "k256", not(feature = "secp256k1")))]
-    {
-        verify_and_compute_sender_unchecked_k256(vk, sig, sig_hash)
-    }
-    #[cfg(not(any(feature = "secp256k1", feature = "k256")))]
-    {
-        let _ = vk;
-        let _ = tx;
-        let _: B256 = sig_hash;
-        let _: &Signature = sig;
-
-        unimplemented!("Must choose either k256 or secp256k1 feature")
-    }
-}
-#[cfg(feature = "k256")]
-fn verify_and_compute_sender_unchecked_k256(
-    vk: &UncompressedPublicKey,
-    sig: &Signature,
-    sig_hash: B256,
-) -> Result<Address, StatelessValidationError> {
-    use k256::ecdsa::{signature::hazmat::PrehashVerifier, VerifyingKey};
-
-    let vk =
-        VerifyingKey::from_sec1_bytes(vk).map_err(|_| StatelessValidationError::SignerRecovery)?;
-
-    sig.to_k256()
-        .and_then(|sig| vk.verify_prehash(sig_hash.as_slice(), &sig))
-        .map_err(|_| StatelessValidationError::SignerRecovery)?;
-
-    Ok(Address::from_public_key(&vk))
-}
-
-#[cfg(feature = "secp256k1")]
-fn verify_and_compute_sender_unchecked_secp256k1(
-    vk: &UncompressedPublicKey,
-    sig: &Signature,
-    sig_hash: B256,
-) -> Result<Address, StatelessValidationError> {
-    use secp256k1::{ecdsa::Signature as SecpSignature, Message, PublicKey, SECP256K1};
-
-    let public_key =
-        PublicKey::from_slice(vk).map_err(|_| StatelessValidationError::SignerRecovery)?;
-
-    let mut sig_bytes = [0u8; 64];
-    sig_bytes[0..32].copy_from_slice(&sig.r().to_be_bytes::<32>());
-    sig_bytes[32..64].copy_from_slice(&sig.s().to_be_bytes::<32>());
-
-    let signature = SecpSignature::from_compact(&sig_bytes)
-        .map_err(|_| StatelessValidationError::SignerRecovery)?;
-
-    let message = Message::from_digest(sig_hash.0);
-    SECP256K1
-        .verify_ecdsa(&message, &signature, &public_key)
-        .map_err(|_| StatelessValidationError::SignerRecovery)?;
-
-    Ok(Address::from_raw_public_key(&vk[1..]))
+    alloy_consensus::crypto::secp256k1::verify_and_compute_signer_unchecked(&vk.0, sig, sig_hash)
+        .map_err(|_| StatelessValidationError::SignerRecovery)
 }

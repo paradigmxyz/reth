@@ -621,12 +621,11 @@ mod tests {
         bodies::test_utils::{insert_headers, zip_blocks},
         test_utils::{generate_bodies, TestBodiesClient},
     };
-    use alloy_primitives::B256;
+    use alloy_primitives::{map::B256Map, B256};
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-    use std::collections::HashMap;
 
     // Check that the blocks are emitted in order of block number, not in order of
     // first-downloaded
@@ -674,7 +673,7 @@ mod tests {
         let bodies = blocks
             .into_iter()
             .map(|block| (block.hash(), block.into_body()))
-            .collect::<HashMap<_, _>>();
+            .collect::<B256Map<_>>();
 
         insert_headers(&factory, &headers);
 

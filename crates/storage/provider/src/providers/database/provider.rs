@@ -27,7 +27,7 @@ use alloy_consensus::{
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, HashMap, HashSet},
+    map::{hash_map, AddressSet, B256Map, HashMap},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
@@ -64,6 +64,7 @@ use reth_storage_api::{
     StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
+use reth_tasks::spawn_scoped_os_thread;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, StoredNibbles,
@@ -565,28 +566,20 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
 
         thread::scope(|s| {
             // SF writes
-            let sf_handle = thread::Builder::new()
-                .name("static-files".into())
-                .spawn_scoped(s, || {
-                    let start = Instant::now();
-                    sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx)?;
-                    Ok::<_, ProviderError>(start.elapsed())
-                })
-                // Same panic happens in `scope.spawn`
-                .expect("failed to spawn thread");
+            let sf_handle = spawn_scoped_os_thread(s, "static-files", || {
+                let start = Instant::now();
+                sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx)?;
+                Ok::<_, ProviderError>(start.elapsed())
+            });
 
             // RocksDB writes
             #[cfg(all(unix, feature = "rocksdb"))]
             let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
-                thread::Builder::new()
-                    .name("rocksdb".into())
-                    .spawn_scoped(s, || {
-                        let start = Instant::now();
-                        rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)?;
-                        Ok::<_, ProviderError>(start.elapsed())
-                    })
-                    // Same panic happens in `scope.spawn`
-                    .expect("failed to spawn thread")
+                spawn_scoped_os_thread(s, "rocksdb", || {
+                    let start = Instant::now();
+                    rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)?;
+                    Ok::<_, ProviderError>(start.elapsed())
+                })
             });
 
             // MDBX writes
@@ -1576,7 +1569,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
             self.cached_storage_settings().account_changesets_in_static_files
         {
             let start = *range.start();
-            let static_end = (*range.end()).min(highest + 1);
+            let static_end = (*range.end()).min(highest);
 
             let mut changed_accounts_and_blocks: BTreeMap<_, Vec<u64>> = BTreeMap::default();
             if start <= static_end {
@@ -2499,7 +2492,7 @@ impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> StateWriter
             PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
 
         // Prepare set of addresses which logs should not be pruned.
-        let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
+        let mut allowed_addresses: AddressSet = AddressSet::default();
         for (_, addresses) in contract_log_pruner.range(..first_block) {
             allowed_addresses.extend(addresses.iter().copied());
         }
@@ -3128,7 +3121,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
     fn unwind_storage_hashing(
         &self,
         changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
-    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
+    ) -> ProviderResult<B256Map<BTreeSet<B256>>> {
         // Aggregate all block changesets and make list of accounts that have been changed.
         let mut hashed_storages = changesets
             .into_iter()
@@ -3139,8 +3132,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
 
         // Apply values to HashedState, and remove the account if it's None.
-        let mut hashed_storage_keys: HashMap<B256, BTreeSet<B256>> =
-            HashMap::with_capacity_and_hasher(hashed_storages.len(), Default::default());
+        let mut hashed_storage_keys: B256Map<BTreeSet<B256>> =
+            B256Map::with_capacity_and_hasher(hashed_storages.len(), Default::default());
         let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, key, value) in hashed_storages.into_iter().rev() {
             hashed_storage_keys.entry(hashed_address).or_default().insert(key);
@@ -3163,7 +3156,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
     fn unwind_storage_hashing_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
+    ) -> ProviderResult<B256Map<BTreeSet<B256>>> {
         let changesets = self.storage_changesets_range(range)?;
         self.unwind_storage_hashing(changesets.into_iter())
     }
@@ -3171,7 +3164,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
     fn insert_storage_for_hashing(
         &self,
         storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageEntry>)>,
-    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
+    ) -> ProviderResult<B256Map<BTreeSet<B256>>> {
         // hash values
         let hashed_storages =
             storages.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
@@ -3775,6 +3768,12 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
     }
 
     /// Commit database transaction, static files, and pending `RocksDB` batches.
+    #[instrument(
+        name = "DatabaseProvider::commit",
+        level = "debug",
+        target = "providers::db",
+        skip_all
+    )]
     fn commit(self) -> ProviderResult<()> {
         // For unwinding it makes more sense to commit the database first, since if
         // it is interrupted before the static files commit, we can just

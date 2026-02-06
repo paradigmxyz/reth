@@ -1,6 +1,6 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{
-    map::{B256HashSet, B256Map},
+    map::{B256Map, B256Set},
     BlockNumber, B256,
 };
 use futures::StreamExt;
@@ -22,7 +22,7 @@ pub struct PendingState<N: NodePrimitives>(Arc<RwLock<PendingStateInner<N>>>);
 struct PendingStateInner<N: NodePrimitives> {
     blocks_by_hash: B256Map<ExecutedBlock<N>>,
     invalid_blocks_by_hash: B256Map<Arc<RecoveredBlock<N::Block>>>,
-    block_hashes_by_number: BTreeMap<BlockNumber, B256HashSet>,
+    block_hashes_by_number: BTreeMap<BlockNumber, B256Set>,
 }
 
 impl<N: NodePrimitives> PendingState<N> {

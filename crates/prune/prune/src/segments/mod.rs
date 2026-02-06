@@ -25,6 +25,10 @@ pub use user::{
 ///
 /// This is a generic helper function used by both receipts and bodies pruning
 /// when data is stored in static files.
+///
+/// The checkpoint block number is set to the highest block in the actually deleted files,
+/// not `input.to_block`, since `to_block` might refer to a block in the middle of an
+/// undeleted file.
 pub(crate) fn prune_static_files<Provider>(
     provider: &Provider,
     input: PruneInput,
@@ -37,18 +41,31 @@ where
         provider.static_file_provider().delete_segment_below_block(segment, input.to_block + 1)?;
 
     if deleted_headers.is_empty() {
-        return Ok(SegmentOutput::done())
+        return Ok(SegmentOutput {
+            progress: PruneProgress::Finished,
+            pruned: 0,
+            checkpoint: input
+                .previous_checkpoint
+                .map(SegmentOutputCheckpoint::from_prune_checkpoint),
+        })
     }
 
     let tx_ranges = deleted_headers.iter().filter_map(|header| header.tx_range());
 
     let pruned = tx_ranges.clone().map(|range| range.len()).sum::<u64>() as usize;
 
+    // The highest block number in the deleted files is the actual checkpoint.
+    let checkpoint_block = deleted_headers
+        .iter()
+        .filter_map(|header| header.block_range())
+        .map(|range| range.end())
+        .max();
+
     Ok(SegmentOutput {
         progress: PruneProgress::Finished,
         pruned,
         checkpoint: Some(SegmentOutputCheckpoint {
-            block_number: Some(input.to_block),
+            block_number: checkpoint_block,
             tx_number: tx_ranges.map(|range| range.end()).max(),
         }),
     })

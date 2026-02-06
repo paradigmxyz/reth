@@ -76,10 +76,11 @@ where
         } = prune_modes;
 
         Self::default()
-            // Transaction lookup
+            // Transaction lookup must run before bodies because it needs to read transaction
+            // data from static files before bodies deletes them.
             .segment_opt(transaction_lookup.map(TransactionLookup::new))
-            // Bodies - run first since file deletion is fast
-            .segment_opt(bodies_history.map(Bodies::new))
+            // Bodies
+            .segment_opt(bodies_history.map(|mode| Bodies::new(mode, transaction_lookup)))
             // Account history
             .segment_opt(account_history.map(AccountHistory::new))
             // Storage history

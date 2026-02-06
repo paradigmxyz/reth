@@ -4,7 +4,7 @@ use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
     GasPriceOracleArgs, RpcStateCacheArgs,
 };
-use alloy_primitives::Address;
+use alloy_primitives::map::AddressSet;
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, Resettable, TypedValueParser},
@@ -15,7 +15,6 @@ use reth_cli_util::{parse_duration_from_secs_or_ms, parse_ether_value};
 use reth_rpc_eth_types::builder::config::PendingBlockKind;
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
 use std::{
-    collections::HashSet,
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
@@ -89,7 +88,7 @@ pub struct DefaultRpcServerArgs {
     rpc_proof_permits: usize,
     rpc_pending_block: PendingBlockKind,
     rpc_forwarder: Option<Url>,
-    builder_disallow: Option<HashSet<Address>>,
+    builder_disallow: Option<AddressSet>,
     rpc_state_cache: RpcStateCacheArgs,
     gas_price_oracle: GasPriceOracleArgs,
     rpc_send_raw_transaction_sync_timeout: Duration,
@@ -335,7 +334,7 @@ impl DefaultRpcServerArgs {
     }
 
     /// Set the default builder disallow addresses
-    pub fn with_builder_disallow(mut self, v: Option<HashSet<Address>>) -> Self {
+    pub fn with_builder_disallow(mut self, v: Option<AddressSet>) -> Self {
         self.builder_disallow = v;
         self
     }
@@ -621,8 +620,8 @@ pub struct RpcServerArgs {
 
     /// Path to file containing disallowed addresses, json-encoded list of strings. Block
     /// validation API will reject blocks containing transactions from these addresses.
-    #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>, default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|v| format!("{:?}", v).into())))]
-    pub builder_disallow: Option<HashSet<Address>>,
+    #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<AddressSet>, default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|v| format!("{:?}", v).into())))]
+    pub builder_disallow: Option<AddressSet>,
 
     /// State cache configuration.
     #[command(flatten)]

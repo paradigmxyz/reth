@@ -66,8 +66,8 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
-    ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
+    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
+    RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
     StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
@@ -236,7 +236,7 @@ impl LaunchContext {
             .map_or(0, |num| num.get().saturating_sub(reserved_cpu_cores).max(1));
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
-            .thread_name(|i| format!("reth-rayon-{i}"))
+            .thread_name(|i| format!("rayon-{i}"))
             .build_global()
         {
             warn!(%err, "Failed to build global thread pool")
@@ -507,32 +507,10 @@ where
         .with_prune_modes(self.prune_modes())
         .with_changeset_cache(changeset_cache);
 
-        // Keep MDBX, static files, and RocksDB aligned. If any check fails, unwind to the
-        // earliest consistent block.
-        //
-        // Order matters:
-        // 1) heal static files (no pruning)
-        // 2) check RocksDB (needs static-file tx data)
-        // 3) check static-file checkpoints vs MDBX (may prune)
-        //
-        // Compute one unwind target and run a single unwind.
-
-        let provider_ro = factory.database_provider_ro()?;
-
-        // Step 1: heal file-level inconsistencies (no pruning)
-        factory.static_file_provider().check_file_consistency(&provider_ro)?;
-
-        // Step 2: RocksDB consistency check (needs static files tx data)
-        let rocksdb_unwind = factory.rocksdb_provider().check_consistency(&provider_ro)?;
-
-        // Step 3: Static file checkpoint consistency (may prune)
-        let static_file_unwind = factory
-            .static_file_provider()
-            .check_consistency(&provider_ro)?
-            .map(|target| match target {
-                PipelineTarget::Unwind(block) => block,
-                PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
-            });
+        // Check consistency between the database and static files, returning
+        // the unwind targets for each storage layer if inconsistencies are
+        // found.
+        let (rocksdb_unwind, static_file_unwind) = factory.check_consistency()?;
 
         // Take the minimum block number to ensure all storage layers are consistent.
         let unwind_target = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();

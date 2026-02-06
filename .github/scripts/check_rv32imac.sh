@@ -29,13 +29,6 @@ crates_to_check=(
     reth-ethereum-primitives
     reth-ethereum-consensus
     reth-stateless
-
-    ## optimism
-    reth-optimism-chainspec
-    reth-optimism-forks
-    reth-optimism-consensus
-    reth-optimism-primitives
-    reth-optimism-evm
 )
 
 # Array to hold the results

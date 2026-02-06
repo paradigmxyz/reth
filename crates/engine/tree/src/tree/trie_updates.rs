@@ -1,4 +1,7 @@
-use alloy_primitives::{map::HashMap, B256};
+use alloy_primitives::{
+    map::{B256Map, HashMap},
+    B256,
+};
 use reth_db::DatabaseError;
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory},
@@ -19,7 +22,7 @@ struct EntryDiff<T> {
 struct TrieUpdatesDiff {
     account_nodes: HashMap<Nibbles, EntryDiff<Option<BranchNodeCompact>>>,
     removed_nodes: HashMap<Nibbles, EntryDiff<bool>>,
-    storage_tries: HashMap<B256, StorageTrieUpdatesDiff>,
+    storage_tries: B256Map<StorageTrieUpdatesDiff>,
 }
 
 impl TrieUpdatesDiff {

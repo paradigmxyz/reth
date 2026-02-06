@@ -1,7 +1,6 @@
 use alloy_eips::BlockId;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{map::AddressMap, U256};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use std::collections::HashMap;
 
 // Required for the subscription attribute below
 use reth_chain_state as _;
@@ -15,7 +14,7 @@ pub trait RethApi {
     async fn reth_get_balance_changes_in_block(
         &self,
         block_id: BlockId,
-    ) -> RpcResult<HashMap<Address, U256>>;
+    ) -> RpcResult<AddressMap<U256>>;
 
     /// Subscribe to json `ChainNotifications`
     #[subscription(

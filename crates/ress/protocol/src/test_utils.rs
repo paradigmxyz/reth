@@ -2,7 +2,7 @@
 
 use crate::RessProtocolProvider;
 use alloy_consensus::Header;
-use alloy_primitives::{map::B256HashMap, Bytes, B256};
+use alloy_primitives::{map::B256Map, Bytes, B256};
 use reth_ethereum_primitives::BlockBody;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
@@ -35,10 +35,10 @@ impl RessProtocolProvider for NoopRessProtocolProvider {
 /// Mock implementation of [`RessProtocolProvider`].
 #[derive(Clone, Default, Debug)]
 pub struct MockRessProtocolProvider {
-    headers: Arc<Mutex<B256HashMap<Header>>>,
-    block_bodies: Arc<Mutex<B256HashMap<BlockBody>>>,
-    bytecodes: Arc<Mutex<B256HashMap<Bytes>>>,
-    witnesses: Arc<Mutex<B256HashMap<Vec<Bytes>>>>,
+    headers: Arc<Mutex<B256Map<Header>>>,
+    block_bodies: Arc<Mutex<B256Map<BlockBody>>>,
+    bytecodes: Arc<Mutex<B256Map<Bytes>>>,
+    witnesses: Arc<Mutex<B256Map<Vec<Bytes>>>>,
     witness_delay: Option<Duration>,
 }
 
