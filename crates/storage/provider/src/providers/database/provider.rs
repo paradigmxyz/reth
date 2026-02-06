@@ -18,7 +18,7 @@ use crate::{
     PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
     RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieWriter,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter, STORAGE_POOL,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -64,7 +64,6 @@ use reth_storage_api::{
     StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
-use reth_tasks::spawn_scoped_os_thread;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, StoredNibbles,
@@ -79,7 +78,6 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::Arc,
-    thread,
     time::Instant,
 };
 use tracing::{debug, instrument, trace};
@@ -550,24 +548,37 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let rocksdb_provider = self.rocksdb_provider.clone();
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb_enabled = rocksdb_ctx.storage_settings.any_in_rocksdb();
 
-        thread::scope(|s| {
+        let mut sf_result = None;
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let mut rocksdb_result = None;
+
+        // Write to all backends in parallel.
+        STORAGE_POOL.in_place_scope(|s| {
             // SF writes
-            let sf_handle = spawn_scoped_os_thread(s, "static-files", || {
+            s.spawn(|_| {
                 let start = Instant::now();
-                sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx)?;
-                Ok::<_, ProviderError>(start.elapsed())
+                sf_result = Some(
+                    sf_provider
+                        .write_blocks_data(&blocks, &tx_nums, sf_ctx)
+                        .map(|()| start.elapsed()),
+                );
             });
 
             // RocksDB writes
             #[cfg(all(unix, feature = "rocksdb"))]
-            let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
-                spawn_scoped_os_thread(s, "rocksdb", || {
+            if rocksdb_enabled {
+                s.spawn(|_| {
                     let start = Instant::now();
-                    rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)?;
-                    Ok::<_, ProviderError>(start.elapsed())
-                })
-            });
+                    rocksdb_result = Some(
+                        rocksdb_provider
+                            .write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)
+                            .map(|()| start.elapsed()),
+                    );
+                });
+            }
 
             // MDBX writes
             let mdbx_start = Instant::now();
@@ -672,24 +683,27 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             timings.mdbx = mdbx_start.elapsed();
 
-            // Wait for SF thread
-            timings.sf = sf_handle
-                .join()
-                .map_err(|_| StaticFileWriterError::ThreadPanic("static file"))??;
+            Ok::<_, ProviderError>(())
+        })?;
 
-            // Wait for RocksDB thread
-            #[cfg(all(unix, feature = "rocksdb"))]
-            if let Some(handle) = rocksdb_handle {
-                timings.rocksdb = handle.join().expect("RocksDB thread panicked")?;
-            }
+        // Collect results from spawned tasks
+        timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
 
-            timings.total = total_start.elapsed();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if rocksdb_enabled {
+            timings.rocksdb = rocksdb_result.ok_or_else(|| {
+                ProviderError::Database(reth_db_api::DatabaseError::Other(
+                    "RocksDB thread panicked".into(),
+                ))
+            })??;
+        }
 
-            self.metrics.record_save_blocks(&timings);
-            debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
+        timings.total = total_start.elapsed();
 
-            Ok(())
-        })
+        self.metrics.record_save_blocks(&timings);
+        debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
+
+        Ok(())
     }
 
     /// Writes MDBX-only data for a block (indices, lookups, and senders if configured for MDBX).
