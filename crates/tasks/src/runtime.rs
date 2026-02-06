@@ -3,27 +3,20 @@
 //! This module provides [`GlobalRuntime`], a static singleton that manages:
 //! - Tokio runtime (either owned or attached)
 //! - [`TaskExecutor`] for spawning async tasks
-//! - Rayon thread pool for CPU-bound work (with `rayon` feature)
-//! - [`BlockingTaskPool`] and [`BlockingTaskGuard`] for rate-limited CPU tasks (with `rayon`
-//!   feature)
+//! - Dedicated rayon thread pools for different workloads (with `rayon` feature)
+//! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
 //!
 //! # Usage
 //!
 //! Initialize the runtime early in your application:
 //!
 //! ```ignore
-//! use reth_tasks::{RuntimeConfig, TokioConfig, RayonConfig, RUNTIME};
+//! use reth_tasks::{RuntimeConfig, RUNTIME};
 //!
-//! // Build and own a tokio runtime
-//! let config = RuntimeConfig::default();
-//! RUNTIME.init(config).expect("runtime already initialized");
-//!
-//! // Or attach to an existing runtime
-//! let config = RuntimeConfig::with_existing_handle(handle);
-//! RUNTIME.init(config).expect("runtime already initialized");
+//! let task_manager = RUNTIME.init(RuntimeConfig::default())?;
 //! ```
 //!
-//! Then use the spawn functions anywhere:
+//! Then use the getters anywhere:
 //!
 //! ```ignore
 //! use reth_tasks::RUNTIME;
@@ -31,8 +24,11 @@
 //! // Spawn async tasks
 //! RUNTIME.executor().spawn(async { /* ... */ });
 //!
-//! // Run CPU-bound work on rayon pool
-//! RUNTIME.cpu_pool().spawn(|| expensive_computation());
+//! // Run CPU-bound work on the general rayon pool
+//! RUNTIME.cpu_pool().install(|| expensive_computation());
+//!
+//! // Run trie proof work on the dedicated trie pool
+//! RUNTIME.trie_pool().spawn(|| compute_proof());
 //! ```
 
 #[cfg(feature = "rayon")]
@@ -45,20 +41,15 @@ use tokio::runtime::{Handle, Runtime};
 use tracing::debug;
 
 /// Global runtime singleton.
-///
-/// Access via [`RUNTIME`].
 pub static RUNTIME: GlobalRuntime = GlobalRuntime::new();
 
 /// Default thread keep-alive duration for the tokio runtime.
-///
-/// Keeps threads alive for at least the block time (12 seconds) plus buffer.
-/// This prevents the costly process of spawning new threads on every new block.
 pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(15);
 
 /// Default reserved CPU cores for OS and other processes.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 2;
 
-/// Default maximum number of concurrent blocking tasks.
+/// Default maximum number of concurrent blocking tasks (for RPC tracing guard).
 pub const DEFAULT_MAX_BLOCKING_TASKS: usize = 512;
 
 /// Configuration for the tokio runtime.
@@ -74,8 +65,6 @@ pub enum TokioConfig {
         thread_name: &'static str,
     },
     /// Attach to an existing tokio runtime handle.
-    ///
-    /// Useful for embedding reth in another application or for tests.
     ExistingHandle(Handle),
 }
 
@@ -105,18 +94,22 @@ impl TokioConfig {
     }
 }
 
-/// Configuration for the rayon thread pool.
+/// Configuration for the rayon thread pools.
 #[derive(Debug, Clone)]
 #[cfg(feature = "rayon")]
 pub struct RayonConfig {
-    /// Number of threads for the CPU pool.
+    /// Number of threads for the general CPU pool.
     /// If `None`, derived from available parallelism minus reserved cores.
     pub cpu_threads: Option<usize>,
     /// Number of CPU cores to reserve for OS and other processes.
     pub reserved_cpu_cores: usize,
-    /// Thread name prefix for the rayon pool.
-    pub thread_name_prefix: &'static str,
-    /// Maximum number of concurrent blocking tasks (for `BlockingTaskGuard`).
+    /// Number of threads for the RPC blocking pool (trace calls, `eth_getProof`, etc.).
+    /// If `None`, uses the same as `cpu_threads`.
+    pub rpc_threads: Option<usize>,
+    /// Number of threads for the trie proof computation pool.
+    /// If `None`, uses the same as `cpu_threads`.
+    pub trie_threads: Option<usize>,
+    /// Maximum number of concurrent blocking tasks for the RPC guard semaphore.
     pub max_blocking_tasks: usize,
 }
 
@@ -126,7 +119,8 @@ impl Default for RayonConfig {
         Self {
             cpu_threads: None,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
-            thread_name_prefix: "reth-cpu",
+            rpc_threads: None,
+            trie_threads: None,
             max_blocking_tasks: DEFAULT_MAX_BLOCKING_TASKS,
         }
     }
@@ -134,16 +128,6 @@ impl Default for RayonConfig {
 
 #[cfg(feature = "rayon")]
 impl RayonConfig {
-    /// Create a config with the specified number of CPU threads.
-    pub const fn with_cpu_threads(cpu_threads: usize) -> Self {
-        Self {
-            cpu_threads: Some(cpu_threads),
-            reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
-            thread_name_prefix: "reth-cpu",
-            max_blocking_tasks: DEFAULT_MAX_BLOCKING_TASKS,
-        }
-    }
-
     /// Set the number of reserved CPU cores.
     pub const fn with_reserved_cpu_cores(mut self, reserved_cpu_cores: usize) -> Self {
         self.reserved_cpu_cores = reserved_cpu_cores;
@@ -156,8 +140,20 @@ impl RayonConfig {
         self
     }
 
-    /// Compute the number of threads for the rayon pool.
-    fn compute_thread_count(&self) -> usize {
+    /// Set the number of threads for the RPC blocking pool.
+    pub const fn with_rpc_threads(mut self, rpc_threads: usize) -> Self {
+        self.rpc_threads = Some(rpc_threads);
+        self
+    }
+
+    /// Set the number of threads for the trie proof pool.
+    pub const fn with_trie_threads(mut self, trie_threads: usize) -> Self {
+        self.trie_threads = Some(trie_threads);
+        self
+    }
+
+    /// Compute the default number of threads based on available parallelism.
+    fn default_thread_count(&self) -> usize {
         self.cpu_threads.unwrap_or_else(|| {
             available_parallelism()
                 .map_or(1, |num| num.get().saturating_sub(self.reserved_cpu_cores).max(1))
@@ -177,6 +173,7 @@ pub struct RuntimeConfig {
 
 impl RuntimeConfig {
     /// Create a config that attaches to an existing tokio runtime handle.
+    #[cfg_attr(not(feature = "rayon"), allow(clippy::missing_const_for_fn))]
     pub fn with_existing_handle(handle: Handle) -> Self {
         Self {
             tokio: TokioConfig::ExistingHandle(handle),
@@ -208,23 +205,31 @@ pub enum RuntimeInitError {
     /// Failed to build the tokio runtime.
     #[error("Failed to build tokio runtime: {0}")]
     TokioBuild(#[from] std::io::Error),
-    /// Failed to build the rayon thread pool.
+    /// Failed to build a rayon thread pool.
     #[cfg(feature = "rayon")]
     #[error("Failed to build rayon thread pool: {0}")]
     RayonBuild(#[from] rayon::ThreadPoolBuildError),
 }
 
+/// Panics with a message indicating the runtime was not initialized.
+#[cold]
+#[inline(never)]
+fn uninitialized_panic() -> ! {
+    panic!("RUNTIME not initialized. Call reth_tasks::RUNTIME.init() before accessing pools.")
+}
+
 /// Global runtime singleton that manages async and parallel execution resources.
 ///
-/// This struct provides centralized access to:
-/// - Tokio runtime/handle for async task execution
-/// - [`TaskExecutor`] for spawning tasks with panic monitoring
-/// - Rayon thread pool for CPU-bound parallel work
-/// - [`BlockingTaskPool`] for async-friendly CPU tasks
-/// - [`BlockingTaskGuard`] for rate-limiting expensive operations
+/// Provides centralized access to:
+/// - Tokio runtime/handle
+/// - [`TaskExecutor`] for spawning async tasks with panic monitoring
+/// - General-purpose rayon CPU pool (replaces global rayon pool)
+/// - Dedicated RPC blocking pool (for trace calls, `eth_getProof`, etc.)
+/// - Dedicated trie proof pool (for parallel state root / multiproof workers)
+/// - [`BlockingTaskGuard`] for rate-limiting expensive RPC operations
 ///
-/// All fields are lazily initialized via [`OnceLock`] and are private.
-/// Use the getter methods to access resources after calling [`GlobalRuntime::init`].
+/// All fields use [`OnceLock`] for thread-safe lazy initialization.
+/// Getter methods panic with a descriptive message if called before [`GlobalRuntime::init`].
 pub struct GlobalRuntime {
     /// The stored configuration.
     config: OnceLock<RuntimeConfig>,
@@ -234,13 +239,16 @@ pub struct GlobalRuntime {
     handle: OnceLock<Handle>,
     /// The task executor.
     executor: OnceLock<TaskExecutor>,
-    /// The rayon CPU thread pool.
+    /// General-purpose rayon CPU pool (hashing, signature recovery, `par_iter`, etc.).
     #[cfg(feature = "rayon")]
     cpu_pool: OnceLock<rayon::ThreadPool>,
-    /// The blocking task pool (wraps `cpu_pool` for async-friendly spawning).
+    /// RPC blocking pool (trace calls, `eth_getProof`, etc.).
     #[cfg(feature = "rayon")]
-    blocking_pool: OnceLock<BlockingTaskPool>,
-    /// Rate limiter for expensive CPU tasks.
+    rpc_pool: OnceLock<BlockingTaskPool>,
+    /// Trie proof computation pool (parallel state root, multiproof workers).
+    #[cfg(feature = "rayon")]
+    trie_pool: OnceLock<rayon::ThreadPool>,
+    /// Rate limiter for expensive RPC operations.
     #[cfg(feature = "rayon")]
     blocking_guard: OnceLock<BlockingTaskGuard>,
 }
@@ -257,7 +265,9 @@ impl GlobalRuntime {
             #[cfg(feature = "rayon")]
             cpu_pool: OnceLock::new(),
             #[cfg(feature = "rayon")]
-            blocking_pool: OnceLock::new(),
+            rpc_pool: OnceLock::new(),
+            #[cfg(feature = "rayon")]
+            trie_pool: OnceLock::new(),
             #[cfg(feature = "rayon")]
             blocking_guard: OnceLock::new(),
         }
@@ -265,8 +275,8 @@ impl GlobalRuntime {
 
     /// Initialize the global runtime with the given configuration.
     ///
-    /// This must be called once before using any getter methods.
-    /// Returns an error if already initialized or if building the runtime fails.
+    /// Must be called once before using any getter methods. Returns the [`TaskManager`] which
+    /// the caller is responsible for driving (polling) to detect critical task panics.
     ///
     /// # Example
     ///
@@ -276,12 +286,10 @@ impl GlobalRuntime {
     /// let task_manager = RUNTIME.init(RuntimeConfig::default())?;
     /// ```
     pub fn init(&self, config: RuntimeConfig) -> Result<TaskManager, RuntimeInitError> {
-        // Store config first
         if self.config.set(config.clone()).is_err() {
             return Err(RuntimeInitError::AlreadyInitialized);
         }
 
-        // Initialize tokio
         let handle = match &config.tokio {
             TokioConfig::Owned { worker_threads, thread_keep_alive, thread_name } => {
                 let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -296,64 +304,62 @@ impl GlobalRuntime {
 
                 let runtime = builder.build()?;
                 let h = runtime.handle().clone();
-
-                // Store the owned runtime
                 let _ = self.runtime.set(runtime);
                 h
             }
             TokioConfig::ExistingHandle(h) => h.clone(),
         };
 
-        // Store the handle
         let _ = self.handle.set(handle.clone());
 
-        // Create TaskManager which also sets the global executor.
-        // The caller is responsible for driving the TaskManager (polling it).
         let task_manager = TaskManager::new(handle);
         let executor = task_manager.executor();
-
-        // Store the executor
         let _ = self.executor.set(executor);
 
-        // Initialize rayon pools
         #[cfg(feature = "rayon")]
         {
-            let num_threads = config.rayon.compute_thread_count();
-            let thread_name_prefix = config.rayon.thread_name_prefix;
+            let default_threads = config.rayon.default_thread_count();
+            let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
+            let trie_threads = config.rayon.trie_threads.unwrap_or(default_threads);
 
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(num_threads)
-                .thread_name(move |i| format!("{thread_name_prefix}-{i}"))
-                .build()?;
-
-            // Create the blocking pool wrapper
-            let blocking_pool = BlockingTaskPool::new(pool);
-
-            // Store cpu_pool as a separate pool with same config
+            // General-purpose CPU pool (replaces rayon global pool for explicit spawns).
             let cpu_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(num_threads)
-                .thread_name(move |i| format!("{thread_name_prefix}-cpu-{i}"))
+                .num_threads(default_threads)
+                .thread_name(|i| format!("reth-cpu-{i}"))
                 .build()?;
-
             let _ = self.cpu_pool.set(cpu_pool);
-            let _ = self.blocking_pool.set(blocking_pool);
+
+            // RPC blocking pool for trace calls, eth_getProof, etc.
+            let rpc_raw = rayon::ThreadPoolBuilder::new()
+                .num_threads(rpc_threads)
+                .thread_name(|i| format!("reth-rpc-{i}"))
+                .build()?;
+            let _ = self.rpc_pool.set(BlockingTaskPool::new(rpc_raw));
+
+            // Trie proof pool for parallel state root and multiproof workers.
+            let trie_raw = rayon::ThreadPoolBuilder::new()
+                .num_threads(trie_threads)
+                .thread_name(|i| format!("reth-trie-{i}"))
+                .build()?;
+            let _ = self.trie_pool.set(trie_raw);
+
             let _ =
                 self.blocking_guard.set(BlockingTaskGuard::new(config.rayon.max_blocking_tasks));
 
             debug!(
-                num_threads,
+                default_threads,
+                rpc_threads,
+                trie_threads,
                 max_blocking_tasks = config.rayon.max_blocking_tasks,
                 "Initialized rayon thread pools"
             );
         }
 
-        debug!("GlobalRuntime initialized");
+        debug!("RUNTIME initialized");
         Ok(task_manager)
     }
 
-    /// Initialize from an existing tokio handle.
-    ///
-    /// Convenience method that creates a [`RuntimeConfig`] with the given handle.
+    /// Initialize from an existing tokio handle with default rayon config.
     pub fn init_with_handle(&self, handle: Handle) -> Result<TaskManager, RuntimeInitError> {
         self.init(RuntimeConfig::with_existing_handle(handle))
     }
@@ -363,97 +369,75 @@ impl GlobalRuntime {
         self.config.get().is_some()
     }
 
-    /// Get the stored configuration, if initialized.
-    pub fn try_config(&self) -> Option<&RuntimeConfig> {
-        self.config.get()
-    }
-
     /// Get the tokio runtime handle.
     ///
     /// # Panics
     ///
-    /// Panics if the runtime has not been initialized. Call [`GlobalRuntime::init`] first.
+    /// Panics if the runtime has not been initialized.
     pub fn handle(&self) -> &Handle {
-        self.try_handle().expect("GlobalRuntime not initialized. Call RUNTIME.init() first.")
-    }
-
-    /// Get the tokio runtime handle, if initialized.
-    pub fn try_handle(&self) -> Option<&Handle> {
-        self.handle.get()
+        self.handle.get().unwrap_or_else(|| uninitialized_panic())
     }
 
     /// Get a clone of the [`TaskExecutor`].
     ///
     /// # Panics
     ///
-    /// Panics if the runtime has not been initialized. Call [`GlobalRuntime::init`] first.
+    /// Panics if the runtime has not been initialized.
     pub fn executor(&self) -> TaskExecutor {
-        self.try_executor().expect("GlobalRuntime not initialized. Call RUNTIME.init() first.")
+        self.executor.get().cloned().unwrap_or_else(|| uninitialized_panic())
     }
 
-    /// Get a clone of the [`TaskExecutor`], if initialized.
-    pub fn try_executor(&self) -> Option<TaskExecutor> {
-        self.executor.get().cloned()
-    }
-
-    /// Get a reference to the rayon CPU thread pool.
+    /// Get the general-purpose rayon CPU thread pool.
     ///
-    /// This pool is suitable for CPU-bound parallel work like hashing, signature verification, etc.
+    /// Suitable for CPU-bound parallel work: hashing, signature recovery, `par_iter`, etc.
     ///
     /// # Panics
     ///
-    /// Panics if the runtime has not been initialized. Call [`GlobalRuntime::init`] first.
+    /// Panics if the runtime has not been initialized.
     #[cfg(feature = "rayon")]
     pub fn cpu_pool(&self) -> &rayon::ThreadPool {
-        self.try_cpu_pool().expect("GlobalRuntime not initialized. Call RUNTIME.init() first.")
+        self.cpu_pool.get().unwrap_or_else(|| uninitialized_panic())
     }
 
-    /// Get a reference to the rayon CPU thread pool, if initialized.
-    #[cfg(feature = "rayon")]
-    pub fn try_cpu_pool(&self) -> Option<&rayon::ThreadPool> {
-        self.cpu_pool.get()
-    }
-
-    /// Get a reference to the [`BlockingTaskPool`].
+    /// Get the RPC blocking task pool.
     ///
-    /// This provides async-friendly access to CPU-bound tasks with panic handling.
+    /// Dedicated pool for expensive RPC operations like `debug_traceTransaction`,
+    /// `eth_getProof`, etc. Wraps a rayon pool with async-friendly oneshot channels.
     ///
     /// # Panics
     ///
-    /// Panics if the runtime has not been initialized. Call [`GlobalRuntime::init`] first.
+    /// Panics if the runtime has not been initialized.
     #[cfg(feature = "rayon")]
-    pub fn blocking_pool(&self) -> &BlockingTaskPool {
-        self.try_blocking_pool().expect("GlobalRuntime not initialized. Call RUNTIME.init() first.")
+    pub fn rpc_pool(&self) -> &BlockingTaskPool {
+        self.rpc_pool.get().unwrap_or_else(|| uninitialized_panic())
     }
 
-    /// Get a reference to the [`BlockingTaskPool`], if initialized.
+    /// Get the trie proof computation pool.
+    ///
+    /// Dedicated pool for parallel state root computation, multiproof workers, and
+    /// storage proof generation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the runtime has not been initialized.
     #[cfg(feature = "rayon")]
-    pub fn try_blocking_pool(&self) -> Option<&BlockingTaskPool> {
-        self.blocking_pool.get()
+    pub fn trie_pool(&self) -> &rayon::ThreadPool {
+        self.trie_pool.get().unwrap_or_else(|| uninitialized_panic())
     }
 
     /// Get a clone of the [`BlockingTaskGuard`].
     ///
-    /// Use this to rate-limit expensive CPU operations like trace execution or proof generation.
+    /// Rate-limits expensive CPU operations like trace execution or proof generation.
     ///
     /// # Panics
     ///
-    /// Panics if the runtime has not been initialized. Call [`GlobalRuntime::init`] first.
+    /// Panics if the runtime has not been initialized.
     #[cfg(feature = "rayon")]
     pub fn blocking_guard(&self) -> BlockingTaskGuard {
-        self.try_blocking_guard()
-            .expect("GlobalRuntime not initialized. Call RUNTIME.init() first.")
+        self.blocking_guard.get().cloned().unwrap_or_else(|| uninitialized_panic())
     }
 
-    /// Get a clone of the [`BlockingTaskGuard`], if initialized.
-    #[cfg(feature = "rayon")]
-    pub fn try_blocking_guard(&self) -> Option<BlockingTaskGuard> {
-        self.blocking_guard.get().cloned()
-    }
-
-    /// Run a closure on the CPU pool, blocking until completion.
-    ///
-    /// This is equivalent to `cpu_pool().install(f)`.
+    /// Run a closure on the CPU pool, blocking the current thread until completion.
     ///
     /// # Panics
     ///
@@ -467,20 +451,32 @@ impl GlobalRuntime {
         self.cpu_pool().install(f)
     }
 
-    /// Spawn a CPU-bound task and return an async handle.
-    ///
-    /// This is equivalent to `blocking_pool().spawn(f)`.
+    /// Spawn a CPU-bound task on the RPC pool and return an async handle.
     ///
     /// # Panics
     ///
     /// Panics if the runtime has not been initialized.
     #[cfg(feature = "rayon")]
-    pub fn spawn_cpu<F, R>(&self, f: F) -> crate::pool::BlockingTaskHandle<R>
+    pub fn spawn_rpc<F, R>(&self, f: F) -> crate::pool::BlockingTaskHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.blocking_pool().spawn(f)
+        self.rpc_pool().spawn(f)
+    }
+
+    /// Run a closure on the trie pool, blocking the current thread until completion.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the runtime has not been initialized.
+    #[cfg(feature = "rayon")]
+    pub fn install_trie<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> R + Send,
+        R: Send,
+    {
+        self.trie_pool().install(f)
     }
 }
 
@@ -517,10 +513,7 @@ mod tests {
     #[test]
     fn test_rayon_config_thread_count() {
         let config = RayonConfig::default();
-        let count = config.compute_thread_count();
+        let count = config.default_thread_count();
         assert!(count >= 1);
-
-        let config = RayonConfig::with_cpu_threads(4);
-        assert_eq!(config.compute_thread_count(), 4);
     }
 }
