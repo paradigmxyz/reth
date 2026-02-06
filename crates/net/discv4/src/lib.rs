@@ -694,7 +694,7 @@ impl Discv4Service {
     ///
     /// **Note:** This is a noop if there are no bootnodes.
     pub fn bootstrap(&mut self) {
-        for record in self.config.bootstrap_nodes.clone() {
+        for record in self.config.bootstrap_nodes.iter().cloned() {
             debug!(target: "discv4", ?record, "pinging boot node");
             let key = kad_key(record.id);
             let entry = NodeEntry::new(record);
