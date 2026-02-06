@@ -452,6 +452,12 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
         queue
     }
 
+    fn queue_delete_raw(&self, ops: Vec<(StaticFileSegment, BlockNumber)>) {
+        if !ops.is_empty() {
+            self.delete_queue.lock().extend(ops);
+        }
+    }
+
     /// Each static file has a fixed number of blocks. This gives out the range where the requested
     /// block is positioned.
     ///
@@ -2396,7 +2402,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
     fn commit(&self) -> ProviderResult<()> {
         self.writers.commit()?;
 
-        let ops = self.take_delete_queue();
+        let mut ops = self.take_delete_queue();
         if ops.is_empty() {
             return Ok(());
         }
@@ -2409,11 +2415,28 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
             }
         }
 
-        for (segment, range_end) in ops {
-            self.delete_jar_no_reindex(segment, range_end)?;
+        let mut delete_err = None;
+        let mut completed = 0;
+        for &(segment, range_end) in &ops {
+            if let Err(err) = self.delete_jar_no_reindex(segment, range_end) {
+                delete_err = Some(err);
+                break;
+            }
+            completed += 1;
         }
 
-        self.initialize_index()
+        let remaining = ops.split_off(completed);
+        if !remaining.is_empty() {
+            self.0.queue_delete_raw(remaining);
+        }
+
+        self.initialize_index()?;
+
+        if let Some(err) = delete_err {
+            return Err(err);
+        }
+
+        Ok(())
     }
 
     fn has_unwind_queued(&self) -> bool {
