@@ -235,6 +235,11 @@ impl SparseTrie for ParallelSparseTrie {
                         &node.node,
                     )
                 {
+                    trace!(
+                        target: "trie::parallel_sparse",
+                        path = ?node.path,
+                        "Boundary leaf not reachable from upper subtrie, skipping",
+                    );
                     continue;
                 }
                 self.lower_subtries[idx].reveal(&node.path);
@@ -318,6 +323,11 @@ impl SparseTrie for ParallelSparseTrie {
                                 &node.node,
                             )
                         {
+                            trace!(
+                                target: "trie::parallel_sparse",
+                                path = ?node.path,
+                                "Boundary leaf not reachable from upper subtrie, skipping",
+                            );
                             continue;
                         }
                         // Reveal each node in the subtrie, returning early on any errors
@@ -2856,6 +2866,11 @@ impl SparseSubtrie {
                 if path.len() != UPPER_TRIE_MAX_DEPTH &&
                     !self.is_leaf_reachable_from_parent(&path, node)
                 {
+                    trace!(
+                        target: "trie::parallel_sparse",
+                        ?path,
+                        "Leaf not reachable from parent branch, skipping",
+                    );
                     return Ok(false)
                 }
 
