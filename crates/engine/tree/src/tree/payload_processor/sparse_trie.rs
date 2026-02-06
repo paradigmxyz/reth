@@ -449,7 +449,10 @@ where
 
             if self.finished_state_updates &&
                 self.account_updates.is_empty() &&
-                self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
+                self.storage_updates.iter().all(|(_, updates)| updates.is_empty()) &&
+                self.pending_account_updates.is_empty() &&
+                self.new_account_updates.is_empty() &&
+                self.new_storage_updates.iter().all(|(_, updates)| updates.is_empty())
             {
                 break;
             }
