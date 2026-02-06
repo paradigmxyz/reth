@@ -2,7 +2,7 @@ use crate::LowerSparseSubtrie;
 use alloc::borrow::Cow;
 use alloy_primitives::{
     map::{Entry, HashMap},
-    B256,
+    B256, U256,
 };
 use alloy_rlp::Decodable;
 use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
@@ -214,13 +214,20 @@ impl SparseTrie for ParallelSparseTrie {
             self.reveal_upper_node(node.path, &node.node, node.masks)?;
         }
 
+        let reachable_subtries = self.reachable_subtries();
+
         if !self.is_reveal_parallelism_enabled(lower_nodes.len()) {
             for node in lower_nodes {
-                if let Some(subtrie) = self.lower_subtrie_for_path_mut(&node.path) {
-                    subtrie.reveal_node(node.path, &node.node, node.masks)?;
-                } else {
-                    panic!("upper subtrie node {node:?} found amongst lower nodes");
+                let idx = path_subtrie_index_unchecked(&node.path);
+                if !reachable_subtries.get(idx) {
+                    continue;
                 }
+                self.lower_subtries[idx].reveal(&node.path);
+                self.subtrie_heat.mark_modified(idx);
+                self.lower_subtries[idx]
+                    .as_revealed_mut()
+                    .expect("just revealed")
+                    .reveal_node(node.path, &node.node, node.masks)?;
             }
             return Ok(())
         }
@@ -247,19 +254,24 @@ impl SparseTrie for ParallelSparseTrie {
             // `zip` to be happy.
             let lower_subtries: Vec<_> = node_groups
                 .iter()
-                .map(|nodes| {
+                .filter_map(|nodes| {
                     // NOTE: chunk_by won't produce empty groups
                     let node = &nodes[0];
                     let idx =
                         SparseSubtrieType::from_path(&node.path).lower_index().unwrap_or_else(
                             || panic!("upper subtrie node {node:?} found amongst lower nodes"),
                         );
+
+                    if !reachable_subtries.get(idx) {
+                        return None;
+                    }
+
                     // due to the nodes being sorted secondarily on their path, and chunk_by keeping
                     // the first element of each group, the `path` here will necessarily be the
                     // shortest path being revealed for each subtrie. Therefore we can reveal the
                     // subtrie itself using this path and retain correct behavior.
                     self.lower_subtries[idx].reveal(&node.path);
-                    (idx, self.lower_subtries[idx].take_revealed().expect("just revealed"))
+                    Some((idx, self.lower_subtries[idx].take_revealed().expect("just revealed")))
                 })
                 .collect();
 
@@ -2072,42 +2084,10 @@ impl ParallelSparseTrie {
         node: &TrieNode,
         masks: Option<BranchNodeMasks>,
     ) -> SparseTrieResult<()> {
-        // For upper subtrie ensure that the node was not removed before by finding its parent and
-        // making sure it knows about the child we are revealing.
-        if !self.upper_subtrie.nodes.contains_key(&path) && !path.is_empty() {
-            // Find the closest parent node walking up the path.
-            let mut parent = path.slice(..path.len() - 1);
-            while !self.upper_subtrie.nodes.contains_key(&parent) && !parent.is_empty() {
-                parent = parent.slice(..parent.len() - 1);
-            }
-
-            match self.upper_subtrie.nodes.get(&parent) {
-                Some(SparseNode::Branch { state_mask, .. }) => {
-                    // If the parent is a branch node more than 1 nibble away from the path, it
-                    // means that path was removed from the trie.
-                    if !parent.len() + 1 == path.len() {
-                        return Ok(())
-                    }
-
-                    // If the path is not set in state mask of the branch node, it means that it was
-                    // removed.
-                    if !state_mask.is_bit_set(path.last().unwrap()) {
-                        return Ok(())
-                    }
-                }
-                Some(SparseNode::Extension { key: remainder, .. }) => {
-                    // If the closest parent is extension node pointing to a different path, it
-                    // means that the current node was removed.
-                    if *remainder != path.slice(parent.len() + 1..) {
-                        return Ok(())
-                    }
-                }
-                // If the parent is a leaf node, it means that the current node was removed.
-                None | Some(SparseNode::Empty | SparseNode::Leaf { .. }) => return Ok(()),
-                Some(SparseNode::Hash(hash)) => {
-                    return Err(SparseTrieErrorKind::BlindedNode { path: parent, hash: *hash }.into())
-                }
-            }
+        // Only reveal nodes that can be reached given the current state of the upper trie. If they
+        // can't be reached, it means that they were removed.
+        if !self.is_path_reachable_from_upper(&path) {
+            return Ok(())
         }
 
         // Exit early if the node was already revealed before.
@@ -2213,31 +2193,94 @@ impl ParallelSparseTrie {
 
         size
     }
+
+    /// Determines if the given path can be directly reached from the upper trie.
+    fn is_path_reachable_from_upper(&self, path: &Nibbles) -> bool {
+        let mut current = Nibbles::default();
+        while current.len() < path.len() {
+            let Some(node) = self.upper_subtrie.nodes.get(&current) else { return false };
+            match node {
+                SparseNode::Branch { state_mask, .. } => {
+                    if !state_mask.is_bit_set(path.get_unchecked(current.len())) {
+                        return false
+                    }
+
+                    current.push_unchecked(path.get_unchecked(current.len()));
+                }
+                SparseNode::Extension { key, .. } => {
+                    if *key != path.slice(current.len()..current.len() + key.len()) {
+                        return false
+                    }
+                    current.extend(key);
+                }
+                SparseNode::Hash(_) | SparseNode::Empty | SparseNode::Leaf { .. } => return false,
+            }
+        }
+        true
+    }
+
+    /// Returns a bitset of all subtries that are reachable from the upper trie. If subtrie is not
+    /// reachable it means that it does not exist.
+    fn reachable_subtries(&self) -> SubtriesBitmap {
+        let mut reachable = SubtriesBitmap::default();
+
+        let mut stack = Vec::new();
+        stack.push(Nibbles::default());
+
+        while let Some(current) = stack.pop() {
+            let Some(node) = self.upper_subtrie.nodes.get(&current) else { continue };
+            match node {
+                SparseNode::Branch { state_mask, .. } => {
+                    for idx in state_mask.iter() {
+                        let mut next = current;
+                        next.push_unchecked(idx);
+                        if next.len() == UPPER_TRIE_MAX_DEPTH {
+                            reachable.set(path_subtrie_index_unchecked(&next));
+                        } else {
+                            stack.push(next);
+                        }
+                    }
+                }
+                SparseNode::Extension { key, .. } => {
+                    let mut next = current;
+                    next.extend(key);
+                    if next.len() >= UPPER_TRIE_MAX_DEPTH {
+                        reachable.set(path_subtrie_index_unchecked(&next));
+                    } else {
+                        stack.push(next);
+                    }
+                }
+                SparseNode::Hash(_) | SparseNode::Empty | SparseNode::Leaf { .. } => {}
+            };
+        }
+
+        reachable
+    }
 }
 
 /// Bitset tracking which of the 256 lower subtries were modified in the current cycle.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
-struct ModifiedSubtries([u64; 4]);
+struct SubtriesBitmap(U256);
 
-impl ModifiedSubtries {
+impl SubtriesBitmap {
     /// Marks a subtrie index as modified.
     #[inline]
     fn set(&mut self, idx: usize) {
         debug_assert!(idx < NUM_LOWER_SUBTRIES);
-        self.0[idx >> 6] |= 1 << (idx & 63);
+        self.0.set_bit(idx, true);
     }
 
     /// Returns whether a subtrie index is marked as modified.
     #[inline]
     fn get(&self, idx: usize) -> bool {
         debug_assert!(idx < NUM_LOWER_SUBTRIES);
-        (self.0[idx >> 6] & (1 << (idx & 63))) != 0
+        self.0.bit(idx)
     }
 
     /// Clears all modification flags.
     #[inline]
     const fn clear(&mut self) {
-        self.0 = [0; 4];
+        self.0 = U256::ZERO;
     }
 }
 
@@ -2254,12 +2297,12 @@ struct SubtrieModifications {
     /// Heat level (0-255) for each of the 256 lower subtries.
     heat: [u8; NUM_LOWER_SUBTRIES],
     /// Tracks which subtries were modified in the current cycle.
-    modified: ModifiedSubtries,
+    modified: SubtriesBitmap,
 }
 
 impl Default for SubtrieModifications {
     fn default() -> Self {
-        Self { heat: [0; NUM_LOWER_SUBTRIES], modified: ModifiedSubtries::default() }
+        Self { heat: [0; NUM_LOWER_SUBTRIES], modified: SubtriesBitmap::default() }
     }
 }
 
