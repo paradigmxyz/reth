@@ -434,6 +434,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
         self.access.is_read_only()
     }
 
+    /// Enqueues jar deletions for `segment` at the given expected block range ends.
     fn queue_delete(&self, segment: StaticFileSegment, range_ends: Vec<BlockNumber>) {
         if !range_ends.is_empty() {
             let mut queue = self.delete_queue.lock();
@@ -441,10 +442,12 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
         }
     }
 
+    /// Returns `true` if there are any pending jar deletions.
     fn has_queued_deletions(&self) -> bool {
         !self.delete_queue.lock().is_empty()
     }
 
+    /// Drains and returns the delete queue, sorted and deduplicated.
     fn take_delete_queue(&self) -> Vec<(StaticFileSegment, BlockNumber)> {
         let mut queue = std::mem::take(&mut *self.delete_queue.lock());
         queue.sort_unstable();
@@ -452,6 +455,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
         queue
     }
 
+    /// Re-enqueues previously taken operations (used when a deletion fails mid-way).
     fn queue_delete_raw(&self, ops: Vec<(StaticFileSegment, BlockNumber)>) {
         if !ops.is_empty() {
             self.delete_queue.lock().extend(ops);
@@ -949,14 +953,16 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let range_ends_to_delete = {
             let indexes = self.indexes.read();
             let Some(index) = indexes.get(segment) else { return Ok(Vec::new()) };
+            // Use the last BTreeMap key (expected block end of the highest jar) to
+            // ensure we never delete the highest jar regardless of how full it is.
             let highest_expected_end =
                 index.expected_block_ranges_by_max_block.keys().next_back().copied();
             index
                 .expected_block_ranges_by_max_block
                 .keys()
                 .copied()
-                .take_while(|&max_block| {
-                    max_block < block && Some(max_block) != highest_expected_end
+                .take_while(|&expected_end| {
+                    expected_end < block && Some(expected_end) != highest_expected_end
                 })
                 .collect::<Vec<_>>()
         };
@@ -981,6 +987,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(header)
     }
 
+    /// Deletes a single jar for `segment` at `block` without rebuilding the index.
+    ///
+    /// CAUTION: destructive. Deletes files on disk immediately. Callers must
+    /// call [`Self::initialize_index`] afterwards to keep the index consistent.
     fn delete_jar_no_reindex(
         &self,
         segment: StaticFileSegment,
@@ -2399,14 +2409,28 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         )
     }
 
+    /// Commits all pending writes and executes any queued jar deletions.
+    ///
+    /// 1. Flush pending writer data via [`StaticFileWriters::commit`].
+    /// 2. Drain the deferred delete queue (populated by [`Self::delete_segment`] /
+    ///    [`Self::delete_segment_below_block`]).
+    /// 3. Reset writers for affected segments so they release file handles.
+    /// 4. Delete jar files from disk (without rebuilding the index after each).
+    /// 5. Rebuild the index once at the end.
+    ///
+    /// If a deletion fails mid-way, unprocessed operations are re-queued so a
+    /// subsequent `commit()` can retry them.
     fn commit(&self) -> ProviderResult<()> {
+        // Step 1: flush pending writer data.
         self.writers.commit()?;
 
+        // Step 2: drain the delete queue (sorted + deduped).
         let mut ops = self.take_delete_queue();
         if ops.is_empty() {
             return Ok(());
         }
 
+        // Step 3: reset writers for segments about to be deleted so file handles are released.
         let mut last_reset = None;
         for &(segment, _) in &ops {
             if last_reset != Some(segment) {
@@ -2415,6 +2439,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
             }
         }
 
+        // Step 4: delete jar files from disk.
         let mut delete_err = None;
         let mut completed = 0;
         for &(segment, range_end) in &ops {
@@ -2425,11 +2450,13 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
             completed += 1;
         }
 
+        // Re-queue any operations that were not completed due to an error.
         let remaining = ops.split_off(completed);
         if !remaining.is_empty() {
             self.0.queue_delete_raw(remaining);
         }
 
+        // Step 5: rebuild the index once after all deletions.
         self.initialize_index()?;
 
         if let Some(err) = delete_err {
@@ -2439,10 +2466,14 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         Ok(())
     }
 
+    /// Returns `true` if any writer has a pending unwind or there are queued jar deletions.
     fn has_unwind_queued(&self) -> bool {
         self.writers.has_unwind_queued() || self.has_queued_deletions()
     }
 
+    /// Finalizes all writers by flushing configuration to disk and updating indices.
+    ///
+    /// Returns an error if there are pending jar deletions — use [`Self::commit`] instead.
     fn finalize(&self) -> ProviderResult<()> {
         if self.has_queued_deletions() {
             return Err(ProviderError::other(StaticFileWriterError::new(

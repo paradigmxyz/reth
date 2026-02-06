@@ -189,6 +189,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
         Ok(())
     }
 
+    /// Drops the writer for `segment`, releasing its file handle so the jar can be deleted.
     pub(crate) fn reset(&self, segment: StaticFileSegment) {
         let mut writer = match segment {
             StaticFileSegment::Headers => self.headers.write(),
