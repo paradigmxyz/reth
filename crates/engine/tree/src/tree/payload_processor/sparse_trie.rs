@@ -656,7 +656,7 @@ where
 
                     let total_items = storage_updates.len();
 
-                    storage_updates
+                    let storage_results = storage_updates
                         .into_par_iter()
                         .with_min_len(total_items / 2)
                         .map(|(address, updates, mut fetched, mut trie)| {
