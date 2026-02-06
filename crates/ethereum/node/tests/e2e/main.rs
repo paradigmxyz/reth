@@ -10,6 +10,7 @@ mod pool;
 mod prestate;
 mod rpc;
 mod selfdestruct;
+mod simulate;
 mod utils;
 
 const fn main() {}
