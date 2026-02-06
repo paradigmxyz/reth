@@ -1288,7 +1288,6 @@ impl RocksDBProvider {
     /// Writes storage history indices for the given blocks.
     ///
     /// Derives history indices from reverts (same source as changesets) to ensure consistency.
-    /// Iterates raw reverts directly to avoid expensive `to_plain_state_reverts()` conversion.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_storage_history<N: reth_node_types::NodePrimitives>(
         &self,
