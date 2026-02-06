@@ -877,7 +877,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                             .state()
                             .peers()
                             .num_backed_off_peers()
-                            .saturating_sub(1)
                             as f64,
                     );
                 self.event_sender
@@ -915,7 +914,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                             .state()
                             .peers()
                             .num_backed_off_peers()
-                            .saturating_sub(1)
                             as f64,
                     );
             }
@@ -952,7 +950,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                             .state()
                             .peers()
                             .num_backed_off_peers()
-                            .saturating_sub(1)
                             as f64,
                     );
             }
@@ -976,7 +973,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                             .state()
                             .peers()
                             .num_backed_off_peers()
-                            .saturating_sub(1)
                             as f64,
                     );
                 self.update_pending_connection_metrics();
