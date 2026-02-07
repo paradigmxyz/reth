@@ -126,6 +126,10 @@ pub struct ParallelSparseTrie {
     /// Tracks heat of lower subtries for smart pruning decisions.
     /// Hot subtries are skipped during pruning to keep frequently-used data revealed.
     subtrie_heat: SubtrieModifications,
+    /// When true, subtries use a flat direct-address table for short paths instead of a hashmap.
+    /// This is beneficial for the accounts trie which has many nodes, but wasteful for small
+    /// storage tries.
+    use_direct_address_table: bool,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
@@ -135,7 +139,11 @@ impl Default for ParallelSparseTrie {
     fn default() -> Self {
         Self {
             upper_subtrie: Box::new(SparseSubtrie {
-                nodes: SparseSubtrieNodes::from_single(Nibbles::default(), SparseNode::Empty),
+                nodes: SparseSubtrieNodes::from_single(
+                    Nibbles::default(),
+                    SparseNode::Empty,
+                    false,
+                ),
                 ..Default::default()
             }),
             lower_subtries: Box::new(
@@ -147,6 +155,7 @@ impl Default for ParallelSparseTrie {
             update_actions_buffers: Vec::default(),
             parallelism_thresholds: Default::default(),
             subtrie_heat: SubtrieModifications::default(),
+            use_direct_address_table: false,
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -227,7 +236,7 @@ impl SparseTrie for ParallelSparseTrie {
                     );
                     continue;
                 }
-                self.lower_subtries[idx].reveal(&node.path);
+                self.lower_subtries[idx].reveal(&node.path, self.use_direct_address_table);
                 self.subtrie_heat.mark_modified(idx);
                 self.lower_subtries[idx]
                     .as_revealed_mut()
@@ -280,7 +289,7 @@ impl SparseTrie for ParallelSparseTrie {
                     // the first element of each group, the `path` here will necessarily be the
                     // shortest path being revealed for each subtrie. Therefore we can reveal the
                     // subtrie itself using this path and retain correct behavior.
-                    self.lower_subtries[idx].reveal(&node.path);
+                    self.lower_subtries[idx].reveal(&node.path, self.use_direct_address_table);
                     Some((idx, self.lower_subtries[idx].take_revealed().expect("just revealed")))
                 })
                 .collect();
@@ -1321,6 +1330,19 @@ impl ParallelSparseTrie {
         self
     }
 
+    /// Enables the direct-address table optimization for subtrie node storage.
+    ///
+    /// When enabled, nodes with short paths (relative to the subtrie root) are stored in a
+    /// pre-allocated flat array indexed by converting nibble paths to integers, avoiding
+    /// hashmap lookups. This is beneficial for large tries like the accounts trie, but
+    /// wasteful for small storage tries.
+    pub fn with_direct_address_table(mut self) -> Self {
+        self.use_direct_address_table = true;
+        self.upper_subtrie.nodes =
+            SparseSubtrieNodes::from_single(Nibbles::default(), SparseNode::Empty, true);
+        self
+    }
+
     /// Returns true if retaining updates is enabled for the overall trie.
     const fn updates_enabled(&self) -> bool {
         self.updates.is_some()
@@ -1462,7 +1484,7 @@ impl ParallelSparseTrie {
         match SparseSubtrieType::from_path(path) {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
-                self.lower_subtries[idx].reveal(path);
+                self.lower_subtries[idx].reveal(path, self.use_direct_address_table);
                 self.subtrie_heat.mark_modified(idx);
                 Some(self.lower_subtries[idx].as_revealed_mut().expect("just revealed"))
             }
@@ -2381,8 +2403,12 @@ enum FindNextToLeafOutcome {
 
 impl SparseSubtrie {
     /// Creates a new empty subtrie with the specified root path.
-    pub(crate) fn new(path: Nibbles) -> Self {
-        Self { path, nodes: SparseSubtrieNodes::new(path), ..Default::default() }
+    pub(crate) fn new(path: Nibbles, use_direct_address_table: bool) -> Self {
+        Self {
+            path,
+            nodes: SparseSubtrieNodes::new(path, use_direct_address_table),
+            ..Default::default()
+        }
     }
 
     /// Returns true if this subtrie has any nodes, false otherwise.
@@ -4003,11 +4029,11 @@ mod tests {
     fn test_get_changed_subtries() {
         // Create a trie with three subtries
         let mut trie = ParallelSparseTrie::default();
-        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0]), false));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
+        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0]), false));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
+        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0]), false));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
@@ -4057,11 +4083,11 @@ mod tests {
     fn test_get_changed_subtries_all() {
         // Create a trie with three subtries
         let mut trie = ParallelSparseTrie::default();
-        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0]), false));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
+        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0]), false));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
+        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0]), false));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
@@ -4460,7 +4486,7 @@ mod tests {
 
     #[test]
     fn test_subtrie_update_hashes() {
-        let mut subtrie = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+        let mut subtrie = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0]), false));
 
         // Create leaf nodes with paths 0x0...0, 0x00001...0, 0x0010...0
         let leaf_1_full_path = Nibbles::from_nibbles([0; 64]);

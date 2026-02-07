@@ -62,20 +62,14 @@ fn index_to_path(index: usize, base: &Nibbles) -> Nibbles {
 /// Nodes with paths whose suffix relative to `base` is at most [`SHORT_PATH_MAX_LEN`] nibbles
 /// are stored in a flat array indexed by converting the suffix to an integer. This avoids
 /// expensive hashmap lookups for the most frequently accessed near-root nodes.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct SparseSubtrieNodes {
     base: Nibbles,
-    short: Vec<Option<SparseNode>>,
+    /// When `false`, the flat array is disabled and all nodes go to the hashmap.
+    use_short: bool,
+    short: Option<Vec<Option<SparseNode>>>,
     short_len: usize,
     long: HashMap<Nibbles, SparseNode>,
-}
-
-impl Default for SparseSubtrieNodes {
-    fn default() -> Self {
-        let mut short = Vec::with_capacity(SHORT_ARRAY_LEN);
-        short.resize_with(SHORT_ARRAY_LEN, || None);
-        Self { base: Nibbles::default(), short, short_len: 0, long: HashMap::default() }
-    }
 }
 
 impl PartialEq for SparseSubtrieNodes {
@@ -91,13 +85,14 @@ impl Eq for SparseSubtrieNodes {}
 
 impl SparseSubtrieNodes {
     /// Creates a new empty node storage with the given base path.
-    pub(crate) fn new(base: Nibbles) -> Self {
-        Self { base, ..Default::default() }
+    /// When `use_short` is true, short paths are stored in a flat array for fast lookups.
+    pub(crate) fn new(base: Nibbles, use_short: bool) -> Self {
+        Self { base, use_short, ..Default::default() }
     }
 
     /// Creates node storage with a single entry.
-    pub(crate) fn from_single(path: Nibbles, node: SparseNode) -> Self {
-        let mut nodes = Self::new(path);
+    pub(crate) fn from_single(path: Nibbles, node: SparseNode, use_short: bool) -> Self {
+        let mut nodes = Self::new(path, use_short);
         nodes.insert(path, node);
         nodes
     }
@@ -116,26 +111,27 @@ impl SparseSubtrieNodes {
         let old_base = self.base;
         self.base = base;
 
-        let mut new_short = Vec::with_capacity(SHORT_ARRAY_LEN);
-        new_short.resize_with(SHORT_ARRAY_LEN, || None);
-        let old_short = core::mem::replace(&mut self.short, new_short);
+        let old_short = self.short.take();
         let old_short_len = self.short_len;
         self.short_len = 0;
 
         let old_long = core::mem::take(&mut self.long);
+        let old_long_len = old_long.len();
 
-        for (i, slot) in old_short.into_iter().enumerate() {
-            if let Some(node) = slot {
-                let path = index_to_path(i, &old_base);
-                self.insert(path, node);
+        if let Some(old_short) = old_short {
+            for (i, slot) in old_short.into_iter().enumerate() {
+                if let Some(node) = slot {
+                    let path = index_to_path(i, &old_base);
+                    self.insert(path, node);
+                }
             }
         }
-
-        debug_assert_eq!(self.short_len + self.long.len(), old_short_len + old_long.len());
 
         for (path, node) in old_long {
             self.insert(path, node);
         }
+
+        debug_assert_eq!(self.short_len + self.long.len(), old_short_len + old_long_len);
     }
 
     /// Returns true if the path is short enough to be stored in the flat array.
@@ -145,7 +141,7 @@ impl SparseSubtrieNodes {
             "path {path:?} is shorter than base {:?}",
             self.base
         );
-        path.len() - self.base.len() <= SHORT_PATH_MAX_LEN
+        self.use_short && path.len() - self.base.len() <= SHORT_PATH_MAX_LEN
     }
 
     /// Returns the total number of nodes stored.
@@ -161,7 +157,7 @@ impl SparseSubtrieNodes {
     /// Looks up a node by its full path.
     pub(crate) fn get(&self, path: &Nibbles) -> Option<&SparseNode> {
         if self.is_short(path) {
-            self.short[suffix_to_index(path, self.base.len())].as_ref()
+            self.short.as_ref()?.get(suffix_to_index(path, self.base.len()))?.as_ref()
         } else {
             self.long.get(path)
         }
@@ -170,7 +166,7 @@ impl SparseSubtrieNodes {
     /// Looks up a node mutably by its full path.
     pub(crate) fn get_mut(&mut self, path: &Nibbles) -> Option<&mut SparseNode> {
         if self.is_short(path) {
-            self.short[suffix_to_index(path, self.base.len())].as_mut()
+            self.short.as_mut()?.get_mut(suffix_to_index(path, self.base.len()))?.as_mut()
         } else {
             self.long.get_mut(path)
         }
@@ -179,7 +175,13 @@ impl SparseSubtrieNodes {
     /// Inserts a node at the given path, returning any previously stored node.
     pub(crate) fn insert(&mut self, path: Nibbles, node: SparseNode) -> Option<SparseNode> {
         if self.is_short(&path) {
-            let slot = &mut self.short[suffix_to_index(&path, self.base.len())];
+            let idx = suffix_to_index(&path, self.base.len());
+            let short = self.short.get_or_insert_with(|| {
+                let mut v = Vec::with_capacity(SHORT_ARRAY_LEN);
+                v.resize_with(SHORT_ARRAY_LEN, || None);
+                v
+            });
+            let slot = &mut short[idx];
             let prev = slot.take();
             if prev.is_none() {
                 self.short_len += 1;
@@ -194,7 +196,7 @@ impl SparseSubtrieNodes {
     /// Removes and returns the node at the given path.
     pub(crate) fn remove(&mut self, path: &Nibbles) -> Option<SparseNode> {
         if self.is_short(path) {
-            let slot = &mut self.short[suffix_to_index(path, self.base.len())];
+            let slot = &mut self.short.as_mut()?[suffix_to_index(path, self.base.len())];
             let prev = slot.take();
             if prev.is_some() {
                 self.short_len -= 1;
@@ -209,15 +211,20 @@ impl SparseSubtrieNodes {
     pub(crate) fn entry(&mut self, path: Nibbles) -> SparseSubtrieNodesEntry<'_> {
         if self.is_short(&path) {
             let idx = suffix_to_index(&path, self.base.len());
-            if self.short[idx].is_some() {
+            let short = self.short.get_or_insert_with(|| {
+                let mut v = Vec::with_capacity(SHORT_ARRAY_LEN);
+                v.resize_with(SHORT_ARRAY_LEN, || None);
+                v
+            });
+            if short[idx].is_some() {
                 SparseSubtrieNodesEntry::ShortOccupied(ShortOccupiedEntry {
-                    slot: &mut self.short[idx],
+                    slot: &mut short[idx],
                     len: &mut self.short_len,
                     key: path,
                 })
             } else {
                 SparseSubtrieNodesEntry::ShortVacant(ShortVacantEntry {
-                    slot: &mut self.short[idx],
+                    slot: &mut short[idx],
                     len: &mut self.short_len,
                     key: path,
                 })
@@ -240,7 +247,9 @@ impl SparseSubtrieNodes {
     /// Clears all nodes from both short and long storage.
     pub(crate) fn clear(&mut self) {
         if self.short_len > 0 {
-            self.short.fill(None);
+            if let Some(short) = self.short.as_mut() {
+                short.fill(None);
+            }
             self.short_len = 0;
         }
         self.long.clear();
@@ -248,15 +257,17 @@ impl SparseSubtrieNodes {
 
     /// Retains only nodes for which the predicate returns `true`.
     pub(crate) fn retain(&mut self, mut f: impl FnMut(&Nibbles, &mut SparseNode) -> bool) {
-        let base = self.base;
-        let base_len = base.len();
-        for (i, slot) in self.short.iter_mut().enumerate() {
-            if let Some(node) = slot {
-                let path = index_to_path(i, &base);
-                debug_assert_eq!(suffix_to_index(&path, base_len), i);
-                if !f(&path, node) {
-                    *slot = None;
-                    self.short_len -= 1;
+        if let Some(short) = self.short.as_mut() {
+            let base = self.base;
+            let base_len = base.len();
+            for (i, slot) in short.iter_mut().enumerate() {
+                if let Some(node) = slot {
+                    let path = index_to_path(i, &base);
+                    debug_assert_eq!(suffix_to_index(&path, base_len), i);
+                    if !f(&path, node) {
+                        *slot = None;
+                        self.short_len -= 1;
+                    }
                 }
             }
         }
@@ -267,7 +278,7 @@ impl SparseSubtrieNodes {
     pub(crate) fn iter(&self) -> SparseSubtrieNodesIter<'_> {
         SparseSubtrieNodesIter {
             base: &self.base,
-            short: &self.short,
+            short: self.short.as_deref().unwrap_or(&[]),
             short_idx: 0,
             long: self.long.iter(),
         }
@@ -277,13 +288,13 @@ impl SparseSubtrieNodes {
     pub(crate) fn memory_size(&self) -> usize {
         let mut size = core::mem::size_of::<Self>();
 
-        // Short array is boxed
-        size += SHORT_ARRAY_LEN * core::mem::size_of::<Option<SparseNode>>();
-        for slot in self.short.iter().flatten() {
-            size += slot.memory_size();
+        if let Some(short) = &self.short {
+            size += short.capacity() * core::mem::size_of::<Option<SparseNode>>();
+            for node in short.iter().flatten() {
+                size += node.memory_size();
+            }
         }
 
-        // Long map
         for (path, node) in &self.long {
             size += core::mem::size_of::<Nibbles>();
             size += path.len();
@@ -410,7 +421,7 @@ impl<'a> Iterator for SparseSubtrieNodesIter<'a> {
     type Item = (Nibbles, &'a SparseNode);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.short_idx < SHORT_ARRAY_LEN {
+        while self.short_idx < self.short.len() {
             let idx = self.short_idx;
             self.short_idx += 1;
             if let Some(node) = &self.short[idx] {
@@ -469,7 +480,7 @@ mod tests {
     #[test]
     fn test_insert_get_remove() {
         let base = Nibbles::default();
-        let mut nodes = SparseSubtrieNodes::new(base);
+        let mut nodes = SparseSubtrieNodes::new(base, true);
 
         // Insert at root (short)
         nodes.insert(base, SparseNode::Empty);
@@ -498,7 +509,7 @@ mod tests {
     #[test]
     fn test_entry_api() {
         let base = Nibbles::default();
-        let mut nodes = SparseSubtrieNodes::new(base);
+        let mut nodes = SparseSubtrieNodes::new(base, true);
 
         let path = Nibbles::from_nibbles([0x1]);
         match nodes.entry(path).split() {
@@ -523,7 +534,7 @@ mod tests {
     #[test]
     fn test_iter_and_retain() {
         let base = Nibbles::default();
-        let mut nodes = SparseSubtrieNodes::new(base);
+        let mut nodes = SparseSubtrieNodes::new(base, true);
 
         nodes.insert(Nibbles::default(), SparseNode::Empty);
         nodes.insert(Nibbles::from_nibbles([0x1]), SparseNode::Empty);
@@ -540,7 +551,7 @@ mod tests {
     #[test]
     fn test_clear() {
         let base = Nibbles::default();
-        let mut nodes = SparseSubtrieNodes::new(base);
+        let mut nodes = SparseSubtrieNodes::new(base, true);
 
         nodes.insert(Nibbles::default(), SparseNode::Empty);
         nodes.insert(Nibbles::from_nibbles([0x1]), SparseNode::Empty);
