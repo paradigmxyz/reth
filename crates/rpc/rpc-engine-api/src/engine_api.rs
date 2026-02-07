@@ -276,7 +276,6 @@ where
             /* //todo */
             payload_or_attrs,
         )?;
-
         Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 

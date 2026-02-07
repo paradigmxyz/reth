@@ -1,4 +1,4 @@
-# Runs `ethereum/hive` tests.
+# Runs `Soubhik-10/hive` tests.
 
 name: hive
 
@@ -8,7 +8,7 @@ on:
     - cron: "0 */6 * * *"
   pull_request:
     branches:
-    - "**"
+      - "**"
 
 env:
   CARGO_TERM_COLOR: always
@@ -44,7 +44,7 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v6
         with:
-          repository: ethereum/hive
+          repository: Soubhik-10/hive
           ref: master
           path: hivetests
 
@@ -227,7 +227,7 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v6
         with:
-          repository: ethereum/hive
+          repository: Soubhik-10/hive
           ref: master
           path: hivetests
 

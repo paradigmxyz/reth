@@ -160,6 +160,10 @@ impl<T: Decodable2718 + Send + Sync + Debug + Unpin + 'static> PayloadBuilderAtt
     fn withdrawals(&self) -> &Withdrawals {
         &self.payload_attributes.withdrawals
     }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.payload_attributes.slot_number
+    }
 }
 
 impl<OpTransactionSigned> From<EthPayloadBuilderAttributes>

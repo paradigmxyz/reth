@@ -50,7 +50,6 @@ where
             block_access_list_hash,
             ..
         } = input;
-
         let timestamp = evm_env.block_env.timestamp().saturating_to();
 
         let transactions_root = proofs::calculate_transaction_root(&transactions);
