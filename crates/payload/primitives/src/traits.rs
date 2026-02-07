@@ -141,6 +141,9 @@ pub trait PayloadBuilderAttributes: Send + Sync + Unpin + fmt::Debug + 'static {
 
     /// Returns the list of withdrawals to be processed in this block.
     fn withdrawals(&self) -> &Withdrawals;
+
+    /// Returns the slot number to be used in the payload's header.
+    fn slot_number(&self) -> Option<u64>;
 }
 
 /// Basic attributes required to initiate payload construction.

@@ -452,6 +452,10 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
     fn withdrawals(&self) -> &Withdrawals {
         &self.withdrawals
     }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.slot_number
+    }
 }
 
 /// Generates the payload id for the configured payload from the [`PayloadAttributes`].
@@ -472,6 +476,10 @@ pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
 
     if let Some(parent_beacon_block) = attributes.parent_beacon_block_root {
         hasher.update(parent_beacon_block);
+    }
+
+    if let Some(slot_number) = attributes.slot_number {
+        hasher.update(&slot_number.to_be_bytes()[..]);
     }
 
     let out = hasher.finalize();
