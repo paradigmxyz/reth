@@ -13,6 +13,7 @@ use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
 use std::{
+    fmt,
     sync::{
         mpsc::{Receiver, SendError, Sender},
         Arc,
@@ -85,6 +86,7 @@ where
     pub fn run(mut self) -> Result<(), PersistenceError> {
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
+            debug!(target: "engine::persistence", %action, "received new persistence action");
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
                     let result = self.on_remove_blocks_above(new_tip_num)?;
@@ -216,6 +218,25 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 
     /// Update the persisted safe block on disk
     SaveSafeBlock(u64),
+}
+
+impl<N: NodePrimitives> fmt::Display for PersistenceAction<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SaveBlocks(blocks, _) => {
+                write!(f, "SaveBlocks({} blocks)", blocks.len())
+            }
+            Self::RemoveBlocksAbove(block_num, _) => {
+                write!(f, "RemoveBlocksAbove({block_num})")
+            }
+            Self::SaveFinalizedBlock(block_num) => {
+                write!(f, "SaveFinalizedBlock({block_num})")
+            }
+            Self::SaveSafeBlock(block_num) => {
+                write!(f, "SaveSafeBlock({block_num})")
+            }
+        }
+    }
 }
 
 /// A handle to the persistence service
