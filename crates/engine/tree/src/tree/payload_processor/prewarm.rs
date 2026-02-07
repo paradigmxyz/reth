@@ -467,6 +467,7 @@ where
             v2_proofs_enabled,
         } = self;
 
+        let t0 = Instant::now();
         let mut state_provider = match provider.build() {
             Ok(provider) => provider,
             Err(err) => {
@@ -478,8 +479,10 @@ where
                 return None
             }
         };
+        let provider_build_us = t0.elapsed().as_micros() as u64;
 
         // Use the caches to create a new provider with caching
+        let t1 = Instant::now();
         if let Some(saved_cache) = saved_cache {
             let caches = saved_cache.cache().clone();
             let cache_metrics = saved_cache.metrics().clone();
@@ -491,6 +494,7 @@ where
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
+        let cache_wrap_us = t1.elapsed().as_micros() as u64;
 
         let mut evm_env = env.evm_env;
 
@@ -503,6 +507,7 @@ where
         evm_env.cfg_env.disable_balance_check = true;
 
         // create a new executor and disable nonce checks in the env
+        let t2 = Instant::now();
         let spec_id = *evm_env.spec_id();
         let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
@@ -517,6 +522,16 @@ where
                 )
             });
         }
+        let evm_create_us = t2.elapsed().as_micros() as u64;
+
+        debug!(
+            target: "engine::tree::prewarm::race",
+            provider_build_us,
+            cache_wrap_us,
+            evm_create_us,
+            total_us = t0.elapsed().as_micros() as u64,
+            "evm_for_ctx breakdown"
+        );
 
         Some((evm, metrics, terminate_execution, v2_proofs_enabled))
     }
