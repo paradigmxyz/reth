@@ -982,16 +982,19 @@ impl MultiProofTask {
             .filter(|proof| !proof.is_empty())
     }
 
-    /// Processes a single proof result message.
+    /// Processes a single proof result message, collecting updates into `pending_sends` instead
+    /// of sending immediately. This keeps the receiver drain hot and avoids channel contention
+    /// with the sparse trie consumer during batched processing.
+    ///
     /// Returns `Err` if the proof calculation failed.
     fn process_proof_result(
         &mut self,
         proof_result: ProofResultMessage,
         batch_metrics: &mut MultiproofBatchMetrics,
+        pending_sends: &mut Vec<SparseTrieUpdate>,
     ) -> Result<(), ()> {
         batch_metrics.proofs_processed += 1;
         self.metrics.proof_calculation_duration_histogram.record(proof_result.elapsed);
-        self.multiproof_manager.on_calculation_complete();
 
         match proof_result.result {
             Ok(proof_result_data) => {
@@ -1004,7 +1007,7 @@ impl MultiProofTask {
                 let update =
                     SparseTrieUpdate { state: proof_result.state, multiproof: proof_result_data };
                 if let Some(combined_update) = self.on_proof(proof_result.sequence_number, update) {
-                    let _ = self.to_sparse_trie.send(combined_update);
+                    pending_sends.push(combined_update);
                 }
                 Ok(())
             }
@@ -1291,20 +1294,24 @@ impl MultiProofTask {
                 recv(self.proof_result_rx) -> proof_msg => {
                     match proof_msg {
                         Ok(first_result) => {
-                            if self.process_proof_result(first_result, &mut batch_metrics).is_err() {
+                            let mut pending_sends = Vec::with_capacity(16);
+
+                            if self.process_proof_result(first_result, &mut batch_metrics, &mut pending_sends).is_err() {
                                 return
                             }
 
                             const MAX_PROOF_BATCH: usize = 64;
                             for _ in 1..MAX_PROOF_BATCH {
-                                match self.proof_result_rx.try_recv() {
-                                    Ok(proof_result) => {
-                                        if self.process_proof_result(proof_result, &mut batch_metrics).is_err() {
-                                            return
-                                        }
-                                    }
-                                    Err(_) => break,
+                                let Ok(msg) = self.proof_result_rx.try_recv() else { break };
+                                if self.process_proof_result(msg, &mut batch_metrics, &mut pending_sends).is_err() {
+                                    return
                                 }
+                            }
+
+                            self.multiproof_manager.on_calculation_complete();
+
+                            for update in pending_sends {
+                                let _ = self.to_sparse_trie.send(update);
                             }
 
                             if self.is_done(&batch_metrics, &ctx) {
