@@ -281,7 +281,6 @@ where
                 Default::default()
             },
         };
-        tracing::info!("Constructed BlockEnv for payload: {:?}", block_env);
 
         Ok(EvmEnv { cfg_env, block_env })
     }
