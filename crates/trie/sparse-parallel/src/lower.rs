@@ -46,20 +46,22 @@ impl LowerSparseSubtrie {
     /// The given path is the path of a node which will be set into the [`SparseSubtrie`]'s `nodes`
     /// map immediately upon being revealed. If the subtrie is blinded, or if its current root path
     /// is longer than this one, than this one becomes the new root path of the subtrie.
-    pub(crate) fn reveal(&mut self, path: &Nibbles) {
+    pub(crate) fn reveal(&mut self, path: &Nibbles, use_direct_address_table: bool) {
         match self {
             Self::Blind(allocated) => {
                 debug_assert!(allocated.as_ref().is_none_or(|subtrie| subtrie.is_empty()));
                 *self = if let Some(mut subtrie) = allocated.take() {
                     subtrie.path = *path;
+                    subtrie.nodes.set_base(*path);
                     Self::Revealed(subtrie)
                 } else {
-                    Self::Revealed(Box::new(SparseSubtrie::new(*path)))
+                    Self::Revealed(Box::new(SparseSubtrie::new(*path, use_direct_address_table)))
                 }
             }
             Self::Revealed(subtrie) => {
                 if path.len() < subtrie.path.len() {
                     subtrie.path = *path;
+                    subtrie.nodes.set_base(*path);
                 }
             }
         };
