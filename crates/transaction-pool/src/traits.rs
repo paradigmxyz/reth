@@ -496,9 +496,18 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Prunes a single transaction corresponding to the given hash.
+    /// Prunes a single transaction from the pool.
     ///
-    /// Returns the pruned transaction if it was found in the pool.
+    /// This is similar to [`Self::remove_transaction`] but treats the transaction as _mined_
+    /// rather than discarded. The key difference is that pruning does **not** park descendant
+    /// transactions: their nonce requirements are considered satisfied, so they remain in whatever
+    /// sub-pool they currently occupy and can be included in the next block.
+    ///
+    /// In contrast, [`Self::remove_transaction`] treats the removal as a discard, which
+    /// introduces a nonce gap and moves all descendant transactions to the queued (parked)
+    /// sub-pool.
+    ///
+    /// Returns the pruned transaction if it existed in the pool.
     ///
     /// Consumer: Utility
     fn prune_transaction(
@@ -508,7 +517,16 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         self.prune_transactions(vec![hash]).pop()
     }
 
-    /// Prunes and returns transactions corresponding to the given hashes.
+    /// Prunes all transactions corresponding to the given hashes from the pool.
+    ///
+    /// This behaves like [`Self::prune_transaction`] but for multiple transactions at once.
+    /// Each transaction is removed as if it was mined: descendant transactions are **not** parked
+    /// and their nonce requirements are considered satisfied.
+    ///
+    /// This is useful for scenarios like Flashblocks where transactions are committed across
+    /// multiple partial blocks without a canonical state update: previously committed transactions
+    /// can be pruned so that the best-transactions iterator yields their descendants in the
+    /// correct priority order.
     ///
     /// Consumer: Utility
     fn prune_transactions(
@@ -1739,7 +1757,7 @@ impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
             match self.st.try_recv() {
                 Ok(event) => {
                     if event.subpool == self.subpool {
-                        return Ok(event);
+                        return Ok(event)
                     }
                 }
                 Err(e) => return Err(e),
@@ -1756,7 +1774,7 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
             match ready!(self.st.poll_recv(cx)) {
                 Some(event) => {
                     if event.subpool == self.subpool {
-                        return Poll::Ready(Some(event));
+                        return Poll::Ready(Some(event))
                     }
                 }
                 None => return Poll::Ready(None),
