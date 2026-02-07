@@ -555,7 +555,7 @@ tracing-appender = "0.2"
 url = { version = "2.3", default-features = false }
 zstd = "0.13"
 byteorder = "1"
-fixed-cache = { version = "0.1.7", features = ["stats"] }
+fixed-cache = { git = "https://github.com/DaniPopes/fixed-cache", rev = "cb8886f", features = ["stats"] }
 moka = "0.12"
 tar-no-std = { version = "0.4.2", default-features = false }
 miniz_oxide = { version = "0.9.0", default-features = false }
@@ -763,3 +763,12 @@ ipnet = "2.11"
 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
 # alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
+
+alloy-primitives = { git = "https://github.com/alloy-rs/core", rev = "d8e219f" }
+alloy-sol-types = { git = "https://github.com/alloy-rs/core", rev = "d8e219f" }
+alloy-dyn-abi = { git = "https://github.com/alloy-rs/core", rev = "d8e219f" }
+alloy-json-abi = { git = "https://github.com/alloy-rs/core", rev = "d8e219f" }
+alloy-sol-macro = { git = "https://github.com/alloy-rs/core", rev = "d8e219f" }
+alloy-sol-macro-expander = { git = "https://github.com/alloy-rs/core", rev = "d8e219f" }
+alloy-sol-macro-input = { git = "https://github.com/alloy-rs/core", rev = "d8e219f" }
+alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core", rev = "d8e219f" }
