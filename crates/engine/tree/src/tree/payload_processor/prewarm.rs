@@ -131,6 +131,10 @@ where
 
     /// Spawns all pending transactions as blocking tasks by first chunking them.
     ///
+    /// Transactions from the same sender are routed to the same worker so that
+    /// sender account state (balance, nonce) is warm in that worker's local EVM
+    /// cache, reducing redundant state lookups.
+    ///
     /// For Optimism chains, special handling is applied to the first transaction if it's a
     /// deposit transaction (type 0x7E/126) which sets critical metadata that affects all
     /// subsequent transactions in the block.
@@ -160,12 +164,13 @@ where
                 max_concurrency
             } else {
                 transaction_count.min(max_concurrency)
-            };
+            }
+            .max(1);
 
-            // Spawn workers
-            let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor, to_multi_proof, done_tx.clone());
+            // Spawn workers with per-worker channels for sender-affinity routing
+            let worker_senders = ctx.clone().spawn_workers(workers_needed, &executor, to_multi_proof, done_tx.clone());
 
-            // Distribute transactions to workers
+            // Distribute transactions to workers based on sender
             let mut tx_index = 0usize;
             while let Ok(tx) = pending.recv() {
                 // Stop distributing if termination was requested
@@ -177,19 +182,22 @@ where
                     break;
                 }
 
+                // Route by sender address so same-sender txs hit the same worker
+                let sender = tx.signer();
+                let worker_idx = sender_to_worker_index(sender, workers_needed);
+
                 let indexed_tx = IndexedTransaction { index: tx_index, tx };
 
-                // Send transaction to the workers
                 // Ignore send errors: workers listen to terminate_execution and may
                 // exit early when signaled.
-                let _ = tx_sender.send(indexed_tx);
+                let _ = worker_senders[worker_idx].send(indexed_tx);
 
                 tx_index += 1;
             }
 
-            // drop sender and wait for all tasks to finish
+            // drop senders and wait for all tasks to finish
             drop(done_tx);
-            drop(tx_sender);
+            drop(worker_senders);
             while done_rx.recv().is_ok() {}
 
             let _ = actions_tx
@@ -608,31 +616,37 @@ where
         let _ = done_tx.send(());
     }
 
-    /// Spawns worker tasks that pull transactions from a shared channel.
+    /// Spawns worker tasks with per-worker channels for sender-affinity routing.
     ///
-    /// Returns the sender for distributing transactions to workers.
+    /// Returns a vec of senders, one per worker, so the caller can route transactions
+    /// to a specific worker based on sender address.
     fn spawn_workers<Tx>(
         self,
         workers_needed: usize,
         task_executor: &WorkloadExecutor,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         done_tx: Sender<()>,
-    ) -> CrossbeamSender<IndexedTransaction<Tx>>
+    ) -> Vec<CrossbeamSender<IndexedTransaction<Tx>>>
     where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
-        let (tx_sender, tx_receiver) = crossbeam_channel::unbounded();
+        let mut worker_senders = Vec::with_capacity(workers_needed);
+        let mut worker_receivers = Vec::with_capacity(workers_needed);
 
-        // Spawn workers that all pull from the shared receiver
+        for _ in 0..workers_needed {
+            let (tx, rx) = crossbeam_channel::unbounded();
+            worker_senders.push(tx);
+            worker_receivers.push(rx);
+        }
+
         let executor = task_executor.clone();
         let span = Span::current();
         task_executor.spawn_blocking(move || {
             let _enter = span.entered();
-            for idx in 0..workers_needed {
+            for (idx, rx) in worker_receivers.into_iter().enumerate() {
                 let ctx = self.clone();
                 let to_multi_proof = to_multi_proof.clone();
                 let done_tx = done_tx.clone();
-                let rx = tx_receiver.clone();
                 let span = debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm worker", idx);
                 executor.spawn_blocking(move || {
                     let _enter = span.entered();
@@ -641,7 +655,7 @@ where
             }
         });
 
-        tx_sender
+        worker_senders
     }
 
     /// Spawns a worker task for BAL slot prefetching.
@@ -734,6 +748,18 @@ where
         let _ = done_tx.send(());
         metrics.bal_slot_iteration_duration.record(elapsed.as_secs_f64());
     }
+}
+
+/// Maps a sender address to a worker index using the low bytes of the address.
+///
+/// Addresses have good entropy in their low bytes (they're derived from keccak of the public
+/// key), so a simple modulo gives reasonable distribution across workers.
+#[inline]
+fn sender_to_worker_index(sender: &alloy_primitives::Address, num_workers: usize) -> usize {
+    debug_assert!(num_workers > 0);
+    let bytes = sender.as_slice();
+    let val = u64::from_le_bytes(bytes[12..20].try_into().expect("20-byte address"));
+    val as usize % num_workers
 }
 
 /// Returns a set of [`VersionedMultiProofTargets`] and the total amount of storage targets, based
