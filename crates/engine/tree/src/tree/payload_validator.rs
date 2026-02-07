@@ -7,8 +7,8 @@ use crate::tree::{
     payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, MeteredStateHook, PayloadHandle,
-    StateProviderBuilder, StateProviderDatabase, TreeConfig,
+    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
+    StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::BlockAccessList;
@@ -518,16 +518,18 @@ where
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
                         let elapsed = root_time.elapsed();
                         info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
+
+                        // Compare trie updates with serial computation if configured
+                        if self.config.always_compare_trie_updates() {
+                            self.compare_trie_updates_with_serial(
+                                overlay_factory.clone(),
+                                &hashed_state,
+                                trie_updates.clone(),
+                            );
+                        }
+
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
-                            // Compare trie updates with serial computation if configured
-                            if self.config.always_compare_trie_updates() {
-                                self.compare_trie_updates_with_serial(
-                                    overlay_factory.clone(),
-                                    &hashed_state,
-                                    trie_updates.clone(),
-                                );
-                            }
                             maybe_state_root = Some((state_root, trie_updates, elapsed))
                         } else {
                             warn!(
@@ -734,13 +736,8 @@ where
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
         self.payload_processor.executor().spawn_blocking(move || task_handle.run(receipts_len));
 
-        // Wrap the state hook with metrics collection
-        let inner_hook = Box::new(handle.state_hook());
-        let state_hook =
-            MeteredStateHook { metrics: self.metrics.executor_metrics().clone(), inner_hook };
-
         let transaction_count = input.transaction_count();
-        let executor = executor.with_state_hook(Some(Box::new(state_hook)));
+        let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));
 
         let execution_start = Instant::now();
 

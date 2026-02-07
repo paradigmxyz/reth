@@ -89,4 +89,5 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
-edge = ["reth-cli-commands/edge"]
+rocksdb = ["reth-cli-commands/rocksdb"]
+edge = ["rocksdb"]

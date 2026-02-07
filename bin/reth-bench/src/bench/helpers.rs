@@ -180,7 +180,7 @@ pub(crate) async fn get_payload_with_sidecar(
     payload_id: PayloadId,
     parent_beacon_block_root: Option<B256>,
 ) -> eyre::Result<(ExecutionPayload, ExecutionPayloadSidecar)> {
-    debug!(get_payload_version = ?version, ?payload_id, "Sending getPayload");
+    debug!(target: "reth-bench", get_payload_version = ?version, ?payload_id, "Sending getPayload");
 
     match version {
         1 => {

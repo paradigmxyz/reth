@@ -21,7 +21,7 @@ use std::{
     time::Instant,
 };
 use thiserror::Error;
-use tracing::{debug, error};
+use tracing::{debug, error, instrument};
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -77,10 +77,10 @@ where
 
     /// Prunes block data before the given block number according to the configured prune
     /// configuration.
+    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_num))]
     fn prune_before(&mut self, block_num: u64) -> Result<PrunerOutput, PrunerError> {
         debug!(target: "engine::persistence", ?block_num, "Running pruner");
         let start_time = Instant::now();
-        // TODO: doing this properly depends on pruner segment changes
         let result = self.pruner.run(block_num);
         self.metrics.prune_before_duration_seconds.record(start_time.elapsed());
         result
@@ -135,6 +135,7 @@ where
         Ok(())
     }
 
+    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(new_tip_num))]
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,
@@ -152,6 +153,7 @@ where
         Ok(new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }))
     }
 
+    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = blocks.len()))]
     fn on_save_blocks(
         &mut self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,

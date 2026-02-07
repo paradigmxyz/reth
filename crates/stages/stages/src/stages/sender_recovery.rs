@@ -12,9 +12,10 @@ use reth_db_api::{
 use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
     BlockReader, DBProvider, EitherWriter, HeaderProvider, ProviderError, PruneCheckpointReader,
-    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionsProvider,
+    PruneCheckpointWriter, StaticFileProviderFactory, StatsReader, StorageSettingsCache,
+    TransactionsProvider,
 };
-use reth_prune_types::PruneSegment;
+use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError,
     StageId, UnwindInput, UnwindOutput,
@@ -43,18 +44,22 @@ pub struct SenderRecoveryStage {
     /// The size of inserted items after which the control
     /// flow will be returned to the pipeline for commit
     pub commit_threshold: u64,
+    /// Prune mode for sender recovery. When set to `PruneMode::Full`, the stage will
+    /// fast-forward its checkpoint to skip all work, since senders will be recovered
+    /// inline by the execution stage instead.
+    pub prune_mode: Option<PruneMode>,
 }
 
 impl SenderRecoveryStage {
     /// Create new instance of [`SenderRecoveryStage`].
-    pub const fn new(config: SenderRecoveryConfig) -> Self {
-        Self { commit_threshold: config.commit_threshold }
+    pub const fn new(config: SenderRecoveryConfig, prune_mode: Option<PruneMode>) -> Self {
+        Self { commit_threshold: config.commit_threshold, prune_mode }
     }
 }
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { commit_threshold: 5_000_000 }
+        Self { commit_threshold: 5_000_000, prune_mode: None }
     }
 }
 
@@ -65,6 +70,7 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + StatsReader
         + PruneCheckpointReader
+        + PruneCheckpointWriter
         + StorageSettingsCache,
 {
     /// Return the id of the stage
@@ -77,7 +83,45 @@ where
     /// collect transactions within that range, recover signer for each transaction and store
     /// entries in the [`TransactionSenders`][reth_db_api::tables::TransactionSenders] table or
     /// static files depending on configuration.
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        mut input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
+        // TODO: when senders are fully pruned, batch recover in execution stage instead of per-tx
+        // fallback
+        if let Some((target_prunable_block, prune_mode)) = self
+            .prune_mode
+            .map(|mode| {
+                mode.prune_target_block(
+                    input.target(),
+                    PruneSegment::SenderRecovery,
+                    PrunePurpose::User,
+                )
+            })
+            .transpose()?
+            .flatten() &&
+            target_prunable_block > input.checkpoint().block_number
+        {
+            input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+
+            if provider.get_prune_checkpoint(PruneSegment::SenderRecovery)?.is_none() {
+                let target_prunable_tx_number = provider
+                    .block_body_indices(target_prunable_block)?
+                    .ok_or(ProviderError::BlockBodyIndicesNotFound(target_prunable_block))?
+                    .last_tx_num();
+
+                provider.save_prune_checkpoint(
+                    PruneSegment::SenderRecovery,
+                    PruneCheckpoint {
+                        block_number: Some(target_prunable_block),
+                        tx_number: Some(target_prunable_tx_number),
+                        prune_mode,
+                    },
+                )?;
+            }
+        }
+
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -494,7 +538,7 @@ mod tests {
 
         let runner = SenderRecoveryTestRunner::default();
         runner.db.factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_senders_in_static_files(true),
+            StorageSettings::v1().with_transaction_senders_in_static_files(true),
         );
         let input = ExecInput {
             target: Some(target),
@@ -720,7 +764,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            SenderRecoveryStage { commit_threshold: self.threshold }
+            SenderRecoveryStage { commit_threshold: self.threshold, prune_mode: None }
         }
     }
 
