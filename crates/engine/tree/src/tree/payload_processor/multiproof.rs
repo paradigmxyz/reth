@@ -995,6 +995,7 @@ impl MultiProofTask {
     ) -> Result<(), ()> {
         batch_metrics.proofs_processed += 1;
         self.metrics.proof_calculation_duration_histogram.record(proof_result.elapsed);
+        self.multiproof_manager.on_calculation_complete();
 
         match proof_result.result {
             Ok(proof_result_data) => {
@@ -1307,8 +1308,6 @@ impl MultiProofTask {
                                     return
                                 }
                             }
-
-                            self.multiproof_manager.on_calculation_complete();
 
                             for update in pending_sends {
                                 let _ = self.to_sparse_trie.send(update);
