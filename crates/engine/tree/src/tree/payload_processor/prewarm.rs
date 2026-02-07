@@ -222,36 +222,43 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            // Perform all cache operations atomically under the lock
+
+            // Phase 1: ALL prep work OUTSIDE the lock
+            // consumes the `SavedCache` held by the prewarming task, which releases its usage
+            // guard
+            let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
+            let new_cache = SavedCache::new(hash, caches, cache_metrics)
+                .with_disable_cache_metrics(disable_cache_metrics);
+
+            // insert_state outside lock (fixed-cache is lock-free internally)
+            if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                debug!(target: "engine::caching", "cleared execution cache on update error");
+                execution_cache.update_with_guard(|cached| *cached = None);
+                return;
+            }
+
+            new_cache.update_metrics();
+
+            // Wait for validation OUTSIDE the lock
+            let validation_wait_start = Instant::now();
+            let is_valid = valid_block_rx.recv().is_ok();
+            let validation_wait = validation_wait_start.elapsed();
+            metrics.save_cache_validation_wait_duration.record(validation_wait.as_secs_f64());
+            debug!(target: "engine::caching", validation_wait_ms = validation_wait.as_millis(), "Waited for block validation");
+
+            // Phase 2: ONLY the pointer swap inside the lock
+            let lock_start = Instant::now();
             execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its usage
-                // guard
-                let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
-                let new_cache = SavedCache::new(hash, caches, cache_metrics)
-                    .with_disable_cache_metrics(disable_cache_metrics);
-
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
-                    // Clear the cache on error to prevent having a polluted cache
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
-                }
-
-                new_cache.update_metrics();
-
-                if valid_block_rx.recv().is_ok() {
-                    // Replace the shared cache with the new one; the previous cache (if any) is
-                    // dropped.
+                if is_valid {
                     *cached = Some(new_cache);
                 } else {
-                    // Block was invalid; caches were already mutated by insert_state above,
-                    // so we must clear to prevent using polluted state
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on invalid block");
                 }
             });
+            let lock_hold = lock_start.elapsed();
+            metrics.save_cache_lock_hold_duration.record(lock_hold.as_secs_f64());
+            debug!(target: "engine::caching", lock_hold_ms = lock_hold.as_millis(), "Write lock held for cache swap");
 
             let elapsed = start.elapsed();
             debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
@@ -874,4 +881,8 @@ pub struct PrewarmMetrics {
     pub(crate) transaction_errors: Counter,
     /// A histogram of BAL slot iteration duration during prefetching
     pub(crate) bal_slot_iteration_duration: Histogram,
+    /// Time spent waiting for block validation result in save_cache
+    pub(crate) save_cache_validation_wait_duration: Histogram,
+    /// Time the write lock is actually held during cache saving
+    pub(crate) save_cache_lock_hold_duration: Histogram,
 }
