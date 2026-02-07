@@ -2,7 +2,7 @@ use crate::tree::metrics::BlockBufferMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber};
 use reth_primitives_traits::{Block, SealedBlock};
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{hash_map, BTreeMap, HashMap, HashSet, VecDeque};
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
 /// It allows to store unconnected blocks for potential future inclusion.
@@ -137,12 +137,10 @@ impl<B: Block> BlockBuffer<B> {
 
     /// Remove from parent child connection. This method does not remove children.
     fn remove_from_parent(&mut self, parent_hash: BlockHash, hash: &BlockHash) {
-        // remove from parent to child connection, but only for this block parent.
-        if let Some(entry) = self.parent_to_child.get_mut(&parent_hash) {
-            entry.remove(hash);
-            // if set is empty remove block entry.
-            if entry.is_empty() {
-                self.parent_to_child.remove(&parent_hash);
+        if let hash_map::Entry::Occupied(mut entry) = self.parent_to_child.entry(parent_hash) {
+            entry.get_mut().remove(hash);
+            if entry.get().is_empty() {
+                entry.remove();
             }
         }
     }

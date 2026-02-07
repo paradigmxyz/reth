@@ -162,11 +162,12 @@ impl<N: NodePrimitives> TreeState<N> {
         let parent_hash = executed.recovered_block().parent_hash();
         let block_number = executed.recovered_block().number();
 
-        if self.blocks_by_hash.contains_key(&hash) {
-            return;
+        match self.blocks_by_hash.entry(hash) {
+            hash_map::Entry::Occupied(_) => return,
+            hash_map::Entry::Vacant(entry) => {
+                entry.insert(executed.clone());
+            }
         }
-
-        self.blocks_by_hash.insert(hash, executed.clone());
 
         self.blocks_by_number.entry(block_number).or_default().push(executed);
 
