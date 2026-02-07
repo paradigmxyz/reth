@@ -18,7 +18,7 @@ use crate::{
     PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
     RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieWriter, STORAGE_POOL,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -556,7 +556,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut rocksdb_result = None;
 
         // Write to all backends in parallel.
-        STORAGE_POOL.in_place_scope(|s| {
+        reth_tasks::RUNTIME.storage_pool().in_place_scope(|s| {
             // SF writes
             s.spawn(|_| {
                 let start = Instant::now();

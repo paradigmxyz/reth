@@ -49,6 +49,9 @@ pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(15);
 /// Default reserved CPU cores for OS and other processes.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 2;
 
+/// Default number of threads for the storage I/O pool.
+pub const DEFAULT_STORAGE_POOL_THREADS: usize = 16;
+
 /// Default maximum number of concurrent blocking tasks (for RPC tracing guard).
 pub const DEFAULT_MAX_BLOCKING_TASKS: usize = 512;
 
@@ -109,6 +112,9 @@ pub struct RayonConfig {
     /// Number of threads for the trie proof computation pool.
     /// If `None`, uses the same as `cpu_threads`.
     pub trie_threads: Option<usize>,
+    /// Number of threads for the storage I/O pool (static file, RocksDB writes in
+    /// `save_blocks`). If `None`, uses [`DEFAULT_STORAGE_POOL_THREADS`].
+    pub storage_threads: Option<usize>,
     /// Maximum number of concurrent blocking tasks for the RPC guard semaphore.
     pub max_blocking_tasks: usize,
 }
@@ -121,6 +127,7 @@ impl Default for RayonConfig {
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             rpc_threads: None,
             trie_threads: None,
+            storage_threads: None,
             max_blocking_tasks: DEFAULT_MAX_BLOCKING_TASKS,
         }
     }
@@ -149,6 +156,12 @@ impl RayonConfig {
     /// Set the number of threads for the trie proof pool.
     pub const fn with_trie_threads(mut self, trie_threads: usize) -> Self {
         self.trie_threads = Some(trie_threads);
+        self
+    }
+
+    /// Set the number of threads for the storage I/O pool.
+    pub const fn with_storage_threads(mut self, storage_threads: usize) -> Self {
+        self.storage_threads = Some(storage_threads);
         self
     }
 
@@ -248,6 +261,9 @@ pub struct GlobalRuntime {
     /// Trie proof computation pool (parallel state root, multiproof workers).
     #[cfg(feature = "rayon")]
     trie_pool: OnceLock<rayon::ThreadPool>,
+    /// Storage I/O pool (static file, RocksDB writes in `save_blocks`).
+    #[cfg(feature = "rayon")]
+    storage_pool: OnceLock<rayon::ThreadPool>,
     /// Rate limiter for expensive RPC operations.
     #[cfg(feature = "rayon")]
     blocking_guard: OnceLock<BlockingTaskGuard>,
@@ -268,6 +284,8 @@ impl GlobalRuntime {
             rpc_pool: OnceLock::new(),
             #[cfg(feature = "rayon")]
             trie_pool: OnceLock::new(),
+            #[cfg(feature = "rayon")]
+            storage_pool: OnceLock::new(),
             #[cfg(feature = "rayon")]
             blocking_guard: OnceLock::new(),
         }
@@ -343,6 +361,14 @@ impl GlobalRuntime {
                 .build()?;
             let _ = self.trie_pool.set(trie_raw);
 
+            let storage_threads =
+                config.rayon.storage_threads.unwrap_or(DEFAULT_STORAGE_POOL_THREADS);
+            let storage_raw = rayon::ThreadPoolBuilder::new()
+                .num_threads(storage_threads)
+                .thread_name(|i| format!("reth-storage-{i}"))
+                .build()?;
+            let _ = self.storage_pool.set(storage_raw);
+
             let _ =
                 self.blocking_guard.set(BlockingTaskGuard::new(config.rayon.max_blocking_tasks));
 
@@ -350,6 +376,7 @@ impl GlobalRuntime {
                 default_threads,
                 rpc_threads,
                 trie_threads,
+                storage_threads,
                 max_blocking_tasks = config.rayon.max_blocking_tasks,
                 "Initialized rayon thread pools"
             );
@@ -423,6 +450,19 @@ impl GlobalRuntime {
     #[cfg(feature = "rayon")]
     pub fn trie_pool(&self) -> &rayon::ThreadPool {
         self.trie_pool.get().unwrap_or_else(|| uninitialized_panic())
+    }
+
+    /// Get the storage I/O pool.
+    ///
+    /// Dedicated pool for parallel writes to static files, RocksDB, and other storage
+    /// backends during block persistence (`save_blocks`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the runtime has not been initialized.
+    #[cfg(feature = "rayon")]
+    pub fn storage_pool(&self) -> &rayon::ThreadPool {
+        self.storage_pool.get().unwrap_or_else(|| uninitialized_panic())
     }
 
     /// Get a clone of the [`BlockingTaskGuard`].

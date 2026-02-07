@@ -6,7 +6,7 @@ use crate::{
     changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
     EitherWriterDestination, HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader,
-    TransactionVariant, TransactionsProvider, TransactionsProviderExt, STORAGE_POOL,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt,
 };
 use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
@@ -696,7 +696,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut r_account_changesets = None;
         let mut r_storage_changesets = None;
 
-        STORAGE_POOL.in_place_scope(|s| {
+        reth_tasks::RUNTIME.storage_pool().in_place_scope(|s| {
             s.spawn(|_| {
                 r_headers =
                     Some(self.write_segment(StaticFileSegment::Headers, first_block_number, |w| {
