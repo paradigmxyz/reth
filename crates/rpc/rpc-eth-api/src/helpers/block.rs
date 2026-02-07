@@ -240,7 +240,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     {
         async move {
             let index: usize = index.into();
-            
+
             let uncle = if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
                 self.provider()
@@ -250,8 +250,8 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
             } else {
                 self.recovered_block(block_id)
                     .await?
-                    .and_then(|block| block.body().ommers().and_then(|o| o.get(index).cloned()))                                                            
-            };  
+                    .and_then(|block| block.body().ommers().and_then(|o| o.get(index).cloned()))
+            };
 
             uncle
                 .into_iter()
