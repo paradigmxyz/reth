@@ -275,9 +275,11 @@ where
             gas_limit: payload.payload.gas_limit(),
             basefee: payload.payload.saturated_base_fee_per_gas(),
             blob_excess_gas_and_price,
-            slot_num: (spec >= SpecId::AMSTERDAM)
-                .then(|| payload.payload.as_v4().unwrap().slot_number)
-                .unwrap_or_default(),
+            slot_num: if spec >= SpecId::AMSTERDAM {
+                payload.payload.as_v4().unwrap().slot_number
+            } else {
+                Default::default()
+            },
         };
         tracing::info!("Constructed BlockEnv for payload: {:?}", block_env);
 
