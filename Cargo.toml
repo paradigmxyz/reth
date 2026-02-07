@@ -555,7 +555,7 @@ tracing-appender = "0.2"
 url = { version = "2.3", default-features = false }
 zstd = "0.13"
 byteorder = "1"
-fixed-cache = { git = "https://github.com/DaniPopes/fixed-cache", rev = "cb8886f", features = ["stats"] }
+fixed-cache = { version = "0.1.7", features = ["stats"] }
 moka = "0.12"
 tar-no-std = { version = "0.4.2", default-features = false }
 miniz_oxide = { version = "0.9.0", default-features = false }
@@ -772,3 +772,4 @@ alloy-sol-macro = { git = "https://github.com/alloy-rs/core", rev = "d8e219f" }
 alloy-sol-macro-expander = { git = "https://github.com/alloy-rs/core", rev = "d8e219f" }
 alloy-sol-macro-input = { git = "https://github.com/alloy-rs/core", rev = "d8e219f" }
 alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core", rev = "d8e219f" }
+fixed-cache = { git = "https://github.com/DaniPopes/fixed-cache", rev = "cb8886f" }
