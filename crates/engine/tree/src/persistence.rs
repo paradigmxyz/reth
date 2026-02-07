@@ -81,7 +81,6 @@ where
     fn prune_before(&mut self, block_num: u64) -> Result<PrunerOutput, PrunerError> {
         debug!(target: "engine::persistence", ?block_num, "Running pruner");
         let start_time = Instant::now();
-        // TODO: doing this properly depends on pruner segment changes
         let result = self.pruner.run(block_num);
         self.metrics.prune_before_duration_seconds.record(start_time.elapsed());
         result
