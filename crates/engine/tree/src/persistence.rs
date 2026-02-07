@@ -91,47 +91,90 @@ impl<N> PersistenceService<N>
 where
     N: ProviderNodeTypes,
 {
+    /// Maximum number of blocks to coalesce into a single persistence transaction.
+    const MAX_COALESCE_BLOCKS: usize = 64;
+
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
-            match action {
-                PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let result = self.on_remove_blocks_above(new_tip_num)?;
-                    // send new sync metrics based on removed blocks
-                    let _ =
-                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(result);
-                }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
-                    let result_number = result.map(|r| r.number);
+            self.handle_action(action)?;
+        }
+        Ok(())
+    }
 
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(result);
+    /// Handle a single persistence action, coalescing consecutive `SaveBlocks` messages.
+    fn handle_action(
+        &mut self,
+        action: PersistenceAction<N::Primitives>,
+    ) -> Result<(), PersistenceError> {
+        match action {
+            PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
+                let result = self.on_remove_blocks_above(new_tip_num)?;
+                let _ =
+                    self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
+                let _ = sender.send(result);
+            }
+            PersistenceAction::SaveBlocks(blocks, sender) => {
+                let mut all_blocks = blocks;
+                let mut senders = vec![sender];
 
-                    if let Some(block_number) = result_number {
-                        // send new sync metrics based on saved blocks
-                        let _ = self
-                            .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: block_number });
-
-                        if self.pruner.is_pruning_needed(block_number) {
-                            // We log `PrunerOutput` inside the `Pruner`
-                            let _ = self.prune_before(block_number)?;
+                while all_blocks.len() < Self::MAX_COALESCE_BLOCKS {
+                    match self.incoming.try_recv() {
+                        Ok(PersistenceAction::SaveBlocks(more_blocks, more_sender)) => {
+                            all_blocks.extend(more_blocks);
+                            senders.push(more_sender);
                         }
+                        Ok(PersistenceAction::SaveFinalizedBlock(finalized_block)) => {
+                            self.pending_finalized_block = Some(finalized_block);
+                        }
+                        Ok(PersistenceAction::SaveSafeBlock(safe_block)) => {
+                            self.pending_safe_block = Some(safe_block);
+                        }
+                        Ok(other) => {
+                            self.flush_save_blocks(all_blocks, senders)?;
+                            return self.handle_action(other);
+                        }
+                        Err(_) => break,
                     }
                 }
-                PersistenceAction::SaveFinalizedBlock(finalized_block) => {
-                    self.pending_finalized_block = Some(finalized_block);
-                }
-                PersistenceAction::SaveSafeBlock(safe_block) => {
-                    self.pending_safe_block = Some(safe_block);
-                }
+
+                self.flush_save_blocks(all_blocks, senders)?;
+            }
+            PersistenceAction::SaveFinalizedBlock(finalized_block) => {
+                self.pending_finalized_block = Some(finalized_block);
+            }
+            PersistenceAction::SaveSafeBlock(safe_block) => {
+                self.pending_safe_block = Some(safe_block);
             }
         }
+        Ok(())
+    }
+
+    /// Flush a coalesced batch of blocks: persist, notify all senders, update metrics, and prune.
+    fn flush_save_blocks(
+        &mut self,
+        blocks: Vec<ExecutedBlock<N::Primitives>>,
+        senders: Vec<CrossbeamSender<Option<BlockNumHash>>>,
+    ) -> Result<(), PersistenceError> {
+        let result = self.on_save_blocks(blocks)?;
+        let result_number = result.map(|r| r.number);
+
+        for s in senders {
+            let _ = s.send(result);
+        }
+
+        if let Some(block_number) = result_number {
+            let _ = self
+                .sync_metrics_tx
+                .send(MetricEvent::SyncHeight { height: block_number });
+
+            if self.pruner.is_pruning_needed(block_number) {
+                let _ = self.prune_before(block_number)?;
+            }
+        }
+
         Ok(())
     }
 
