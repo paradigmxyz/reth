@@ -1227,26 +1227,45 @@ impl RocksDBProvider {
             }
         });
 
-        if write_tx_hash {
-            r_tx_hash.ok_or_else(|| {
+        let tx_hash_batch = if write_tx_hash {
+            Some(r_tx_hash.ok_or_else(|| {
                 ProviderError::Database(DatabaseError::Other(
                     "rocksdb tx-hash write thread panicked".into(),
                 ))
-            })??;
-        }
-        if write_account_history {
-            r_account_history.ok_or_else(|| {
+            })??)
+        } else {
+            None
+        };
+        let account_history_batch = if write_account_history {
+            Some(r_account_history.ok_or_else(|| {
                 ProviderError::Database(DatabaseError::Other(
                     "rocksdb account-history write thread panicked".into(),
                 ))
-            })??;
-        }
-        if write_storage_history {
-            r_storage_history.ok_or_else(|| {
+            })??)
+        } else {
+            None
+        };
+        let storage_history_batch = if write_storage_history {
+            Some(r_storage_history.ok_or_else(|| {
                 ProviderError::Database(DatabaseError::Other(
                     "rocksdb storage-history write thread panicked".into(),
                 ))
-            })??;
+            })??)
+        } else {
+            None
+        };
+
+        {
+            let mut batches = ctx.pending_batches.lock();
+            if let Some(batch) = tx_hash_batch {
+                batches.push(batch);
+            }
+            if let Some(batch) = account_history_batch {
+                batches.push(batch);
+            }
+            if let Some(batch) = storage_history_batch {
+                batches.push(batch);
+            }
         }
 
         Ok(())
@@ -1258,8 +1277,8 @@ impl RocksDBProvider {
         &self,
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
-        ctx: &RocksDBWriteCtx,
-    ) -> ProviderResult<()> {
+        _ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<WriteBatchWithTransaction<true>> {
         let mut batch = self.batch();
         for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
             let body = block.recovered_block().body();
@@ -1269,8 +1288,7 @@ impl RocksDBProvider {
                 tx_num += 1;
             }
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
-        Ok(())
+        Ok(batch.into_inner())
     }
 
     /// Writes account history indices for the given blocks.
@@ -1281,7 +1299,7 @@ impl RocksDBProvider {
         &self,
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<WriteBatchWithTransaction<true>> {
         let mut batch = self.batch();
         let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
 
@@ -1302,8 +1320,7 @@ impl RocksDBProvider {
         for (address, indices) in account_history {
             batch.append_account_history_shard(address, indices)?;
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
-        Ok(())
+        Ok(batch.into_inner())
     }
 
     /// Writes storage history indices for the given blocks.
@@ -1314,7 +1331,7 @@ impl RocksDBProvider {
         &self,
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<WriteBatchWithTransaction<true>> {
         let mut batch = self.batch();
         let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
 
@@ -1341,8 +1358,7 @@ impl RocksDBProvider {
         for ((address, slot), indices) in storage_history {
             batch.append_storage_history_shard(address, slot, indices)?;
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
-        Ok(())
+        Ok(batch.into_inner())
     }
 }
 
