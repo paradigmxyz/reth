@@ -7,6 +7,7 @@ use itertools::Itertools;
 use reth_execution_errors::{SparseTrieError, StateProofError, StorageRootError};
 use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_errors::db::DatabaseError;
+use reth_tasks::RUNTIME;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     node_iter::{TrieElement, TrieNodeIter},
@@ -16,11 +17,7 @@ use reth_trie::{
     walker::TrieWalker,
     HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_tasks::RUNTIME;
-use std::{
-    collections::HashMap,
-    sync::mpsc,
-};
+use std::{collections::HashMap, sync::mpsc};
 use thiserror::Error;
 use tracing::*;
 

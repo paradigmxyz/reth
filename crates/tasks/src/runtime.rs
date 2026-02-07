@@ -112,7 +112,7 @@ pub struct RayonConfig {
     /// Number of threads for the trie proof computation pool.
     /// If `None`, uses the same as `cpu_threads`.
     pub trie_threads: Option<usize>,
-    /// Number of threads for the storage I/O pool (static file, RocksDB writes in
+    /// Number of threads for the storage I/O pool (static file, `RocksDB` writes in
     /// `save_blocks`). If `None`, uses [`DEFAULT_STORAGE_POOL_THREADS`].
     pub storage_threads: Option<usize>,
     /// Maximum number of concurrent blocking tasks for the RPC guard semaphore.
@@ -261,7 +261,7 @@ pub struct GlobalRuntime {
     /// Trie proof computation pool (parallel state root, multiproof workers).
     #[cfg(feature = "rayon")]
     trie_pool: OnceLock<rayon::ThreadPool>,
-    /// Storage I/O pool (static file, RocksDB writes in `save_blocks`).
+    /// Storage I/O pool (static file, `RocksDB` writes in `save_blocks`).
     #[cfg(feature = "rayon")]
     storage_pool: OnceLock<rayon::ThreadPool>,
     /// Rate limiter for expensive RPC operations.
@@ -454,7 +454,7 @@ impl GlobalRuntime {
 
     /// Get the storage I/O pool.
     ///
-    /// Dedicated pool for parallel writes to static files, RocksDB, and other storage
+    /// Dedicated pool for parallel writes to static files, `RocksDB`, and other storage
     /// backends during block persistence (`save_blocks`).
     ///
     /// # Panics

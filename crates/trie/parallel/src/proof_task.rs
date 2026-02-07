@@ -46,6 +46,7 @@ use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofErro
 use reth_primitives_traits::dashmap::{self, DashMap};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
+use reth_tasks::RUNTIME;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedCursorMetricsCache, InstrumentedHashedCursor},
     node_iter::{TrieElement, TrieNodeIter},
@@ -64,7 +65,6 @@ use reth_trie_common::{
     BranchNodeMasks, BranchNodeMasksMap,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
-use reth_tasks::RUNTIME;
 use std::{
     cell::RefCell,
     rc::Rc,
