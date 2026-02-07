@@ -239,20 +239,21 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
     {
         async move {
-            let uncles = if block_id.is_pending() {
+            let index: usize = index.into();
+            
+            let uncle = if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
                 self.provider()
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
-                    .and_then(|block| block.body().ommers().map(|o| o.to_vec()))
+                    .and_then(|block| block.body().ommers().and_then(|o| o.get(index).cloned()))
             } else {
                 self.recovered_block(block_id)
                     .await?
-                    .map(|block| block.body().ommers().map(|o| o.to_vec()).unwrap_or_default())
-            }
-            .unwrap_or_default();
+                    .and_then(|block| block.body().ommers().and_then(|o| o.get(index).cloned()))                                                            
+            };  
 
-            uncles
+            uncle
                 .into_iter()
                 .nth(index.into())
                 .map(|header| {
