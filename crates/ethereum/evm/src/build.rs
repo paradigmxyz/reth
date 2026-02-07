@@ -25,6 +25,30 @@ impl<ChainSpec> EthBlockAssembler<ChainSpec> {
     }
 }
 
+impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
+    /// Calculates the excess blob gas for the next block.
+    ///
+    /// If the parent block was already post-Cancun, derives the value from the parent header.
+    /// Otherwise (first post-fork block), both `blob_gas_used` and `excess_blob_gas` are
+    /// treated as zero per the EIP-4844 specification.
+    fn excess_blob_gas_for_block(
+        &self,
+        parent: &BlockHeader,
+        timestamp: u64,
+    ) -> Option<u64> {
+        if self.chain_spec.is_cancun_active_at_timestamp(parent.timestamp) {
+            parent.maybe_next_block_excess_blob_gas(
+                self.chain_spec.blob_params_at_timestamp(timestamp),
+            )
+        } else {
+            Some(
+                alloy_eips::eip7840::BlobParams::cancun()
+                    .next_block_excess_blob_gas_osaka(0, 0, 0),
+            )
+        }
+    }
+}
+
 impl<F, ChainSpec> BlockAssembler<F> for EthBlockAssembler<ChainSpec>
 where
     F: for<'a> BlockExecutorFactory<
@@ -76,18 +100,7 @@ where
         // only determine cancun fields when active
         if self.chain_spec.is_cancun_active_at_timestamp(timestamp) {
             block_blob_gas_used = Some(*blob_gas_used);
-            excess_blob_gas = if self.chain_spec.is_cancun_active_at_timestamp(parent.timestamp) {
-                parent.maybe_next_block_excess_blob_gas(
-                    self.chain_spec.blob_params_at_timestamp(timestamp),
-                )
-            } else {
-                // for the first post-fork block, both parent.blob_gas_used and
-                // parent.excess_blob_gas are evaluated as 0
-                Some(
-                    alloy_eips::eip7840::BlobParams::cancun()
-                        .next_block_excess_blob_gas_osaka(0, 0, 0),
-                )
-            };
+            excess_blob_gas = self.excess_blob_gas_for_block(parent, timestamp);
         }
 
         let header = Header {
