@@ -623,28 +623,36 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let start = Instant::now();
                 self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
                 timings.insert_block += start.elapsed();
+            }
 
-                if save_mode.with_state() {
-                    let execution_output = block.execution_outcome();
-
-                    // Write state and changesets to the database.
-                    // Must be written after blocks because of the receipt lookup.
-                    // Skip receipts/account changesets if they're being written to static files.
-                    let start = Instant::now();
-                    self.write_state(
-                        WriteStateInput::Single {
-                            outcome: execution_output,
-                            block: recovered_block.number(),
-                        },
-                        OriginalValuesKnown::No,
-                        StateWriteConfig {
-                            write_receipts: !sf_ctx.write_receipts,
-                            write_account_changesets: !sf_ctx.write_account_changesets,
-                            write_storage_changesets: !sf_ctx.write_storage_changesets,
-                        },
-                    )?;
-                    timings.write_state += start.elapsed();
-                }
+            // Write all state and changesets in a single batch to reduce cursor overhead.
+            // Previously this was done per-block, opening/closing cursors N times.
+            if save_mode.with_state() {
+                let start = Instant::now();
+                let merged_outcome = ExecutionOutcome::from_blocks(
+                    first_number,
+                    {
+                        let mut merged = blocks[0].execution_outcome().state.clone();
+                        for block in &blocks[1..] {
+                            merged.extend(block.execution_outcome().state.clone());
+                        }
+                        merged
+                    },
+                    blocks
+                        .iter()
+                        .map(|b| b.execution_outcome().result.clone())
+                        .collect(),
+                );
+                self.write_state(
+                    &merged_outcome,
+                    OriginalValuesKnown::No,
+                    StateWriteConfig {
+                        write_receipts: !sf_ctx.write_receipts,
+                        write_account_changesets: !sf_ctx.write_account_changesets,
+                        write_storage_changesets: !sf_ctx.write_storage_changesets,
+                    },
+                )?;
+                timings.write_state += start.elapsed();
             }
 
             // Write all hashed state and trie updates in single batches.
