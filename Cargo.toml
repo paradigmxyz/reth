@@ -763,3 +763,17 @@ ipnet = "2.11"
 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
 # alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
+
+revm = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
+revm-handler = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
+op-revm = { git = "https://github.com/bluealloy/revm", rev = "0801c5d75c97f1d2e7b141dbc2d76d9f0b78ac55" }
