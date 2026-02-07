@@ -502,24 +502,17 @@ struct ExecutionCacheInner {
     /// Cache for basic account information (nonce, balance, code hash).
     account_cache: FixedCache<Address, Option<Account>, FbBuildHasher<20>>,
 
-    /// Stats handlers for the caches (shared with each cache via [`Stats`]).
-    stats: ExecutionCacheStats,
+    /// Stats handler for the code cache (shared with the cache via [`Stats`]).
+    code_stats: Arc<CacheStatsHandler>,
+
+    /// Stats handler for the storage cache (shared with the cache via [`Stats`]).
+    storage_stats: Arc<CacheStatsHandler>,
+
+    /// Stats handler for the account cache (shared with the cache via [`Stats`]).
+    account_stats: Arc<CacheStatsHandler>,
 
     /// One-time notification when SELFDESTRUCT is encountered
     selfdestruct_encountered: Once,
-}
-
-/// Stats handlers for each cache in the [`ExecutionCache`].
-///
-/// Each handler is shared with its corresponding [`FixedCache`] via [`Stats`].
-#[derive(Debug)]
-struct ExecutionCacheStats {
-    /// Stats handler for the code cache.
-    code: Arc<CacheStatsHandler>,
-    /// Stats handler for the storage cache.
-    storage: Arc<CacheStatsHandler>,
-    /// Stats handler for the account cache.
-    account: Arc<CacheStatsHandler>,
 }
 
 impl ExecutionCache {
@@ -564,11 +557,9 @@ impl ExecutionCache {
                 .with_stats(Some(Stats::new(storage_stats.clone()))),
             account_cache: FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
                 .with_stats(Some(Stats::new(account_stats.clone()))),
-            stats: ExecutionCacheStats {
-                code: code_stats,
-                storage: storage_stats,
-                account: account_stats,
-            },
+            code_stats,
+            storage_stats,
+            account_stats,
             selfdestruct_encountered: Once::new(),
         }))
     }
@@ -747,27 +738,27 @@ impl ExecutionCache {
         self.0.storage_cache.clear();
         self.0.account_cache.clear();
 
-        self.0.stats.storage.reset_size();
-        self.0.stats.account.reset_size();
+        self.0.storage_stats.reset_size();
+        self.0.account_stats.reset_size();
     }
 
     /// Updates the provided metrics with the current stats from the cache's stats handlers,
     /// and resets the hit/miss/collision counters.
     pub(crate) fn update_metrics(&self, metrics: &CachedStateMetrics) {
-        metrics.code_cache_size.set(self.0.stats.code.size() as f64);
-        metrics.code_cache_capacity.set(self.0.stats.code.capacity() as f64);
-        metrics.code_cache_collisions.set(self.0.stats.code.collisions() as f64);
-        self.0.stats.code.reset_stats();
+        metrics.code_cache_size.set(self.0.code_stats.size() as f64);
+        metrics.code_cache_capacity.set(self.0.code_stats.capacity() as f64);
+        metrics.code_cache_collisions.set(self.0.code_stats.collisions() as f64);
+        self.0.code_stats.reset_stats();
 
-        metrics.storage_cache_size.set(self.0.stats.storage.size() as f64);
-        metrics.storage_cache_capacity.set(self.0.stats.storage.capacity() as f64);
-        metrics.storage_cache_collisions.set(self.0.stats.storage.collisions() as f64);
-        self.0.stats.storage.reset_stats();
+        metrics.storage_cache_size.set(self.0.storage_stats.size() as f64);
+        metrics.storage_cache_capacity.set(self.0.storage_stats.capacity() as f64);
+        metrics.storage_cache_collisions.set(self.0.storage_stats.collisions() as f64);
+        self.0.storage_stats.reset_stats();
 
-        metrics.account_cache_size.set(self.0.stats.account.size() as f64);
-        metrics.account_cache_capacity.set(self.0.stats.account.capacity() as f64);
-        metrics.account_cache_collisions.set(self.0.stats.account.collisions() as f64);
-        self.0.stats.account.reset_stats();
+        metrics.account_cache_size.set(self.0.account_stats.size() as f64);
+        metrics.account_cache_capacity.set(self.0.account_stats.capacity() as f64);
+        metrics.account_cache_collisions.set(self.0.account_stats.collisions() as f64);
+        self.0.account_stats.reset_stats();
     }
 }
 
