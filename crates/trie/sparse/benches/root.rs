@@ -49,7 +49,7 @@ fn calculate_root_from_leaves(c: &mut Criterion) {
                         sparse
                             .update_leaf(
                                 Nibbles::unpack(key),
-                                alloy_rlp::encode_fixed_size(value).to_vec(),
+                                &alloy_rlp::encode_fixed_size(value),
                                 &provider,
                             )
                             .unwrap();
@@ -215,7 +215,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                 sparse
                                     .update_leaf(
                                         Nibbles::unpack(key),
-                                        alloy_rlp::encode_fixed_size(value).to_vec(),
+                                        &alloy_rlp::encode_fixed_size(value),
                                         &provider,
                                     )
                                     .unwrap();
@@ -229,7 +229,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                     sparse
                                         .update_leaf(
                                             Nibbles::unpack(key),
-                                            alloy_rlp::encode_fixed_size(value).to_vec(),
+                                            &alloy_rlp::encode_fixed_size(value),
                                             &provider,
                                         )
                                         .unwrap();

@@ -261,7 +261,7 @@ fn calculate_state_root(
             } else {
                 storage_trie.update_leaf(
                     nibbles,
-                    alloy_rlp::encode_fixed_size(&value).to_vec(),
+                    &alloy_rlp::encode_fixed_size(&value),
                     &storage_provider,
                 )?;
             }
@@ -300,7 +300,7 @@ fn calculate_state_root(
         if let Some(account) = account {
             account_rlp_buf.clear();
             account.into_trie_account(storage_root).encode(&mut account_rlp_buf);
-            trie.update_account_leaf(nibbles, account_rlp_buf.clone(), &provider_factory)?;
+            trie.update_account_leaf(nibbles, &account_rlp_buf, &provider_factory)?;
         } else {
             trie.remove_account_leaf(&nibbles, &provider_factory)?;
         }
