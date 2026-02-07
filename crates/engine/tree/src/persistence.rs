@@ -165,7 +165,7 @@ where
             }
 
             if self.pruner.is_pruning_needed(last.number) {
-                debug!(target: "engine::persistence", block_num=?last.number, "Running pruner in same transaction as save_blocks");
+                debug!(target: "engine::persistence", block_num=?last.number, "Running pruner");
                 let prune_start = Instant::now();
                 let _ = self.pruner.run_with_provider(&provider_rw, last.number)?;
                 self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
