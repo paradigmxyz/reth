@@ -34,7 +34,6 @@ thiserror.workspace = true
 derive_more.workspace = true
 rayon.workspace = true
 itertools.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread"] }
 crossbeam-channel.workspace = true
 
 # `metrics` feature

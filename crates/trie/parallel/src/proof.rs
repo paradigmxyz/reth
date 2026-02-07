@@ -257,8 +257,6 @@ mod tests {
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::proof::Proof;
     use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-    use tokio::runtime::Runtime;
-
     #[test]
     fn random_parallel_proof() {
         let factory = create_test_provider_factory();
@@ -321,14 +319,14 @@ mod tests {
         let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_rw.tx_ref());
         let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
 
-        let rt = Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _ = reth_tasks::RUNTIME.init_with_handle(rt.handle().clone());
 
         let changeset_cache = reth_trie_db::ChangesetCache::new();
         let factory =
             reth_provider::providers::OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(factory);
-        let proof_worker_handle =
-            ProofWorkerHandle::new(rt.handle().clone(), task_ctx, 1, 1, false);
+        let proof_worker_handle = ProofWorkerHandle::new(task_ctx, 1, 1, false);
 
         let parallel_result = ParallelProof::new(Default::default(), proof_worker_handle.clone())
             .decoded_multiproof(targets.clone())

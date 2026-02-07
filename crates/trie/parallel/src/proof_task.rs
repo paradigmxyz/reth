@@ -64,6 +64,7 @@ use reth_trie_common::{
     BranchNodeMasks, BranchNodeMasksMap,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
+use reth_tasks::RUNTIME;
 use std::{
     cell::RefCell,
     rc::Rc,
@@ -74,7 +75,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tokio::runtime::Handle;
 use tracing::{debug, debug_span, error, trace};
 
 #[cfg(feature = "metrics")]
@@ -131,14 +131,14 @@ impl ProofWorkerHandle {
     /// Returns a handle for submitting proof tasks to the worker pools.
     /// Workers run until the last handle is dropped.
     ///
+    /// Uses [`RUNTIME`] to obtain the tokio handle for spawning blocking tasks.
+    ///
     /// # Parameters
-    /// - `executor`: Tokio runtime handle for spawning blocking tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `storage_worker_count`: Number of storage workers to spawn
     /// - `account_worker_count`: Number of account workers to spawn
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
     pub fn new<Factory>(
-        executor: Handle,
         task_ctx: ProofTaskCtx<Factory>,
         storage_worker_count: usize,
         account_worker_count: usize,
@@ -178,7 +178,8 @@ impl ProofWorkerHandle {
             v2_proofs_enabled,
         };
 
-        // Clone for the first spawn_blocking (storage workers)
+        let executor = RUNTIME.handle();
+
         let task_ctx_for_storage = task_ctx.clone();
         let executor_for_storage = executor.clone();
         let cached_storage_roots_for_storage = cached_storage_roots.clone();
@@ -2031,8 +2032,8 @@ mod tests {
     #[test]
     fn spawn_proof_workers_creates_handle() {
         let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        let _ = RUNTIME.init_with_handle(runtime.handle().clone());
         runtime.block_on(async {
-            let handle = tokio::runtime::Handle::current();
             let provider_factory = create_test_provider_factory();
             let changeset_cache = reth_trie_db::ChangesetCache::new();
             let factory = reth_provider::providers::OverlayStateProviderFactory::new(
@@ -2041,7 +2042,7 @@ mod tests {
             );
             let ctx = test_ctx(factory);
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false);
+            let proof_handle = ProofWorkerHandle::new(ctx, 5, 3, false);
 
             // Verify handle can be cloned
             let _cloned_handle = proof_handle.clone();

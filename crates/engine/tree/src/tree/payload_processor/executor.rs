@@ -18,11 +18,6 @@ impl Default for WorkloadExecutor {
 }
 
 impl WorkloadExecutor {
-    /// Returns the handle to the tokio runtime
-    pub(super) const fn handle(&self) -> &Handle {
-        &self.handle
-    }
-
     /// Runs the provided function on an executor dedicated to blocking operations.
     #[track_caller]
     pub fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
