@@ -74,6 +74,10 @@ impl ExecutionPayload for CustomExecutionData {
     fn transaction_count(&self) -> usize {
         self.inner.payload.as_v1().transactions.len()
     }
+
+    fn slot_number(&self) -> Option<u64> {
+        None
+    }
 }
 
 impl TryFrom<&reth_optimism_flashblocks::FlashBlockCompleteSequence> for CustomExecutionData {
@@ -105,6 +109,10 @@ impl PayloadAttributes for CustomPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<revm_primitives::B256> {
         self.inner.parent_beacon_block_root()
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        None
     }
 }
 

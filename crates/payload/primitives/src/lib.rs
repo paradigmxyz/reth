@@ -256,6 +256,45 @@ pub fn validate_block_access_list_presence<T: EthereumHardforks>(
     Ok(())
 }
 
+/// Validates the presence of the `slot number` field according to the payload timestamp.
+/// After Amsterdam, slot number field must be [Some].
+/// Before Amsterdam, slot number field must be [None];
+pub fn validate_slot_number_presence<T: EthereumHardforks>(
+    chain_spec: &T,
+    version: EngineApiMessageVersion,
+    message_validation_kind: MessageValidationKind,
+    timestamp: u64,
+    has_slot_number: bool,
+) -> Result<(), EngineObjectValidationError> {
+    let is_amsterdam_active = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
+
+    match version {
+        EngineApiMessageVersion::V1 |
+        EngineApiMessageVersion::V2 |
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 => {
+            if has_slot_number {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::SlotNumberNotSupportedBeforeV6))
+            }
+        }
+
+        EngineApiMessageVersion::V6 => {
+            if is_amsterdam_active && !has_slot_number {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::NoSlotNumberPostAmsterdam))
+            }
+            if !is_amsterdam_active && has_slot_number {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::HasSlotNumberPreAmsterdam))
+            }
+        }
+    };
+
+    Ok(())
+}
+
 /// Validate the presence of the `parentBeaconBlockRoot` field according to the given timestamp.
 /// This method is meant to be used with either a `payloadAttributes` field or a full payload, with
 /// the `engine_forkchoiceUpdated` and `engine_newPayload` methods respectively.
@@ -428,6 +467,14 @@ where
             payload_or_attrs.block_access_list().is_some(),
         )?;
     }
+
+    validate_slot_number_presence(
+        chain_spec,
+        version,
+        payload_or_attrs.message_validation_kind(),
+        payload_or_attrs.timestamp(),
+        payload_or_attrs.slot_number().is_some(),
+    )?;
 
     validate_withdrawals_presence(
         chain_spec,

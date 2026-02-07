@@ -127,6 +127,17 @@ pub enum VersionSpecificValidationError {
     /// before Amsterdam
     #[error("block access list pre-Amsterdam")]
     HasBlockAccessListPreAmsterdam,
+    /// Thrown if the pre-V6 `PayloadAttributes` or `ExecutionPayload` contains a slot number
+    #[error("slot number not before V6")]
+    SlotNumberNotSupportedBeforeV6,
+    /// Thrown if  `engine_newPayload` contains no slot number
+    /// after Amsterdam
+    #[error("no slot number post-Amsterdam")]
+    NoSlotNumberPostAmsterdam,
+    /// Thrown if  `engine_newPayload` contains slot number
+    /// before Amsterdam
+    #[error("slot number pre-Amsterdam")]
+    HasSlotNumberPreAmsterdam,
     /// Thrown if the `PayloadAttributes` or `ExecutionPayload` contains no parent beacon block
     /// root after Cancun
     #[error("no parent beacon block root post-cancun")]
