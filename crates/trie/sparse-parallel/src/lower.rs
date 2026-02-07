@@ -52,6 +52,7 @@ impl LowerSparseSubtrie {
                 debug_assert!(allocated.as_ref().is_none_or(|subtrie| subtrie.is_empty()));
                 *self = if let Some(mut subtrie) = allocated.take() {
                     subtrie.path = *path;
+                    subtrie.nodes.set_base(*path);
                     Self::Revealed(subtrie)
                 } else {
                     Self::Revealed(Box::new(SparseSubtrie::new(*path)))
@@ -60,6 +61,7 @@ impl LowerSparseSubtrie {
             Self::Revealed(subtrie) => {
                 if path.len() < subtrie.path.len() {
                     subtrie.path = *path;
+                    subtrie.nodes.set_base(*path);
                 }
             }
         };

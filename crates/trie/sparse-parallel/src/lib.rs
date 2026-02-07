@@ -10,5 +10,7 @@ pub use trie::*;
 mod lower;
 use lower::*;
 
+pub(crate) mod nodes;
+
 #[cfg(feature = "metrics")]
 mod metrics;

@@ -1,4 +1,4 @@
-use crate::LowerSparseSubtrie;
+use crate::{nodes::SparseSubtrieNodes, LowerSparseSubtrie};
 use alloc::borrow::Cow;
 use alloy_primitives::{
     map::{Entry, HashMap},
@@ -135,7 +135,7 @@ impl Default for ParallelSparseTrie {
     fn default() -> Self {
         Self {
             upper_subtrie: Box::new(SparseSubtrie {
-                nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
+                nodes: SparseSubtrieNodes::from_single(Nibbles::default(), SparseNode::Empty),
                 ..Default::default()
             }),
             lower_subtries: Box::new(
@@ -2058,7 +2058,7 @@ impl ParallelSparseTrie {
 
     /// Returns an iterator over all nodes in the trie in no particular order.
     #[cfg(test)]
-    fn all_nodes(&self) -> impl IntoIterator<Item = (&Nibbles, &SparseNode)> {
+    fn all_nodes(&self) -> impl IntoIterator<Item = (Nibbles, &SparseNode)> {
         let mut nodes = vec![];
         for subtrie in self.lower_subtries.iter().filter_map(LowerSparseSubtrie::as_revealed_ref) {
             nodes.extend(subtrie.nodes.iter())
@@ -2357,8 +2357,9 @@ pub struct SparseSubtrie {
     ///
     /// There should be a node for this path in `nodes` map.
     pub(crate) path: Nibbles,
-    /// The map from paths to sparse trie nodes within this subtrie.
-    nodes: HashMap<Nibbles, SparseNode>,
+    /// Hybrid storage for sparse trie nodes: short paths use a flat array indexed by converting
+    /// the nibble suffix to an integer, while longer paths fall back to a [`HashMap`].
+    pub(crate) nodes: SparseSubtrieNodes,
     /// Subset of fields for mutable access while `nodes` field is also being mutably borrowed.
     inner: SparseSubtrieInner,
 }
@@ -2381,7 +2382,7 @@ enum FindNextToLeafOutcome {
 impl SparseSubtrie {
     /// Creates a new empty subtrie with the specified root path.
     pub(crate) fn new(path: Nibbles) -> Self {
-        Self { path, ..Default::default() }
+        Self { path, nodes: SparseSubtrieNodes::new(path), ..Default::default() }
     }
 
     /// Returns true if this subtrie has any nodes, false otherwise.
@@ -2728,8 +2729,8 @@ impl SparseSubtrie {
                 }
                 // Update the branch node entry in the nodes map, handling cases where a blinded
                 // node is now replaced with a revealed node.
-                match self.nodes.entry(path) {
-                    Entry::Occupied(mut entry) => match entry.get() {
+                match self.nodes.entry(path).split() {
+                    Ok(mut entry) => match entry.get() {
                         // Replace a hash node with a fully revealed branch node.
                         SparseNode::Hash(hash) => {
                             entry.insert(SparseNode::Branch {
@@ -2744,13 +2745,13 @@ impl SparseSubtrie {
                         }
                         _ => unreachable!("checked that node is either a hash or non-existent"),
                     },
-                    Entry::Vacant(entry) => {
+                    Err(entry) => {
                         entry.insert(SparseNode::new_branch(branch.state_mask));
                     }
                 }
             }
-            TrieNode::Extension(ext) => match self.nodes.entry(path) {
-                Entry::Occupied(mut entry) => match entry.get() {
+            TrieNode::Extension(ext) => match self.nodes.entry(path).split() {
+                Ok(mut entry) => match entry.get() {
                     // Replace a hash node with a revealed extension node.
                     SparseNode::Hash(hash) => {
                         let mut child_path = *entry.key();
@@ -2768,7 +2769,7 @@ impl SparseSubtrie {
                     }
                     _ => unreachable!("checked that node is either a hash or non-existent"),
                 },
-                Entry::Vacant(entry) => {
+                Err(entry) => {
                     let mut child_path = *entry.key();
                     child_path.extend(&ext.key);
                     entry.insert(SparseNode::new_ext(ext.key));
@@ -2777,8 +2778,8 @@ impl SparseSubtrie {
                     }
                 }
             },
-            TrieNode::Leaf(leaf) => match self.nodes.entry(path) {
-                Entry::Occupied(mut entry) => match entry.get() {
+            TrieNode::Leaf(leaf) => match self.nodes.entry(path).split() {
+                Ok(mut entry) => match entry.get() {
                     // Replace a hash node with a revealed leaf node and store leaf node value.
                     SparseNode::Hash(hash) => {
                         let mut full = *entry.key();
@@ -2793,7 +2794,7 @@ impl SparseSubtrie {
                     }
                     _ => unreachable!("checked that node is either a hash or non-existent"),
                 },
-                Entry::Vacant(entry) => {
+                Err(entry) => {
                     let mut full = *entry.key();
                     full.extend(&leaf.key);
                     entry.insert(SparseNode::new_leaf(leaf.key));
@@ -2826,8 +2827,8 @@ impl SparseSubtrie {
     fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
         if child.len() == B256::len_bytes() + 1 {
             let hash = B256::from_slice(&child[1..]);
-            match self.nodes.entry(path) {
-                Entry::Occupied(entry) => match entry.get() {
+            match self.nodes.entry(path).split() {
+                Ok(entry) => match entry.get() {
                     // Hash node with a different hash can't be handled.
                     SparseNode::Hash(previous_hash) if previous_hash != &hash => {
                         return Err(SparseTrieErrorKind::Reveal {
@@ -2838,7 +2839,7 @@ impl SparseSubtrie {
                     }
                     _ => {}
                 },
-                Entry::Vacant(entry) => {
+                Err(entry) => {
                     entry.insert(SparseNode::Hash(hash));
                 }
             }
@@ -2905,7 +2906,8 @@ impl SparseSubtrie {
     /// Removes all nodes and values from the subtrie, resetting it to a blank state
     /// with only an empty root node. This is used when a storage root is deleted.
     fn wipe(&mut self) {
-        self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
+        self.nodes.clear();
+        self.nodes.insert(Nibbles::default(), SparseNode::Empty);
         self.inner.clear();
     }
 
@@ -2929,12 +2931,7 @@ impl SparseSubtrie {
     pub(crate) fn memory_size(&self) -> usize {
         let mut size = core::mem::size_of::<Self>();
 
-        // Nodes map: key (Nibbles) + value (SparseNode)
-        for (path, node) in &self.nodes {
-            size += core::mem::size_of::<Nibbles>();
-            size += path.len(); // Nibbles heap allocation
-            size += node.memory_size();
-        }
+        size += self.nodes.memory_size();
 
         // Values map: key (Nibbles) + value (Vec<u8>)
         for (path, value) in &self.inner.values {
@@ -3932,16 +3929,17 @@ mod tests {
 
     fn parallel_sparse_trie_nodes(
         sparse_trie: &ParallelSparseTrie,
-    ) -> impl IntoIterator<Item = (&Nibbles, &SparseNode)> {
-        let lower_sparse_nodes = sparse_trie
+    ) -> impl IntoIterator<Item = (Nibbles, &SparseNode)> {
+        let mut nodes: Vec<_> = sparse_trie
             .lower_subtries
             .iter()
             .filter_map(|subtrie| subtrie.as_revealed_ref())
-            .flat_map(|subtrie| subtrie.nodes.iter());
+            .flat_map(|subtrie| subtrie.nodes.iter())
+            .chain(sparse_trie.upper_subtrie.nodes.iter())
+            .collect();
 
-        let upper_sparse_nodes = sparse_trie.upper_subtrie.nodes.iter();
-
-        lower_sparse_nodes.chain(upper_sparse_nodes).sorted_by_key(|(path, _)| *path)
+        nodes.sort_by_key(|(path, _)| *path);
+        nodes
     }
 
     /// Assert that the parallel sparse trie nodes and the proof nodes from the hash builder are
@@ -3960,7 +3958,7 @@ mod tests {
         for ((proof_node_path, proof_node), (sparse_node_path, sparse_node)) in
             proof_nodes.zip(all_sparse_nodes)
         {
-            assert_eq!(&proof_node_path, sparse_node_path);
+            assert_eq!(proof_node_path, sparse_node_path);
 
             let equals = match (&proof_node, &sparse_node) {
                 // Both nodes are empty
@@ -5621,7 +5619,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             parallel_sparse_trie_nodes(&sparse)
                 .into_iter()
-                .map(|(k, v)| (*k, v.clone()))
+                .map(|(k, v)| (k, v.clone()))
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
@@ -5679,7 +5677,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             parallel_sparse_trie_nodes(&sparse)
                 .into_iter()
-                .map(|(k, v)| (*k, v.clone()))
+                .map(|(k, v)| (k, v.clone()))
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
@@ -5730,7 +5728,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             parallel_sparse_trie_nodes(&sparse)
                 .into_iter()
-                .map(|(k, v)| (*k, v.clone()))
+                .map(|(k, v)| (k, v.clone()))
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
@@ -5767,7 +5765,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             parallel_sparse_trie_nodes(&sparse)
                 .into_iter()
-                .map(|(k, v)| (*k, v.clone()))
+                .map(|(k, v)| (k, v.clone()))
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
@@ -5801,7 +5799,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             parallel_sparse_trie_nodes(&sparse)
                 .into_iter()
-                .map(|(k, v)| (*k, v.clone()))
+                .map(|(k, v)| (k, v.clone()))
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
@@ -5823,7 +5821,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             parallel_sparse_trie_nodes(&sparse)
                 .into_iter()
-                .map(|(k, v)| (*k, v.clone()))
+                .map(|(k, v)| (k, v.clone()))
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([(
                 Nibbles::default(),
@@ -5837,7 +5835,7 @@ mod tests {
         pretty_assertions::assert_eq!(
             parallel_sparse_trie_nodes(&sparse)
                 .into_iter()
-                .map(|(k, v)| (*k, v.clone()))
+                .map(|(k, v)| (k, v.clone()))
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([(Nibbles::default(), SparseNode::Empty)])
         );
