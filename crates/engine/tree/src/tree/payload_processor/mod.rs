@@ -379,6 +379,7 @@ where
         let (execute_tx, execute_rx) = mpsc::channel();
 
         // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
+        let iter_start = Instant::now();
         rayon::spawn(move || {
             let (transactions, convert) = transactions.into();
             transactions.into_par_iter().enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
@@ -390,6 +391,14 @@ where
                 // Only send Ok(_) variants to prewarming task.
                 if let Ok(tx) = &tx {
                     let _ = prewarm_tx.send(tx.clone());
+                }
+                if idx < 5 {
+                    debug!(
+                        target: "engine::tree::prewarm::race",
+                        idx,
+                        elapsed_us = iter_start.elapsed().as_micros() as u64,
+                        "tx sent to prewarm+ooo channels"
+                    );
                 }
                 let _ = ooo_tx.send((idx, tx));
             });

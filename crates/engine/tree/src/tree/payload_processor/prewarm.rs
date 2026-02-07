@@ -149,6 +149,7 @@ where
 
         self.executor.spawn_blocking(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
+            let spawn_all_start = Instant::now();
 
             let (done_tx, done_rx) = mpsc::channel();
 
@@ -163,7 +164,14 @@ where
             };
 
             // Spawn workers
-            let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor, to_multi_proof, done_tx.clone());
+            let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor, to_multi_proof, done_tx.clone(), spawn_all_start);
+
+            debug!(
+                target: "engine::tree::prewarm::race",
+                elapsed_us = spawn_all_start.elapsed().as_micros() as u64,
+                workers_needed,
+                "prewarm distributor ready, waiting for txs"
+            );
 
             // Distribute transactions to workers
             let mut tx_index = 0usize;
@@ -525,19 +533,35 @@ where
         txs: CrossbeamReceiver<IndexedTransaction<Tx>>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         done_tx: Sender<()>,
+        spawn_all_start: Instant,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
+        let worker_entry = Instant::now();
         let Some((mut evm, metrics, terminate_execution, v2_proofs_enabled)) = self.evm_for_ctx()
         else {
             return
         };
+        debug!(
+            target: "engine::tree::prewarm::race",
+            evm_setup_us = worker_entry.elapsed().as_micros() as u64,
+            since_spawn_all_us = spawn_all_start.elapsed().as_micros() as u64,
+            "prewarm worker ready to execute txs"
+        );
 
         while let Ok(IndexedTransaction { index, tx }) = {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", "recv tx")
                 .entered();
             txs.recv()
         } {
+            if index < 5 {
+                debug!(
+                    target: "engine::tree::prewarm::race",
+                    index,
+                    since_spawn_all_us = spawn_all_start.elapsed().as_micros() as u64,
+                    "prewarm worker picked up tx"
+                );
+            }
             let enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 "prewarm tx",
@@ -617,6 +641,7 @@ where
         task_executor: &WorkloadExecutor,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         done_tx: Sender<()>,
+        spawn_all_start: Instant,
     ) -> CrossbeamSender<IndexedTransaction<Tx>>
     where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
@@ -636,7 +661,7 @@ where
                 let span = debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm worker", idx);
                 executor.spawn_blocking(move || {
                     let _enter = span.entered();
-                    ctx.transact_batch(rx, to_multi_proof, done_tx);
+                    ctx.transact_batch(rx, to_multi_proof, done_tx, spawn_all_start);
                 });
             }
         });

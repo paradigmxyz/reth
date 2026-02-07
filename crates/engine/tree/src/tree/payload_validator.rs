@@ -802,18 +802,29 @@ where
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
+        let exec_start = Instant::now();
         let mut transactions = transactions.into_iter();
         // Some executors may execute transactions that do not append receipts during the
         // main loop (e.g., system transactions whose receipts are added during finalization).
         // In that case, invoking the callback on every transaction would resend the previous
         // receipt with the same index and can panic the ordered root builder.
         let mut last_sent_len = 0usize;
+        let mut tx_counter = 0usize;
         loop {
             // Measure time spent waiting for next transaction from iterator
             // (e.g., parallel signature recovery)
             let wait_start = Instant::now();
             let Some(tx_result) = transactions.next() else { break };
             self.metrics.record_transaction_wait(wait_start.elapsed());
+            if tx_counter < 5 {
+                debug!(
+                    target: "engine::tree::prewarm::race",
+                    tx_counter,
+                    elapsed_us = exec_start.elapsed().as_micros() as u64,
+                    wait_us = wait_start.elapsed().as_micros() as u64,
+                    "execution received tx"
+                );
+            }
 
             let tx = tx_result.map_err(BlockExecutionError::other)?;
             let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
@@ -845,6 +856,7 @@ where
             }
 
             enter.record("gas_used", gas_used);
+            tx_counter += 1;
         }
         drop(exec_span);
 
