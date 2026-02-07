@@ -9862,6 +9862,7 @@ dependencies = [
  "revm",
  "revm-inspectors",
  "revm-primitives",
+ "schnellru",
  "serde",
  "serde_json",
  "sha2",

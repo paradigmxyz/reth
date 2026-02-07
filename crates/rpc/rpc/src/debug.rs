@@ -39,10 +39,14 @@ use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
+use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
+
+/// Default number of execution witnesses to cache.
+const DEFAULT_EXECUTION_WITNESS_CACHE_SIZE: u32 = 128;
 
 /// `debug` API implementation.
 ///
@@ -67,6 +71,9 @@ where
             eth_api,
             blocking_task_guard,
             bad_block_store: bad_block_store.clone(),
+            execution_witness_cache: RwLock::new(LruMap::new(ByLength::new(
+                DEFAULT_EXECUTION_WITNESS_CACHE_SIZE,
+            ))),
         });
 
         // Spawn a task caching bad blocks
@@ -529,10 +536,19 @@ where
     }
 
     /// Generates an execution witness, using the given recovered block.
+    ///
+    /// Results are cached by block hash to avoid re-executing the block on repeated calls.
     pub async fn debug_execution_witness_for_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
     ) -> Result<ExecutionWitness, Eth::Error> {
+        let block_hash = block.hash();
+
+        if let Some(witness) = self.inner.execution_witness_cache.write().get(&block_hash).cloned()
+        {
+            return Ok(witness.as_ref().clone());
+        }
+
         let block_number = block.header().number();
 
         let (mut exec_witness, lowest_block_number) = self
@@ -565,11 +581,7 @@ where
 
         let smallest = match lowest_block_number {
             Some(smallest) => smallest,
-            None => {
-                // Return only the parent header, if there were no calls to the
-                // BLOCKHASH opcode.
-                block_number.saturating_sub(1)
-            }
+            None => block_number.saturating_sub(1),
         };
 
         let range = smallest..block_number;
@@ -584,6 +596,11 @@ where
                 serialized_header.into()
             })
             .collect();
+
+        self.inner
+            .execution_witness_cache
+            .write()
+            .insert(block_hash, Arc::new(exec_witness.clone()));
 
         Ok(exec_witness)
     }
@@ -1113,6 +1130,8 @@ struct DebugApiInner<Eth: RpcNodeCore> {
     blocking_task_guard: BlockingTaskGuard,
     /// Cache for bad blocks.
     bad_block_store: BadBlockStore<BlockTy<Eth::Primitives>>,
+    /// LRU cache for computed execution witnesses, keyed by block hash.
+    execution_witness_cache: RwLock<LruMap<B256, Arc<ExecutionWitness>, ByLength>>,
 }
 
 /// A bounded, deduplicating store of recently observed bad blocks.
