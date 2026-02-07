@@ -37,6 +37,9 @@ pub struct PersistenceState {
     /// sent when done. A None value means there's no persistence task in progress.
     pub(crate) rx:
         Option<(CrossbeamReceiver<Option<BlockNumHash>>, Instant, CurrentPersistenceAction)>,
+    /// The highest block of a pre-prepared batch that is ready to be dispatched
+    /// as soon as the current in-progress persistence completes.
+    pub(crate) queued_save: Option<BlockNumHash>,
 }
 
 impl PersistenceState {
@@ -70,6 +73,32 @@ impl PersistenceState {
     #[cfg(test)]
     pub(crate) fn current_action(&self) -> Option<&CurrentPersistenceAction> {
         self.rx.as_ref().map(|rx| &rx.2)
+    }
+
+    /// Queues a pre-prepared batch's highest block for dispatch after the current persistence
+    /// completes.
+    pub(crate) fn queue_save(&mut self, highest: BlockNumHash) {
+        self.queued_save = Some(highest);
+    }
+
+    /// Takes the queued save, returning it and clearing the slot.
+    pub(crate) fn take_queued(&mut self) -> Option<BlockNumHash> {
+        self.queued_save.take()
+    }
+
+    /// Returns `true` if a batch is already queued for dispatch.
+    pub(crate) const fn has_queued(&self) -> bool {
+        self.queued_save.is_some()
+    }
+
+    /// Returns the highest block number that is either already persisted or currently being
+    /// persisted. This is used to determine the lower bound for preparing queued batches.
+    pub(crate) fn effective_persisted_block_number(&self) -> u64 {
+        if let Some((_, _, CurrentPersistenceAction::SavingBlocks { highest })) = &self.rx {
+            highest.number
+        } else {
+            self.last_persisted_block.number
+        }
     }
 
     /// Sets state for a finished persistence task.
