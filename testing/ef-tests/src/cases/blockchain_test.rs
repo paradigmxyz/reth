@@ -5,7 +5,7 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_rlp::{Decodable, Encodable};
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
@@ -13,7 +13,9 @@ use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus}
 use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{Block as BlockTrait, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{
+    Block as BlockTrait, ParallelBridgeBuffered, RecoveredBlock, SealedBlock,
+};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown, StateProofProvider,
@@ -170,7 +172,7 @@ impl Case for BlockchainTestCase {
     ///
     /// # Errors
     /// Returns an error if the test is flagged for skipping or encounters issues during execution.
-    fn run(&self) -> Result<(), Error> {
+    fn run(self) -> Result<(), Error> {
         // If the test is marked for skipping, return a Skipped error immediately.
         if self.skip {
             return Err(Error::Skipped);
@@ -178,12 +180,11 @@ impl Case for BlockchainTestCase {
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
         self.tests
-            .iter()
+            .into_iter()
             .filter(|(_, case)| !Self::excluded_fork(case.network))
-            .par_bridge()
-            .try_for_each(|(name, case)| Self::run_single_case(name, case).map(|_| ()))?;
-
-        Ok(())
+            .par_bridge_buffered()
+            .with_min_len(64)
+            .try_for_each(|(name, case)| Self::run_single_case(&name, &case).map(|_| ()))
     }
 }
 
@@ -205,7 +206,7 @@ fn run_case(
     case: &BlockchainTest,
 ) -> Result<Vec<(RecoveredBlock<Block>, ExecutionWitness)>, Error> {
     // Create a new test database and initialize a provider for the test case.
-    let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
+    let chain_spec = case.network.to_chain_spec();
     let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
     let provider = factory.database_provider_rw().unwrap();
 

@@ -54,6 +54,7 @@ where
         payload_attributes: Option<PayloadAttributes>,
     ) -> TransportResult<ForkchoiceUpdated> {
         debug!(
+            target: "reth-bench",
             method = "engine_forkchoiceUpdatedV1",
             ?fork_choice_state,
             ?payload_attributes,
@@ -66,6 +67,7 @@ where
         while !status.is_valid() {
             if status.is_invalid() {
                 error!(
+                    target: "reth-bench",
                     ?status,
                     ?fork_choice_state,
                     ?payload_attributes,
@@ -91,6 +93,7 @@ where
         payload_attributes: Option<PayloadAttributes>,
     ) -> TransportResult<ForkchoiceUpdated> {
         debug!(
+            target: "reth-bench",
             method = "engine_forkchoiceUpdatedV2",
             ?fork_choice_state,
             ?payload_attributes,
@@ -103,6 +106,7 @@ where
         while !status.is_valid() {
             if status.is_invalid() {
                 error!(
+                    target: "reth-bench",
                     ?status,
                     ?fork_choice_state,
                     ?payload_attributes,
@@ -128,6 +132,7 @@ where
         payload_attributes: Option<PayloadAttributes>,
     ) -> TransportResult<ForkchoiceUpdated> {
         debug!(
+            target: "reth-bench",
             method = "engine_forkchoiceUpdatedV3",
             ?fork_choice_state,
             ?payload_attributes,
@@ -140,6 +145,7 @@ where
         while !status.is_valid() {
             if status.is_invalid() {
                 error!(
+                    target: "reth-bench",
                     ?status,
                     ?fork_choice_state,
                     ?payload_attributes,
@@ -253,14 +259,16 @@ pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
 ) -> TransportResult<()> {
     let method = version.method_name();
 
-    debug!(method, "Sending newPayload");
+    debug!(target: "reth-bench", method, "Sending newPayload");
 
     let mut status: PayloadStatus = provider.client().request(method, &params).await?;
 
     while !status.is_valid() {
         if status.is_invalid() {
-            error!(?status, ?params, "Invalid {method}",);
-            panic!("Invalid {method}: {status:?}");
+            error!(target: "reth-bench", ?status, ?params, "Invalid {method}",);
+            return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(std::io::Error::other(
+                format!("Invalid {method}: {status:?}"),
+            ))))
         }
         if status.is_syncing() {
             return Err(alloy_json_rpc::RpcError::UnsupportedFeature(

@@ -119,6 +119,13 @@ impl RocksDBProvider {
     pub const fn flush(&self, _tables: &[&'static str]) -> ProviderResult<()> {
         Ok(())
     }
+
+    /// Creates an iterator over all entries in the specified table (stub implementation).
+    ///
+    /// Returns an empty iterator since there is no `RocksDB` when the feature is disabled.
+    pub const fn iter<T: reth_db_api::table::Table>(&self) -> ProviderResult<RocksDBIter<T>> {
+        Ok(RocksDBIter(std::marker::PhantomData))
+    }
 }
 
 impl DatabaseMetrics for RocksDBProvider {
@@ -189,3 +196,37 @@ pub struct RocksTx;
 /// A stub raw iterator for `RocksDB`.
 #[derive(Debug)]
 pub struct RocksDBRawIter;
+
+/// A stub typed iterator for `RocksDB`.
+#[derive(Debug)]
+pub struct RocksDBIter<T: reth_db_api::table::Table>(std::marker::PhantomData<T>);
+
+impl<T: reth_db_api::table::Table> Iterator for RocksDBIter<T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        None
+    }
+}
+
+/// Outcome of pruning a history shard in `RocksDB` (stub).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneShardOutcome {
+    /// Shard was deleted entirely.
+    Deleted,
+    /// Shard was updated with filtered block numbers.
+    Updated,
+    /// Shard was unchanged (no blocks <= `to_block`).
+    Unchanged,
+}
+
+/// Tracks pruning outcomes for batch operations (stub).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PrunedIndices {
+    /// Number of shards completely deleted.
+    pub deleted: usize,
+    /// Number of shards that were updated (filtered but still have entries).
+    pub updated: usize,
+    /// Number of shards that were unchanged.
+    pub unchanged: usize,
+}

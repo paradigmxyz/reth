@@ -1,8 +1,4 @@
-// Docker Bake configuration for reth and op-reth images
-// Usage:
-//   docker buildx bake ethereum    # Build reth
-//   docker buildx bake optimism    # Build op-reth
-//   docker buildx bake             # Build all
+// Docker Bake configuration for reth images
 
 variable "REGISTRY" {
   default = "ghcr.io/paradigmxyz"
@@ -40,11 +36,11 @@ variable "USE_PGO_BOLT" {
 
 // Common settings for all targets
 group "default" {
-  targets = ["ethereum", "optimism"]
+  targets = ["ethereum"]
 }
 
 group "nightly" {
-  targets = ["ethereum", "ethereum-profiling", "ethereum-edge-profiling", "optimism", "optimism-profiling", "optimism-edge-profiling"]
+  targets = ["ethereum", "ethereum-profiling", "ethereum-edge-profiling"]
 }
 
 // Base target with shared configuration
@@ -59,6 +55,16 @@ target "_base" {
     VERGEN_GIT_DIRTY    = "${VERGEN_GIT_DIRTY}"
     USE_PGO_BOLT        = "${USE_PGO_BOLT}"
   }
+  secret = [
+    {
+      type = "env"
+      id   = "DEPOT_TOKEN"
+    }
+  ]
+}
+target "_base_profiling" {
+  inherits = ["_base"]
+  platforms  = ["linux/amd64"]
 }
 
 // Ethereum (reth)
@@ -72,7 +78,7 @@ target "ethereum" {
 }
 
 target "ethereum-profiling" {
-  inherits = ["_base"]
+  inherits = ["_base_profiling"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
@@ -83,7 +89,7 @@ target "ethereum-profiling" {
 }
 
 target "ethereum-edge-profiling" {
-  inherits = ["_base"]
+  inherits = ["_base_profiling"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
@@ -93,34 +99,3 @@ target "ethereum-edge-profiling" {
   tags = ["${REGISTRY}/reth:nightly-edge-profiling"]
 }
 
-// Optimism (op-reth)
-target "optimism" {
-  inherits = ["_base"]
-  args = {
-    BINARY        = "op-reth"
-    MANIFEST_PATH = "crates/optimism/bin"
-  }
-  tags = ["${REGISTRY}/op-reth:${TAG}"]
-}
-
-target "optimism-profiling" {
-  inherits = ["_base"]
-  args = {
-    BINARY        = "op-reth"
-    MANIFEST_PATH = "crates/optimism/bin"
-    BUILD_PROFILE = "profiling"
-    FEATURES      = "jemalloc jemalloc-prof asm-keccak min-debug-logs"
-  }
-  tags = ["${REGISTRY}/op-reth:nightly-profiling"]
-}
-
-target "optimism-edge-profiling" {
-  inherits = ["_base"]
-  args = {
-    BINARY        = "op-reth"
-    MANIFEST_PATH = "crates/optimism/bin"
-    BUILD_PROFILE = "profiling"
-    FEATURES      = "jemalloc jemalloc-prof asm-keccak min-debug-logs edge"
-  }
-  tags = ["${REGISTRY}/op-reth:nightly-edge-profiling"]
-}

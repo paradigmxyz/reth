@@ -3,11 +3,10 @@ use crate::{
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
-    tree::{error::InsertPayloadError, metrics::EngineApiMetrics, payload_validator::TreeCtx},
+    tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -23,22 +22,22 @@ use reth_engine_primitives::{
     ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::{ConfigureEvm, OnStateHook};
+use reth_evm::ConfigureEvm;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
-    BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader, ChangeSetReader,
+    BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
     StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
     TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
-use revm::state::EvmState;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Instant};
 
@@ -55,18 +54,19 @@ pub mod error;
 pub mod instrumented_state;
 mod invalid_headers;
 mod metrics;
-mod payload_processor;
+pub mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
 pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
-#[expect(unused)]
 mod trie_updates;
 
 use crate::tree::error::AdvancePersistenceError;
 pub use block_buffer::BlockBuffer;
+pub use cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache, SavedCache};
 pub use invalid_headers::InvalidHeaderCache;
+pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
@@ -158,6 +158,16 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
     }
+
+    /// Returns a reference to the tree state.
+    pub const fn tree_state(&self) -> &TreeState<N> {
+        &self.tree_state
+    }
+
+    /// Returns true if the block has been marked as invalid.
+    pub fn has_invalid_header(&mut self, hash: &B256) -> bool {
+        self.invalid_headers.get(hash).is_some()
+    }
 }
 
 /// The outcome of a tree operation.
@@ -208,28 +218,6 @@ pub enum TreeAction {
         /// The sync target head hash
         sync_target_head: B256,
     },
-}
-
-/// Wrapper struct that combines metrics and state hook
-struct MeteredStateHook {
-    metrics: reth_evm::metrics::ExecutorMetrics,
-    inner_hook: Box<dyn OnStateHook>,
-}
-
-impl OnStateHook for MeteredStateHook {
-    fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
-        // Update the metrics for the number of accounts, storage slots and bytecodes loaded
-        let accounts = state.keys().len();
-        let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = state.values().filter(|account| !account.info.is_empty_code_hash()).count();
-
-        self.metrics.accounts_loaded_histogram.record(accounts as f64);
-        self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
-        self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
-
-        // Call the original state hook
-        self.inner_hook.on_state(source, state);
-    }
 }
 
 /// The engine API tree handler implementation.
@@ -321,11 +309,10 @@ where
         + HashedPostStateProvider
         + Clone
         + 'static,
-    <P as DatabaseProviderFactory>::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
+    P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StageCheckpointReader
         + ChangeSetReader
-        + StorageChangeSetReader
-        + BlockNumReader,
+        + StorageChangeSetReader,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
     V: EngineValidator<T>,
@@ -421,7 +408,7 @@ where
             changeset_cache,
         );
         let incoming = task.incoming_tx.clone();
-        std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
+        spawn_os_thread("engine", || task.run());
         (incoming, outgoing)
     }
 
@@ -958,14 +945,13 @@ where
         &self,
         canonical_header: &SealedHeader<N::BlockHeader>,
     ) -> ProviderResult<()> {
-        let new_head_number = canonical_header.number();
-        let new_head_hash = canonical_header.hash();
+        // Load the block into memory if it's not already present
+        self.ensure_block_in_memory(canonical_header.number(), canonical_header.hash())?;
 
         // Update the canonical head header
         self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
 
-        // Load the block into memory if it's not already present
-        self.ensure_block_in_memory(new_head_number, new_head_hash)
+        Ok(())
     }
 
     /// Ensures a block is loaded into memory if not already present.
@@ -1406,7 +1392,20 @@ where
         );
         self.changeset_cache.evict(eviction_threshold);
 
+        // Invalidate cached overlay since the anchor has changed
+        self.state.tree_state.invalidate_cached_overlay();
+
         self.on_new_persisted_block()?;
+
+        // Re-prepare overlay for the current canonical head with the new anchor.
+        // Spawn a background task to trigger computation so it's ready when the next payload
+        // arrives.
+        if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
+            rayon::spawn(move || {
+                let _ = overlay.get();
+            });
+        }
+
         Ok(())
     }
 
@@ -1490,6 +1489,10 @@ where
 
                                     // handle the event if any
                                     self.on_maybe_tree_event(res.event.take())?;
+                                }
+
+                                if let Err(ref err) = output {
+                                    error!(target: "engine::tree", %err, ?state, "Error processing forkchoice update");
                                 }
 
                                 self.metrics.engine.forkchoice_updated.update_response_metrics(
@@ -2585,19 +2588,27 @@ where
         let block_num_hash = block_id.block;
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
-        match self.sealed_header_by_hash(block_num_hash.hash) {
-            Err(err) => {
-                let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block, err.into()).into());
+        // Check if block already exists - first in memory, then DB only if it could be persisted
+        if self.state.tree_state.sealed_header_by_hash(&block_num_hash.hash).is_some() {
+            convert_to_block(self, input)?;
+            return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
+        }
+
+        // Only query DB if block could be persisted (number <= last persisted block).
+        // New blocks from CL always have number > last persisted, so skip DB lookup for them.
+        if block_num_hash.number <= self.persistence_state.last_persisted_block.number {
+            match self.provider.sealed_header_by_hash(block_num_hash.hash) {
+                Err(err) => {
+                    let block = convert_to_block(self, input)?;
+                    return Err(InsertBlockError::new(block, err.into()).into());
+                }
+                Ok(Some(_)) => {
+                    convert_to_block(self, input)?;
+                    return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
+                }
+                Ok(None) => {}
             }
-            Ok(Some(_)) => {
-                // We now assume that we already have this block in the tree. However, we need to
-                // run the conversion to ensure that the block hash is valid.
-                convert_to_block(self, input)?;
-                return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid))
-            }
-            _ => {}
-        };
+        }
 
         // Ensure that the parent state is available.
         match self.state_provider_builder(block_id.parent) {

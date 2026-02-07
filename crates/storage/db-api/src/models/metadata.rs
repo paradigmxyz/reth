@@ -37,44 +37,39 @@ pub struct StorageSettings {
 }
 
 impl StorageSettings {
-    /// Returns the default base `StorageSettings` for this build.
+    /// Returns the default base `StorageSettings`.
     ///
-    /// When the `edge` feature is enabled, returns [`Self::edge()`].
-    /// Otherwise, returns [`Self::legacy()`].
+    /// Always returns [`Self::v1()`]. Use the `--storage.v2` CLI flag to opt into
+    /// [`Self::v2()`] at runtime. The `rocksdb` feature only makes the v2 backend
+    /// *available*; it does not activate it by default.
     pub const fn base() -> Self {
-        #[cfg(feature = "edge")]
-        {
-            Self::edge()
-        }
-        #[cfg(not(feature = "edge"))]
-        {
-            Self::legacy()
-        }
+        Self::v1()
     }
 
-    /// Creates `StorageSettings` for edge nodes with all storage features enabled:
+    /// Creates `StorageSettings` for v2 nodes with all storage features enabled:
     /// - Receipts and transaction senders in static files
     /// - History indices in `RocksDB` (storages, accounts, transaction hashes)
-    /// - Account changesets in static files
-    #[cfg(feature = "edge")]
-    pub const fn edge() -> Self {
+    /// - Account and storage changesets in static files
+    ///
+    /// Use this when the `--storage.v2` CLI flag is set.
+    pub const fn v2() -> Self {
         Self {
             receipts_in_static_files: true,
             transaction_senders_in_static_files: true,
             account_changesets_in_static_files: true,
             storage_changesets_in_static_files: true,
-            storages_history_in_rocksdb: false,
+            storages_history_in_rocksdb: true,
             transaction_hash_numbers_in_rocksdb: true,
-            account_history_in_rocksdb: false,
+            account_history_in_rocksdb: true,
         }
     }
 
-    /// Creates `StorageSettings` for legacy nodes.
+    /// Creates `StorageSettings` for v1/legacy nodes.
     ///
     /// This explicitly sets `receipts_in_static_files` and `transaction_senders_in_static_files` to
     /// `false`, ensuring older nodes continue writing receipts and transaction senders to the
     /// database when receipt pruning is enabled.
-    pub const fn legacy() -> Self {
+    pub const fn v1() -> Self {
         Self {
             receipts_in_static_files: false,
             transaction_senders_in_static_files: false,

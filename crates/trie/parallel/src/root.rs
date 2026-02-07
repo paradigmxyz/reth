@@ -4,7 +4,7 @@ use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets
 use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
-use reth_execution_errors::{StateProofError, StorageRootError};
+use reth_execution_errors::{SparseTrieError, StateProofError, StorageRootError};
 use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -98,7 +98,7 @@ where
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
 
         // Get runtime handle once outside the loop
-        let handle = get_runtime_handle();
+        let handle = get_tokio_runtime_handle();
 
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
@@ -232,6 +232,9 @@ pub enum ParallelStateRootError {
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// Sparse trie error.
+    #[error(transparent)]
+    SparseTrie(#[from] SparseTrieError),
     /// Other unspecified error.
     #[error("{_0}")]
     Other(String),
@@ -244,6 +247,7 @@ impl From<ParallelStateRootError> for ProviderError {
             ParallelStateRootError::StorageRoot(StorageRootError::Database(error)) => {
                 Self::Database(error)
             }
+            ParallelStateRootError::SparseTrie(error) => Self::other(error),
             ParallelStateRootError::Other(other) => Self::Database(DatabaseError::Other(other)),
         }
     }
@@ -260,23 +264,28 @@ impl From<StateProofError> for ParallelStateRootError {
         match error {
             StateProofError::Database(err) => Self::Provider(ProviderError::Database(err)),
             StateProofError::Rlp(err) => Self::Provider(ProviderError::Rlp(err)),
+            StateProofError::TrieInconsistency(msg) => {
+                Self::Provider(ProviderError::TrieWitnessError(msg))
+            }
         }
     }
 }
 
 /// Gets or creates a tokio runtime handle for spawning blocking tasks.
 /// This ensures we always have a runtime available for I/O operations.
-fn get_runtime_handle() -> Handle {
+pub fn get_tokio_runtime_handle() -> Handle {
     Handle::try_current().unwrap_or_else(|_| {
         // Create a new runtime if no runtime is available
         static RT: OnceLock<Runtime> = OnceLock::new();
 
         let rt = RT.get_or_init(|| {
             Builder::new_multi_thread()
+                .enable_all()
                 // Keep the threads alive for at least the block time (12 seconds) plus buffer.
                 // This prevents the costly process of spawning new threads on every
                 // new block, and instead reuses the existing threads.
                 .thread_keep_alive(Duration::from_secs(15))
+                .thread_name("trie-tokio-rt")
                 .build()
                 .expect("Failed to create tokio runtime")
         });

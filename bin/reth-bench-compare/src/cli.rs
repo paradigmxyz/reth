@@ -116,9 +116,9 @@ pub(crate) struct Args {
 
     /// Optional fixed delay between engine API calls (passed to reth-bench).
     ///
-    /// When set, reth-bench uses wait-time mode and disables persistence-based flow.
-    /// This flag remains for compatibility with older scripts.
-    #[arg(long, value_name = "DURATION", hide = true)]
+    /// Can be combined with `--wait-for-persistence`: when both are set,
+    /// waits at least this duration, and also waits for persistence if needed.
+    #[arg(long, value_name = "DURATION")]
     pub wait_time: Option<String>,
 
     /// Wait for blocks to be persisted before sending the next batch (passed to reth-bench).
@@ -126,6 +126,9 @@ pub(crate) struct Args {
     /// When enabled, waits for every Nth block to be persisted using the
     /// `reth_subscribePersistedBlock` subscription. This ensures the benchmark
     /// doesn't outpace persistence.
+    ///
+    /// Can be combined with `--wait-time`: when both are set, waits at least
+    /// wait-time, and also waits for persistence if the block hasn't been persisted yet.
     #[arg(long)]
     pub wait_for_persistence: bool,
 
@@ -274,10 +277,10 @@ impl Args {
     /// Get the default RPC URL for a given chain
     const fn get_default_rpc_url(chain: &Chain) -> &'static str {
         match chain.id() {
-            8453 => "https://base-mainnet.rpc.ithaca.xyz",  // base
+            8453 => "https://base.reth.rs/rpc",             // base
             84532 => "https://base-sepolia.rpc.ithaca.xyz", // base-sepolia
             27082 => "https://rpc.hoodi.ethpandaops.io",    // hoodi
-            _ => "https://reth-ethereum.ithaca.xyz/rpc",    // mainnet and fallback
+            _ => "https://ethereum.reth.rs/rpc",            // mainnet and fallback
         }
     }
 
@@ -471,7 +474,6 @@ async fn run_compilation_phase(
     git_manager: &GitManager,
     compilation_manager: &CompilationManager,
     args: &Args,
-    is_optimism: bool,
 ) -> Result<(String, String)> {
     info!("=== Running compilation phase ===");
 
@@ -524,7 +526,7 @@ async fn run_compilation_phase(
         git_manager.switch_ref(git_ref)?;
 
         // Compile reth (with caching)
-        compilation_manager.compile_reth(commit, is_optimism, features, rustflags)?;
+        compilation_manager.compile_reth(commit, features, rustflags)?;
 
         info!("Completed compilation for {} reference", ref_type);
     }
@@ -544,7 +546,6 @@ async fn run_warmup_phase(
     node_manager: &mut NodeManager,
     benchmark_runner: &BenchmarkRunner,
     args: &Args,
-    is_optimism: bool,
     baseline_commit: &str,
     starting_tip: u64,
 ) -> Result<()> {
@@ -562,8 +563,7 @@ async fn run_warmup_phase(
     git_manager.switch_ref(warmup_ref)?;
 
     // Get the cached binary path for baseline (should already be compiled)
-    let binary_path =
-        compilation_manager.get_cached_binary_path_for_commit(baseline_commit, is_optimism);
+    let binary_path = compilation_manager.get_cached_binary_path_for_commit(baseline_commit);
 
     // Verify the cached binary exists
     if !binary_path.exists() {
@@ -616,18 +616,13 @@ async fn run_benchmark_workflow(
     comparison_generator: &mut ComparisonGenerator,
     args: &Args,
 ) -> Result<()> {
-    // Detect if this is an Optimism chain once at the beginning
-    let rpc_url = args.get_rpc_url();
-    let is_optimism = compilation_manager.detect_optimism_chain(&rpc_url).await?;
-
     // Run compilation phase for both binaries
     let (baseline_commit, feature_commit) =
-        run_compilation_phase(git_manager, compilation_manager, args, is_optimism).await?;
+        run_compilation_phase(git_manager, compilation_manager, args).await?;
 
     // Switch to baseline reference and get the starting tip
     git_manager.switch_ref(&args.baseline_ref)?;
-    let binary_path =
-        compilation_manager.get_cached_binary_path_for_commit(&baseline_commit, is_optimism);
+    let binary_path = compilation_manager.get_cached_binary_path_for_commit(&baseline_commit);
     if !binary_path.exists() {
         return Err(eyre!(
             "Cached baseline binary not found at {:?}. Compilation phase should have created it.",
@@ -657,7 +652,6 @@ async fn run_benchmark_workflow(
             node_manager,
             benchmark_runner,
             args,
-            is_optimism,
             &baseline_commit,
             starting_tip,
         )
@@ -683,8 +677,7 @@ async fn run_benchmark_workflow(
         git_manager.switch_ref(git_ref)?;
 
         // Get the cached binary path for this git reference (should already be compiled)
-        let binary_path =
-            compilation_manager.get_cached_binary_path_for_commit(commit, is_optimism);
+        let binary_path = compilation_manager.get_cached_binary_path_for_commit(commit);
 
         // Verify the cached binary exists
         if !binary_path.exists() {

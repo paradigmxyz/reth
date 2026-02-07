@@ -49,7 +49,8 @@ use std::{
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 /// Determines the prewarming mode: transaction-based or BAL-based.
-pub(super) enum PrewarmMode<Tx> {
+#[derive(Debug)]
+pub enum PrewarmMode<Tx> {
     /// Prewarm by executing transactions from a stream.
     Transactions(Receiver<Tx>),
     /// Prewarm by prefetching slots from a Block Access List.
@@ -69,7 +70,8 @@ struct IndexedTransaction<Tx> {
 /// individually in parallel.
 ///
 /// Note: This task runs until cancelled externally.
-pub(super) struct PrewarmCacheTask<N, P, Evm>
+#[derive(Debug)]
+pub struct PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
@@ -82,8 +84,6 @@ where
     ctx: PrewarmContext<N, P, Evm>,
     /// How many transactions should be executed in parallel
     max_concurrency: usize,
-    /// The number of transactions to be processed
-    transaction_count_hint: usize,
     /// Sender to emit evm state outcome messages, if any.
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
@@ -99,12 +99,11 @@ where
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
-    pub(super) fn new(
+    pub fn new(
         executor: WorkloadExecutor,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-        transaction_count_hint: usize,
         max_concurrency: usize,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
@@ -112,7 +111,7 @@ where
         trace!(
             target: "engine::tree::payload_processor::prewarm",
             max_concurrency,
-            transaction_count_hint,
+            transaction_count = ctx.env.transaction_count,
             "Initialized prewarm task"
         );
 
@@ -122,7 +121,6 @@ where
                 execution_cache,
                 ctx,
                 max_concurrency,
-                transaction_count_hint,
                 to_multi_proof,
                 actions_rx,
                 parent_span: Span::current(),
@@ -140,13 +138,13 @@ where
         &self,
         pending: mpsc::Receiver<Tx>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
+        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
-        let transaction_count_hint = self.transaction_count_hint;
         let span = Span::current();
 
         self.executor.spawn_blocking(move || {
@@ -154,17 +152,18 @@ where
 
             let (done_tx, done_rx) = mpsc::channel();
 
-            // When transaction_count_hint is 0, it means the count is unknown. In this case, spawn
+            // When transaction_count is 0, it means the count is unknown. In this case, spawn
             // max workers to handle potentially many transactions in parallel rather
             // than bottlenecking on a single worker.
-            let workers_needed = if transaction_count_hint == 0 {
+            let transaction_count = ctx.env.transaction_count;
+            let workers_needed = if transaction_count == 0 {
                 max_concurrency
             } else {
-                transaction_count_hint.min(max_concurrency)
+                transaction_count.min(max_concurrency)
             };
 
             // Spawn workers
-            let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor, actions_tx.clone(), done_tx.clone());
+            let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor, to_multi_proof, done_tx.clone());
 
             // Distribute transactions to workers
             let mut tx_index = 0usize;
@@ -196,24 +195,6 @@ where
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_index });
         });
-    }
-
-    /// Returns true if prewarming was terminated and no more transactions should be prewarmed.
-    fn is_execution_terminated(&self) -> bool {
-        self.ctx.terminate_execution.load(Ordering::Relaxed)
-    }
-
-    /// If configured and the tx returned proof targets, emit the targets the transaction produced
-    fn send_multi_proof_targets(&self, targets: Option<VersionedMultiProofTargets>) {
-        if self.is_execution_terminated() {
-            // if execution is already terminated then we dont need to send more proof fetch
-            // messages
-            return
-        }
-
-        if let Some((proof_targets, to_multi_proof)) = targets.zip(self.to_multi_proof.as_ref()) {
-            let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(proof_targets));
-        }
     }
 
     /// This method calls `ExecutionCache::update_with_guard` which requires exclusive access.
@@ -370,17 +351,14 @@ where
         name = "prewarm and caching",
         skip_all
     )]
-    pub(super) fn run<Tx>(
-        self,
-        mode: PrewarmMode<Tx>,
-        actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
-    ) where
+    pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
+    where
         Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         // Spawn execution tasks based on mode
         match mode {
             PrewarmMode::Transactions(pending) => {
-                self.spawn_all(pending, actions_tx);
+                self.spawn_all(pending, actions_tx, self.to_multi_proof.clone());
             }
             PrewarmMode::BlockAccessList(bal) => {
                 self.run_bal_prewarm(bal, actions_tx);
@@ -395,10 +373,6 @@ where
                     // stop tx processing
                     debug!(target: "engine::tree::prewarm", "Terminating prewarm execution");
                     self.ctx.terminate_execution.store(true, Ordering::Relaxed);
-                }
-                PrewarmTaskEvent::Outcome { proof_targets } => {
-                    // completed executing a set of transactions
-                    self.send_multi_proof_targets(proof_targets);
                 }
                 PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx } => {
                     trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
@@ -436,23 +410,29 @@ where
 
 /// Context required by tx execution tasks.
 #[derive(Debug, Clone)]
-pub(super) struct PrewarmContext<N, P, Evm>
+pub struct PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    pub(super) env: ExecutionEnv<Evm>,
-    pub(super) evm_config: Evm,
-    pub(super) saved_cache: Option<SavedCache>,
+    /// The execution environment.
+    pub env: ExecutionEnv<Evm>,
+    /// The EVM configuration.
+    pub evm_config: Evm,
+    /// The saved cache.
+    pub saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
-    pub(super) provider: StateProviderBuilder<N, P>,
-    pub(super) metrics: PrewarmMetrics,
+    pub provider: StateProviderBuilder<N, P>,
+    /// The metrics for the prewarm task.
+    pub metrics: PrewarmMetrics,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
-    pub(super) terminate_execution: Arc<AtomicBool>,
-    pub(super) precompile_cache_disabled: bool,
-    pub(super) precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    pub terminate_execution: Arc<AtomicBool>,
+    /// Whether the precompile cache is disabled.
+    pub precompile_cache_disabled: bool,
+    /// The precompile cache map.
+    pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Whether V2 proof calculation is enabled.
-    pub(super) v2_proofs_enabled: bool,
+    pub v2_proofs_enabled: bool,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -530,7 +510,8 @@ where
     }
 
     /// Accepts a [`CrossbeamReceiver`] of transactions and a handle to prewarm task. Executes
-    /// transactions and streams [`PrewarmTaskEvent::Outcome`] messages for each transaction.
+    /// transactions and streams [`MultiProofMessage::PrefetchProofs`] messages for each
+    /// transaction.
     ///
     /// This function processes transactions sequentially from the receiver and emits outcome events
     /// via the provided sender. Execution errors are logged and tracked but do not stop the batch
@@ -542,7 +523,7 @@ where
     fn transact_batch<Tx>(
         self,
         txs: CrossbeamReceiver<IndexedTransaction<Tx>>,
-        sender: Sender<PrewarmTaskEvent<N::Receipt>>,
+        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         done_tx: Sender<()>,
     ) where
         Tx: ExecutableTxFor<Evm>,
@@ -563,16 +544,15 @@ where
                 index,
                 tx_hash = %tx.tx().tx_hash(),
                 is_success = tracing::field::Empty,
+                gas_used = tracing::field::Empty,
             )
             .entered();
 
             // create the tx env
             let start = Instant::now();
 
-            // If the task was cancelled, stop execution, send an empty result to notify the task,
-            // and exit.
+            // If the task was cancelled, stop execution, and exit.
             if terminate_execution.load(Ordering::Relaxed) {
-                let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: None });
                 break
             }
 
@@ -601,10 +581,8 @@ where
 
             drop(enter);
 
-            // If the task was cancelled, stop execution, send an empty result to notify the task,
-            // and exit.
+            // If the task was cancelled, stop execution, and exit.
             if terminate_execution.load(Ordering::Relaxed) {
-                let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: None });
                 break
             }
 
@@ -617,7 +595,9 @@ where
                 let (targets, storage_targets) =
                     multiproof_targets_from_state(res.state, v2_proofs_enabled);
                 metrics.prefetch_storage_targets.record(storage_targets as f64);
-                let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
+                if let Some(to_multi_proof) = &to_multi_proof {
+                    let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
+                }
                 drop(_enter);
             }
 
@@ -635,7 +615,7 @@ where
         self,
         workers_needed: usize,
         task_executor: &WorkloadExecutor,
-        actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
+        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         done_tx: Sender<()>,
     ) -> CrossbeamSender<IndexedTransaction<Tx>>
     where
@@ -650,13 +630,13 @@ where
             let _enter = span.entered();
             for idx in 0..workers_needed {
                 let ctx = self.clone();
-                let actions_tx = actions_tx.clone();
+                let to_multi_proof = to_multi_proof.clone();
                 let done_tx = done_tx.clone();
                 let rx = tx_receiver.clone();
                 let span = debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm worker", idx);
                 executor.spawn_blocking(move || {
                     let _enter = span.entered();
-                    ctx.transact_batch(rx, actions_tx, done_tx);
+                    ctx.transact_batch(rx, to_multi_proof, done_tx);
                 });
             }
         });
@@ -851,7 +831,8 @@ fn multiproof_targets_v2_from_state(state: EvmState) -> (VersionedMultiProofTarg
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
 /// execution path without cloning the expensive `BundleState`.
-pub(super) enum PrewarmTaskEvent<R> {
+#[derive(Debug)]
+pub enum PrewarmTaskEvent<R> {
     /// Forcefully terminate all remaining transaction execution.
     TerminateTransactionExecution,
     /// Forcefully terminate the task on demand and update the shared cache with the given output
@@ -866,11 +847,6 @@ pub(super) enum PrewarmTaskEvent<R> {
         /// updated cache but only save it once we know the block is valid.
         valid_block_rx: mpsc::Receiver<()>,
     },
-    /// The outcome of a pre-warm task
-    Outcome {
-        /// The prepared proof targets based on the evm state outcome
-        proof_targets: Option<VersionedMultiProofTargets>,
-    },
     /// Finished executing all transactions
     FinishedTxExecution {
         /// Number of transactions executed
@@ -881,7 +857,7 @@ pub(super) enum PrewarmTaskEvent<R> {
 /// Metrics for transactions prewarming.
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.prewarm")]
-pub(crate) struct PrewarmMetrics {
+pub struct PrewarmMetrics {
     /// The number of transactions to prewarm
     pub(crate) transactions: Gauge,
     /// A histogram of the number of transactions to prewarm

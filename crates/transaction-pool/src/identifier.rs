@@ -1,5 +1,5 @@
 //! Identifier types for transactions and senders.
-use alloy_primitives::{map::HashMap, Address};
+use alloy_primitives::{map::AddressMap, Address};
 use rustc_hash::FxHashMap;
 
 /// An internal mapping of addresses.
@@ -11,7 +11,7 @@ pub struct SenderIdentifiers {
     /// The identifier to use next.
     id: u64,
     /// Assigned [`SenderId`] for an [`Address`].
-    address_to_id: HashMap<Address, SenderId>,
+    address_to_id: AddressMap<SenderId>,
     /// Reverse mapping of [`SenderId`] to [`Address`].
     sender_to_address: FxHashMap<SenderId, Address>,
 }

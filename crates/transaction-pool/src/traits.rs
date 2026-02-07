@@ -70,7 +70,7 @@ use alloy_eips::{
     eip7594::BlobTransactionSidecarVariant,
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
@@ -78,7 +78,7 @@ use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt,
     fmt::Debug,
     future::Future,
@@ -405,6 +405,16 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Consumer: RPC
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns a pending transaction if it exists and is ready for immediate execution
+    /// (i.e., has the lowest nonce among the sender's pending transactions).
+    fn get_pending_transaction_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.best_transactions().find(|tx| tx.sender() == sender && tx.nonce() == nonce)
+    }
+
     /// Returns first `max` transactions that can be included in the next block.
     /// See <https://github.com/paradigmxyz/reth/issues/12767#issuecomment-2493223579>
     ///
@@ -612,7 +622,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     }
 
     /// Returns a set of all senders of transactions in the pool
-    fn unique_senders(&self) -> HashSet<Address>;
+    fn unique_senders(&self) -> AddressSet;
 
     /// Returns the [`BlobTransactionSidecarVariant`] for the given transaction hash if it exists in
     /// the blob store.
