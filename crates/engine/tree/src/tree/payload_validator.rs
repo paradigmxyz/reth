@@ -843,7 +843,18 @@ where
 
             let tx_start = Instant::now();
             let gas_used = executor.execute_transaction(tx)?;
-            self.metrics.record_transaction_execution(tx_start.elapsed());
+            let tx_exec_elapsed = tx_start.elapsed();
+            self.metrics.record_transaction_execution(tx_exec_elapsed);
+
+            if tx_counter < 5 {
+                debug!(
+                    target: "engine::tree::prewarm::race",
+                    tx_counter,
+                    tx_exec_us = tx_exec_elapsed.as_micros() as u64,
+                    cumulative_us = exec_start.elapsed().as_micros() as u64,
+                    "execution finished tx"
+                );
+            }
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
@@ -859,6 +870,13 @@ where
             tx_counter += 1;
         }
         drop(exec_span);
+
+        debug!(
+            target: "engine::tree::prewarm::race",
+            tx_count = tx_counter,
+            total_exec_us = exec_start.elapsed().as_micros() as u64,
+            "execution loop finished"
+        );
 
         Ok((executor, senders))
     }

@@ -176,6 +176,14 @@ where
             // Distribute transactions to workers
             let mut tx_index = 0usize;
             while let Ok(tx) = pending.recv() {
+                if tx_index == 0 {
+                    debug!(
+                        target: "engine::tree::prewarm::race",
+                        since_spawn_all_us = spawn_all_start.elapsed().as_micros() as u64,
+                        "distributor received first tx from prewarm channel"
+                    );
+                }
+
                 // Stop distributing if termination was requested
                 if ctx.terminate_execution.load(Ordering::Relaxed) {
                     trace!(
@@ -187,6 +195,13 @@ where
 
                 let indexed_tx = IndexedTransaction { index: tx_index, tx };
 
+                debug!(
+                    target: "engine::tree::prewarm::race",
+                    tx_index,
+                    channel_depth = tx_sender.len(),
+                    "distributor dispatching tx"
+                );
+
                 // Send transaction to the workers
                 // Ignore send errors: workers listen to terminate_execution and may
                 // exit early when signaled.
@@ -194,6 +209,13 @@ where
 
                 tx_index += 1;
             }
+
+            debug!(
+                target: "engine::tree::prewarm::race",
+                distributed = tx_index,
+                since_spawn_all_us = spawn_all_start.elapsed().as_micros() as u64,
+                "distributor finished sending all txs to workers"
+            );
 
             // drop sender and wait for all tasks to finish
             drop(done_tx);
@@ -571,13 +593,24 @@ where
         let mut executed = 0u64;
         let mut failed = 0u64;
         let mut cancelled = 0u64;
+        let mut first_tx_index: Option<usize> = None;
+        let mut last_tx_index: Option<usize> = None;
 
         while let Ok(IndexedTransaction { index, tx }) = {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", "recv tx")
                 .entered();
             txs.recv()
         } {
-            if index < 5 {
+            if first_tx_index.is_none() {
+                first_tx_index = Some(index);
+                debug!(
+                    target: "engine::tree::prewarm::race",
+                    index,
+                    since_spawn_all_us = spawn_all_start.elapsed().as_micros() as u64,
+                    setup_us = worker_entry.elapsed().as_micros() as u64,
+                    "prewarm worker picked up first tx"
+                );
+            } else if index < 5 {
                 debug!(
                     target: "engine::tree::prewarm::race",
                     index,
@@ -622,15 +655,27 @@ where
                     continue
                 }
             };
-            metrics.execution_duration.record(start.elapsed());
+            let tx_elapsed = start.elapsed();
+            metrics.execution_duration.record(tx_elapsed);
 
             // record some basic information about the transactions
             enter.record("gas_used", res.result.gas_used());
             enter.record("is_success", res.result.is_success());
 
+            if index < 5 {
+                debug!(
+                    target: "engine::tree::prewarm::race",
+                    index,
+                    tx_exec_us = tx_elapsed.as_micros() as u64,
+                    since_spawn_all_us = spawn_all_start.elapsed().as_micros() as u64,
+                    "prewarm worker finished tx"
+                );
+            }
+
             drop(enter);
 
             executed += 1;
+            last_tx_index = Some(index);
 
             // If the task was cancelled, stop execution, and exit.
             if terminate_execution.load(Ordering::Relaxed) {
@@ -660,6 +705,8 @@ where
             executed,
             failed,
             cancelled,
+            first_tx_index = first_tx_index.unwrap_or(usize::MAX),
+            last_tx_index = last_tx_index.unwrap_or(0),
             total_us = worker_entry.elapsed().as_micros() as u64,
             "prewarm worker finished"
         );
