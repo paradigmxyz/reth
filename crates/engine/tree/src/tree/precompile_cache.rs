@@ -1,11 +1,12 @@
 //! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
 
 use alloy_primitives::Bytes;
-use moka::policy::EvictionPolicy;
+use parking_lot::Mutex;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
 use reth_primitives_traits::dashmap::DashMap;
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
+use schnellru::{ByLength, LruMap};
 use std::{hash::Hash, sync::Arc};
 
 /// Default max cache size for [`PrecompileCache`]
@@ -37,9 +38,7 @@ where
 
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]
-pub struct PrecompileCache<S>(
-    moka::sync::Cache<Bytes, CacheEntry<S>, alloy_primitives::map::DefaultHashBuilder>,
-)
+pub struct PrecompileCache<S>(Arc<Mutex<LruMap<Bytes, CacheEntry<S>, ByLength>>>)
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
 
@@ -48,12 +47,7 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
-        Self(
-            moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
-                .initial_capacity(MAX_CACHE_SIZE as usize)
-                .eviction_policy(EvictionPolicy::lru())
-                .build_with_hasher(Default::default()),
-        )
+        Self(Arc::new(Mutex::new(LruMap::new(ByLength::new(MAX_CACHE_SIZE)))))
     }
 }
 
@@ -62,13 +56,15 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
-        self.0.get(input).filter(|e| e.spec == spec)
+        let mut map = self.0.lock();
+        map.get(input).filter(|e| e.spec == spec).cloned()
     }
 
     /// Inserts the given key and value into the cache, returning the new cache size.
     fn insert(&self, input: Bytes, value: CacheEntry<S>) -> usize {
-        self.0.insert(input, value);
-        self.0.entry_count() as usize
+        let mut map = self.0.lock();
+        map.insert(input, value);
+        map.len()
     }
 }
 

@@ -8344,7 +8344,6 @@ dependencies = [
  "futures",
  "metrics",
  "metrics-util",
- "moka",
  "parking_lot",
  "proptest",
  "rand 0.8.5",
