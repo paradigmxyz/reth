@@ -142,6 +142,9 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
     fn withdrawals(&self) -> &Withdrawals {
         &self.0.withdrawals
     }
+    fn slot_number(&self) -> Option<u64> {
+        self.0.slot_number
+    }
 }
 
 /// Custom engine types - uses a custom payload attributes RPC type, but uses the default

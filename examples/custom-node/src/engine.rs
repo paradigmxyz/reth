@@ -166,6 +166,10 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
     fn withdrawals(&self) -> &alloy_eips::eip4895::Withdrawals {
         self.inner.withdrawals()
     }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.inner.slot_number()
+    }
 }
 
 impl OpAttributes for CustomPayloadBuilderAttributes {
