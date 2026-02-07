@@ -549,6 +549,10 @@ where
             "prewarm worker ready to execute txs"
         );
 
+        let mut executed = 0u64;
+        let mut failed = 0u64;
+        let mut cancelled = 0u64;
+
         while let Ok(IndexedTransaction { index, tx }) = {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", "recv tx")
                 .entered();
@@ -572,11 +576,11 @@ where
             )
             .entered();
 
-            // create the tx env
             let start = Instant::now();
 
             // If the task was cancelled, stop execution, and exit.
             if terminate_execution.load(Ordering::Relaxed) {
+                cancelled += 1;
                 break
             }
 
@@ -584,12 +588,14 @@ where
             let res = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    trace!(
-                        target: "engine::tree::payload_processor::prewarm",
+                    failed += 1;
+                    debug!(
+                        target: "engine::tree::prewarm::race",
                         %err,
+                        index,
                         tx_hash=%tx.tx().tx_hash(),
                         sender=%tx.signer(),
-                        "Error when executing prewarm transaction",
+                        "prewarm tx failed",
                     );
                     // Track transaction execution errors
                     metrics.transaction_errors.increment(1);
@@ -604,6 +610,8 @@ where
             enter.record("is_success", res.result.is_success());
 
             drop(enter);
+
+            executed += 1;
 
             // If the task was cancelled, stop execution, and exit.
             if terminate_execution.load(Ordering::Relaxed) {
@@ -627,6 +635,15 @@ where
 
             metrics.total_runtime.record(start.elapsed());
         }
+
+        debug!(
+            target: "engine::tree::prewarm::race",
+            executed,
+            failed,
+            cancelled,
+            total_us = worker_entry.elapsed().as_micros() as u64,
+            "prewarm worker finished"
+        );
 
         // send a message to the main task to flag that we're done
         let _ = done_tx.send(());
