@@ -674,17 +674,34 @@ where
         let span = Span::current();
         task_executor.spawn_blocking(move || {
             let _enter = span.entered();
+            let spawn_loop_start = Instant::now();
             for idx in 0..workers_needed {
                 let ctx = self.clone();
                 let to_multi_proof = to_multi_proof.clone();
                 let done_tx = done_tx.clone();
                 let rx = tx_receiver.clone();
                 let span = debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm worker", idx);
+                let spawned_at = Instant::now();
                 executor.spawn_blocking(move || {
+                    let _batch_entry = Instant::now();
                     let _enter = span.entered();
+                    debug!(
+                        target: "engine::tree::prewarm::race",
+                        idx,
+                        spawn_to_entry_us = spawned_at.elapsed().as_micros() as u64,
+                        since_spawn_all_us = spawn_all_start.elapsed().as_micros() as u64,
+                        "worker scheduled"
+                    );
                     ctx.transact_batch(rx, to_multi_proof, done_tx, spawn_all_start);
                 });
             }
+            debug!(
+                target: "engine::tree::prewarm::race",
+                spawn_loop_us = spawn_loop_start.elapsed().as_micros() as u64,
+                workers_needed,
+                since_spawn_all_us = spawn_all_start.elapsed().as_micros() as u64,
+                "all workers spawned"
+            );
         });
 
         tx_sender
