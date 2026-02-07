@@ -16,13 +16,12 @@ use reth_trie::{
     walker::TrieWalker,
     HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
+use reth_tasks::RUNTIME;
 use std::{
     collections::HashMap,
-    sync::{mpsc, OnceLock},
-    time::Duration,
+    sync::mpsc,
 };
 use thiserror::Error;
-use tokio::runtime::{Builder, Handle, Runtime};
 use tracing::*;
 
 /// Parallel incremental state root calculator.
@@ -97,8 +96,7 @@ where
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
 
-        // Get runtime handle once outside the loop
-        let handle = get_tokio_runtime_handle();
+        let handle = RUNTIME.handle();
 
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
@@ -269,29 +267,6 @@ impl From<StateProofError> for ParallelStateRootError {
             }
         }
     }
-}
-
-/// Gets or creates a tokio runtime handle for spawning blocking tasks.
-/// This ensures we always have a runtime available for I/O operations.
-pub fn get_tokio_runtime_handle() -> Handle {
-    Handle::try_current().unwrap_or_else(|_| {
-        // Create a new runtime if no runtime is available
-        static RT: OnceLock<Runtime> = OnceLock::new();
-
-        let rt = RT.get_or_init(|| {
-            Builder::new_multi_thread()
-                .enable_all()
-                // Keep the threads alive for at least the block time (12 seconds) plus buffer.
-                // This prevents the costly process of spawning new threads on every
-                // new block, and instead reuses the existing threads.
-                .thread_keep_alive(Duration::from_secs(15))
-                .thread_name("trie-tokio-rt")
-                .build()
-                .expect("Failed to create tokio runtime")
-        });
-
-        rt.handle().clone()
-    })
 }
 
 #[cfg(test)]

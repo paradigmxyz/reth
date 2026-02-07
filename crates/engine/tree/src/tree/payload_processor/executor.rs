@@ -1,27 +1,26 @@
 //! Executor for mixed I/O and CPU workloads.
 
-use reth_trie_parallel::root::get_tokio_runtime_handle;
+use reth_tasks::RUNTIME;
 use tokio::{runtime::Handle, task::JoinHandle};
 
 /// An executor for mixed I/O and CPU workloads.
 ///
-/// This type uses tokio to spawn blocking tasks and will reuse an existing tokio
-/// runtime if available or create its own.
+/// This type uses the global [`RUNTIME`] tokio handle for spawning blocking tasks.
 #[derive(Debug, Clone)]
 pub struct WorkloadExecutor {
-    inner: WorkloadExecutorInner,
+    handle: Handle,
 }
 
 impl Default for WorkloadExecutor {
     fn default() -> Self {
-        Self { inner: WorkloadExecutorInner::new() }
+        Self { handle: RUNTIME.handle().clone() }
     }
 }
 
 impl WorkloadExecutor {
     /// Returns the handle to the tokio runtime
     pub(super) const fn handle(&self) -> &Handle {
-        &self.inner.handle
+        &self.handle
     }
 
     /// Runs the provided function on an executor dedicated to blocking operations.
@@ -31,17 +30,6 @@ impl WorkloadExecutor {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.inner.handle.spawn_blocking(func)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct WorkloadExecutorInner {
-    handle: Handle,
-}
-
-impl WorkloadExecutorInner {
-    fn new() -> Self {
-        Self { handle: get_tokio_runtime_handle() }
+        self.handle.spawn_blocking(func)
     }
 }
