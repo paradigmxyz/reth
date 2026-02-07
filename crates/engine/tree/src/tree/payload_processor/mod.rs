@@ -541,14 +541,21 @@ where
                         target: "engine::tree::payload_processor",
                         "Creating new sparse trie - no preserved trie available"
                     );
-                    let default_trie = RevealableSparseTrie::blind_from(
+                    let accounts_trie = RevealableSparseTrie::blind_from(
+                        ParallelSparseTrie::default()
+                            .with_parallelism_thresholds(
+                                PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS,
+                            )
+                            .with_direct_address_table(),
+                    );
+                    let storage_trie = RevealableSparseTrie::blind_from(
                         ParallelSparseTrie::default().with_parallelism_thresholds(
                             PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS,
                         ),
                     );
                     SparseStateTrie::new()
-                        .with_accounts_trie(default_trie.clone())
-                        .with_default_storage_trie(default_trie)
+                        .with_accounts_trie(accounts_trie)
+                        .with_default_storage_trie(storage_trie)
                         .with_updates(true)
                 });
 
