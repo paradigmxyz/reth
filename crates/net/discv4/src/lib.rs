@@ -1675,22 +1675,22 @@ impl Discv4Service {
     }
 
     fn ping_expiration(&self) -> u64 {
-        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.ping_expiration)
+        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default() + self.config.ping_expiration)
             .as_secs()
     }
 
     fn find_node_expiration(&self) -> u64 {
-        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.request_timeout)
+        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default() + self.config.request_timeout)
             .as_secs()
     }
 
     fn enr_request_expiration(&self) -> u64 {
-        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.enr_expiration)
+        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default() + self.config.enr_expiration)
             .as_secs()
     }
 
     fn send_neighbours_expiration(&self) -> u64 {
-        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + self.config.neighbours_expiration)
+        (SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default() + self.config.neighbours_expiration)
             .as_secs()
     }
 
