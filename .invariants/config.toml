@@ -1,0 +1,38 @@
+# LLM Invariant-Driven Development — Configuration
+#
+# This file configures the invariant checking system. An LLM CI agent reads
+# INVARIANTS.md files across the repo and validates PR diffs against them.
+
+[general]
+# Invariant files are named INVARIANTS.md and live next to the code they cover.
+invariant_file = "INVARIANTS.md"
+
+# Severity levels that block merge. "critical" and "high" block by default.
+blocking_severities = ["critical", "high"]
+
+# Invariant ID pattern: INV-<MODULE>-<NNN>
+id_pattern = "INV-[A-Z]+-[0-9]{3}"
+
+[ci]
+# The model used for invariant review. Can be any model accessible to the CI agent.
+# The agent receives: (1) the INVARIANTS.md, (2) the PR diff, (3) this config.
+model = "claude-sonnet-4-20250514"
+
+# Maximum diff size (in lines) before the agent skips and defers to human review.
+max_diff_lines = 2000
+
+# When true, the agent will also propose NEW invariants it discovers from the diff.
+propose_new_invariants = true
+
+# When true, the agent generates property-based test stubs for new invariants.
+generate_test_stubs = true
+
+[review]
+# How the agent reports violations.
+# "comment" = inline PR comment per violation
+# "review" = single review with all violations
+# "check" = GitHub check run with annotations
+output_mode = "review"
+
+# Whether to request changes or just warn.
+request_changes_on_violation = true
