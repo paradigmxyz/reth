@@ -16,10 +16,19 @@ use alloy_transport_ws::WsConnect;
 use eyre::Context;
 use futures::StreamExt;
 use std::time::Duration;
+use tokio::task::JoinHandle;
 use tracing::{debug, info};
 
 /// Default `WebSocket` RPC port for reth.
 const DEFAULT_WS_RPC_PORT: u16 = 8546;
+
+/// Interval for sending keepalive heartbeats on the WS connection.
+///
+/// `alloy-transport-ws` sends a `WebSocket` ping every 10s and disconnects if no pong arrives
+/// before the next ping. Under heavy I/O (e.g. MDBX fsync during persistence), the server
+/// may not respond in time. Sending periodic RPC requests resets the transport's keepalive
+/// timer, preventing pings from being sent at all.
+const WS_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(6);
 use url::Url;
 
 /// Returns the websocket RPC URL used for the persistence subscription.
@@ -135,21 +144,37 @@ async fn wait_for_persistence(
 
 /// Wrapper that keeps both the subscription stream and the underlying provider alive.
 /// The provider must be kept alive for the subscription to continue receiving events.
+///
+/// Spawns a keepalive task that periodically sends a no-op RPC request to prevent
+/// the `WebSocket` transport from disconnecting due to missed pong frames.
 pub(crate) struct PersistenceSubscription {
     _provider: RootProvider<Ethereum>,
     stream: SubscriptionStream<BlockNumHash>,
+    keepalive_handle: JoinHandle<()>,
 }
 
 impl PersistenceSubscription {
-    const fn new(
-        provider: RootProvider<Ethereum>,
-        stream: SubscriptionStream<BlockNumHash>,
-    ) -> Self {
-        Self { _provider: provider, stream }
+    fn new(provider: RootProvider<Ethereum>, stream: SubscriptionStream<BlockNumHash>) -> Self {
+        let heartbeat = provider.clone();
+        let keepalive_handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(WS_KEEPALIVE_INTERVAL);
+            loop {
+                interval.tick().await;
+                let _ = heartbeat.get_chain_id().await;
+            }
+        });
+
+        Self { _provider: provider, stream, keepalive_handle }
     }
 
     const fn stream_mut(&mut self) -> &mut SubscriptionStream<BlockNumHash> {
         &mut self.stream
+    }
+}
+
+impl Drop for PersistenceSubscription {
+    fn drop(&mut self) {
+        self.keepalive_handle.abort();
     }
 }
 
