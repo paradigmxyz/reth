@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=floor#fd022464ff028022d45e8ae6035abf7e93a26190"
+source = "git+https://github.com/alloy-rs/evm?branch=bal-devnet2#0871e6bbe2aea138082066fc7d796abef9e1242c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -414,7 +414,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=floor#fd022464ff028022d45e8ae6035abf7e93a26190"
+source = "git+https://github.com/alloy-rs/evm?branch=bal-devnet2#0871e6bbe2aea138082066fc7d796abef9e1242c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -1391,9 +1391,9 @@ dependencies = [
 
 [[package]]
 name = "async-compression"
-version = "0.4.38"
+version = "0.4.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82da0ea54ea533ec09d949717c6386a1c34f2d9b51c1fcc7eef8b9ce0b690a3e"
+checksum = "68650b7df54f0293fd061972a0fb05aaf4fc0879d3b3d21a638a182c5c543b9f"
 dependencies = [
  "compression-codecs",
  "compression-core",
@@ -5802,9 +5802,9 @@ dependencies = [
 
 [[package]]
 name = "memchr"
-version = "2.7.6"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
+checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "memmap2"
