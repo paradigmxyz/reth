@@ -276,7 +276,7 @@ where
             /* //todo */
             payload_or_attrs,
         )?;
-
+        tracing::info!("Payload got in v5 {:?}", payload);
         Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 
