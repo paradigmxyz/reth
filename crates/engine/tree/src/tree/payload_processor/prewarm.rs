@@ -19,7 +19,7 @@ use crate::tree::{
         multiproof::{MultiProofMessage, VersionedMultiProofTargets},
         PayloadExecutionCache,
     },
-    precompile_cache::{CachedPrecompile, PrecompileCacheMap},
+    precompile_cache::{supports_caching, CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
 use alloy_consensus::transaction::TxHashRef;
@@ -495,8 +495,12 @@ where
         let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
         if !precompile_cache_disabled {
-            // Only cache pure precompiles to avoid issues with stateful precompiles
+            // Only cache pure precompiles to avoid issues with stateful precompiles.
+            // Additionally skip precompiles where caching overhead exceeds benefit (e.g. identity).
             evm.precompiles_mut().map_pure_precompiles(|address, precompile| {
+                if !supports_caching(address) {
+                    return precompile;
+                }
                 CachedPrecompile::wrap(
                     precompile,
                     precompile_cache_map.cache_for_address(*address),

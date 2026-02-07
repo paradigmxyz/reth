@@ -11,6 +11,24 @@ use std::{hash::Hash, sync::Arc};
 /// Default max cache size for [`PrecompileCache`]
 const MAX_CACHE_SIZE: u32 = 10_000;
 
+/// Identity precompile address (0x04).
+///
+/// The identity precompile simply copies its input to output, which is an O(n) operation.
+/// Caching it is counterproductive because computing the cache key hash is also O(n),
+/// so we'd be doing O(n) work to potentially save O(n) work with no net benefit.
+const IDENTITY_PRECOMPILE: Address =
+    Address::new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x04]);
+
+/// Returns `true` if caching should be enabled for the precompile at the given address.
+///
+/// Some precompiles are not worth caching because the overhead of computing the cache key
+/// (hashing the input) is comparable to or greater than the cost of simply re-executing
+/// the precompile.
+#[inline]
+pub fn supports_caching(address: &Address) -> bool {
+    *address != IDENTITY_PRECOMPILE
+}
+
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
 pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>>>)
@@ -366,5 +384,24 @@ mod tests {
             .into_output()
             .unwrap();
         assert_eq!(result3.as_ref(), b"output_from_precompile_1");
+    }
+
+    #[test]
+    fn test_supports_caching() {
+        use super::{supports_caching, IDENTITY_PRECOMPILE};
+
+        // Identity precompile should NOT support caching
+        assert!(!supports_caching(&IDENTITY_PRECOMPILE));
+        assert!(!supports_caching(&Address::with_last_byte(0x04)));
+
+        // Other precompiles should support caching
+        assert!(supports_caching(&Address::with_last_byte(0x01))); // ecrecover
+        assert!(supports_caching(&Address::with_last_byte(0x02))); // sha256
+        assert!(supports_caching(&Address::with_last_byte(0x03))); // ripemd160
+        assert!(supports_caching(&Address::with_last_byte(0x05))); // modexp
+        assert!(supports_caching(&Address::with_last_byte(0x06))); // bn254 add
+        assert!(supports_caching(&Address::with_last_byte(0x07))); // bn254 mul
+        assert!(supports_caching(&Address::with_last_byte(0x08))); // bn254 pairing
+        assert!(supports_caching(&Address::with_last_byte(0x09))); // blake2f
     }
 }
