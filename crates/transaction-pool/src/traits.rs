@@ -175,6 +175,20 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send {
+        self.add_transactions_with_origins(transactions.into_iter().map(move |tx| (origin, tx)))
+    }
+
+    /// Adds the given _unvalidated_ transactions into the pool.
+    ///
+    /// Each transaction is paired with its own [`TransactionOrigin`].
+    ///
+    /// Returns a list of results.
+    ///
+    /// Consumer: RPC
+    fn add_transactions_with_origins(
+        &self,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
     ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
 
     /// Submit a consensus transaction directly to the pool
@@ -867,7 +881,7 @@ pub struct NewBlobSidecar {
 ///
 /// Depending on where the transaction was picked up, it affects how the transaction is handled
 /// internally, e.g. limits for simultaneous transaction of one sender.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum TransactionOrigin {
     /// Transaction is coming from a local source.
     #[default]

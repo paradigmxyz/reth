@@ -72,7 +72,7 @@ where
         let _ = response_tx.send(pool_result);
     }
 
-    /// Process a batch of transaction requests, grouped by origin
+    /// Process a batch of transaction requests with per-transaction origins
     async fn process_batch(pool: &Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
         if batch.len() == 1 {
             Self::process_request(pool, batch.into_iter().next().expect("batch is not empty"))
@@ -80,19 +80,12 @@ where
             return
         }
 
-        let mut by_origin: std::collections::BTreeMap<TransactionOrigin, (Vec<_>, Vec<_>)> =
-            std::collections::BTreeMap::new();
-        for req in batch {
-            let entry = by_origin.entry(req.origin).or_default();
-            entry.0.push(req.pool_tx);
-            entry.1.push(req.response_tx);
-        }
+        let (transactions, response_txs): (Vec<_>, Vec<_>) =
+            batch.into_iter().map(|req| ((req.origin, req.pool_tx), req.response_tx)).unzip();
 
-        for (origin, (pool_transactions, response_txs)) in by_origin {
-            let pool_results = pool.add_transactions(origin, pool_transactions).await;
-            for (response_tx, pool_result) in response_txs.into_iter().zip(pool_results) {
-                let _ = response_tx.send(pool_result);
-            }
+        let pool_results = pool.add_transactions_with_origins(transactions).await;
+        for (response_tx, pool_result) in response_txs.into_iter().zip(pool_results) {
+            let _ = response_tx.send(pool_result);
         }
     }
 }
