@@ -10034,6 +10034,7 @@ dependencies = [
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",
+ "parking_lot",
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
