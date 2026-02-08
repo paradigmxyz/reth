@@ -1083,6 +1083,17 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
         self
     }
 
+    /// Disables the support for EIP-7702 transactions.
+    pub const fn no_eip7702(self) -> Self {
+        self.set_eip7702(false)
+    }
+
+    /// Set the support for EIP-7702 transactions.
+    pub const fn set_eip7702(mut self, eip7702: bool) -> Self {
+        self.eip7702 = eip7702;
+        self
+    }
+
     /// Disables EIP-7594 blob sidecar support.
     ///
     /// When disabled, EIP-7594 (v1) blob sidecars are always rejected and EIP-4844 (v0)
