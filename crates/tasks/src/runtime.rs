@@ -224,7 +224,43 @@ pub enum RuntimeInitError {
     RayonBuild(#[from] rayon::ThreadPoolBuildError),
 }
 
-/// Panics with a message indicating the runtime was not initialized.
+/// Returns a fallback tokio [`Handle`] if one is available in the current context (e.g. in tests),
+/// otherwise panics.
+fn fallback_handle() -> Handle {
+    match Handle::try_current() {
+        Ok(handle) => handle,
+        Err(_) => uninitialized_panic(),
+    }
+}
+
+/// Returns a fallback [`TaskExecutor`] if a tokio runtime is available in the current context
+/// (e.g. in tests), otherwise panics.
+fn fallback_executor() -> TaskExecutor {
+    TaskManager::new(fallback_handle()).executor()
+}
+
+/// Returns a fallback rayon pool with the given name prefix. Used when `RUNTIME` was not
+/// explicitly initialized (e.g. in tests).
+#[cfg(feature = "rayon")]
+fn fallback_rayon_pool(name: &'static str) -> rayon::ThreadPool {
+    rayon::ThreadPoolBuilder::new()
+        .thread_name(move |i| format!("reth-{name}-{i}"))
+        .build()
+        .expect("failed to build fallback rayon pool")
+}
+
+/// Returns a fallback [`BlockingTaskPool`]. Used when `RUNTIME` was not explicitly initialized.
+#[cfg(feature = "rayon")]
+fn fallback_rpc_pool() -> BlockingTaskPool {
+    BlockingTaskPool::new(fallback_rayon_pool("rpc"))
+}
+
+/// Returns a fallback [`BlockingTaskGuard`]. Used when `RUNTIME` was not explicitly initialized.
+#[cfg(feature = "rayon")]
+fn fallback_blocking_guard() -> BlockingTaskGuard {
+    BlockingTaskGuard::new(DEFAULT_MAX_BLOCKING_TASKS)
+}
+
 #[cold]
 #[inline(never)]
 fn uninitialized_panic() -> ! {
@@ -400,18 +436,20 @@ impl GlobalRuntime {
     ///
     /// # Panics
     ///
-    /// Panics if the runtime has not been initialized.
-    pub fn handle(&self) -> &Handle {
-        self.handle.get().unwrap_or_else(|| uninitialized_panic())
+    /// Panics if the runtime has not been initialized and no tokio runtime is available in the
+    /// current context.
+    pub fn handle(&self) -> Handle {
+        self.handle.get().cloned().unwrap_or_else(fallback_handle)
     }
 
     /// Get a clone of the [`TaskExecutor`].
     ///
     /// # Panics
     ///
-    /// Panics if the runtime has not been initialized.
+    /// Panics if the runtime has not been initialized and no tokio runtime is available in the
+    /// current context.
     pub fn executor(&self) -> TaskExecutor {
-        self.executor.get().cloned().unwrap_or_else(|| uninitialized_panic())
+        self.executor.get().cloned().unwrap_or_else(fallback_executor)
     }
 
     /// Get the general-purpose rayon CPU thread pool.
@@ -420,10 +458,10 @@ impl GlobalRuntime {
     ///
     /// # Panics
     ///
-    /// Panics if the runtime has not been initialized.
+    /// Panics if the runtime has not been initialized (in non-test builds).
     #[cfg(feature = "rayon")]
     pub fn cpu_pool(&self) -> &rayon::ThreadPool {
-        self.cpu_pool.get().unwrap_or_else(|| uninitialized_panic())
+        self.cpu_pool.get_or_init(|| fallback_rayon_pool("cpu"))
     }
 
     /// Get the RPC blocking task pool.
@@ -433,10 +471,10 @@ impl GlobalRuntime {
     ///
     /// # Panics
     ///
-    /// Panics if the runtime has not been initialized.
+    /// Panics if the runtime has not been initialized (in non-test builds).
     #[cfg(feature = "rayon")]
     pub fn rpc_pool(&self) -> &BlockingTaskPool {
-        self.rpc_pool.get().unwrap_or_else(|| uninitialized_panic())
+        self.rpc_pool.get_or_init(fallback_rpc_pool)
     }
 
     /// Get the trie proof computation pool.
@@ -446,10 +484,10 @@ impl GlobalRuntime {
     ///
     /// # Panics
     ///
-    /// Panics if the runtime has not been initialized.
+    /// Panics if the runtime has not been initialized (in non-test builds).
     #[cfg(feature = "rayon")]
     pub fn trie_pool(&self) -> &rayon::ThreadPool {
-        self.trie_pool.get().unwrap_or_else(|| uninitialized_panic())
+        self.trie_pool.get_or_init(|| fallback_rayon_pool("trie"))
     }
 
     /// Get the storage I/O pool.
@@ -459,10 +497,10 @@ impl GlobalRuntime {
     ///
     /// # Panics
     ///
-    /// Panics if the runtime has not been initialized.
+    /// Panics if the runtime has not been initialized (in non-test builds).
     #[cfg(feature = "rayon")]
     pub fn storage_pool(&self) -> &rayon::ThreadPool {
-        self.storage_pool.get().unwrap_or_else(|| uninitialized_panic())
+        self.storage_pool.get_or_init(|| fallback_rayon_pool("storage"))
     }
 
     /// Get a clone of the [`BlockingTaskGuard`].
@@ -471,10 +509,10 @@ impl GlobalRuntime {
     ///
     /// # Panics
     ///
-    /// Panics if the runtime has not been initialized.
+    /// Panics if the runtime has not been initialized (in non-test builds).
     #[cfg(feature = "rayon")]
     pub fn blocking_guard(&self) -> BlockingTaskGuard {
-        self.blocking_guard.get().cloned().unwrap_or_else(|| uninitialized_panic())
+        self.blocking_guard.get_or_init(fallback_blocking_guard).clone()
     }
 
     /// Run a closure on the CPU pool, blocking the current thread until completion.

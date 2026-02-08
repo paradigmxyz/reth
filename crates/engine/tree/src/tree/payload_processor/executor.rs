@@ -13,7 +13,7 @@ pub struct WorkloadExecutor {
 
 impl Default for WorkloadExecutor {
     fn default() -> Self {
-        Self { handle: RUNTIME.handle().clone() }
+        Self { handle: RUNTIME.handle() }
     }
 }
 
