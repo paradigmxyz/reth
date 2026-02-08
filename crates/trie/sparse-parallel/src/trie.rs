@@ -845,14 +845,7 @@ impl SparseTrie for ParallelSparseTrie {
 
         if self.prefix_set.is_empty() &&
             let Some(hash) =
-                self.upper_subtrie.nodes.get(&Nibbles::default()).and_then(|node| match node {
-                    SparseNode::Empty => Some(EMPTY_ROOT_HASH),
-                    SparseNode::Hash(h) |
-                    SparseNode::Leaf { hash: Some(h), .. } |
-                    SparseNode::Extension { hash: Some(h), .. } |
-                    SparseNode::Branch { hash: Some(h), .. } => Some(*h),
-                    _ => None,
-                })
+                self.upper_subtrie.nodes.get(&Nibbles::default()).and_then(|node| node.hash())
         {
             return hash;
         }
@@ -870,7 +863,11 @@ impl SparseTrie for ParallelSparseTrie {
     }
 
     fn is_root_cached(&self) -> bool {
-        self.prefix_set.is_empty()
+        self.prefix_set.is_empty() &&
+            self.upper_subtrie
+                .nodes
+                .get(&Nibbles::default())
+                .is_some_and(|node| node.hash().is_some())
     }
 
     #[instrument(level = "trace", target = "trie::sparse::parallel", skip(self))]

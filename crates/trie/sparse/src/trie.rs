@@ -971,7 +971,8 @@ impl SparseTrieTrait for SerialSparseTrie {
     }
 
     fn is_root_cached(&self) -> bool {
-        self.prefix_set.is_empty()
+        self.prefix_set.is_empty() &&
+            self.nodes.get(&Nibbles::default()).is_some_and(|node| node.is_hash())
     }
 
     fn update_subtrie_hashes(&mut self) {
