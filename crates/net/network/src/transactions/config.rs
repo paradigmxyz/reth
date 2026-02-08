@@ -24,6 +24,9 @@ pub struct TransactionsManagerConfig {
     pub transaction_fetcher_config: TransactionFetcherConfig,
     /// Max number of seen transactions to store for each peer.
     pub max_transactions_seen_by_peer_history: u32,
+    /// Max entries stored in the recovered transaction cache.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub recovered_tx_cache_size: u32,
     /// How new pending transactions are propagated.
     #[cfg_attr(feature = "serde", serde(default))]
     pub propagation_mode: TransactionPropagationMode,
@@ -37,6 +40,7 @@ impl Default for TransactionsManagerConfig {
         Self {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+            recovered_tx_cache_size: super::DEFAULT_RECOVERED_TX_CACHE_SIZE,
             propagation_mode: TransactionPropagationMode::default(),
             ingress_policy: TransactionIngressPolicy::default(),
         }
