@@ -723,8 +723,9 @@ where
         self.trie
             .storage_tries_mut()
             .iter_mut()
-            .filter(|(address, _)| {
-                self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty())
+            .filter(|(address, trie)| {
+                self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty()) &&
+                    !trie.is_root_cached()
             })
             .par_bridge_buffered()
             .for_each(|(address, trie)| {
