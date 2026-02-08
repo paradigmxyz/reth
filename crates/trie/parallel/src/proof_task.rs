@@ -2022,34 +2022,30 @@ enum AccountWorkerJob {
 mod tests {
     use super::*;
     use reth_provider::test_utils::create_test_provider_factory;
-    use tokio::{runtime::Builder, task};
+    use tokio::task;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
     }
 
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
-    #[test]
-    fn spawn_proof_workers_creates_handle() {
-        let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
-        let _ = RUNTIME.init_with_handle(runtime.handle().clone());
-        runtime.block_on(async {
-            let provider_factory = create_test_provider_factory();
-            let changeset_cache = reth_trie_db::ChangesetCache::new();
-            let factory = reth_provider::providers::OverlayStateProviderFactory::new(
-                provider_factory,
-                changeset_cache,
-            );
-            let ctx = test_ctx(factory);
+    #[tokio::test]
+    async fn spawn_proof_workers_creates_handle() {
+        let provider_factory = create_test_provider_factory();
+        let changeset_cache = reth_trie_db::ChangesetCache::new();
+        let factory = reth_provider::providers::OverlayStateProviderFactory::new(
+            provider_factory,
+            changeset_cache,
+        );
+        let ctx = test_ctx(factory);
 
-            let proof_handle = ProofWorkerHandle::new(ctx, 5, 3, false);
+        let proof_handle = ProofWorkerHandle::new(ctx, 5, 3, false);
 
-            // Verify handle can be cloned
-            let _cloned_handle = proof_handle.clone();
+        // Verify handle can be cloned
+        let _cloned_handle = proof_handle.clone();
 
-            // Workers shut down automatically when handle is dropped
-            drop(proof_handle);
-            task::yield_now().await;
-        });
+        // Workers shut down automatically when handle is dropped
+        drop(proof_handle);
+        task::yield_now().await;
     }
 }
