@@ -722,10 +722,11 @@ where
         let span = debug_span!("compute_storage_roots").entered();
         self.trie
             .storage_tries_mut()
-            .par_iter_mut()
+            .iter_mut()
             .filter(|(address, _)| {
                 self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty())
             })
+            .par_bridge_buffered()
             .for_each(|(address, trie)| {
                 let _span = debug_span!(parent: &span, "compute_storage_root", address = ?address)
                     .entered();
