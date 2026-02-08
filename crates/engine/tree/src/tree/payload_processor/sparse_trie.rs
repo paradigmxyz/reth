@@ -726,7 +726,7 @@ where
             .filter(|(address, _)| {
                 self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty())
             })
-            .for_each(|(_, trie)| {
+            .for_each(|(address, trie)| {
                 let _span = debug_span!(parent: &span, "compute_storage_root", address = ?address)
                     .entered();
                 trie.root().expect("updates are drained, trie should be revealed by now");
