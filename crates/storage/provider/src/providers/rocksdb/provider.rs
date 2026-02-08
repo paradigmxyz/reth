@@ -1110,13 +1110,14 @@ impl RocksDBProvider {
                 .or_insert(block_number);
         }
 
+        let mut targets: Vec<_> = address_min_block
+            .into_iter()
+            .map(|(address, min_block)| (address, min_block.checked_sub(1)))
+            .collect();
+        targets.sort_unstable_by_key(|(addr, _)| *addr);
+
         let mut batch = self.batch();
-        for (address, min_block) in address_min_block {
-            match min_block.checked_sub(1) {
-                Some(keep_to) => batch.unwind_account_history_to(address, keep_to)?,
-                None => batch.clear_account_history(address)?,
-            }
-        }
+        batch.unwind_account_history_batch(&targets)?;
 
         Ok(batch.into_inner())
     }
@@ -1141,13 +1142,14 @@ impl RocksDBProvider {
                 .or_insert(block_number);
         }
 
+        let mut targets: Vec<_> = key_min_block
+            .into_iter()
+            .map(|(key, min_block)| (key, min_block.checked_sub(1)))
+            .collect();
+        targets.sort_unstable_by_key(|(key, _)| *key);
+
         let mut batch = self.batch();
-        for ((address, storage_key), min_block) in key_min_block {
-            match min_block.checked_sub(1) {
-                Some(keep_to) => batch.unwind_storage_history_to(address, storage_key, keep_to)?,
-                None => batch.clear_storage_history(address, storage_key)?,
-            }
-        }
+        batch.unwind_storage_history_batch(&targets)?;
 
         Ok(batch.into_inner())
     }
@@ -1703,6 +1705,311 @@ impl<'a> RocksDBBatch<'a> {
         }
 
         self.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &new_last)?;
+
+        Ok(())
+    }
+
+    /// Unwinds account history for multiple addresses in a single iterator pass.
+    ///
+    /// `targets` MUST be sorted by address for correctness.
+    /// `None` means clear all history for that address.
+    pub fn unwind_account_history_batch(
+        &mut self,
+        targets: &[(Address, Option<BlockNumber>)],
+    ) -> ProviderResult<()> {
+        if targets.is_empty() {
+            return Ok(());
+        }
+
+        debug_assert!(
+            targets.windows(2).all(|w| w[0].0 <= w[1].0),
+            "targets must be sorted by address for correctness"
+        );
+
+        const PREFIX_LEN: usize = 20;
+
+        let cf = self.provider.get_cf_handle::<tables::AccountsHistory>()?;
+        let mut iter = self.provider.0.raw_iterator_cf(cf);
+
+        for (address, keep_to) in targets {
+            let start_key = ShardedKey::new(*address, 0u64).encode();
+            let target_prefix = &start_key[..PREFIX_LEN];
+
+            let needs_seek = if iter.valid() {
+                if let Some(current_key) = iter.key() {
+                    current_key.get(..PREFIX_LEN).is_none_or(|p| p < target_prefix)
+                } else {
+                    true
+                }
+            } else {
+                true
+            };
+
+            if needs_seek {
+                iter.seek(start_key);
+                iter.status().map_err(|e| {
+                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
+            }
+
+            let mut shards = Vec::new();
+            while iter.valid() {
+                let Some(key_bytes) = iter.key() else { break };
+
+                let current_prefix = key_bytes.get(..PREFIX_LEN);
+                if current_prefix != Some(target_prefix) {
+                    break;
+                }
+
+                let key = ShardedKey::<Address>::decode(key_bytes)
+                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                let Some(value_bytes) = iter.value() else { break };
+                let value = BlockNumberList::decompress(value_bytes)
+                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                shards.push((key, value));
+                iter.next();
+            }
+
+            iter.status().map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+
+            if shards.is_empty() {
+                continue;
+            }
+
+            match keep_to {
+                Some(keep_to) => {
+                    self.unwind_account_history_shards(*address, shards, *keep_to)?;
+                }
+                None => {
+                    for (key, _) in shards {
+                        self.delete::<tables::AccountsHistory>(key)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Processes pre-fetched account history shards for unwind.
+    fn unwind_account_history_shards(
+        &mut self,
+        address: Address,
+        shards: Vec<(ShardedKey<Address>, BlockNumberList)>,
+        keep_to: BlockNumber,
+    ) -> ProviderResult<()> {
+        if shards.is_empty() {
+            return Ok(());
+        }
+
+        let boundary_idx = shards.iter().position(|(key, _)| {
+            key.highest_block_number == u64::MAX || key.highest_block_number > keep_to
+        });
+
+        let Some(boundary_idx) = boundary_idx else {
+            let (last_key, last_value) = shards.last().expect("shards is non-empty");
+            if last_key.highest_block_number != u64::MAX {
+                self.delete::<tables::AccountsHistory>(last_key.clone())?;
+                self.put::<tables::AccountsHistory>(
+                    ShardedKey::new(address, u64::MAX),
+                    last_value,
+                )?;
+            }
+            return Ok(());
+        };
+
+        for (key, _) in shards.iter().skip(boundary_idx + 1) {
+            self.delete::<tables::AccountsHistory>(key.clone())?;
+        }
+
+        let (boundary_key, boundary_list) = &shards[boundary_idx];
+        self.delete::<tables::AccountsHistory>(boundary_key.clone())?;
+
+        let new_last =
+            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
+
+        if new_last.is_empty() {
+            if boundary_idx == 0 {
+                return Ok(());
+            }
+
+            let (prev_key, prev_value) = &shards[boundary_idx - 1];
+            if prev_key.highest_block_number != u64::MAX {
+                self.delete::<tables::AccountsHistory>(prev_key.clone())?;
+                self.put::<tables::AccountsHistory>(
+                    ShardedKey::new(address, u64::MAX),
+                    prev_value,
+                )?;
+            }
+            return Ok(());
+        }
+
+        self.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &new_last)?;
+
+        Ok(())
+    }
+
+    /// Unwinds storage history for multiple (address, `storage_key`) pairs in a single pass.
+    ///
+    /// `targets` MUST be sorted by (address, `storage_key`) for correctness.
+    /// `None` means clear all history for that slot.
+    pub fn unwind_storage_history_batch(
+        &mut self,
+        targets: &[((Address, B256), Option<BlockNumber>)],
+    ) -> ProviderResult<()> {
+        if targets.is_empty() {
+            return Ok(());
+        }
+
+        debug_assert!(
+            targets.windows(2).all(|w| w[0].0 <= w[1].0),
+            "targets must be sorted by (address, storage_key) for correctness"
+        );
+
+        const PREFIX_LEN: usize = 52;
+
+        let cf = self.provider.get_cf_handle::<tables::StoragesHistory>()?;
+        let mut iter = self.provider.0.raw_iterator_cf(cf);
+
+        for ((address, storage_key), keep_to) in targets {
+            let start_key = StorageShardedKey::new(*address, *storage_key, 0u64).encode();
+            let target_prefix = &start_key[..PREFIX_LEN];
+
+            let needs_seek = if iter.valid() {
+                if let Some(current_key) = iter.key() {
+                    current_key.get(..PREFIX_LEN).is_none_or(|p| p < target_prefix)
+                } else {
+                    true
+                }
+            } else {
+                true
+            };
+
+            if needs_seek {
+                iter.seek(start_key);
+                iter.status().map_err(|e| {
+                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
+            }
+
+            let mut shards = Vec::new();
+            while iter.valid() {
+                let Some(key_bytes) = iter.key() else { break };
+
+                let current_prefix = key_bytes.get(..PREFIX_LEN);
+                if current_prefix != Some(target_prefix) {
+                    break;
+                }
+
+                let key = StorageShardedKey::decode(key_bytes)
+                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                let Some(value_bytes) = iter.value() else { break };
+                let value = BlockNumberList::decompress(value_bytes)
+                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                shards.push((key, value));
+                iter.next();
+            }
+
+            iter.status().map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+
+            if shards.is_empty() {
+                continue;
+            }
+
+            match keep_to {
+                Some(keep_to) => {
+                    self.unwind_storage_history_shards(*address, *storage_key, shards, *keep_to)?;
+                }
+                None => {
+                    for (key, _) in shards {
+                        self.delete::<tables::StoragesHistory>(key)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Processes pre-fetched storage history shards for unwind.
+    fn unwind_storage_history_shards(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        shards: Vec<(StorageShardedKey, BlockNumberList)>,
+        keep_to: BlockNumber,
+    ) -> ProviderResult<()> {
+        if shards.is_empty() {
+            return Ok(());
+        }
+
+        let boundary_idx = shards.iter().position(|(key, _)| {
+            key.sharded_key.highest_block_number == u64::MAX ||
+                key.sharded_key.highest_block_number > keep_to
+        });
+
+        let Some(boundary_idx) = boundary_idx else {
+            let (last_key, last_value) = shards.last().expect("shards is non-empty");
+            if last_key.sharded_key.highest_block_number != u64::MAX {
+                self.delete::<tables::StoragesHistory>(last_key.clone())?;
+                self.put::<tables::StoragesHistory>(
+                    StorageShardedKey::last(address, storage_key),
+                    last_value,
+                )?;
+            }
+            return Ok(());
+        };
+
+        for (key, _) in shards.iter().skip(boundary_idx + 1) {
+            self.delete::<tables::StoragesHistory>(key.clone())?;
+        }
+
+        let (boundary_key, boundary_list) = &shards[boundary_idx];
+        self.delete::<tables::StoragesHistory>(boundary_key.clone())?;
+
+        let new_last =
+            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
+
+        if new_last.is_empty() {
+            if boundary_idx == 0 {
+                return Ok(());
+            }
+
+            let (prev_key, prev_value) = &shards[boundary_idx - 1];
+            if prev_key.sharded_key.highest_block_number != u64::MAX {
+                self.delete::<tables::StoragesHistory>(prev_key.clone())?;
+                self.put::<tables::StoragesHistory>(
+                    StorageShardedKey::last(address, storage_key),
+                    prev_value,
+                )?;
+            }
+            return Ok(());
+        }
+
+        self.put::<tables::StoragesHistory>(
+            StorageShardedKey::last(address, storage_key),
+            &new_last,
+        )?;
 
         Ok(())
     }
