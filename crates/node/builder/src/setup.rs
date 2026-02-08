@@ -131,5 +131,21 @@ where
         )
         .build(provider_factory, static_file_producer);
 
+    // NOTE: To enable prewarming (POC), use ExecutionStage::new_with_prewarm() instead:
+    //
+    // ```
+    // ExecutionStage::new_with_prewarm(
+    //     evm_config,
+    //     consensus,
+    //     stage_config.execution.into(),
+    //     stage_config.execution_external_clean_threshold(),
+    //     exex_manager_handle,
+    //     provider_factory.clone(), // Clone the factory for prewarm threads
+    //     8_000_000_000,            // 8GB cache
+    // )
+    // ```
+    //
+    // This requires modifying the pipeline builder to accept the different stage type.
+
     Ok(pipeline)
 }
