@@ -9,7 +9,7 @@ use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_provider::AccountReader;
-use reth_revm::state::EvmState;
+use reth_revm::state::{Account, EvmState};
 use reth_trie::{
     added_removed_keys::MultiAddedRemovedKeys, proof_v2, HashedPostState, HashedStorage,
     MultiProofTargets,
@@ -197,6 +197,29 @@ impl Drop for StateHookSender {
         // Send completion signal when the sender is dropped
         let _ = self.0.send(MultiProofMessage::FinishedStateUpdates);
     }
+}
+
+pub(crate) fn extract_dirty_state(state: &EvmState) -> EvmState {
+    state
+        .iter()
+        .filter(|(_, account)| account.is_touched())
+        .map(|(addr, account)| {
+            let dirty_storage = account
+                .storage
+                .iter()
+                .filter(|(_, slot)| slot.is_changed())
+                .map(|(key, slot)| (*key, slot.clone()))
+                .collect();
+            let dirty_account = Account {
+                info: account.info.clone(),
+                original_info: Box::default(),
+                storage: dirty_storage,
+                status: account.status,
+                transaction_id: account.transaction_id,
+            };
+            (*addr, dirty_account)
+        })
+        .collect()
 }
 
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
