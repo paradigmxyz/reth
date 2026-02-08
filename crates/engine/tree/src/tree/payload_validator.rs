@@ -338,7 +338,7 @@ where
         mut ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N, InsertPayloadError<N::Block>>
     where
-        V: PayloadValidator<T, Block = N::Block>,
+        V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         /// A helper macro that returns the block in case there was an error
@@ -451,6 +451,22 @@ where
             block_access_list,
         ));
 
+        // Spawn block conversion on a background thread so it runs concurrently with execution.
+        // Cloning the payload is cheap (transaction bytes are Arc-backed) and this overlaps the
+        // cost of RLP decoding + header hashing with block execution.
+        let convert_input = input.clone();
+        let convert_validator = self.validator.clone();
+        let (convert_tx, convert_rx) = tokio::sync::oneshot::channel();
+        self.payload_processor.executor().spawn_blocking(move || {
+            let result = match convert_input {
+                BlockOrPayload::Payload(payload) => {
+                    convert_validator.convert_payload_to_block(payload)
+                }
+                BlockOrPayload::Block(block) => Ok(block),
+            };
+            let _ = convert_tx.send(result);
+        });
+
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
         if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
@@ -483,7 +499,12 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
-        let block = self.convert_to_block(input)?.with_senders(senders);
+        // Join the background block conversion task. The conversion ran concurrently with
+        // execution, so this should return near-instantly.
+        let block = convert_rx
+            .blocking_recv()
+            .map_err(|_| NewPayloadError::Other("block conversion task panicked".into()))??
+            .with_senders(senders);
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = receipt_root_rx
@@ -1446,7 +1467,7 @@ where
         + Clone
         + 'static,
     N: NodePrimitives,
-    V: PayloadValidator<Types, Block = N::Block>,
+    V: PayloadValidator<Types, Block = N::Block> + Clone,
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
@@ -1491,7 +1512,7 @@ where
 }
 
 /// Enum representing either block or payload being validated.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BlockOrPayload<T: PayloadTypes> {
     /// Payload.
     Payload(T::ExecutionData),
