@@ -843,6 +843,20 @@ impl SparseTrie for ParallelSparseTrie {
     fn root(&mut self) -> B256 {
         trace!(target: "trie::parallel_sparse", "Calculating trie root hash");
 
+        if self.prefix_set.is_empty() &&
+            let Some(hash) =
+                self.upper_subtrie.nodes.get(&Nibbles::default()).and_then(|node| match node {
+                    SparseNode::Empty => Some(EMPTY_ROOT_HASH),
+                    SparseNode::Hash(h) |
+                    SparseNode::Leaf { hash: Some(h), .. } |
+                    SparseNode::Extension { hash: Some(h), .. } |
+                    SparseNode::Branch { hash: Some(h), .. } => Some(*h),
+                    _ => None,
+                })
+        {
+            return hash;
+        }
+
         // Update all lower subtrie hashes
         self.update_subtrie_hashes();
 
