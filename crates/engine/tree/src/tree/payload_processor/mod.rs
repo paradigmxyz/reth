@@ -56,7 +56,6 @@ use tracing::{debug, debug_span, instrument, warn, Span};
 pub mod bal;
 pub mod executor;
 pub mod multiproof;
-mod lock_contention_test;
 mod preserved_sparse_trie;
 pub mod prewarm;
 pub mod receipt_root_task;
