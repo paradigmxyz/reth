@@ -136,12 +136,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let sf_path = data_dir.static_files();
         let rocksdb_path = data_dir.rocksdb();
 
-        // Always create directories, even for read-only access.
-        // Offline commands (e.g. `re-execute`) may run against a freshly restored snapshot
-        // that lacks some directories (e.g. `rocksdb/`).
-        reth_fs_util::create_dir_all(&db_path)?;
-        reth_fs_util::create_dir_all(&sf_path)?;
-        reth_fs_util::create_dir_all(&rocksdb_path)?;
+        if access.is_read_write() {
+            reth_fs_util::create_dir_all(&db_path)?;
+            reth_fs_util::create_dir_all(&sf_path)?;
+            reth_fs_util::create_dir_all(&rocksdb_path)?;
+        }
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
@@ -170,12 +169,6 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     .build()?,
             ),
             AccessRights::RO | AccessRights::RoInconsistent => {
-                // If the MDBX database hasn't been initialized yet (e.g. freshly restored
-                // snapshot), briefly open in read-write mode to create tables and run
-                // migrations, then reopen as read-only.
-                if is_database_empty(&db_path) {
-                    let _ = init_db(&db_path, self.db.database_args())?;
-                }
                 (open_db_read_only(&db_path, self.db.database_args())?, {
                     let provider = StaticFileProviderBuilder::read_only(sf_path)
                         .with_metrics()
@@ -186,14 +179,6 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                 })
             }
         };
-        // If RocksDB hasn't been initialized yet (no CURRENT file), briefly open in
-        // read-write mode to create the database, then reopen as read-only.
-        if !access.is_read_write() && !data_dir.rocksdb().join("CURRENT").exists() {
-            let _ = RocksDBProvider::builder(data_dir.rocksdb())
-                .with_default_tables()
-                .with_database_log_level(self.db.log_level)
-                .build()?;
-        }
         let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
             .with_default_tables()
             .with_database_log_level(self.db.log_level)
@@ -208,6 +193,44 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         }
 
         Ok(Environment { config, provider_factory, data_dir })
+    }
+
+    /// Ensures the data directories and databases exist.
+    ///
+    /// Intended for offline commands (e.g. `re-execute`) that open the environment
+    /// in read-only mode but may run against freshly restored snapshots that lack
+    /// MDBX tables or RocksDB column families.
+    ///
+    /// Creates directories and briefly opens each database in read-write mode to
+    /// set up the necessary structures, then drops the handle so it can be reopened
+    /// as read-only. Skips initialization when the database already exists.
+    pub fn ensure_databases_exist(&self) -> eyre::Result<()>
+    where
+        C::ChainSpec: EthChainSpec,
+    {
+        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
+        let db_path = data_dir.db();
+        let sf_path = data_dir.static_files();
+        let rocksdb_path = data_dir.rocksdb();
+
+        reth_fs_util::create_dir_all(&db_path)?;
+        reth_fs_util::create_dir_all(&sf_path)?;
+        reth_fs_util::create_dir_all(&rocksdb_path)?;
+
+        if is_database_empty(&db_path) {
+            info!(target: "reth::cli", "MDBX database not initialized, creating tables");
+            let _ = init_db(&db_path, self.db.database_args())?;
+        }
+
+        if is_database_empty(&rocksdb_path) {
+            info!(target: "reth::cli", "RocksDB database not initialized, creating column families");
+            let _ = RocksDBProvider::builder(&rocksdb_path)
+                .with_default_tables()
+                .with_database_log_level(self.db.log_level)
+                .build()?;
+        }
+
+        Ok(())
     }
 
     /// Returns a [`ProviderFactory`] after executing consistency checks.
