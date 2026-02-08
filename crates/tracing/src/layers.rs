@@ -207,6 +207,8 @@ pub struct FileInfo {
     file_name: String,
     max_size_bytes: u64,
     max_files: usize,
+    buffer_size: usize,
+    behavior: NonBlockingBehavior,
 }
 
 impl FileInfo {
@@ -217,7 +219,26 @@ impl FileInfo {
         max_size_bytes: u64,
         max_files: usize,
     ) -> Self {
-        Self { dir, file_name, max_size_bytes, max_files }
+        Self {
+            dir,
+            file_name,
+            max_size_bytes,
+            max_files,
+            buffer_size: 1000,                   // Default buffer size
+            behavior: NonBlockingBehavior::Drop, // Default behavior
+        }
+    }
+
+    /// Sets the buffer size for the non-blocking writer.
+    pub const fn with_buffer_size(mut self, buffer_size: usize) -> Self {
+        self.buffer_size = buffer_size;
+        self
+    }
+
+    /// Sets the behavior for when the buffer is full.
+    pub const fn with_behavior(mut self, behavior: NonBlockingBehavior) -> Self {
+        self.behavior = behavior;
+        self
     }
 
     /// Creates the log directory if it doesn't exist.
@@ -232,20 +253,23 @@ impl FileInfo {
         log_dir
     }
 
-    /// Creates a non-blocking writer for the log file.
+    /// Creates a non-blocking writer for the log file with drop tracking.
     ///
     /// # Returns
     /// A tuple containing the non-blocking writer and its associated worker guard.
-    fn create_log_writer(&self) -> (tracing_appender::non_blocking::NonBlocking, WorkerGuard) {
+    fn create_log_writer(&self) -> (NonBlockingDropTracking, WorkerGuard) {
         let log_dir = self.create_log_dir();
-        let (writer, guard) = tracing_appender::non_blocking(
-            RollingFileAppender::new(
-                log_dir.join(&self.file_name),
-                RollingConditionBasic::new().max_size(self.max_size_bytes),
-                self.max_files,
-            )
-            .expect("Could not initialize file logging"),
-        );
+        let (writer, guard) = NonBlockingDropTrackingBuilder::new()
+            .buffered_lines_limit(self.buffer_size)
+            .behavior(self.behavior)
+            .build(
+                RollingFileAppender::new(
+                    log_dir.join(&self.file_name),
+                    RollingConditionBasic::new().max_size(self.max_size_bytes),
+                    self.max_files,
+                )
+                .expect("Could not initialize file logging"),
+            );
         (writer, guard)
     }
 }
