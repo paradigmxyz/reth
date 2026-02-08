@@ -24,7 +24,9 @@ pub static TRANSACTION_DICTIONARY: &[u8] = include_bytes!("../transaction_dictio
 pub use locals::*;
 #[cfg(feature = "std")]
 mod locals {
-    use super::*;
+    use super::{
+        Compressor, Decompressor, ReusableDecompressor, RECEIPT_DICTIONARY, TRANSACTION_DICTIONARY,
+    };
     use core::cell::RefCell;
 
     // We use `thread_local` compressors and decompressors because dictionaries can be quite big,
@@ -58,13 +60,13 @@ mod locals {
     }
 }
 
-/// Fn creates tx [`Compressor`]
+/// Creates a transaction [`Compressor`] with the appropriate dictionary.
 pub fn create_tx_compressor() -> Compressor<'static> {
     Compressor::with_dictionary(0, TRANSACTION_DICTIONARY)
         .expect("Failed to instantiate tx compressor")
 }
 
-/// Fn creates tx [`Decompressor`]
+/// Creates a transaction [`Decompressor`] with the appropriate dictionary.
 pub fn create_tx_decompressor() -> ReusableDecompressor {
     ReusableDecompressor::new(
         Decompressor::with_dictionary(TRANSACTION_DICTIONARY)
@@ -72,13 +74,13 @@ pub fn create_tx_decompressor() -> ReusableDecompressor {
     )
 }
 
-/// Fn creates receipt [`Compressor`]
+/// Creates a receipt [`Compressor`] with the appropriate dictionary.
 pub fn create_receipt_compressor() -> Compressor<'static> {
     Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
         .expect("Failed to instantiate receipt compressor")
 }
 
-/// Fn creates receipt [`Decompressor`]
+/// Creates a receipt [`Decompressor`] with the appropriate dictionary.
 pub fn create_receipt_decompressor() -> ReusableDecompressor {
     ReusableDecompressor::new(
         Decompressor::with_dictionary(RECEIPT_DICTIONARY)
