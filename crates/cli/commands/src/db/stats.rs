@@ -15,8 +15,22 @@ use reth_provider::{
     providers::{ProviderNodeTypes, StaticFileProvider},
     RocksDBProviderFactory,
 };
-use reth_static_file_types::SegmentRangeInclusive;
+use reth_static_file_types::{SegmentRangeInclusive, StaticFileSegment};
 use std::time::Duration;
+use tracing::warn;
+
+/// Information about a static file that could not be processed
+#[derive(Debug, Clone)]
+struct SkippedFile {
+    /// The segment this file belongs to
+    segment: StaticFileSegment,
+    /// The block range from the file on disk
+    file_block_range: SegmentRangeInclusive,
+    /// The calculated/expected block range
+    calculated_block_range: SegmentRangeInclusive,
+    /// The error message
+    error: String,
+}
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command
@@ -257,6 +271,7 @@ impl Command {
         let mut total_index_size = 0;
         let mut total_offsets_size = 0;
         let mut total_config_size = 0;
+        let mut skipped_files = Vec::new();
 
         for (segment, ranges) in static_files.into_iter().sorted_by_key(|(segment, _)| *segment) {
             let (
@@ -271,11 +286,46 @@ impl Command {
             for (block_range, header) in &ranges {
                 let fixed_block_range =
                     static_file_provider.find_fixed_range(segment, block_range.start());
-                let jar_provider = static_file_provider
-                    .get_segment_provider_for_range(segment, || Some(fixed_block_range), None)?
-                    .ok_or_else(|| {
-                        eyre::eyre!("Failed to get segment provider for segment: {}", segment)
-                    })?;
+
+                // Try to get the jar provider, but handle errors gracefully
+                let jar_provider = match static_file_provider.get_segment_provider_for_range(
+                    segment,
+                    || Some(fixed_block_range),
+                    None,
+                ) {
+                    Ok(Some(provider)) => provider,
+                    Ok(None) => {
+                        warn!(
+                            segment = %segment,
+                            file_range = %block_range,
+                            calculated_range = %fixed_block_range,
+                            "Skipping static file: provider not found"
+                        );
+                        skipped_files.push(SkippedFile {
+                            segment,
+                            file_block_range: *block_range,
+                            calculated_block_range: fixed_block_range,
+                            error: "Provider not found".to_string(),
+                        });
+                        continue;
+                    }
+                    Err(e) => {
+                        warn!(
+                            segment = %segment,
+                            file_range = %block_range,
+                            calculated_range = %fixed_block_range,
+                            error = %e,
+                            "Skipping static file: failed to load"
+                        );
+                        skipped_files.push(SkippedFile {
+                            segment,
+                            file_block_range: *block_range,
+                            calculated_block_range: fixed_block_range,
+                            error: e.to_string(),
+                        });
+                        continue;
+                    }
+                };
 
                 let columns = jar_provider.columns();
                 let rows = jar_provider.rows();
@@ -402,6 +452,30 @@ impl Command {
             (total_data_size + total_index_size + total_offsets_size + total_config_size) as f64,
         )));
         table.add_row(row);
+
+        // Add skipped files summary if there are any
+        if !skipped_files.is_empty() {
+            println!("{table}\n");
+
+            let mut skipped_table = ComfyTable::new();
+            skipped_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+            skipped_table.set_header(["Segment", "File Range", "Calculated Range", "Reason"]);
+
+            for skipped in &skipped_files {
+                let mut row = Row::new();
+                row.add_cell(Cell::new(skipped.segment))
+                    .add_cell(Cell::new(format!("{}", skipped.file_block_range)))
+                    .add_cell(Cell::new(format!("{}", skipped.calculated_block_range)))
+                    .add_cell(Cell::new(&skipped.error));
+                skipped_table.add_row(row);
+            }
+
+            println!(
+                "⚠️  Skipped Static Files: {} file(s) could not be processed\n",
+                skipped_files.len()
+            );
+            return Ok(skipped_table);
+        }
 
         Ok(table)
     }
