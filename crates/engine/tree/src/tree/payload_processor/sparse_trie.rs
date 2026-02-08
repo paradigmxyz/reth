@@ -671,6 +671,11 @@ where
     /// Invokes `update_leaves` for the accounts trie and collects any new targets.
     ///
     /// Returns whether any updates were drained (applied to the trie).
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
     fn process_account_leaf_updates(&mut self, new: bool) -> SparseTrieResult<bool> {
         let account_updates =
             if new { &mut self.new_account_updates } else { &mut self.account_updates };
@@ -714,6 +719,7 @@ where
             return Ok(());
         }
 
+        let span = debug_span!("compute_storage_roots").entered();
         self.trie
             .storage_tries_mut()
             .par_iter_mut()
@@ -721,12 +727,17 @@ where
                 self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty())
             })
             .for_each(|(_, trie)| {
+                let _span = debug_span!(parent: &span, "compute_storage_root", address = ?address)
+                    .entered();
                 trie.root().expect("updates are drained, trie should be revealed by now");
             });
+        drop(span);
 
         loop {
+            let span = debug_span!("promote_updates", promoted = tracing::field::Empty).entered();
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
+            let mut num_promoted = 0;
             self.pending_account_updates.retain(|addr, account| {
                 if let Some(updates) = self.storage_updates.get(addr) {
                     if !updates.is_empty() {
@@ -747,6 +758,7 @@ where
                             account_rlp_buf.clone()
                         };
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                        num_promoted += 1;
                         return false;
                     }
                 }
@@ -783,15 +795,18 @@ where
                     account_rlp_buf.clone()
                 };
                 self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                num_promoted += 1;
 
                 false
             });
+            span.record("promoted", num_promoted);
+            drop(span);
 
             // Only exit when no new updates are processed.
             //
             // We need to keep iterating if any updates are being drained because that might
             // indicate that more pending account updates can be promoted.
-            if !self.process_account_leaf_updates(false)? {
+            if num_promoted == 0 || !self.process_account_leaf_updates(false)? {
                 break
             }
         }
