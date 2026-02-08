@@ -24,6 +24,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::BlockAccessList;
+use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -829,6 +830,57 @@ fn multiproof_targets_v2_from_state(state: EvmState) -> (VersionedMultiProofTarg
     }
 
     (VersionedMultiProofTargets::V2(targets), storage_target_count)
+}
+
+/// Returns [`VersionedMultiProofTargets`] for withdrawal addresses.
+///
+/// Withdrawals only modify account balances (no storage), so the targets contain
+/// only account-level entries with empty storage sets.
+pub fn multiproof_targets_from_withdrawals(
+    withdrawals: &[Withdrawal],
+    v2_enabled: bool,
+) -> VersionedMultiProofTargets {
+    if v2_enabled {
+        multiproof_targets_v2_from_withdrawals(withdrawals)
+    } else {
+        multiproof_targets_legacy_from_withdrawals(withdrawals)
+    }
+}
+
+/// Returns legacy [`MultiProofTargets`] for withdrawal addresses.
+fn multiproof_targets_legacy_from_withdrawals(
+    withdrawals: &[Withdrawal],
+) -> VersionedMultiProofTargets {
+    let mut targets = MultiProofTargets::with_capacity(withdrawals.len());
+    for withdrawal in withdrawals {
+        if withdrawal.amount > 0 {
+            targets
+                .entry(keccak256(withdrawal.address))
+                .or_insert_with(|| B256Set::with_capacity_and_hasher(0, Default::default()));
+        }
+    }
+    VersionedMultiProofTargets::Legacy(targets)
+}
+
+/// Returns V2 [`reth_trie_parallel::targets_v2::MultiProofTargetsV2`] for withdrawal addresses.
+fn multiproof_targets_v2_from_withdrawals(
+    withdrawals: &[Withdrawal],
+) -> VersionedMultiProofTargets {
+    use alloy_primitives::{map::DefaultHashBuilder, Address};
+    use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+    use std::collections::HashSet;
+
+    let mut seen = HashSet::<Address, DefaultHashBuilder>::with_capacity_and_hasher(
+        withdrawals.len(),
+        Default::default(),
+    );
+    let mut targets = MultiProofTargetsV2::default();
+    for withdrawal in withdrawals {
+        if withdrawal.amount > 0 && seen.insert(withdrawal.address) {
+            targets.account_targets.push(keccak256(withdrawal.address).into());
+        }
+    }
+    VersionedMultiProofTargets::V2(targets)
 }
 
 /// The events the pre-warm task can handle.

@@ -4,14 +4,17 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache, SavedCache},
     payload_processor::{
-        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
+        prewarm::{
+            multiproof_targets_from_withdrawals, PrewarmCacheTask, PrewarmContext, PrewarmMode,
+            PrewarmTaskEvent,
+        },
         sparse_trie::StateRootComputeOutcome,
     },
     sparse_trie::{SparseTrieCacheTask, SparseTrieTask, SpawnedSparseTrieTask},
     StateProviderBuilder, TreeConfig,
 };
 use alloy_eip7928::BlockAccessList;
-use alloy_eips::eip1898::BlockWithParent;
+use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -265,6 +268,14 @@ where
                 v2_proofs_enabled,
             )
         } else {
+            // Send withdrawal prefetch targets immediately since addresses are known upfront
+            if let Some(withdrawals) = &env.withdrawals &&
+                withdrawals.iter().any(|w| w.amount > 0)
+            {
+                let targets = multiproof_targets_from_withdrawals(withdrawals, v2_proofs_enabled);
+                let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
+            }
+
             // Normal path: spawn with transaction prewarming
             self.spawn_caching_with(
                 env,
@@ -976,6 +987,9 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used to determine parallel worker count for prewarming.
     /// A value of 0 indicates the count is unknown.
     pub transaction_count: usize,
+    /// Withdrawals included in the block.
+    /// Used to generate prefetch targets for withdrawal addresses.
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
@@ -989,6 +1003,7 @@ where
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
             transaction_count: 0,
+            withdrawals: None,
         }
     }
 }
