@@ -50,6 +50,45 @@ pub trait Executor<DB: Database>: Sized {
     where
         F: OnStateHook + 'static;
 
+    /// Consumes the executor, optionally inspects the state, and returns [`BlockExecutionOutput`].
+    ///
+    /// This is the shared helper behind `execute`, `execute_with_state_closure`,
+    /// `execute_with_state_closure_always`, and `execute_with_state_hook`.
+    ///
+    /// When `always_inspect` is `true`, the `state_fn` closure is called even if `result` is
+    /// an `Err`, which mirrors the semantics of `execute_with_state_closure_always`.
+    fn finish_execution(
+        self,
+        result: Result<
+            BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>,
+            Self::Error,
+        >,
+        state_fn: Option<impl FnOnce(&State<DB>)>,
+        always_inspect: bool,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        let mut state = self.into_state();
+
+        match (&result, always_inspect) {
+            // On success, always call the inspector if present.
+            (Ok(_), _) => {
+                if let Some(f) = state_fn {
+                    f(&state);
+                }
+            }
+            // On failure, only call the inspector when `always_inspect` is set.
+            (Err(_), true) => {
+                if let Some(f) = state_fn {
+                    f(&state);
+                }
+            }
+            // On failure without `always_inspect`, skip the inspector.
+            (Err(_), false) => {}
+        }
+
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result: result? })
+    }
+
     /// Consumes the type and executes the block.
     ///
     /// # Note
@@ -62,9 +101,8 @@ pub trait Executor<DB: Database>: Sized {
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let result = self.execute_one(block)?;
-        let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
+        let result = self.execute_one(block);
+        self.finish_execution(result, None::<fn(&State<DB>)>, false)
     }
 
     /// Executes multiple inputs in the batch, and returns an aggregated [`ExecutionOutcome`].
@@ -98,15 +136,13 @@ pub trait Executor<DB: Database>: Sized {
     fn execute_with_state_closure<F>(
         mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        mut f: F,
+        f: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&State<DB>),
+        F: FnOnce(&State<DB>),
     {
-        let result = self.execute_one(block)?;
-        let mut state = self.into_state();
-        f(&state);
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
+        let result = self.execute_one(block);
+        self.finish_execution(result, Some(f), false)
     }
 
     /// Executes the EVM with the given input and accepts a state closure that is always invoked
@@ -114,16 +150,13 @@ pub trait Executor<DB: Database>: Sized {
     fn execute_with_state_closure_always<F>(
         mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        mut f: F,
+        f: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&State<DB>),
+        F: FnOnce(&State<DB>),
     {
         let result = self.execute_one(block);
-        let mut state = self.into_state();
-        f(&state);
-
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result: result? })
+        self.finish_execution(result, Some(f), true)
     }
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
@@ -136,9 +169,8 @@ pub trait Executor<DB: Database>: Sized {
     where
         F: OnStateHook + 'static,
     {
-        let result = self.execute_one_with_state_hook(block, state_hook)?;
-        let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
+        let result = self.execute_one_with_state_hook(block, state_hook);
+        self.finish_execution(result, None::<fn(&State<DB>)>, false)
     }
 
     /// Consumes the executor and returns the [`State`] containing all state changes.
