@@ -25,6 +25,8 @@ jobs:
     name: detect affected crates
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    env:
+      RUSTC_WRAPPER: ""
     outputs:
       cargo-args: ${{ steps.rail.outputs.cargo-args }}
       count: ${{ steps.rail.outputs.count }}
