@@ -1,7 +1,8 @@
 use super::setup;
+use alloy_primitives::Address;
 use eyre::Result;
 use reth_db::DatabaseEnv;
-use reth_db_api::{database::Database, table::TableImporter, tables};
+use reth_db_api::{database::Database, models::BlockNumberAddress, table::TableImporter, tables};
 use reth_db_common::DbTool;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
@@ -20,7 +21,7 @@ pub(crate) async fn dump_hashing_storage_stage<N: ProviderNodeTypes<DB = Databas
 ) -> Result<()> {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
-    unwind_and_copy(db_tool, from, tip_block_number, &output_db)?;
+    unwind_and_copy(db_tool, from, to, tip_block_number, &output_db)?;
 
     if should_run {
         dry_run(
@@ -42,6 +43,7 @@ pub(crate) async fn dump_hashing_storage_stage<N: ProviderNodeTypes<DB = Databas
 fn unwind_and_copy<N: ProviderNodeTypes>(
     db_tool: &DbTool<N>,
     from: u64,
+    to: u64,
     tip_block_number: u64,
     output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
@@ -62,8 +64,13 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     // TODO optimize we can actually just get the entries we need for both these tables
     output_db
         .update(|tx| tx.import_dupsort::<tables::PlainStorageState, _>(&unwind_inner_tx))??;
-    output_db
-        .update(|tx| tx.import_dupsort::<tables::StorageChangeSets, _>(&unwind_inner_tx))??;
+    output_db.update(|tx| {
+        tx.import_table_with_range::<tables::StorageChangeSets, _>(
+            &unwind_inner_tx,
+            Some(BlockNumberAddress((from, Address::ZERO))),
+            BlockNumberAddress((to, Address::repeat_byte(0xff))),
+        )
+    })??;
 
     Ok(())
 }
