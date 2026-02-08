@@ -2022,15 +2022,14 @@ enum AccountWorkerJob {
 mod tests {
     use super::*;
     use reth_provider::test_utils::create_test_provider_factory;
-    use tokio::task;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
     }
 
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
-    #[tokio::test]
-    async fn spawn_proof_workers_creates_handle() {
+    #[test]
+    fn spawn_proof_workers_creates_handle() {
         let provider_factory = create_test_provider_factory();
         let changeset_cache = reth_trie_db::ChangesetCache::new();
         let factory = reth_provider::providers::OverlayStateProviderFactory::new(
@@ -2046,6 +2045,5 @@ mod tests {
 
         // Workers shut down automatically when handle is dropped
         drop(proof_handle);
-        task::yield_now().await;
     }
 }

@@ -1988,8 +1988,8 @@ mod tests {
     }
 
     /// Verifies that consecutive prefetch proof messages are batched together.
-    #[tokio::test]
-    async fn test_prefetch_proofs_batching() {
+    #[test]
+    fn test_prefetch_proofs_batching() {
         let test_provider_factory = create_test_provider_factory();
         let mut task = create_test_state_root_task(test_provider_factory);
 
@@ -2041,8 +2041,8 @@ mod tests {
     }
 
     /// Verifies that different message types arriving mid-batch are not lost and preserve order.
-    #[tokio::test]
-    async fn test_batching_preserves_ordering_with_different_message_type() {
+    #[test]
+    fn test_batching_preserves_ordering_with_different_message_type() {
         use alloy_evm::block::StateChangeSource;
         use revm_state::Account;
 
@@ -2178,8 +2178,8 @@ mod tests {
     }
 
     /// Verifies that a pending message is processed before the next loop iteration (ordering).
-    #[tokio::test]
-    async fn test_pending_message_processed_before_next_iteration() {
+    #[test]
+    fn test_pending_message_processed_before_next_iteration() {
         use alloy_evm::block::StateChangeSource;
         use revm_state::Account;
 
@@ -2264,8 +2264,8 @@ mod tests {
     }
 
     /// Verifies that BAL messages are processed correctly and generate state updates.
-    #[tokio::test]
-    async fn test_bal_message_processing() {
+    #[test]
+    fn test_bal_message_processing() {
         let test_provider_factory = create_test_provider_factory();
         let test_provider = create_cached_provider(test_provider_factory.clone());
         let mut task = create_test_state_root_task(test_provider_factory);

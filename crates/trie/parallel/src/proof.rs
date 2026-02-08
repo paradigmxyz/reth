@@ -257,8 +257,8 @@ mod tests {
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::proof::Proof;
     use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-    #[tokio::test]
-    async fn random_parallel_proof() {
+    #[test]
+    fn random_parallel_proof() {
         let factory = create_test_provider_factory();
 
         let mut rng = rand::rng();

@@ -224,19 +224,9 @@ pub enum RuntimeInitError {
     RayonBuild(#[from] rayon::ThreadPoolBuildError),
 }
 
-/// Returns a fallback tokio [`Handle`] if one is available in the current context (e.g. in tests),
-/// otherwise panics.
-fn fallback_handle() -> Handle {
-    match Handle::try_current() {
-        Ok(handle) => handle,
-        Err(_) => uninitialized_panic(),
-    }
-}
-
-/// Returns a fallback [`TaskExecutor`] if a tokio runtime is available in the current context
-/// (e.g. in tests), otherwise panics.
+/// Returns a fallback [`TaskExecutor`], using the handle from [`GlobalRuntime::handle`].
 fn fallback_executor() -> TaskExecutor {
-    TaskManager::new(fallback_handle()).executor()
+    TaskManager::new(RUNTIME.handle()).executor()
 }
 
 /// Returns a fallback rayon pool with the given name prefix. Used when `RUNTIME` was not
@@ -259,12 +249,6 @@ fn fallback_rpc_pool() -> BlockingTaskPool {
 #[cfg(feature = "rayon")]
 fn fallback_blocking_guard() -> BlockingTaskGuard {
     BlockingTaskGuard::new(DEFAULT_MAX_BLOCKING_TASKS)
-}
-
-#[cold]
-#[inline(never)]
-fn uninitialized_panic() -> ! {
-    panic!("RUNTIME not initialized. Call reth_tasks::RUNTIME.init() before accessing pools.")
 }
 
 /// Global runtime singleton that manages async and parallel execution resources.
@@ -434,12 +418,28 @@ impl GlobalRuntime {
 
     /// Get the tokio runtime handle.
     ///
-    /// # Panics
-    ///
-    /// Panics if the runtime has not been initialized and no tokio runtime is available in the
-    /// current context.
+    /// If the runtime has not been explicitly initialized, this will:
+    /// 1. Try to use the current tokio context (e.g. inside `#[tokio::test]`)
+    /// 2. Otherwise, create and store a new multi-thread tokio runtime as a fallback
     pub fn handle(&self) -> Handle {
-        self.handle.get().cloned().unwrap_or_else(fallback_handle)
+        if let Some(h) = self.handle.get() {
+            return h.clone()
+        }
+
+        if let Ok(h) = Handle::try_current() {
+            return h
+        }
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .thread_keep_alive(DEFAULT_THREAD_KEEP_ALIVE)
+            .thread_name("tokio-rt-fallback")
+            .build()
+            .expect("failed to build fallback tokio runtime");
+        let h = runtime.handle().clone();
+        let _ = self.runtime.set(runtime);
+        let _ = self.handle.set(h.clone());
+        h
     }
 
     /// Get a clone of the [`TaskExecutor`].
