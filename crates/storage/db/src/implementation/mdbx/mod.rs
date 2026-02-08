@@ -109,15 +109,20 @@ pub struct DatabaseArguments {
     /// performance. The available modes are:
     ///
     /// - [`SyncMode::Durable`]: Ensures all transactions are fully flushed to disk before they are
-    ///   considered committed.   This provides the highest level of durability and crash safety
-    ///   but may have a performance cost.
-    /// - [`SyncMode::SafeNoSync`]: Skips certain fsync operations to improve write performance.
-    ///   This mode still maintains database integrity but may lose the most recent transactions if
-    ///   the system crashes unexpectedly.
+    ///   considered committed. This provides the highest level of durability and crash safety but
+    ///   has a significant performance cost due to per-commit fsync.
+    /// - [`SyncMode::SafeNoSync`]: Skips fsync on commit to improve write performance. Database
+    ///   structural integrity is always maintained — a system crash cannot corrupt the database,
+    ///   but the most recent transactions since the last steady commit may be lost. On application
+    ///   crash (without OS/power failure), no data is lost because the OS eventually flushes dirty
+    ///   mmap pages.
     ///
-    /// Choose `Durable` if consistency and crash safety are critical (e.g., production
-    /// environments). Choose `SafeNoSync` if performance is more important and occasional data
-    /// loss is acceptable (e.g., testing or ephemeral data).
+    /// Defaults to `SafeNoSync` because reth's engine already handles recovery from lost
+    /// recent blocks (re-executing from peers on restart), making the durability trade-off
+    /// acceptable for the significant persistence throughput improvement (up to 10x faster
+    /// commit latency).
+    ///
+    /// Use `--db.sync-mode=durable` to opt into per-commit fsync if strict durability is required.
     sync_mode: SyncMode,
 }
 
@@ -142,7 +147,7 @@ impl DatabaseArguments {
             max_read_transaction_duration: None,
             exclusive: None,
             max_readers: None,
-            sync_mode: SyncMode::Durable,
+            sync_mode: SyncMode::SafeNoSync,
         }
     }
 
