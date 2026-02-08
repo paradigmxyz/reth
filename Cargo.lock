@@ -8280,6 +8280,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "auto_impl",
  "futures",
+ "rand 0.9.2",
  "reth-chain-state",
  "reth-errors",
  "reth-ethereum-primitives",
@@ -8292,6 +8293,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -10666,6 +10668,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.9.2",
  "rayon",
+ "reth-engine-primitives",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",

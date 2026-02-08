@@ -46,6 +46,10 @@ pub use invalid_block_hook::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlo
 pub mod config;
 pub use config::*;
 
+/// Debug jitter utilities for testing timing-related bugs.
+#[cfg(feature = "debug-jitter")]
+pub mod jitter;
+
 /// This type defines the versioned types of the engine API based on the [ethereum engine API](https://github.com/ethereum/execution-apis/tree/main/src/engine).
 ///
 /// This includes the execution payload types and payload attributes that are used to trigger a

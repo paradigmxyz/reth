@@ -107,6 +107,7 @@ js-tracer = [
     "reth-rpc-eth-types/js-tracer",
 ]
 
+debug-jitter = ["reth-node-builder/debug-jitter"]
 dev = ["reth-ethereum-cli/dev"]
 
 asm-keccak = [

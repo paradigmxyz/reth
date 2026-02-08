@@ -244,6 +244,10 @@ impl SparseTrie for ParallelSparseTrie {
         // Reveal lower subtrie nodes in parallel
         {
             use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+            use tracing::Span;
+
+            // Capture the current span so it can be propagated to rayon worker threads
+            let parent_span = Span::current();
 
             // Group the nodes by lower subtrie. This must be collected into a Vec in order for
             // rayon's `zip` to be happy.
@@ -291,6 +295,10 @@ impl SparseTrie for ParallelSparseTrie {
                 .into_par_iter()
                 .zip(node_groups.into_par_iter())
                 .map(|((subtrie_idx, mut subtrie), nodes)| {
+                    // Enter the parent span to propagate context (e.g., hashed_address for storage
+                    // tries) to the worker thread
+                    let _guard = parent_span.enter();
+
                     // reserve space in the HashMap ahead of time; doing it on a node-by-node basis
                     // can cause multiple re-allocations as the hashmap grows.
                     subtrie.nodes.reserve(nodes.len());
@@ -326,6 +334,13 @@ impl SparseTrie for ParallelSparseTrie {
         value: Vec<u8>,
         provider: P,
     ) -> SparseTrieResult<()> {
+        trace!(
+            target: "trie::parallel_sparse",
+            ?full_path,
+            value_len = value.len(),
+            "Updating leaf",
+        );
+
         // Check if the value already exists - if so, just update it (no structural changes needed)
         if self.upper_subtrie.inner.values.contains_key(&full_path) {
             self.prefix_set.insert(full_path);
@@ -577,6 +592,12 @@ impl SparseTrie for ParallelSparseTrie {
         full_path: &Nibbles,
         provider: P,
     ) -> SparseTrieResult<()> {
+        trace!(
+            target: "trie::parallel_sparse",
+            ?full_path,
+            "Removing leaf",
+        );
+
         // When removing a leaf node it's possibly necessary to modify its parent node, and possibly
         // the parent's parent node. It is not ever necessary to descend further than that; once an
         // extension node is hit it must terminate in a branch or the root, which won't need further
@@ -2706,6 +2727,14 @@ impl SparseSubtrie {
             return Ok(false)
         }
 
+        trace!(
+            target: "trie::parallel_sparse",
+            ?path,
+            ?node,
+            ?masks,
+            "Revealing node",
+        );
+
         match node {
             TrieNode::EmptyRoot => {
                 // For an empty root, ensure that we are at the root path, and at the upper subtrie.
@@ -3036,6 +3065,14 @@ impl SparseSubtrieInner {
                     self.buffers.rlp_buf.clear();
                     let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.buffers.rlp_buf);
                     *hash = rlp_node.as_hash();
+                    trace!(
+                        target: "trie::parallel_sparse",
+                        ?path,
+                        ?key,
+                        value = %alloy_primitives::hex::encode(value),
+                        ?hash,
+                        "Calculated leaf hash",
+                    );
                     (rlp_node, SparseNodeType::Leaf)
                 }
             }

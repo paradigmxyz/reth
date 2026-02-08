@@ -35,3 +35,7 @@ pub mod metrics;
 /// Proof task manager metrics.
 #[cfg(feature = "metrics")]
 pub mod proof_task_metrics;
+
+/// Debug jitter utilities for testing timing-related bugs.
+#[cfg(feature = "debug-jitter")]
+mod jitter;
