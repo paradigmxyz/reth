@@ -1809,6 +1809,7 @@ where
         debug_assert!(!self.persistence_state.in_progress());
 
         let mut blocks_to_persist = Vec::new();
+        let max_batch_size = if self.config.persistence_threshold() == 0 { 1 } else { usize::MAX };
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
@@ -1838,6 +1839,9 @@ where
             }
 
             current_hash = block.recovered_block().parent_hash();
+            if blocks_to_persist.len() >= max_batch_size {
+                break;
+            }
         }
 
         // Reverse the order so that the oldest block comes first
