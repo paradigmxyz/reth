@@ -149,6 +149,22 @@ impl Environment {
         f(self.env_ptr())
     }
 
+    /// Warms up the database by loading pages into the OS page cache.
+    ///
+    /// `flags` are `MDBX_warmup_flags_t` bitflags (e.g. `MDBX_warmup_default`,
+    /// `MDBX_warmup_force | MDBX_warmup_oomsafe`).
+    ///
+    /// `timeout_seconds_16dot16` is a 16.16 fixed-point timeout in seconds (0 = no timeout).
+    pub fn warmup(
+        &self,
+        flags: ffi::MDBX_warmup_flags_t,
+        timeout_seconds_16dot16: u32,
+    ) -> Result<bool> {
+        mdbx_result(unsafe {
+            ffi::mdbx_env_warmup(self.env_ptr(), ptr::null(), flags, timeout_seconds_16dot16)
+        })
+    }
+
     /// Flush the environment data buffers to disk.
     pub fn sync(&self, force: bool) -> Result<bool> {
         mdbx_result(unsafe { ffi::mdbx_env_sync_ex(self.env_ptr(), force, false) })
