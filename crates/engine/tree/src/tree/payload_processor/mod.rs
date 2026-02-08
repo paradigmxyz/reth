@@ -943,8 +943,22 @@ impl PayloadExecutionCache {
     where
         F: FnOnce(&mut Option<SavedCache>),
     {
+        let wait_start = Instant::now();
         let mut guard = self.inner.write();
+        let wait_elapsed = wait_start.elapsed();
+        self.metrics.execution_cache_write_wait_duration.record(wait_elapsed.as_secs_f64());
+        if wait_elapsed.as_millis() > 5 {
+            warn!(blocked_for=?wait_elapsed, "Blocked waiting for execution cache write lock");
+        }
+
+        let hold_start = Instant::now();
         update_fn(&mut guard);
+        drop(guard);
+        let hold_elapsed = hold_start.elapsed();
+        self.metrics.execution_cache_write_hold_duration.record(hold_elapsed.as_secs_f64());
+        if hold_elapsed.as_millis() > 5 {
+            warn!(hold_duration=?hold_elapsed, "Held execution cache write lock for extended period");
+        }
     }
 }
 
@@ -957,6 +971,10 @@ pub(crate) struct ExecutionCacheMetrics {
     pub(crate) execution_cache_in_use: Counter,
     /// Time spent waiting for execution cache mutex to become available.
     pub(crate) execution_cache_wait_duration: Histogram,
+    /// Histogram of time waiting to acquire write lock on execution cache
+    pub(crate) execution_cache_write_wait_duration: Histogram,
+    /// Histogram of time holding write lock on execution cache
+    pub(crate) execution_cache_write_hold_duration: Histogram,
 }
 
 /// EVM context required to execute a block.
