@@ -169,8 +169,8 @@ pub struct TreeConfig {
     disable_proof_v2: bool,
     /// Whether to disable cache metrics recording (can be expensive with large cached state).
     disable_cache_metrics: bool,
-    /// Whether to enable sparse trie as cache.
-    enable_sparse_trie_as_cache: bool,
+    /// Whether to disable sparse trie cache.
+    disable_trie_cache: bool,
     /// Depth for sparse trie pruning after state root computation.
     sparse_trie_prune_depth: usize,
     /// Maximum number of storage tries to retain after pruning.
@@ -204,7 +204,7 @@ impl Default for TreeConfig {
             account_worker_count: default_account_worker_count(),
             disable_proof_v2: false,
             disable_cache_metrics: false,
-            enable_sparse_trie_as_cache: false,
+            disable_trie_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
         }
@@ -267,7 +267,7 @@ impl TreeConfig {
             account_worker_count,
             disable_proof_v2,
             disable_cache_metrics,
-            enable_sparse_trie_as_cache: false,
+            disable_trie_cache: false,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
         }
@@ -586,14 +586,14 @@ impl TreeConfig {
         self
     }
 
-    /// Returns whether sparse trie as cache is enabled.
-    pub const fn enable_sparse_trie_as_cache(&self) -> bool {
-        self.enable_sparse_trie_as_cache
+    /// Returns whether sparse trie cache is disabled.
+    pub const fn disable_trie_cache(&self) -> bool {
+        self.disable_trie_cache
     }
 
-    /// Setter for whether to enable sparse trie as cache.
-    pub const fn with_enable_sparse_trie_as_cache(mut self, value: bool) -> Self {
-        self.enable_sparse_trie_as_cache = value;
+    /// Setter for whether to disable sparse trie cache.
+    pub const fn with_disable_trie_cache(mut self, value: bool) -> Self {
+        self.disable_trie_cache = value;
         self
     }
 
