@@ -84,6 +84,15 @@ impl HelloMessageWithProtocols {
         self.protocols.iter().any(|p| p.cap == protocol.cap)
     }
 
+    /// Adds snap/1 to the protocol list if not present.
+    pub fn with_snap(mut self) -> Self {
+        let snap = Protocol::snap();
+        if !self.contains_protocol(&snap) {
+            let _ = self.try_add_protocol(snap);
+        }
+        self
+    }
+
     /// Adds a new protocol to the set.
     ///
     /// Returns an error if the protocol already exists.
@@ -178,6 +187,16 @@ impl HelloMessageBuilder {
     /// Sets protocols to use.
     pub fn protocols(mut self, protocols: impl IntoIterator<Item = Protocol>) -> Self {
         self.protocols.get_or_insert_with(Vec::new).extend(protocols);
+        self
+    }
+
+    /// Enables or disables announcing snap/1 capability.
+    pub fn with_snap(mut self, enable: bool) -> Self {
+        if enable {
+            self.protocols.get_or_insert_with(Vec::new).push(Protocol::snap());
+        } else if let Some(protocols) = self.protocols.as_mut() {
+            protocols.retain(|p| p.cap.name != "snap");
+        }
         self
     }
 
@@ -294,5 +313,22 @@ mod tests {
 
         // zero is encoded as 0x80, the empty string code in RLP
         assert_eq!(hello_encoded[0], EMPTY_STRING_CODE);
+    }
+
+    #[test]
+    fn builder_with_snap_toggle() {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let id = pk2id(&secret_key.public_key(SECP256K1));
+
+        let snap_proto = crate::protocol::Protocol::snap();
+
+        // enable snap: should contain snap capability
+        let hello_with_snap = HelloMessageWithProtocols::builder(id).with_snap(true).build();
+        assert!(hello_with_snap.contains_protocol(&snap_proto));
+
+        // enable then disable: snap should be removed
+        let hello_without_snap =
+            HelloMessageWithProtocols::builder(id).with_snap(true).with_snap(false).build();
+        assert!(!hello_without_snap.contains_protocol(&snap_proto));
     }
 }
