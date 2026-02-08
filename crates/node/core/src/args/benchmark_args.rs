@@ -58,6 +58,14 @@ pub struct BenchmarkArgs {
     /// The path to the output directory for granular benchmark results.
     #[arg(long, short, value_name = "BENCHMARK_OUTPUT", verbatim_doc_comment)]
     pub output: Option<PathBuf>,
+
+    /// Use `reth_newPayload*` endpoints instead of `engine_newPayload*`.
+    ///
+    /// The `reth_newPayload*` endpoints are reth-specific extensions that wait for
+    /// execution cache and preserved sparse trie locks to become available before
+    /// processing, ensuring optimal cache utilization during benchmarking.
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    pub reth_new_payload: bool,
 }
 
 #[cfg(test)]

@@ -153,6 +153,17 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
+    /// Message with new payload that waits for execution cache and sparse trie locks.
+    ///
+    /// This variant is used by `reth_newPayload*` endpoints to ensure that the payload
+    /// processing waits for execution cache and preserved sparse trie locks to become
+    /// available before starting execution.
+    NewPayloadWaitForCaches {
+        /// The execution payload received by Engine API.
+        payload: Payload::ExecutionData,
+        /// The sender for returning payload status result.
+        tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
+    },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {
         /// The updated forkchoice state.
@@ -173,6 +184,15 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                 write!(
                     f,
                     "NewPayload(parent: {}, number: {}, hash: {})",
+                    payload.parent_hash(),
+                    payload.block_number(),
+                    payload.block_hash()
+                )
+            }
+            Self::NewPayloadWaitForCaches { payload, .. } => {
+                write!(
+                    f,
+                    "NewPayloadWaitForCaches(parent: {}, number: {}, hash: {})",
                     payload.parent_hash(),
                     payload.block_number(),
                     payload.block_hash()
@@ -220,6 +240,20 @@ where
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
+        rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
+    }
+
+    /// Sends a new payload message to the beacon consensus engine that waits for execution cache
+    /// and preserved sparse trie locks to become available before processing.
+    ///
+    /// This is used by the `reth_newPayload*` endpoints to ensure sequential processing with
+    /// proper cache synchronization.
+    pub async fn new_payload_wait_for_caches(
+        &self,
+        payload: Payload::ExecutionData,
+    ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_engine.send(BeaconEngineMessage::NewPayloadWaitForCaches { payload, tx });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
