@@ -1259,8 +1259,7 @@ where
 
         // NOTE: checked non-empty above
         let highest_num_hash = blocks_to_persist
-            .iter()
-            .max_by_key(|block| block.recovered_block().number())
+            .last()
             .map(|b| b.recovered_block().num_hash())
             .expect("Checked non-empty persisting blocks");
 
