@@ -29,11 +29,11 @@ use reth_provider::{
     },
     ProviderFactory, StaticFileProviderFactory, StorageSettings,
 };
-use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
+use reth_stages::{check_unwind_history_available, sets::DefaultStages, Pipeline};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Struct to hold config and datadir paths
 #[derive(Debug, Parser)]
@@ -232,11 +232,29 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
+            let unwind_block = unwind_target.unwind_target().expect("should exist");
             assert_ne!(
-                unwind_target,
-                PipelineTarget::Unwind(0),
+                unwind_block, 0,
                 "A static file <> database inconsistency was found that would trigger an unwind to block 0"
             );
+
+            // Pre-check history availability before attempting unwind
+            let provider = factory.provider()?;
+            if let Err(err) = check_unwind_history_available(&provider, &prune_modes, unwind_block)
+            {
+                error!(
+                    target: "reth::cli",
+                    %err,
+                    unwind_block,
+                    "Cannot recover from storage inconsistency: required history data has been pruned.\n\
+                     Recovery options:\n\
+                     1. Re-sync from scratch by removing the data directory\n\
+                     2. Restore from a backup that has the required history\n\
+                     3. If only static files are corrupted, try deleting the affected static files \
+                        and using `reth stage drop <stage>` to reset the stage checkpoint"
+                );
+                return Err(err.into());
+            }
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
@@ -259,7 +277,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
             // Move all applicable data from database to static files.
             pipeline.move_to_static_files()?;
-            pipeline.unwind(unwind_target.unwind_target().expect("should exist"), None)?;
+            pipeline.unwind(unwind_block, None)?;
         }
 
         Ok(factory)
