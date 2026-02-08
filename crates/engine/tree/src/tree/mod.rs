@@ -551,7 +551,7 @@ where
         level = "debug",
         target = "engine::tree",
         skip_all,
-        fields(block_hash = %payload.block_hash(), block_num = %payload.block_number()),
+        fields(block_hash = %payload.block_hash(), block_num = %payload.block_number(), gas_used = %payload.gas_used()),
     )]
     fn on_new_payload(
         &mut self,

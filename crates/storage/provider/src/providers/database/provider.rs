@@ -80,7 +80,7 @@ use std::{
     sync::Arc,
     time::Instant,
 };
-use tracing::{debug, instrument, trace};
+use tracing::{debug, debug_span, instrument, trace};
 
 /// Determines the commit order for database operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -503,7 +503,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
     /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
-    #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = blocks.len()))]
+    #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = blocks.len(), first_block, last_block))]
     pub fn save_blocks(
         &self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
@@ -518,6 +518,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let block_count = blocks.len() as u64;
         let first_number = blocks.first().unwrap().recovered_block().number();
         let last_block_number = blocks.last().unwrap().recovered_block().number();
+        tracing::Span::current().record("first_block", first_number);
+        tracing::Span::current().record("last_block", last_block_number);
 
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
 
@@ -559,6 +561,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         STORAGE_POOL.in_place_scope(|s| {
             // SF writes
             s.spawn(|_| {
+                let _span = debug_span!(target: "providers::db", "save_blocks::static_file_writes").entered();
                 let start = Instant::now();
                 sf_result = Some(
                     sf_provider
@@ -571,6 +574,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             #[cfg(all(unix, feature = "rocksdb"))]
             if rocksdb_enabled {
                 s.spawn(|_| {
+                    let _span = debug_span!(target: "providers::db", "save_blocks::rocksdb_writes").entered();
                     let start = Instant::now();
                     rocksdb_result = Some(
                         rocksdb_provider
@@ -590,6 +594,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let start = Instant::now();
                 let total_tx_count: usize =
                     blocks.iter().map(|b| b.recovered_block().body().transaction_count()).sum();
+                let _span = debug_span!(target: "providers::db", "save_blocks::insert_tx_hash_numbers", total_tx_count).entered();
                 let mut all_tx_hashes = Vec::with_capacity(total_tx_count);
                 for (i, block) in blocks.iter().enumerate() {
                     let recovered_block = block.recovered_block();
@@ -652,6 +657,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             if save_mode.with_state() {
                 // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
                 let start = Instant::now();
+                let _span = debug_span!(target: "providers::db", "save_blocks::write_hashed_state").entered();
                 let merged_hashed_state = HashedPostStateSorted::merge_batch(
                     blocks.iter().rev().map(|b| b.trie_data().hashed_state),
                 );
@@ -661,6 +667,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
+                let _span = debug_span!(target: "providers::db", "save_blocks::write_trie_updates").entered();
                 let merged_trie =
                     TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
                 if !merged_trie.is_empty() {
@@ -671,6 +678,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Full mode: update history indices
             if save_mode.with_state() {
+                let _span = debug_span!(target: "providers::db", "save_blocks::update_history_indices", first_number, last_block_number).entered();
                 let start = Instant::now();
                 self.update_history_indices(first_number..=last_block_number)?;
                 timings.update_history_indices = start.elapsed();
