@@ -78,7 +78,7 @@ use reth_stages::{
     StageId,
 };
 use reth_static_file::StaticFileProducer;
-use reth_tasks::TaskExecutor;
+use reth_tasks::{RayonConfig, RuntimeConfig, TaskExecutor, TokioConfig, RUNTIME};
 use reth_tracing::{
     throttle,
     tracing::{debug, error, info, warn},
@@ -215,9 +215,8 @@ impl LaunchContext {
     /// Configure global settings this includes:
     ///
     /// - Raising the file descriptor limit
-    /// - Configuring the global rayon thread pool with available parallelism. Honoring
-    ///   engine.reserved-cpu-cores to reserve given number of cores for O while using at least 1
-    ///   core for the rayon thread pool
+    /// - Initializing the global [`RUNTIME`] with dedicated rayon thread pools
+    /// - Configuring the global rayon thread pool for implicit `par_iter` usage
     pub fn configure_globals(&self, reserved_cpu_cores: usize) {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
@@ -229,9 +228,17 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Reserving the given number of CPU cores for the rest of OS.
-        // Users can reserve more cores by setting engine.reserved-cpu-cores
-        // Note: The global rayon thread pool will use at least one core.
+        // Initialize the global RUNTIME with the tokio handle and dedicated rayon pools.
+        let handle = self.task_executor.handle().clone();
+        let rayon_config = RayonConfig::default().with_reserved_cpu_cores(reserved_cpu_cores);
+        let config = RuntimeConfig::default()
+            .with_tokio(TokioConfig::existing_handle(handle))
+            .with_rayon(rayon_config);
+        if let Err(err) = RUNTIME.init(config) {
+            warn!(%err, "Failed to initialize global RUNTIME");
+        }
+
+        // Configure the implicit global rayon pool for `par_iter` usage.
         let num_threads = available_parallelism()
             .map_or(0, |num| num.get().saturating_sub(reserved_cpu_cores).max(1));
         if let Err(err) = ThreadPoolBuilder::new()
