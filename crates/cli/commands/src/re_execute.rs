@@ -64,6 +64,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
+        // Ensure databases exist before opening in read-only mode.
+        // Freshly restored snapshots may lack MDBX tables or RocksDB column families.
+        self.env.ensure_databases_exist()?;
+
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
 
         let components = components(provider_factory.chain_spec());

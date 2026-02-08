@@ -8,7 +8,7 @@ use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::noop::NoopConsensus;
-use reth_db::{init_db, open_db_read_only, DatabaseEnv};
+use reth_db::{init_db, is_database_empty, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis_with_settings;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_eth_wire::NetPrimitivesFor;
@@ -193,6 +193,44 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         }
 
         Ok(Environment { config, provider_factory, data_dir })
+    }
+
+    /// Ensures the data directories and databases exist.
+    ///
+    /// Intended for offline commands (e.g. `re-execute`) that open the environment
+    /// in read-only mode but may run against freshly restored snapshots that lack
+    /// MDBX tables or RocksDB column families.
+    ///
+    /// Creates directories and briefly opens each database in read-write mode to
+    /// set up the necessary structures, then drops the handle so it can be reopened
+    /// as read-only. Skips initialization when the database already exists.
+    pub fn ensure_databases_exist(&self) -> eyre::Result<()>
+    where
+        C::ChainSpec: EthChainSpec,
+    {
+        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
+        let db_path = data_dir.db();
+        let sf_path = data_dir.static_files();
+        let rocksdb_path = data_dir.rocksdb();
+
+        reth_fs_util::create_dir_all(&db_path)?;
+        reth_fs_util::create_dir_all(&sf_path)?;
+        reth_fs_util::create_dir_all(&rocksdb_path)?;
+
+        if is_database_empty(&db_path) {
+            info!(target: "reth::cli", "MDBX database not initialized, creating tables");
+            let _ = init_db(&db_path, self.db.database_args())?;
+        }
+
+        if is_database_empty(&rocksdb_path) {
+            info!(target: "reth::cli", "RocksDB database not initialized, creating column families");
+            let _ = RocksDBProvider::builder(&rocksdb_path)
+                .with_default_tables()
+                .with_database_log_level(self.db.log_level)
+                .build()?;
+        }
+
+        Ok(())
     }
 
     /// Returns a [`ProviderFactory`] after executing consistency checks.
