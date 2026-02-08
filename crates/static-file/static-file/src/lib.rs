@@ -8,6 +8,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod metrics;
 pub mod segments;
 mod static_file_producer;
 
