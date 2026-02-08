@@ -11,15 +11,39 @@ env:
   RUSTC_WRAPPER: "sccache"
 
 jobs:
+  detect:
+    name: detect affected crates
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    env:
+      RUSTC_WRAPPER: ""
+    outputs:
+      cargo-args: ${{ steps.rail.outputs.cargo-args }}
+      count: ${{ steps.rail.outputs.count }}
+      rebuild-all: ${{ steps.rail.outputs.rebuild-all }}
+      docs-only: ${{ steps.rail.outputs.docs-only }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: loadingalias/cargo-rail-action@v2
+        id: rail
+
   clippy-binaries:
     name: clippy binaries / ${{ matrix.type }}
+    needs: [detect]
+    if: |
+      always() &&
+      (needs.detect.result == 'skipped' ||
+       (needs.detect.result == 'success' &&
+        (needs.detect.outputs.rebuild-all == 'true' ||
+         (needs.detect.outputs.count != '0' && needs.detect.outputs.docs-only != 'true'))))
     runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
         include:
           - type: ethereum
-            args: --workspace --lib --examples --tests --benches --locked
             features: "ethereum asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
     steps:
       - uses: actions/checkout@v6
@@ -36,12 +60,24 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run clippy on binaries
-        run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
+        run: |
+          SCOPE="${{ needs.detect.outputs.cargo-args }}"
+          if [ -z "$SCOPE" ] || [ "${{ needs.detect.outputs.rebuild-all }}" == "true" ]; then
+            SCOPE="--workspace"
+          fi
+          cargo clippy $SCOPE --lib --examples --tests --benches --locked --features "${{ matrix.features }}"
         env:
           RUSTFLAGS: -D warnings
 
   clippy:
     name: clippy
+    needs: [detect]
+    if: |
+      always() &&
+      (needs.detect.result == 'skipped' ||
+       (needs.detect.result == 'success' &&
+        (needs.detect.outputs.rebuild-all == 'true' ||
+         (needs.detect.outputs.count != '0' && needs.detect.outputs.docs-only != 'true'))))
     runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -54,11 +90,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
+      - name: Run clippy
+        run: |
+          SCOPE="${{ needs.detect.outputs.cargo-args }}"
+          if [ -z "$SCOPE" ] || [ "${{ needs.detect.outputs.rebuild-all }}" == "true" ]; then
+            SCOPE="--workspace"
+          fi
+          cargo clippy $SCOPE --lib --examples --tests --benches --all-features --locked
         env:
           RUSTFLAGS: -D warnings
 
   wasm:
+    needs: [detect]
+    if: |
+      always() &&
+      (needs.detect.result == 'skipped' ||
+       (needs.detect.result == 'success' &&
+        (needs.detect.outputs.rebuild-all == 'true' ||
+         (needs.detect.outputs.count != '0' && needs.detect.outputs.docs-only != 'true'))))
     runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -79,6 +128,13 @@ jobs:
           .github/scripts/check_wasm.sh
 
   riscv:
+    needs: [detect]
+    if: |
+      always() &&
+      (needs.detect.result == 'skipped' ||
+       (needs.detect.result == 'success' &&
+        (needs.detect.outputs.rebuild-all == 'true' ||
+         (needs.detect.outputs.count != '0' && needs.detect.outputs.docs-only != 'true'))))
     runs-on: depot-ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -98,6 +154,13 @@ jobs:
 
   crate-checks:
     name: crate-checks (${{ matrix.partition }}/${{ matrix.total_partitions }})
+    needs: [detect]
+    if: |
+      always() &&
+      (needs.detect.result == 'skipped' ||
+       (needs.detect.result == 'success' &&
+        (needs.detect.outputs.rebuild-all == 'true' ||
+         (needs.detect.outputs.count != '0' && needs.detect.outputs.docs-only != 'true'))))
     runs-on: depot-ubuntu-latest-4
     strategy:
       matrix:
@@ -135,6 +198,13 @@ jobs:
 
   docs:
     name: docs
+    needs: [detect]
+    if: |
+      always() &&
+      (needs.detect.result == 'skipped' ||
+       (needs.detect.result == 'success' &&
+        (needs.detect.outputs.rebuild-all == 'true' ||
+         (needs.detect.outputs.count != '0' && needs.detect.outputs.docs-only != 'true'))))
     runs-on: depot-ubuntu-latest-4
     timeout-minutes: 30
     steps:
@@ -145,7 +215,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo docs --document-private-items
+      - name: Run doc build
+        run: |
+          SCOPE="${{ needs.detect.outputs.cargo-args }}"
+          if [ -z "$SCOPE" ] || [ "${{ needs.detect.outputs.rebuild-all }}" == "true" ]; then
+            cargo docs --document-private-items
+          else
+            cargo doc $SCOPE --all-features --no-deps --document-private-items
+          fi
         env:
           # Keep in sync with ./book.yml:jobs.build
           # This should only add `-D warnings`
@@ -167,6 +244,13 @@ jobs:
 
   udeps:
     name: udeps
+    needs: [detect]
+    if: |
+      always() &&
+      (needs.detect.result == 'skipped' ||
+       (needs.detect.result == 'success' &&
+        (needs.detect.outputs.rebuild-all == 'true' ||
+         (needs.detect.outputs.count != '0' && needs.detect.outputs.docs-only != 'true'))))
     runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -178,7 +262,13 @@ jobs:
         with:
           cache-on-failure: true
       - uses: taiki-e/install-action@cargo-udeps
-      - run: cargo udeps --workspace --lib --examples --tests --benches --all-features --locked
+      - name: Run udeps
+        run: |
+          SCOPE="${{ needs.detect.outputs.cargo-args }}"
+          if [ -z "$SCOPE" ] || [ "${{ needs.detect.outputs.rebuild-all }}" == "true" ]; then
+            SCOPE="--workspace"
+          fi
+          cargo udeps $SCOPE --lib --examples --tests --benches --all-features --locked
 
   book:
     name: book
@@ -286,9 +376,11 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
+      - detect
       - clippy-binaries
       - clippy
       - wasm
+      - riscv
       - crate-checks
       - docs
       - fmt
@@ -305,4 +397,5 @@ jobs:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1
         with:
+          allowed-skips: detect, clippy-binaries, clippy, wasm, riscv, crate-checks, docs, udeps
           jobs: ${{ toJSON(needs) }}
