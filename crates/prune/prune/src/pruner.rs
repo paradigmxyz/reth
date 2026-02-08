@@ -15,7 +15,7 @@ use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 /// Result of [`Pruner::run`] execution.
 pub type PrunerResult = Result<PrunerOutput, PrunerError>;
@@ -114,6 +114,12 @@ where
     ///
     /// Returns a [`PruneProgress`], indicating whether pruning is finished, or there is more data
     /// to prune.
+    #[instrument(
+        name = "Pruner::run_with_provider",
+        level = "debug",
+        target = "pruner",
+        skip(self, provider)
+    )]
     pub fn run_with_provider(
         &mut self,
         provider: &Provider,
@@ -162,6 +168,7 @@ where
     ///
     /// Returns a list of stats per pruned segment, total number of entries pruned, and
     /// [`PruneProgress`].
+    #[instrument(level = "debug", target = "pruner", skip_all, fields(segments = self.segments.len()))]
     fn prune_segments(
         &mut self,
         provider: &Provider,
@@ -330,6 +337,7 @@ where
     ///
     /// Returns a [`PruneProgress`], indicating whether pruning is finished, or there is more data
     /// to prune.
+    #[instrument(name = "Pruner::run", level = "debug", target = "pruner", skip(self))]
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
         let provider = self.provider_factory.database_provider_rw()?;
         let result = self.run_with_provider(&provider, tip_block_number);

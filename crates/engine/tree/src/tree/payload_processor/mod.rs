@@ -517,6 +517,7 @@ where
         let max_storage_tries = self.sparse_trie_max_storage_tries;
         let chunk_size =
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
+        let executor = self.executor.clone();
 
         let parent_span = Span::current();
         self.executor.spawn_blocking(move || {
@@ -560,10 +561,11 @@ where
                 ))
             } else {
                 SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_trie(
+                    &executor,
                     from_multi_proof,
                     proof_worker_handle,
                     trie_metrics.clone(),
-                    sparse_state_trie,
+                    sparse_state_trie.with_skip_proof_node_filtering(true),
                     chunk_size,
                 ))
             };

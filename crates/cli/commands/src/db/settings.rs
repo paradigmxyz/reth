@@ -121,7 +121,7 @@ impl Command {
             account_history_in_rocksdb: _,
             account_changesets_in_static_files: _,
             storage_changesets_in_static_files: _,
-        } = settings.unwrap_or_else(StorageSettings::legacy);
+        } = settings.unwrap_or_else(StorageSettings::v1);
 
         // Update the setting based on the key
         match cmd {

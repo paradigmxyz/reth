@@ -84,5 +84,9 @@ pub use static_files::{StaticFilesArgs, MINIMAL_BLOCKS_PER_FILE};
 mod rocksdb;
 pub use rocksdb::{RocksDbArgs, RocksDbArgsError};
 
+/// `StorageArgs` for configuring storage mode (v2 vs v1/legacy).
+mod storage;
+pub use storage::StorageArgs;
+
 mod error;
 pub mod types;

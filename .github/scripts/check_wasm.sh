@@ -40,12 +40,6 @@ exclude_crates=(
   reth-node-ethereum
   reth-node-events
   reth-node-metrics
-  reth-optimism-cli
-  reth-optimism-flashblocks
-  reth-optimism-node
-  reth-optimism-payload-builder
-  reth-optimism-rpc
-  reth-optimism-storage
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util
@@ -77,7 +71,6 @@ exclude_crates=(
   reth-trie-parallel # tokio
   reth-trie-sparse-parallel # rayon
   reth-testing-utils
-  reth-optimism-txpool # reth-transaction-pool
   reth-era-downloader # tokio
   reth-era-utils # tokio
   reth-tracing-otlp

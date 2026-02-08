@@ -13,7 +13,7 @@ use tracing::{level_filters::LevelFilter, Level};
 const MB_TO_BYTES: u64 = 1024 * 1024;
 
 const PROFILER_TRACING_FILTER: &str =
-    "info,engine=debug,trie=debug,providers=debug,rpc=debug,sync=debug,pruner=debug";
+    "info,engine=debug,trie=debug,providers=debug,rpc=debug,sync=debug,pruner=debug,libmdbx=debug";
 
 /// The log configuration.
 #[derive(Debug, Args)]
@@ -166,10 +166,16 @@ impl LogArgs {
             tracer = tracer.with_samply(config);
         }
 
-        #[cfg(feature = "tracy")]
         if self.tracy {
-            let config = self.layer_info(LogFormat::Terminal, self.tracy_filter.clone(), false);
-            tracer = tracer.with_tracy(config);
+            #[cfg(feature = "tracy")]
+            {
+                let config = self.layer_info(LogFormat::Terminal, self.tracy_filter.clone(), false);
+                tracer = tracer.with_tracy(config);
+            }
+            #[cfg(not(feature = "tracy"))]
+            {
+                tracing::warn!("`--log.tracy` requested but `tracy` feature was not compiled in");
+            }
         }
 
         let guard = tracer.init_with_layers(layers)?;

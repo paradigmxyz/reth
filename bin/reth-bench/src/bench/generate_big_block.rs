@@ -152,7 +152,7 @@ impl<S: TransactionSource> TransactionCollector<S> {
         while total_gas < gas_target {
             let Some((block_txs, _)) = self.source.fetch_block_transactions(current_block).await?
             else {
-                warn!(block = current_block, "Block not found, stopping");
+                warn!(target: "reth-bench", block = current_block, "Block not found, stopping");
                 break;
             };
 
@@ -182,6 +182,7 @@ impl<S: TransactionSource> TransactionCollector<S> {
         }
 
         info!(
+            target: "reth-bench",
             total_txs = transactions.len(),
             gas_sent = total_gas,
             next_block = current_block,
@@ -299,10 +300,10 @@ async fn fetch_batch_with_retry<S: TransactionSource>(
             Ok(result) => return Some(result),
             Err(e) => {
                 if attempt == MAX_FETCH_RETRIES {
-                    warn!(attempt, error = %e, "Failed to fetch transactions after max retries");
+                    warn!(target: "reth-bench", attempt, error = %e, "Failed to fetch transactions after max retries");
                     return None;
                 }
-                warn!(attempt, error = %e, "Failed to fetch transactions, retrying...");
+                warn!(target: "reth-bench", attempt, error = %e, "Failed to fetch transactions, retrying...");
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
         }
@@ -342,7 +343,7 @@ impl TxBuffer {
 impl Command {
     /// Execute the `generate-big-block` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        info!(target_gas = self.target_gas, count = self.count, "Generating big block(s)");
+        info!(target: "reth-bench", target_gas = self.target_gas, count = self.count, "Generating big block(s)");
 
         // Set up authenticated engine provider
         let jwt =
@@ -350,20 +351,20 @@ impl Command {
         let jwt = JwtSecret::from_hex(jwt.trim())?;
         let auth_url = Url::parse(&self.engine_rpc_url)?;
 
-        info!("Connecting to Engine RPC at {}", auth_url);
+        info!(target: "reth-bench", "Connecting to Engine RPC at {}", auth_url);
         let auth_transport = AuthenticatedTransportConnect::new(auth_url.clone(), jwt);
         let auth_client = ClientBuilder::default().connect_with(auth_transport).await?;
         let auth_provider = RootProvider::<AnyNetwork>::new(auth_client);
 
         // Set up testing RPC provider (for testing_buildBlockV1)
-        info!("Connecting to Testing RPC at {}", self.testing_rpc_url);
+        info!(target: "reth-bench", "Connecting to Testing RPC at {}", self.testing_rpc_url);
         let testing_client = ClientBuilder::default()
             .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
             .http(self.testing_rpc_url.parse()?);
         let testing_provider = RootProvider::<AnyNetwork>::new(testing_client);
 
         // Get the parent block (latest canonical block)
-        info!(endpoint = "engine", method = "eth_getBlockByNumber", block = "latest", "RPC call");
+        info!(target: "reth-bench", endpoint = "engine", method = "eth_getBlockByNumber", block = "latest", "RPC call");
         let parent_block = auth_provider
             .get_block_by_number(BlockNumberOrTag::Latest)
             .await?
@@ -374,6 +375,7 @@ impl Command {
         let parent_timestamp = parent_block.header.timestamp;
 
         info!(
+            target: "reth-bench",
             parent_hash = %parent_hash,
             parent_number = parent_number,
             "Using initial parent block"
@@ -417,7 +419,7 @@ impl Command {
             .await?;
         }
 
-        info!(count = self.count, output_dir = %self.output_dir.display(), "All payloads generated");
+        info!(target: "reth-bench", count = self.count, output_dir = %self.output_dir.display(), "All payloads generated");
         Ok(())
     }
 
@@ -448,9 +450,9 @@ impl Command {
             self.save_payload(&built)?;
 
             if self.execute || self.count > 1 {
-                info!(payload = i + 1, block_hash = %built.block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
+                info!(target: "reth-bench", payload = i + 1, block_hash = %built.block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
                 self.execute_payload_v4(auth_provider, built.envelope, parent_hash).await?;
-                info!(payload = i + 1, "Payload executed successfully");
+                info!(target: "reth-bench", payload = i + 1, "Payload executed successfully");
             }
 
             parent_hash = built.block_hash;
@@ -477,6 +479,7 @@ impl Command {
             let gas_sent = result.gas_sent;
 
             info!(
+                target: "reth-bench",
                 payload = index + 1,
                 attempt,
                 tx_count = tx_bytes.len(),
@@ -506,7 +509,7 @@ impl Command {
             }
         }
 
-        warn!(payload = index + 1, "Retry loop exited without returning a payload");
+        warn!(target: "reth-bench", payload = index + 1, "Retry loop exited without returning a payload");
         Err(eyre::eyre!("build_with_retry exhausted retries without result"))
     }
 
@@ -534,7 +537,7 @@ impl Command {
             let tx_source = match RpcTransactionSource::from_url(&rpc_url) {
                 Ok(source) => source,
                 Err(e) => {
-                    warn!(error = %e, "Failed to create transaction source");
+                    warn!(target: "reth-bench", error = %e, "Failed to create transaction source");
                     return None;
                 }
             };
@@ -544,11 +547,12 @@ impl Command {
 
             while let Some(batch) = fetch_batch_with_retry(&collector, current_block).await {
                 if batch.transactions.is_empty() {
-                    info!(block = current_block, "Reached chain tip, stopping fetcher");
+                    info!(target: "reth-bench", block = current_block, "Reached chain tip, stopping fetcher");
                     break;
                 }
 
                 info!(
+                    target: "reth-bench",
                     tx_count = batch.transactions.len(),
                     gas_sent = batch.gas_sent,
                     blocks = format!("{}..{}", current_block, batch.next_block),
@@ -574,6 +578,7 @@ impl Command {
             // Get initial batch of transactions for this payload
             let Some(mut result) = tx_buffer.take_batch().await else {
                 info!(
+                    target: "reth-bench",
                     payloads_built = i,
                     payloads_requested = self.count,
                     "Transaction source exhausted, stopping"
@@ -583,6 +588,7 @@ impl Command {
 
             if result.transactions.is_empty() {
                 info!(
+                    target: "reth-bench",
                     payloads_built = i,
                     payloads_requested = self.count,
                     "No more transactions available, stopping"
@@ -608,9 +614,9 @@ impl Command {
             let current_timestamp = built.timestamp;
 
             // Execute payload
-            info!(payload = i + 1, block_hash = %current_block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
+            info!(target: "reth-bench", payload = i + 1, block_hash = %current_block_hash, gas_used = built.gas_used, "Executing payload (newPayload + FCU)");
             self.execute_payload_v4(auth_provider, built.envelope, parent_hash).await?;
-            info!(payload = i + 1, "Payload executed successfully");
+            info!(target: "reth-bench", payload = i + 1, "Payload executed successfully");
 
             parent_hash = current_block_hash;
             parent_timestamp = current_timestamp;
@@ -638,6 +644,7 @@ impl Command {
             let gas_sent = result.gas_sent;
 
             info!(
+                target: "reth-bench",
                 payload = index + 1,
                 attempt,
                 tx_count = tx_bytes.len(),
@@ -666,7 +673,7 @@ impl Command {
                             result.gas_sent = result.gas_sent.saturating_add(batch.gas_sent);
                             result.next_block = batch.next_block;
                         } else {
-                            warn!("Transaction fetcher exhausted, proceeding with available transactions");
+                            warn!(target: "reth-bench", "Transaction fetcher exhausted, proceeding with available transactions");
                             break;
                         }
                     }
@@ -674,7 +681,7 @@ impl Command {
             }
         }
 
-        warn!(payload = index + 1, "Retry loop exited without returning a payload");
+        warn!(target: "reth-bench", payload = index + 1, "Retry loop exited without returning a payload");
         Err(eyre::eyre!("build_with_retry_buffered exhausted retries without result"))
     }
 
@@ -690,6 +697,7 @@ impl Command {
 
         if gas_used + MIN_TARGET_SLACK >= self.target_gas {
             info!(
+                target: "reth-bench",
                 payload = index + 1,
                 gas_used,
                 target_gas = self.target_gas,
@@ -701,6 +709,7 @@ impl Command {
 
         if attempt == MAX_BUILD_RETRIES {
             warn!(
+                target: "reth-bench",
                 payload = index + 1,
                 gas_used,
                 target_gas = self.target_gas,
@@ -712,6 +721,7 @@ impl Command {
 
         if gas_used == 0 {
             warn!(
+                target: "reth-bench",
                 payload = index + 1,
                 "Zero gas used in payload, requesting fixed chunk of additional transactions"
             );
@@ -725,6 +735,7 @@ impl Command {
 
         if additional == 0 {
             info!(
+                target: "reth-bench",
                 payload = index + 1,
                 gas_used,
                 target_gas = self.target_gas,
@@ -735,6 +746,7 @@ impl Command {
 
         let ratio = gas_used as f64 / gas_sent as f64;
         info!(
+            target: "reth-bench",
             payload = index + 1,
             gas_used,
             gas_sent,
@@ -768,6 +780,7 @@ impl Command {
 
         let total_tx_bytes: usize = transactions.iter().map(|tx| tx.len()).sum();
         info!(
+            target: "reth-bench",
             payload = index + 1,
             tx_count = transactions.len(),
             total_tx_bytes = total_tx_bytes,
@@ -795,7 +808,7 @@ impl Command {
         let json = serde_json::to_string_pretty(&payload.envelope)?;
         std::fs::write(&filepath, &json)
             .wrap_err_with(|| format!("Failed to write payload to {:?}", filepath))?;
-        info!(block_number = payload.block_number, block_hash = %payload.block_hash, path = %filepath.display(), "Payload saved");
+        info!(target: "reth-bench", block_number = payload.block_number, block_hash = %payload.block_hash, path = %filepath.display(), "Payload saved");
         Ok(())
     }
 

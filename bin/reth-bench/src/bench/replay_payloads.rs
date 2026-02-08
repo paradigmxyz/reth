@@ -20,7 +20,6 @@ use crate::{
         },
         persistence_waiter::{
             derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
-            PERSISTENCE_CHECKPOINT_TIMEOUT,
         },
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
@@ -105,6 +104,19 @@ pub struct Command {
     )]
     persistence_threshold: u64,
 
+    /// Timeout for waiting on persistence at each checkpoint.
+    ///
+    /// Must be long enough to account for the persistence thread being blocked
+    /// by pruning after the previous save.
+    #[arg(
+        long = "persistence-timeout",
+        value_name = "PERSISTENCE_TIMEOUT",
+        value_parser = parse_duration,
+        default_value = "120s",
+        verbatim_doc_comment
+    )]
+    persistence_timeout: Duration,
+
     /// Optional `WebSocket` RPC URL for persistence subscription.
     /// If not provided, derives from engine RPC URL by changing scheme to ws and port to 8546.
     #[arg(long, value_name = "WS_RPC_URL", verbatim_doc_comment)]
@@ -134,14 +146,15 @@ struct GasRampPayload {
 impl Command {
     /// Execute the `replay-payloads` command.
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        info!(payload_dir = %self.payload_dir.display(), "Replaying payloads");
+        info!(target: "reth-bench", payload_dir = %self.payload_dir.display(), "Replaying payloads");
 
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!("Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+            info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
         }
         if self.wait_for_persistence {
             info!(
+                target: "reth-bench",
                 "Persistence waiting enabled (waits after every {} blocks to match engine gap > {} behavior)",
                 self.persistence_threshold + 1,
                 self.persistence_threshold
@@ -158,7 +171,7 @@ impl Command {
                     duration,
                     sub,
                     self.persistence_threshold,
-                    PERSISTENCE_CHECKPOINT_TIMEOUT,
+                    self.persistence_timeout,
                 ))
             }
             (Some(duration), false) => Some(PersistenceWaiter::with_duration(duration)),
@@ -168,7 +181,7 @@ impl Command {
                 Some(PersistenceWaiter::with_subscription(
                     sub,
                     self.persistence_threshold,
-                    PERSISTENCE_CHECKPOINT_TIMEOUT,
+                    self.persistence_timeout,
                 ))
             }
             (None, false) => None,
@@ -180,7 +193,7 @@ impl Command {
         let jwt = JwtSecret::from_hex(jwt.trim())?;
         let auth_url = Url::parse(&self.engine_rpc_url)?;
 
-        info!("Connecting to Engine RPC at {}", auth_url);
+        info!(target: "reth-bench", "Connecting to Engine RPC at {}", auth_url);
         let auth_transport = AuthenticatedTransportConnect::new(auth_url.clone(), jwt);
         let auth_client = ClientBuilder::default().connect_with(auth_transport).await?;
         let auth_provider = RootProvider::<AnyNetwork>::new(auth_client);
@@ -195,6 +208,7 @@ impl Command {
         let initial_parent_number = parent_block.header.number;
 
         info!(
+            target: "reth-bench",
             parent_hash = %initial_parent_hash,
             parent_number = initial_parent_number,
             "Using initial parent block"
@@ -206,7 +220,7 @@ impl Command {
             if payloads.is_empty() {
                 return Err(eyre::eyre!("No gas ramp payload files found in {:?}", gas_ramp_dir));
             }
-            info!(count = payloads.len(), "Loaded gas ramp payloads from disk");
+            info!(target: "reth-bench", count = payloads.len(), "Loaded gas ramp payloads from disk");
             payloads
         } else {
             Vec::new()
@@ -216,13 +230,14 @@ impl Command {
         if payloads.is_empty() {
             return Err(eyre::eyre!("No payload files found in {:?}", self.payload_dir));
         }
-        info!(count = payloads.len(), "Loaded main payloads from disk");
+        info!(target: "reth-bench", count = payloads.len(), "Loaded main payloads from disk");
 
         let mut parent_hash = initial_parent_hash;
 
         // Replay gas ramp payloads first
         for (i, payload) in gas_ramp_payloads.iter().enumerate() {
             info!(
+                target: "reth-bench",
                 gas_ramp_payload = i + 1,
                 total = gas_ramp_payloads.len(),
                 block_number = payload.block_number,
@@ -239,7 +254,7 @@ impl Command {
             };
             call_forkchoice_updated(&auth_provider, payload.version, fcu_state, None).await?;
 
-            info!(gas_ramp_payload = i + 1, "Gas ramp payload executed successfully");
+            info!(target: "reth-bench", gas_ramp_payload = i + 1, "Gas ramp payload executed successfully");
 
             if let Some(w) = &mut waiter {
                 w.on_block(payload.block_number).await?;
@@ -249,7 +264,7 @@ impl Command {
         }
 
         if !gas_ramp_payloads.is_empty() {
-            info!(count = gas_ramp_payloads.len(), "All gas ramp payloads replayed");
+            info!(target: "reth-bench", count = gas_ramp_payloads.len(), "All gas ramp payloads replayed");
         }
 
         let mut results = Vec::new();
@@ -268,6 +283,7 @@ impl Command {
                 execution_payload.payload_inner.payload_inner.transactions.len() as u64;
 
             debug!(
+                target: "reth-bench",
                 payload = i + 1,
                 total = payloads.len(),
                 index = payload.index,
@@ -278,6 +294,7 @@ impl Command {
             let start = Instant::now();
 
             debug!(
+                target: "reth-bench",
                 method = "engine_newPayloadV4",
                 block_hash = %block_hash,
                 "Sending newPayload"
@@ -304,7 +321,7 @@ impl Command {
                 finalized_block_hash: parent_hash,
             };
 
-            debug!(method = "engine_forkchoiceUpdatedV3", ?fcu_state, "Sending forkchoiceUpdated");
+            debug!(target: "reth-bench", method = "engine_forkchoiceUpdatedV3", ?fcu_state, "Sending forkchoiceUpdated");
 
             let fcu_result = auth_provider.fork_choice_updated_v3(fcu_state, None).await?;
 
@@ -321,7 +338,7 @@ impl Command {
             };
 
             let current_duration = total_benchmark_duration.elapsed();
-            info!(%combined_result);
+            info!(target: "reth-bench", %combined_result);
 
             if let Some(w) = &mut waiter {
                 w.on_block(block_number).await?;
@@ -331,7 +348,7 @@ impl Command {
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
 
-            debug!(?status, ?fcu_result, "Payload executed successfully");
+            debug!(target: "reth-bench", ?status, ?fcu_result, "Payload executed successfully");
             parent_hash = block_hash;
         }
 
@@ -349,6 +366,7 @@ impl Command {
         let gas_output =
             TotalGasOutput::with_combined_results(gas_output_results, &combined_results)?;
         info!(
+            target: "reth-bench",
             total_gas_used = gas_output.total_gas_used,
             total_duration = ?gas_output.total_duration,
             execution_duration = ?gas_output.execution_duration,
@@ -407,7 +425,8 @@ impl Command {
             let block_hash =
                 envelope.envelope_inner.execution_payload.payload_inner.payload_inner.block_hash;
 
-            info!(
+            debug!(
+                target: "reth-bench",
                 index = index,
                 block_hash = %block_hash,
                 path = %path.display(),
