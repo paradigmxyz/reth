@@ -367,6 +367,26 @@ pub struct BlockValidationMetrics {
     pub anchored_overlay_trie_updates_size: Histogram,
     /// Size of `AnchoredTrieInput` overlay `HashedPostStateSorted` (`total_len`)
     pub anchored_overlay_hashed_state_size: Histogram,
+
+    // --- Perf observability: gas/s focused metrics ---
+
+    /// Number of times deferred trie data was ready (async task completed first).
+    pub deferred_trie_async_ready: Counter,
+    /// Number of times deferred trie data required synchronous computation (fallback path).
+    pub deferred_trie_sync_fallback: Counter,
+    /// Gas/s for the execution phase only (EVM time, no state root wait).
+    pub execution_gas_per_second: Gauge,
+    /// Gas/s including execution + state root blocking wait.
+    pub total_gas_per_second: Gauge,
+    /// Histogram of per-block gas/s (total newPayload). Enables percentile analysis to
+    /// find the slowest blocks on a gas-normalized basis.
+    pub gas_per_second_histogram: Histogram,
+    /// The gas used for the latest block (needed to correlate with timing).
+    pub block_gas_used: Gauge,
+    /// Execution-only duration for the latest block (no state root wait).
+    pub execution_duration: Gauge,
+    /// State root wait duration after execution finishes (blocking time).
+    pub state_root_blocking_duration: Gauge,
 }
 
 impl BlockValidationMetrics {
@@ -383,6 +403,36 @@ impl BlockValidationMetrics {
     pub fn record_payload_validation(&self, elapsed_as_secs: f64) {
         self.payload_validation_duration.set(elapsed_as_secs);
         self.payload_validation_histogram.record(elapsed_as_secs);
+    }
+
+    /// Records per-block performance metrics for the automated optimization loop.
+    ///
+    /// Captures gas/s at different granularities so the optimizer can identify
+    /// which blocks are slowest relative to their size and drill into why.
+    pub fn record_block_perf(
+        &self,
+        gas_used: u64,
+        execution_duration: Duration,
+        state_root_blocking: Duration,
+        total_duration: Duration,
+    ) {
+        let gas = gas_used as f64;
+
+        let exec_secs = execution_duration.as_secs_f64();
+        if exec_secs > 0.0 {
+            self.execution_gas_per_second.set(gas / exec_secs);
+        }
+        self.execution_duration.set(exec_secs);
+
+        let total_secs = total_duration.as_secs_f64();
+        if total_secs > 0.0 {
+            let total_gps = gas / total_secs;
+            self.total_gas_per_second.set(total_gps);
+            self.gas_per_second_histogram.record(total_gps);
+        }
+
+        self.block_gas_used.set(gas);
+        self.state_root_blocking_duration.set(state_root_blocking.as_secs_f64());
     }
 }
 

@@ -571,40 +571,13 @@ where
             };
 
             let result = task.run();
-            // Capture the computed state_root before sending the result
             let computed_state_root = result.as_ref().ok().map(|outcome| outcome.state_root);
 
-            // Acquire the guard before sending the result to prevent a race condition:
-            // Without this, the next block could start after send() but before store(),
-            // causing take() to return None and forcing it to create a new empty trie
-            // instead of reusing the preserved one. Holding the guard ensures the next
-            // block's take() blocks until we've stored the trie for reuse.
-            let mut guard = preserved_sparse_trie.lock();
-
-            // Send state root computation result - next block may start but will block on take()
-            if state_root_tx.send(result).is_err() {
-                // Receiver dropped - payload was likely invalid or cancelled.
-                // Clear the trie instead of preserving potentially invalid state.
-                debug!(
-                    target: "engine::tree::payload_processor",
-                    "State root receiver dropped, clearing trie"
-                );
-                let (trie, deferred) = task.into_cleared_trie(
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                );
-                guard.store(PreservedSparseTrie::cleared(trie));
-                // Drop guard before deferred to release lock before expensive deallocations
-                drop(guard);
-                drop(deferred);
-                return;
-            }
-
-            // Only preserve the trie as anchored if computation succeeded.
-            // A failed computation may have left the trie in a partially updated state.
+            // Perform expensive prune/shrink BEFORE acquiring the lock to minimize
+            // the time the next block is blocked waiting for the preserved trie.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let deferred = if let Some(state_root) = computed_state_root {
+            let (preserved, deferred) = if let Some(state_root) = computed_state_root {
                 let start = std::time::Instant::now();
                 let (trie, deferred) = task.into_trie_for_reuse(
                     prune_depth,
@@ -615,8 +588,7 @@ where
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                guard.store(PreservedSparseTrie::anchored(trie, state_root));
-                deferred
+                (PreservedSparseTrie::anchored(trie, state_root), deferred)
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
@@ -626,10 +598,31 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                guard.store(PreservedSparseTrie::cleared(trie));
-                deferred
+                (PreservedSparseTrie::cleared(trie), deferred)
             };
-            // Drop guard before deferred to release lock before expensive deallocations
+
+            // Acquire the guard before sending the result to prevent a race condition:
+            // Without this, the next block could start after send() but before store(),
+            // causing take() to return None and forcing it to create a new empty trie
+            // instead of reusing the preserved one. Holding the guard ensures the next
+            // block's take() blocks until we've stored the trie for reuse.
+            let mut guard = preserved_sparse_trie.lock();
+
+            if state_root_tx.send(result).is_err() {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    "State root receiver dropped, clearing trie"
+                );
+                let (PreservedSparseTrie::Anchored { mut trie, .. } |
+                PreservedSparseTrie::Cleared { mut trie }) = preserved;
+                trie.clear();
+                guard.store(PreservedSparseTrie::cleared(trie));
+                drop(guard);
+                drop(deferred);
+                return;
+            }
+
+            guard.store(preserved);
             drop(guard);
             drop(deferred);
         });

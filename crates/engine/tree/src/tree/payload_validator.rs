@@ -465,11 +465,13 @@ where
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
+        let exec_start = Instant::now();
         let (output, senders, receipt_root_rx) =
             match self.execute_block(state_provider, env, &input, &mut handle) {
                 Ok(output) => output,
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
             };
+        let exec_duration = exec_start.elapsed();
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
@@ -597,7 +599,23 @@ where
         };
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
-        debug!(target: "engine::tree::payload_validator", ?root_elapsed, "Calculated state root");
+
+        let gas_used = output.result.gas_used;
+        self.metrics.block_validation.record_block_perf(
+            gas_used,
+            exec_duration,
+            root_elapsed,
+            exec_duration + root_elapsed,
+        );
+        debug!(
+            target: "engine::tree::payload_validator",
+            ?root_elapsed,
+            ?exec_duration,
+            gas_used,
+            exec_gps = %(gas_used as f64 / exec_duration.as_secs_f64()),
+            total_gps = %(gas_used as f64 / (exec_duration + root_elapsed).as_secs_f64()),
+            "Block performance"
+        );
 
         // ensure state root matches
         if state_root != block.header().state_root() {
