@@ -112,13 +112,27 @@ impl PruneModes {
     ///
     /// Returns `true` if any migration was performed.
     pub const fn migrate(&mut self) -> bool {
-        match &self.receipts {
-            Some(PruneMode::Full | PruneMode::Distance(0..MINIMUM_DISTANCE)) => {
-                self.receipts = Some(PruneMode::Distance(MINIMUM_DISTANCE));
-                true
-            }
-            _ => false,
-        }
+        let migrated_receipts = if matches!(
+            &self.receipts,
+            Some(PruneMode::Full | PruneMode::Distance(0..MINIMUM_DISTANCE))
+        ) {
+            self.receipts = Some(PruneMode::Distance(MINIMUM_DISTANCE));
+            true
+        } else {
+            false
+        };
+
+        let migrated_bodies = if matches!(
+            &self.bodies_history,
+            Some(PruneMode::Full | PruneMode::Distance(0..MINIMUM_DISTANCE))
+        ) {
+            self.bodies_history = Some(PruneMode::Distance(MINIMUM_DISTANCE));
+            true
+        } else {
+            false
+        };
+
+        migrated_receipts || migrated_bodies
     }
 
     /// Returns an error if we can't unwind to the targeted block because the target block is
