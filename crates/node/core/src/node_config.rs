@@ -155,7 +155,7 @@ pub struct NodeConfig<ChainSpec> {
     /// All `RocksDB` table routing arguments
     pub rocksdb: RocksDbArgs,
 
-    /// Storage mode configuration (v2 vs v1/legacy)
+    /// All storage related arguments with --storage prefix
     pub storage: StorageArgs,
 }
 
@@ -355,6 +355,12 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Set the storage args for the node
+    pub const fn with_storage(mut self, storage: StorageArgs) -> Self {
+        self.storage = storage;
+        self
+    }
+
     /// Returns pruning configuration.
     pub fn prune_config(&self) -> Option<PruneConfig>
     where
@@ -407,6 +413,9 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         if let Some(v) = self.rocksdb.account_history {
             s = s.with_account_history_in_rocksdb(v);
         }
+
+        // Apply use_hashed_state from --db.use-hashed-state flag
+        s = s.with_use_hashed_state(self.db.use_hashed_state);
 
         s
     }

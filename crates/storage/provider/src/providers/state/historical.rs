@@ -263,7 +263,12 @@ impl<
                     .map(|account_before| account_before.info)
             }
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
+                if self.provider.cached_storage_settings().use_hashed_state {
+                    let hashed_address = alloy_primitives::keccak256(address);
+                    Ok(self.tx().get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?)
+                } else {
+                    Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
+                }
             }
         }
     }
@@ -430,13 +435,27 @@ impl<
                 })
                 .map(|entry| entry.value)
                 .map(Some),
-            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
-                .tx()
-                .cursor_dup_read::<tables::PlainStorageState>()?
-                .seek_by_key_subkey(address, storage_key)?
-                .filter(|entry| entry.key == storage_key)
-                .map(|entry| entry.value)
-                .or(Some(StorageValue::ZERO))),
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                if self.provider.cached_storage_settings().use_hashed_state {
+                    let hashed_address = alloy_primitives::keccak256(address);
+                    let hashed_slot = alloy_primitives::keccak256(storage_key);
+                    Ok(self
+                        .tx()
+                        .cursor_dup_read::<tables::HashedStorages>()?
+                        .seek_by_key_subkey(hashed_address, hashed_slot)?
+                        .filter(|entry| entry.key == hashed_slot)
+                        .map(|entry| entry.value)
+                        .or(Some(StorageValue::ZERO)))
+                } else {
+                    Ok(self
+                        .tx()
+                        .cursor_dup_read::<tables::PlainStorageState>()?
+                        .seek_by_key_subkey(address, storage_key)?
+                        .filter(|entry| entry.key == storage_key)
+                        .map(|entry| entry.value)
+                        .or(Some(StorageValue::ZERO)))
+                }
+            }
         }
     }
 }
