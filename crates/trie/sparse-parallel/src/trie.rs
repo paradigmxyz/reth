@@ -323,13 +323,13 @@ impl SparseTrie for ParallelSparseTrie {
     fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
-        value: Vec<u8>,
+        value: &[u8],
         provider: P,
     ) -> SparseTrieResult<()> {
         // Check if the value already exists - if so, just update it (no structural changes needed)
         if self.upper_subtrie.inner.values.contains_key(&full_path) {
             self.prefix_set.insert(full_path);
-            self.upper_subtrie.inner.values.insert(full_path, value);
+            self.upper_subtrie.inner.values.insert(full_path, value.to_vec());
             return Ok(());
         }
         // Also check lower subtries for existing value
@@ -341,7 +341,7 @@ impl SparseTrie for ParallelSparseTrie {
                 .expect("subtrie exists")
                 .inner
                 .values
-                .insert(full_path, value);
+                .insert(full_path, value.to_vec());
             return Ok(());
         }
 
@@ -349,7 +349,7 @@ impl SparseTrie for ParallelSparseTrie {
 
         // Insert value into upper subtrie temporarily. We'll move it to the correct subtrie
         // during traversal, or clean it up if we error.
-        self.upper_subtrie.inner.values.insert(full_path, value.clone());
+        self.upper_subtrie.inner.values.insert(full_path, value.to_vec());
 
         // Start at the root, traversing until we find either the node to update or a subtrie to
         // update.
@@ -1281,8 +1281,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                         }
                     } else {
                         // Update/insert: update_leaf is atomic - cleans up on error.
-                        if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider)
-                        {
+                        if let Err(e) = self.update_leaf(full_path, &value, NoRevealProvider) {
                             if let Some(path) = Self::get_retriable_path(&e) {
                                 let (target_key, min_len) =
                                     Self::proof_target_for_path(key, &full_path, &path);
@@ -2414,7 +2413,7 @@ impl SparseSubtrie {
     pub fn update_leaf(
         &mut self,
         full_path: Nibbles,
-        value: Vec<u8>,
+        value: &[u8],
         provider: impl TrieNodeProvider,
         retain_updates: bool,
     ) -> SparseTrieResult<Option<(Nibbles, BranchNodeMasks)>> {
@@ -2422,7 +2421,7 @@ impl SparseSubtrie {
 
         // Check if value already exists - if so, just update it (no structural changes needed)
         if let Entry::Occupied(mut e) = self.inner.values.entry(full_path) {
-            e.insert(value);
+            e.insert(value.to_vec());
             return Ok(None)
         }
 
@@ -2536,7 +2535,7 @@ impl SparseSubtrie {
         }
 
         // Only insert the value after all structural changes succeed
-        self.inner.values.insert(full_path, value);
+        self.inner.values.insert(full_path, value.to_vec());
 
         Ok(revealed)
     }
@@ -3693,7 +3692,7 @@ mod tests {
             leaves: impl IntoIterator<Item = (Nibbles, Vec<u8>)>,
         ) {
             for (path, value) in leaves {
-                trie.update_leaf(path, value, DefaultTrieNodeProvider).unwrap();
+                trie.update_leaf(path, &value, DefaultTrieNodeProvider).unwrap();
             }
         }
 
@@ -4419,7 +4418,7 @@ mod tests {
         // Insert leaf_3 via update_leaf. This modifies the branch at [0x0] to add child
         // 0x2 and creates a fresh leaf node with hash: None in the lower subtrie.
         let provider = MockTrieNodeProvider::new();
-        trie.update_leaf(leaf_3_full_path, encode_account_value(3), provider).unwrap();
+        trie.update_leaf(leaf_3_full_path, &encode_account_value(3), provider).unwrap();
 
         // Calculate subtrie indexes
         let subtrie_1_index = SparseSubtrieType::from_path(&leaf_1_path).lower_index().unwrap();
@@ -5477,7 +5476,7 @@ mod tests {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default().with_updates(true);
         for path in &paths {
-            sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
+            sparse.update_leaf(*path, &value_encoded(), &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
@@ -5972,7 +5971,7 @@ mod tests {
                         let account = account.into_trie_account(EMPTY_ROOT_HASH);
                         let mut account_rlp = Vec::new();
                         account.encode(&mut account_rlp);
-                        sparse.update_leaf(key, account_rlp, &default_provider).unwrap();
+                        sparse.update_leaf(key, &account_rlp, &default_provider).unwrap();
                     }
                     // We need to clone the sparse trie, so that all updated branch nodes are
                     // preserved, and not only those that were changed after the last call to
@@ -6121,8 +6120,8 @@ mod tests {
                     let account = account.into_trie_account(EMPTY_ROOT_HASH);
                     let mut account_rlp = Vec::new();
                     account.encode(&mut account_rlp);
-                    serial.update_leaf(key, account_rlp.clone(), &default_provider).unwrap();
-                    parallel.update_leaf(key, account_rlp, &default_provider).unwrap();
+                    serial.update_leaf(key, &account_rlp, &default_provider).unwrap();
+                    parallel.update_leaf(key, &account_rlp, &default_provider).unwrap();
                 }
 
                 // Calculate roots and assert their equality
@@ -6221,11 +6220,11 @@ mod tests {
         account.encode(&mut account_rlp);
 
         // Add a leaf and calculate the root.
-        trie.update_leaf(key_50, account_rlp.clone(), &provider).unwrap();
+        trie.update_leaf(key_50, &account_rlp, &provider).unwrap();
         trie.root();
 
         // Add a second leaf and assert that the root is the expected value.
-        trie.update_leaf(key_51, account_rlp.clone(), &provider).unwrap();
+        trie.update_leaf(key_51, &account_rlp, &provider).unwrap();
 
         let expected_root =
             hex!("0xdaf0ef9f91a2f179bb74501209effdb5301db1697bcab041eca2234b126e25de");

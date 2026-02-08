@@ -155,7 +155,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
-        value: Vec<u8>,
+        value: &[u8],
         provider: P,
     ) -> SparseTrieResult<()>;
 

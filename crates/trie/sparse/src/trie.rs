@@ -241,7 +241,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     pub fn update_leaf(
         &mut self,
         path: Nibbles,
-        value: Vec<u8>,
+        value: &[u8],
         provider: impl TrieNodeProvider,
     ) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
@@ -635,11 +635,11 @@ impl SparseTrieTrait for SerialSparseTrie {
     fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
-        value: Vec<u8>,
+        value: &[u8],
         provider: P,
     ) -> SparseTrieResult<()> {
         self.prefix_set.insert(full_path);
-        let existing = self.values.insert(full_path, value);
+        let existing = self.values.insert(full_path, value.to_vec());
         if existing.is_some() {
             // trie structure unchanged, return immediately
             return Ok(())
@@ -1670,7 +1670,7 @@ impl SerialSparseTrie {
 
                     let mut tree_mask = TrieMask::default();
                     let mut hash_mask = TrieMask::default();
-                    let mut hashes = Vec::new();
+                    buffers.hashes_buf.clear();
 
                     // Lazy lookup for branch node masks - shared across loop iterations
                     let mut path_masks_storage = None;
@@ -1721,7 +1721,7 @@ impl SerialSparseTrie {
                                 });
                                 if let Some(hash) = hash {
                                     hash_mask.set_bit(last_child_nibble);
-                                    hashes.push(hash);
+                                    buffers.hashes_buf.push(hash);
                                 }
                             }
 
@@ -1772,12 +1772,12 @@ impl SerialSparseTrie {
                         if store_in_db_trie {
                             // Store in DB trie if there are either any children that are stored in
                             // the DB trie, or any children represent hashed values
-                            hashes.reverse();
+                            buffers.hashes_buf.reverse();
                             let branch_node = BranchNodeCompact::new(
                                 *state_mask,
                                 tree_mask,
                                 hash_mask,
-                                hashes,
+                                buffers.hashes_buf.clone(),
                                 hash.filter(|_| path.is_empty()),
                             );
                             updates.updated_nodes.insert(path, branch_node);
@@ -2024,6 +2024,8 @@ pub struct RlpNodeBuffers {
     branch_child_buf: Vec<Nibbles>,
     /// Reusable branch value stack
     branch_value_stack_buf: Vec<RlpNode>,
+    /// Reusable buffer for collecting branch node child hashes during updates
+    hashes_buf: Vec<B256>,
 }
 
 impl RlpNodeBuffers {
@@ -2038,6 +2040,7 @@ impl RlpNodeBuffers {
             rlp_node_stack: Vec::new(),
             branch_child_buf: Vec::new(),
             branch_value_stack_buf: Vec::new(),
+            hashes_buf: Vec::new(),
         }
     }
 }
@@ -2116,7 +2119,7 @@ mod find_leaf_tests {
         let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let value = b"test_value".to_vec();
 
-        sparse.update_leaf(path, value.clone(), &provider).unwrap();
+        sparse.update_leaf(path, &value, &provider).unwrap();
 
         // Check that the leaf exists
         let result = sparse.find_leaf(&path, None);
@@ -2136,7 +2139,7 @@ mod find_leaf_tests {
         let value = b"test_value".to_vec();
         let wrong_value = b"wrong_value".to_vec();
 
-        sparse.update_leaf(path, value, &provider).unwrap();
+        sparse.update_leaf(path, &value, &provider).unwrap();
 
         // Check with wrong expected value
         let result = sparse.find_leaf(&path, Some(&wrong_value));
@@ -2171,7 +2174,7 @@ mod find_leaf_tests {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
-        sparse.update_leaf(path, VALUE_A(), &provider).unwrap();
+        sparse.update_leaf(path, &VALUE_A(), &provider).unwrap();
 
         let result = sparse.find_leaf(&path, None);
         assert_matches!(result, Ok(LeafLookup::Exists));
@@ -2183,7 +2186,7 @@ mod find_leaf_tests {
         let mut sparse = SerialSparseTrie::default();
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         let value = VALUE_A();
-        sparse.update_leaf(path, value.clone(), &provider).unwrap();
+        sparse.update_leaf(path, &value, &provider).unwrap();
 
         let result = sparse.find_leaf(&path, Some(&value));
         assert_matches!(result, Ok(LeafLookup::Exists));
@@ -2197,8 +2200,8 @@ mod find_leaf_tests {
         let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]); // Belongs to same branch
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x7, 0x8]); // Diverges at nibble 7
 
-        sparse.update_leaf(path1, VALUE_A(), &provider).unwrap();
-        sparse.update_leaf(path2, VALUE_B(), &provider).unwrap();
+        sparse.update_leaf(path1, &VALUE_A(), &provider).unwrap();
+        sparse.update_leaf(path2, &VALUE_B(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
         assert_matches!(result, Ok(LeafLookup::NonExistent));
@@ -2213,7 +2216,7 @@ mod find_leaf_tests {
         // This path diverges from the extension key
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x7, 0x8]);
 
-        sparse.update_leaf(path1, VALUE_A(), &provider).unwrap();
+        sparse.update_leaf(path1, &VALUE_A(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
         assert_matches!(result, Ok(LeafLookup::NonExistent));
@@ -2226,7 +2229,7 @@ mod find_leaf_tests {
         let existing_leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
 
-        sparse.update_leaf(existing_leaf_path, VALUE_A(), &provider).unwrap();
+        sparse.update_leaf(existing_leaf_path, &VALUE_A(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
         assert_matches!(result, Ok(LeafLookup::NonExistent));
@@ -2240,8 +2243,8 @@ mod find_leaf_tests {
         let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2]); // Path of the branch itself
 
-        sparse.update_leaf(path1, VALUE_A(), &provider).unwrap();
-        sparse.update_leaf(path2, VALUE_B(), &provider).unwrap();
+        sparse.update_leaf(path1, &VALUE_A(), &provider).unwrap();
+        sparse.update_leaf(path2, &VALUE_B(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
         assert_matches!(result, Ok(LeafLookup::NonExistent));
@@ -2574,7 +2577,7 @@ mod tests {
 
         let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default().with_updates(true);
-        sparse.update_leaf(key, value_encoded(), &provider).unwrap();
+        sparse.update_leaf(key, &value_encoded(), &provider).unwrap();
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
 
@@ -2606,7 +2609,7 @@ mod tests {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default().with_updates(true);
         for path in &paths {
-            sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
+            sparse.update_leaf(*path, &value_encoded(), &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
@@ -2637,7 +2640,7 @@ mod tests {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default().with_updates(true);
         for path in &paths {
-            sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
+            sparse.update_leaf(*path, &value_encoded(), &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
@@ -2676,7 +2679,7 @@ mod tests {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default().with_updates(true);
         for path in &paths {
-            sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
+            sparse.update_leaf(*path, &value_encoded(), &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
@@ -2716,7 +2719,7 @@ mod tests {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default().with_updates(true);
         for path in &paths {
-            sparse.update_leaf(*path, old_value_encoded.clone(), &provider).unwrap();
+            sparse.update_leaf(*path, &old_value_encoded, &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.updates_ref();
@@ -2734,7 +2737,7 @@ mod tests {
             );
 
         for path in &paths {
-            sparse.update_leaf(*path, new_value_encoded.clone(), &provider).unwrap();
+            sparse.update_leaf(*path, &new_value_encoded, &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
@@ -2754,22 +2757,22 @@ mod tests {
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
 
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value, &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), &value, &provider)
             .unwrap();
 
         // Extension (Key = 5)
@@ -3105,7 +3108,7 @@ mod tests {
                         let account = account.into_trie_account(EMPTY_ROOT_HASH);
                         let mut account_rlp = Vec::new();
                         account.encode(&mut account_rlp);
-                        sparse.update_leaf(key, account_rlp, &default_provider).unwrap();
+                        sparse.update_leaf(key, &account_rlp, &default_provider).unwrap();
                     }
                     // We need to clone the sparse trie, so that all updated branch nodes are
                     // preserved, and not only those that were changed after the last call to
@@ -3296,7 +3299,7 @@ mod tests {
         );
 
         // Insert the leaf for the second key
-        sparse.update_leaf(key2(), value_encoded(), &provider).unwrap();
+        sparse.update_leaf(key2(), &value_encoded(), &provider).unwrap();
 
         // Check that the branch node was updated and another nibble was set
         assert_eq!(
@@ -3476,7 +3479,7 @@ mod tests {
         );
 
         // Insert the leaf with a different prefix
-        sparse.update_leaf(key3(), value_encoded(), &provider).unwrap();
+        sparse.update_leaf(key3(), &value_encoded(), &provider).unwrap();
 
         // Check that the extension node was turned into a branch node
         assert_matches!(
@@ -3526,22 +3529,22 @@ mod tests {
         //                       ├── 0 -> Leaf (Key = 3302, Path = 53302) – Level 4
         //                       └── 2 -> Leaf (Key = 3320, Path = 53320) – Level 4
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value, &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), &value, &provider)
             .unwrap();
 
         assert_eq!(
@@ -3625,8 +3628,8 @@ mod tests {
 
         let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
-        sparse.update_leaf(key1(), value_encoded(), &provider).unwrap();
-        sparse.update_leaf(key2(), value_encoded(), &provider).unwrap();
+        sparse.update_leaf(key1(), &value_encoded(), &provider).unwrap();
+        sparse.update_leaf(key2(), &value_encoded(), &provider).unwrap();
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
 
@@ -3654,22 +3657,22 @@ mod tests {
         //                       ├── 0 -> Leaf (Key = 3302, Path = 53302) – Level 4
         //                       └── 2 -> Leaf (Key = 3320, Path = 53320) – Level 4
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value, &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), &value, &provider)
             .unwrap();
 
         sparse.wipe();
@@ -3690,16 +3693,16 @@ mod tests {
         let mut sparse = SerialSparseTrie::default();
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value, &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), &value, &provider)
             .unwrap();
 
         sparse.clear();
@@ -3728,22 +3731,22 @@ mod tests {
         //                       ├── 0 -> Leaf (Key = 3302, Path = 53302) – Level 4
         //                       └── 2 -> Leaf (Key = 3320, Path = 53320) – Level 4
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone(), &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), &value, &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value, &provider)
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), &value, &provider)
             .unwrap();
 
         let normal_printed = format!("{sparse}");

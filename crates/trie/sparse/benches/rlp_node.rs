@@ -26,11 +26,7 @@ fn update_rlp_node_level(c: &mut Criterion) {
         let mut sparse = SerialSparseTrie::default();
         for (key, value) in &state {
             sparse
-                .update_leaf(
-                    Nibbles::unpack(key),
-                    alloy_rlp::encode_fixed_size(value).to_vec(),
-                    &provider,
-                )
+                .update_leaf(Nibbles::unpack(key), &alloy_rlp::encode_fixed_size(value), &provider)
                 .unwrap();
         }
         sparse.root();
@@ -43,7 +39,7 @@ fn update_rlp_node_level(c: &mut Criterion) {
                 sparse
                     .update_leaf(
                         Nibbles::unpack(key),
-                        alloy_rlp::encode_fixed_size(&rng.random::<U256>()).to_vec(),
+                        &alloy_rlp::encode_fixed_size(&rng.random::<U256>()),
                         &provider,
                     )
                     .unwrap();
