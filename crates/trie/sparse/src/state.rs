@@ -837,6 +837,40 @@ where
         }
     }
 
+    /// Pre-computes subtrie hashes for all revealed storage tries in parallel.
+    ///
+    /// This can be called during idle time between state updates to spread out
+    /// hash computation work, reducing latency spikes when computing final state roots.
+    /// Storage tries that haven't been revealed are skipped.
+    #[cfg(feature = "std")]
+    #[instrument(target = "trie::sparse", skip_all)]
+    pub fn calculate_storage_subtries(&mut self) {
+        use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+
+        let num_tries = self.storage.tries.len();
+        if num_tries == 0 {
+            return;
+        }
+
+        self.storage.tries.par_iter_mut().for_each(|(_, trie)| {
+            if let RevealableSparseTrie::Revealed(trie) = trie {
+                trie.update_subtrie_hashes();
+            }
+        });
+
+        debug!(target: "trie::sparse", num_tries, "Pre-computed storage subtrie hashes");
+    }
+
+    /// Pre-computes subtrie hashes for all revealed storage tries sequentially (no-std version).
+    #[cfg(not(feature = "std"))]
+    pub fn calculate_storage_subtries(&mut self) {
+        for (_, trie) in &mut self.storage.tries {
+            if let RevealableSparseTrie::Revealed(trie) = trie {
+                trie.update_subtrie_hashes();
+            }
+        }
+    }
+
     /// Returns storage sparse trie root if the trie has been revealed.
     pub fn storage_root(&mut self, account: &B256) -> Option<B256> {
         self.storage.tries.get_mut(account).and_then(|trie| trie.root())
