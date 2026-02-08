@@ -341,6 +341,23 @@ where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        // Spawn block conversion on a background thread so it runs concurrently with the
+        // rest of the function (setup + execution). For payloads this overlaps the cost of
+        // RLP decoding + header hashing; for blocks it's a no-op.
+        let await_sealed_block = match &input {
+            BlockOrPayload::Payload(_) => {
+                let payload_clone = input.clone();
+                let validator = self.validator.clone();
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                self.payload_processor.executor().spawn_blocking(move || {
+                    let BlockOrPayload::Payload(payload) = payload_clone else { unreachable!() };
+                    let _ = tx.send(validator.convert_payload_to_block(payload));
+                });
+                Either::Left(rx)
+            }
+            BlockOrPayload::Block(_) => Either::Right(()),
+        };
+
         /// A helper macro that returns the block in case there was an error
         /// This macro is used for early returns before block conversion
         macro_rules! ensure_ok {
@@ -451,22 +468,6 @@ where
             block_access_list,
         ));
 
-        // Spawn block conversion on a background thread so it runs concurrently with execution.
-        // Cloning the payload is cheap (transaction bytes are Arc-backed) and this overlaps the
-        // cost of RLP decoding + header hashing with block execution.
-        let convert_input = input.clone();
-        let convert_validator = self.validator.clone();
-        let (convert_tx, convert_rx) = tokio::sync::oneshot::channel();
-        self.payload_processor.executor().spawn_blocking(move || {
-            let result = match convert_input {
-                BlockOrPayload::Payload(payload) => {
-                    convert_validator.convert_payload_to_block(payload)
-                }
-                BlockOrPayload::Block(block) => Ok(block),
-            };
-            let _ = convert_tx.send(result);
-        });
-
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
         if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
@@ -499,12 +500,15 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
-        // Join the background block conversion task. The conversion ran concurrently with
-        // execution, so this should return near-instantly.
-        let block = convert_rx
-            .blocking_recv()
-            .map_err(|_| NewPayloadError::Other("block conversion task panicked".into()))??
-            .with_senders(senders);
+        // Await the block conversion. For payloads, the background task ran concurrently with
+        // setup + execution; for blocks the value is already available.
+        let block = match await_sealed_block {
+            Either::Left(rx) => rx
+                .blocking_recv()
+                .map_err(|_| NewPayloadError::Other("block conversion task panicked".into()))??,
+            Either::Right(()) => self.convert_to_block(input)?,
+        }
+        .with_senders(senders);
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = receipt_root_rx
