@@ -213,7 +213,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo docs --document-private-items
+      - name: Run doc build
+        run: |
+          SCOPE="${{ needs.detect.outputs.cargo-args }}"
+          if [ -z "$SCOPE" ] || [ "${{ needs.detect.outputs.rebuild-all }}" == "true" ]; then
+            cargo docs --document-private-items
+          else
+            cargo doc $SCOPE --all-features --no-deps --document-private-items
+          fi
         env:
           # Keep in sync with ./book.yml:jobs.build
           # This should only add `-D warnings`
