@@ -530,9 +530,11 @@ where
             // keep allocations.
             let start = Instant::now();
             let preserved = preserved_sparse_trie.take();
+            let cache_wait_elapsed = start.elapsed().as_secs_f64();
             trie_metrics
                 .sparse_trie_cache_wait_duration_histogram
-                .record(start.elapsed().as_secs_f64());
+                .record(cache_wait_elapsed);
+            trie_metrics.sparse_trie_cache_wait_duration_last.set(cache_wait_elapsed);
 
             let sparse_state_trie = preserved
                 .map(|preserved| preserved.into_trie_for(parent_state_root))
@@ -612,9 +614,11 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
+                let reuse_elapsed = start.elapsed().as_secs_f64();
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
-                    .record(start.elapsed().as_secs_f64());
+                    .record(reuse_elapsed);
+                trie_metrics.into_trie_for_reuse_duration_last.set(reuse_elapsed);
                 guard.store(PreservedSparseTrie::anchored(trie, state_root));
                 deferred
             } else {

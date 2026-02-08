@@ -1023,10 +1023,15 @@ where
         }
 
         // record post-execution validation duration
+        let post_exec_elapsed = start.elapsed().as_secs_f64();
         self.metrics
             .block_validation
             .post_execution_validation_duration
-            .record(start.elapsed().as_secs_f64());
+            .record(post_exec_elapsed);
+        self.metrics
+            .block_validation
+            .post_execution_validation_duration_last
+            .set(post_exec_elapsed);
 
         Ok(hashed_state)
     }
@@ -1084,10 +1089,15 @@ where
                 );
 
                 // record prewarming initialization duration
+                let spawn_elapsed = spawn_start.elapsed().as_secs_f64();
                 self.metrics
                     .block_validation
                     .spawn_payload_processor
-                    .record(spawn_start.elapsed().as_secs_f64());
+                    .record(spawn_elapsed);
+                self.metrics
+                    .block_validation
+                    .spawn_payload_processor_last
+                    .set(spawn_elapsed);
 
                 Ok(handle)
             }
@@ -1283,9 +1293,13 @@ where
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
                 let computed = deferred_handle_task.wait_cloned();
+                let deferred_elapsed = compute_start.elapsed().as_secs_f64();
                 block_validation_metrics
                     .deferred_trie_compute_duration
-                    .record(compute_start.elapsed().as_secs_f64());
+                    .record(deferred_elapsed);
+                block_validation_metrics
+                    .deferred_trie_compute_duration_last
+                    .set(deferred_elapsed);
 
                 // Record sizes of the computed trie data
                 block_validation_metrics

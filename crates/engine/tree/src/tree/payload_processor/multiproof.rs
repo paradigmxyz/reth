@@ -566,10 +566,16 @@ pub(crate) struct MultiProofTaskMetrics {
 
     /// Histogram of sparse trie update durations.
     pub sparse_trie_update_duration_histogram: Histogram,
+    /// Latest sparse trie update duration.
+    pub sparse_trie_update_duration_last: Gauge,
     /// Histogram of sparse trie final update durations.
     pub sparse_trie_final_update_duration_histogram: Histogram,
+    /// Latest sparse trie final update duration.
+    pub sparse_trie_final_update_duration_last: Gauge,
     /// Histogram of sparse trie total durations.
     pub sparse_trie_total_duration_histogram: Histogram,
+    /// Latest sparse trie total duration.
+    pub sparse_trie_total_duration_last: Gauge,
 
     /// Histogram of state updates received.
     pub state_updates_received_histogram: Histogram,
@@ -583,8 +589,12 @@ pub(crate) struct MultiProofTaskMetrics {
     pub last_proof_wait_time_histogram: Histogram,
     /// Time spent preparing the sparse trie for reuse after state root computation.
     pub into_trie_for_reuse_duration_histogram: Histogram,
+    /// Latest trie reuse duration.
+    pub into_trie_for_reuse_duration_last: Gauge,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub sparse_trie_cache_wait_duration_histogram: Histogram,
+    /// Latest cache wait duration.
+    pub sparse_trie_cache_wait_duration_last: Gauge,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant

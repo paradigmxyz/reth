@@ -173,6 +173,7 @@ where
                         ))
                     })?;
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
+            self.metrics.sparse_trie_update_duration_last.set(elapsed.as_secs_f64());
             trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
 
@@ -186,7 +187,9 @@ where
 
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
+        self.metrics.sparse_trie_final_update_duration_last.set(end.duration_since(start).as_secs_f64());
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
+        self.metrics.sparse_trie_total_duration_last.set(end.duration_since(now).as_secs_f64());
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
@@ -466,7 +469,9 @@ where
 
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
+        self.metrics.sparse_trie_final_update_duration_last.set(end.duration_since(start).as_secs_f64());
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
+        self.metrics.sparse_trie_total_duration_last.set(end.duration_since(now).as_secs_f64());
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }

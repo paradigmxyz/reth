@@ -349,14 +349,20 @@ pub struct BlockValidationMetrics {
     pub state_root_histogram: Histogram,
     /// Histogram of deferred trie computation duration.
     pub deferred_trie_compute_duration: Histogram,
+    /// Latest deferred trie computation duration.
+    pub deferred_trie_compute_duration_last: Gauge,
     /// Payload conversion and validation latency
     pub payload_validation_duration: Gauge,
     /// Histogram of payload validation latency
     pub payload_validation_histogram: Histogram,
     /// Payload processor spawning duration
     pub spawn_payload_processor: Histogram,
+    /// Latest payload processor spawning duration.
+    pub spawn_payload_processor_last: Gauge,
     /// Post-execution validation duration
     pub post_execution_validation_duration: Histogram,
+    /// Latest post-execution validation duration.
+    pub post_execution_validation_duration_last: Gauge,
     /// Total duration of the new payload call
     pub total_duration: Histogram,
     /// Size of `HashedPostStateSorted` (`total_len`)
