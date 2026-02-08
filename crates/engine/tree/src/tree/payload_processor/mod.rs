@@ -135,6 +135,8 @@ where
     sparse_trie_prune_depth: usize,
     /// Maximum storage tries to retain after pruning.
     sparse_trie_max_storage_tries: usize,
+    /// Whether sparse trie cache pruning is fully disabled.
+    disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
 }
@@ -170,6 +172,7 @@ where
             prewarm_max_concurrency: config.prewarm_max_concurrency(),
             sparse_trie_prune_depth: config.sparse_trie_prune_depth(),
             sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
+            disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             disable_cache_metrics: config.disable_cache_metrics(),
         }
     }
@@ -515,6 +518,7 @@ where
         let disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
+        let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
         let chunk_size =
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
         let executor = self.executor.clone();
@@ -611,6 +615,7 @@ where
                     max_storage_tries,
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                    disable_cache_pruning,
                 );
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram

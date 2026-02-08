@@ -175,6 +175,8 @@ pub struct TreeConfig {
     sparse_trie_prune_depth: usize,
     /// Maximum number of storage tries to retain after pruning.
     sparse_trie_max_storage_tries: usize,
+    /// Whether to fully disable sparse trie cache pruning between blocks.
+    disable_sparse_trie_cache_pruning: bool,
 }
 
 impl Default for TreeConfig {
@@ -207,6 +209,7 @@ impl Default for TreeConfig {
             enable_sparse_trie_as_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            disable_sparse_trie_cache_pruning: false,
         }
     }
 }
@@ -270,6 +273,7 @@ impl TreeConfig {
             enable_sparse_trie_as_cache: false,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            disable_sparse_trie_cache_pruning: false,
         }
     }
 
@@ -616,6 +620,17 @@ impl TreeConfig {
     /// Setter for maximum storage tries to retain.
     pub const fn with_sparse_trie_max_storage_tries(mut self, max_tries: usize) -> Self {
         self.sparse_trie_max_storage_tries = max_tries;
+        self
+    }
+
+    /// Returns whether sparse trie cache pruning is disabled.
+    pub const fn disable_sparse_trie_cache_pruning(&self) -> bool {
+        self.disable_sparse_trie_cache_pruning
+    }
+
+    /// Setter for whether to disable sparse trie cache pruning.
+    pub const fn with_disable_sparse_trie_cache_pruning(mut self, value: bool) -> Self {
+        self.disable_sparse_trie_cache_pruning = value;
         self
     }
 }

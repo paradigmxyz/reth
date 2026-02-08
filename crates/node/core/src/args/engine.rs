@@ -43,6 +43,7 @@ pub struct DefaultEngineValues {
     enable_sparse_trie_as_cache: bool,
     sparse_trie_prune_depth: usize,
     sparse_trie_max_storage_tries: usize,
+    disable_sparse_trie_cache_pruning: bool,
 }
 
 impl DefaultEngineValues {
@@ -196,6 +197,12 @@ impl DefaultEngineValues {
         self.sparse_trie_max_storage_tries = v;
         self
     }
+
+    /// Set whether to disable sparse trie cache pruning by default
+    pub const fn with_disable_sparse_trie_cache_pruning(mut self, v: bool) -> Self {
+        self.disable_sparse_trie_cache_pruning = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -224,6 +231,7 @@ impl Default for DefaultEngineValues {
             enable_sparse_trie_as_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            disable_sparse_trie_cache_pruning: false,
         }
     }
 }
@@ -363,6 +371,12 @@ pub struct EngineArgs {
     /// Maximum number of storage tries to retain after sparse trie pruning.
     #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries, requires = "enable_sparse_trie_as_cache")]
     pub sparse_trie_max_storage_tries: usize,
+
+    /// Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved
+    /// without any node pruning or storage trie eviction between blocks. Useful for benchmarking
+    /// the effects of retaining the full trie cache.
+    #[arg(long = "engine.disable-sparse-trie-cache-pruning", default_value_t = DefaultEngineValues::get_global().disable_sparse_trie_cache_pruning, requires = "enable_sparse_trie_as_cache")]
+    pub disable_sparse_trie_cache_pruning: bool,
 }
 
 #[allow(deprecated)]
@@ -392,6 +406,7 @@ impl Default for EngineArgs {
             enable_sparse_trie_as_cache,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            disable_sparse_trie_cache_pruning,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -421,6 +436,7 @@ impl Default for EngineArgs {
             enable_sparse_trie_as_cache,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            disable_sparse_trie_cache_pruning,
         }
     }
 }
@@ -453,6 +469,7 @@ impl EngineArgs {
             .with_enable_sparse_trie_as_cache(self.enable_sparse_trie_as_cache)
             .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
             .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
+            .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
     }
 }
 
@@ -506,6 +523,7 @@ mod tests {
             enable_sparse_trie_as_cache: true,
             sparse_trie_prune_depth: 10,
             sparse_trie_max_storage_tries: 100,
+            disable_sparse_trie_cache_pruning: true,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -541,6 +559,7 @@ mod tests {
             "10",
             "--engine.sparse-trie-max-storage-tries",
             "100",
+            "--engine.disable-sparse-trie-cache-pruning",
         ])
         .args;
 
