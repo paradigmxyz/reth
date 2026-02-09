@@ -655,6 +655,8 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        drop(span);
+
         for (address, targets, fetched, trie) in storage_results {
             self.fetched_storage_targets.insert(*address, fetched);
             self.trie.insert_storage_trie(*address, trie);
