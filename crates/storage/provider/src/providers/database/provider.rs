@@ -78,7 +78,6 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::Arc,
-    thread,
     time::Instant,
 };
 use tracing::{debug, instrument, trace};
@@ -4559,14 +4558,14 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Test 1: Verify edge mode detection
-        factory.set_storage_settings_cache(StorageSettings::edge());
+        factory.set_storage_settings_cache(StorageSettings::v2());
         assert!(
             factory.cached_storage_settings().is_edge_mode(),
             "Edge mode should be detected with all edge settings enabled"
         );
 
         // Test 2: Verify legacy mode is not edge mode
-        factory.set_storage_settings_cache(StorageSettings::legacy());
+        factory.set_storage_settings_cache(StorageSettings::v1());
         assert!(
             !factory.cached_storage_settings().is_edge_mode(),
             "Legacy mode should NOT be detected as edge mode"
@@ -4574,18 +4573,18 @@ mod tests {
 
         // Test 3: Verify partial edge settings are not edge mode
         factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_receipts_in_static_files(true),
+            StorageSettings::v1().with_receipts_in_static_files(true),
         );
         assert!(
             !factory.cached_storage_settings().is_edge_mode(),
             "Partial edge settings should NOT be detected as edge mode"
         );
 
-        // Test 4: Verify all conditions for edge mode (must use StorageSettings::edge())
-        factory.set_storage_settings_cache(StorageSettings::edge());
+        // Test 4: Verify all conditions for edge mode (must use StorageSettings::v2())
+        factory.set_storage_settings_cache(StorageSettings::v2());
         assert!(
             factory.cached_storage_settings().is_edge_mode(),
-            "StorageSettings::edge() should enable edge mode"
+            "StorageSettings::v2() should enable edge mode"
         );
     }
 
@@ -4686,7 +4685,7 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Enable edge mode for parallel writes
-        factory.set_storage_settings_cache(StorageSettings::edge());
+        factory.set_storage_settings_cache(StorageSettings::v2());
         assert!(factory.cached_storage_settings().is_edge_mode(), "Edge mode should be enabled");
 
         // Get initial db info for later comparison
@@ -4820,7 +4819,7 @@ mod tests {
 
         let factory = create_test_provider_factory();
 
-        factory.set_storage_settings_cache(StorageSettings::edge());
+        factory.set_storage_settings_cache(StorageSettings::v2());
         assert!(factory.cached_storage_settings().is_edge_mode(), "Edge mode should be enabled");
 
         let initial_info = factory.db_ref().db().info().unwrap();
@@ -5017,7 +5016,7 @@ mod tests {
         println!("Blocks per iteration: {}", blocks_per_iteration);
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::edge());
+        factory.set_storage_settings_cache(StorageSettings::v2());
         assert!(factory.cached_storage_settings().is_edge_mode());
 
         let initial_info = factory.db_ref().db().info().unwrap();
