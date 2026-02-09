@@ -5,6 +5,7 @@ use reth_codecs::Compact;
 use reth_db_api::{cursor::DbDupCursorRO, database::Database, tables, transaction::DbTx};
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
+use reth_storage_api::StorageSettingsCache;
 use std::time::{Duration, Instant};
 use tracing::info;
 
@@ -16,19 +17,15 @@ const LOG_INTERVAL: Duration = Duration::from_secs(5);
 pub struct Command {
     /// The account address to check storage for
     address: Address,
-
-    /// Read from HashedStorages instead of PlainStorageState
-    #[arg(long)]
-    hashed: bool,
 }
 
 impl Command {
     /// Execute `db account-storage` command
     pub fn execute<N: NodeTypesWithDB>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         let address = self.address;
-        let hashed = self.hashed;
+        let use_hashed_state = tool.provider_factory.cached_storage_settings().use_hashed_state;
 
-        let (slot_count, storage_size) = if hashed {
+        let (slot_count, storage_size) = if use_hashed_state {
             let hashed_address = keccak256(address);
             tool.provider_factory.db_ref().view(|tx| {
                 let mut cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
@@ -98,7 +95,7 @@ impl Command {
         println!("Account: {address}");
         println!("Hashed address: {hashed_address}");
         println!("Storage slots: {slot_count}");
-        if hashed {
+        if use_hashed_state {
             println!("Hashed storage size: {} (estimated)", human_bytes(storage_size as f64));
         } else {
             let hashed_size_estimate = if slot_count > 0 { storage_size + 12 } else { 0 };

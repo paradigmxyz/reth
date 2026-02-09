@@ -10,7 +10,7 @@ use crate::{
 };
 
 #[cfg(feature = "db-api")]
-use crate::{DBProvider, DatabaseProviderFactory, StorageChangeSetReader};
+use crate::{DBProvider, DatabaseProviderFactory, StorageChangeSetReader, StorageSettingsCache};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -694,4 +694,13 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DatabaseProviderFactory
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
         Ok(self.clone())
     }
+}
+
+#[cfg(feature = "db-api")]
+impl<ChainSpec: Send + Sync, N: Send + Sync> StorageSettingsCache for NoopProvider<ChainSpec, N> {
+    fn cached_storage_settings(&self) -> reth_db_api::models::StorageSettings {
+        reth_db_api::models::StorageSettings::default()
+    }
+
+    fn set_storage_settings_cache(&self, _settings: reth_db_api::models::StorageSettings) {}
 }

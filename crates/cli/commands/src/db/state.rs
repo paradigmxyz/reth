@@ -39,10 +39,6 @@ pub struct Command {
     /// Output format (table, json, csv)
     #[arg(long, short, default_value = "table")]
     format: OutputFormat,
-
-    /// Read from HashedAccounts/HashedStorages instead of PlainAccountState/PlainStorageState
-    #[arg(long)]
-    hashed: bool,
 }
 
 impl Command {
@@ -67,8 +63,10 @@ impl Command {
         address: Address,
         limit: usize,
     ) -> eyre::Result<()> {
+        let use_hashed_state = tool.provider_factory.cached_storage_settings().use_hashed_state;
+
         let entries = tool.provider_factory.db_ref().view(|tx| {
-            let (account, walker_entries) = if self.hashed {
+            let (account, walker_entries) = if use_hashed_state {
                 let hashed_address = keccak256(address);
                 let account = tx.get::<tables::HashedAccounts>(hashed_address)?;
                 let mut cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
