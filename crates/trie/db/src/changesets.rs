@@ -78,10 +78,8 @@ where
 
     // Step 1: Collect/calculate state reverts
 
-    let use_hashed = provider.cached_storage_settings().use_hashed_state;
-
     // This is just the changes from this specific block
-    let individual_state_revert = if use_hashed {
+    let individual_state_revert = if provider.cached_storage_settings().use_hashed_state {
         HashedPostStateSorted::from_reverts::<IdentityKeyHasher>(
             provider,
             block_number..=block_number,
@@ -94,7 +92,7 @@ where
     };
 
     // This reverts all changes from db tip back to just after block was processed
-    let cumulative_state_revert = if use_hashed {
+    let cumulative_state_revert = if provider.cached_storage_settings().use_hashed_state {
         HashedPostStateSorted::from_reverts::<IdentityKeyHasher>(provider, (block_number + 1)..)?
     } else {
         HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(provider, (block_number + 1)..)?
