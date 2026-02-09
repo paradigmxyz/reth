@@ -7,7 +7,7 @@
 //! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
 //! - **Memory efficiency**: Automatic eviction ensures bounded memory usage
 
-use crate::{DatabaseHashedPostState, DatabaseStateRoot, DatabaseTrieCursorFactory};
+use crate::{DatabaseStateRoot, DatabaseTrieCursorFactory};
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
 use reth_storage_api::{
@@ -18,7 +18,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     changesets::compute_trie_changesets,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory},
-    HashedPostStateSorted, IdentityKeyHasher, KeccakKeyHasher, StateRoot, TrieInputSorted,
+    StateRoot, TrieInputSorted,
 };
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
@@ -79,24 +79,12 @@ where
     // Step 1: Collect/calculate state reverts
 
     // This is just the changes from this specific block
-    let individual_state_revert = if provider.cached_storage_settings().use_hashed_state {
-        HashedPostStateSorted::from_reverts::<IdentityKeyHasher>(
-            provider,
-            block_number..=block_number,
-        )?
-    } else {
-        HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
-            provider,
-            block_number..=block_number,
-        )?
-    };
+    let individual_state_revert =
+        crate::state::from_reverts_auto(provider, block_number..=block_number)?;
 
     // This reverts all changes from db tip back to just after block was processed
-    let cumulative_state_revert = if provider.cached_storage_settings().use_hashed_state {
-        HashedPostStateSorted::from_reverts::<IdentityKeyHasher>(provider, (block_number + 1)..)?
-    } else {
-        HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(provider, (block_number + 1)..)?
-    };
+    let cumulative_state_revert =
+        crate::state::from_reverts_auto(provider, (block_number + 1)..)?;
 
     // This reverts all changes from db tip back to just after block-1 was processed
     let mut cumulative_state_revert_prev = cumulative_state_revert.clone();

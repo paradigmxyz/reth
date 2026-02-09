@@ -21,12 +21,12 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage, IdentityKeyHasher,
-    KeccakKeyHasher, MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot,
-    TrieInput, TrieInputSorted,
+    AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher,
+    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
+    TrieInputSorted,
 };
 use reth_trie_db::{
-    hashed_storage_from_reverts_with_provider, DatabaseHashedPostState, DatabaseProof,
+    hashed_storage_from_reverts_with_provider, DatabaseProof,
     DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
 };
 
@@ -196,17 +196,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             );
         }
 
-        if self.provider.cached_storage_settings().use_hashed_state {
-            HashedPostStateSorted::from_reverts::<IdentityKeyHasher>(
-                self.provider,
-                self.block_number..,
-            )
-        } else {
-            HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
-                self.provider,
-                self.block_number..,
-            )
-        }
+        reth_trie_db::from_reverts_auto(self.provider, self.block_number..)
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.

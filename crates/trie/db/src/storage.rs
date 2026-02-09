@@ -5,7 +5,8 @@ use reth_execution_errors::StorageRootError;
 use reth_storage_api::{BlockNumReader, StorageChangeSetReader, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
+    hashed_cursor::HashedPostStateCursorFactory, maybe_hash_key, HashedPostState, HashedStorage,
+    StorageRoot,
 };
 
 #[cfg(feature = "metrics")]
@@ -49,11 +50,7 @@ where
         provider.storage_changesets_range(from..=tip)?
     {
         if storage_address == address {
-            let hashed_slot = if use_hashed {
-                B256::from_slice(storage_change.key.as_ref())
-            } else {
-                keccak256(storage_change.key)
-            };
+            let hashed_slot = maybe_hash_key(storage_change.key, use_hashed);
             if let hash_map::Entry::Vacant(entry) = storage.storage.entry(hashed_slot) {
                 entry.insert(storage_change.value);
             }

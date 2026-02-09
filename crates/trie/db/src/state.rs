@@ -1,6 +1,4 @@
-use crate::{
-    load_prefix_sets_with_provider, DatabaseHashedCursorFactory, DatabaseTrieCursorFactory,
-};
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress},
@@ -149,11 +147,8 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let loaded_prefix_sets = if provider.cached_storage_settings().use_hashed_state {
-            load_prefix_sets_with_provider::<_, IdentityKeyHasher>(provider, range)?
-        } else {
-            load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, range)?
-        };
+        let loaded_prefix_sets =
+            crate::prefix_set::load_prefix_sets_auto(provider, range)?;
         Ok(Self::from_tx(provider.tx_ref()).with_prefix_sets(loaded_prefix_sets))
     }
 
@@ -238,6 +233,18 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         )
         .with_prefix_sets(input.prefix_sets.freeze())
         .root_with_updates()
+    }
+}
+
+/// Calls [`HashedPostStateSorted::from_reverts`] with the correct [`KeyHasher`] based on storage settings.
+pub fn from_reverts_auto(
+    provider: &(impl ChangeSetReader + StorageChangeSetReader + BlockNumReader + DBProvider + StorageSettingsCache),
+    range: impl RangeBounds<BlockNumber> + Clone,
+) -> Result<HashedPostStateSorted, ProviderError> {
+    if provider.cached_storage_settings().use_hashed_state {
+        HashedPostStateSorted::from_reverts::<IdentityKeyHasher>(provider, range)
+    } else {
+        HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(provider, range)
     }
 }
 

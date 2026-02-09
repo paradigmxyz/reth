@@ -17,6 +17,17 @@ impl KeyHasher for KeccakKeyHasher {
     }
 }
 
+/// Returns the key as-is when `use_hashed_state` is enabled (already hashed in changeset),
+/// or applies keccak256 when disabled.
+#[inline]
+pub fn maybe_hash_key(key: B256, use_hashed_state: bool) -> B256 {
+    if use_hashed_state {
+        key
+    } else {
+        keccak256(key)
+    }
+}
+
 /// A key hasher that returns the input bytes as-is, assuming they are already a 32-byte hash.
 #[derive(Clone, Debug, Default)]
 pub struct IdentityKeyHasher;
