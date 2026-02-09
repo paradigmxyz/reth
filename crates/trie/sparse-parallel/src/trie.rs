@@ -2463,7 +2463,7 @@ impl SparseSubtrie {
     ///
     /// Returns `false` if the parent is a branch node that doesn't have the `state_mask` bit set
     /// for this leaf's nibble, meaning the leaf is not reachable.
-    fn is_leaf_reachable_from_parent(&self, path: &Nibbles, _node: &TrieNode) -> bool {
+    fn is_leaf_reachable_from_parent(&self, path: &Nibbles) -> bool {
         if path.is_empty() {
             return true
         }
@@ -2865,8 +2865,7 @@ impl SparseSubtrie {
                 // at that boundary the leaf is in the lower subtrie but its parent branch is in
                 // the upper subtrie. The subtrie cannot check connectivity across the upper/lower
                 // boundary, so that check happens in `reveal_nodes` instead.
-                if path.len() != UPPER_TRIE_MAX_DEPTH &&
-                    !self.is_leaf_reachable_from_parent(&path, node)
+                if path.len() != UPPER_TRIE_MAX_DEPTH && !self.is_leaf_reachable_from_parent(&path)
                 {
                     trace!(
                         target: "trie::parallel_sparse",
@@ -2876,13 +2875,28 @@ impl SparseSubtrie {
                     return Ok(false)
                 }
 
+                let mut full_key = path;
+                full_key.extend(&leaf.key);
+
+                match self.inner.values.entry(full_key) {
+                    Entry::Occupied(_) => {
+                        trace!(
+                            target: "trie::parallel_sparse",
+                            ?path,
+                            ?full_key,
+                            "Leaf full key value already present, skipping",
+                        );
+                        return Ok(false)
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(leaf.value.clone());
+                    }
+                }
+
                 match self.nodes.entry(path) {
                     Entry::Occupied(mut entry) => match entry.get() {
                         // Replace a hash node with a revealed leaf node and store leaf node value.
                         SparseNode::Hash(hash) => {
-                            let mut full = *entry.key();
-                            full.extend(&leaf.key);
-                            self.inner.values.insert(full, leaf.value.clone());
                             entry.insert(SparseNode::Leaf {
                                 key: leaf.key,
                                 // Memoize the hash of a previously blinded node in a new leaf
@@ -2893,10 +2907,7 @@ impl SparseSubtrie {
                         _ => unreachable!("checked that node is either a hash or non-existent"),
                     },
                     Entry::Vacant(entry) => {
-                        let mut full = *entry.key();
-                        full.extend(&leaf.key);
                         entry.insert(SparseNode::new_leaf(leaf.key));
-                        self.inner.values.insert(full, leaf.value.clone());
                     }
                 }
             }
