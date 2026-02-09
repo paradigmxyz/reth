@@ -10,31 +10,26 @@ use reth_transaction_pool::PoolTransaction;
 /// and compose it with the rest of the transactions.
 #[derive(Debug)]
 pub struct PayloadTransactionsFixed<T> {
-    transactions: Vec<T>,
-    index: usize,
+    transactions: std::vec::IntoIter<T>,
 }
 
 impl<T> PayloadTransactionsFixed<T> {
     /// Constructs a new [`PayloadTransactionsFixed`].
     pub fn new(transactions: Vec<T>) -> Self {
-        Self { transactions, index: Default::default() }
+        Self { transactions: transactions.into_iter() }
     }
 
     /// Constructs a new [`PayloadTransactionsFixed`] with a single transaction.
     pub fn single(transaction: T) -> Self {
-        Self { transactions: vec![transaction], index: Default::default() }
+        Self { transactions: vec![transaction].into_iter() }
     }
 }
 
-impl<T: Clone> PayloadTransactions for PayloadTransactionsFixed<T> {
+impl<T> PayloadTransactions for PayloadTransactionsFixed<T> {
     type Transaction = T;
 
     fn next(&mut self, _ctx: ()) -> Option<T> {
-        (self.index < self.transactions.len()).then(|| {
-            let tx = self.transactions[self.index].clone();
-            self.index += 1;
-            tx
-        })
+        self.transactions.next()
     }
 
     fn mark_invalid(&mut self, _sender: Address, _nonce: u64) {}
