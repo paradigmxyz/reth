@@ -400,17 +400,6 @@ where
 
         loop {
             crossbeam_channel::select_biased! {
-                recv(self.updates) -> message => {
-                    let update = match message {
-                        Ok(m) => m,
-                        Err(_) => {
-                            break
-                        }
-                    };
-
-                    self.on_message(update);
-                    self.pending_updates += 1;
-                }
                 recv(self.proof_result_rx) -> message => {
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
@@ -427,6 +416,17 @@ where
                     }
 
                     self.on_proof_result(result)?;
+                },
+                recv(self.updates) -> message => {
+                    let update = match message {
+                        Ok(m) => m,
+                        Err(_) => {
+                            break
+                        }
+                    };
+
+                    self.on_message(update);
+                    self.pending_updates += 1;
                 },
             }
 
