@@ -1970,33 +1970,49 @@ impl ParallelSparseTrie {
 
         while let Some(stack_item) = self.upper_subtrie.inner.buffers.path_stack.pop() {
             let path = stack_item.path;
-            let node = if path.len() < UPPER_TRIE_MAX_DEPTH {
-                self.upper_subtrie.nodes.get_mut(&path).expect("upper subtrie node must exist")
-            } else {
-                let index = path_subtrie_index_unchecked(&path);
-                let node = self.lower_subtries[index]
-                    .as_revealed_mut()
-                    .expect("lower subtrie must exist")
-                    .nodes
-                    .get_mut(&path)
-                    .expect("lower subtrie node must exist");
-                // Lower subtrie root node hashes must be computed before updating upper subtrie
-                // hashes
-                debug_assert!(
-                    node.hash().is_some(),
-                    "Lower subtrie root node at path {path:?} has no hash"
+            if path.len() < UPPER_TRIE_MAX_DEPTH {
+                let node =
+                    self.upper_subtrie.nodes.get_mut(&path).expect("upper subtrie node must exist");
+                // Calculate the RLP node for the current node using upper subtrie
+                self.upper_subtrie.inner.rlp_node(
+                    prefix_set,
+                    &mut update_actions_buf,
+                    stack_item,
+                    node,
+                    &self.branch_node_masks,
                 );
-                node
-            };
+            } else {
+                // For lower subtrie roots, use the pre-computed root_rlp_node if available
+                // (for changed subtries), otherwise fall back to the rlp_node path (for unchanged
+                // subtries with cached hashes)
+                let index = path_subtrie_index_unchecked(&path);
+                let lower_subtrie =
+                    self.lower_subtries[index].as_revealed_ref().expect("lower subtrie must exist");
 
-            // Calculate the RLP node for the current node using upper subtrie
-            self.upper_subtrie.inner.rlp_node(
-                prefix_set,
-                &mut update_actions_buf,
-                stack_item,
-                node,
-                &self.branch_node_masks,
-            );
+                if let Some((rlp_node, node_type)) = lower_subtrie.root_rlp_node.clone() {
+                    // Changed subtrie: use pre-computed root_rlp_node
+                    self.upper_subtrie.inner.buffers.rlp_node_stack.push(RlpNodeStackItem {
+                        path,
+                        rlp_node,
+                        node_type,
+                    });
+                } else {
+                    // Unchanged subtrie: call rlp_node which will use cached hash
+                    let node = self.lower_subtries[index]
+                        .as_revealed_mut()
+                        .expect("lower subtrie must exist")
+                        .nodes
+                        .get_mut(&path)
+                        .expect("lower subtrie node must exist");
+                    self.upper_subtrie.inner.rlp_node(
+                        prefix_set,
+                        &mut update_actions_buf,
+                        stack_item,
+                        node,
+                        &self.branch_node_masks,
+                    );
+                }
+            }
         }
 
         // If there were any branch node updates as a result of calculating the RLP node for the
@@ -2441,6 +2457,8 @@ pub struct SparseSubtrie {
     nodes: HashMap<Nibbles, SparseNode>,
     /// Subset of fields for mutable access while `nodes` field is also being mutably borrowed.
     inner: SparseSubtrieInner,
+    /// The last calculated RLP node for this subtrie's root, along with its node type.
+    root_rlp_node: Option<(RlpNode, SparseNodeType)>,
 }
 
 /// Returned by the `find_next_to_leaf` method to indicate either that the leaf has been found,
@@ -3004,10 +3022,6 @@ impl SparseSubtrie {
     ///   retention is disabled.
     /// - `branch_node_masks`: The tree and hash masks for branch nodes.
     ///
-    /// # Returns
-    ///
-    /// A tuple containing the root node of the updated subtrie.
-    ///
     /// # Panics
     ///
     /// If the node at the root path does not exist.
@@ -3017,7 +3031,7 @@ impl SparseSubtrie {
         prefix_set: &mut PrefixSet,
         update_actions: &mut Option<Vec<SparseTrieUpdatesAction>>,
         branch_node_masks: &BranchNodeMasksMap,
-    ) -> RlpNode {
+    ) {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
         debug_assert!(prefix_set.iter().all(|path| path.starts_with(&self.path)));
@@ -3039,7 +3053,9 @@ impl SparseSubtrie {
         }
 
         debug_assert_eq!(self.inner.buffers.rlp_node_stack.len(), 1);
-        self.inner.buffers.rlp_node_stack.pop().unwrap().rlp_node
+        let RlpNodeStackItem { rlp_node, node_type, .. } =
+            self.inner.buffers.rlp_node_stack.pop().unwrap();
+        self.root_rlp_node = Some((rlp_node, node_type));
     }
 
     /// Removes all nodes and values from the subtrie, resetting it to a blank state
@@ -3053,6 +3069,7 @@ impl SparseSubtrie {
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.inner.clear();
+        self.root_rlp_node = None;
     }
 
     /// Shrinks the capacity of the subtrie's node storage.
