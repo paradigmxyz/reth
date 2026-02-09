@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare-reth:
+  build-reth:
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: kurtosis
@@ -32,7 +32,7 @@ jobs:
     name: run kurtosis
     runs-on: depot-ubuntu-latest
     needs:
-      - prepare-reth
+      - build-reth
     steps:
       - uses: actions/checkout@v6
         with:

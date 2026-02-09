@@ -15,14 +15,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare-reth-stable:
+  build-reth-stable:
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive-stable
       artifact_name: "reth-stable"
     secrets: inherit
 
-  prepare-reth-edge:
+  build-reth-edge:
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive-edge
@@ -185,8 +185,8 @@ jobs:
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/paris.*
     needs:
-      - prepare-reth-stable
-      - prepare-reth-edge
+      - build-reth-stable
+      - build-reth-edge
       - prepare-hive
     name: ${{ matrix.storage }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     runs-on:
