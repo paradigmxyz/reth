@@ -618,3 +618,89 @@ fn test_invariant_clone_shares_parallel_writes_flag() {
     let val: Option<Cow<'_, [u8]>> = txn.get(dbi, b"key").unwrap();
     assert_eq!(val.as_deref(), Some(b"value".as_slice()));
 }
+
+// =============================================================================
+// INVARIANT 12: Active cursor blocks commit_subtxns
+// =============================================================================
+
+#[test]
+fn test_invariant_active_cursor_blocks_commit_subtxns() {
+    let dir = tempdir().unwrap();
+    let env = Environment::builder()
+        .set_max_dbs(10)
+        .set_geometry(Geometry { size: Some(0..(1024 * 1024 * 10)), ..Default::default() })
+        .write_map()
+        .open(dir.path())
+        .unwrap();
+
+    let txn = env.begin_rw_txn().unwrap();
+    let db = txn.create_db(Some("table"), DatabaseFlags::empty()).unwrap();
+    let dbi = db.dbi();
+    txn.commit().unwrap();
+
+    let txn = env.begin_rw_txn().unwrap();
+    txn.enable_parallel_writes(&[dbi]).unwrap();
+
+    // Get an owned cursor (keeps strong reference count elevated)
+    let cursor = txn.cursor_with_dbi_parallel_owned(dbi).unwrap();
+
+    // Attempt commit_subtxns() with active cursor - should return Error::Busy
+    let result = txn.commit_subtxns();
+    assert!(
+        matches!(result, Err(Error::Busy)),
+        "commit_subtxns should return Error::Busy with active cursor, got {:?}",
+        result
+    );
+
+    // Drop the cursor
+    drop(cursor);
+
+    // Now commit_subtxns should succeed
+    txn.commit_subtxns().expect("commit_subtxns should succeed after cursor dropped");
+    txn.commit().expect("parent commit should succeed");
+}
+
+// =============================================================================
+// INVARIANT 13: DBI opened in previous transaction handled correctly
+// =============================================================================
+
+#[test]
+fn test_invariant_dbi_stale_handled() {
+    let dir = tempdir().unwrap();
+    let env = Environment::builder()
+        .set_max_dbs(10)
+        .set_geometry(Geometry { size: Some(0..(1024 * 1024 * 10)), ..Default::default() })
+        .write_map()
+        .open(dir.path())
+        .unwrap();
+
+    // Transaction 1: Open DBI and write some data
+    let txn1 = env.begin_rw_txn().unwrap();
+    let db = txn1.create_db(Some("table"), DatabaseFlags::empty()).unwrap();
+    let dbi = db.dbi();
+    txn1.put(dbi, b"initial_key", b"initial_value", WriteFlags::empty()).unwrap();
+    txn1.commit().unwrap();
+
+    // Transaction 2: Use the DBI from previous transaction with parallel writes
+    let txn2 = env.begin_rw_txn().unwrap();
+    // enable_parallel_writes should handle DBI correctly (pre-touch logic handles stale DBIs)
+    txn2.enable_parallel_writes(&[dbi])
+        .expect("enable_parallel_writes should handle DBI from previous txn");
+
+    // Write data via parallel cursor
+    {
+        let mut cursor = txn2.cursor_with_dbi_parallel(dbi).unwrap();
+        cursor.put(b"new_key", b"new_value", WriteFlags::empty()).unwrap();
+    }
+
+    // Commit subtxns and parent
+    txn2.commit_subtxns().expect("commit_subtxns should succeed");
+    txn2.commit().expect("parent commit should succeed");
+
+    // Verify both initial and new data are readable
+    let txn = env.begin_ro_txn().unwrap();
+    let initial: Option<Cow<'_, [u8]>> = txn.get(dbi, b"initial_key").unwrap();
+    let new: Option<Cow<'_, [u8]>> = txn.get(dbi, b"new_key").unwrap();
+    assert_eq!(initial.as_deref(), Some(b"initial_value".as_slice()));
+    assert_eq!(new.as_deref(), Some(b"new_value".as_slice()));
+}
