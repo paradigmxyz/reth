@@ -3676,8 +3676,8 @@ mod tests {
         SparseSubtrieType,
     };
     use crate::{
+        parallel::ChangedSubtrie,
         provider::{DefaultTrieNodeProvider, RevealedNode, TrieNodeProvider},
-        trie::ChangedSubtrie,
         LeafLookup, LeafLookupError, SparseNode, SparseTrie, SparseTrieExt, SparseTrieUpdates,
     };
     use alloy_primitives::{
