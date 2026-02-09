@@ -1,6 +1,6 @@
 //! E2E tests for `RocksDB` provider functionality.
 
-#![cfg(all(feature = "edge", unix))]
+#![cfg(all(feature = "rocksdb", unix))]
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
@@ -13,7 +13,7 @@ use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet, E2ETestSe
 use reth_node_core::args::RocksDbArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_provider::{RocksDBProviderFactory, StorageSettings};
+use reth_provider::RocksDBProviderFactory;
 use std::{sync::Arc, time::Duration};
 
 const ROCKSDB_POLL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -96,23 +96,19 @@ fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
 
-/// Verifies that `RocksDB` CLI defaults match `StorageSettings::base()`.
+/// Verifies that `RocksDB` CLI defaults are `None` (deferred to storage mode).
 #[test]
-fn test_rocksdb_defaults_match_storage_settings() {
+fn test_rocksdb_defaults_are_none() {
     let args = RocksDbArgs::default();
-    let settings = StorageSettings::base();
 
-    assert_eq!(
-        args.tx_hash, settings.transaction_hash_numbers_in_rocksdb,
-        "tx_hash default should match StorageSettings::base()"
+    assert!(args.tx_hash.is_none(), "tx_hash default should be None (deferred to --storage.v2)");
+    assert!(
+        args.storages_history.is_none(),
+        "storages_history default should be None (deferred to --storage.v2)"
     );
-    assert_eq!(
-        args.storages_history, settings.storages_history_in_rocksdb,
-        "storages_history default should match StorageSettings::base()"
-    );
-    assert_eq!(
-        args.account_history, settings.account_history_in_rocksdb,
-        "account_history default should match StorageSettings::base()"
+    assert!(
+        args.account_history.is_none(),
+        "account_history default should be None (deferred to --storage.v2)"
     );
 }
 
@@ -125,6 +121,7 @@ async fn test_rocksdb_node_startup() -> Result<()> {
 
     let (nodes, _tasks, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
+            .with_storage_v2()
             .build()
             .await?;
 
@@ -152,6 +149,7 @@ async fn test_rocksdb_block_mining() -> Result<()> {
 
     let (mut nodes, _tasks, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
+            .with_storage_v2()
             .build()
             .await?;
 
@@ -208,6 +206,7 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
+    .with_storage_v2()
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -274,6 +273,7 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
+    .with_storage_v2()
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -341,6 +341,7 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
+    .with_storage_v2()
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -425,6 +426,7 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
+    .with_storage_v2()
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -488,6 +490,7 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
+    .with_storage_v2()
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;

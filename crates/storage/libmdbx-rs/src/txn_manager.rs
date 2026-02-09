@@ -4,7 +4,7 @@ use crate::{
     CommitLatency,
 };
 use std::{
-    ptr,
+    fmt, ptr,
     sync::mpsc::{sync_channel, Receiver, SyncSender},
 };
 
@@ -17,6 +17,18 @@ pub(crate) enum TxnManagerMessage {
     Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
     Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
     Commit { tx: TxnPtr, sender: SyncSender<Result<(bool, CommitLatency)>> },
+}
+
+impl fmt::Debug for TxnManagerMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Begin { parent, flags, sender: _ } => {
+                f.debug_struct("Begin").field("parent", parent).field("flags", flags).finish()
+            }
+            Self::Abort { tx, sender: _ } => f.debug_struct("Abort").field("tx", tx).finish(),
+            Self::Commit { tx, sender: _ } => f.debug_struct("Commit").field("tx", tx).finish(),
+        }
+    }
 }
 
 /// Manages transactions by doing two things:
@@ -55,7 +67,9 @@ impl TxnManager {
         let task = move || {
             let env = env;
             loop {
-                match rx.recv() {
+                let msg = rx.recv();
+                tracing::debug!(target: "libmdbx::txn", ?msg, "txn-mngr received");
+                match msg {
                     Ok(msg) => match msg {
                         TxnManagerMessage::Begin { parent, flags, sender } => {
                             let _span =

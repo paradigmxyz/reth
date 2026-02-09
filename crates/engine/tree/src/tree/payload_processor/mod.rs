@@ -502,7 +502,6 @@ where
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
@@ -519,9 +518,11 @@ where
         let max_storage_tries = self.sparse_trie_max_storage_tries;
         let chunk_size =
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
+        let executor = self.executor.clone();
 
+        let parent_span = Span::current();
         self.executor.spawn_blocking(move || {
-            let _enter = debug_span!(target: "engine::tree::payload_processor", "sparse_trie_task")
+            let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 
             // Reuse a stored SparseStateTrie if available, applying continuation logic.
@@ -561,10 +562,11 @@ where
                 ))
             } else {
                 SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_trie(
+                    &executor,
                     from_multi_proof,
                     proof_worker_handle,
                     trie_metrics.clone(),
-                    sparse_state_trie,
+                    sparse_state_trie.with_skip_proof_node_filtering(true),
                     chunk_size,
                 ))
             };

@@ -6,7 +6,7 @@ use crate::{
     changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
     EitherWriterDestination, HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader,
-    TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, STORAGE_POOL,
 };
 use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
@@ -39,22 +39,20 @@ use reth_primitives_traits::{
 use reth_prune_types::PruneSegment;
 use reth_stages_types::PipelineTarget;
 use reth_static_file_types::{
-    find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileMap,
-    StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
+    find_fixed_range, ChangesetOffsetReader, HighestStaticFiles, SegmentHeader,
+    SegmentRangeInclusive, StaticFileMap, StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChangeSetReader, DBProvider, PruneCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
-use reth_tasks::spawn_scoped_os_thread;
 use std::{
     collections::BTreeMap,
     fmt::Debug,
     ops::{Bound, Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::{atomic::AtomicU64, mpsc, Arc},
-    thread,
 };
 use tracing::{debug, info, info_span, instrument, trace, warn};
 
@@ -276,7 +274,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// receive `update_index` notifications from a node that appends/truncates data.
     pub fn watch_directory(&self) {
         let provider = self.clone();
-        std::thread::spawn(move || {
+        reth_tasks::spawn_os_thread("sf-watch", move || {
             let (tx, rx) = std::sync::mpsc::channel();
             let mut watcher = RecommendedWatcher::new(
                 move |res| tx.send(res).unwrap(),
@@ -656,31 +654,28 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(())
     }
 
-    /// Spawns a scoped thread that writes to a static file segment using the provided closure.
+    /// Writes to a static file segment using the provided closure.
     ///
     /// The closure receives a mutable reference to the segment writer. After the closure completes,
     /// `sync_all()` is called to flush writes to disk.
-    fn spawn_segment_writer<'scope, 'env, F>(
-        &'env self,
-        scope: &'scope thread::Scope<'scope, 'env>,
+    fn write_segment<F>(
+        &self,
         segment: StaticFileSegment,
         first_block_number: BlockNumber,
         f: F,
-    ) -> thread::ScopedJoinHandle<'scope, ProviderResult<()>>
+    ) -> ProviderResult<()>
     where
-        F: FnOnce(&mut StaticFileProviderRWRefMut<'_, N>) -> ProviderResult<()> + Send + 'env,
+        F: FnOnce(&mut StaticFileProviderRWRefMut<'_, N>) -> ProviderResult<()>,
     {
-        spawn_scoped_os_thread(scope, segment.as_short_str(), move || {
-            let mut w = self.get_writer(first_block_number, segment)?;
-            f(&mut w)?;
-            w.sync_all()
-        })
+        let mut w = self.get_writer(first_block_number, segment)?;
+        f(&mut w)?;
+        w.sync_all()
     }
 
     /// Writes all static file data for multiple blocks in parallel per-segment.
     ///
-    /// This spawns separate threads for each segment type and each thread calls `sync_all()` on its
-    /// writer when done.
+    /// This spawns tasks on the storage thread pool for each segment type and each task calls
+    /// `sync_all()` on its writer when done.
     #[instrument(level = "debug", target = "providers::static_file", skip_all)]
     pub fn write_blocks_data(
         &self,
@@ -694,70 +689,87 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         let first_block_number = blocks[0].recovered_block().number();
 
-        thread::scope(|s| {
-            let h_headers =
-                self.spawn_segment_writer(s, StaticFileSegment::Headers, first_block_number, |w| {
-                    Self::write_headers(w, blocks)
+        let mut r_headers = None;
+        let mut r_txs = None;
+        let mut r_senders = None;
+        let mut r_receipts = None;
+        let mut r_account_changesets = None;
+        let mut r_storage_changesets = None;
+
+        STORAGE_POOL.in_place_scope(|s| {
+            s.spawn(|_| {
+                r_headers =
+                    Some(self.write_segment(StaticFileSegment::Headers, first_block_number, |w| {
+                        Self::write_headers(w, blocks)
+                    }));
+            });
+
+            s.spawn(|_| {
+                r_txs = Some(self.write_segment(
+                    StaticFileSegment::Transactions,
+                    first_block_number,
+                    |w| Self::write_transactions(w, blocks, tx_nums),
+                ));
+            });
+
+            if ctx.write_senders {
+                s.spawn(|_| {
+                    r_senders = Some(self.write_segment(
+                        StaticFileSegment::TransactionSenders,
+                        first_block_number,
+                        |w| Self::write_transaction_senders(w, blocks, tx_nums),
+                    ));
                 });
-
-            let h_txs = self.spawn_segment_writer(
-                s,
-                StaticFileSegment::Transactions,
-                first_block_number,
-                |w| Self::write_transactions(w, blocks, tx_nums),
-            );
-
-            let h_senders = ctx.write_senders.then(|| {
-                self.spawn_segment_writer(
-                    s,
-                    StaticFileSegment::TransactionSenders,
-                    first_block_number,
-                    |w| Self::write_transaction_senders(w, blocks, tx_nums),
-                )
-            });
-
-            let h_receipts = ctx.write_receipts.then(|| {
-                self.spawn_segment_writer(s, StaticFileSegment::Receipts, first_block_number, |w| {
-                    Self::write_receipts(w, blocks, tx_nums, &ctx)
-                })
-            });
-
-            let h_account_changesets = ctx.write_account_changesets.then(|| {
-                self.spawn_segment_writer(
-                    s,
-                    StaticFileSegment::AccountChangeSets,
-                    first_block_number,
-                    |w| Self::write_account_changesets(w, blocks),
-                )
-            });
-
-            let h_storage_changesets = ctx.write_storage_changesets.then(|| {
-                self.spawn_segment_writer(
-                    s,
-                    StaticFileSegment::StorageChangeSets,
-                    first_block_number,
-                    |w| Self::write_storage_changesets(w, blocks),
-                )
-            });
-
-            h_headers.join().map_err(|_| StaticFileWriterError::ThreadPanic("headers"))??;
-            h_txs.join().map_err(|_| StaticFileWriterError::ThreadPanic("transactions"))??;
-            if let Some(h) = h_senders {
-                h.join().map_err(|_| StaticFileWriterError::ThreadPanic("senders"))??;
             }
-            if let Some(h) = h_receipts {
-                h.join().map_err(|_| StaticFileWriterError::ThreadPanic("receipts"))??;
+
+            if ctx.write_receipts {
+                s.spawn(|_| {
+                    r_receipts = Some(self.write_segment(
+                        StaticFileSegment::Receipts,
+                        first_block_number,
+                        |w| Self::write_receipts(w, blocks, tx_nums, &ctx),
+                    ));
+                });
             }
-            if let Some(h) = h_account_changesets {
-                h.join()
-                    .map_err(|_| StaticFileWriterError::ThreadPanic("account_changesets"))??;
+
+            if ctx.write_account_changesets {
+                s.spawn(|_| {
+                    r_account_changesets = Some(self.write_segment(
+                        StaticFileSegment::AccountChangeSets,
+                        first_block_number,
+                        |w| Self::write_account_changesets(w, blocks),
+                    ));
+                });
             }
-            if let Some(h) = h_storage_changesets {
-                h.join()
-                    .map_err(|_| StaticFileWriterError::ThreadPanic("storage_changesets"))??;
+
+            if ctx.write_storage_changesets {
+                s.spawn(|_| {
+                    r_storage_changesets = Some(self.write_segment(
+                        StaticFileSegment::StorageChangeSets,
+                        first_block_number,
+                        |w| Self::write_storage_changesets(w, blocks),
+                    ));
+                });
             }
-            Ok(())
-        })
+        });
+
+        r_headers.ok_or(StaticFileWriterError::ThreadPanic("headers"))??;
+        r_txs.ok_or(StaticFileWriterError::ThreadPanic("transactions"))??;
+        if ctx.write_senders {
+            r_senders.ok_or(StaticFileWriterError::ThreadPanic("senders"))??;
+        }
+        if ctx.write_receipts {
+            r_receipts.ok_or(StaticFileWriterError::ThreadPanic("receipts"))??;
+        }
+        if ctx.write_account_changesets {
+            r_account_changesets
+                .ok_or(StaticFileWriterError::ThreadPanic("account_changesets"))??;
+        }
+        if ctx.write_storage_changesets {
+            r_storage_changesets
+                .ok_or(StaticFileWriterError::ThreadPanic("storage_changesets"))??;
+        }
+        Ok(())
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and start index that can be
@@ -932,7 +944,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
 
             debug!(
-                target: "provider::static_file",
+                target: "providers::static_file",
                 ?segment,
                 ?block_height,
                 "Deleting static file below block"
@@ -941,7 +953,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             // now we need to wipe the static file, this will take care of updating the index and
             // advance the lowest tracked block height for the segment.
             let header = self.delete_jar(segment, block_height).inspect_err(|err| {
-                warn!( target: "provider::static_file", ?segment, %block_height, ?err, "Failed to delete static file below block")
+                warn!( target: "providers::static_file", ?segment, %block_height, ?err, "Failed to delete static file below block")
             })?;
 
             deleted_headers.push(header);
@@ -962,12 +974,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<SegmentHeader> {
         let fixed_block_range = self.find_fixed_range(segment, block);
         let key = (fixed_block_range.end(), segment);
+        let file = self.path.join(segment.filename(&fixed_block_range));
         let jar = if let Some((_, jar)) = self.map.remove(&key) {
             jar.jar
         } else {
-            let file = self.path.join(segment.filename(&fixed_block_range));
             debug!(
-                target: "provider::static_file",
+                target: "providers::static_file",
                 ?file,
                 ?fixed_block_range,
                 ?block,
@@ -977,6 +989,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         let header = jar.user_header().clone();
+
+        // Delete the sidecar file for changeset segments before deleting the main jar
+        if segment.is_change_based() {
+            let csoff_path = file.with_extension("csoff");
+            if csoff_path.exists() {
+                std::fs::remove_file(&csoff_path).map_err(ProviderError::other)?;
+            }
+        }
+
         jar.delete().map_err(ProviderError::other)?;
 
         // SAFETY: this is currently necessary to ensure that certain indexes like
@@ -998,14 +1019,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         while let Some(block_height) = self.get_highest_static_file_block(segment) {
             debug!(
-                target: "provider::static_file",
+                target: "providers::static_file",
                 ?segment,
                 ?block_height,
                 "Deleting static file jar"
             );
 
             let header = self.delete_jar(segment, block_height).inspect_err(|err| {
-                warn!(target: "provider::static_file", ?segment, %block_height, ?err, "Failed to delete static file jar")
+                warn!(target: "providers::static_file", ?segment, %block_height, ?err, "Failed to delete static file jar")
             })?;
 
             deleted_headers.push(header);
@@ -1025,12 +1046,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let key = (fixed_block_range.end(), segment);
 
         // Avoid using `entry` directly to avoid a write lock in the common case.
-        trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Getting provider");
+        trace!(target: "providers::static_file", ?segment, ?fixed_block_range, "Getting provider");
         let mut provider: StaticFileJarProvider<'_, N> = if let Some(jar) = self.map.get(&key) {
-            trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Jar found in cache");
+            trace!(target: "providers::static_file", ?segment, ?fixed_block_range, "Jar found in cache");
             jar.into()
         } else {
-            trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
+            trace!(target: "providers::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
             let jar = NippyJar::load(&path).map_err(ProviderError::other)?;
             self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
@@ -1105,7 +1126,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment_max_block: Option<BlockNumber>,
     ) -> ProviderResult<()> {
         debug!(
-            target: "provider::static_file",
+            target: "providers::static_file",
             ?segment,
             ?segment_max_block,
             "Updating provider index"
@@ -1217,20 +1238,20 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 }
 
                 // Update the cached provider.
-                debug!(target: "provider::static_file", ?segment, "Inserting updated jar into cache");
+                debug!(target: "providers::static_file", ?segment, "Inserting updated jar into cache");
                 self.map.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
 
                 // Delete any cached provider that no longer has an associated jar.
-                debug!(target: "provider::static_file", ?segment, "Cleaning up jar map");
+                debug!(target: "providers::static_file", ?segment, "Cleaning up jar map");
                 self.map.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
             }
             None => {
-                debug!(target: "provider::static_file", ?segment, "Removing segment from index");
+                debug!(target: "providers::static_file", ?segment, "Removing segment from index");
                 indexes.remove(segment);
             }
         };
 
-        debug!(target: "provider::static_file", ?segment, "Updated provider index");
+        debug!(target: "providers::static_file", ?segment, "Updated provider index");
         Ok(())
     }
 
@@ -2335,7 +2356,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
             return Err(ProviderError::ReadOnlyStaticFileAccess);
         }
 
-        trace!(target: "provider::static_file", ?block, ?segment, "Getting static file writer.");
+        trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
         self.writers.get_or_create(segment, || {
             StaticFileProviderRW::new(segment, block, Arc::downgrade(&self.0), self.metrics.clone())
         })
@@ -2380,7 +2401,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             Err(err) => return Err(err),
         };
 
-        if let Some(offset) = provider.user_header().changeset_offset(block_number) {
+        if let Some(offset) = provider.read_changeset_offset(block_number)? {
             let mut cursor = provider.cursor()?;
             let mut changeset = Vec::with_capacity(offset.num_changes() as usize);
 
@@ -2412,9 +2433,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             Err(err) => return Err(err),
         };
 
-        let user_header = provider.user_header();
-
-        let Some(offset) = user_header.changeset_offset(block_number) else {
+        let Some(offset) = provider.read_changeset_offset(block_number)? else {
             return Ok(None);
         };
 
@@ -2437,7 +2456,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
                 // This is not expected but means we are out of the range / file somehow, and can't
                 // continue
                 debug!(
-                    target: "provider::static_file",
+                    target: "providers::static_file",
                     ?low,
                     ?mid,
                     ?high,
@@ -2473,12 +2492,19 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
     fn account_changeset_count(&self) -> ProviderResult<usize> {
         let mut count = 0;
 
-        // iterate through static files and sum changeset metadata via each static file header
         let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
         if let Some(changeset_segments) = static_files.get(StaticFileSegment::AccountChangeSets) {
-            for (_, header) in changeset_segments {
-                if let Some(changeset_offsets) = header.changeset_offsets() {
-                    for offset in changeset_offsets {
+            for (block_range, header) in changeset_segments {
+                let csoff_path = self
+                    .path
+                    .join(StaticFileSegment::AccountChangeSets.filename(block_range))
+                    .with_extension("csoff");
+                if csoff_path.exists() {
+                    let len = header.changeset_offsets_len();
+                    let mut reader = ChangesetOffsetReader::new(&csoff_path, len)
+                        .map_err(ProviderError::other)?;
+                    let offsets = reader.get_range(0, len).map_err(ProviderError::other)?;
+                    for offset in offsets {
                         count += offset.num_changes() as usize;
                     }
                 }
@@ -2504,7 +2530,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
             Err(err) => return Err(err),
         };
 
-        if let Some(offset) = provider.user_header().changeset_offset(block_number) {
+        if let Some(offset) = provider.read_changeset_offset(block_number)? {
             let mut cursor = provider.cursor()?;
             let mut changeset = Vec::with_capacity(offset.num_changes() as usize);
 
@@ -2537,8 +2563,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
             Err(err) => return Err(err),
         };
 
-        let user_header = provider.user_header();
-        let Some(offset) = user_header.changeset_offset(block_number) else {
+        let Some(offset) = provider.read_changeset_offset(block_number)? else {
             return Ok(None);
         };
 
@@ -2556,7 +2581,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
                 }
             } else {
                 debug!(
-                    target: "provider::static_file",
+                    target: "providers::static_file",
                     ?low,
                     ?mid,
                     ?high,
@@ -2595,9 +2620,17 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
 
         let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
         if let Some(changeset_segments) = static_files.get(StaticFileSegment::StorageChangeSets) {
-            for (_, header) in changeset_segments {
-                if let Some(changeset_offsets) = header.changeset_offsets() {
-                    for offset in changeset_offsets {
+            for (block_range, header) in changeset_segments {
+                let csoff_path = self
+                    .path
+                    .join(StaticFileSegment::StorageChangeSets.filename(block_range))
+                    .with_extension("csoff");
+                if csoff_path.exists() {
+                    let len = header.changeset_offsets_len();
+                    let mut reader = ChangesetOffsetReader::new(&csoff_path, len)
+                        .map_err(ProviderError::other)?;
+                    let offsets = reader.get_range(0, len).map_err(ProviderError::other)?;
+                    for offset in offsets {
                         count += offset.num_changes() as usize;
                     }
                 }

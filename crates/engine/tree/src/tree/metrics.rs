@@ -47,7 +47,7 @@ impl EngineApiMetrics {
         self.executor.execution_histogram.record(execution_secs);
         self.executor.execution_duration.set(execution_secs);
 
-        // Update the metrics for the number of accounts, storage slots and bytecodes updated
+        // Update the metrics for the number of accounts, storage slots and bytecodes
         let accounts = output.state.state.len();
         let storage_slots =
             output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
