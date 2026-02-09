@@ -490,6 +490,10 @@ where
         // doesn't match what's on chain.
         evm_env.cfg_env.disable_nonce_check = true;
 
+        // disable the balance check so that transactions from senders who were funded by earlier
+        // transactions in the block can still be prewarmed
+        evm_env.cfg_env.disable_balance_check = true;
+
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
         let mut evm = evm_config.evm_with_env(state_provider, evm_env);
