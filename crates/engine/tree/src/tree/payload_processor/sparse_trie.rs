@@ -346,8 +346,7 @@ where
                 MultiProofMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
-                // BAL carries the complete post-state in one shot — convert it,
-                // send `HashedState` + `FinishedStateUpdates`, and return.
+                // BAL provides the full post-state; convert and send it in one shot.
                 MultiProofMessage::BlockAccessList(bal) => {
                     let Some(ref provider) = provider else {
                         error!(target: "engine::tree::payload_processor::sparse_trie", "Received BAL but no provider available");
