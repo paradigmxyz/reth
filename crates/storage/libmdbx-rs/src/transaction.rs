@@ -587,21 +587,6 @@ where
             stats_vec.push((subtxn.dbi(), stats));
         }
 
-        // Temporary debug output for stress testing
-        if !stats_vec.is_empty() {
-            let hit_rate = if total_page_allocations + total_refill_events > 0 {
-                (total_page_allocations as f64 /
-                    (total_page_allocations + total_refill_events) as f64) *
-                    100.0
-            } else {
-                0.0
-            };
-            eprintln!(
-                "[ARENA] subtxns={} page_allocations={} refill_events={} hit_rate={:.1}% initial_pages={} refill_pages={} unused={} from_gc={} from_eof={}",
-                stats_vec.len(), total_page_allocations, total_refill_events, hit_rate, total_initial_pages, total_refill_pages, total_unused, total_from_gc, total_from_eof
-            );
-        }
-
         Ok(stats_vec)
     }
 }
