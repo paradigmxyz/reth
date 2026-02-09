@@ -223,28 +223,31 @@ where
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
 
+            // Detach the published cache so readers see None during the update.
+            // ExecutionCache is Arc-shared, so insert_state mutations on the new
+            // SavedCache would be visible through the old published pointer.
+            execution_cache.update_with_guard(|cached| {
+                cached.take();
+            });
+
             let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
             let new_cache = SavedCache::new(hash, caches, cache_metrics)
                 .with_disable_cache_metrics(disable_cache_metrics);
 
             if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
-                execution_cache.update_with_guard(|cached| {
-                    *cached = None;
-                });
                 debug!(target: "engine::caching", "cleared execution cache on update error");
             } else {
                 new_cache.update_metrics();
 
-                if valid_block_rx.recv().is_ok() {
-                    execution_cache.update_with_guard(|cached| {
+                let valid = valid_block_rx.recv().is_ok();
+
+                execution_cache.update_with_guard(|cached| {
+                    if valid {
                         *cached = Some(new_cache);
-                    });
-                } else {
-                    execution_cache.update_with_guard(|cached| {
-                        *cached = None;
-                    });
-                    debug!(target: "engine::caching", "cleared execution cache on invalid block");
-                }
+                    } else {
+                        debug!(target: "engine::caching", "cleared execution cache on invalid block");
+                    }
+                });
             }
 
             let elapsed = start.elapsed();
