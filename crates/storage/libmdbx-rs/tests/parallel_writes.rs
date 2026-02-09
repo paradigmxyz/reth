@@ -33,7 +33,7 @@ fn test_parallel_subtx_dupsort_storage_pattern() {
     txn.commit().unwrap();
 
     // Now do parallel subtxn with the exact write_state_changes pattern
-    let txn = env.begin_rw_txn().unwrap();
+    let mut txn = env.begin_rw_txn().unwrap();
     txn.enable_parallel_writes(&[dbi]).unwrap();
 
     {
@@ -73,7 +73,7 @@ fn test_parallel_subtx_dupsort_storage_pattern() {
 
     // Verify
     let txn = env.begin_ro_txn().unwrap();
-    let mut cursor = txn.cursor(dbi).unwrap();
+    let cursor = txn.cursor(dbi).unwrap();
     let entries: Vec<(Cow<'_, [u8]>, Cow<'_, [u8]>)> =
         cursor.iter_slices().collect::<Result<Vec<_>>>().unwrap();
     println!("Final entries: {} items", entries.len());
@@ -125,7 +125,7 @@ fn test_parallel_subtx_dupsort_realistic_data() {
     txn.commit().unwrap();
 
     // Test parallel subtxn with realistic operations
-    let txn = env.begin_rw_txn().unwrap();
+    let mut txn = env.begin_rw_txn().unwrap();
     txn.enable_parallel_writes(&[dbi]).unwrap();
 
     {
@@ -188,7 +188,7 @@ fn test_parallel_subtxn_freelist_reuse() {
     // Run multiple transactions with parallel subtxns
     // This should cause pages to be retired and then reused from freelist
     for round in 0..5 {
-        let txn = env.begin_rw_txn().unwrap();
+        let mut txn = env.begin_rw_txn().unwrap();
 
         // Enable parallel writes with arena hints
         txn.enable_parallel_writes_with_hints(&[

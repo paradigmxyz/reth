@@ -504,7 +504,7 @@ impl Tx<RW> {
         let dbi = self.get_dbi::<T>()?;
         let inner = self
             .inner
-            .cursor_with_dbi_parallel(dbi)
+            .cursor_with_dbi_parallel_owned(dbi)
             .map_err(|e| DatabaseError::InitCursor(e.into()))?;
 
         Ok(Cursor::new_with_metrics(

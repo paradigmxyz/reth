@@ -30,7 +30,7 @@ fn test_invariant_cross_dbi_access_rejected() {
     let dbi2 = db2.dbi();
     txn.commit().unwrap();
 
-    let txn = env.begin_rw_txn().unwrap();
+    let mut txn = env.begin_rw_txn().unwrap();
     // Only enable subtxn for dbi1
     txn.enable_parallel_writes(&[dbi1]).unwrap();
 
@@ -41,8 +41,10 @@ fn test_invariant_cross_dbi_access_rejected() {
     } // cursor1 dropped here before abort
 
     // Try to get cursor for dbi2 - should FAIL (no subtxn for it)
-    let cursor2 = txn.cursor_with_dbi_parallel(dbi2);
-    assert!(cursor2.is_err(), "Cursor for non-assigned DBI should fail");
+    {
+        let cursor2 = txn.cursor_with_dbi_parallel(dbi2);
+        assert!(cursor2.is_err(), "Cursor for non-assigned DBI should fail");
+    }
 
     txn.abort_subtxns().unwrap();
     drop(txn);
@@ -66,21 +68,23 @@ fn test_invariant_dbi_subtxn_isolation() {
     let dbi2 = db2.dbi();
     txn.commit().unwrap();
 
-    let txn = env.begin_rw_txn().unwrap();
+    let mut txn = env.begin_rw_txn().unwrap();
     // Enable subtxn for BOTH DBIs - proper usage pattern
     txn.enable_parallel_writes(&[dbi1, dbi2]).unwrap();
 
-    // Get cursor for dbi1 - should work via subtxn
-    let cursor1 = txn.cursor_with_dbi_parallel(dbi1);
-    assert!(cursor1.is_ok(), "Cursor for assigned DBI 1 should succeed");
+    {
+        // Get cursor for dbi1 - should work via subtxn
+        let cursor1 = txn.cursor_with_dbi_parallel(dbi1);
+        assert!(cursor1.is_ok(), "Cursor for assigned DBI 1 should succeed");
 
-    // Get cursor for dbi2 - should work via its own subtxn
-    let cursor2 = txn.cursor_with_dbi_parallel(dbi2);
-    assert!(cursor2.is_ok(), "Cursor for assigned DBI 2 should succeed");
+        // Get cursor for dbi2 - should work via its own subtxn
+        let cursor2 = txn.cursor_with_dbi_parallel(dbi2);
+        assert!(cursor2.is_ok(), "Cursor for assigned DBI 2 should succeed");
 
-    // Write to both
-    cursor1.unwrap().put(b"key1", b"val1", WriteFlags::empty()).unwrap();
-    cursor2.unwrap().put(b"key2", b"val2", WriteFlags::empty()).unwrap();
+        // Write to both
+        cursor1.unwrap().put(b"key1", b"val1", WriteFlags::empty()).unwrap();
+        cursor2.unwrap().put(b"key2", b"val2", WriteFlags::empty()).unwrap();
+    }
 
     txn.commit_subtxns().unwrap();
     txn.commit().unwrap();
@@ -190,7 +194,7 @@ fn test_invariant_commit_subtxns_then_parent_succeeds() {
     let dbi = db.dbi();
     txn.commit().unwrap();
 
-    let txn = env.begin_rw_txn().unwrap();
+    let mut txn = env.begin_rw_txn().unwrap();
     txn.enable_parallel_writes(&[dbi]).unwrap();
 
     {
@@ -232,7 +236,7 @@ fn test_invariant_subtxn_abort_no_page_leak() {
 
     // Run multiple abort cycles - pages should not leak
     for _ in 0..10 {
-        let txn = env.begin_rw_txn().unwrap();
+        let mut txn = env.begin_rw_txn().unwrap();
         txn.enable_parallel_writes_with_hints(&[(dbi, 100)]).unwrap();
 
         // Allocate some pages
@@ -317,7 +321,7 @@ fn test_invariant_dupsort_concurrent_safety() {
 
     // If page_auxbuf was shared, data would be corrupted
     // Use Arc::try_unwrap to get ownership back
-    let txn = Arc::try_unwrap(txn).expect("All thread handles joined");
+    let mut txn = Arc::try_unwrap(txn).expect("All thread handles joined");
     txn.commit_subtxns().unwrap();
     txn.commit().unwrap();
 
@@ -386,7 +390,7 @@ fn test_invariant_concurrent_commits_serialized() {
 
         // All subtxns commit - mutex ensures no race
         // Use Arc::try_unwrap to get ownership back
-        let txn = Arc::try_unwrap(txn).expect("All thread handles joined");
+        let mut txn = Arc::try_unwrap(txn).expect("All thread handles joined");
         txn.commit_subtxns().unwrap();
         txn.commit().unwrap();
     }
@@ -420,7 +424,7 @@ fn test_invariant_parent_put_blocked() {
     let dbi = db.dbi();
     txn.commit().unwrap();
 
-    let txn = env.begin_rw_txn().unwrap();
+    let mut txn = env.begin_rw_txn().unwrap();
     txn.enable_parallel_writes(&[dbi]).unwrap();
 
     // Try to use parent's direct put - should fail
@@ -451,7 +455,7 @@ fn test_invariant_data_visible_after_commit() {
     txn.commit().unwrap();
 
     // Write via parallel subtxn
-    let txn = env.begin_rw_txn().unwrap();
+    let mut txn = env.begin_rw_txn().unwrap();
     txn.enable_parallel_writes(&[dbi]).unwrap();
 
     {
@@ -509,11 +513,8 @@ fn test_invariant_dupsort_upsert_appends_not_replaces() {
     let entries: Vec<_> = cursor.iter_slices().collect::<Result<Vec<_>>>().unwrap();
 
     // Filter for our key and collect values
-    let key_entries: Vec<_> = entries
-        .iter()
-        .filter(|(k, _)| k.as_ref() == b"key")
-        .map(|(_, v)| v.to_vec())
-        .collect();
+    let key_entries: Vec<_> =
+        entries.iter().filter(|(k, _)| k.as_ref() == b"key").map(|(_, v)| v.to_vec()).collect();
 
     // Should have BOTH values (appended, not replaced)
     assert_eq!(key_entries.len(), 2, "DUPSORT UPSERT should append, not replace");
@@ -541,7 +542,7 @@ fn test_invariant_arena_exhaustion_fallback() {
     txn.commit().unwrap();
 
     // Use very small arena hint - should trigger fallback
-    let txn = env.begin_rw_txn().unwrap();
+    let mut txn = env.begin_rw_txn().unwrap();
     txn.enable_parallel_writes_with_hints(&[(dbi, 2)]).unwrap(); // Only 2 pages!
 
     // Write enough data to exceed 2 pages
@@ -563,4 +564,57 @@ fn test_invariant_arena_exhaustion_fallback() {
     let cursor = txn.cursor(dbi).unwrap();
     let count: usize = cursor.iter_slices().count();
     assert_eq!(count, 1000);
+}
+
+// =============================================================================
+// INVARIANT 11: Clone shares parallel_writes_enabled flag
+// =============================================================================
+
+#[test]
+fn test_invariant_clone_shares_parallel_writes_flag() {
+    // Clones of a transaction must share the parallel_writes_enabled flag.
+    // When commit_subtxns() is called on one, all clones must see the change.
+    let dir = tempdir().unwrap();
+    let env = Environment::builder()
+        .set_max_dbs(10)
+        .set_geometry(Geometry { size: Some(0..(1024 * 1024 * 10)), ..Default::default() })
+        .write_map()
+        .open(dir.path())
+        .unwrap();
+
+    let txn = env.begin_rw_txn().unwrap();
+    let db = txn.create_db(Some("table"), DatabaseFlags::empty()).unwrap();
+    let dbi = db.dbi();
+    txn.commit().unwrap();
+
+    let mut txn = env.begin_rw_txn().unwrap();
+    txn.enable_parallel_writes(&[dbi]).unwrap();
+
+    // Clone the transaction
+    let txn_clone = txn.clone();
+
+    // Both should see parallel writes as enabled
+    assert!(txn.is_parallel_writes_enabled());
+    assert!(txn_clone.is_parallel_writes_enabled());
+
+    // Write via the original transaction's subtxn
+    {
+        let mut cursor = txn.cursor_with_dbi_parallel(dbi).unwrap();
+        cursor.put(b"key", b"value", WriteFlags::empty()).unwrap();
+    }
+
+    // Commit subtxns via the original - clone should also see the flag change
+    txn.commit_subtxns().unwrap();
+
+    // Both should now see parallel writes as disabled
+    assert!(!txn.is_parallel_writes_enabled(), "Original should see flag as false");
+    assert!(!txn_clone.is_parallel_writes_enabled(), "Clone must share flag state");
+
+    // Now commit the parent (using either clone works since they share inner)
+    txn.commit().unwrap();
+
+    // Verify data persisted
+    let txn = env.begin_ro_txn().unwrap();
+    let val: Option<Cow<'_, [u8]>> = txn.get(dbi, b"key").unwrap();
+    assert_eq!(val.as_deref(), Some(b"value".as_slice()));
 }
