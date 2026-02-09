@@ -111,6 +111,15 @@ const DEFAULT_BLOCK_SIZE: usize = 16 * 1024;
 /// Default max background jobs for `RocksDB` compaction and flushing.
 const DEFAULT_MAX_BACKGROUND_JOBS: i32 = 6;
 
+/// Default max open file descriptors for `RocksDB`.
+///
+/// Caps the number of SST file handles `RocksDB` keeps open simultaneously.
+/// Set to 512 to stay within the common default OS `ulimit -n` of 1024,
+/// leaving headroom for MDBX, static files, and other I/O.
+/// `RocksDB` uses an internal table cache and re-opens files on demand,
+/// so this has negligible performance impact on read-heavy workloads.
+const DEFAULT_MAX_OPEN_FILES: i32 = 512;
+
 /// Default bytes per sync for `RocksDB` WAL writes (1 MB).
 const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 
@@ -202,6 +211,8 @@ impl RocksDBBuilder {
         options.set_compaction_pri(CompactionPri::MinOverlappingRatio);
 
         options.set_log_level(log_level);
+
+        options.set_max_open_files(DEFAULT_MAX_OPEN_FILES);
 
         // Delete obsolete WAL files immediately after all column families have flushed.
         // Both set to 0 means "delete ASAP, no archival".
