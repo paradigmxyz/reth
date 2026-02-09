@@ -38,6 +38,14 @@ use tokio::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{trace, warn};
 
+/// Entry in the backed-off peers map, storing when the backoff expires and whether the
+/// connection was incoming.
+#[derive(Debug, Clone, Copy)]
+struct BackoffEntry {
+    until: std::time::Instant,
+    is_incoming: bool,
+}
+
 /// Maintains the state of _all_ the peers known to the network.
 ///
 /// This is supposed to be owned by the network itself, but can be reached via the [`PeersHandle`].
@@ -70,8 +78,9 @@ pub struct PeersManager {
     connection_info: ConnectionInfo,
     /// Tracks unwanted ips/peer ids.
     ban_list: BanList,
-    /// Tracks currently backed off peers.
-    backed_off_peers: HashMap<PeerId, std::time::Instant>,
+    /// Tracks currently backed off peers with their expiry time and whether the connection was
+    /// incoming.
+    backed_off_peers: HashMap<PeerId, BackoffEntry>,
     /// Interval at which to check for peers to unban and release from the backoff map.
     release_interval: Interval,
     /// How long to ban bad peers.
@@ -239,6 +248,18 @@ impl PeersManager {
     #[inline]
     pub(crate) fn num_backed_off_peers(&self) -> usize {
         self.backed_off_peers.len()
+    }
+
+    /// Returns the number of currently backed off incoming peers.
+    #[inline]
+    pub(crate) fn num_backed_off_incoming_peers(&self) -> usize {
+        self.backed_off_peers.values().filter(|e| e.is_incoming).count()
+    }
+
+    /// Returns the number of currently backed off outgoing peers.
+    #[inline]
+    pub(crate) fn num_backed_off_outgoing_peers(&self) -> usize {
+        self.backed_off_peers.values().filter(|e| !e.is_incoming).count()
     }
 
     /// Returns the number of idle trusted peers.
@@ -424,12 +445,17 @@ impl PeersManager {
     }
 
     /// Temporarily puts the peer in timeout by inserting it into the backedoff peers set
-    fn backoff_peer_until(&mut self, peer_id: PeerId, until: std::time::Instant) {
+    fn backoff_peer_until(
+        &mut self,
+        peer_id: PeerId,
+        until: std::time::Instant,
+        is_incoming: bool,
+    ) {
         trace!(target: "net::peers", ?peer_id, "backing off");
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.backed_off = true;
-            self.backed_off_peers.insert(peer_id, until);
+            self.backed_off_peers.insert(peer_id, BackoffEntry { until, is_incoming });
         }
     }
 
@@ -544,8 +570,9 @@ impl PeersManager {
     pub(crate) fn on_active_session_gracefully_closed(&mut self, peer_id: PeerId) {
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
-                trace!(target: "net::peers", ?peer_id, direction=?entry.get().state, "active session gracefully closed");
-                self.connection_info.decr_state(entry.get().state);
+                let prev_state = entry.get().state;
+                trace!(target: "net::peers", ?peer_id, direction=?prev_state, "active session gracefully closed");
+                self.connection_info.decr_state(prev_state);
 
                 if entry.get().remove_after_disconnect && !entry.get().is_trusted() {
                     // this peer should be removed from the set
@@ -559,6 +586,11 @@ impl PeersManager {
                     peer.severe_backoff_counter = 0;
                     peer.state = PeerConnectionState::Idle;
 
+                    let is_incoming = matches!(
+                        prev_state,
+                        PeerConnectionState::In | PeerConnectionState::DisconnectingIn
+                    );
+
                     // but we're backing off slightly to avoid dialing the peer again right away, to
                     // give the remote time to also properly register the closed session and clean
                     // up and to avoid any issues with ip throttling on the remote in case this
@@ -566,7 +598,10 @@ impl PeersManager {
                     peer.backed_off = true;
                     self.backed_off_peers.insert(
                         peer_id,
-                        std::time::Instant::now() + self.incoming_ip_throttle_duration,
+                        BackoffEntry {
+                            until: std::time::Instant::now() + self.incoming_ip_throttle_duration,
+                            is_incoming,
+                        },
                     );
                     trace!(target: "net::peers", ?peer_id, kind=?peer.kind, duration=?self.incoming_ip_throttle_duration, "backing off on gracefully closed session");
                 }
@@ -663,8 +698,14 @@ impl PeersManager {
         } else {
             let mut backoff_until = None;
             let mut remove_peer = false;
+            let mut is_incoming = false;
 
             if let Some(peer) = self.peers.get_mut(peer_id) {
+                is_incoming = matches!(
+                    peer.state,
+                    PeerConnectionState::In | PeerConnectionState::DisconnectingIn
+                );
+
                 if let Some(kind) = err.should_backoff() {
                     if peer.is_trusted() || peer.is_static() {
                         // provide a bit more leeway for trusted peers and use a lower backoff so
@@ -717,7 +758,7 @@ impl PeersManager {
                 self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
             } else if let Some(backoff_until) = backoff_until {
                 // otherwise, backoff the peer if marked as such
-                self.backoff_peer_until(*peer_id, backoff_until);
+                self.backoff_peer_until(*peer_id, backoff_until, is_incoming);
             }
         }
 
@@ -1080,8 +1121,8 @@ impl PeersManager {
 
                 // clear the backoff list of expired backoffs, and mark the relevant peers as
                 // ready to be dialed
-                self.backed_off_peers.retain(|peer_id, until| {
-                    if now > *until {
+                self.backed_off_peers.retain(|peer_id, entry| {
+                    if now > entry.until {
                         if let Some(peer) = self.peers.get_mut(peer_id) {
                             peer.backed_off = false;
                         }

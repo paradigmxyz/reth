@@ -19,6 +19,10 @@ pub struct NetworkMetrics {
     /// Number of currently backed off peers
     pub(crate) backed_off_peers: Gauge,
 
+    /// Per-direction backed off peers gauges.
+    #[metric(skip)]
+    pub(crate) backed_off_peers_direction: DirectionalBackoffGauges,
+
     /// Number of peers known to the node
     pub(crate) tracked_peers: Gauge,
 
@@ -316,6 +320,21 @@ impl DisconnectMetrics {
             DisconnectReason::SubprotocolSpecific => self.subprotocol_specific.increment(1),
         }
         self.directional.increment(reason, direction);
+    }
+}
+
+/// Per-direction backed off peers gauges, labeled with `direction`.
+pub(crate) struct DirectionalBackoffGauges {
+    pub(crate) incoming: Gauge,
+    pub(crate) outgoing: Gauge,
+}
+
+impl Default for DirectionalBackoffGauges {
+    fn default() -> Self {
+        Self {
+            incoming: metrics::gauge!("reth_network_backed_off_peers", "direction" => "incoming"),
+            outgoing: metrics::gauge!("reth_network_backed_off_peers", "direction" => "outgoing"),
+        }
     }
 }
 

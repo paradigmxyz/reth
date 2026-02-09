@@ -887,9 +887,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 if let Some(reason) = reason {
                     self.disconnect_metrics.increment(reason, direction);
                 }
-                self.metrics
-                    .backed_off_peers
-                    .set(self.swarm.state().peers().num_backed_off_peers() as f64);
+                self.update_backed_off_metrics();
                 self.event_sender
                     .notify(NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }));
             }
@@ -920,9 +918,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 self.metrics
                     .incoming_connections
                     .set(self.swarm.state().peers().num_inbound_connections() as f64);
-                self.metrics
-                    .backed_off_peers
-                    .set(self.swarm.state().peers().num_backed_off_peers() as f64);
+                self.update_backed_off_metrics();
             }
             SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
                 trace!(
@@ -951,10 +947,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 }
                 self.metrics.closed_sessions.increment(1);
                 self.update_pending_connection_metrics();
-
-                self.metrics
-                    .backed_off_peers
-                    .set(self.swarm.state().peers().num_backed_off_peers() as f64);
+                self.update_backed_off_metrics();
             }
             SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                 trace!(
@@ -971,9 +964,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     &error,
                 );
 
-                self.metrics
-                    .backed_off_peers
-                    .set(self.swarm.state().peers().num_backed_off_peers() as f64);
+                self.update_backed_off_metrics();
                 self.update_pending_connection_metrics();
             }
             SwarmEvent::BadMessage { peer_id } => {
@@ -1037,6 +1028,21 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         self.metrics
             .outgoing_connections
             .set(self.swarm.state().peers().num_outbound_connections() as f64);
+    }
+
+    /// Updates the backed-off peers gauges (total + per-direction).
+    #[inline]
+    fn update_backed_off_metrics(&self) {
+        let peers = self.swarm.state().peers();
+        self.metrics.backed_off_peers.set(peers.num_backed_off_peers() as f64);
+        self.metrics
+            .backed_off_peers_direction
+            .incoming
+            .set(peers.num_backed_off_incoming_peers() as f64);
+        self.metrics
+            .backed_off_peers_direction
+            .outgoing
+            .set(peers.num_backed_off_outgoing_peers() as f64);
     }
 
     /// Updates the metrics for pending connections
