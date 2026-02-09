@@ -52,8 +52,8 @@ impl Command {
             "Starting storage changeset migration"
         );
 
-        ranges.par_iter().try_for_each(|(block_range, _header)| {
-            migrate_jar(&input_dir, &self.output_dir, *block_range)
+        ranges.par_iter().try_for_each(|(_, header)| {
+            migrate_jar(&input_dir, &self.output_dir, header.expected_block_range())
         })?;
 
         info!("Migration complete");
