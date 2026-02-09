@@ -82,7 +82,6 @@ use std::{
 };
 use tracing::{debug, instrument, trace};
 
-#[cfg(feature = "edge")]
 use super::ArenaHints;
 
 /// Determines the commit order for database operations.
@@ -211,11 +210,9 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     minimum_pruning_distance: u64,
     /// Database provider metrics
     metrics: metrics::DatabaseProviderMetrics,
-    /// Per-table arena hint estimation metrics
-    #[cfg(feature = "edge")]
+    /// Per-table arena hint estimation metrics (for parallel writes)
     arena_hint_metrics: metrics::ArenaHintMetrics,
-    /// Arena hint input metrics for correlation analysis
-    #[cfg(feature = "edge")]
+    /// Arena hint input metrics for correlation analysis (for parallel writes)
     arena_input_metrics: metrics::ArenaHintInputMetrics,
 }
 
@@ -378,9 +375,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
-            #[cfg(feature = "edge")]
             arena_hint_metrics: metrics::ArenaHintMetrics::default(),
-            #[cfg(feature = "edge")]
             arena_input_metrics: metrics::ArenaHintInputMetrics::default(),
         }
     }
@@ -632,11 +627,9 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
             }
 
             // Pre-compute merged hashed state and trie updates before write section
-            #[cfg(feature = "edge")]
+            // Use parallel writes when StorageSettings has all v2 features enabled
             let use_parallel_writes =
-                save_mode.with_state() && self.cached_storage_settings().is_edge_mode();
-            #[cfg(not(feature = "edge"))]
-            let use_parallel_writes = false;
+                save_mode.with_state() && self.cached_storage_settings().is_v2();
             let (merged_hashed_state, merged_trie) = if save_mode.with_state() {
                 let start = Instant::now();
                 let merged_hashed_state: Arc<HashedPostStateSorted> =
@@ -680,7 +673,6 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 // - Thread 5: HashedStorages
                 // - Thread 6: AccountsTrie
                 // - Thread 7: StoragesTrie
-                #[cfg(feature = "edge")]
                 if use_parallel_writes {
                     let mut edge_timings = metrics::EdgeWriteTimings::default();
                     let total_start = Instant::now();
@@ -1225,9 +1217,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
-            #[cfg(feature = "edge")]
             arena_hint_metrics: metrics::ArenaHintMetrics::default(),
-            #[cfg(feature = "edge")]
             arena_input_metrics: metrics::ArenaHintInputMetrics::default(),
         }
     }
@@ -4549,7 +4539,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "edge")]
     #[test]
     fn test_save_blocks_edge_mode_settings() {
         use reth_db_api::models::StorageSettings;
@@ -4560,30 +4549,29 @@ mod tests {
         // Test 1: Verify edge mode detection
         factory.set_storage_settings_cache(StorageSettings::v2());
         assert!(
-            factory.cached_storage_settings().is_edge_mode(),
+            factory.cached_storage_settings().is_v2(),
             "Edge mode should be detected with all edge settings enabled"
         );
 
         // Test 2: Verify legacy mode is not edge mode
         factory.set_storage_settings_cache(StorageSettings::v1());
         assert!(
-            !factory.cached_storage_settings().is_edge_mode(),
+            !factory.cached_storage_settings().is_v2(),
             "Legacy mode should NOT be detected as edge mode"
         );
 
         // Test 3: Verify partial edge settings are not edge mode
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_receipts_in_static_files(true),
-        );
+        factory
+            .set_storage_settings_cache(StorageSettings::v1().with_receipts_in_static_files(true));
         assert!(
-            !factory.cached_storage_settings().is_edge_mode(),
+            !factory.cached_storage_settings().is_v2(),
             "Partial edge settings should NOT be detected as edge mode"
         );
 
         // Test 4: Verify all conditions for edge mode (must use StorageSettings::v2())
         factory.set_storage_settings_cache(StorageSettings::v2());
         assert!(
-            factory.cached_storage_settings().is_edge_mode(),
+            factory.cached_storage_settings().is_v2(),
             "StorageSettings::v2() should enable edge mode"
         );
     }
@@ -4674,7 +4662,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "edge")]
     fn test_save_blocks_edge_mode_parallel() {
         use alloy_primitives::{map::HashMap, U256};
         use reth_chain_state::ExecutedBlock;
@@ -4686,7 +4673,7 @@ mod tests {
 
         // Enable edge mode for parallel writes
         factory.set_storage_settings_cache(StorageSettings::v2());
-        assert!(factory.cached_storage_settings().is_edge_mode(), "Edge mode should be enabled");
+        assert!(factory.cached_storage_settings().is_v2(), "V2 mode should be enabled");
 
         // Get initial db info for later comparison
         let initial_info = factory.db_ref().db().info().unwrap();
@@ -4809,7 +4796,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "edge")]
     fn test_save_blocks_edge_mode_stress_unique() {
         use alloy_primitives::{map::HashMap, U256};
         use reth_chain_state::ExecutedBlock;
@@ -4820,7 +4806,7 @@ mod tests {
         let factory = create_test_provider_factory();
 
         factory.set_storage_settings_cache(StorageSettings::v2());
-        assert!(factory.cached_storage_settings().is_edge_mode(), "Edge mode should be enabled");
+        assert!(factory.cached_storage_settings().is_v2(), "V2 mode should be enabled");
 
         let initial_info = factory.db_ref().db().info().unwrap();
         let initial_last_pgno = initial_info.last_pgno();
@@ -4948,7 +4934,6 @@ mod tests {
 
         // Verify with read-only transaction
         let provider_ro = factory.provider().unwrap();
-        use crate::StateProvider;
 
         // Sample verification from different iterations
         let mut verified_accounts = 0;
@@ -4987,11 +4972,10 @@ mod tests {
     }
 
     /// 5-minute continuous stress test for parallel subtxn writes.
-    /// Run with: cargo test -p reth-storage-provider --features edge
+    /// Run with: cargo test -p reth-storage-provider
     /// test_save_blocks_edge_mode_stress_5min -- --ignored --nocapture
     #[test]
     #[ignore] // Long-running test, run manually
-    #[cfg(feature = "edge")]
     fn test_save_blocks_edge_mode_stress_5min() {
         use alloy_primitives::{map::HashMap, U256};
         use reth_chain_state::ExecutedBlock;
@@ -5017,7 +5001,7 @@ mod tests {
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
-        assert!(factory.cached_storage_settings().is_edge_mode());
+        assert!(factory.cached_storage_settings().is_v2());
 
         let initial_info = factory.db_ref().db().info().unwrap();
         let initial_last_pgno = initial_info.last_pgno();

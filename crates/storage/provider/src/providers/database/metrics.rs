@@ -31,6 +31,7 @@ impl<'a> DurationsRecorder<'a> {
 }
 
 #[derive(Debug, Copy, Clone)]
+#[allow(dead_code)] // Edge variants used at runtime based on StorageSettings::is_v2()
 pub(crate) enum Action {
     InsertBlock,
     InsertState,
@@ -42,19 +43,13 @@ pub(crate) enum Action {
     InsertTransactionBlocks,
     InsertTransactionSenders,
     InsertTransactionHashNumbers,
-    #[cfg(feature = "edge")]
+    // Parallel write actions (used when StorageSettings::is_v2() returns true)
     EdgeWritePlainAccounts,
-    #[cfg(feature = "edge")]
     EdgeWriteBytecodes,
-    #[cfg(feature = "edge")]
     EdgeWritePlainStorage,
-    #[cfg(feature = "edge")]
     EdgeWriteHashedAccounts,
-    #[cfg(feature = "edge")]
     EdgeWriteHashedStorages,
-    #[cfg(feature = "edge")]
     EdgeWriteAccountTrie,
-    #[cfg(feature = "edge")]
     EdgeWriteStorageTrie,
 }
 
@@ -193,19 +188,17 @@ pub(crate) struct DatabaseProviderMetrics {
 
 /// Per-table arena hint metrics for tracking estimation quality.
 #[derive(Debug)]
-#[cfg(feature = "edge")]
+
 pub(crate) struct ArenaHintMetrics {
     handles: std::collections::HashMap<&'static str, ArenaHintTableMetrics>,
 }
 
-#[cfg(feature = "edge")]
 impl Default for ArenaHintMetrics {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(feature = "edge")]
 impl ArenaHintMetrics {
     pub(crate) fn new() -> Self {
         use reth_db::tables;
@@ -233,7 +226,6 @@ impl ArenaHintMetrics {
     }
 }
 
-#[cfg(feature = "edge")]
 #[derive(Debug)]
 struct ArenaHintTableMetrics {
     estimated: Gauge,
@@ -241,7 +233,6 @@ struct ArenaHintTableMetrics {
     source: Gauge,
 }
 
-#[cfg(feature = "edge")]
 impl ArenaHintTableMetrics {
     fn new(table: &'static str) -> Self {
         Self {
@@ -261,7 +252,7 @@ impl ArenaHintTableMetrics {
 /// Raw input counts used for arena hint estimation.
 /// These metrics enable correlation between inputs and actual page demand.
 #[derive(Debug, Default, Clone, Copy)]
-#[cfg(feature = "edge")]
+
 pub(crate) struct ArenaHintInputs {
     /// Number of account changes in batch
     pub num_accounts: usize,
@@ -279,7 +270,7 @@ pub(crate) struct ArenaHintInputs {
 
 /// Metrics for recording arena hint estimation inputs.
 #[derive(Debug)]
-#[cfg(feature = "edge")]
+
 pub(crate) struct ArenaHintInputMetrics {
     num_accounts: Gauge,
     num_storage: Gauge,
@@ -289,14 +280,12 @@ pub(crate) struct ArenaHintInputMetrics {
     num_storage_trie_addresses: Gauge,
 }
 
-#[cfg(feature = "edge")]
 impl Default for ArenaHintInputMetrics {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(feature = "edge")]
 impl ArenaHintInputMetrics {
     pub(crate) fn new() -> Self {
         Self {
@@ -346,7 +335,7 @@ pub(crate) struct CommitTimings {
 }
 
 /// Timings collected during edge mode parallel writes.
-#[cfg(feature = "edge")]
+
 #[derive(Debug, Default)]
 pub(crate) struct EdgeWriteTimings {
     /// Duration of preprocessing (merging states, sorting, converting)
@@ -369,7 +358,7 @@ pub(crate) struct EdgeWriteTimings {
 
 /// Operation counts for storage trie cursor operations.
 /// Used to identify which operation type dominates storage_trie write time.
-#[cfg(feature = "edge")]
+
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct StorageTrieOpCounts {
     /// Number of `seek_by_key_subkey` calls
@@ -380,7 +369,6 @@ pub(crate) struct StorageTrieOpCounts {
     pub upsert_count: u64,
 }
 
-#[cfg(feature = "edge")]
 impl From<reth_trie_db::StorageTrieOpCounts> for StorageTrieOpCounts {
     fn from(counts: reth_trie_db::StorageTrieOpCounts) -> Self {
         Self {
@@ -407,19 +395,19 @@ impl DatabaseProviderMetrics {
             Action::InsertTransactionHashNumbers => {
                 self.insert_transaction_hash_numbers.record(duration)
             }
-            #[cfg(feature = "edge")]
+
             Action::EdgeWritePlainAccounts => self.edge_write_plain_accounts.record(duration),
-            #[cfg(feature = "edge")]
+
             Action::EdgeWriteBytecodes => self.edge_write_bytecodes.record(duration),
-            #[cfg(feature = "edge")]
+
             Action::EdgeWritePlainStorage => self.edge_write_plain_storage.record(duration),
-            #[cfg(feature = "edge")]
+
             Action::EdgeWriteHashedAccounts => self.edge_write_hashed_accounts.record(duration),
-            #[cfg(feature = "edge")]
+
             Action::EdgeWriteHashedStorages => self.edge_write_hashed_storages.record(duration),
-            #[cfg(feature = "edge")]
+
             Action::EdgeWriteAccountTrie => self.edge_write_account_trie.record(duration),
-            #[cfg(feature = "edge")]
+
             Action::EdgeWriteStorageTrie => self.edge_write_storage_trie.record(duration),
         }
     }
@@ -465,7 +453,7 @@ impl DatabaseProviderMetrics {
     }
 
     /// Records all edge mode parallel write timings.
-    #[cfg(feature = "edge")]
+
     pub(crate) fn record_edge_writes(&self, timings: &EdgeWriteTimings) {
         self.edge_write_plain_accounts.record(timings.plain_accounts);
         self.edge_write_plain_accounts_last.set(timings.plain_accounts.as_secs_f64());

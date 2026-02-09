@@ -130,11 +130,8 @@ impl StorageSettings {
             self.storages_history_in_rocksdb
     }
 
-    /// Returns `true` if this is edge mode configuration.
-    ///
-    /// Edge mode is when all data that doesn't need immediate read-back is written
-    /// to static files, enabling parallel MDBX subtransaction writes.
-    pub const fn is_edge_mode(&self) -> bool {
+    /// Returns `true` if all v2 storage features are enabled.
+    pub const fn is_v2(&self) -> bool {
         self.receipts_in_static_files &&
             self.transaction_senders_in_static_files &&
             self.account_changesets_in_static_files &&

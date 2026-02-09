@@ -55,9 +55,7 @@ pub use builder::{ProviderFactoryBuilder, ReadOnlyConfig};
 
 mod metrics;
 
-#[cfg(feature = "edge")]
 mod parallel_writes;
-#[cfg(feature = "edge")]
 pub use parallel_writes::{
     ArenaHintDetail, ArenaHintDetails, ArenaHintSource, ArenaHints, ArenaUsageSnapshot,
     ArenaUsageTracker, ParallelWriteTimings, PreparedStateWrites, PreparedStorageWrite,
