@@ -38,6 +38,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
+use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Instant};
 
@@ -2376,7 +2377,7 @@ where
             let old_first = old.first().map(|first| first.recovered_block().num_hash());
             trace!(target: "engine::tree", ?new_first, ?old_first, "Reorg detected, new and old first blocks");
 
-            self.update_reorg_metrics(old.len());
+            self.update_reorg_metrics(old.len(), old_first);
             self.reinsert_reorged_blocks(new.clone());
             self.reinsert_reorged_blocks(old.clone());
         }
@@ -2398,9 +2399,23 @@ where
         ));
     }
 
-    /// This updates metrics based on the given reorg length.
-    fn update_reorg_metrics(&self, old_chain_length: usize) {
-        self.metrics.tree.reorgs.increment(1);
+    /// This updates metrics based on the given reorg length and first reorged block number.
+    fn update_reorg_metrics(&self, old_chain_length: usize, first_reorged_block: Option<NumHash>) {
+        if let Some(first_reorged_block) = first_reorged_block.map(|block| block.number) {
+            if let Some(finalized) = self.canonical_in_memory_state.get_finalized_num_hash() &&
+                first_reorged_block <= finalized.number
+            {
+                self.metrics.tree.finalized_reorgs.increment(1);
+            } else if let Some(safe) = self.canonical_in_memory_state.get_safe_num_hash() &&
+                first_reorged_block <= safe.number
+            {
+                self.metrics.tree.safe_reorgs.increment(1);
+            } else {
+                self.metrics.tree.head_reorgs.increment(1);
+            }
+        } else {
+            debug_unreachable!("Reorged chain doesn't have any blocks");
+        }
         self.metrics.tree.latest_reorg_depth.set(old_chain_length as f64);
     }
 
