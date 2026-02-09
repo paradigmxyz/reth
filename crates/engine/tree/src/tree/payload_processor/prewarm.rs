@@ -164,7 +164,7 @@ where
             };
 
             // Spawn workers
-            let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor, to_multi_proof, done_tx.clone());
+            let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor,  to_multi_proof.clone(), done_tx.clone());
 
             // Distribute transactions to workers
             let mut tx_index = 0usize;
@@ -186,6 +186,17 @@ where
                 let _ = tx_sender.send(indexed_tx);
 
                 tx_index += 1;
+            }
+
+            // Send withdrawal prefetch targets after all transactions have been distributed
+            // since withdrawals only modify account balances
+            if let Some(to_multi_proof) = to_multi_proof
+                && let Some(withdrawals) = &ctx.env.withdrawals
+                && !withdrawals.is_empty()
+            {
+                let targets =
+                    multiproof_targets_from_withdrawals(withdrawals, ctx.v2_proofs_enabled);
+                let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
             }
 
             // drop sender and wait for all tasks to finish

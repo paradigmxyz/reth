@@ -4,10 +4,7 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache, SavedCache},
     payload_processor::{
-        prewarm::{
-            multiproof_targets_from_withdrawals, PrewarmCacheTask, PrewarmContext, PrewarmMode,
-            PrewarmTaskEvent,
-        },
+        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
     },
     sparse_trie::{SparseTrieCacheTask, SparseTrieTask, SpawnedSparseTrieTask},
@@ -268,14 +265,6 @@ where
                 v2_proofs_enabled,
             )
         } else {
-            // Send withdrawal prefetch targets immediately since addresses are known upfront
-            if let Some(withdrawals) = &env.withdrawals &&
-                !withdrawals.is_empty()
-            {
-                let targets = multiproof_targets_from_withdrawals(withdrawals, v2_proofs_enabled);
-                let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
-            }
-
             // Normal path: spawn with transaction prewarming
             self.spawn_caching_with(
                 env,
