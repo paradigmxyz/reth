@@ -44,6 +44,9 @@ pub trait StorageChangeSetReader: Send {
 
     /// Search the block's changesets for the given address and storage key, and return the result.
     ///
+    /// When `use_hashed_state` is enabled, `storage_key` must be the keccak256-hashed slot
+    /// (callers are responsible for hashing before calling this method).
+    ///
     /// Returns `None` if the storage slot was not changed in this block.
     fn get_storage_before_block(
         &self,
