@@ -17,7 +17,7 @@ use reth_rpc_eth_types::{error::RpcPoolError, EthApiError};
 use reth_storage_api::BlockReaderIdExt;
 use reth_transaction_pool::{
     error::Eip4844PoolTransactionError, AddedTransactionOutcome, EthBlobTransactionSidecar,
-    EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
+    EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionOrigin, TransactionPool,
 };
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
@@ -105,8 +105,11 @@ where
                     tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
                 }).map_err(EthApiError::other)?;
 
-            // Retain tx in local tx pool after forwarding, for local RPC usage.
-            let _ = self.inner.add_pool_transaction(pool_transaction).await;
+            // Retain tx in local tx pool after forwarding.
+            let _ = self
+                .inner
+                .add_pool_transaction(TransactionOrigin::External, pool_transaction)
+                .await;
 
             return Ok(hash);
         }
@@ -114,9 +117,8 @@ where
         // broadcast raw transaction to subscribers if there is any.
         self.broadcast_raw_transaction(tx);
 
-        // submit the transaction to the pool with a `Local` origin
         let AddedTransactionOutcome { hash, .. } =
-            self.inner.add_pool_transaction(pool_transaction).await?;
+            self.inner.add_pool_transaction(TransactionOrigin::External, pool_transaction).await?;
 
         Ok(hash)
     }
