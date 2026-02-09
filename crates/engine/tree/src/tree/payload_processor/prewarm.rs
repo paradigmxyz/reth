@@ -236,36 +236,33 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            // Perform all cache operations atomically under the lock
+
+            // Detach the published cache so readers see None during the update.
+            // This is necessary because ExecutionCache is Arc-shared: mutating
+            // it via insert_state would be visible through the old SavedCache.
             execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its usage
-                // guard
-                let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
-                let new_cache = SavedCache::new(hash, caches, cache_metrics)
-                    .with_disable_cache_metrics(disable_cache_metrics);
+                cached.take();
+            });
 
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
-                    // Clear the cache on error to prevent having a polluted cache
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
-                }
+            let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
+            let new_cache = SavedCache::new(hash, caches, cache_metrics)
+                .with_disable_cache_metrics(disable_cache_metrics);
 
+            if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                debug!(target: "engine::caching", "cleared execution cache on update error");
+            } else {
                 new_cache.update_metrics();
 
-                if valid_block_rx.recv().is_ok() {
-                    // Replace the shared cache with the new one; the previous cache (if any) is
-                    // dropped.
-                    *cached = Some(new_cache);
-                } else {
-                    // Block was invalid; caches were already mutated by insert_state above,
-                    // so we must clear to prevent using polluted state
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on invalid block");
-                }
-            });
+                let valid = valid_block_rx.recv().is_ok();
+
+                execution_cache.update_with_guard(|cached| {
+                    if valid {
+                        *cached = Some(new_cache);
+                    } else {
+                        debug!(target: "engine::caching", "cleared execution cache on invalid block");
+                    }
+                });
+            }
 
             let elapsed = start.elapsed();
             debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
