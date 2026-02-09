@@ -22,7 +22,8 @@ use reth_engine_primitives::{
     ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::ConfigureEvm;
+use reth_evm::{block::StateChangeSource, ConfigureEvm, OnStateHook};
+use reth_revm::state::EvmState;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
@@ -233,9 +234,9 @@ impl OnStateHook for MeteredStateHook {
         let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
         let bytecodes = state.values().filter(|account| !account.info.is_empty_code_hash()).count();
 
-        self.metrics.accounts_loaded_histogram.record(accounts as f64);
-        self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
-        self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
+        self.metrics.accounts_updated_histogram.record(accounts as f64);
+        self.metrics.storage_slots_updated_histogram.record(storage_slots as f64);
+        self.metrics.bytecodes_updated_histogram.record(bytecodes as f64);
 
         // Call the original state hook
         self.inner_hook.on_state(source, state);
