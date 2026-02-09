@@ -381,7 +381,6 @@ where
                         }
                     }
                 }
-                // Empty proofs carry no state; skip and wait for the next message.
                 MultiProofMessage::EmptyProof { .. } => continue,
             };
             if hashed_state_tx.send(msg).is_err() {
@@ -1116,10 +1115,10 @@ mod tests {
         updates_tx.send(MultiProofMessage::BlockAccessList(Arc::new(bal))).unwrap();
         drop(updates_tx);
 
-        let first = hashed_state_rx.recv().unwrap();
-        let hashed_state = match first {
-            SparseTrieTaskMessage::HashedState(state) => state,
-            _ => panic!("expected HashedState message"),
+        let SparseTrieTaskMessage::HashedState(hashed_state) =
+            hashed_state_rx.recv().unwrap()
+        else {
+            panic!("expected HashedState message");
         };
 
         let hashed_address = keccak256(address);

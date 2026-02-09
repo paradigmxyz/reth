@@ -289,12 +289,12 @@ where
             v2_proofs_enabled,
         );
 
-        let stac_provider: Option<StateProviderBox> = has_bal.then(|| {
+        let stac_provider = has_bal.then(|| {
             let provider = provider_builder
                 .build()
                 .expect("failed to build provider for sparse trie task");
             if let Some(saved_cache) = prewarm_handle.saved_cache.clone() {
-                let (cache, metrics, _disable_metrics) = saved_cache.split();
+                let (cache, metrics, ..) = saved_cache.split();
                 Box::new(CachedStateProvider::new(provider, cache, metrics)) as StateProviderBox
             } else {
                 Box::new(provider) as StateProviderBox
