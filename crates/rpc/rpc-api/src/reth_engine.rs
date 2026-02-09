@@ -24,7 +24,7 @@ pub struct RethPayloadStatus {
 
 impl RethPayloadStatus {
     /// Creates a new [`RethPayloadStatus`] from a [`PayloadStatus`] and execution [`Duration`].
-    pub fn new(status: PayloadStatus, latency: Duration) -> Self {
+    pub const fn new(status: PayloadStatus, latency: Duration) -> Self {
         Self { status, latency_us: latency.as_micros() as u64 }
     }
 }
