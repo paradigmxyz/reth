@@ -9324,4 +9324,68 @@ mod tests {
         // Populated trie should use more memory than an empty one
         assert!(populated_size > empty_size);
     }
+
+    #[test]
+    fn test_reveal_extension_branch_leaves_then_root() {
+        // Test structure:
+        // - 0x (root): extension node with key of 63 zeroes
+        // - 0x000...000 (63 zeroes): branch node with children at 1 and 2
+        // - 0x000...0001 (62 zeroes + 01): leaf with value 1
+        // - 0x000...0002 (62 zeroes + 02): leaf with value 2
+        //
+        // The leaves and branch are small enough to be embedded (< 32 bytes),
+        // so we manually RLP encode them and use those encodings in parent nodes.
+
+        // Create the extension key (63 zero nibbles)
+        let ext_key: [u8; 63] = [0; 63];
+
+        // The branch is at the end of the extension (63 zeroes)
+        let branch_path = Nibbles::from_nibbles(&ext_key);
+
+        // Leaf paths: 63 zeroes + 1, 63 zeroes + 2
+        let mut leaf1_path_bytes = [0u8; 64];
+        leaf1_path_bytes[63] = 1;
+        let leaf1_path = Nibbles::from_nibbles(&leaf1_path_bytes);
+
+        let mut leaf2_path_bytes = [0u8; 64];
+        leaf2_path_bytes[63] = 2;
+        let leaf2_path = Nibbles::from_nibbles(&leaf2_path_bytes);
+
+        // Create leaves with empty keys (full path consumed by extension + branch)
+        // and simple values
+        let leaf1_node = TrieNode::Leaf(LeafNode::new(Nibbles::default(), vec![0x1]));
+        let leaf2_node = TrieNode::Leaf(LeafNode::new(Nibbles::default(), vec![0x2]));
+
+        // RLP encode the leaves to get their RlpNode representations
+        let leaf1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(&leaf1_node));
+        let leaf2_rlp = RlpNode::from_rlp(&alloy_rlp::encode(&leaf2_node));
+
+        // Create the branch node with children at indices 1 and 2, using the RLP-encoded leaves
+        let branch_node = TrieNode::Branch(BranchNode::new(
+            vec![leaf1_rlp.clone(), leaf2_rlp.clone()],
+            TrieMask::new(0b0000_0110), // bits 1 and 2 set
+        ));
+
+        // RLP encode the branch to get its RlpNode representation
+        let branch_rlp = RlpNode::from_rlp(&alloy_rlp::encode(&branch_node));
+
+        // Create the extension node pointing to the branch using its RLP encoding
+        // Since branch is < 32 bytes, it will be embedded directly
+        let ext_node =
+            TrieNode::Extension(ExtensionNode::new(Nibbles::from_nibbles(&ext_key), branch_rlp));
+
+        // Initialize trie with the extension as root
+        let mut trie = ParallelSparseTrie::from_root(ext_node, None, false).unwrap();
+
+        // Reveal the branch and leaves
+        let mut nodes = vec![
+            ProofTrieNode { path: branch_path, node: branch_node, masks: None },
+            ProofTrieNode { path: leaf1_path, node: leaf1_node, masks: None },
+            ProofTrieNode { path: leaf2_path, node: leaf2_node, masks: None },
+        ];
+        trie.reveal_nodes(&mut nodes).unwrap();
+
+        // Call root() to compute the trie root hash
+        let _root = trie.root();
+    }
 }
