@@ -2405,13 +2405,13 @@ where
             if let Some(finalized) = self.canonical_in_memory_state.get_finalized_num_hash() &&
                 first_reorged_block <= finalized.number
             {
-                self.metrics.tree.finalized_reorgs.increment(1);
+                self.metrics.tree.reorgs.finalized.increment(1);
             } else if let Some(safe) = self.canonical_in_memory_state.get_safe_num_hash() &&
                 first_reorged_block <= safe.number
             {
-                self.metrics.tree.safe_reorgs.increment(1);
+                self.metrics.tree.reorgs.safe.increment(1);
             } else {
-                self.metrics.tree.head_reorgs.increment(1);
+                self.metrics.tree.reorgs.head.increment(1);
             }
         } else {
             debug_unreachable!("Reorged chain doesn't have any blocks");

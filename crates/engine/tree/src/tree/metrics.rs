@@ -12,7 +12,7 @@ use reth_trie::updates::TrieUpdates;
 use std::time::{Duration, Instant};
 
 /// Metrics for the `EngineApi`.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct EngineApiMetrics {
     /// Engine API-specific metrics.
     pub engine: EngineMetrics,
@@ -25,18 +25,6 @@ pub struct EngineApiMetrics {
     /// Metrics for EIP-7928 Block-Level Access Lists (BAL).
     #[allow(dead_code)]
     pub(crate) bal: BalMetrics,
-}
-
-impl Default for EngineApiMetrics {
-    fn default() -> Self {
-        Self {
-            engine: Default::default(),
-            executor: Default::default(),
-            block_validation: Default::default(),
-            tree: TreeMetrics::new(),
-            bal: Default::default(),
-        }
-    }
 }
 
 impl EngineApiMetrics {
@@ -102,12 +90,9 @@ impl EngineApiMetrics {
 pub struct TreeMetrics {
     /// The highest block number in the canonical chain
     pub canonical_chain_height: Gauge,
-    /// The number of head block reorgs
-    pub head_reorgs: Counter,
-    /// The number of safe block reorgs
-    pub safe_reorgs: Counter,
-    /// The number of finalized block reorgs
-    pub finalized_reorgs: Counter,
+    /// Metrics for reorgs.
+    #[metric(skip)]
+    pub reorgs: ReorgMetrics,
     /// The latest reorg depth
     pub latest_reorg_depth: Gauge,
     /// The current safe block height (this is required by optimism)
@@ -116,13 +101,23 @@ pub struct TreeMetrics {
     pub finalized_block_height: Gauge,
 }
 
-impl TreeMetrics {
-    fn new() -> Self {
+/// Metrics for reorgs.
+#[derive(Debug)]
+pub struct ReorgMetrics {
+    /// The number of head block reorgs
+    pub head: Counter,
+    /// The number of safe block reorgs
+    pub safe: Counter,
+    /// The number of finalized block reorgs
+    pub finalized: Counter,
+}
+
+impl Default for ReorgMetrics {
+    fn default() -> Self {
         Self {
-            head_reorgs: metrics::counter!("blockchain_tree_reorgs", "commitment" => "head"),
-            safe_reorgs: metrics::counter!("blockchain_tree_reorgs", "commitment" => "safe"),
-            finalized_reorgs: metrics::counter!("blockchain_tree_reorgs", "commitment" => "finalized"),
-            ..Default::default()
+            head: metrics::counter!("blockchain_tree_reorgs", "commitment" => "head"),
+            safe: metrics::counter!("blockchain_tree_reorgs", "commitment" => "safe"),
+            finalized: metrics::counter!("blockchain_tree_reorgs", "commitment" => "finalized"),
         }
     }
 }
