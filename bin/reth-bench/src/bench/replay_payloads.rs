@@ -20,7 +20,6 @@ use crate::{
         },
         persistence_waiter::{
             derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
-            PERSISTENCE_CHECKPOINT_TIMEOUT,
         },
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
@@ -105,6 +104,19 @@ pub struct Command {
     )]
     persistence_threshold: u64,
 
+    /// Timeout for waiting on persistence at each checkpoint.
+    ///
+    /// Must be long enough to account for the persistence thread being blocked
+    /// by pruning after the previous save.
+    #[arg(
+        long = "persistence-timeout",
+        value_name = "PERSISTENCE_TIMEOUT",
+        value_parser = parse_duration,
+        default_value = "120s",
+        verbatim_doc_comment
+    )]
+    persistence_timeout: Duration,
+
     /// Optional `WebSocket` RPC URL for persistence subscription.
     /// If not provided, derives from engine RPC URL by changing scheme to ws and port to 8546.
     #[arg(long, value_name = "WS_RPC_URL", verbatim_doc_comment)]
@@ -159,7 +171,7 @@ impl Command {
                     duration,
                     sub,
                     self.persistence_threshold,
-                    PERSISTENCE_CHECKPOINT_TIMEOUT,
+                    self.persistence_timeout,
                 ))
             }
             (Some(duration), false) => Some(PersistenceWaiter::with_duration(duration)),
@@ -169,7 +181,7 @@ impl Command {
                 Some(PersistenceWaiter::with_subscription(
                     sub,
                     self.persistence_threshold,
-                    PERSISTENCE_CHECKPOINT_TIMEOUT,
+                    self.persistence_timeout,
                 ))
             }
             (None, false) => None,

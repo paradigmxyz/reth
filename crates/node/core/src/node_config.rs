@@ -3,7 +3,7 @@
 use crate::{
     args::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RocksDbArgs, RpcServerArgs, StaticFilesArgs, TxPoolArgs,
+        PruningArgs, RocksDbArgs, RpcServerArgs, StaticFilesArgs, StorageArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
     utils::get_single_header,
@@ -154,6 +154,9 @@ pub struct NodeConfig<ChainSpec> {
 
     /// All `RocksDB` table routing arguments
     pub rocksdb: RocksDbArgs,
+
+    /// Storage mode configuration (v2 vs v1/legacy)
+    pub storage: StorageArgs,
 }
 
 impl NodeConfig<ChainSpec> {
@@ -186,6 +189,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             era: EraArgs::default(),
             static_files: StaticFilesArgs::default(),
             rocksdb: RocksDbArgs::default(),
+            storage: StorageArgs::default(),
         }
     }
 
@@ -261,6 +265,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             era,
             static_files,
             rocksdb,
+            storage,
             ..
         } = self;
         NodeConfig {
@@ -281,6 +286,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             era,
             static_files,
             rocksdb,
+            storage,
         }
     }
 
@@ -357,16 +363,52 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self.pruning.prune_config(&self.chain)
     }
 
-    /// Returns the effective storage settings derived from static-file and `RocksDB` CLI args.
+    /// Returns the effective storage settings derived from `--storage.v2`, static-file, and
+    /// `RocksDB` CLI args.
+    ///
+    /// The base storage mode is determined by `--storage.v2`:
+    /// - When `--storage.v2` is set: uses [`StorageSettings::v2()`] defaults
+    /// - Otherwise: uses [`StorageSettings::v1()`] defaults
+    ///
+    /// Individual `--static-files.*` and `--rocksdb.*` flags override the base when explicitly set.
     pub const fn storage_settings(&self) -> StorageSettings {
-        StorageSettings::base()
-            .with_receipts_in_static_files(self.static_files.receipts)
-            .with_transaction_senders_in_static_files(self.static_files.transaction_senders)
-            .with_account_changesets_in_static_files(self.static_files.account_changesets)
-            .with_storage_changesets_in_static_files(self.static_files.storage_changesets)
-            .with_transaction_hash_numbers_in_rocksdb(self.rocksdb.all || self.rocksdb.tx_hash)
-            .with_storages_history_in_rocksdb(self.rocksdb.all || self.rocksdb.storages_history)
-            .with_account_history_in_rocksdb(self.rocksdb.all || self.rocksdb.account_history)
+        let mut s = if self.storage.v2 { StorageSettings::v2() } else { StorageSettings::base() };
+
+        // Apply static files overrides (only when explicitly set)
+        if let Some(v) = self.static_files.receipts {
+            s = s.with_receipts_in_static_files(v);
+        }
+        if let Some(v) = self.static_files.transaction_senders {
+            s = s.with_transaction_senders_in_static_files(v);
+        }
+        if let Some(v) = self.static_files.account_changesets {
+            s = s.with_account_changesets_in_static_files(v);
+        }
+        if let Some(v) = self.static_files.storage_changesets {
+            s = s.with_storage_changesets_in_static_files(v);
+        }
+
+        // Apply rocksdb overrides
+        // --rocksdb.all sets all rocksdb flags to true
+        if self.rocksdb.all {
+            s = s
+                .with_transaction_hash_numbers_in_rocksdb(true)
+                .with_storages_history_in_rocksdb(true)
+                .with_account_history_in_rocksdb(true);
+        }
+
+        // Individual rocksdb flags override --rocksdb.all when explicitly set
+        if let Some(v) = self.rocksdb.tx_hash {
+            s = s.with_transaction_hash_numbers_in_rocksdb(v);
+        }
+        if let Some(v) = self.rocksdb.storages_history {
+            s = s.with_storages_history_in_rocksdb(v);
+        }
+        if let Some(v) = self.rocksdb.account_history {
+            s = s.with_account_history_in_rocksdb(v);
+        }
+
+        s
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if
@@ -564,6 +606,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             era: self.era,
             static_files: self.static_files,
             rocksdb: self.rocksdb,
+            storage: self.storage,
         }
     }
 
@@ -606,6 +649,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             era: self.era.clone(),
             static_files: self.static_files,
             rocksdb: self.rocksdb,
+            storage: self.storage,
         }
     }
 }

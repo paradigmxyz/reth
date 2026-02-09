@@ -105,7 +105,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         // to read persisted settings, falling back to legacy defaults if none exist.
         //
         // Both factory and all providers it creates should share these cached settings.
-        let legacy_settings = StorageSettings::legacy();
+        let legacy_settings = StorageSettings::v1();
         let storage_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),

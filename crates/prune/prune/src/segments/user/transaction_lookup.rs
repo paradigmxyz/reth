@@ -492,7 +492,7 @@ mod tests {
 
         // Enable RocksDB storage for transaction hash numbers
         db.factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+            StorageSettings::v1().with_transaction_hash_numbers_in_rocksdb(true),
         );
 
         let provider = db.factory.database_provider_rw().unwrap();
@@ -579,7 +579,7 @@ mod tests {
 
         // Enable RocksDB storage for transaction hash numbers
         db.factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+            StorageSettings::v1().with_transaction_hash_numbers_in_rocksdb(true),
         );
 
         let to_block: BlockNumber = 6;

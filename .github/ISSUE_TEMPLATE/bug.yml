@@ -43,7 +43,6 @@ body:
 
         - `~/.cache/reth/logs` on Linux
         - `~/Library/Caches/reth/logs` on macOS
-        - `%localAppData%/reth/logs` on Windows
       render: text
     validations:
       required: false
@@ -58,8 +57,6 @@ body:
         - Linux (ARM)
         - Mac (Intel)
         - Mac (Apple Silicon)
-        - Windows (x86)
-        - Windows (ARM)
   - type: dropdown
     id: container_type
     attributes:
