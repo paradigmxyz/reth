@@ -291,11 +291,15 @@ pub struct DisconnectMetrics {
 
     /// Number of peer disconnects due to `SubprotocolSpecific` (0x10)
     pub(crate) subprotocol_specific: Counter,
+
+    /// Directional disconnect counters with a `direction` label.
+    #[metric(skip)]
+    pub(crate) directional: DirectionalDisconnectMetrics,
 }
 
 impl DisconnectMetrics {
-    /// Increments the proper counter for the given disconnect reason
-    pub(crate) fn increment(&self, reason: DisconnectReason) {
+    /// Increments the proper counter for the given disconnect reason and direction.
+    pub(crate) fn increment(&self, reason: DisconnectReason, direction: &'static str) {
         match reason {
             DisconnectReason::DisconnectRequested => self.disconnect_requested.increment(1),
             DisconnectReason::TcpSubsystemError => self.tcp_subsystem_error.increment(1),
@@ -310,6 +314,92 @@ impl DisconnectMetrics {
             DisconnectReason::ConnectedToSelf => self.connected_to_self.increment(1),
             DisconnectReason::PingTimeout => self.ping_timeout.increment(1),
             DisconnectReason::SubprotocolSpecific => self.subprotocol_specific.increment(1),
+        }
+        self.directional.increment(reason, direction);
+    }
+}
+
+/// Direction label values for disconnect metrics.
+pub(crate) mod disconnect_direction {
+    pub(crate) const INCOMING: &str = "incoming";
+    pub(crate) const OUTGOING: &str = "outgoing";
+}
+
+/// Per-direction disconnect counters, labeled with `direction = "incoming" | "outgoing"`.
+pub(crate) struct DirectionalDisconnectMetrics {
+    incoming: DirectionalDisconnectCounters,
+    outgoing: DirectionalDisconnectCounters,
+}
+
+struct DirectionalDisconnectCounters {
+    disconnect_requested: Counter,
+    tcp_subsystem_error: Counter,
+    protocol_breach: Counter,
+    useless_peer: Counter,
+    too_many_peers: Counter,
+    already_connected: Counter,
+    incompatible: Counter,
+    null_node_identity: Counter,
+    client_quitting: Counter,
+    unexpected_identity: Counter,
+    connected_to_self: Counter,
+    ping_timeout: Counter,
+    subprotocol_specific: Counter,
+}
+
+impl DirectionalDisconnectCounters {
+    fn new(direction: &'static str) -> Self {
+        Self {
+            disconnect_requested: metrics::counter!("reth_network_disconnect_requested", "direction" => direction),
+            tcp_subsystem_error: metrics::counter!("reth_network_tcp_subsystem_error", "direction" => direction),
+            protocol_breach: metrics::counter!("reth_network_protocol_breach", "direction" => direction),
+            useless_peer: metrics::counter!("reth_network_useless_peer", "direction" => direction),
+            too_many_peers: metrics::counter!("reth_network_too_many_peers", "direction" => direction),
+            already_connected: metrics::counter!("reth_network_already_connected", "direction" => direction),
+            incompatible: metrics::counter!("reth_network_incompatible", "direction" => direction),
+            null_node_identity: metrics::counter!("reth_network_null_node_identity", "direction" => direction),
+            client_quitting: metrics::counter!("reth_network_client_quitting", "direction" => direction),
+            unexpected_identity: metrics::counter!("reth_network_unexpected_identity", "direction" => direction),
+            connected_to_self: metrics::counter!("reth_network_connected_to_self", "direction" => direction),
+            ping_timeout: metrics::counter!("reth_network_ping_timeout", "direction" => direction),
+            subprotocol_specific: metrics::counter!("reth_network_subprotocol_specific", "direction" => direction),
+        }
+    }
+
+    fn increment(&self, reason: DisconnectReason) {
+        match reason {
+            DisconnectReason::DisconnectRequested => self.disconnect_requested.increment(1),
+            DisconnectReason::TcpSubsystemError => self.tcp_subsystem_error.increment(1),
+            DisconnectReason::ProtocolBreach => self.protocol_breach.increment(1),
+            DisconnectReason::UselessPeer => self.useless_peer.increment(1),
+            DisconnectReason::TooManyPeers => self.too_many_peers.increment(1),
+            DisconnectReason::AlreadyConnected => self.already_connected.increment(1),
+            DisconnectReason::IncompatibleP2PProtocolVersion => self.incompatible.increment(1),
+            DisconnectReason::NullNodeIdentity => self.null_node_identity.increment(1),
+            DisconnectReason::ClientQuitting => self.client_quitting.increment(1),
+            DisconnectReason::UnexpectedHandshakeIdentity => self.unexpected_identity.increment(1),
+            DisconnectReason::ConnectedToSelf => self.connected_to_self.increment(1),
+            DisconnectReason::PingTimeout => self.ping_timeout.increment(1),
+            DisconnectReason::SubprotocolSpecific => self.subprotocol_specific.increment(1),
+        }
+    }
+}
+
+impl Default for DirectionalDisconnectMetrics {
+    fn default() -> Self {
+        Self {
+            incoming: DirectionalDisconnectCounters::new(disconnect_direction::INCOMING),
+            outgoing: DirectionalDisconnectCounters::new(disconnect_direction::OUTGOING),
+        }
+    }
+}
+
+impl DirectionalDisconnectMetrics {
+    fn increment(&self, reason: DisconnectReason, direction: &str) {
+        match direction {
+            disconnect_direction::INCOMING => self.incoming.increment(reason),
+            disconnect_direction::OUTGOING => self.outgoing.increment(reason),
+            _ => {}
         }
     }
 }

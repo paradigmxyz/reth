@@ -194,6 +194,10 @@ impl PeersManager {
     }
 
     /// Returns the `NodeRecord` and `PeerKind` for the given peer id
+    pub(crate) fn peer_connection_state(&self, peer_id: PeerId) -> Option<PeerConnectionState> {
+        self.peers.get(&peer_id).map(|p| p.state)
+    }
+
     pub(crate) fn peer_by_id(&self, peer_id: PeerId) -> Option<(NodeRecord, PeerKind)> {
         self.peers.get(&peer_id).map(|v| {
             (

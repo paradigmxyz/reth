@@ -24,7 +24,9 @@ use crate::{
     import::{BlockImport, BlockImportEvent, BlockImportOutcome, BlockValidation, NewBlockEvent},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage},
-    metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
+    metrics::{
+        disconnect_direction, DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE,
+    },
     network::{NetworkHandle, NetworkHandleMessage},
     peers::PeersManager,
     poll_nested_stream_with_budget,
@@ -48,7 +50,7 @@ use reth_network_api::{
     EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
 };
 use reth_network_peers::{NodeRecord, PeerId};
-use reth_network_types::ReputationChangeKind;
+use reth_network_types::{PeerConnectionState, ReputationChangeKind};
 use reth_storage_api::BlockNumReader;
 use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventSender;
@@ -852,6 +854,19 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     "Session disconnected"
                 );
 
+                let direction = self
+                    .swarm
+                    .state()
+                    .peers()
+                    .peer_connection_state(peer_id)
+                    .map(|state| match state {
+                        PeerConnectionState::In | PeerConnectionState::DisconnectingIn => {
+                            disconnect_direction::INCOMING
+                        }
+                        _ => disconnect_direction::OUTGOING,
+                    })
+                    .unwrap_or(disconnect_direction::OUTGOING);
+
                 let reason = if let Some(ref err) = error {
                     // If the connection was closed due to an error, we report
                     // the peer
@@ -870,7 +885,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 self.update_active_connection_metrics();
 
                 if let Some(reason) = reason {
-                    self.disconnect_metrics.increment(reason);
+                    self.disconnect_metrics.increment(reason, direction);
                 }
                 self.metrics
                     .backed_off_peers
@@ -893,7 +908,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         .on_incoming_pending_session_dropped(remote_addr, err);
                     self.metrics.pending_session_failures.increment(1);
                     if let Some(reason) = err.as_disconnected() {
-                        self.disconnect_metrics.increment(reason);
+                        self.disconnect_metrics.increment(reason, disconnect_direction::INCOMING);
                     }
                 } else {
                     self.swarm
@@ -926,7 +941,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     );
                     self.metrics.pending_session_failures.increment(1);
                     if let Some(reason) = err.as_disconnected() {
-                        self.disconnect_metrics.increment(reason);
+                        self.disconnect_metrics.increment(reason, disconnect_direction::OUTGOING);
                     }
                 } else {
                     self.swarm
