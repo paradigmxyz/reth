@@ -70,8 +70,8 @@ pub struct PeersManager {
     connection_info: ConnectionInfo,
     /// Tracks unwanted ips/peer ids.
     ban_list: BanList,
-    /// Tracks currently backed off peers.
-    backed_off_peers: HashMap<PeerId, std::time::Instant>,
+    /// Tracks currently backed off peers and the reason for backing off.
+    backed_off_peers: HashMap<PeerId, (std::time::Instant, BackoffReason)>,
     /// Interval at which to check for peers to unban and release from the backoff map.
     release_interval: Interval,
     /// How long to ban bad peers.
@@ -235,6 +235,19 @@ impl PeersManager {
     #[inline]
     pub(crate) fn num_backed_off_peers(&self) -> usize {
         self.backed_off_peers.len()
+    }
+
+    /// Returns the count of backed off peers grouped by reason.
+    pub(crate) fn backed_off_peers_count_by_reason(&self) -> BackoffCounts {
+        let mut counts = BackoffCounts::default();
+        for (_until, reason) in self.backed_off_peers.values() {
+            match reason {
+                BackoffReason::TooManyPeers => counts.too_many_peers += 1,
+                BackoffReason::GracefulClose => counts.graceful_close += 1,
+                BackoffReason::ConnectionError => counts.connection_error += 1,
+            }
+        }
+        counts
     }
 
     /// Returns the number of idle trusted peers.
@@ -420,12 +433,17 @@ impl PeersManager {
     }
 
     /// Temporarily puts the peer in timeout by inserting it into the backedoff peers set
-    fn backoff_peer_until(&mut self, peer_id: PeerId, until: std::time::Instant) {
-        trace!(target: "net::peers", ?peer_id, "backing off");
+    fn backoff_peer_until(
+        &mut self,
+        peer_id: PeerId,
+        until: std::time::Instant,
+        reason: BackoffReason,
+    ) {
+        trace!(target: "net::peers", ?peer_id, ?reason, "backing off");
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.backed_off = true;
-            self.backed_off_peers.insert(peer_id, until);
+            self.backed_off_peers.insert(peer_id, (until, reason));
         }
     }
 
@@ -533,7 +551,14 @@ impl PeersManager {
         peer_id: &PeerId,
         err: &PendingSessionHandshakeError,
     ) {
-        self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::FailedToConnect)
+        let reason = BackoffReason::from_disconnect(err.as_disconnected());
+        self.on_connection_failure(
+            remote_addr,
+            peer_id,
+            err,
+            ReputationChangeKind::FailedToConnect,
+            reason,
+        )
     }
 
     /// Gracefully disconnected an active session
@@ -562,7 +587,10 @@ impl PeersManager {
                     peer.backed_off = true;
                     self.backed_off_peers.insert(
                         peer_id,
-                        std::time::Instant::now() + self.incoming_ip_throttle_duration,
+                        (
+                            std::time::Instant::now() + self.incoming_ip_throttle_duration,
+                            BackoffReason::GracefulClose,
+                        ),
                     );
                     trace!(target: "net::peers", ?peer_id, kind=?peer.kind, duration=?self.incoming_ip_throttle_duration, "backing off on gracefully closed session");
                 }
@@ -593,7 +621,8 @@ impl PeersManager {
         peer_id: &PeerId,
         err: &EthStreamError,
     ) {
-        self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::Dropped)
+        let reason = BackoffReason::from_disconnect(err.as_disconnected());
+        self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::Dropped, reason)
     }
 
     /// Called when an attempt to create an _outgoing_ pending session failed while setting up a tcp
@@ -620,7 +649,13 @@ impl PeersManager {
             }
         }
 
-        self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::FailedToConnect)
+        self.on_connection_failure(
+            remote_addr,
+            peer_id,
+            err,
+            ReputationChangeKind::FailedToConnect,
+            BackoffReason::ConnectionError,
+        )
     }
 
     fn on_connection_failure(
@@ -629,6 +664,7 @@ impl PeersManager {
         peer_id: &PeerId,
         err: impl SessionError,
         reputation_change: ReputationChangeKind,
+        backoff_reason: BackoffReason,
     ) {
         trace!(target: "net::peers", ?remote_addr, ?peer_id, %err, "handling failed connection");
 
@@ -713,7 +749,7 @@ impl PeersManager {
                 self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
             } else if let Some(backoff_until) = backoff_until {
                 // otherwise, backoff the peer if marked as such
-                self.backoff_peer_until(*peer_id, backoff_until);
+                self.backoff_peer_until(*peer_id, backoff_until, backoff_reason);
             }
         }
 
@@ -1076,7 +1112,7 @@ impl PeersManager {
 
                 // clear the backoff list of expired backoffs, and mark the relevant peers as
                 // ready to be dialed
-                self.backed_off_peers.retain(|peer_id, until| {
+                self.backed_off_peers.retain(|peer_id, (until, _reason)| {
                     if now > *until {
                         if let Some(peer) = self.peers.get_mut(peer_id) {
                             peer.backed_off = false;
@@ -1257,6 +1293,38 @@ pub enum InboundConnectionError {
 impl Display for InboundConnectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
+    }
+}
+
+/// Count of backed-off peers grouped by reason.
+#[derive(Debug, Default)]
+pub struct BackoffCounts {
+    /// Number of peers backed off because they reported too many peers.
+    pub too_many_peers: usize,
+    /// Number of peers backed off after a graceful session close.
+    pub graceful_close: usize,
+    /// Number of peers backed off due to connection/protocol errors.
+    pub connection_error: usize,
+}
+
+/// The reason a peer was backed off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackoffReason {
+    /// The remote peer responded with `TooManyPeers` (0x04).
+    TooManyPeers,
+    /// The session was gracefully closed and we're backing off briefly.
+    GracefulClose,
+    /// A connection or protocol-level error occurred.
+    ConnectionError,
+}
+
+impl BackoffReason {
+    /// Derives the backoff reason from an optional [`DisconnectReason`].
+    const fn from_disconnect(reason: Option<DisconnectReason>) -> Self {
+        match reason {
+            Some(DisconnectReason::TooManyPeers) => Self::TooManyPeers,
+            _ => Self::ConnectionError,
+        }
     }
 }
 
