@@ -13,7 +13,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_BUILD_JOBS: 32
+  CARGO_BUILD_JOBS: 16
   RUSTC_WRAPPER: "sccache"
 
 name: compact-codec
@@ -28,9 +28,6 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - name: Checkout base
         uses: actions/checkout@v6
         with:

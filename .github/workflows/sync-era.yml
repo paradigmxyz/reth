@@ -9,7 +9,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_BUILD_JOBS: 32
+  CARGO_BUILD_JOBS: 16
   RUSTC_WRAPPER: "sccache"
 
 concurrency:
@@ -38,9 +38,6 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - name: Build ${{ matrix.chain.bin }}
         run: make ${{ matrix.chain.build }}
       - name: Run sync with ERA enabled

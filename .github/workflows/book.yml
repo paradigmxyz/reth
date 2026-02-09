@@ -11,7 +11,7 @@ on:
   merge_group:
 
 env:
-  CARGO_BUILD_JOBS: 32
+  CARGO_BUILD_JOBS: 16
   RUSTC_WRAPPER: "sccache"
 
 jobs:

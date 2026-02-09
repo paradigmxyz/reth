@@ -8,7 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_BUILD_JOBS: 32
+  CARGO_BUILD_JOBS: 16
   RUSTC_WRAPPER: "sccache"
 
 jobs:
@@ -29,9 +29,6 @@ jobs:
         with:
           components: clippy
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - if: "${{ matrix.type == 'book' }}"
         uses: arduino/setup-protoc@v3
         with:
@@ -52,9 +49,6 @@ jobs:
         with:
           components: clippy
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
         env:
           RUSTFLAGS: -D warnings
@@ -70,9 +64,6 @@ jobs:
           target: wasm32-wasip1
       - uses: taiki-e/install-action@cargo-hack
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - uses: dcarbone/install-jq-action@v3
       - name: Run Wasm checks
         run: |
@@ -90,9 +81,6 @@ jobs:
           target: riscv32imac-unknown-none-elf
       - uses: taiki-e/install-action@cargo-hack
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - uses: dcarbone/install-jq-action@v3
       - name: Run RISC-V checks
         run: .github/scripts/check_rv32imac.sh
@@ -111,9 +99,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-hack
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - run: cargo hack check --workspace --partition ${{ matrix.partition }}/${{ matrix.total_partitions }}
 
   msrv:
@@ -127,9 +112,6 @@ jobs:
         with:
           toolchain: "1.88" # MSRV
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - run: cargo build --bin reth --workspace
         env:
           RUSTFLAGS: -D warnings
@@ -143,9 +125,6 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - run: cargo docs --document-private-items
         env:
           # Keep in sync with ./book.yml:jobs.build
@@ -175,9 +154,6 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - uses: taiki-e/install-action@cargo-udeps
       - run: cargo udeps --workspace --lib --examples --tests --benches --all-features --locked
 
@@ -190,9 +166,6 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - run: cargo build --bin reth --workspace
         env:
           RUSTFLAGS: -D warnings
@@ -248,9 +221,6 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@clippy
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - name: cargo install cargo-hack
         uses: taiki-e/install-action@cargo-hack
       - run: |

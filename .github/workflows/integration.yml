@@ -13,7 +13,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_BUILD_JOBS: 32
+  CARGO_BUILD_JOBS: 16
   SEED: rustethereumethereumrust
   RUSTC_WRAPPER: "sccache"
 
@@ -41,9 +41,6 @@ jobs:
         run: .github/scripts/install_geth.sh
       - uses: taiki-e/install-action@nextest
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - name: Run tests
         run: |
           cargo nextest run \
@@ -73,8 +70,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@nextest
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - name: run era1 files integration tests
         run: cargo nextest run --release --package reth-era --test it -- --ignored

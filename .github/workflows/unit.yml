@@ -10,7 +10,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_BUILD_JOBS: 32
+  CARGO_BUILD_JOBS: 16
   SEED: rustethereumethereumrust
   RUSTC_WRAPPER: "sccache"
 
@@ -39,9 +39,6 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - uses: taiki-e/install-action@nextest
       - if: "${{ matrix.type == 'book' }}"
         uses: arduino/setup-protoc@v3
@@ -85,9 +82,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@nextest
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - run: cargo nextest run --cargo-profile hivetests -p ef-tests --features "asm-keccak ef-tests"
 
   doc:
@@ -101,9 +95,6 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - name: Run doctests
         run: cargo test --doc --workspace --all-features
 

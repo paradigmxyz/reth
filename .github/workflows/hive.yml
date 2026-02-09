@@ -9,7 +9,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_BUILD_JOBS: 32
+  CARGO_BUILD_JOBS: 16
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
