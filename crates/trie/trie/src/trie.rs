@@ -716,8 +716,7 @@ where
             "calculated storage root"
         );
 
-        let storage_slots_walked = stats.leaves_added() as usize;
-        Ok(StorageRootProgress::Complete(root, storage_slots_walked, trie_updates))
+        Ok(StorageRootProgress::Complete(root, hashed_entries_walked, trie_updates))
     }
 }
 
