@@ -191,7 +191,8 @@ impl Command {
             std::fs::write(&payload_path, &payload_json)?;
             info!(target: "reth-bench", block_number = block.header.number, path = %payload_path.display(), "Saved payload");
 
-            call_new_payload_with_reth(&provider, version, params, self.reth_new_payload).await?;
+            let _ = call_new_payload_with_reth(&provider, version, params, self.reth_new_payload)
+                .await?;
 
             let forkchoice_state = ForkchoiceState {
                 head_block_hash: block_hash,

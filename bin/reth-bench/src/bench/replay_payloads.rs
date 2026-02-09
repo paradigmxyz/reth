@@ -259,7 +259,7 @@ impl Command {
                 "Executing gas ramp payload (newPayload + FCU)"
             );
 
-            call_new_payload_with_reth(
+            let _ = call_new_payload_with_reth(
                 &auth_provider,
                 payload.version,
                 payload.file.params.clone(),
@@ -327,7 +327,7 @@ impl Command {
                 envelope.execution_requests.to_vec(),
             ))?;
 
-            call_new_payload_with_reth(
+            let server_latency = call_new_payload_with_reth(
                 &auth_provider,
                 EngineApiMessageVersion::V4,
                 params,
@@ -335,7 +335,8 @@ impl Command {
             )
             .await?;
 
-            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
+            let np_latency = server_latency.unwrap_or_else(|| start.elapsed());
+            let new_payload_result = NewPayloadResult { gas_used, latency: np_latency };
 
             let fcu_state = ForkchoiceState {
                 head_block_hash: block_hash,

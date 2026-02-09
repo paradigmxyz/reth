@@ -12,6 +12,8 @@ use alloy_rpc_types_engine::{
 use alloy_transport::TransportResult;
 use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
 use reth_node_api::EngineApiMessageVersion;
+use serde::Deserialize;
+use std::time::Duration;
 use tracing::{debug, error};
 
 /// An extension trait for providers that implement the engine API, to wait for a VALID response.
@@ -257,8 +259,16 @@ pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
     provider: P,
     version: EngineApiMessageVersion,
     params: serde_json::Value,
-) -> TransportResult<()> {
+) -> TransportResult<Option<Duration>> {
     call_new_payload_with_reth(provider, version, params, false).await
+}
+
+/// Response from `reth_newPayload*` endpoints, which includes server-measured latency.
+#[derive(Debug, Deserialize)]
+struct RethPayloadStatus {
+    #[serde(flatten)]
+    status: PayloadStatus,
+    latency_us: u64,
 }
 
 /// Calls either `engine_newPayload*` or `reth_newPayload*` depending on the `use_reth_namespace`
@@ -266,34 +276,58 @@ pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
 ///
 /// When `use_reth_namespace` is true, uses the `reth_newPayload*` endpoints which wait for
 /// execution cache and preserved sparse trie locks to become available before processing.
+///
+/// Returns the server-reported execution latency when using the reth namespace, or `None` for
+/// the standard engine namespace.
 pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
     provider: P,
     version: EngineApiMessageVersion,
     params: serde_json::Value,
     use_reth_namespace: bool,
-) -> TransportResult<()> {
+) -> TransportResult<Option<Duration>> {
     let method =
         if use_reth_namespace { version.reth_method_name() } else { version.method_name() };
 
     debug!(target: "reth-bench", method, "Sending newPayload");
 
-    let mut status: PayloadStatus = provider.client().request(method, &params).await?;
+    if use_reth_namespace {
+        let mut resp: RethPayloadStatus = provider.client().request(method, &params).await?;
 
-    while !status.is_valid() {
-        if status.is_invalid() {
-            error!(target: "reth-bench", ?status, ?params, "Invalid {method}",);
-            return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(std::io::Error::other(
-                format!("Invalid {method}: {status:?}"),
-            ))))
+        while !resp.status.is_valid() {
+            if resp.status.is_invalid() {
+                error!(target: "reth-bench", status=?resp.status, ?params, "Invalid {method}",);
+                return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
+                    std::io::Error::other(format!("Invalid {method}: {:?}", resp.status)),
+                )))
+            }
+            if resp.status.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
+            }
+            resp = provider.client().request(method, &params).await?;
         }
-        if status.is_syncing() {
-            return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
-                "invalid range: no canonical state found for parent of requested block",
-            ))
+
+        Ok(Some(Duration::from_micros(resp.latency_us)))
+    } else {
+        let mut status: PayloadStatus = provider.client().request(method, &params).await?;
+
+        while !status.is_valid() {
+            if status.is_invalid() {
+                error!(target: "reth-bench", ?status, ?params, "Invalid {method}",);
+                return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
+                    std::io::Error::other(format!("Invalid {method}: {status:?}")),
+                )))
+            }
+            if status.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
+            }
+            status = provider.client().request(method, &params).await?;
         }
-        status = provider.client().request(method, &params).await?;
+        Ok(None)
     }
-    Ok(())
 }
 
 /// Calls the correct `engine_forkchoiceUpdated` method depending on the given

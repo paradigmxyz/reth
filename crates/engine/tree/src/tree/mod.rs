@@ -1559,6 +1559,7 @@ where
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
                                 let mut output = self.on_new_payload(payload);
+                                let latency = start.elapsed();
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
@@ -1569,9 +1570,9 @@ where
                                 let maybe_event =
                                     output.as_mut().ok().and_then(|out| out.event.take());
 
-                                // emit response
+                                // emit response with execution latency
                                 if let Err(err) =
-                                    tx.send(output.map(|o| o.outcome).map_err(|e| {
+                                    tx.send(output.map(|o| (o.outcome, latency)).map_err(|e| {
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {

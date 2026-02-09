@@ -9,11 +9,33 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, PayloadStatus,
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+
+/// Reth-specific payload status that includes server-measured execution latency.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RethPayloadStatus {
+    /// The standard payload status.
+    #[serde(flatten)]
+    pub status: PayloadStatus,
+    /// Server-side execution latency in microseconds.
+    pub latency_us: u64,
+}
+
+impl RethPayloadStatus {
+    /// Creates a new [`RethPayloadStatus`] from a [`PayloadStatus`] and execution [`Duration`].
+    pub fn new(status: PayloadStatus, latency: Duration) -> Self {
+        Self { status, latency_us: latency.as_micros() as u64 }
+    }
+}
 
 /// Reth-specific engine API extensions.
 ///
 /// This trait provides `reth_newPayload*` endpoints that mirror the standard
 /// `engine_newPayload*` endpoints but are available under the `reth_` namespace.
+///
+/// Responses include a `latency_us` field with the server-measured execution latency
+/// in microseconds.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "reth"))]
 pub trait RethEngineApi {
@@ -22,7 +44,10 @@ pub trait RethEngineApi {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     #[method(name = "newPayloadV1")]
-    async fn reth_new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus>;
+    async fn reth_new_payload_v1(
+        &self,
+        payload: ExecutionPayloadV1,
+    ) -> RpcResult<RethPayloadStatus>;
 
     /// Reth-specific version of `engine_newPayloadV2`.
     ///
@@ -31,7 +56,7 @@ pub trait RethEngineApi {
     async fn reth_new_payload_v2(
         &self,
         payload: ExecutionPayloadInputV2,
-    ) -> RpcResult<PayloadStatus>;
+    ) -> RpcResult<RethPayloadStatus>;
 
     /// Reth-specific version of `engine_newPayloadV3`.
     ///
@@ -44,7 +69,7 @@ pub trait RethEngineApi {
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
-    ) -> RpcResult<PayloadStatus>;
+    ) -> RpcResult<RethPayloadStatus>;
 
     /// Reth-specific version of `engine_newPayloadV4`.
     ///
@@ -58,5 +83,5 @@ pub trait RethEngineApi {
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: RequestsOrHash,
-    ) -> RpcResult<PayloadStatus>;
+    ) -> RpcResult<RethPayloadStatus>;
 }
