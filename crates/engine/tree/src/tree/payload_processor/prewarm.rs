@@ -850,8 +850,8 @@ fn multiproof_targets_from_withdrawals(
     withdrawals: &[Withdrawal],
     v2_enabled: bool,
 ) -> VersionedMultiProofTargets {
+    use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
     if v2_enabled {
-        use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
         VersionedMultiProofTargets::V2(MultiProofTargetsV2 {
             account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
             ..Default::default()
