@@ -489,6 +489,7 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 .is_none() &&
                 PruneMode::Distance(self.minimum_pruning_distance)
                     .should_prune(first_block, tip),
+            use_hashed_state: self.cached_storage_settings().use_hashed_state,
         })
     }
 
@@ -814,6 +815,7 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                     // SPAWN 7 THREADS: One per DBI for maximum parallelism
                     let parallel_start = Instant::now();
 
+                    let use_hashed_state = self.cached_storage_settings().use_hashed_state;
                     std::thread::scope(|s| {
                         // Thread 1: PlainAccountState
                         let t1 = s.spawn(|| self.write_plain_accounts_only(&prepared.accounts));
@@ -821,8 +823,12 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                         // Thread 2: Bytecodes
                         let t2 = s.spawn(|| self.write_bytecodes_only(&prepared.contracts));
 
-                        // Thread 3: PlainStorageState
-                        let t3 = s.spawn(|| self.write_plain_storage_only(&prepared.storage));
+                        // Thread 3: PlainStorageState (skip if use_hashed_state is enabled)
+                        let t3 = if !use_hashed_state {
+                            Some(s.spawn(|| self.write_plain_storage_only(&prepared.storage)))
+                        } else {
+                            None
+                        };
 
                         // Thread 4: HashedAccounts
                         let t4 = s.spawn(|| {
@@ -844,8 +850,11 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                         edge_timings.plain_accounts =
                             t1.join().expect("plain_accounts thread panicked")?;
                         edge_timings.bytecodes = t2.join().expect("bytecodes thread panicked")?;
-                        edge_timings.plain_storage =
-                            t3.join().expect("plain_storage thread panicked")?;
+                        edge_timings.plain_storage = if let Some(t3) = t3 {
+                            t3.join().expect("plain_storage thread panicked")?
+                        } else {
+                            std::time::Duration::ZERO
+                        };
                         edge_timings.hashed_accounts =
                             t4.join().expect("hashed_accounts thread panicked")?;
                         edge_timings.hashed_storages =
@@ -1643,6 +1652,8 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         }
     }
 
+    /// When `use_hashed_state` is enabled, `storage_key` must be a hashed slot
+    /// (i.e., `keccak256(plain_key)`), as the changesets store hashed keys in that mode.
     fn get_storage_before_block(
         &self,
         block_number: BlockNumber,
@@ -2966,6 +2977,30 @@ impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> StateWriter
                 // insert value if needed
                 if !old_storage_value.is_zero() {
                     plain_storage_cursor.upsert(*address, &storage_entry)?;
+                }
+            }
+        }
+
+        if self.cached_storage_settings().use_hashed_state {
+            let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
+            for (address, (_, _, storage)) in &state {
+                let hashed_address = keccak256(address);
+                for (storage_key, (old_value, _)) in storage {
+                    let hashed_slot = keccak256(storage_key);
+                    if hashed_storage_cursor
+                        .seek_by_key_subkey(hashed_address, hashed_slot)?
+                        .filter(|entry| entry.key == hashed_slot)
+                        .is_some()
+                    {
+                        hashed_storage_cursor.delete_current()?;
+                    }
+
+                    if !old_value.is_zero() {
+                        hashed_storage_cursor.upsert(
+                            hashed_address,
+                            &StorageEntry { key: hashed_slot, value: *old_value },
+                        )?;
+                    }
                 }
             }
         }

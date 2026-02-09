@@ -4,7 +4,7 @@
 //! where each method writes to exactly ONE database table (DBI). This allows for
 //! maximum parallelism when using subtxns.
 
-use crate::{providers::NodeTypesForProvider, DatabaseProvider};
+use crate::{providers::NodeTypesForProvider, DatabaseProvider, StorageSettingsCache};
 use alloy_primitives::{Address, B256};
 use rayon::slice::ParallelSliceMut;
 use reth_db_api::{
@@ -683,10 +683,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// This method is designed for use in a subtxn, writing to exactly ONE DBI.
     /// Returns the duration of the write operation.
+    ///
+    /// When `use_hashed_state` is enabled, this is a no-op since plain state tables are not used.
     pub fn write_plain_storage_only(
         &self,
         storage: &[PreparedStorageWrite],
     ) -> ProviderResult<Duration> {
+        if self.cached_storage_settings().use_hashed_state {
+            return Ok(Duration::ZERO);
+        }
+
         let start = Instant::now();
 
         let mut cursor = self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;

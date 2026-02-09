@@ -21,6 +21,13 @@ use tracing::info;
 /// Stage is indexing history the storage changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
 /// on index sharding take a look at [`tables::StoragesHistory`].
+///
+/// # Hashed State Compatibility
+///
+/// This stage uses storage keys directly from changesets without additional hashing.
+/// When `use_hashed_state` is enabled, changesets already contain hashed storage slots,
+/// so the history index will use hashed keys. When disabled (default), changesets contain
+/// plain slots, so the history index will use plain keys.
 #[derive(Debug)]
 pub struct IndexStorageHistoryStage {
     /// Number of blocks after which the control

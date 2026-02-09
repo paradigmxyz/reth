@@ -34,7 +34,7 @@ mod account;
 pub use account::TrieAccount;
 
 mod key;
-pub use key::{KeccakKeyHasher, KeyHasher};
+pub use key::{IdentityKeyHasher, KeccakKeyHasher, KeyHasher};
 
 mod nibbles;
 pub use nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey};

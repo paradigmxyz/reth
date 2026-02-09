@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, BlockNumber, B256, U256};
+use alloy_primitives::{keccak256, Address, BlockNumber, B256, U256};
 use clap::Parser;
 use parking_lot::Mutex;
 use reth_db_api::{
@@ -39,6 +39,10 @@ pub struct Command {
     /// Output format (table, json, csv)
     #[arg(long, short, default_value = "table")]
     format: OutputFormat,
+
+    /// Use hashed state tables (HashedStorages) instead of plain state
+    #[arg(long)]
+    hashed: bool,
 }
 
 impl Command {
@@ -63,35 +67,66 @@ impl Command {
         address: Address,
         limit: usize,
     ) -> eyre::Result<()> {
-        let entries = tool.provider_factory.db_ref().view(|tx| {
-            // Get account info
-            let account = tx.get::<tables::PlainAccountState>(address)?;
+        let use_hashed = self.hashed;
+        let hashed_address = keccak256(address);
 
-            // Get storage entries
-            let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+        let entries = tool.provider_factory.db_ref().view(|tx| {
+            let account = if use_hashed {
+                tx.get::<tables::HashedAccounts>(hashed_address)?
+            } else {
+                tx.get::<tables::PlainAccountState>(address)?
+            };
+
             let mut entries = Vec::new();
             let mut last_log = Instant::now();
 
-            let walker = cursor.walk_dup(Some(address), None)?;
-            for (idx, entry) in walker.enumerate() {
-                let (_, storage_entry) = entry?;
+            if use_hashed {
+                let mut cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
+                let walker = cursor.walk_dup(Some(hashed_address), None)?;
+                for (idx, entry) in walker.enumerate() {
+                    let (_, storage_entry) = entry?;
 
-                if storage_entry.value != U256::ZERO {
-                    entries.push((storage_entry.key, storage_entry.value));
+                    if storage_entry.value != U256::ZERO {
+                        entries.push((storage_entry.key, storage_entry.value));
+                    }
+
+                    if entries.len() >= limit {
+                        break;
+                    }
+
+                    if last_log.elapsed() >= LOG_INTERVAL {
+                        info!(
+                            target: "reth::cli",
+                            hashed_address = %hashed_address,
+                            slots_scanned = idx,
+                            "Scanning hashed storage slots"
+                        );
+                        last_log = Instant::now();
+                    }
                 }
+            } else {
+                let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+                let walker = cursor.walk_dup(Some(address), None)?;
+                for (idx, entry) in walker.enumerate() {
+                    let (_, storage_entry) = entry?;
 
-                if entries.len() >= limit {
-                    break;
-                }
+                    if storage_entry.value != U256::ZERO {
+                        entries.push((storage_entry.key, storage_entry.value));
+                    }
 
-                if last_log.elapsed() >= LOG_INTERVAL {
-                    info!(
-                        target: "reth::cli",
-                        address = %address,
-                        slots_scanned = idx,
-                        "Scanning storage slots"
-                    );
-                    last_log = Instant::now();
+                    if entries.len() >= limit {
+                        break;
+                    }
+
+                    if last_log.elapsed() >= LOG_INTERVAL {
+                        info!(
+                            target: "reth::cli",
+                            address = %address,
+                            slots_scanned = idx,
+                            "Scanning storage slots"
+                        );
+                        last_log = Instant::now();
+                    }
                 }
             }
 
@@ -100,7 +135,7 @@ impl Command {
 
         let (account, storage_entries) = entries;
 
-        self.print_results(address, None, account, &storage_entries);
+        self.print_results(address, None, account, &storage_entries, use_hashed);
 
         Ok(())
     }
@@ -176,7 +211,7 @@ impl Command {
             }
         }
 
-        self.print_results(address, Some(block), account, &entries);
+        self.print_results(address, Some(block), account, &entries, false);
 
         Ok(())
     }
@@ -318,15 +353,22 @@ impl Command {
         block: Option<BlockNumber>,
         account: Option<reth_primitives_traits::Account>,
         storage: &[(alloy_primitives::B256, U256)],
+        use_hashed: bool,
     ) {
+        let state_source = if use_hashed { "hashed" } else { "plain" };
+
         match self.format {
             OutputFormat::Table => {
                 println!("Account: {address}");
+                if use_hashed {
+                    println!("Hashed address: {}", keccak256(address));
+                }
                 if let Some(b) = block {
                     println!("Block: {b}");
                 } else {
                     println!("Block: latest");
                 }
+                println!("State source: {state_source}");
                 println!();
 
                 if let Some(acc) = account {
@@ -340,9 +382,10 @@ impl Command {
                 }
 
                 println!();
+                let slot_header = if use_hashed { "Hashed Slot" } else { "Slot" };
                 println!("Storage ({} slots):", storage.len());
                 println!("{:-<130}", "");
-                println!("{:<66} | {:<64}", "Slot", "Value");
+                println!("{:<66} | {:<64}", slot_header, "Value");
                 println!("{:-<130}", "");
                 for (key, value) in storage {
                     println!("{key} | {value:#066x}");
@@ -351,7 +394,9 @@ impl Command {
             OutputFormat::Json => {
                 let output = serde_json::json!({
                     "address": address.to_string(),
+                    "hashed_address": if use_hashed { Some(keccak256(address).to_string()) } else { None },
                     "block": block,
+                    "state_source": state_source,
                     "account": account.map(|a| serde_json::json!({
                         "nonce": a.nonce,
                         "balance": a.balance.to_string(),
@@ -409,5 +454,17 @@ mod tests {
         let cmd = Command::try_parse_from(["state", "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"])
             .unwrap();
         assert_eq!(cmd.block, None);
+        assert!(!cmd.hashed);
+    }
+
+    #[test]
+    fn parse_state_args_hashed() {
+        let cmd = Command::try_parse_from([
+            "state",
+            "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+            "--hashed",
+        ])
+        .unwrap();
+        assert!(cmd.hashed);
     }
 }

@@ -3,7 +3,7 @@ use crate::{
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     table::Table,
@@ -147,6 +147,15 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     }
 
     /// Lookup a storage key in the `StoragesHistory` table using `EitherReader`.
+    ///
+    /// # Key format
+    ///
+    /// When `use_hashed_state` is enabled, the caller is expected to pass an already-hashed
+    /// storage key (the keccak256 hash of the plain slot). The `StoragesHistory` table stores
+    /// entries with hashed slots in this mode since the changesets also use hashed slots.
+    ///
+    /// When `use_hashed_state` is disabled (default), the caller passes the plain storage key
+    /// and the history table uses plain keys.
     pub fn storage_history_lookup(
         &self,
         address: Address,
@@ -418,25 +427,45 @@ impl<
         address: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        match self.storage_history_lookup(address, storage_key)? {
+        let use_hashed_state = self.provider.cached_storage_settings().use_hashed_state;
+
+        // When use_hashed_state is enabled, the history table uses hashed slots.
+        // Hash the storage key for the history lookup.
+        let lookup_key = if use_hashed_state { keccak256(storage_key) } else { storage_key };
+
+        match self.storage_history_lookup(address, lookup_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => self
                 .provider
-                .get_storage_before_block(changeset_block_number, address, storage_key)?
+                .get_storage_before_block(changeset_block_number, address, lookup_key)?
                 .ok_or_else(|| ProviderError::StorageChangesetNotFound {
                     block_number: changeset_block_number,
                     address,
-                    storage_key: Box::new(storage_key),
+                    storage_key: Box::new(lookup_key),
                 })
                 .map(|entry| entry.value)
                 .map(Some),
-            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
-                .tx()
-                .cursor_dup_read::<tables::PlainStorageState>()?
-                .seek_by_key_subkey(address, storage_key)?
-                .filter(|entry| entry.key == storage_key)
-                .map(|entry| entry.value)
-                .or(Some(StorageValue::ZERO))),
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                if use_hashed_state {
+                    // When use_hashed_state is enabled, read from HashedStorages table.
+                    let hashed_address = keccak256(address);
+                    Ok(self
+                        .tx()
+                        .cursor_dup_read::<tables::HashedStorages>()?
+                        .seek_by_key_subkey(hashed_address, lookup_key)?
+                        .filter(|entry| entry.key == lookup_key)
+                        .map(|entry| entry.value)
+                        .or(Some(StorageValue::ZERO)))
+                } else {
+                    Ok(self
+                        .tx()
+                        .cursor_dup_read::<tables::PlainStorageState>()?
+                        .seek_by_key_subkey(address, storage_key)?
+                        .filter(|entry| entry.key == storage_key)
+                        .map(|entry| entry.value)
+                        .or(Some(StorageValue::ZERO)))
+                }
+            }
         }
     }
 }

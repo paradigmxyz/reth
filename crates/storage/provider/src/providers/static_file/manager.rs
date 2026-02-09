@@ -101,6 +101,8 @@ pub struct StaticFileWriteCtx {
     pub receipts_prune_mode: Option<reth_prune_types::PruneMode>,
     /// Whether receipts are prunable (based on storage settings and prune distance).
     pub receipts_prunable: bool,
+    /// Whether to use hashed state tables instead of plain state tables.
+    pub use_hashed_state: bool,
 }
 
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
@@ -626,10 +628,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Writes storage changesets for all blocks to the static file segment.
+    ///
+    /// When `use_hashed_state` is true, storage keys are stored as keccak256 hashes of the plain
+    /// slot rather than plain slots, enabling compatibility with hashed state storage.
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_storage_changesets(
         w: &mut StaticFileProviderRWRefMut<'_, N>,
         blocks: &[ExecutedBlock<N>],
+        use_hashed_state: bool,
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
@@ -641,9 +647,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 .flatten()
                 .flat_map(|revert| {
                     revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
+                        let plain_key = B256::new(key.to_be_bytes());
+                        let storage_key =
+                            if use_hashed_state { keccak256(plain_key) } else { plain_key };
                         StorageBeforeTx {
                             address: revert.address,
-                            key: B256::new(key.to_be_bytes()),
+                            key: storage_key,
                             value: revert_to_slot.to_previous_value(),
                         }
                     })
@@ -747,7 +756,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     r_storage_changesets = Some(self.write_segment(
                         StaticFileSegment::StorageChangeSets,
                         first_block_number,
-                        |w| Self::write_storage_changesets(w, blocks),
+                        |w| Self::write_storage_changesets(w, blocks, ctx.use_hashed_state),
                     ));
                 });
             }

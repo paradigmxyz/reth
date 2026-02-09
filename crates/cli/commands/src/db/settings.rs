@@ -121,6 +121,7 @@ impl Command {
             account_history_in_rocksdb: _,
             account_changesets_in_static_files: _,
             storage_changesets_in_static_files: _,
+            use_hashed_state: _,
         } = settings.unwrap_or_else(StorageSettings::v1);
 
         // Update the setting based on the key
