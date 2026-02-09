@@ -340,10 +340,12 @@ where
                 MultiProofMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
-                MultiProofMessage::EmptyProof { state, .. } => {
+                MultiProofMessage::EmptyProof { .. } | MultiProofMessage::BlockAccessList(_) => {
+                    continue
+                }
+                MultiProofMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
                 }
-                MultiProofMessage::BlockAccessList(_) => continue,
             };
             if hashed_state_tx.send(msg).is_err() {
                 break;
@@ -1038,7 +1040,7 @@ mod tests {
     use reth_trie_sparse_parallel::ParallelSparseTrie;
 
     #[test]
-    fn test_run_hashing_task_empty_proof_forwards_hashed_state() {
+    fn test_run_hashing_task_hashed_state_update_forwards() {
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
@@ -1064,9 +1066,7 @@ mod tests {
             );
         });
 
-        updates_tx
-            .send(MultiProofMessage::EmptyProof { sequence_number: 0, state: hashed_state })
-            .unwrap();
+        updates_tx.send(MultiProofMessage::HashedStateUpdate(hashed_state)).unwrap();
         updates_tx.send(MultiProofMessage::FinishedStateUpdates).unwrap();
         drop(updates_tx);
 

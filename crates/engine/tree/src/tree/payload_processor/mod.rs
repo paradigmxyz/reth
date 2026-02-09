@@ -269,10 +269,8 @@ where
                                 storages = hashed_state.storages.len(),
                                 "Converted BAL to hashed post state"
                             );
-                            let _ = to_multi_proof.send(MultiProofMessage::EmptyProof {
-                                sequence_number: 0,
-                                state: hashed_state,
-                            });
+                            let _ = to_multi_proof
+                                .send(MultiProofMessage::HashedStateUpdate(hashed_state));
                             let _ = to_multi_proof.send(MultiProofMessage::FinishedStateUpdates);
                         }
                         Err(err) => {
