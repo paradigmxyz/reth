@@ -444,6 +444,11 @@ where
                     break;
                 }
 
+                // If even after processing all updates and proofs we don't have any new messages, update account subtrie hashes.
+                if self.updates.is_empty() && self.proof_result_rx.is_empty() {
+                    self.trie.calculate_subtries();
+                }
+
                 self.dispatch_pending_targets();
             } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
                 // If we don't have any pending updates OR we've accumulated a lot already, apply
