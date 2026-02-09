@@ -5,7 +5,7 @@ name: kurtosis
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 0 * * *"
 
   push:
     tags:
@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   prepare-reth:
-    uses: ./.github/workflows/prepare-reth.yml
+    uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: kurtosis
     secrets: inherit

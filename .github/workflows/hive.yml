@@ -5,7 +5,7 @@ name: hive
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 0 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,14 +16,14 @@ concurrency:
 
 jobs:
   prepare-reth-stable:
-    uses: ./.github/workflows/prepare-reth.yml
+    uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive-stable
       artifact_name: "reth-stable"
     secrets: inherit
 
   prepare-reth-edge:
-    uses: ./.github/workflows/prepare-reth.yml
+    uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive-edge
       artifact_name: "reth-edge"

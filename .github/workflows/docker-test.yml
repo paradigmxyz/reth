@@ -1,4 +1,4 @@
-name: Prepare Reth Image
+name: Build test Docker image
 
 on:
   workflow_call:
