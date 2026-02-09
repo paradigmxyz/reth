@@ -14,6 +14,7 @@ extern crate alloc;
 use alloc::{fmt::Debug, sync::Arc};
 use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
+use alloy_primitives::B256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use reth_consensus_common::validation::{
@@ -99,8 +100,12 @@ where
         validate_body_against_header(body, header.header())
     }
 
-    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError> {
-        validate_block_pre_execution(block, &self.chain_spec)
+    fn validate_block_pre_execution(
+        &self,
+        block: &SealedBlock<B>,
+        transactions_root: Option<B256>,
+    ) -> Result<(), ConsensusError> {
+        validate_block_pre_execution(block, &self.chain_spec, transactions_root)
     }
 }
 

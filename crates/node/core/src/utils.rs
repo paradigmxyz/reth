@@ -85,7 +85,7 @@ where
     };
 
     let block = SealedBlock::from_sealed_parts(header, body);
-    consensus.validate_block_pre_execution(&block)?;
+    consensus.validate_block_pre_execution(&block, None)?;
 
     Ok(block)
 }

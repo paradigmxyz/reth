@@ -283,7 +283,7 @@ where
     consensus.validate_header(block.sealed_header())?;
     consensus.validate_header_against_parent(block.sealed_header(), parent)?;
 
-    consensus.validate_block_pre_execution(block)?;
+    consensus.validate_block_pre_execution(block, None)?;
 
     Ok(())
 }

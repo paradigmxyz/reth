@@ -58,6 +58,12 @@ pub trait ExecutionPayload:
 
     /// Returns the number of transactions in the payload.
     fn transaction_count(&self) -> usize;
+
+    /// Returns the raw RLP-encoded transactions from the payload.
+    ///
+    /// These are the pre-encoded transaction bytes that can be used to compute the
+    /// transaction root without decoding and re-encoding.
+    fn raw_transactions(&self) -> Vec<Bytes>;
 }
 
 impl ExecutionPayload for ExecutionData {
@@ -95,6 +101,10 @@ impl ExecutionPayload for ExecutionData {
 
     fn transaction_count(&self) -> usize {
         self.payload.as_v1().transactions.len()
+    }
+
+    fn raw_transactions(&self) -> Vec<Bytes> {
+        self.payload.as_v1().transactions.clone()
     }
 }
 
@@ -206,6 +216,10 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
 
     fn transaction_count(&self) -> usize {
         self.payload.as_v1().transactions.len()
+    }
+
+    fn raw_transactions(&self) -> Vec<Bytes> {
+        self.payload.as_v1().transactions.clone()
     }
 }
 

@@ -185,7 +185,7 @@ where
 
                 let block = SealedBlock::from_sealed_parts(next_header, next_body);
 
-                if let Err(error) = self.consensus.validate_block_pre_execution(&block) {
+                if let Err(error) = self.consensus.validate_block_pre_execution(&block, None) {
                     // Body is invalid, put the header back and return an error
                     let hash = block.hash();
                     let number = block.number();

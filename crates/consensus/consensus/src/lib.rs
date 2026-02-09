@@ -76,8 +76,15 @@ pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
     ///
     /// **This should not be called for the genesis block**.
     ///
+    /// If `transactions_root` is provided, the implementation should use the pre-computed
+    /// transaction root instead of recomputing it from the block body.
+    ///
     /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError>;
+    fn validate_block_pre_execution(
+        &self,
+        block: &SealedBlock<B>,
+        transactions_root: Option<B256>,
+    ) -> Result<(), ConsensusError>;
 }
 
 /// `HeaderValidator` is a protocol that validates headers and their relationships.

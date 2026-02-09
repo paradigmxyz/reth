@@ -131,7 +131,7 @@ where
         self.validate_message_against_header(block.sealed_header(), &message)?;
 
         self.consensus.validate_header(block.sealed_header())?;
-        self.consensus.validate_block_pre_execution(block.sealed_block())?;
+        self.consensus.validate_block_pre_execution(block.sealed_block(), None)?;
 
         if !self.disallow.is_empty() {
             if self.disallow.contains(&block.beneficiary()) {

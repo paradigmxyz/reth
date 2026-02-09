@@ -2,6 +2,7 @@
 
 use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
+use alloy_primitives::B256;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
@@ -137,9 +138,13 @@ where
 /// - Compares the ommer hash in the block header to the block body
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
+///
+/// If `transactions_root` is provided, the pre-computed transaction root is used instead of
+/// recomputing it from the block body.
 pub fn validate_block_pre_execution<B, ChainSpec>(
     block: &SealedBlock<B>,
     chain_spec: &ChainSpec,
+    transactions_root: Option<B256>,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -148,7 +153,13 @@ where
     post_merge_hardfork_fields(block, chain_spec)?;
 
     // Check transaction root
-    if let Err(error) = block.ensure_transaction_root_valid() {
+    if let Some(root) = transactions_root {
+        if block.header().transactions_root() != root {
+            return Err(ConsensusError::BodyTransactionRootDiff(
+                GotExpected { got: root, expected: block.header().transactions_root() }.into(),
+            ))
+        }
+    } else if let Err(error) = block.ensure_transaction_root_valid() {
         return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
 
@@ -485,7 +496,7 @@ mod tests {
 
         // validate blob, it should fail blob gas used validation
         assert!(matches!(
-            validate_block_pre_execution(&block, &chain_spec).unwrap_err(),
+            validate_block_pre_execution(&block, &chain_spec, None).unwrap_err(),
             ConsensusError::BlobGasUsedDiff(diff)
                 if diff.got == 1 && diff.expected == expected_blob_gas_used
         ));
