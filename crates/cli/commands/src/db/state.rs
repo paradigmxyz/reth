@@ -19,7 +19,7 @@ use std::{
 };
 use tracing::{error, info};
 
-/// Log progress every 5 seconds
+/// Log progress every 30 seconds
 const LOG_INTERVAL: Duration = Duration::from_secs(30);
 
 /// The arguments for the `reth db state` command
