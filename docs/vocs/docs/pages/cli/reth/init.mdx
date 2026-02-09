@@ -59,13 +59,6 @@ Database:
           - trace:   Enables logging for trace debug-level messages
           - extra:   Enables logging for extra debug-level messages
 
-      --db.use-hashed-state
-          Use hashed state tables (`HashedAccounts`/`HashedStorages`) as the canonical state representation instead of plain state tables (`PlainAccountState`/`PlainStorageState`).
-
-          When enabled: - Execution writes directly to hashed tables, eliminating need for separate hashing stages - State reads come from hashed tables - `AccountHashingStage` and `StorageHashingStage` become no-ops
-
-          WARNING: This setting is only configurable at database creation. Enabling it on an existing database that was created without it requires re-syncing. Disabling it on a database that was created with it also requires re-syncing.
-
       --db.exclusive <EXCLUSIVE>
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
 
@@ -205,6 +198,38 @@ Storage:
           When enabled, execution writes directly to hashed tables, eliminating the need for separate hashing stages. This should only be enabled for new databases.
 
           WARNING: Changing this setting on an existing database requires a full resync.
+
+      --storage.receipts-in-static-files <RECEIPTS_IN_STATIC_FILES>
+          Store receipts in static files instead of the database.
+
+          This is enabled by default for new nodes. Existing nodes continue using their current storage location unless migrated.
+
+          [possible values: true, false]
+
+      --storage.transaction-senders-in-static-files <TRANSACTION_SENDERS_IN_STATIC_FILES>
+          Store transaction senders in static files instead of the database
+
+          [possible values: true, false]
+
+      --storage.account-changesets-in-static-files <ACCOUNT_CHANGESETS_IN_STATIC_FILES>
+          Store account changesets in static files instead of the database
+
+          [possible values: true, false]
+
+      --storage.storages-history-in-rocksdb <STORAGES_HISTORY_IN_ROCKSDB>
+          Store storage history in `RocksDB` instead of MDBX
+
+          [possible values: true, false]
+
+      --storage.transaction-hash-numbers-in-rocksdb <TRANSACTION_HASH_NUMBERS_IN_ROCKSDB>
+          Store transaction hash to number mapping in `RocksDB` instead of MDBX
+
+          [possible values: true, false]
+
+      --storage.account-history-in-rocksdb <ACCOUNT_HISTORY_IN_ROCKSDB>
+          Store account history in `RocksDB` instead of MDBX
+
+          [possible values: true, false]
 
 Logging:
       --log.stdout.format <FORMAT>
