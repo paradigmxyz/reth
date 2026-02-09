@@ -95,6 +95,8 @@ pub struct StaticFileWriteCtx {
     pub write_account_changesets: bool,
     /// Whether storage changesets should be written to static files.
     pub write_storage_changesets: bool,
+    /// Whether to use hashed state (keccak256 storage keys in changesets).
+    pub use_hashed_state: bool,
     /// The current chain tip block number (for pruning).
     pub tip: BlockNumber,
     /// The prune mode for receipts, if any.
@@ -630,6 +632,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     fn write_storage_changesets(
         w: &mut StaticFileProviderRWRefMut<'_, N>,
         blocks: &[ExecutedBlock<N>],
+        use_hashed_state: bool,
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
@@ -644,7 +647,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         let raw_key = B256::new(key.to_be_bytes());
                         StorageBeforeTx {
                             address: revert.address,
-                            key: keccak256(raw_key),
+                            key: if use_hashed_state { keccak256(raw_key) } else { raw_key },
                             value: revert_to_slot.to_previous_value(),
                         }
                     })
@@ -748,7 +751,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     r_storage_changesets = Some(self.write_segment(
                         StaticFileSegment::StorageChangeSets,
                         first_block_number,
-                        |w| Self::write_storage_changesets(w, blocks),
+                        |w| Self::write_storage_changesets(w, blocks, ctx.use_hashed_state),
                     ));
                 });
             }

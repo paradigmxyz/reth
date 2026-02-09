@@ -416,6 +416,13 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
 
         s = s.with_use_hashed_state(self.storage.use_hashed_state);
 
+        if s.use_hashed_state {
+            s = s.with_storage_changesets_in_static_files(true);
+        }
+        if s.storage_changesets_in_static_files {
+            s = s.with_use_hashed_state(true);
+        }
+
         s
     }
 
