@@ -9,6 +9,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 32
   BASELINE: base
   SEED: reth
   RUSTC_WRAPPER: "sccache"

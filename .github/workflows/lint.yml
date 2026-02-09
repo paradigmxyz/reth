@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 32
   RUSTC_WRAPPER: "sccache"
 
 jobs:
