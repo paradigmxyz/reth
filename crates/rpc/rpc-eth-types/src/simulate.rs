@@ -367,7 +367,7 @@ where
                     status: false,
                 }
             }
-            ExecutionResult::Revert { output, gas_used } => {
+            ExecutionResult::Revert { output, gas_used,.. } => {
                 let error = Err::from_revert(output.clone());
                 #[allow(clippy::needless_update)]
                 SimCallResult {
