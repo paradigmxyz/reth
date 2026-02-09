@@ -30,7 +30,7 @@ use reth_evm::{
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProvider, StateProviderBox,
+    BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProvider,
     StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
@@ -248,13 +248,43 @@ where
         let parent_state_root = env.parent_state_root;
 
         // Handle BAL-based optimization if available
-        let has_bal = bal.is_some();
         let prewarm_handle = if let Some(bal) = bal {
             // When BAL is present, use BAL prewarming and send BAL to multiproof
             debug!(target: "engine::tree::payload_processor", "BAL present, using BAL prewarming");
 
-            // Send BAL message immediately to MultiProofTask
-            let _ = to_multi_proof.send(MultiProofMessage::BlockAccessList(Arc::clone(&bal)));
+            // Spawn a task that converts BAL to HashedPostState and sends it via the multiproof
+            // channel. This avoids threading a provider through the sparse trie task interface.
+            {
+                let to_multi_proof = to_multi_proof.clone();
+                let provider_builder = provider_builder.clone();
+                let bal_clone = Arc::clone(&bal);
+                self.executor.spawn_blocking(move || {
+                    let provider =
+                        provider_builder.build().expect("failed to build provider for BAL task");
+                    match bal::bal_to_hashed_post_state(&bal_clone, &provider) {
+                        Ok(hashed_state) => {
+                            debug!(
+                                target: "engine::tree::payload_processor",
+                                accounts = hashed_state.accounts.len(),
+                                storages = hashed_state.storages.len(),
+                                "Converted BAL to hashed post state"
+                            );
+                            let _ = to_multi_proof.send(MultiProofMessage::EmptyProof {
+                                sequence_number: 0,
+                                state: hashed_state,
+                            });
+                            let _ = to_multi_proof.send(MultiProofMessage::FinishedStateUpdates);
+                        }
+                        Err(err) => {
+                            warn!(
+                                target: "engine::tree::payload_processor",
+                                ?err,
+                                "Failed to convert BAL to hashed state"
+                            );
+                        }
+                    }
+                });
+            }
 
             // Spawn with BAL prewarming
             self.spawn_caching_with(
@@ -288,17 +318,6 @@ where
             account_worker_count,
             v2_proofs_enabled,
         );
-
-        let stac_provider = has_bal.then(|| {
-            let provider =
-                provider_builder.build().expect("failed to build provider for sparse trie task");
-            if let Some(saved_cache) = prewarm_handle.saved_cache.clone() {
-                let (cache, metrics, ..) = saved_cache.split();
-                Box::new(CachedStateProvider::new(provider, cache, metrics)) as StateProviderBox
-            } else {
-                Box::new(provider) as StateProviderBox
-            }
-        });
 
         if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(
@@ -339,7 +358,6 @@ where
             from_multi_proof,
             config,
             parent_state_root,
-            stac_provider,
         );
 
         PayloadHandle {
@@ -514,7 +532,6 @@ where
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
-    #[expect(clippy::too_many_arguments)]
     fn spawn_sparse_trie_task(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
@@ -523,7 +540,6 @@ where
         from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
         config: &TreeConfig,
         parent_state_root: B256,
-        provider: Option<StateProviderBox>,
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
@@ -582,7 +598,6 @@ where
                     trie_metrics.clone(),
                     sparse_state_trie.with_skip_proof_node_filtering(true),
                     chunk_size,
-                    provider,
                 ))
             };
 
