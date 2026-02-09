@@ -508,6 +508,13 @@ where
     ///
     /// V2 proofs already include the masks in the `ProofTrieNode` structure,
     /// so no separate masks map is needed.
+    #[instrument(
+        target = "trie::sparse",
+        skip_all,
+        fields(
+            nodes = nodes.len()
+        )
+    )]
     pub fn reveal_account_v2_proof_nodes(
         &mut self,
         mut nodes: Vec<ProofTrieNode>,

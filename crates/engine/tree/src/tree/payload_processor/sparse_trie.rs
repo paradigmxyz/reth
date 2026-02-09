@@ -711,7 +711,7 @@ where
             return Ok(());
         }
 
-        let span = debug_span!("compute_storage_roots").entered();
+        let span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "compute_storage_roots").entered();
         self
             .trie
             .storage_tries_mut()
@@ -728,7 +728,7 @@ where
         drop(span);
 
         loop {
-            let span = debug_span!("promote_updates", promoted = tracing::field::Empty).entered();
+            let span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "promote_updates", promoted = tracing::field::Empty).entered();
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
             let mut num_promoted = 0;
