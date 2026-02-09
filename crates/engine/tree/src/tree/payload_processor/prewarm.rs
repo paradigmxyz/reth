@@ -847,46 +847,21 @@ fn multiproof_targets_v2_from_state(state: EvmState) -> (VersionedMultiProofTarg
 ///
 /// Withdrawals only modify account balances (no storage), so the targets contain
 /// only account-level entries with empty storage sets.
-pub fn multiproof_targets_from_withdrawals(
+fn multiproof_targets_from_withdrawals(
     withdrawals: &[Withdrawal],
     v2_enabled: bool,
 ) -> VersionedMultiProofTargets {
     if v2_enabled {
-        multiproof_targets_v2_from_withdrawals(withdrawals)
+        use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+        VersionedMultiProofTargets::V2(MultiProofTargetsV2 {
+            account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
+            ..Default::default()
+        })
     } else {
-        multiproof_targets_legacy_from_withdrawals(withdrawals)
+        VersionedMultiProofTargets::Legacy(
+            withdrawals.iter().map(|w| (keccak256(w.address), Default::default())).collect(),
+        )
     }
-}
-
-/// Returns legacy [`MultiProofTargets`] for withdrawal addresses.
-fn multiproof_targets_legacy_from_withdrawals(
-    withdrawals: &[Withdrawal],
-) -> VersionedMultiProofTargets {
-    VersionedMultiProofTargets::Legacy(
-        withdrawals.iter().map(|w| (keccak256(w.address), Default::default())).collect(),
-    )
-}
-
-/// Returns V2 [`reth_trie_parallel::targets_v2::MultiProofTargetsV2`] for withdrawal addresses.
-fn multiproof_targets_v2_from_withdrawals(
-    withdrawals: &[Withdrawal],
-) -> VersionedMultiProofTargets {
-    use alloy_primitives::{map::DefaultHashBuilder, Address};
-    use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
-    use std::collections::HashSet;
-
-    let mut seen = HashSet::<Address, DefaultHashBuilder>::with_capacity_and_hasher(
-        withdrawals.len(),
-        Default::default(),
-    );
-    VersionedMultiProofTargets::V2(MultiProofTargetsV2 {
-        account_targets: withdrawals
-            .iter()
-            .filter(|w| seen.insert(w.address))
-            .map(|w| keccak256(w.address).into())
-            .collect(),
-        ..Default::default()
-    })
 }
 
 /// The events the pre-warm task can handle.
