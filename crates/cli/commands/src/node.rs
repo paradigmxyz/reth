@@ -129,12 +129,12 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
 }
 
 impl<C: ChainSpecParser> NodeCommand<C> {
-    /// Parsers only the default CLI arguments
+    /// Parses only the default CLI arguments
     pub fn parse_args() -> Self {
         Self::parse()
     }
 
-    /// Parsers only the default [`NodeCommand`] arguments from the given iterator
+    /// Parses only the default [`NodeCommand`] arguments from the given iterator
     pub fn try_parse_args_from<I, T>(itr: I) -> Result<Self, clap::error::Error>
     where
         I: IntoIterator<Item = T>,
