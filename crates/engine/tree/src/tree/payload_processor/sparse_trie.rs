@@ -625,6 +625,10 @@ where
         // Process all storage updates in parallel, skipping tries with no pending updates.
         let span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "process_storage_leaf_updates").entered();
         for (address, updates) in storage_updates {
+            if updates.is_empty() {
+                continue;
+            }
+
             let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie leaf updates", ?address, num_updates = updates.len()).entered();
 
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
