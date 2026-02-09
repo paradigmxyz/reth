@@ -21,7 +21,7 @@ use crate::chainspec::ChainSpecParser;
 ///
 /// This trait is supposed to be implemented by the main struct of the CLI.
 ///
-/// It provides commonly used functionality for running commands and information about the CL, such
+/// It provides commonly used functionality for running commands and information about the CLI, such
 /// as the name and version.
 pub trait RethCli: Sized {
     /// The associated `ChainSpecParser` type
