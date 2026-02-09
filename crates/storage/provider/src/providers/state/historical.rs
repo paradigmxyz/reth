@@ -454,11 +454,17 @@ impl<
         address: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        match self.storage_history_lookup(address, storage_key)? {
+        let lookup_key = if self.provider.cached_storage_settings().use_hashed_state {
+            alloy_primitives::keccak256(storage_key)
+        } else {
+            storage_key
+        };
+
+        match self.storage_history_lookup(address, lookup_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => self
                 .provider
-                .get_storage_before_block(changeset_block_number, address, storage_key)?
+                .get_storage_before_block(changeset_block_number, address, lookup_key)?
                 .ok_or_else(|| ProviderError::StorageChangesetNotFound {
                     block_number: changeset_block_number,
                     address,
@@ -469,12 +475,11 @@ impl<
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
                 if self.provider.cached_storage_settings().use_hashed_state {
                     let hashed_address = alloy_primitives::keccak256(address);
-                    let hashed_slot = alloy_primitives::keccak256(storage_key);
                     Ok(self
                         .tx()
                         .cursor_dup_read::<tables::HashedStorages>()?
-                        .seek_by_key_subkey(hashed_address, hashed_slot)?
-                        .filter(|entry| entry.key == hashed_slot)
+                        .seek_by_key_subkey(hashed_address, lookup_key)?
+                        .filter(|entry| entry.key == lookup_key)
                         .map(|entry| entry.value)
                         .or(Some(StorageValue::ZERO)))
                 } else {

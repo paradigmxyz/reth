@@ -1495,13 +1495,19 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         address: Address,
         storage_key: B256,
     ) -> ProviderResult<Option<StorageEntry>> {
+        let lookup_key = if self.cached_storage_settings().use_hashed_state {
+            keccak256(storage_key)
+        } else {
+            storage_key
+        };
+
         if self.cached_storage_settings().storage_changesets_in_static_files {
-            self.static_file_provider.get_storage_before_block(block_number, address, storage_key)
+            self.static_file_provider.get_storage_before_block(block_number, address, lookup_key)
         } else {
             self.tx
                 .cursor_dup_read::<tables::StorageChangeSets>()?
-                .seek_by_key_subkey(BlockNumberAddress((block_number, address)), storage_key)?
-                .filter(|entry| entry.key == storage_key)
+                .seek_by_key_subkey(BlockNumberAddress((block_number, address)), lookup_key)?
+                .filter(|entry| entry.key == lookup_key)
                 .map(Ok)
                 .transpose()
         }
@@ -2455,7 +2461,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 for PlainStorageRevert { address, wiped, storage_revert } in storage_changes {
                     let mut storage = storage_revert
                         .into_iter()
-                        .map(|(k, v)| (B256::new(k.to_be_bytes()), v))
+                        .map(|(k, v)| {
+                            let key = B256::new(k.to_be_bytes());
+                            if use_hashed_state {
+                                (keccak256(key), v)
+                            } else {
+                                (key, v)
+                            }
+                        })
                         .collect::<Vec<_>>();
                     // sort storage slots by key.
                     storage.par_sort_unstable_by_key(|a| a.0);
