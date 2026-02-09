@@ -189,7 +189,6 @@ where
             }
 
             // Send withdrawal prefetch targets after all transactions have been distributed
-            // since withdrawals only modify account balances
             if let Some(to_multi_proof) = to_multi_proof
                 && let Some(withdrawals) = &ctx.env.withdrawals
                 && !withdrawals.is_empty()
