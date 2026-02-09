@@ -231,6 +231,13 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         vec![]
     }
 
+    fn prune_transactions(
+        &self,
+        _hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
     fn retain_unknown<A>(&self, _announcement: &mut A)
     where
         A: HandleMempoolData,

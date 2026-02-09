@@ -1066,6 +1066,21 @@ where
         removed
     }
 
+    /// Prunes and returns all matching transactions from the pool.
+    ///
+    /// This removes the transactions as if they were mined: descendant transactions are **not**
+    /// parked and remain eligible for inclusion.
+    pub fn prune_transactions(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        if hashes.is_empty() {
+            return Vec::new()
+        }
+
+        self.pool.write().prune_transactions(hashes)
+    }
+
     /// Removes and returns all transactions that are present in the pool.
     pub fn retain_unknown<A>(&self, announcement: &mut A)
     where
