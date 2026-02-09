@@ -289,18 +289,17 @@ where
             v2_proofs_enabled,
         );
 
-        let stac_provider: Option<StateProviderBox> =
-            (!config.disable_trie_cache() && has_bal).then(|| {
-                let provider = provider_builder
-                    .build()
-                    .expect("failed to build provider for sparse trie task");
-                if let Some(saved_cache) = prewarm_handle.saved_cache.clone() {
-                    let (cache, metrics, _disable_metrics) = saved_cache.split();
-                    Box::new(CachedStateProvider::new(provider, cache, metrics)) as StateProviderBox
-                } else {
-                    Box::new(provider) as StateProviderBox
-                }
-            });
+        let stac_provider: Option<StateProviderBox> = has_bal.then(|| {
+            let provider = provider_builder
+                .build()
+                .expect("failed to build provider for sparse trie task");
+            if let Some(saved_cache) = prewarm_handle.saved_cache.clone() {
+                let (cache, metrics, _disable_metrics) = saved_cache.split();
+                Box::new(CachedStateProvider::new(provider, cache, metrics)) as StateProviderBox
+            } else {
+                Box::new(provider) as StateProviderBox
+            }
+        });
 
         if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(
