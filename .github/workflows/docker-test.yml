@@ -23,6 +23,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+      - run: mkdir -p artifacts
 
       - name: Set up Depot CLI
         uses: depot/setup-action@v1
