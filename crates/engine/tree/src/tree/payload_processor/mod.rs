@@ -252,44 +252,13 @@ where
             // When BAL is present, use BAL prewarming and send BAL to multiproof
             debug!(target: "engine::tree::payload_processor", "BAL present, using BAL prewarming");
 
-            // Spawn a task that converts BAL to HashedPostState and sends it via the multiproof
-            // channel. This avoids threading a provider through the sparse trie task interface.
-            {
-                let to_multi_proof = to_multi_proof.clone();
-                let provider_builder = provider_builder.clone();
-                let bal_clone = Arc::clone(&bal);
-                self.executor.spawn_blocking(move || {
-                    let provider =
-                        provider_builder.build().expect("failed to build provider for BAL task");
-                    match bal::bal_to_hashed_post_state(&bal_clone, &provider) {
-                        Ok(hashed_state) => {
-                            debug!(
-                                target: "engine::tree::payload_processor",
-                                accounts = hashed_state.accounts.len(),
-                                storages = hashed_state.storages.len(),
-                                "Converted BAL to hashed post state"
-                            );
-                            let _ = to_multi_proof
-                                .send(MultiProofMessage::HashedStateUpdate(hashed_state));
-                            let _ = to_multi_proof.send(MultiProofMessage::FinishedStateUpdates);
-                        }
-                        Err(err) => {
-                            warn!(
-                                target: "engine::tree::payload_processor",
-                                ?err,
-                                "Failed to convert BAL to hashed state"
-                            );
-                        }
-                    }
-                });
-            }
-
-            // Spawn with BAL prewarming
+            // The prewarm task converts the BAL to HashedPostState and sends it on
+            // to_multi_proof after slot prefetching completes.
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
                 provider_builder.clone(),
-                None, // Don't send proof targets when BAL is present
+                Some(to_multi_proof.clone()),
                 Some(bal),
                 v2_proofs_enabled,
             )
