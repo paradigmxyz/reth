@@ -515,10 +515,13 @@ where
             StateRootStrategy::StateRootTask => {
                 debug!(target: "engine::tree::payload_validator", "Using sparse trie state root algorithm");
 
-                let (task_result, used_sequential_fallback) = self.await_state_root_with_timeout(
-                    &mut handle,
-                    overlay_factory.clone(),
-                    &hashed_state,
+                let task_result = ensure_ok_post_block!(
+                    self.await_state_root_with_timeout(
+                        &mut handle,
+                        overlay_factory.clone(),
+                        &hashed_state,
+                    ),
+                    block
                 );
 
                 match task_result {
@@ -549,12 +552,8 @@ where
                         }
                     }
                     Err(error) => {
-                        if used_sequential_fallback {
-                            warn!(target: "engine::tree::payload_validator", %error, "Sequential fallback failed, skipping serial retry");
-                        } else {
-                            debug!(target: "engine::tree::payload_validator", %error, "State root task failed");
-                            state_root_task_failed = true;
-                        }
+                        debug!(target: "engine::tree::payload_validator", %error, "State root task failed");
+                        state_root_task_failed = true;
                     }
                 }
             }
@@ -596,7 +595,7 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                self.compute_state_root_serial(overlay_factory.clone(), &hashed_state),
+                Self::compute_state_root_serial(overlay_factory.clone(), &hashed_state),
                 block
             );
 
@@ -893,7 +892,6 @@ where
     /// [`HashedPostState`] containing the changes of this block, to compute the state root and
     /// trie updates for this block.
     fn compute_state_root_serial(
-        &self,
         overlay_factory: OverlayStateProviderFactory<P>,
         hashed_state: &HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
@@ -921,24 +919,25 @@ where
     ///
     /// If no timeout is configured, this simply awaits the state root task without any fallback.
     ///
-    /// Returns `(result, used_sequential_fallback)` where the bool indicates whether the
-    /// sequential fallback was spawned and its result was used.
+    /// Returns `ProviderResult<Result<...>>` where the outer `ProviderResult` captures
+    /// unrecoverable errors from the sequential fallback (e.g. DB errors), while the inner
+    /// `Result` captures parallel state root task errors that can still fall back to serial.
     fn await_state_root_with_timeout<Tx, Err, R: Send + Sync + 'static>(
         &self,
         handle: &mut PayloadHandle<Tx, Err, R>,
         overlay_factory: OverlayStateProviderFactory<P>,
         hashed_state: &HashedPostState,
-    ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, bool) {
+    ) -> ProviderResult<Result<StateRootComputeOutcome, ParallelStateRootError>> {
         let Some(timeout) = self.config.state_root_task_timeout() else {
-            return (handle.state_root(), false);
+            return Ok(handle.state_root());
         };
 
         let task_rx = handle.take_state_root_rx();
 
         match task_rx.recv_timeout(timeout) {
-            Ok(result) => (result, false),
+            Ok(result) => Ok(result),
             Err(RecvTimeoutError::Disconnected) => {
-                (Err(ParallelStateRootError::Other("sparse trie task dropped".to_string())), false)
+                Ok(Err(ParallelStateRootError::Other("sparse trie task dropped".to_string())))
             }
             Err(RecvTimeoutError::Timeout) => {
                 warn!(
@@ -948,27 +947,13 @@ where
                 );
                 self.metrics.block_validation.state_root_task_timeout_total.increment(1);
 
-                let (seq_tx, seq_rx) = std::sync::mpsc::channel();
+                let (seq_tx, seq_rx) =
+                    std::sync::mpsc::channel::<ProviderResult<(B256, TrieUpdates)>>();
 
                 let seq_overlay = overlay_factory;
                 let seq_hashed_state = hashed_state.clone();
                 self.payload_processor.executor().spawn_blocking(move || {
-                    let prefix_sets = seq_hashed_state.construct_prefix_sets().freeze();
-                    let seq_overlay = seq_overlay
-                        .with_extended_hashed_state_overlay(seq_hashed_state.clone_into_sorted());
-                    let result = seq_overlay
-                        .database_provider_ro()
-                        .map_err(|e| ParallelStateRootError::Other(e.to_string()))
-                        .and_then(|provider| {
-                            StateRoot::new(&provider, &provider)
-                                .with_prefix_sets(prefix_sets)
-                                .root_with_updates()
-                                .map(|(root, updates)| StateRootComputeOutcome {
-                                    state_root: root,
-                                    trie_updates: updates,
-                                })
-                                .map_err(|e| ParallelStateRootError::Other(e.to_string()))
-                        });
+                    let result = Self::compute_state_root_serial(seq_overlay, &seq_hashed_state);
                     let _ = seq_tx.send(result);
                 });
 
@@ -982,7 +967,7 @@ where
                                 source = "task",
                                 "State root timeout race won"
                             );
-                            return (result, false);
+                            return Ok(result);
                         }
                         Err(RecvTimeoutError::Disconnected) => {
                             debug!(
@@ -990,14 +975,12 @@ where
                                 "State root task dropped, waiting for sequential fallback"
                             );
                             let result = seq_rx.recv().map_err(|_| {
-                                ParallelStateRootError::Other(
-                                    "both state root computations failed".to_string(),
-                                )
-                            });
-                            return match result {
-                                Ok(inner) => (inner, true),
-                                Err(e) => (Err(e), true),
-                            };
+                                ProviderError::other(std::io::Error::other(
+                                    "both state root computations failed",
+                                ))
+                            })?;
+                            let (state_root, trie_updates) = result?;
+                            return Ok(Ok(StateRootComputeOutcome { state_root, trie_updates }));
                         }
                         Err(RecvTimeoutError::Timeout) => {}
                     }
@@ -1008,7 +991,8 @@ where
                             source = "sequential",
                             "State root timeout race won"
                         );
-                        return (result, true);
+                        let (state_root, trie_updates) = result?;
+                        return Ok(Ok(StateRootComputeOutcome { state_root, trie_updates }));
                     }
                 }
             }
@@ -1029,7 +1013,7 @@ where
     ) {
         debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
 
-        match self.compute_state_root_serial(overlay_factory.clone(), hashed_state) {
+        match Self::compute_state_root_serial(overlay_factory.clone(), hashed_state) {
             Ok((serial_root, serial_trie_updates)) => {
                 debug!(
                     target: "engine::tree::payload_validator",

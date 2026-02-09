@@ -375,8 +375,10 @@ pub struct EngineArgs {
     /// Configure the timeout for the state root task before spawning a sequential fallback.
     /// If the state root task takes longer than this, a sequential computation starts in
     /// parallel and whichever finishes first is used.
-    /// Parses strings using [`humantime::parse_duration`]
-    /// e.g. --engine.state-root-task-timeout 1s
+    ///
+    /// --engine.state-root-task-timeout 1s
+    /// --engine.state-root-task-timeout 400ms
+    ///
     /// Set to 0s to disable.
     #[arg(
         long = "engine.state-root-task-timeout",
