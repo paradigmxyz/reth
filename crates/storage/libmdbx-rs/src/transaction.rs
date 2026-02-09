@@ -102,14 +102,23 @@ pub struct SubTransaction {
     txn_ptr: TransactionPtr,
     /// The DBI this subtransaction is bound to.
     dbi: ffi::MDBX_dbi,
-    /// Whether this subtransaction has been committed.
+    /// Whether this subtransaction has been finished (committed or aborted).
+    /// Used to prevent double-commit/abort operations.
+    finished: AtomicBool,
+    /// Whether this subtransaction was successfully committed.
+    /// Used by parent transaction to verify all subtxns were committed before parent commit.
     committed: AtomicBool,
 }
 
 impl SubTransaction {
     /// Creates a new subtransaction wrapper.
     fn new(ptr: *mut ffi::MDBX_txn, dbi: ffi::MDBX_dbi) -> Self {
-        Self { txn_ptr: TransactionPtr::new(ptr), dbi, committed: AtomicBool::new(false) }
+        Self {
+            txn_ptr: TransactionPtr::new(ptr),
+            dbi,
+            finished: AtomicBool::new(false),
+            committed: AtomicBool::new(false),
+        }
     }
 
     /// Returns a clone of the transaction pointer.
@@ -124,18 +133,19 @@ impl SubTransaction {
 
     /// Commits this subtransaction, merging changes to parent.
     pub fn commit(&self) -> Result<()> {
-        if self.committed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        if self.finished.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
         }
         self.txn_ptr.txn_execute_fail_on_timeout(|ptr| {
             mdbx_result(unsafe { ffi::mdbx_subtx_commit(ptr) })
         })??;
+        self.committed.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 
     /// Aborts this subtransaction.
     pub fn abort(&self) -> Result<()> {
-        if self.committed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        if self.finished.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
         }
         self.txn_ptr.txn_execute_fail_on_timeout(|ptr| {
@@ -273,7 +283,22 @@ where
     /// Commits the transaction.
     ///
     /// Any pending operations will be saved.
+    ///
+    /// # Errors
+    /// Returns `Error::Busy` if parallel writes is enabled and subtransactions
+    /// have not been committed via `commit_subtxns()`.
     pub fn commit(self) -> Result<CommitLatency> {
+        // Check that all subtxns are committed before allowing parent commit
+        let parallel_enabled = self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst);
+        if parallel_enabled {
+            let subtxns = self.subtxns.read();
+            for subtxn in subtxns.values() {
+                if !subtxn.committed.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Err(Error::Busy);
+                }
+            }
+        }
+
         match self.txn_execute(|txn| {
             if K::IS_READ_ONLY {
                 #[cfg(feature = "read-tx-timeouts")]
@@ -482,6 +507,25 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RoTransaction").finish_non_exhaustive()
+    }
+}
+
+impl<K> Drop for Transaction<K>
+where
+    K: TransactionKind,
+{
+    fn drop(&mut self) {
+        // Only abort subtxns if this is the last reference to the shared Arc.
+        // Clone shares the subtxns Arc, so we must not abort if other clones exist.
+        if Arc::strong_count(&self.subtxns) == 1 &&
+            self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst)
+        {
+            let subtxns = self.subtxns.read();
+            for subtxn in subtxns.values() {
+                let _ = subtxn.abort();
+            }
+        }
+        // TransactionInner::drop will handle aborting the parent transaction
     }
 }
 
@@ -863,18 +907,22 @@ impl Transaction<RW> {
 
     /// Gets the subtransaction pointer for the given DBI, if parallel writes is enabled.
     ///
-    /// Returns the subtransaction pointer if one exists for this DBI, otherwise returns
-    /// a clone of the parent transaction pointer.
-    pub(crate) fn get_txn_ptr_for_dbi(&self, dbi: ffi::MDBX_dbi) -> TransactionPtr {
+    /// Returns the subtransaction pointer if one exists for this DBI.
+    /// Returns an error if parallel writes is enabled but no subtxn exists for this DBI
+    /// (prevents accidental cross-DBI access which would bypass subtxn isolation).
+    /// Falls back to parent txn only if parallel writes is not enabled.
+    pub(crate) fn get_txn_ptr_for_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<TransactionPtr> {
         let parallel_enabled =
             self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst);
         if parallel_enabled {
             let subtxns = self.subtxns.read();
             if let Some(subtxn) = subtxns.get(&dbi) {
-                return subtxn.txn_ptr();
+                return Ok(subtxn.txn_ptr());
             }
+            // Parallel writes enabled but no subtxn for this DBI - reject to enforce isolation
+            return Err(Error::Access);
         }
-        self.inner.txn.clone()
+        Ok(self.inner.txn.clone())
     }
 
     /// Aborts all subtransactions.
@@ -909,7 +957,7 @@ impl Transaction<RW> {
         let mut data_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
 
-        let txn_ptr = self.get_txn_ptr_for_dbi(dbi);
+        let txn_ptr = self.get_txn_ptr_for_dbi(dbi)?;
         mdbx_result(txn_ptr.txn_execute_fail_on_timeout(|txn| unsafe {
             ffi::mdbx_put(txn, dbi, &key_val, &mut data_val, flags.bits())
         })?)?;
@@ -934,7 +982,7 @@ impl Transaction<RW> {
             iov_base: data.as_ptr() as *mut c_void,
         });
 
-        let txn_ptr = self.get_txn_ptr_for_dbi(dbi);
+        let txn_ptr = self.get_txn_ptr_for_dbi(dbi)?;
         mdbx_result(txn_ptr.txn_execute_fail_on_timeout(|txn| {
             if let Some(d) = data_val {
                 unsafe { ffi::mdbx_del(txn, dbi, &key_val, &d) }
@@ -953,7 +1001,7 @@ impl Transaction<RW> {
     ///
     /// This is the parallel-writes-aware version of `cursor_with_dbi`.
     pub fn cursor_with_dbi_parallel(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<RW>> {
-        let txn_ptr = self.get_txn_ptr_for_dbi(dbi);
+        let txn_ptr = self.get_txn_ptr_for_dbi(dbi)?;
         Cursor::new_with_ptr(self.clone(), dbi, txn_ptr)
     }
 }
