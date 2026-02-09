@@ -43,6 +43,7 @@ pub struct DefaultEngineValues {
     disable_trie_cache: bool,
     sparse_trie_prune_depth: usize,
     sparse_trie_max_storage_tries: usize,
+    state_root_task_timeout_ms: Option<u64>,
 }
 
 impl DefaultEngineValues {
@@ -196,6 +197,12 @@ impl DefaultEngineValues {
         self.sparse_trie_max_storage_tries = v;
         self
     }
+
+    /// Set the default state root task timeout in milliseconds
+    pub const fn with_state_root_task_timeout_ms(mut self, v: Option<u64>) -> Self {
+        self.state_root_task_timeout_ms = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -224,6 +231,7 @@ impl Default for DefaultEngineValues {
             disable_trie_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            state_root_task_timeout_ms: Some(1000),
         }
     }
 }
@@ -363,6 +371,13 @@ pub struct EngineArgs {
     /// Maximum number of storage tries to retain after sparse trie pruning.
     #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries)]
     pub sparse_trie_max_storage_tries: usize,
+
+    /// Configure the timeout in milliseconds for the state root task before spawning a
+    /// sequential fallback. If the state root task takes longer than this, a sequential
+    /// computation starts in parallel and whichever finishes first is used.
+    /// Set to 0 to disable.
+    #[arg(long = "engine.state-root-task-timeout-ms", default_value_t = DefaultEngineValues::get_global().state_root_task_timeout_ms.unwrap_or(1000))]
+    pub state_root_task_timeout_ms: u64,
 }
 
 #[allow(deprecated)]
@@ -392,6 +407,7 @@ impl Default for EngineArgs {
             disable_trie_cache,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            state_root_task_timeout_ms,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -421,6 +437,7 @@ impl Default for EngineArgs {
             disable_trie_cache,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            state_root_task_timeout_ms: state_root_task_timeout_ms.unwrap_or(1000),
         }
     }
 }
@@ -453,6 +470,11 @@ impl EngineArgs {
             .with_disable_trie_cache(self.disable_trie_cache)
             .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
             .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
+            .with_state_root_task_timeout(if self.state_root_task_timeout_ms == 0 {
+                None
+            } else {
+                Some(std::time::Duration::from_millis(self.state_root_task_timeout_ms))
+            })
     }
 }
 
@@ -506,6 +528,7 @@ mod tests {
             disable_trie_cache: true,
             sparse_trie_prune_depth: 10,
             sparse_trie_max_storage_tries: 100,
+            state_root_task_timeout_ms: 2000,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -541,6 +564,8 @@ mod tests {
             "10",
             "--engine.sparse-trie-max-storage-tries",
             "100",
+            "--engine.state-root-task-timeout-ms",
+            "2000",
         ])
         .args;
 

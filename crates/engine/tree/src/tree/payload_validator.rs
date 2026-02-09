@@ -49,7 +49,7 @@ use revm_primitives::Address;
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
-    sync::Arc,
+    sync::{mpsc::RecvTimeoutError, Arc},
     time::Instant,
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
@@ -514,7 +514,14 @@ where
         match strategy {
             StateRootStrategy::StateRootTask => {
                 debug!(target: "engine::tree::payload_validator", "Using sparse trie state root algorithm");
-                match handle.state_root() {
+
+                let task_result = self.await_state_root_with_timeout(
+                    &mut handle,
+                    overlay_factory.clone(),
+                    &hashed_state,
+                );
+
+                match task_result {
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
                         let elapsed = root_time.elapsed();
                         info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
@@ -898,6 +905,110 @@ where
         Ok(StateRoot::new(&provider, &provider)
             .with_prefix_sets(prefix_sets)
             .root_with_updates()?)
+    }
+
+    /// Awaits the state root from the background task, with an optional timeout fallback.
+    ///
+    /// If a timeout is configured (`state_root_task_timeout`), this method first waits for the
+    /// state root task up to the timeout duration. If the task doesn't complete in time, a
+    /// sequential state root computation is spawned in a separate thread. Both computations
+    /// then race: the main thread polls the task receiver and the sequential result channel
+    /// in a loop, returning whichever finishes first.
+    ///
+    /// If no timeout is configured, this simply awaits the state root task without any fallback.
+    fn await_state_root_with_timeout<Tx, Err, R: Send + Sync + 'static>(
+        &self,
+        handle: &mut PayloadHandle<Tx, Err, R>,
+        overlay_factory: OverlayStateProviderFactory<P>,
+        hashed_state: &HashedPostState,
+    ) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+        let Some(timeout) = self.config.state_root_task_timeout() else {
+            return handle.state_root();
+        };
+
+        let task_rx = handle.take_state_root_rx();
+
+        match task_rx.recv_timeout(timeout) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Disconnected) => {
+                Err(ParallelStateRootError::Other("sparse trie task dropped".to_string()))
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    ?timeout,
+                    "State root task timed out, spawning sequential fallback"
+                );
+                self.metrics.block_validation.state_root_task_timeout_total.increment(1);
+
+                let (seq_tx, seq_rx) = std::sync::mpsc::channel();
+
+                let seq_overlay = overlay_factory;
+                let seq_hashed_state = hashed_state.clone();
+                std::thread::spawn(move || {
+                    let result =
+                        Self::compute_state_root_serial_static(seq_overlay, seq_hashed_state);
+                    let _ = seq_tx.send(result);
+                });
+
+                const POLL_INTERVAL: std::time::Duration =
+                    std::time::Duration::from_millis(10);
+
+                loop {
+                    match task_rx.recv_timeout(POLL_INTERVAL) {
+                        Ok(result) => {
+                            info!(
+                                target: "engine::tree::payload_validator",
+                                source = "task",
+                                "State root timeout race won"
+                            );
+                            return result;
+                        }
+                        Err(RecvTimeoutError::Disconnected) => {
+                            info!(
+                                target: "engine::tree::payload_validator",
+                                "State root task dropped, waiting for sequential fallback"
+                            );
+                            return seq_rx.recv().map_err(|_| {
+                                ParallelStateRootError::Other(
+                                    "both state root computations failed".to_string(),
+                                )
+                            })?;
+                        }
+                        Err(RecvTimeoutError::Timeout) => {}
+                    }
+
+                    if let Ok(result) = seq_rx.try_recv() {
+                        info!(
+                            target: "engine::tree::payload_validator",
+                            source = "sequential",
+                            "State root timeout race won"
+                        );
+                        return result;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Static helper for computing state root serially without needing `&self`.
+    ///
+    /// This is used by the timeout fallback to run in a separate thread.
+    fn compute_state_root_serial_static(
+        overlay_factory: OverlayStateProviderFactory<P>,
+        hashed_state: HashedPostState,
+    ) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+        let overlay_factory =
+            overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
+        let provider = overlay_factory
+            .database_provider_ro()
+            .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
+        let (state_root, trie_updates) = StateRoot::new(&provider, &provider)
+            .with_prefix_sets(prefix_sets)
+            .root_with_updates()
+            .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
+        Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
 
     /// Compares trie updates from the state root task with serial state root computation.

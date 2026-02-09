@@ -724,6 +724,18 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
             .map_err(|_| ParallelStateRootError::Other("sparse trie task dropped".to_string()))?
     }
 
+    /// Takes the state root receiver out of the handle for use with custom waiting logic
+    /// (e.g., timeout-based waiting).
+    ///
+    /// # Panics
+    ///
+    /// If payload processing was started without background tasks.
+    pub const fn take_state_root_rx(
+        &mut self,
+    ) -> mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
+        self.state_root.take().expect("state_root is None")
+    }
+
     /// Returns a state hook to be used to send state updates to this task.
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
