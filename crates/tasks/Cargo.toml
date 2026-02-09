@@ -36,3 +36,4 @@ tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time",
 
 [features]
 rayon = ["dep:rayon", "pin-project"]
+test-utils = []

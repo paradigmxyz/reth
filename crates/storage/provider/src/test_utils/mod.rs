@@ -71,6 +71,7 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
+        reth_tasks::Runtime::test(),
     )
     .expect("failed to create test provider factory")
 }

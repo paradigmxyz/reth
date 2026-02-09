@@ -1190,6 +1190,7 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
         ctx: RocksDBWriteCtx,
+        runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
         if !ctx.storage_settings.any_in_rocksdb() {
             return Ok(());
@@ -1204,7 +1205,7 @@ impl RocksDBProvider {
         let write_account_history = ctx.storage_settings.account_history_in_rocksdb;
         let write_storage_history = ctx.storage_settings.storages_history_in_rocksdb;
 
-        reth_tasks::RUNTIME.storage_pool().in_place_scope(|s| {
+        runtime.storage_pool().in_place_scope(|s| {
             if write_tx_hash {
                 s.spawn(|_| {
                     r_tx_hash = Some(self.write_tx_hash_numbers(blocks, tx_nums, &ctx));

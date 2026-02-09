@@ -39,6 +39,7 @@ pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = Databas
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                reth_tasks::Runtime::current(),
             )?,
             to,
             from,

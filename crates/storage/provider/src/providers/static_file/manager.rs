@@ -682,6 +682,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
         ctx: StaticFileWriteCtx,
+        runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             return Ok(());
@@ -696,7 +697,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut r_account_changesets = None;
         let mut r_storage_changesets = None;
 
-        reth_tasks::RUNTIME.storage_pool().in_place_scope(|s| {
+        runtime.storage_pool().in_place_scope(|s| {
             s.spawn(|_| {
                 r_headers =
                     Some(self.write_segment(StaticFileSegment::Headers, first_block_number, |w| {

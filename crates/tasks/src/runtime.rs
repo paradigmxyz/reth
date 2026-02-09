@@ -1,47 +1,39 @@
-//! Global runtime singleton for centralized management of async and parallel execution.
+//! Centralized management of async and parallel execution.
 //!
-//! This module provides [`GlobalRuntime`], a static singleton that manages:
+//! This module provides [`Runtime`], a cheaply cloneable handle that manages:
 //! - Tokio runtime (either owned or attached)
-//! - [`TaskExecutor`] for spawning async tasks
+//! - Task spawning with shutdown awareness and panic monitoring
 //! - Dedicated rayon thread pools for different workloads (with `rayon` feature)
 //! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
-//!
-//! # Usage
-//!
-//! Initialize the runtime early in your application:
-//!
-//! ```ignore
-//! use reth_tasks::{RuntimeConfig, RUNTIME};
-//!
-//! let task_manager = RUNTIME.init(RuntimeConfig::default())?;
-//! ```
-//!
-//! Then use the getters anywhere:
-//!
-//! ```ignore
-//! use reth_tasks::RUNTIME;
-//!
-//! // Spawn async tasks
-//! RUNTIME.executor().spawn(async { /* ... */ });
-//!
-//! // Run CPU-bound work on the general rayon pool
-//! RUNTIME.cpu_pool().install(|| expensive_computation());
-//!
-//! // Run trie proof work on the dedicated trie pool
-//! RUNTIME.trie_pool().spawn(|| compute_proof());
-//! ```
 
 #[cfg(feature = "rayon")]
 use crate::pool::{BlockingTaskGuard, BlockingTaskPool};
-use crate::{TaskExecutor, TaskManager};
+use crate::{
+    metrics::{IncCounterOnDrop, TaskExecutorMetrics},
+    shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
+    PanickedTaskError, TaskEvent, TaskManager,
+};
+use futures_util::{
+    future::{select, BoxFuture},
+    Future, FutureExt, TryFutureExt,
+};
 #[cfg(feature = "rayon")]
 use std::thread::available_parallelism;
-use std::{sync::OnceLock, time::Duration};
-use tokio::runtime::{Handle, Runtime};
+use std::{
+    pin::pin,
+    sync::{atomic::AtomicUsize, Arc, OnceLock},
+    time::Duration,
+};
+use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
+#[cfg(feature = "rayon")]
 use tracing::debug;
+use tracing::error;
+use tracing_futures::Instrument;
 
-/// Global runtime singleton.
-pub static RUNTIME: GlobalRuntime = GlobalRuntime::new();
+use tokio::runtime::Runtime as TokioRuntime;
+
+/// Global [`Runtime`] instance set by [`TaskManager::new`].
+pub(crate) static GLOBAL_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 /// Default thread keep-alive duration for the tokio runtime.
 pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(15);
@@ -174,7 +166,7 @@ impl RayonConfig {
     }
 }
 
-/// Configuration for initializing the [`GlobalRuntime`].
+/// Configuration for building a [`Runtime`].
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeConfig {
     /// Tokio runtime configuration.
@@ -209,12 +201,9 @@ impl RuntimeConfig {
     }
 }
 
-/// Error returned when [`GlobalRuntime::init`] fails.
+/// Error returned when [`RuntimeBuilder::build`] fails.
 #[derive(Debug, thiserror::Error)]
-pub enum RuntimeInitError {
-    /// The runtime has already been initialized.
-    #[error("GlobalRuntime has already been initialized")]
-    AlreadyInitialized,
+pub enum RuntimeBuildError {
     /// Failed to build the tokio runtime.
     #[error("Failed to build tokio runtime: {0}")]
     TokioBuild(#[from] std::io::Error),
@@ -224,111 +213,556 @@ pub enum RuntimeInitError {
     RayonBuild(#[from] rayon::ThreadPoolBuildError),
 }
 
-/// Returns a fallback [`TaskExecutor`], using the handle from [`GlobalRuntime::handle`].
-fn fallback_executor() -> TaskExecutor {
-    TaskManager::new(RUNTIME.handle()).executor()
-}
+// ── RuntimeInner ──────────────────────────────────────────────────────
 
-/// Returns a fallback rayon pool with the given name prefix. Used when `RUNTIME` was not
-/// explicitly initialized (e.g. in tests).
-#[cfg(feature = "rayon")]
-fn fallback_rayon_pool(name: &'static str) -> rayon::ThreadPool {
-    rayon::ThreadPoolBuilder::new()
-        .thread_name(move |i| format!("reth-{name}-{i}"))
-        .build()
-        .expect("failed to build fallback rayon pool")
-}
-
-/// Returns a fallback [`BlockingTaskPool`]. Used when `RUNTIME` was not explicitly initialized.
-#[cfg(feature = "rayon")]
-fn fallback_rpc_pool() -> BlockingTaskPool {
-    BlockingTaskPool::new(fallback_rayon_pool("rpc"))
-}
-
-/// Returns a fallback [`BlockingTaskGuard`]. Used when `RUNTIME` was not explicitly initialized.
-#[cfg(feature = "rayon")]
-fn fallback_blocking_guard() -> BlockingTaskGuard {
-    BlockingTaskGuard::new(DEFAULT_MAX_BLOCKING_TASKS)
-}
-
-/// Global runtime singleton that manages async and parallel execution resources.
-///
-/// Provides centralized access to:
-/// - Tokio runtime/handle
-/// - [`TaskExecutor`] for spawning async tasks with panic monitoring
-/// - General-purpose rayon CPU pool (replaces global rayon pool)
-/// - Dedicated RPC blocking pool (for trace calls, `eth_getProof`, etc.)
-/// - Dedicated trie proof pool (for parallel state root / multiproof workers)
-/// - [`BlockingTaskGuard`] for rate-limiting expensive RPC operations
-///
-/// All fields use [`OnceLock`] for thread-safe lazy initialization.
-/// Getter methods panic with a descriptive message if called before [`GlobalRuntime::init`].
-pub struct GlobalRuntime {
-    /// The stored configuration.
-    config: OnceLock<RuntimeConfig>,
-    /// The owned tokio runtime (if we built it).
-    runtime: OnceLock<Runtime>,
-    /// The tokio handle (always set after init).
-    handle: OnceLock<Handle>,
-    /// The task executor.
-    executor: OnceLock<TaskExecutor>,
-    /// General-purpose rayon CPU pool (hashing, signature recovery, `par_iter`, etc.).
+struct RuntimeInner {
+    /// Owned tokio runtime, if we built one.
+    _tokio_runtime: Option<TokioRuntime>,
+    /// Handle to the tokio runtime.
+    handle: Handle,
+    /// Receiver of the shutdown signal.
+    on_shutdown: Shutdown,
+    /// Sender half for sending task events to the [`TaskManager`].
+    task_events_tx: UnboundedSender<TaskEvent>,
+    /// Task executor metrics.
+    metrics: TaskExecutorMetrics,
+    /// How many [`GracefulShutdown`] tasks are currently active.
+    graceful_tasks: Arc<AtomicUsize>,
+    /// General-purpose rayon CPU pool.
     #[cfg(feature = "rayon")]
-    cpu_pool: OnceLock<rayon::ThreadPool>,
-    /// RPC blocking pool (trace calls, `eth_getProof`, etc.).
+    cpu_pool: rayon::ThreadPool,
+    /// RPC blocking pool.
     #[cfg(feature = "rayon")]
-    rpc_pool: OnceLock<BlockingTaskPool>,
-    /// Trie proof computation pool (parallel state root, multiproof workers).
+    rpc_pool: BlockingTaskPool,
+    /// Trie proof computation pool.
     #[cfg(feature = "rayon")]
-    trie_pool: OnceLock<rayon::ThreadPool>,
-    /// Storage I/O pool (static file, `RocksDB` writes in `save_blocks`).
+    trie_pool: rayon::ThreadPool,
+    /// Storage I/O pool.
     #[cfg(feature = "rayon")]
-    storage_pool: OnceLock<rayon::ThreadPool>,
+    storage_pool: rayon::ThreadPool,
     /// Rate limiter for expensive RPC operations.
     #[cfg(feature = "rayon")]
-    blocking_guard: OnceLock<BlockingTaskGuard>,
+    blocking_guard: BlockingTaskGuard,
 }
 
-impl GlobalRuntime {
-    /// Create a new uninitialized `GlobalRuntime`.
-    #[allow(clippy::new_without_default)]
-    pub const fn new() -> Self {
-        Self {
-            config: OnceLock::new(),
-            runtime: OnceLock::new(),
-            handle: OnceLock::new(),
-            executor: OnceLock::new(),
+// ── Runtime ───────────────────────────────────────────────────────────
+
+/// A cheaply cloneable handle to the runtime resources.
+///
+/// Wraps an `Arc<RuntimeInner>` and provides access to:
+/// - The tokio [`Handle`]
+/// - Task spawning with shutdown awareness and panic monitoring
+/// - Rayon thread pools (with `rayon` feature)
+#[derive(Clone)]
+pub struct Runtime(Arc<RuntimeInner>);
+
+impl std::fmt::Debug for Runtime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Runtime").field("handle", &self.0.handle).finish()
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl Default for Runtime {
+    fn default() -> Self {
+        let config = match Handle::try_current() {
+            Ok(handle) => RuntimeConfig::with_existing_handle(handle),
+            Err(_) => RuntimeConfig::default(),
+        };
+        let (runtime, _task_manager) =
+            RuntimeBuilder::new(config).build().expect("failed to build default Runtime");
+        // Leak the TaskManager so the Runtime remains usable (shutdown signal never fires).
+        std::mem::forget(_task_manager);
+        runtime
+    }
+}
+
+// ── Pool accessors ────────────────────────────────────────────────────
+
+impl Runtime {
+    /// Returns the tokio runtime [`Handle`].
+    pub fn handle(&self) -> &Handle {
+        &self.0.handle
+    }
+
+    /// Get the general-purpose rayon CPU thread pool.
+    #[cfg(feature = "rayon")]
+    pub fn cpu_pool(&self) -> &rayon::ThreadPool {
+        &self.0.cpu_pool
+    }
+
+    /// Get the RPC blocking task pool.
+    #[cfg(feature = "rayon")]
+    pub fn rpc_pool(&self) -> &BlockingTaskPool {
+        &self.0.rpc_pool
+    }
+
+    /// Get the trie proof computation pool.
+    #[cfg(feature = "rayon")]
+    pub fn trie_pool(&self) -> &rayon::ThreadPool {
+        &self.0.trie_pool
+    }
+
+    /// Get the storage I/O pool.
+    #[cfg(feature = "rayon")]
+    pub fn storage_pool(&self) -> &rayon::ThreadPool {
+        &self.0.storage_pool
+    }
+
+    /// Get a clone of the [`BlockingTaskGuard`].
+    #[cfg(feature = "rayon")]
+    pub fn blocking_guard(&self) -> BlockingTaskGuard {
+        self.0.blocking_guard.clone()
+    }
+
+    /// Run a closure on the CPU pool, blocking the current thread until completion.
+    #[cfg(feature = "rayon")]
+    pub fn install_cpu<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> R + Send,
+        R: Send,
+    {
+        self.cpu_pool().install(f)
+    }
+
+    /// Spawn a CPU-bound task on the RPC pool and return an async handle.
+    #[cfg(feature = "rayon")]
+    pub fn spawn_rpc<F, R>(&self, f: F) -> crate::pool::BlockingTaskHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.rpc_pool().spawn(f)
+    }
+
+    /// Run a closure on the trie pool, blocking the current thread until completion.
+    #[cfg(feature = "rayon")]
+    pub fn install_trie<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> R + Send,
+        R: Send,
+    {
+        self.trie_pool().install(f)
+    }
+}
+
+// ── Test helpers ──────────────────────────────────────────────────────
+
+impl Runtime {
+    /// Creates a lightweight [`Runtime`] for tests with minimal thread pools.
+    pub fn test() -> Self {
+        let (runtime, _task_manager) =
+            RuntimeBuilder::new(Self::test_config()).build().expect("failed to build test Runtime");
+        std::mem::forget(_task_manager);
+        runtime
+    }
+
+    /// Creates a lightweight [`Runtime`] for tests, attaching to the given tokio handle.
+    pub fn test_with_handle(handle: Handle) -> Self {
+        let config = Self::test_config().with_tokio(TokioConfig::existing_handle(handle));
+        let (runtime, _task_manager) =
+            RuntimeBuilder::new(config).build().expect("failed to build test Runtime");
+        std::mem::forget(_task_manager);
+        runtime
+    }
+
+    const fn test_config() -> RuntimeConfig {
+        RuntimeConfig {
+            tokio: TokioConfig::Owned {
+                worker_threads: Some(2),
+                thread_keep_alive: DEFAULT_THREAD_KEEP_ALIVE,
+                thread_name: "tokio-test",
+            },
             #[cfg(feature = "rayon")]
-            cpu_pool: OnceLock::new(),
-            #[cfg(feature = "rayon")]
-            rpc_pool: OnceLock::new(),
-            #[cfg(feature = "rayon")]
-            trie_pool: OnceLock::new(),
-            #[cfg(feature = "rayon")]
-            storage_pool: OnceLock::new(),
-            #[cfg(feature = "rayon")]
-            blocking_guard: OnceLock::new(),
+            rayon: RayonConfig {
+                cpu_threads: Some(2),
+                reserved_cpu_cores: 0,
+                rpc_threads: Some(2),
+                trie_threads: Some(2),
+                storage_threads: Some(2),
+                max_blocking_tasks: 16,
+            },
+        }
+    }
+}
+
+// ── Global access ─────────────────────────────────────────────────────
+
+impl Runtime {
+    /// Attempts to get the current [`Runtime`] if one has been set globally.
+    pub fn try_current() -> Result<Self, crate::NoCurrentTaskExecutorError> {
+        GLOBAL_RUNTIME.get().cloned().ok_or_else(crate::NoCurrentTaskExecutorError::default)
+    }
+
+    /// Returns the current global [`Runtime`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if no global runtime has been set via [`TaskManager`].
+    pub fn current() -> Self {
+        Self::try_current().unwrap()
+    }
+}
+
+// ── Spawn methods ─────────────────────────────────────────────────────
+
+/// Determines how a task is spawned.
+enum TaskKind {
+    /// Spawn the task to the default executor [`Handle::spawn`].
+    Default,
+    /// Spawn the task to the blocking executor [`Handle::spawn_blocking`].
+    Blocking,
+}
+
+impl Runtime {
+    /// Returns the receiver of the shutdown signal.
+    pub fn on_shutdown_signal(&self) -> &Shutdown {
+        &self.0.on_shutdown
+    }
+
+    /// Spawns a future on the tokio runtime depending on the [`TaskKind`].
+    fn spawn_on_rt<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        match task_kind {
+            TaskKind::Default => self.0.handle.spawn(fut),
+            TaskKind::Blocking => {
+                let handle = self.0.handle.clone();
+                self.0.handle.spawn_blocking(move || handle.block_on(fut))
+            }
         }
     }
 
-    /// Initialize the global runtime with the given configuration.
+    /// Spawns a regular task depending on the given [`TaskKind`].
+    fn spawn_task_as<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let on_shutdown = self.0.on_shutdown.clone();
+
+        let finished_counter = match task_kind {
+            TaskKind::Default => self.0.metrics.finished_regular_tasks_total.clone(),
+            TaskKind::Blocking => self.0.metrics.finished_regular_blocking_tasks_total.clone(),
+        };
+
+        let task = {
+            async move {
+                let _inc_counter_on_drop = IncCounterOnDrop::new(finished_counter);
+                let fut = pin!(fut);
+                let _ = select(on_shutdown, fut).await;
+            }
+        }
+        .in_current_span();
+
+        self.spawn_on_rt(task, task_kind)
+    }
+
+    /// Spawns the task onto the runtime.
+    /// The given future resolves as soon as the [Shutdown] signal is received.
     ///
-    /// Must be called once before using any getter methods. Returns the [`TaskManager`] which
-    /// the caller is responsible for driving (polling) to detect critical task panics.
+    /// See also [`Handle::spawn`].
+    pub fn spawn<F>(&self, fut: F) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.spawn_task_as(fut, TaskKind::Default)
+    }
+
+    /// Spawns a blocking task onto the runtime.
+    /// The given future resolves as soon as the [Shutdown] signal is received.
+    ///
+    /// See also [`Handle::spawn_blocking`].
+    pub fn spawn_blocking<F>(&self, fut: F) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.spawn_task_as(fut, TaskKind::Blocking)
+    }
+
+    /// Spawns a blocking closure directly on the tokio runtime, bypassing shutdown
+    /// awareness. Useful for raw CPU-bound work.
+    pub fn spawn_blocking_fn<F, R>(&self, func: F) -> JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.0.handle.spawn_blocking(func)
+    }
+
+    /// Spawns the task onto the runtime.
+    /// The given future resolves as soon as the [Shutdown] signal is received.
+    ///
+    /// See also [`Handle::spawn`].
+    pub fn spawn_with_signal<F>(&self, f: impl FnOnce(Shutdown) -> F) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let on_shutdown = self.0.on_shutdown.clone();
+        let fut = f(on_shutdown);
+        let task = fut.in_current_span();
+        self.0.handle.spawn(task)
+    }
+
+    /// Spawns a critical task depending on the given [`TaskKind`].
+    fn spawn_critical_as<F>(
+        &self,
+        name: &'static str,
+        fut: F,
+        task_kind: TaskKind,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let panicked_tasks_tx = self.0.task_events_tx.clone();
+        let on_shutdown = self.0.on_shutdown.clone();
+
+        // wrap the task in catch unwind
+        let task = std::panic::AssertUnwindSafe(fut)
+            .catch_unwind()
+            .map_err(move |error| {
+                let task_error = PanickedTaskError::new(name, error);
+                error!("{task_error}");
+                let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
+            })
+            .in_current_span();
+
+        let finished_critical_tasks_total_metrics =
+            self.0.metrics.finished_critical_tasks_total.clone();
+        let task = async move {
+            let _inc_counter_on_drop = IncCounterOnDrop::new(finished_critical_tasks_total_metrics);
+            let task = pin!(task);
+            let _ = select(on_shutdown, task).await;
+        };
+
+        self.spawn_on_rt(task, task_kind)
+    }
+
+    /// This spawns a critical task onto the runtime.
+    /// The given future resolves as soon as the [Shutdown] signal is received.
+    ///
+    /// If this task panics, the [`TaskManager`] is notified.
+    pub fn spawn_critical<F>(&self, name: &'static str, fut: F) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.spawn_critical_as(name, fut, TaskKind::Default)
+    }
+
+    /// This spawns a critical blocking task onto the runtime.
+    /// The given future resolves as soon as the [Shutdown] signal is received.
+    ///
+    /// If this task panics, the [`TaskManager`] is notified.
+    pub fn spawn_critical_blocking<F>(&self, name: &'static str, fut: F) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.spawn_critical_as(name, fut, TaskKind::Blocking)
+    }
+
+    /// This spawns a critical task onto the runtime.
+    ///
+    /// If this task panics, the [`TaskManager`] is notified.
+    pub fn spawn_critical_with_shutdown_signal<F>(
+        &self,
+        name: &'static str,
+        f: impl FnOnce(Shutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let panicked_tasks_tx = self.0.task_events_tx.clone();
+        let on_shutdown = self.0.on_shutdown.clone();
+        let fut = f(on_shutdown);
+
+        // wrap the task in catch unwind
+        let task = std::panic::AssertUnwindSafe(fut)
+            .catch_unwind()
+            .map_err(move |error| {
+                let task_error = PanickedTaskError::new(name, error);
+                error!("{task_error}");
+                let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
+            })
+            .map(drop)
+            .in_current_span();
+
+        self.0.handle.spawn(task)
+    }
+
+    /// This spawns a critical task onto the runtime.
+    ///
+    /// If this task panics, the [`TaskManager`] is notified.
+    /// The [`TaskManager`] will wait until the given future has completed before shutting down.
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// use reth_tasks::{RuntimeConfig, RUNTIME};
+    /// ```no_run
+    /// # async fn t(executor: reth_tasks::TaskExecutor) {
     ///
-    /// let task_manager = RUNTIME.init(RuntimeConfig::default())?;
+    /// executor.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
+    ///     // await the shutdown signal
+    ///     let guard = shutdown.await;
+    ///     // do work before exiting the program
+    ///     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    ///     // allow graceful shutdown
+    ///     drop(guard);
+    /// });
+    /// # }
     /// ```
-    pub fn init(&self, config: RuntimeConfig) -> Result<TaskManager, RuntimeInitError> {
-        if self.config.set(config.clone()).is_err() {
-            return Err(RuntimeInitError::AlreadyInitialized);
-        }
+    pub fn spawn_critical_with_graceful_shutdown_signal<F>(
+        &self,
+        name: &'static str,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let panicked_tasks_tx = self.0.task_events_tx.clone();
+        let on_shutdown = GracefulShutdown::new(
+            self.0.on_shutdown.clone(),
+            GracefulShutdownGuard::new(Arc::clone(&self.0.graceful_tasks)),
+        );
+        let fut = f(on_shutdown);
 
-        let handle = match &config.tokio {
+        // wrap the task in catch unwind
+        let task = std::panic::AssertUnwindSafe(fut)
+            .catch_unwind()
+            .map_err(move |error| {
+                let task_error = PanickedTaskError::new(name, error);
+                error!("{task_error}");
+                let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
+            })
+            .map(drop)
+            .in_current_span();
+
+        self.0.handle.spawn(task)
+    }
+
+    /// This spawns a regular task onto the runtime.
+    ///
+    /// The [`TaskManager`] will wait until the given future has completed before shutting down.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn t(executor: reth_tasks::TaskExecutor) {
+    ///
+    /// executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
+    ///     // await the shutdown signal
+    ///     let guard = shutdown.await;
+    ///     // do work before exiting the program
+    ///     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    ///     // allow graceful shutdown
+    ///     drop(guard);
+    /// });
+    /// # }
+    /// ```
+    pub fn spawn_with_graceful_shutdown_signal<F>(
+        &self,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let on_shutdown = GracefulShutdown::new(
+            self.0.on_shutdown.clone(),
+            GracefulShutdownGuard::new(Arc::clone(&self.0.graceful_tasks)),
+        );
+        let fut = f(on_shutdown);
+
+        self.0.handle.spawn(fut)
+    }
+
+    /// Sends a request to the `TaskManager` to initiate a graceful shutdown.
+    ///
+    /// Caution: This will terminate the entire program.
+    pub fn initiate_graceful_shutdown(
+        &self,
+    ) -> Result<GracefulShutdown, tokio::sync::mpsc::error::SendError<()>> {
+        self.0
+            .task_events_tx
+            .send(TaskEvent::GracefulShutdown)
+            .map_err(|_send_error_with_task_event| tokio::sync::mpsc::error::SendError(()))?;
+
+        Ok(GracefulShutdown::new(
+            self.0.on_shutdown.clone(),
+            GracefulShutdownGuard::new(Arc::clone(&self.0.graceful_tasks)),
+        ))
+    }
+}
+
+// ── TaskSpawner impl ──────────────────────────────────────────────────
+
+impl crate::TaskSpawner for Runtime {
+    fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        self.0.metrics.inc_regular_tasks();
+        Self::spawn(self, fut)
+    }
+
+    fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        self.0.metrics.inc_critical_tasks();
+        Self::spawn_critical(self, name, fut)
+    }
+
+    fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        self.0.metrics.inc_regular_blocking_tasks();
+        Self::spawn_blocking(self, fut)
+    }
+
+    fn spawn_critical_blocking(
+        &self,
+        name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> JoinHandle<()> {
+        self.0.metrics.inc_critical_tasks();
+        Self::spawn_critical_blocking(self, name, fut)
+    }
+}
+
+// ── TaskSpawnerExt impl ──────────────────────────────────────────────
+
+impl crate::TaskSpawnerExt for Runtime {
+    fn spawn_critical_with_graceful_shutdown_signal<F>(
+        &self,
+        name: &'static str,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        Self::spawn_critical_with_graceful_shutdown_signal(self, name, f)
+    }
+
+    fn spawn_with_graceful_shutdown_signal<F>(
+        &self,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        Self::spawn_with_graceful_shutdown_signal(self, f)
+    }
+}
+
+// ── RuntimeBuilder ────────────────────────────────────────────────────
+
+/// Builder for constructing a [`Runtime`].
+#[derive(Debug, Clone)]
+pub struct RuntimeBuilder {
+    config: RuntimeConfig,
+}
+
+impl RuntimeBuilder {
+    /// Create a new builder with the given configuration.
+    pub const fn new(config: RuntimeConfig) -> Self {
+        Self { config }
+    }
+
+    /// Build the [`Runtime`] and [`TaskManager`].
+    pub fn build(self) -> Result<(Runtime, TaskManager), RuntimeBuildError> {
+        let config = self.config;
+
+        let (owned_runtime, handle) = match &config.tokio {
             TokioConfig::Owned { worker_threads, thread_keep_alive, thread_name } => {
                 let mut builder = tokio::runtime::Builder::new_multi_thread();
                 builder
@@ -342,55 +776,44 @@ impl GlobalRuntime {
 
                 let runtime = builder.build()?;
                 let h = runtime.handle().clone();
-                let _ = self.runtime.set(runtime);
-                h
+                (Some(runtime), h)
             }
-            TokioConfig::ExistingHandle(h) => h.clone(),
+            TokioConfig::ExistingHandle(h) => (None, h.clone()),
         };
 
-        let _ = self.handle.set(handle.clone());
-
-        let task_manager = TaskManager::new(handle);
-        let executor = task_manager.executor();
-        let _ = self.executor.set(executor);
+        let (task_manager, on_shutdown, task_events_tx, graceful_tasks) =
+            TaskManager::new_parts(handle.clone());
 
         #[cfg(feature = "rayon")]
-        {
+        let (cpu_pool, rpc_pool, trie_pool, storage_pool, blocking_guard) = {
             let default_threads = config.rayon.default_thread_count();
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
             let trie_threads = config.rayon.trie_threads.unwrap_or(default_threads);
 
-            // General-purpose CPU pool (replaces rayon global pool for explicit spawns).
             let cpu_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(default_threads)
                 .thread_name(|i| format!("reth-cpu-{i}"))
                 .build()?;
-            let _ = self.cpu_pool.set(cpu_pool);
 
-            // RPC blocking pool for trace calls, eth_getProof, etc.
             let rpc_raw = rayon::ThreadPoolBuilder::new()
                 .num_threads(rpc_threads)
                 .thread_name(|i| format!("reth-rpc-{i}"))
                 .build()?;
-            let _ = self.rpc_pool.set(BlockingTaskPool::new(rpc_raw));
+            let rpc_pool = BlockingTaskPool::new(rpc_raw);
 
-            // Trie proof pool for parallel state root and multiproof workers.
-            let trie_raw = rayon::ThreadPoolBuilder::new()
+            let trie_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(trie_threads)
                 .thread_name(|i| format!("reth-trie-{i}"))
                 .build()?;
-            let _ = self.trie_pool.set(trie_raw);
 
             let storage_threads =
                 config.rayon.storage_threads.unwrap_or(DEFAULT_STORAGE_POOL_THREADS);
-            let storage_raw = rayon::ThreadPoolBuilder::new()
+            let storage_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(storage_threads)
                 .thread_name(|i| format!("reth-storage-{i}"))
                 .build()?;
-            let _ = self.storage_pool.set(storage_raw);
 
-            let _ =
-                self.blocking_guard.set(BlockingTaskGuard::new(config.rayon.max_blocking_tasks));
+            let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
             debug!(
                 default_threads,
@@ -400,175 +823,33 @@ impl GlobalRuntime {
                 max_blocking_tasks = config.rayon.max_blocking_tasks,
                 "Initialized rayon thread pools"
             );
-        }
 
-        debug!("RUNTIME initialized");
-        Ok(task_manager)
-    }
+            (cpu_pool, rpc_pool, trie_pool, storage_pool, blocking_guard)
+        };
 
-    /// Initialize from an existing tokio handle with default rayon config.
-    pub fn init_with_handle(&self, handle: Handle) -> Result<TaskManager, RuntimeInitError> {
-        self.init(RuntimeConfig::with_existing_handle(handle))
-    }
+        let inner = RuntimeInner {
+            _tokio_runtime: owned_runtime,
+            handle,
+            on_shutdown,
+            task_events_tx,
+            metrics: Default::default(),
+            graceful_tasks,
+            #[cfg(feature = "rayon")]
+            cpu_pool,
+            #[cfg(feature = "rayon")]
+            rpc_pool,
+            #[cfg(feature = "rayon")]
+            trie_pool,
+            #[cfg(feature = "rayon")]
+            storage_pool,
+            #[cfg(feature = "rayon")]
+            blocking_guard,
+        };
 
-    /// Returns `true` if the runtime has been initialized.
-    pub fn is_initialized(&self) -> bool {
-        self.config.get().is_some()
-    }
-
-    /// Get the tokio runtime handle.
-    ///
-    /// If the runtime has not been explicitly initialized, this will:
-    /// 1. Try to use the current tokio context (e.g. inside `#[tokio::test]`)
-    /// 2. Otherwise, create and store a new multi-thread tokio runtime as a fallback
-    pub fn handle(&self) -> Handle {
-        if let Some(h) = self.handle.get() {
-            return h.clone()
-        }
-
-        if let Ok(h) = Handle::try_current() {
-            return h
-        }
-
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .thread_keep_alive(DEFAULT_THREAD_KEEP_ALIVE)
-            .thread_name("tokio-rt-fallback")
-            .build()
-            .expect("failed to build fallback tokio runtime");
-        let h = runtime.handle().clone();
-        let _ = self.runtime.set(runtime);
-        let _ = self.handle.set(h.clone());
-        h
-    }
-
-    /// Get a clone of the [`TaskExecutor`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if the runtime has not been initialized and no tokio runtime is available in the
-    /// current context.
-    pub fn executor(&self) -> TaskExecutor {
-        self.executor.get().cloned().unwrap_or_else(fallback_executor)
-    }
-
-    /// Get the general-purpose rayon CPU thread pool.
-    ///
-    /// Suitable for CPU-bound parallel work: hashing, signature recovery, `par_iter`, etc.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the runtime has not been initialized (in non-test builds).
-    #[cfg(feature = "rayon")]
-    pub fn cpu_pool(&self) -> &rayon::ThreadPool {
-        self.cpu_pool.get_or_init(|| fallback_rayon_pool("cpu"))
-    }
-
-    /// Get the RPC blocking task pool.
-    ///
-    /// Dedicated pool for expensive RPC operations like `debug_traceTransaction`,
-    /// `eth_getProof`, etc. Wraps a rayon pool with async-friendly oneshot channels.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the runtime has not been initialized (in non-test builds).
-    #[cfg(feature = "rayon")]
-    pub fn rpc_pool(&self) -> &BlockingTaskPool {
-        self.rpc_pool.get_or_init(fallback_rpc_pool)
-    }
-
-    /// Get the trie proof computation pool.
-    ///
-    /// Dedicated pool for parallel state root computation, multiproof workers, and
-    /// storage proof generation.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the runtime has not been initialized (in non-test builds).
-    #[cfg(feature = "rayon")]
-    pub fn trie_pool(&self) -> &rayon::ThreadPool {
-        self.trie_pool.get_or_init(|| fallback_rayon_pool("trie"))
-    }
-
-    /// Get the storage I/O pool.
-    ///
-    /// Dedicated pool for parallel writes to static files, `RocksDB`, and other storage
-    /// backends during block persistence (`save_blocks`).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the runtime has not been initialized (in non-test builds).
-    #[cfg(feature = "rayon")]
-    pub fn storage_pool(&self) -> &rayon::ThreadPool {
-        self.storage_pool.get_or_init(|| fallback_rayon_pool("storage"))
-    }
-
-    /// Get a clone of the [`BlockingTaskGuard`].
-    ///
-    /// Rate-limits expensive CPU operations like trace execution or proof generation.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the runtime has not been initialized (in non-test builds).
-    #[cfg(feature = "rayon")]
-    pub fn blocking_guard(&self) -> BlockingTaskGuard {
-        self.blocking_guard.get_or_init(fallback_blocking_guard).clone()
-    }
-
-    /// Run a closure on the CPU pool, blocking the current thread until completion.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the runtime has not been initialized.
-    #[cfg(feature = "rayon")]
-    pub fn install_cpu<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce() -> R + Send,
-        R: Send,
-    {
-        self.cpu_pool().install(f)
-    }
-
-    /// Spawn a CPU-bound task on the RPC pool and return an async handle.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the runtime has not been initialized.
-    #[cfg(feature = "rayon")]
-    pub fn spawn_rpc<F, R>(&self, f: F) -> crate::pool::BlockingTaskHandle<R>
-    where
-        F: FnOnce() -> R + Send + 'static,
-        R: Send + 'static,
-    {
-        self.rpc_pool().spawn(f)
-    }
-
-    /// Run a closure on the trie pool, blocking the current thread until completion.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the runtime has not been initialized.
-    #[cfg(feature = "rayon")]
-    pub fn install_trie<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce() -> R + Send,
-        R: Send,
-    {
-        self.trie_pool().install(f)
+        let runtime = Runtime(Arc::new(inner));
+        Ok((runtime, task_manager))
     }
 }
-
-impl std::fmt::Debug for GlobalRuntime {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GlobalRuntime")
-            .field("initialized", &self.is_initialized())
-            .field("has_owned_runtime", &self.runtime.get().is_some())
-            .finish()
-    }
-}
-
-// SAFETY: All fields are protected by OnceLock which is Sync.
-unsafe impl Sync for GlobalRuntime {}
 
 #[cfg(test)]
 mod tests {
@@ -582,7 +863,7 @@ mod tests {
 
     #[test]
     fn test_runtime_config_existing_handle() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = TokioRuntime::new().unwrap();
         let config = RuntimeConfig::with_existing_handle(rt.handle().clone());
         assert!(matches!(config.tokio, TokioConfig::ExistingHandle(_)));
     }
@@ -593,5 +874,13 @@ mod tests {
         let config = RayonConfig::default();
         let count = config.default_thread_count();
         assert!(count >= 1);
+    }
+
+    #[test]
+    fn test_runtime_builder() {
+        let rt = TokioRuntime::new().unwrap();
+        let config = RuntimeConfig::with_existing_handle(rt.handle().clone());
+        let (runtime, _manager) = RuntimeBuilder::new(config).build().unwrap();
+        let _ = runtime.handle();
     }
 }

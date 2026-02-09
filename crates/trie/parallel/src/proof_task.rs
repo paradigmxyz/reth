@@ -46,7 +46,7 @@ use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofErro
 use reth_primitives_traits::dashmap::{self, DashMap};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
-use reth_tasks::RUNTIME;
+use reth_tasks::Runtime;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedCursorMetricsCache, InstrumentedHashedCursor},
     node_iter::{TrieElement, TrieNodeIter},
@@ -137,6 +137,7 @@ impl ProofWorkerHandle {
     /// - `account_worker_count`: Number of account workers to spawn
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
     pub fn new<Factory>(
+        runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         storage_worker_count: usize,
         account_worker_count: usize,
@@ -176,7 +177,7 @@ impl ProofWorkerHandle {
             v2_proofs_enabled,
         };
 
-        let executor = RUNTIME.handle();
+        let executor = runtime.handle().clone();
 
         let task_ctx_for_storage = task_ctx.clone();
         let executor_for_storage = executor.clone();
@@ -2036,7 +2037,8 @@ mod tests {
         );
         let ctx = test_ctx(factory);
 
-        let proof_handle = ProofWorkerHandle::new(ctx, 5, 3, false);
+        let runtime = reth_tasks::Runtime::test();
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, 5, 3, false);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();

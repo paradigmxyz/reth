@@ -281,6 +281,7 @@ where
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
         let proof_handle = ProofWorkerHandle::new(
+            self.executor.runtime(),
             task_ctx,
             storage_worker_count,
             account_worker_count,
@@ -1101,7 +1102,7 @@ mod tests {
     #[test]
     fn on_inserted_executed_block_populates_cache() {
         let payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::default(),
+            WorkloadExecutor::new(reth_tasks::Runtime::test()),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
@@ -1130,7 +1131,7 @@ mod tests {
     #[test]
     fn on_inserted_executed_block_skips_on_parent_mismatch() {
         let payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::default(),
+            WorkloadExecutor::new(reth_tasks::Runtime::test()),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
@@ -1265,7 +1266,7 @@ mod tests {
         }
 
         let mut payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::default(),
+            WorkloadExecutor::new(reth_tasks::Runtime::test()),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),

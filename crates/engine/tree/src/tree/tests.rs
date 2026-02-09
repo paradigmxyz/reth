@@ -203,6 +203,7 @@ impl TestHarness {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
+            reth_tasks::Runtime::test(),
         );
 
         let tree = EngineApiTreeHandler::new(
@@ -404,6 +405,7 @@ impl ValidatorTestHarness {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache,
+            reth_tasks::Runtime::test(),
         );
 
         Self { harness, validator, metrics: TestMetrics::default() }

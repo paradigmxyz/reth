@@ -219,7 +219,7 @@ fn bench_state_root(c: &mut Criterion) {
                         setup_provider(&factory, &state_updates).expect("failed to setup provider");
 
                         let payload_processor = PayloadProcessor::new(
-                            WorkloadExecutor::default(),
+                            WorkloadExecutor::new(reth_tasks::Runtime::test()),
                             EthEvmConfig::new(factory.chain_spec()),
                             &TreeConfig::default(),
                             PrecompileCacheMap::default(),

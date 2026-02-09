@@ -217,6 +217,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             self.chain.clone(),
             static_file_provider,
             rocksdb_provider,
+            reth_tasks::Runtime::current(),
         )?
         .with_prune_modes(prune_modes.clone());
 

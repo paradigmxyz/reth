@@ -110,6 +110,7 @@ impl<N> ProviderFactoryBuilder<N> {
             .chainspec(chainspec)
             .static_file(StaticFileProvider::read_only(static_files_dir, watch_static_files)?)
             .rocksdb_provider(RocksDBProvider::builder(&rocksdb_dir).with_default_tables().build()?)
+            .runtime(reth_tasks::Runtime::current())
             .build_provider_factory()
             .map_err(Into::into)
     }
@@ -365,11 +366,59 @@ where
     N: NodeTypesForProvider,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
+    /// Sets the task runtime for the provider factory.
+    #[allow(clippy::type_complexity)]
+    pub fn runtime(
+        self,
+        runtime: reth_tasks::Runtime,
+    ) -> TypesAnd5<
+        N,
+        DB,
+        Arc<N::ChainSpec>,
+        StaticFileProvider<N::Primitives>,
+        RocksDBProvider,
+        reth_tasks::Runtime,
+    > {
+        TypesAnd5::new(self.val_1, self.val_2, self.val_3, self.val_4, runtime)
+    }
+}
+
+/// This is staging type that contains the configured types and _five_ values.
+#[derive(Debug)]
+pub struct TypesAnd5<N, Val1, Val2, Val3, Val4, Val5> {
+    _types: PhantomData<N>,
+    val_1: Val1,
+    val_2: Val2,
+    val_3: Val3,
+    val_4: Val4,
+    val_5: Val5,
+}
+
+impl<N, Val1, Val2, Val3, Val4, Val5> TypesAnd5<N, Val1, Val2, Val3, Val4, Val5> {
+    /// Creates a new instance with the given types and five values.
+    pub fn new(val_1: Val1, val_2: Val2, val_3: Val3, val_4: Val4, val_5: Val5) -> Self {
+        Self { _types: Default::default(), val_1, val_2, val_3, val_4, val_5 }
+    }
+}
+
+impl<N, DB>
+    TypesAnd5<
+        N,
+        DB,
+        Arc<N::ChainSpec>,
+        StaticFileProvider<N::Primitives>,
+        RocksDBProvider,
+        reth_tasks::Runtime,
+    >
+where
+    N: NodeTypesForProvider,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
+{
     /// Creates the [`ProviderFactory`].
     pub fn build_provider_factory(
         self,
     ) -> ProviderResult<ProviderFactory<NodeTypesWithDBAdapter<N, DB>>> {
-        let Self { _types, val_1, val_2, val_3, val_4 } = self;
-        ProviderFactory::new(val_1, val_2, val_3, val_4)
+        let Self { _types, val_1, val_2, val_3, val_4, val_5 } = self;
+        ProviderFactory::new(val_1, val_2, val_3, val_4, val_5)
     }
 }

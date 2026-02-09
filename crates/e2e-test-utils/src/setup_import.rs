@@ -129,6 +129,7 @@ pub async fn setup_engine_with_chain_import(
                     .with_default_tables()
                     .build()
                     .unwrap(),
+                reth_tasks::Runtime::test(),
             )?;
 
         // Initialize genesis if needed
@@ -333,6 +334,7 @@ mod tests {
                     .with_default_tables()
                     .build()
                     .unwrap(),
+                reth_tasks::Runtime::test(),
             )
             .expect("failed to create provider factory");
 
@@ -397,6 +399,7 @@ mod tests {
                     .with_default_tables()
                     .build()
                     .unwrap(),
+                reth_tasks::Runtime::test(),
             )
             .expect("failed to create provider factory");
 
@@ -497,6 +500,7 @@ mod tests {
                 .with_default_tables()
                 .build()
                 .unwrap(),
+            reth_tasks::Runtime::test(),
         )
         .expect("failed to create provider factory");
 

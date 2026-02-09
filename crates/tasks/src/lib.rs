@@ -12,22 +12,16 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use crate::{
-    metrics::{IncCounterOnDrop, TaskExecutorMetrics},
-    shutdown::{signal, GracefulShutdown, GracefulShutdownGuard, Shutdown, Signal},
-};
+use crate::shutdown::{signal, GracefulShutdown, Shutdown, Signal};
 use dyn_clone::DynClone;
-use futures_util::{
-    future::{select, BoxFuture},
-    Future, FutureExt, TryFutureExt,
-};
+use futures_util::future::BoxFuture;
 use std::{
     any::Any,
     fmt::{Display, Formatter},
-    pin::{pin, Pin},
+    pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, OnceLock,
+        Arc,
     },
     task::{ready, Context, Poll},
     thread,
@@ -38,7 +32,6 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{debug, error};
-use tracing_futures::Instrument;
 
 pub mod metrics;
 pub mod runtime;
@@ -49,10 +42,12 @@ pub mod pool;
 
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
-pub use runtime::{GlobalRuntime, RuntimeConfig, RuntimeInitError, TokioConfig, RUNTIME};
+pub use runtime::{Runtime, RuntimeBuildError, RuntimeBuilder, RuntimeConfig, TokioConfig};
 
-/// Global [`TaskExecutor`] instance that can be accessed from anywhere.
-static GLOBAL_EXECUTOR: OnceLock<TaskExecutor> = OnceLock::new();
+use crate::runtime::GLOBAL_RUNTIME;
+
+/// A [`TaskExecutor`] is now an alias for [`Runtime`].
+pub type TaskExecutor = Runtime;
 
 /// Spawns an OS thread with the current tokio runtime context propagated.
 ///
@@ -101,7 +96,7 @@ where
 
 /// A type that can spawn tasks.
 ///
-/// The main purpose of this type is to abstract over [`TaskExecutor`] so it's more convenient to
+/// The main purpose of this type is to abstract over [`Runtime`] so it's more convenient to
 /// provide default impls for testing.
 ///
 ///
@@ -121,7 +116,7 @@ where
 /// # }
 /// ```
 ///
-/// Use the [`TaskExecutor`] that spawns task directly onto the tokio runtime via the [Handle].
+/// Use the [`Runtime`] that spawns task directly onto the tokio runtime via the [Handle].
 ///
 /// ```
 /// # use reth_tasks::TaskManager;
@@ -204,26 +199,20 @@ impl TaskSpawner for TokioTaskExecutor {
 ///
 /// The main purpose of this type is to be able to monitor if a critical task panicked, for
 /// diagnostic purposes, since tokio task essentially fail silently. Therefore, this type is a
-/// Stream that yields the name of panicked task, See [`TaskExecutor::spawn_critical`]. In order to
-/// execute Tasks use the [`TaskExecutor`] type [`TaskManager::executor`].
+/// Stream that yields the name of panicked task, See [`Runtime::spawn_critical`]. In order to
+/// execute Tasks use the [`Runtime`] type [`TaskManager::executor`].
 #[derive(Debug)]
 #[must_use = "TaskManager must be polled to monitor critical tasks"]
 pub struct TaskManager {
-    /// Handle to the tokio runtime this task manager is associated with.
-    ///
-    /// See [`Handle`] docs.
-    handle: Handle,
-    /// Sender half for sending task events to this type
-    task_events_tx: UnboundedSender<TaskEvent>,
-    /// Receiver for task events
+    /// The associated [`Runtime`], set after construction via [`TaskManager::new`].
+    runtime: Option<Runtime>,
+    /// Receiver for task events.
     task_events_rx: UnboundedReceiver<TaskEvent>,
     /// The [Signal] to fire when all tasks should be shutdown.
     ///
     /// This is fired when dropped.
     signal: Option<Signal>,
-    /// Receiver of the shutdown signal.
-    on_shutdown: Shutdown,
-    /// How many [`GracefulShutdown`] tasks are currently active
+    /// How many [`GracefulShutdown`] tasks are currently active.
     graceful_tasks: Arc<AtomicUsize>,
 }
 
@@ -234,7 +223,7 @@ impl TaskManager {
     ///
     /// This must be polled for the duration of the program.
     ///
-    /// To obtain the current [`TaskExecutor`] see [`TaskExecutor::current`].
+    /// To obtain the current [`Runtime`] see [`Runtime::current`].
     ///
     /// # Panics
     ///
@@ -246,36 +235,39 @@ impl TaskManager {
 
     /// Create a new instance connected to the given handle's tokio runtime.
     ///
-    /// This also sets the global [`TaskExecutor`].
+    /// This also sets the global [`Runtime`].
     pub fn new(handle: Handle) -> Self {
-        let (task_events_tx, task_events_rx) = unbounded_channel();
-        let (signal, on_shutdown) = signal();
-        let manager = Self {
-            handle,
-            task_events_tx,
-            task_events_rx,
-            signal: Some(signal),
-            on_shutdown,
-            graceful_tasks: Arc::new(AtomicUsize::new(0)),
-        };
-
-        let _ = GLOBAL_EXECUTOR
-            .set(manager.executor())
-            .inspect_err(|_| error!("Global executor already set"));
-
-        manager
+        let config = RuntimeConfig::with_existing_handle(handle);
+        let (runtime, mut task_manager) =
+            RuntimeBuilder::new(config).build().expect("failed to build Runtime from TaskManager");
+        let _ = GLOBAL_RUNTIME
+            .set(runtime.clone())
+            .inspect_err(|_| error!("Global runtime already set"));
+        task_manager.runtime = Some(runtime);
+        task_manager
     }
 
-    /// Returns a new [`TaskExecutor`] that can spawn new tasks onto the tokio runtime this type is
+    /// Create a new [`TaskManager`] without an associated [`Runtime`], returning
+    /// the shutdown/event primitives for [`RuntimeBuilder`] to wire up.
+    pub(crate) fn new_parts(
+        _handle: Handle,
+    ) -> (Self, Shutdown, UnboundedSender<TaskEvent>, Arc<AtomicUsize>) {
+        let (task_events_tx, task_events_rx) = unbounded_channel();
+        let (signal, on_shutdown) = signal();
+        let graceful_tasks = Arc::new(AtomicUsize::new(0));
+        let manager = Self {
+            runtime: None,
+            task_events_rx,
+            signal: Some(signal),
+            graceful_tasks: Arc::clone(&graceful_tasks),
+        };
+        (manager, on_shutdown, task_events_tx, graceful_tasks)
+    }
+
+    /// Returns a new [`Runtime`] that can spawn new tasks onto the tokio runtime this type is
     /// connected to.
-    pub fn executor(&self) -> TaskExecutor {
-        TaskExecutor {
-            handle: self.handle.clone(),
-            on_shutdown: self.on_shutdown.clone(),
-            task_events_tx: self.task_events_tx.clone(),
-            metrics: Default::default(),
-            graceful_tasks: Arc::clone(&self.graceful_tasks),
-        }
+    pub fn executor(&self) -> Runtime {
+        self.runtime.clone().expect("TaskManager has no associated Runtime")
     }
 
     /// Fires the shutdown signal and awaits until all tasks are shutdown.
@@ -308,8 +300,8 @@ impl TaskManager {
 
 /// An endless future that resolves if a critical task panicked.
 ///
-/// See [`TaskExecutor::spawn_critical`]
-impl Future for TaskManager {
+/// See [`Runtime::spawn_critical`]
+impl std::future::Future for TaskManager {
     type Output = Result<(), PanickedTaskError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -344,7 +336,7 @@ impl Display for PanickedTaskError {
 }
 
 impl PanickedTaskError {
-    fn new(task_name: &'static str, error: Box<dyn Any>) -> Self {
+    pub(crate) fn new(task_name: &'static str, error: Box<dyn Any>) -> Self {
         let error = match error.downcast::<String>() {
             Ok(value) => Some(*value),
             Err(error) => match error.downcast::<&str>() {
@@ -359,354 +351,11 @@ impl PanickedTaskError {
 
 /// Represents the events that the `TaskManager`'s main future can receive.
 #[derive(Debug)]
-enum TaskEvent {
+pub(crate) enum TaskEvent {
     /// Indicates that a critical task has panicked.
     Panic(PanickedTaskError),
     /// A signal requesting a graceful shutdown of the `TaskManager`.
     GracefulShutdown,
-}
-
-/// A type that can spawn new tokio tasks
-#[derive(Debug, Clone)]
-pub struct TaskExecutor {
-    /// Handle to the tokio runtime this task manager is associated with.
-    ///
-    /// See [`Handle`] docs.
-    handle: Handle,
-    /// Receiver of the shutdown signal.
-    on_shutdown: Shutdown,
-    /// Sender half for sending task events to this type
-    task_events_tx: UnboundedSender<TaskEvent>,
-    /// Task Executor Metrics
-    metrics: TaskExecutorMetrics,
-    /// How many [`GracefulShutdown`] tasks are currently active
-    graceful_tasks: Arc<AtomicUsize>,
-}
-
-// === impl TaskExecutor ===
-
-impl TaskExecutor {
-    /// Attempts to get the current `TaskExecutor` if one has been initialized.
-    ///
-    /// Returns an error if no [`TaskExecutor`] has been initialized via [`TaskManager`].
-    pub fn try_current() -> Result<Self, NoCurrentTaskExecutorError> {
-        GLOBAL_EXECUTOR.get().cloned().ok_or_else(NoCurrentTaskExecutorError::default)
-    }
-
-    /// Returns the current `TaskExecutor`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if no global executor has been initialized. Use [`try_current`](Self::try_current)
-    /// for a non-panicking version.
-    pub fn current() -> Self {
-        Self::try_current().unwrap()
-    }
-
-    /// Returns the [Handle] to the tokio runtime.
-    pub const fn handle(&self) -> &Handle {
-        &self.handle
-    }
-
-    /// Returns the receiver of the shutdown signal.
-    pub const fn on_shutdown_signal(&self) -> &Shutdown {
-        &self.on_shutdown
-    }
-
-    /// Spawns a future on the tokio runtime depending on the [`TaskKind`]
-    fn spawn_on_rt<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        match task_kind {
-            TaskKind::Default => self.handle.spawn(fut),
-            TaskKind::Blocking => {
-                let handle = self.handle.clone();
-                self.handle.spawn_blocking(move || handle.block_on(fut))
-            }
-        }
-    }
-
-    /// Spawns a regular task depending on the given [`TaskKind`]
-    fn spawn_task_as<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        let on_shutdown = self.on_shutdown.clone();
-
-        // Choose the appropriate finished counter based on task kind
-        let finished_counter = match task_kind {
-            TaskKind::Default => self.metrics.finished_regular_tasks_total.clone(),
-            TaskKind::Blocking => self.metrics.finished_regular_blocking_tasks_total.clone(),
-        };
-
-        // Wrap the original future to increment the finished tasks counter upon completion
-        let task = {
-            async move {
-                // Create an instance of IncCounterOnDrop with the counter to increment
-                let _inc_counter_on_drop = IncCounterOnDrop::new(finished_counter);
-                let fut = pin!(fut);
-                let _ = select(on_shutdown, fut).await;
-            }
-        }
-        .in_current_span();
-
-        self.spawn_on_rt(task, task_kind)
-    }
-
-    /// Spawns the task onto the runtime.
-    /// The given future resolves as soon as the [Shutdown] signal is received.
-    ///
-    /// See also [`Handle::spawn`].
-    pub fn spawn<F>(&self, fut: F) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        self.spawn_task_as(fut, TaskKind::Default)
-    }
-
-    /// Spawns a blocking task onto the runtime.
-    /// The given future resolves as soon as the [Shutdown] signal is received.
-    ///
-    /// See also [`Handle::spawn_blocking`].
-    pub fn spawn_blocking<F>(&self, fut: F) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        self.spawn_task_as(fut, TaskKind::Blocking)
-    }
-
-    /// Spawns the task onto the runtime.
-    /// The given future resolves as soon as the [Shutdown] signal is received.
-    ///
-    /// See also [`Handle::spawn`].
-    pub fn spawn_with_signal<F>(&self, f: impl FnOnce(Shutdown) -> F) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        let on_shutdown = self.on_shutdown.clone();
-        let fut = f(on_shutdown);
-
-        let task = fut.in_current_span();
-
-        self.handle.spawn(task)
-    }
-
-    /// Spawns a critical task depending on the given [`TaskKind`]
-    fn spawn_critical_as<F>(
-        &self,
-        name: &'static str,
-        fut: F,
-        task_kind: TaskKind,
-    ) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        let panicked_tasks_tx = self.task_events_tx.clone();
-        let on_shutdown = self.on_shutdown.clone();
-
-        // wrap the task in catch unwind
-        let task = std::panic::AssertUnwindSafe(fut)
-            .catch_unwind()
-            .map_err(move |error| {
-                let task_error = PanickedTaskError::new(name, error);
-                error!("{task_error}");
-                let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
-            })
-            .in_current_span();
-
-        // Clone only the specific counter that we need.
-        let finished_critical_tasks_total_metrics =
-            self.metrics.finished_critical_tasks_total.clone();
-        let task = async move {
-            // Create an instance of IncCounterOnDrop with the counter to increment
-            let _inc_counter_on_drop = IncCounterOnDrop::new(finished_critical_tasks_total_metrics);
-            let task = pin!(task);
-            let _ = select(on_shutdown, task).await;
-        };
-
-        self.spawn_on_rt(task, task_kind)
-    }
-
-    /// This spawns a critical blocking task onto the runtime.
-    /// The given future resolves as soon as the [Shutdown] signal is received.
-    ///
-    /// If this task panics, the [`TaskManager`] is notified.
-    pub fn spawn_critical_blocking<F>(&self, name: &'static str, fut: F) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        self.spawn_critical_as(name, fut, TaskKind::Blocking)
-    }
-
-    /// This spawns a critical task onto the runtime.
-    /// The given future resolves as soon as the [Shutdown] signal is received.
-    ///
-    /// If this task panics, the [`TaskManager`] is notified.
-    pub fn spawn_critical<F>(&self, name: &'static str, fut: F) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        self.spawn_critical_as(name, fut, TaskKind::Default)
-    }
-
-    /// This spawns a critical task onto the runtime.
-    ///
-    /// If this task panics, the [`TaskManager`] is notified.
-    pub fn spawn_critical_with_shutdown_signal<F>(
-        &self,
-        name: &'static str,
-        f: impl FnOnce(Shutdown) -> F,
-    ) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        let panicked_tasks_tx = self.task_events_tx.clone();
-        let on_shutdown = self.on_shutdown.clone();
-        let fut = f(on_shutdown);
-
-        // wrap the task in catch unwind
-        let task = std::panic::AssertUnwindSafe(fut)
-            .catch_unwind()
-            .map_err(move |error| {
-                let task_error = PanickedTaskError::new(name, error);
-                error!("{task_error}");
-                let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
-            })
-            .map(drop)
-            .in_current_span();
-
-        self.handle.spawn(task)
-    }
-
-    /// This spawns a critical task onto the runtime.
-    ///
-    /// If this task panics, the [`TaskManager`] is notified.
-    /// The [`TaskManager`] will wait until the given future has completed before shutting down.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # async fn t(executor: reth_tasks::TaskExecutor) {
-    ///
-    /// executor.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
-    ///     // await the shutdown signal
-    ///     let guard = shutdown.await;
-    ///     // do work before exiting the program
-    ///     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    ///     // allow graceful shutdown
-    ///     drop(guard);
-    /// });
-    /// # }
-    /// ```
-    pub fn spawn_critical_with_graceful_shutdown_signal<F>(
-        &self,
-        name: &'static str,
-        f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        let panicked_tasks_tx = self.task_events_tx.clone();
-        let on_shutdown = GracefulShutdown::new(
-            self.on_shutdown.clone(),
-            GracefulShutdownGuard::new(Arc::clone(&self.graceful_tasks)),
-        );
-        let fut = f(on_shutdown);
-
-        // wrap the task in catch unwind
-        let task = std::panic::AssertUnwindSafe(fut)
-            .catch_unwind()
-            .map_err(move |error| {
-                let task_error = PanickedTaskError::new(name, error);
-                error!("{task_error}");
-                let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
-            })
-            .map(drop)
-            .in_current_span();
-
-        self.handle.spawn(task)
-    }
-
-    /// This spawns a regular task onto the runtime.
-    ///
-    /// The [`TaskManager`] will wait until the given future has completed before shutting down.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # async fn t(executor: reth_tasks::TaskExecutor) {
-    ///
-    /// executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
-    ///     // await the shutdown signal
-    ///     let guard = shutdown.await;
-    ///     // do work before exiting the program
-    ///     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    ///     // allow graceful shutdown
-    ///     drop(guard);
-    /// });
-    /// # }
-    /// ```
-    pub fn spawn_with_graceful_shutdown_signal<F>(
-        &self,
-        f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        let on_shutdown = GracefulShutdown::new(
-            self.on_shutdown.clone(),
-            GracefulShutdownGuard::new(Arc::clone(&self.graceful_tasks)),
-        );
-        let fut = f(on_shutdown);
-
-        self.handle.spawn(fut)
-    }
-
-    /// Sends a request to the `TaskManager` to initiate a graceful shutdown.
-    ///
-    /// Caution: This will terminate the entire program.
-    ///
-    /// The [`TaskManager`] upon receiving this event, will terminate and initiate the shutdown that
-    /// can be handled via the returned [`GracefulShutdown`].
-    pub fn initiate_graceful_shutdown(
-        &self,
-    ) -> Result<GracefulShutdown, tokio::sync::mpsc::error::SendError<()>> {
-        self.task_events_tx
-            .send(TaskEvent::GracefulShutdown)
-            .map_err(|_send_error_with_task_event| tokio::sync::mpsc::error::SendError(()))?;
-
-        Ok(GracefulShutdown::new(
-            self.on_shutdown.clone(),
-            GracefulShutdownGuard::new(Arc::clone(&self.graceful_tasks)),
-        ))
-    }
-}
-
-impl TaskSpawner for TaskExecutor {
-    fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.metrics.inc_regular_tasks();
-        Self::spawn(self, fut)
-    }
-
-    fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.metrics.inc_critical_tasks();
-        Self::spawn_critical(self, name, fut)
-    }
-
-    fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.metrics.inc_regular_blocking_tasks();
-        Self::spawn_blocking(self, fut)
-    }
-
-    fn spawn_critical_blocking(
-        &self,
-        name: &'static str,
-        fut: BoxFuture<'static, ()>,
-    ) -> JoinHandle<()> {
-        self.metrics.inc_critical_tasks();
-        Self::spawn_critical_blocking(self, name, fut)
-    }
 }
 
 /// `TaskSpawner` with extended behaviour
@@ -722,7 +371,7 @@ pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
         f: impl FnOnce(GracefulShutdown) -> F,
     ) -> JoinHandle<()>
     where
-        F: Future<Output = ()> + Send + 'static;
+        F: std::future::Future<Output = ()> + Send + 'static;
 
     /// This spawns a regular task onto the runtime.
     ///
@@ -732,38 +381,7 @@ pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
         f: impl FnOnce(GracefulShutdown) -> F,
     ) -> JoinHandle<()>
     where
-        F: Future<Output = ()> + Send + 'static;
-}
-
-impl TaskSpawnerExt for TaskExecutor {
-    fn spawn_critical_with_graceful_shutdown_signal<F>(
-        &self,
-        name: &'static str,
-        f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        Self::spawn_critical_with_graceful_shutdown_signal(self, name, f)
-    }
-
-    fn spawn_with_graceful_shutdown_signal<F>(
-        &self,
-        f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        Self::spawn_with_graceful_shutdown_signal(self, f)
-    }
-}
-
-/// Determines how a task is spawned
-enum TaskKind {
-    /// Spawn the task to the default executor [`Handle::spawn`]
-    Default,
-    /// Spawn the task to the blocking executor [`Handle::spawn_blocking`]
-    Blocking,
+        F: std::future::Future<Output = ()> + Send + 'static;
 }
 
 /// Error returned by `try_current` when no task executor has been configured.

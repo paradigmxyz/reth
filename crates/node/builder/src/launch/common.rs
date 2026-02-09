@@ -78,7 +78,7 @@ use reth_stages::{
     StageId,
 };
 use reth_static_file::StaticFileProducer;
-use reth_tasks::{RayonConfig, RuntimeConfig, TaskExecutor, TokioConfig, RUNTIME};
+use reth_tasks::{RayonConfig, RuntimeBuilder, RuntimeConfig, TaskExecutor, TokioConfig};
 use reth_tracing::{
     throttle,
     tracing::{debug, error, info, warn},
@@ -215,7 +215,7 @@ impl LaunchContext {
     /// Configure global settings this includes:
     ///
     /// - Raising the file descriptor limit
-    /// - Initializing the global [`RUNTIME`] with dedicated rayon thread pools
+    /// - Initializing the global [`Runtime`] with dedicated rayon thread pools
     /// - Configuring the global rayon thread pool for implicit `par_iter` usage
     pub fn configure_globals(&self, reserved_cpu_cores: usize) {
         // Raise the fd limit of the process.
@@ -228,14 +228,21 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Initialize the global RUNTIME with the tokio handle and dedicated rayon pools.
+        // Initialize the global Runtime with the tokio handle and dedicated rayon pools.
         let handle = self.task_executor.handle().clone();
         let rayon_config = RayonConfig::default().with_reserved_cpu_cores(reserved_cpu_cores);
         let config = RuntimeConfig::default()
             .with_tokio(TokioConfig::existing_handle(handle))
             .with_rayon(rayon_config);
-        if let Err(err) = RUNTIME.init(config) {
-            warn!(%err, "Failed to initialize global RUNTIME");
+        match RuntimeBuilder::new(config).build() {
+            Ok((_runtime, _task_manager)) => {
+                // The runtime and task manager are stored globally via TaskManager::new.
+                // We leak the task manager here since the node will manage shutdown separately.
+                std::mem::forget(_task_manager);
+            }
+            Err(err) => {
+                warn!(%err, "Failed to initialize Runtime");
+            }
         }
 
         // Configure the implicit global rayon pool for `par_iter` usage.
@@ -510,6 +517,7 @@ where
             self.chain_spec(),
             static_file_provider,
             rocksdb_provider,
+            self.task_executor().clone(),
         )?
         .with_prune_modes(self.prune_modes())
         .with_changeset_cache(changeset_cache);

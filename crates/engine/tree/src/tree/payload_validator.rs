@@ -134,6 +134,8 @@ where
     validator: V,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Task runtime for spawning parallel work.
+    runtime: reth_tasks::Runtime,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -166,10 +168,11 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
+        runtime: reth_tasks::Runtime,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::default(),
+            WorkloadExecutor::new(runtime.clone()),
             evm_config.clone(),
             &config,
             precompile_cache_map.clone(),
@@ -186,6 +189,7 @@ where
             metrics: EngineApiMetrics::default(),
             validator,
             changeset_cache,
+            runtime,
         }
     }
 
@@ -873,7 +877,8 @@ where
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
         let overlay_factory =
             overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
-        ParallelStateRoot::new(overlay_factory, prefix_sets).incremental_root_with_updates()
+        ParallelStateRoot::new(overlay_factory, prefix_sets, self.runtime.clone())
+            .incremental_root_with_updates()
     }
 
     /// Compute state root for the given hashed post state in serial.
