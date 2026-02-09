@@ -346,12 +346,8 @@ where
                 MultiProofMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
-                // BAL (Block Access List) is a special message that carries the complete
-                // post-state for the block. Unlike incremental `StateUpdate` messages,
-                // a BAL contains all touched accounts/storage in one shot, so we:
-                //   1. Convert the BAL into a hashed post-state using the provider
-                //   2. Send the full hashed state followed by `FinishedStateUpdates`
-                //   3. Return immediately — no further messages need processing
+                // BAL carries the complete post-state in one shot — convert it,
+                // send `HashedState` + `FinishedStateUpdates`, and return.
                 MultiProofMessage::BlockAccessList(bal) => {
                     let Some(ref provider) = provider else {
                         error!(target: "engine::tree::payload_processor::sparse_trie", "Received BAL but no provider available");
