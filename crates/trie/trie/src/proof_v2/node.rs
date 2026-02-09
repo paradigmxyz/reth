@@ -79,9 +79,10 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
 
     /// Converts this child into a [`ProofTrieNode`] having the given path.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If called on a [`Self::RlpNode`].
+    /// Returns [`StateProofError::TrieInconsistency`] if called on a [`Self::RlpNode`],
+    /// as RlpNodes have already lost their structural information and cannot be converted.
     pub(crate) fn into_proof_trie_node(
         self,
         path: Nibbles,
@@ -104,7 +105,11 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 (TrieNode::Extension(ExtensionNode { key: short_key, child }), None)
             }
             Self::Branch { node, masks } => (TrieNode::Branch(node), masks),
-            Self::RlpNode(_) => panic!("Cannot call `into_proof_trie_node` on RlpNode"),
+            Self::RlpNode(_) => {
+                return Err(StateProofError::TrieInconsistency(
+                    "Cannot call into_proof_trie_node on RlpNode".to_string(),
+                ))
+            }
         };
 
         Ok(ProofTrieNode { node, path, masks })
