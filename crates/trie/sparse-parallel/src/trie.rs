@@ -2014,7 +2014,7 @@ impl ParallelSparseTrie {
     fn lower_subtrie_rlp_node(&mut self, path: Nibbles) -> RlpNodeStackItem {
         let index = path_subtrie_index_unchecked(&path);
         let lower_subtrie =
-            self.lower_subtries[index].as_revealed_ref().expect("lower subtrie must exist");
+            self.lower_subtries[index].as_revealed_mut().expect("lower subtrie must exist");
 
         // Check for pre-computed root_rlp_node from changed subtries
         if let Some((rlp_node, node_type)) = lower_subtrie.root_rlp_node.clone() {
@@ -2023,8 +2023,6 @@ impl ParallelSparseTrie {
 
         // No pre-computed value - call update_hashes with empty prefix set.
         // This will use cached hashes where available, and compute only where needed.
-        let lower_subtrie =
-            self.lower_subtries[index].as_revealed_mut().expect("lower subtrie must exist");
         let mut empty_prefix_set = PrefixSetMut::default().freeze();
         lower_subtrie.update_hashes(&mut empty_prefix_set, &mut None, &self.branch_node_masks);
 
