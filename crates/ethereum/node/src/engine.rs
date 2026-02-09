@@ -49,6 +49,18 @@ where
     ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
         self.inner.ensure_well_formed_payload(payload).map_err(Into::into)
     }
+
+    fn convert_payload_to_block_with_transactions(
+        &self,
+        payload: ExecutionData,
+        transactions: Vec<
+            <<Self::Block as reth_primitives_traits::Block>::Body as reth_primitives_traits::BlockBody>::Transaction,
+        >,
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+        self.inner
+            .ensure_well_formed_payload_with_transactions(payload, transactions)
+            .map_err(Into::into)
+    }
 }
 
 impl<ChainSpec, Types> EngineApiValidator<Types> for EthereumEngineValidator<ChainSpec>

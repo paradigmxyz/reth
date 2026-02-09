@@ -10,7 +10,7 @@ use crate::tree::{
     EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
     StateProviderDatabase, TreeConfig,
 };
-use alloy_consensus::transaction::{Either, TxHashRef};
+use alloy_consensus::transaction::{Either, Recovered, TxHashRef};
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
@@ -45,7 +45,6 @@ use reth_revm::db::{states::bundle_state::BundleRetention, State};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::Address;
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
@@ -201,6 +200,35 @@ where
         match input {
             BlockOrPayload::Payload(payload) => self.validator.convert_payload_to_block(payload),
             BlockOrPayload::Block(block) => Ok(block),
+        }
+    }
+
+    /// Converts a [`BlockOrPayload`] into a [`RecoveredBlock`], reusing pre-decoded and
+    /// pre-recovered transactions from execution to avoid re-decoding the raw payload bytes.
+    ///
+    /// For the `Payload` variant, this calls
+    /// [`PayloadValidator::convert_payload_to_block_with_transactions`] which constructs the
+    /// block using the already-decoded transactions. For the `Block` variant, the block is
+    /// already available and simply combined with the recovered senders.
+    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
+    pub fn convert_to_recovered_block<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
+        &self,
+        input: BlockOrPayload<T>,
+        recovered_txs: Vec<Recovered<N::SignedTx>>,
+    ) -> Result<RecoveredBlock<N::Block>, NewPayloadError>
+    where
+        V: PayloadValidator<T, Block = N::Block>,
+    {
+        let (transactions, senders): (Vec<_>, Vec<_>) =
+            recovered_txs.into_iter().map(|tx| tx.into_parts()).unzip();
+        match input {
+            BlockOrPayload::Payload(payload) => {
+                let sealed_block = self
+                    .validator
+                    .convert_payload_to_block_with_transactions(payload, transactions)?;
+                Ok(sealed_block.with_senders(senders))
+            }
+            BlockOrPayload::Block(block) => Ok(block.with_senders(senders)),
         }
     }
 
@@ -465,7 +493,7 @@ where
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
-        let (output, senders, receipt_root_rx) =
+        let (output, recovered_txs, receipt_root_rx) =
             match self.execute_block(state_provider, env, &input, &mut handle) {
                 Ok(output) => output,
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
@@ -483,7 +511,7 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
-        let block = self.convert_to_block(input)?.with_senders(senders);
+        let block = self.convert_to_recovered_block(input, recovered_txs)?;
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = receipt_root_rx
@@ -685,7 +713,7 @@ where
     ) -> Result<
         (
             BlockExecutionOutput<N::Receipt>,
-            Vec<Address>,
+            Vec<Recovered<N::SignedTx>>,
             tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>,
         ),
         InsertBlockErrorKind,
@@ -785,14 +813,14 @@ where
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
-    ) -> Result<(E, Vec<Address>), BlockExecutionError>
+    ) -> Result<(E, Vec<Recovered<N::SignedTx>>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt>,
         Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
-        InnerTx: TxHashRef,
+        InnerTx: TxHashRef + Clone + Into<N::SignedTx>,
         Err: core::error::Error + Send + Sync + 'static,
     {
-        let mut senders = Vec::with_capacity(transaction_count);
+        let mut recovered_txs = Vec::with_capacity(transaction_count);
 
         // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
@@ -817,9 +845,10 @@ where
 
             let tx = tx_result.map_err(BlockExecutionError::other)?;
             let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
-            let tx_hash = <Tx as alloy_evm::RecoveredTx<InnerTx>>::tx(&tx).tx_hash();
+            let inner_tx = <Tx as alloy_evm::RecoveredTx<InnerTx>>::tx(&tx).clone();
+            let tx_hash = *inner_tx.tx_hash();
 
-            senders.push(tx_signer);
+            recovered_txs.push(Recovered::new_unchecked(inner_tx.into(), tx_signer));
 
             let span = debug_span!(
                 target: "engine::tree",
@@ -848,7 +877,7 @@ where
         }
         drop(exec_span);
 
-        Ok((executor, senders))
+        Ok((executor, recovered_txs))
     }
 
     /// Compute state root for the given hashed post state in parallel.

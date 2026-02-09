@@ -11,13 +11,14 @@
 
 extern crate alloc;
 
+use alloc::vec::Vec;
 use alloy_consensus::BlockHeader;
 use reth_errors::ConsensusError;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{Block, BlockBody, RecoveredBlock, SealedBlock};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -155,6 +156,19 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         &self,
         payload: Types::ExecutionData,
     ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
+
+    /// Like [`Self::convert_payload_to_block`], but reuses already-decoded transactions instead
+    /// of re-decoding from raw payload bytes.
+    ///
+    /// The default implementation falls back to [`Self::convert_payload_to_block`], ignoring the
+    /// pre-decoded transactions.
+    fn convert_payload_to_block_with_transactions(
+        &self,
+        payload: Types::ExecutionData,
+        _transactions: Vec<<<Self::Block as Block>::Body as BlockBody>::Transaction>,
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+        self.convert_payload_to_block(payload)
+    }
 
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.
