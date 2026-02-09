@@ -898,6 +898,13 @@ impl SparseTrie for ParallelSparseTrie {
     fn root(&mut self) -> B256 {
         trace!(target: "trie::parallel_sparse", "Calculating trie root hash");
 
+        if self.prefix_set.is_empty() &&
+            let Some(hash) =
+                self.upper_subtrie.nodes.get(&Nibbles::default()).and_then(|node| node.hash())
+        {
+            return hash;
+        }
+
         // Update all lower subtrie hashes
         self.update_subtrie_hashes();
 
@@ -908,6 +915,14 @@ impl SparseTrie for ParallelSparseTrie {
 
         // Return the root hash
         root_rlp.as_hash().unwrap_or(EMPTY_ROOT_HASH)
+    }
+
+    fn is_root_cached(&self) -> bool {
+        self.prefix_set.is_empty() &&
+            self.upper_subtrie
+                .nodes
+                .get(&Nibbles::default())
+                .is_some_and(|node| node.hash().is_some())
     }
 
     #[instrument(level = "trace", target = "trie::sparse::parallel", skip(self))]

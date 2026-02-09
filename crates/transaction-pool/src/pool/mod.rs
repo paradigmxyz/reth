@@ -630,10 +630,24 @@ where
     }
 
     /// Adds all transactions in the iterator to the pool, returning a list of results.
+    ///
+    /// Convenience method that assigns the same origin to all transactions. Delegates to
+    /// [`Self::add_transactions_with_origins`].
     pub fn add_transactions(
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        self.add_transactions_with_origins(transactions.into_iter().map(|tx| (origin, tx)))
+    }
+
+    /// Adds all transactions in the iterator to the pool, each with its own
+    /// [`TransactionOrigin`], returning a list of results.
+    pub fn add_transactions_with_origins(
+        &self,
+        transactions: impl IntoIterator<
+            Item = (TransactionOrigin, TransactionValidationOutcome<T::Transaction>),
+        >,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         // Collect results and metadata while holding the pool write lock
         let (mut results, added_metas, discarded) = {
@@ -642,7 +656,7 @@ where
 
             let results = transactions
                 .into_iter()
-                .map(|tx| {
+                .map(|(origin, tx)| {
                     let (result, meta) = self.add_transaction(&mut pool, origin, tx);
 
                     // Only collect metadata for successful insertions
