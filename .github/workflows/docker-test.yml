@@ -25,6 +25,12 @@ jobs:
       - uses: actions/checkout@v6
       - run: mkdir -p artifacts
 
+      - name: Get git info
+        id: git
+        run: |
+          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "describe=$(git describe --always --tags)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Depot CLI
         uses: depot/setup-action@v1
 
@@ -32,6 +38,8 @@ jobs:
         uses: depot/bake-action@v1
         env:
           DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
+          VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
+          VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
         with:
           project: ${{ vars.DEPOT_PROJECT_ID }}
           files: docker-bake.hcl
