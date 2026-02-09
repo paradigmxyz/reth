@@ -28,13 +28,19 @@ pub fn maybe_hash_key(key: B256, use_hashed_state: bool) -> B256 {
     }
 }
 
-/// A key hasher that returns the input bytes as-is, assuming they are already a 32-byte hash.
+/// A key hasher that passes through 32-byte inputs as-is (already hashed storage keys)
+/// and applies keccak256 to shorter inputs (e.g. 20-byte addresses).
 #[derive(Clone, Debug, Default)]
-pub struct IdentityKeyHasher;
+pub struct PreHashedKeyHasher;
 
-impl KeyHasher for IdentityKeyHasher {
+impl KeyHasher for PreHashedKeyHasher {
     #[inline]
     fn hash_key<T: AsRef<[u8]>>(bytes: T) -> B256 {
-        B256::from_slice(bytes.as_ref())
+        let b = bytes.as_ref();
+        if b.len() == 32 {
+            B256::from_slice(b)
+        } else {
+            keccak256(b)
+        }
     }
 }

@@ -11,7 +11,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, IdentityKeyHasher,
+    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, PreHashedKeyHasher,
     KeccakKeyHasher, KeyHasher, StateRoot, StateRootProgress, TrieInputSorted,
 };
 use std::{
@@ -148,7 +148,11 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
         let loaded_prefix_sets =
-            crate::prefix_set::load_prefix_sets_auto(provider, range)?;
+            if provider.cached_storage_settings().use_hashed_state {
+                crate::prefix_set::load_prefix_sets_with_provider::<_, PreHashedKeyHasher>(provider, range)?
+            } else {
+                crate::prefix_set::load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, range)?
+            };
         Ok(Self::from_tx(provider.tx_ref()).with_prefix_sets(loaded_prefix_sets))
     }
 
@@ -242,7 +246,7 @@ pub fn from_reverts_auto(
     range: impl RangeBounds<BlockNumber> + Clone,
 ) -> Result<HashedPostStateSorted, ProviderError> {
     if provider.cached_storage_settings().use_hashed_state {
-        HashedPostStateSorted::from_reverts::<IdentityKeyHasher>(provider, range)
+        HashedPostStateSorted::from_reverts::<PreHashedKeyHasher>(provider, range)
     } else {
         HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(provider, range)
     }

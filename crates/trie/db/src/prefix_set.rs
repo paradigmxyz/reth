@@ -10,11 +10,11 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_primitives_traits::StorageEntry;
-use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache};
+use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    IdentityKeyHasher, KeccakKeyHasher, KeyHasher, Nibbles,
+    KeyHasher, Nibbles,
 };
 
 /// Load prefix sets using a provider that implements [`ChangeSetReader`]. This function can read
@@ -70,14 +70,3 @@ where
     })
 }
 
-/// Calls [`load_prefix_sets_with_provider`] with the correct [`KeyHasher`] based on storage settings.
-pub fn load_prefix_sets_auto(
-    provider: &(impl ChangeSetReader + StorageChangeSetReader + DBProvider + StorageSettingsCache),
-    range: RangeInclusive<BlockNumber>,
-) -> Result<TriePrefixSets, ProviderError> {
-    if provider.cached_storage_settings().use_hashed_state {
-        load_prefix_sets_with_provider::<_, IdentityKeyHasher>(provider, range)
-    } else {
-        load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, range)
-    }
-}
