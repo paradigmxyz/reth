@@ -11,7 +11,7 @@ use crate::tree::{
     StateProviderBuilder, TreeConfig,
 };
 use alloy_eip7928::BlockAccessList;
-use alloy_eips::eip1898::BlockWithParent;
+use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -976,6 +976,9 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used to determine parallel worker count for prewarming.
     /// A value of 0 indicates the count is unknown.
     pub transaction_count: usize,
+    /// Withdrawals included in the block.
+    /// Used to generate prefetch targets for withdrawal addresses.
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
@@ -989,6 +992,7 @@ where
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
             transaction_count: 0,
+            withdrawals: None,
         }
     }
 }

@@ -24,6 +24,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::BlockAccessList;
+use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -163,7 +164,7 @@ where
             };
 
             // Spawn workers
-            let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor, to_multi_proof, done_tx.clone());
+            let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor,  to_multi_proof.clone(), done_tx.clone());
 
             // Distribute transactions to workers
             let mut tx_index = 0usize;
@@ -185,6 +186,16 @@ where
                 let _ = tx_sender.send(indexed_tx);
 
                 tx_index += 1;
+            }
+
+            // Send withdrawal prefetch targets after all transactions have been distributed
+            if let Some(to_multi_proof) = to_multi_proof
+                && let Some(withdrawals) = &ctx.env.withdrawals
+                && !withdrawals.is_empty()
+            {
+                let targets =
+                    multiproof_targets_from_withdrawals(withdrawals, ctx.v2_proofs_enabled);
+                let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
             }
 
             // drop sender and wait for all tasks to finish
@@ -829,6 +840,27 @@ fn multiproof_targets_v2_from_state(state: EvmState) -> (VersionedMultiProofTarg
     }
 
     (VersionedMultiProofTargets::V2(targets), storage_target_count)
+}
+
+/// Returns [`VersionedMultiProofTargets`] for withdrawal addresses.
+///
+/// Withdrawals only modify account balances (no storage), so the targets contain
+/// only account-level entries with empty storage sets.
+fn multiproof_targets_from_withdrawals(
+    withdrawals: &[Withdrawal],
+    v2_enabled: bool,
+) -> VersionedMultiProofTargets {
+    use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+    if v2_enabled {
+        VersionedMultiProofTargets::V2(MultiProofTargetsV2 {
+            account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
+            ..Default::default()
+        })
+    } else {
+        VersionedMultiProofTargets::Legacy(
+            withdrawals.iter().map(|w| (keccak256(w.address), Default::default())).collect(),
+        )
+    }
 }
 
 /// The events the pre-warm task can handle.
