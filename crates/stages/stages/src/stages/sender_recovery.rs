@@ -200,7 +200,7 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
+        let unwind_to = input.unwind_block_range_with_threshold(self.commit_threshold).unwind_to;
 
         if self.prune_mode.is_none_or(|mode| !mode.is_full()) {
             // Lookup the next tx id after unwind_to block (first tx to remove)

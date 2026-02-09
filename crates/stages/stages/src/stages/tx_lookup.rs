@@ -218,20 +218,20 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.chunk_size);
+        let output = input.unwind_block_range_with_threshold(self.chunk_size);
 
         provider.with_rocksdb_batch(|rocksdb_batch| {
             let mut writer = EitherWriter::new_transaction_hash_numbers(provider, rocksdb_batch)?;
 
             let static_file_provider = provider.static_file_provider();
             let rev_walker = provider
-                .block_body_indices_range(range.clone())?
+                .block_body_indices_range(output.block_range.clone())?
                 .into_iter()
                 .rev()
-                .zip(range.rev());
+                .zip(output.block_range.clone().rev());
 
             for (body, number) in rev_walker {
-                if number <= unwind_to {
+                if number <= output.unwind_to {
                     break;
                 }
 
@@ -247,7 +247,7 @@ where
         })?;
 
         Ok(UnwindOutput {
-            checkpoint: StageCheckpoint::new(unwind_to)
+            checkpoint: StageCheckpoint::new(output.unwind_to)
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
