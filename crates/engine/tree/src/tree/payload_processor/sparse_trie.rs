@@ -750,7 +750,7 @@ where
                         // If account has pending storage updates, it is still pending.
                         return true;
                     } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr).expect("updates are drained, trie should be revealed by now");
+                        let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
                         let encoded = if account.is_none_or(|account| account.is_empty()) &&
                             storage_root == EMPTY_ROOT_HASH
                         {
