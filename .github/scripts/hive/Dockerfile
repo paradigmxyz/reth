@@ -7,7 +7,7 @@ FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get -y upgrade && apt-get install -y libclang-dev pkg-config
+RUN apt-get update && apt-get -y upgrade && apt-get install -y libclang-dev pkg-config cmake build-essential
 
 # 
 # We prepare the build plan
