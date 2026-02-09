@@ -10582,6 +10582,7 @@ dependencies = [
  "reth-tracing",
  "reth-trie-common",
  "reth-trie-sparse",
+ "reth-trie-sparse-parallel",
  "revm-database",
  "revm-state",
  "tracing",

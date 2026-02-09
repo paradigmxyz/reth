@@ -1982,36 +1982,9 @@ impl ParallelSparseTrie {
                     &self.branch_node_masks,
                 );
             } else {
-                // For lower subtrie roots, use the pre-computed root_rlp_node if available
-                // (for changed subtries), otherwise fall back to the rlp_node path (for unchanged
-                // subtries with cached hashes)
-                let index = path_subtrie_index_unchecked(&path);
-                let lower_subtrie =
-                    self.lower_subtries[index].as_revealed_ref().expect("lower subtrie must exist");
-
-                if let Some((rlp_node, node_type)) = lower_subtrie.root_rlp_node.clone() {
-                    // Changed subtrie: use pre-computed root_rlp_node
-                    self.upper_subtrie.inner.buffers.rlp_node_stack.push(RlpNodeStackItem {
-                        path,
-                        rlp_node,
-                        node_type,
-                    });
-                } else {
-                    // Unchanged subtrie: call rlp_node which will use cached hash
-                    let node = self.lower_subtries[index]
-                        .as_revealed_mut()
-                        .expect("lower subtrie must exist")
-                        .nodes
-                        .get_mut(&path)
-                        .expect("lower subtrie node must exist");
-                    self.upper_subtrie.inner.rlp_node(
-                        prefix_set,
-                        &mut update_actions_buf,
-                        stack_item,
-                        node,
-                        &self.branch_node_masks,
-                    );
-                }
+                // For lower subtrie roots, get the RLP node from the lower subtrie
+                let rlp_node_stack_item = self.lower_subtrie_rlp_node(path);
+                self.upper_subtrie.inner.buffers.rlp_node_stack.push(rlp_node_stack_item);
             }
         }
 
@@ -2030,6 +2003,33 @@ impl ParallelSparseTrie {
 
         debug_assert_eq!(self.upper_subtrie.inner.buffers.rlp_node_stack.len(), 1);
         self.upper_subtrie.inner.buffers.rlp_node_stack.pop().unwrap().rlp_node
+    }
+
+    /// Returns the RLP node for a lower subtrie root at the given path.
+    ///
+    /// If the subtrie has a pre-computed `root_rlp_node` (from parallel hash updates), uses it
+    /// directly. Otherwise, computes the hash by calling `update_hashes` with an empty prefix
+    /// set - this will return cached hashes immediately for nodes that have them, and compute
+    /// hashes only for nodes that don't.
+    fn lower_subtrie_rlp_node(&mut self, path: Nibbles) -> RlpNodeStackItem {
+        let index = path_subtrie_index_unchecked(&path);
+        let lower_subtrie =
+            self.lower_subtries[index].as_revealed_ref().expect("lower subtrie must exist");
+
+        // Check for pre-computed root_rlp_node from changed subtries
+        if let Some((rlp_node, node_type)) = lower_subtrie.root_rlp_node.clone() {
+            return RlpNodeStackItem { path, rlp_node, node_type };
+        }
+
+        // No pre-computed value - call update_hashes with empty prefix set.
+        // This will use cached hashes where available, and compute only where needed.
+        let lower_subtrie =
+            self.lower_subtries[index].as_revealed_mut().expect("lower subtrie must exist");
+        let mut empty_prefix_set = PrefixSetMut::default().freeze();
+        lower_subtrie.update_hashes(&mut empty_prefix_set, &mut None, &self.branch_node_masks);
+
+        let (rlp_node, node_type) = lower_subtrie.root_rlp_node.clone().expect("just computed");
+        RlpNodeStackItem { path, rlp_node, node_type }
     }
 
     /// Returns:
@@ -9384,6 +9384,34 @@ mod tests {
             ProofTrieNode { path: leaf2_path, node: leaf2_node, masks: None },
         ];
         trie.reveal_nodes(&mut nodes).unwrap();
+
+        // Call root() to compute the trie root hash
+        let _root = trie.root();
+    }
+
+    #[test]
+    fn test_update_leaf_creates_embedded_nodes_then_root() {
+        // Similar structure to test_reveal_extension_branch_leaves_then_root, but created
+        // via update_leaf calls on an empty trie instead of revealing pre-built nodes.
+        //
+        // Two leaves with paths that share a long common prefix will create:
+        // - Extension node at root with the shared prefix
+        // - Branch node where the paths diverge
+        // - Two leaf nodes (embedded in the branch since they're small)
+
+        // Create two paths that share 63 nibbles and differ only at the 64th
+        let mut leaf1_path_bytes = [0u8; 64];
+        leaf1_path_bytes[63] = 1;
+        let leaf1_path = Nibbles::from_nibbles(&leaf1_path_bytes);
+
+        let mut leaf2_path_bytes = [0u8; 64];
+        leaf2_path_bytes[63] = 2;
+        let leaf2_path = Nibbles::from_nibbles(&leaf2_path_bytes);
+
+        // Create an empty trie and update with two leaves
+        let mut trie = ParallelSparseTrie::default();
+        trie.update_leaf(leaf1_path, vec![0x1], DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(leaf2_path, vec![0x2], DefaultTrieNodeProvider).unwrap();
 
         // Call root() to compute the trie root hash
         let _root = trie.root();
