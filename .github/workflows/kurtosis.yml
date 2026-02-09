@@ -65,4 +65,4 @@ jobs:
         env:
           SLACK_COLOR: ${{ job.status }}
           SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_HIVE_WEBHOOK_URL }}
