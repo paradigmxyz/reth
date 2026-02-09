@@ -181,6 +181,15 @@ impl<N: NodePrimitives> ExExHandle<N> {
             Ok(()) => {
                 self.next_notification_id = notification_id + 1;
                 self.metrics.notifications_sent_total.increment(1);
+
+                if matches!(
+                    notification,
+                    ExExNotification::ChainReorged { .. } |
+                        ExExNotification::ChainReverted { .. }
+                ) {
+                    self.finished_height = None;
+                }
+
                 Poll::Ready(Ok(()))
             }
             Err(err) => Poll::Ready(Err(err)),
@@ -1264,6 +1273,73 @@ mod tests {
 
         // Ensure the notification ID was incremented
         assert_eq!(exex_handle.next_notification_id, 23);
+
+        // Ensure finished_height was reset after sending the reorg notification
+        assert!(exex_handle.finished_height.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_chain_committed_not_skipped_after_reorg() {
+        let provider_factory = create_test_provider_factory();
+        init_genesis(&provider_factory).unwrap();
+        let provider = BlockchainProvider::new(provider_factory).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Default::default(),
+            provider,
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+
+        // Simulate: ExEx has finished processing up to block 50 on the old chain
+        exex_handle.finished_height = Some(BlockNumHash::new(50, B256::random()));
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // Step 1: A reorg occurs — send ChainReverted notification
+        let revert_notification =
+            ExExNotification::ChainReverted { old: Arc::new(Chain::default()) };
+
+        match exex_handle.send(&mut cx, &(0, revert_notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received = notifications.next().await.unwrap().unwrap();
+                assert_eq!(received, revert_notification);
+            }
+            other => panic!("Expected Ready(Ok(())), got {other:?}"),
+        }
+
+        // After the revert, finished_height should be reset to None
+        assert!(
+            exex_handle.finished_height.is_none(),
+            "finished_height should be reset after sending a ChainReverted notification"
+        );
+
+        // Step 2: New chain is committed with blocks at or below the old finished height.
+        // Without the fix, this notification would be incorrectly skipped because the stale
+        // finished_height (50) >= new tip (50).
+        let mut block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        block.set_hash(B256::new([0x01; 32]));
+        block.set_block_number(50);
+
+        let commit_notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![block], Default::default(), Default::default())),
+        };
+
+        match exex_handle.send(&mut cx, &(1, commit_notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received = notifications.next().await.unwrap().unwrap();
+                assert_eq!(received, commit_notification);
+            }
+            Poll::Pending => panic!(
+                "ChainCommitted notification was not sent — \
+                 likely skipped due to stale finished_height (bug #19755)"
+            ),
+            Poll::Ready(Err(e)) => panic!("Failed to send notification: {e:?}"),
+        }
     }
 
     #[tokio::test]
@@ -1304,6 +1380,9 @@ mod tests {
 
         // Ensure the notification ID was incremented
         assert_eq!(exex_handle.next_notification_id, 23);
+
+        // Ensure finished_height was reset after sending the revert notification
+        assert!(exex_handle.finished_height.is_none());
     }
 
     #[tokio::test]
