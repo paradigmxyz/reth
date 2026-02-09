@@ -254,7 +254,8 @@ where
 
     async fn validate_transactions(
         &self,
-        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction), IntoIter: Send>
+            + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         let transactions: Vec<_> = transactions.into_iter().collect();
         let hashes: Vec<_> = transactions.iter().map(|(_, tx)| *tx.hash()).collect();
@@ -294,15 +295,6 @@ where
                 })
                 .collect(),
         }
-    }
-
-    async fn validate_transactions_with_origin(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        let transactions: Vec<_> = transactions.into_iter().map(|tx| (origin, tx)).collect();
-        self.validate_transactions(transactions).await
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
