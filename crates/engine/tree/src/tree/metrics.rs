@@ -90,14 +90,36 @@ impl EngineApiMetrics {
 pub struct TreeMetrics {
     /// The highest block number in the canonical chain
     pub canonical_chain_height: Gauge,
-    /// The number of reorgs
-    pub reorgs: Counter,
+    /// Metrics for reorgs.
+    #[metric(skip)]
+    pub reorgs: ReorgMetrics,
     /// The latest reorg depth
     pub latest_reorg_depth: Gauge,
     /// The current safe block height (this is required by optimism)
     pub safe_block_height: Gauge,
     /// The current finalized block height (this is required by optimism)
     pub finalized_block_height: Gauge,
+}
+
+/// Metrics for reorgs.
+#[derive(Debug)]
+pub struct ReorgMetrics {
+    /// The number of head block reorgs
+    pub head: Counter,
+    /// The number of safe block reorgs
+    pub safe: Counter,
+    /// The number of finalized block reorgs
+    pub finalized: Counter,
+}
+
+impl Default for ReorgMetrics {
+    fn default() -> Self {
+        Self {
+            head: metrics::counter!("blockchain_tree_reorgs", "commitment" => "head"),
+            safe: metrics::counter!("blockchain_tree_reorgs", "commitment" => "safe"),
+            finalized: metrics::counter!("blockchain_tree_reorgs", "commitment" => "finalized"),
+        }
+    }
 }
 
 /// Metrics for the `EngineApi`.
