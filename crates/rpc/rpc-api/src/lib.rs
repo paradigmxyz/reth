@@ -48,7 +48,7 @@ pub mod servers {
         net::NetApiServer,
         otterscan::OtterscanServer,
         reth::RethApiServer,
-        reth_engine::RethEngineApiServer,
+        reth_engine::{RethEngineApiServer, RethPayloadStatus},
         rpc::RpcApiServer,
         testing::TestingApiServer,
         trace::TraceApiServer,

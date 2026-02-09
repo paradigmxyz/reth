@@ -237,9 +237,12 @@ impl Command {
 
             let (version, params) = block_to_new_payload(block, is_optimism)?;
             let start = Instant::now();
-            call_new_payload_with_reth(&auth_provider, version, params, use_reth_namespace).await?;
+            let server_latency =
+                call_new_payload_with_reth(&auth_provider, version, params, use_reth_namespace)
+                    .await?;
 
-            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
+            let np_latency = server_latency.unwrap_or_else(|| start.elapsed());
+            let new_payload_result = NewPayloadResult { gas_used, latency: np_latency };
 
             call_forkchoice_updated(&auth_provider, version, forkchoice_state, None).await?;
 

@@ -26,7 +26,9 @@ use reth_payload_primitives::{
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
-use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule, RethEngineApiServer};
+use reth_rpc_api::{
+    EngineApiServer, IntoEngineApiRpcModule, RethEngineApiServer, RethPayloadStatus,
+};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -261,10 +263,11 @@ where
     /// Like `new_payload_v1` but waits for execution cache and sparse trie locks.
     ///
     /// Used by `reth_newPayloadV1` endpoint.
+    /// Returns the payload status and server-side execution latency.
     pub async fn new_payload_v1_wait_for_caches(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<(PayloadStatus, std::time::Duration)> {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
             PayloadT::ExecutionData,
@@ -282,21 +285,22 @@ where
     pub async fn new_payload_v1_wait_for_caches_metered(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<RethPayloadStatus> {
         let start = Instant::now();
         let res = Self::new_payload_v1_wait_for_caches(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v1.record(elapsed);
-        res
+        res.map(|(status, latency)| RethPayloadStatus::new(status, latency))
     }
 
     /// Like `new_payload_v2` but waits for execution cache and sparse trie locks.
     ///
     /// Used by `reth_newPayloadV2` endpoint.
+    /// Returns the payload status and server-side execution latency.
     pub async fn new_payload_v2_wait_for_caches(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<(PayloadStatus, std::time::Duration)> {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
             PayloadT::ExecutionData,
@@ -312,21 +316,22 @@ where
     pub async fn new_payload_v2_wait_for_caches_metered(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<RethPayloadStatus> {
         let start = Instant::now();
         let res = Self::new_payload_v2_wait_for_caches(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v2.record(elapsed);
-        res
+        res.map(|(status, latency)| RethPayloadStatus::new(status, latency))
     }
 
     /// Like `new_payload_v3` but waits for execution cache and sparse trie locks.
     ///
     /// Used by `reth_newPayloadV3` endpoint.
+    /// Returns the payload status and server-side execution latency.
     pub async fn new_payload_v3_wait_for_caches(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<(PayloadStatus, std::time::Duration)> {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
             PayloadT::ExecutionData,
@@ -339,25 +344,26 @@ where
         Ok(self.inner.beacon_consensus.new_payload_wait_for_caches(payload).await?)
     }
 
-    /// Metrics version of `new_payload_v3_wait_for_caches`
+    /// Metered version of `new_payload_v3_wait_for_caches`.
     pub async fn new_payload_v3_wait_for_caches_metered(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> RpcResult<PayloadStatus> {
+    ) -> RpcResult<RethPayloadStatus> {
         let start = Instant::now();
         let res = Self::new_payload_v3_wait_for_caches(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v3.record(elapsed);
-        Ok(res?)
+        Ok(res.map(|(status, latency)| RethPayloadStatus::new(status, latency))?)
     }
 
     /// Like `new_payload_v4` but waits for execution cache and sparse trie locks.
     ///
     /// Used by `reth_newPayloadV4` endpoint.
+    /// Returns the payload status and server-side execution latency.
     pub async fn new_payload_v4_wait_for_caches(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<(PayloadStatus, std::time::Duration)> {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
             PayloadT::ExecutionData,
@@ -370,16 +376,16 @@ where
         Ok(self.inner.beacon_consensus.new_payload_wait_for_caches(payload).await?)
     }
 
-    /// Metrics version of `new_payload_v4_wait_for_caches`
+    /// Metered version of `new_payload_v4_wait_for_caches`.
     pub async fn new_payload_v4_wait_for_caches_metered(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> RpcResult<PayloadStatus> {
+    ) -> RpcResult<RethPayloadStatus> {
         let start = Instant::now();
         let res = Self::new_payload_v4_wait_for_caches(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v4.record(elapsed);
-        Ok(res?)
+        Ok(res.map(|(status, latency)| RethPayloadStatus::new(status, latency))?)
     }
 }
 
@@ -1424,7 +1430,10 @@ where
     /// Handler for `reth_newPayloadV1`
     ///
     /// Waits for execution cache and sparse trie locks before processing.
-    async fn reth_new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
+    async fn reth_new_payload_v1(
+        &self,
+        payload: ExecutionPayloadV1,
+    ) -> RpcResult<RethPayloadStatus> {
         trace!(target: "rpc::engine", "Serving reth_newPayloadV1");
         let payload =
             ExecutionData { payload: payload.into(), sidecar: ExecutionPayloadSidecar::none() };
@@ -1437,7 +1446,7 @@ where
     async fn reth_new_payload_v2(
         &self,
         payload: ExecutionPayloadInputV2,
-    ) -> RpcResult<PayloadStatus> {
+    ) -> RpcResult<RethPayloadStatus> {
         trace!(target: "rpc::engine", "Serving reth_newPayloadV2");
         let payload = ExecutionData {
             payload: payload.into_payload(),
@@ -1454,7 +1463,7 @@ where
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
-    ) -> RpcResult<PayloadStatus> {
+    ) -> RpcResult<RethPayloadStatus> {
         trace!(target: "rpc::engine", "Serving reth_newPayloadV3");
         let payload = ExecutionData {
             payload: payload.into(),
@@ -1463,7 +1472,7 @@ where
                 parent_beacon_block_root,
             }),
         };
-        Ok(self.new_payload_v3_wait_for_caches_metered(payload).await?)
+        self.new_payload_v3_wait_for_caches_metered(payload).await
     }
 
     /// Handler for `reth_newPayloadV4`
@@ -1475,7 +1484,7 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         requests: RequestsOrHash,
-    ) -> RpcResult<PayloadStatus> {
+    ) -> RpcResult<RethPayloadStatus> {
         trace!(target: "rpc::engine", "Serving reth_newPayloadV4");
 
         if requests.is_hash() && !self.inner.accept_execution_requests_hash {
@@ -1489,7 +1498,7 @@ where
                 PraguePayloadFields { requests },
             ),
         };
-        Ok(self.new_payload_v4_wait_for_caches_metered(payload).await?)
+        self.new_payload_v4_wait_for_caches_metered(payload).await
     }
 }
 

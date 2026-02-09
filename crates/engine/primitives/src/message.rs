@@ -15,6 +15,7 @@ use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadTypes};
+use std::time::Duration;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Type alias for backwards compat
@@ -158,11 +159,14 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
     /// This variant is used by `reth_newPayload*` endpoints to ensure that the payload
     /// processing waits for execution cache and preserved sparse trie locks to become
     /// available before starting execution.
+    ///
+    /// Returns `(PayloadStatus, Duration)` where the duration is the server-side
+    /// execution latency measured inside the engine tree handler.
     NewPayloadWaitForCaches {
         /// The execution payload received by Engine API.
         payload: Payload::ExecutionData,
-        /// The sender for returning payload status result.
-        tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
+        /// The sender for returning payload status result and execution latency.
+        tx: oneshot::Sender<Result<(PayloadStatus, Duration), BeaconOnNewPayloadError>>,
     },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {
@@ -248,10 +252,12 @@ where
     ///
     /// This is used by the `reth_newPayload*` endpoints to ensure sequential processing with
     /// proper cache synchronization.
+    ///
+    /// Returns the payload status and the server-side execution latency.
     pub async fn new_payload_wait_for_caches(
         &self,
         payload: Payload::ExecutionData,
-    ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
+    ) -> Result<(PayloadStatus, Duration), BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::NewPayloadWaitForCaches { payload, tx });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
