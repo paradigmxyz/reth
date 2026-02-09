@@ -1,4 +1,9 @@
+//! Bootnodes for the network
+//!
 //! Ethereum bootnodes come from <https://github.com/ledgerwatch/erigon/blob/devel/params/bootnodes.go>
+
+use crate::NodeRecord;
+use alloc::vec::Vec;
 
 /// Ethereum Foundation Go Bootnodes
 pub static MAINNET_BOOTNODES: [&str; 4] = [
@@ -30,3 +35,28 @@ pub static HOODI_BOOTNODES: [&str; 3] = [
     "enode://60203fcb3524e07c5df60a14ae1c9c5b24023ea5d47463dfae051d2c9f3219f309657537576090ca0ae641f73d419f53d8e8000d7a464319d4784acd7d2abc41@209.38.124.160:30303",
     "enode://8ae4a48101b2299597341263da0deb47cc38aa4d3ef4b7430b897d49bfa10eb1ccfe1655679b1ed46928ef177fbf21b86837bd724400196c508427a6f41602cd@134.199.184.23:30303",
 ];
+
+/// Returns parsed mainnet nodes
+pub fn mainnet_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&MAINNET_BOOTNODES[..])
+}
+
+/// Returns parsed sepolia nodes
+pub fn sepolia_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&SEPOLIA_BOOTNODES[..])
+}
+
+/// Returns parsed holesky nodes
+pub fn holesky_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&HOLESKY_BOOTNODES[..])
+}
+
+/// Returns parsed hoodi nodes
+pub fn hoodi_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&HOODI_BOOTNODES[..])
+}
+
+/// Parses all the nodes
+pub fn parse_nodes(nodes: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<NodeRecord> {
+    nodes.into_iter().map(|s| s.as_ref().parse().unwrap()).collect()
+}
