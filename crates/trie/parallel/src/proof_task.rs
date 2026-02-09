@@ -131,8 +131,6 @@ impl ProofWorkerHandle {
     /// Returns a handle for submitting proof tasks to the worker pools.
     /// Workers run until the last handle is dropped.
     ///
-    /// Uses [`RUNTIME`] to obtain the tokio handle for spawning blocking tasks.
-    ///
     /// # Parameters
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `storage_worker_count`: Number of storage workers to spawn
