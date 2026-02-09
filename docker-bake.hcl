@@ -113,7 +113,7 @@ target "hive-stable" {
     MANIFEST_PATH = "bin/reth"
     FEATURES      = "asm-keccak"
   }
-  tags   = ["ghcr.io/paradigmxyz/reth:latest"]
+  tags   = ["reth:local"]
   output = ["type=docker,dest=${HIVE_OUTPUT_DIR}/reth_image.tar"]
 }
 
@@ -124,7 +124,7 @@ target "hive-edge" {
     MANIFEST_PATH = "bin/reth"
     FEATURES      = "asm-keccak edge"
   }
-  tags   = ["ghcr.io/paradigmxyz/reth:latest"]
+  tags   = ["reth:local"]
   output = ["type=docker,dest=${HIVE_OUTPUT_DIR}/reth_image.tar"]
 }
 
