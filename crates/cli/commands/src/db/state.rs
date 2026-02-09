@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, BlockNumber, B256, U256};
+use alloy_primitives::{keccak256, Address, BlockNumber, B256, U256};
 use clap::Parser;
 use parking_lot::Mutex;
 use reth_db_api::{
@@ -39,6 +39,10 @@ pub struct Command {
     /// Output format (table, json, csv)
     #[arg(long, short, default_value = "table")]
     format: OutputFormat,
+
+    /// Read from HashedAccounts/HashedStorages instead of PlainAccountState/PlainStorageState
+    #[arg(long)]
+    hashed: bool,
 }
 
 impl Command {
@@ -64,38 +68,60 @@ impl Command {
         limit: usize,
     ) -> eyre::Result<()> {
         let entries = tool.provider_factory.db_ref().view(|tx| {
-            // Get account info
-            let account = tx.get::<tables::PlainAccountState>(address)?;
-
-            // Get storage entries
-            let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-            let mut entries = Vec::new();
-            let mut last_log = Instant::now();
-
-            let walker = cursor.walk_dup(Some(address), None)?;
-            for (idx, entry) in walker.enumerate() {
-                let (_, storage_entry) = entry?;
-
-                if storage_entry.value != U256::ZERO {
-                    entries.push((storage_entry.key, storage_entry.value));
+            let (account, walker_entries) = if self.hashed {
+                let hashed_address = keccak256(address);
+                let account = tx.get::<tables::HashedAccounts>(hashed_address)?;
+                let mut cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
+                let walker = cursor.walk_dup(Some(hashed_address), None)?;
+                let mut entries = Vec::new();
+                let mut last_log = Instant::now();
+                for (idx, entry) in walker.enumerate() {
+                    let (_, storage_entry) = entry?;
+                    if storage_entry.value != U256::ZERO {
+                        entries.push((storage_entry.key, storage_entry.value));
+                    }
+                    if entries.len() >= limit {
+                        break;
+                    }
+                    if last_log.elapsed() >= LOG_INTERVAL {
+                        info!(
+                            target: "reth::cli",
+                            address = %address,
+                            slots_scanned = idx,
+                            "Scanning storage slots"
+                        );
+                        last_log = Instant::now();
+                    }
                 }
-
-                if entries.len() >= limit {
-                    break;
+                (account, entries)
+            } else {
+                let account = tx.get::<tables::PlainAccountState>(address)?;
+                let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+                let walker = cursor.walk_dup(Some(address), None)?;
+                let mut entries = Vec::new();
+                let mut last_log = Instant::now();
+                for (idx, entry) in walker.enumerate() {
+                    let (_, storage_entry) = entry?;
+                    if storage_entry.value != U256::ZERO {
+                        entries.push((storage_entry.key, storage_entry.value));
+                    }
+                    if entries.len() >= limit {
+                        break;
+                    }
+                    if last_log.elapsed() >= LOG_INTERVAL {
+                        info!(
+                            target: "reth::cli",
+                            address = %address,
+                            slots_scanned = idx,
+                            "Scanning storage slots"
+                        );
+                        last_log = Instant::now();
+                    }
                 }
+                (account, entries)
+            };
 
-                if last_log.elapsed() >= LOG_INTERVAL {
-                    info!(
-                        target: "reth::cli",
-                        address = %address,
-                        slots_scanned = idx,
-                        "Scanning storage slots"
-                    );
-                    last_log = Instant::now();
-                }
-            }
-
-            Ok::<_, eyre::Report>((account, entries))
+            Ok::<_, eyre::Report>((account, walker_entries))
         })??;
 
         let (account, storage_entries) = entries;

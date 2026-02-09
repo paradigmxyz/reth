@@ -16,3 +16,14 @@ impl KeyHasher for KeccakKeyHasher {
         keccak256(bytes)
     }
 }
+
+/// A key hasher that returns the input bytes as-is, assuming they are already a 32-byte hash.
+#[derive(Clone, Debug, Default)]
+pub struct IdentityKeyHasher;
+
+impl KeyHasher for IdentityKeyHasher {
+    #[inline]
+    fn hash_key<T: AsRef<[u8]>>(bytes: T) -> B256 {
+        B256::from_slice(bytes.as_ref())
+    }
+}

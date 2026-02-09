@@ -472,6 +472,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 EitherWriterDestination::account_changesets(self).is_static_file(),
             write_storage_changesets: save_mode.with_state() &&
                 EitherWriterDestination::storage_changesets(self).is_static_file(),
+            use_hashed_state: self.cached_storage_settings().use_hashed_state,
             tip,
             receipts_prune_mode: self.prune_modes.receipts,
             // Receipts are prunable if no receipts exist in SF yet and within pruning distance
@@ -3109,11 +3110,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         &self,
         changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<B256Map<BTreeSet<B256>>> {
-        // Aggregate all block changesets and make list of accounts that have been changed.
+        let use_hashed_state = self.cached_storage_settings().use_hashed_state;
         let mut hashed_storages = changesets
             .into_iter()
             .map(|(BlockNumberAddress((_, address)), storage_entry)| {
-                (keccak256(address), keccak256(storage_entry.key), storage_entry.value)
+                let hashed_key =
+                    if use_hashed_state { storage_entry.key } else { keccak256(storage_entry.key) };
+                (keccak256(address), hashed_key, storage_entry.value)
             })
             .collect::<Vec<_>>();
         hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));

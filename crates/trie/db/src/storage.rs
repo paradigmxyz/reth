@@ -2,7 +2,7 @@ use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use alloy_primitives::{keccak256, map::hash_map, Address, BlockNumber, B256};
 use reth_db_api::{models::BlockNumberAddress, transaction::DbTx};
 use reth_execution_errors::StorageRootError;
-use reth_storage_api::{BlockNumReader, StorageChangeSetReader};
+use reth_storage_api::{BlockNumReader, StorageChangeSetReader, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
@@ -34,7 +34,7 @@ pub fn hashed_storage_from_reverts_with_provider<P>(
     from: BlockNumber,
 ) -> ProviderResult<HashedStorage>
 where
-    P: StorageChangeSetReader + BlockNumReader,
+    P: StorageChangeSetReader + BlockNumReader + StorageSettingsCache,
 {
     let mut storage = HashedStorage::new(false);
     let tip = provider.last_block_number()?;
@@ -43,11 +43,17 @@ where
         return Ok(storage)
     }
 
+    let use_hashed = provider.cached_storage_settings().use_hashed_state;
+
     for (BlockNumberAddress((_, storage_address)), storage_change) in
         provider.storage_changesets_range(from..=tip)?
     {
         if storage_address == address {
-            let hashed_slot = keccak256(storage_change.key);
+            let hashed_slot = if use_hashed {
+                B256::from_slice(storage_change.key.as_ref())
+            } else {
+                keccak256(storage_change.key)
+            };
             if let hash_map::Entry::Vacant(entry) = storage.storage.entry(hashed_slot) {
                 entry.insert(storage_change.value);
             }

@@ -10,13 +10,13 @@ use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
     DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
-    StorageChangeSetReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
-    HashedPostStateSorted, KeccakKeyHasher,
+    HashedPostStateSorted, IdentityKeyHasher, KeccakKeyHasher,
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
@@ -198,7 +198,8 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + DBProvider
-        + BlockNumReader,
+        + BlockNumReader
+        + StorageSettingsCache,
 {
     /// Resolves the effective overlay (trie updates, hashed state).
     ///
@@ -336,10 +337,17 @@ where
                 let _guard = debug_span!(target: "providers::state::overlay", "Retrieving hashed state reverts").entered();
 
                 let start = Instant::now();
-                let res = HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
-                    provider,
-                    from_block + 1..,
-                )?;
+                let res = if provider.cached_storage_settings().use_hashed_state {
+                    HashedPostStateSorted::from_reverts::<IdentityKeyHasher>(
+                        provider,
+                        from_block + 1..,
+                    )?
+                } else {
+                    HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
+                        provider,
+                        from_block + 1..,
+                    )?
+                };
                 retrieve_hashed_state_reverts_duration = start.elapsed();
                 res
             };
@@ -450,7 +458,8 @@ where
         + PruneCheckpointReader
         + BlockNumReader
         + ChangeSetReader
-        + StorageChangeSetReader,
+        + StorageChangeSetReader
+        + StorageSettingsCache,
 {
     type Provider = OverlayStateProvider<F::Provider>;
 
