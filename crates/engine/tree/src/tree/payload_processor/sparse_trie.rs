@@ -346,6 +346,12 @@ where
                 MultiProofMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
+                // BAL (Block Access List) is a special message that carries the complete
+                // post-state for the block. Unlike incremental `StateUpdate` messages,
+                // a BAL contains all touched accounts/storage in one shot, so we:
+                //   1. Convert the BAL into a hashed post-state using the provider
+                //   2. Send the full hashed state followed by `FinishedStateUpdates`
+                //   3. Return immediately — no further messages need processing
                 MultiProofMessage::BlockAccessList(bal) => {
                     let Some(ref provider) = provider else {
                         error!(target: "engine::tree::payload_processor::sparse_trie", "Received BAL but no provider available");
@@ -359,6 +365,8 @@ where
                                 storages = hashed_state.storages.len(),
                                 "Processing BAL state update"
                             );
+                            // Send the complete hashed state, then signal that all state
+                            // updates are finished. Both sends must succeed or we abort.
                             if hashed_state_tx
                                 .send(SparseTrieTaskMessage::HashedState(hashed_state))
                                 .is_err()
@@ -371,6 +379,8 @@ where
                             {
                                 break;
                             }
+                            // BAL is terminal — the entire block state was delivered
+                            // in this single message, so we're done.
                             return;
                         }
                         Err(err) => {
@@ -379,6 +389,7 @@ where
                         }
                     }
                 }
+                // Empty proofs carry no state; skip and wait for the next message.
                 MultiProofMessage::EmptyProof { .. } => continue,
             };
             if hashed_state_tx.send(msg).is_err() {
