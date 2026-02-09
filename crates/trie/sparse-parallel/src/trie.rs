@@ -1983,7 +1983,8 @@ impl ParallelSparseTrie {
                 );
             } else {
                 // For lower subtrie roots, get the RLP node from the lower subtrie
-                let rlp_node_stack_item = self.lower_subtrie_rlp_node(path);
+                let rlp_node_stack_item =
+                    self.lower_subtrie_rlp_node(path, &mut update_actions_buf);
                 self.upper_subtrie.inner.buffers.rlp_node_stack.push(rlp_node_stack_item);
             }
         }
@@ -2011,22 +2012,37 @@ impl ParallelSparseTrie {
     /// directly. Otherwise, computes the hash by calling `update_hashes` with an empty prefix
     /// set - this will return cached hashes immediately for nodes that have them, and compute
     /// hashes only for nodes that don't.
-    fn lower_subtrie_rlp_node(&mut self, path: Nibbles) -> RlpNodeStackItem {
+    fn lower_subtrie_rlp_node(
+        &mut self,
+        path: Nibbles,
+        update_actions: &mut Option<Vec<SparseTrieUpdatesAction>>,
+    ) -> RlpNodeStackItem {
         let index = path_subtrie_index_unchecked(&path);
-        let lower_subtrie =
-            self.lower_subtries[index].as_revealed_mut().expect("lower subtrie must exist");
 
         // Check for pre-computed root_rlp_node from changed subtries
-        if let Some((rlp_node, node_type)) = lower_subtrie.root_rlp_node.clone() {
+        if let Some((rlp_node, node_type)) = self.lower_subtries[index]
+            .as_revealed_ref()
+            .expect("lower subtrie must exist")
+            .root_rlp_node
+            .clone()
+        {
             return RlpNodeStackItem { path, rlp_node, node_type };
         }
 
         // No pre-computed value - call update_hashes with empty prefix set.
         // This will use cached hashes where available, and compute only where needed.
         let mut empty_prefix_set = PrefixSetMut::default().freeze();
-        lower_subtrie.update_hashes(&mut empty_prefix_set, &mut None, &self.branch_node_masks);
+        self.lower_subtries[index]
+            .as_revealed_mut()
+            .expect("lower subtrie must exist")
+            .update_hashes(&mut empty_prefix_set, update_actions, &self.branch_node_masks);
 
-        let (rlp_node, node_type) = lower_subtrie.root_rlp_node.clone().expect("just computed");
+        let (rlp_node, node_type) = self.lower_subtries[index]
+            .as_revealed_ref()
+            .expect("lower subtrie must exist")
+            .root_rlp_node
+            .clone()
+            .expect("just computed");
         RlpNodeStackItem { path, rlp_node, node_type }
     }
 
