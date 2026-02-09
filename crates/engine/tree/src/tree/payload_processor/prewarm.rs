@@ -851,11 +851,14 @@ pub fn multiproof_targets_from_withdrawals(
 fn multiproof_targets_legacy_from_withdrawals(
     withdrawals: &[Withdrawal],
 ) -> VersionedMultiProofTargets {
-    let targets = withdrawals
-        .iter()
-        .filter(|w| w.amount > 0)
-        .map(|w| (keccak256(w.address), B256Set::default()))
-        .collect();
+    let mut targets = MultiProofTargets::with_capacity(withdrawals.len());
+    for withdrawal in withdrawals {
+        if withdrawal.amount > 0 {
+            targets
+                .entry(keccak256(withdrawal.address))
+                .or_insert_with(|| B256Set::with_capacity_and_hasher(0, Default::default()));
+        }
+    }
     VersionedMultiProofTargets::Legacy(targets)
 }
 
@@ -863,11 +866,21 @@ fn multiproof_targets_legacy_from_withdrawals(
 fn multiproof_targets_v2_from_withdrawals(
     withdrawals: &[Withdrawal],
 ) -> VersionedMultiProofTargets {
+    use alloy_primitives::{map::DefaultHashBuilder, Address};
     use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+    use std::collections::HashSet;
 
-    let account_targets =
-        withdrawals.iter().filter(|w| w.amount > 0).map(|w| keccak256(w.address).into()).collect();
-    VersionedMultiProofTargets::V2(MultiProofTargetsV2 { account_targets, ..Default::default() })
+    let mut seen = HashSet::<Address, DefaultHashBuilder>::with_capacity_and_hasher(
+        withdrawals.len(),
+        Default::default(),
+    );
+    let mut targets = MultiProofTargetsV2::default();
+    for withdrawal in withdrawals {
+        if withdrawal.amount > 0 && seen.insert(withdrawal.address) {
+            targets.account_targets.push(keccak256(withdrawal.address).into());
+        }
+    }
+    VersionedMultiProofTargets::V2(targets)
 }
 
 /// The events the pre-warm task can handle.
