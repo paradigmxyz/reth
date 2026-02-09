@@ -604,10 +604,19 @@ impl reth_codecs::Compact for TransactionSigned {
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
             reth_zstd_compressors::with_tx_decompressor(|decompressor| {
-                // TODO: enforce that zstd is only present at a "top" level type
+                // zstd compression must only be applied at the TransactionSigned level, not at
+                // nested Transaction levels. This ensures proper decompression and prevents
+                // conflicts if zstd support is added to Transaction::from_compact in the future.
+                let decompressed = decompressor.decompress(buf);
+                // Ensure the decompressed buffer doesn't contain zstd flags at the nested level.
+                // The first byte of a Transaction compact encoding should be the tx type
+                // identifier, not TransactionSigned flags (which would have zstd
+                // bit set).
+                if !decompressed.is_empty() && (decompressed[0] >> 3) & 1 != 0 {
+                    panic!("zstd compression detected at nested Transaction level, which is not supported");
+                }
                 let transaction_type = (bitflags & 0b110) >> 1;
-                let (transaction, _) =
-                    Transaction::from_compact(decompressor.decompress(buf), transaction_type);
+                let (transaction, _) = Transaction::from_compact(decompressed, transaction_type);
                 (transaction, buf)
             })
         } else {
