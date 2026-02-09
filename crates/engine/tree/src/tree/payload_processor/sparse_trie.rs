@@ -352,7 +352,7 @@ where
 
     /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
     ///
-    /// Should be called after the state root result has been sent.
+    /// Called before storing the trie into the preserved slot.
     pub(super) fn into_trie_for_reuse(
         self,
         prune_depth: usize,
