@@ -1114,8 +1114,7 @@ mod tests {
         updates_tx.send(MultiProofMessage::BlockAccessList(Arc::new(bal))).unwrap();
         drop(updates_tx);
 
-        let SparseTrieTaskMessage::HashedState(hashed_state) =
-            hashed_state_rx.recv().unwrap()
+        let SparseTrieTaskMessage::HashedState(hashed_state) = hashed_state_rx.recv().unwrap()
         else {
             panic!("expected HashedState message");
         };
