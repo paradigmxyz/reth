@@ -28,8 +28,10 @@ pub fn maybe_hash_key(key: B256, use_hashed_state: bool) -> B256 {
     }
 }
 
-/// A key hasher that passes through 32-byte inputs as-is (already hashed storage keys)
-/// and applies keccak256 to shorter inputs (e.g. 20-byte addresses).
+/// A [`KeyHasher`] for `use_hashed_state` mode where storage slot keys in changesets
+/// are already `keccak256`-hashed (32 bytes) but addresses remain plain (20 bytes).
+///
+/// 32-byte inputs are returned as-is; shorter inputs (addresses) are `keccak256`-hashed.
 #[derive(Clone, Debug, Default)]
 pub struct PreHashedKeyHasher;
 
