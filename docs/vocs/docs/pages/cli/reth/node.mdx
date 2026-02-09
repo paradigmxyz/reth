@@ -159,7 +159,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
 
-          [default: reth/<VERSION>-<SHA>/<ARCH>]
+          [default: reth/<VERSION>/<OS>-unknown-linux-gnu]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -1021,6 +1021,9 @@ Engine:
           Maximum number of storage tries to retain after sparse trie pruning
 
           [default: 100]
+
+      --engine.disable-sparse-trie-cache-pruning
+          Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved without any node pruning or storage trie eviction between blocks. Useful for benchmarking the effects of retaining the full trie cache
 
 ERA:
       --era.enable
