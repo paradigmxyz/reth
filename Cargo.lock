@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=gas-traces#d28d3d44351c316e59d1581530bcf662130608e8"
+source = "git+https://github.com/Soubhik-10/evm?branch=gas-traces#ac596e9fc03a81923691a8c2bb0b3a80c21eede5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -415,7 +415,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=gas-traces#d28d3d44351c316e59d1581530bcf662130608e8"
+source = "git+https://github.com/Soubhik-10/evm?branch=gas-traces#ac596e9fc03a81923691a8c2bb0b3a80c21eede5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6446,7 +6446,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "15.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "auto_impl",
  "revm",
@@ -7347,9 +7347,9 @@ dependencies = [
 
 [[package]]
 name = "rapidhash"
-version = "4.2.2"
+version = "4.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71ec30b38a417407efe7676bad0ca6b78f995f810185ece9af3bd5dc561185a9"
+checksum = "84816e4c99c467e92cf984ee6328caa976dfecd33a673544489d79ca2caaefe5"
 dependencies = [
  "rand 0.9.2",
  "rustversion",
@@ -11280,7 +11280,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "34.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -11298,7 +11298,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "8.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "bitvec",
  "phf",
@@ -11309,7 +11309,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "13.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -11325,7 +11325,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "14.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -11340,7 +11340,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "10.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -11353,7 +11353,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "9.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "auto_impl",
  "either",
@@ -11366,7 +11366,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "15.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -11379,12 +11379,13 @@ dependencies = [
  "revm-primitives",
  "revm-state",
  "serde",
+ "tracing",
 ]
 
 [[package]]
 name = "revm-inspector"
 version = "15.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "auto_impl",
  "either",
@@ -11420,7 +11421,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "32.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11432,7 +11433,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "32.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11455,7 +11456,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "22.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -11466,7 +11467,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "9.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=6aa06829d2caa2aa38606ed22b83354a7a7ff98e#6aa06829d2caa2aa38606ed22b83354a7a7ff98e"
+source = "git+https://github.com/Rimeeeeee/revm?branch=main#9bf12ba93af0009808bedf53ecef940a74e25c71"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.10.0",
@@ -11821,9 +11822,9 @@ dependencies = [
 
 [[package]]
 name = "ryu"
-version = "1.0.22"
+version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a50f4cf475b65d88e057964e0e9bb1f0aa9bbb2036dc65c64596b42932536984"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "ryu-js"
@@ -13420,9 +13421,9 @@ checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.22"
+version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9312f7c4f6ff9069b165498234ce8be658059c6728633667c526e27dc2cf1df5"
+checksum = "537dd038a89878be9b64dd4bd1b260315c1bb94f4d784956b81e27a088d9a09e"
 
 [[package]]
 name = "unicode-segmentation"
@@ -14512,9 +14513,9 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.19"
+version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ff05f8caa9038894637571ae6b9e29466c1f4f829d26c9b28f869a29cbe3445"
+checksum = "4de98dfa5d5b7fef4ee834d0073d560c9ca7b6c46a71d058c48db7960f8cfaf7"
 
 [[package]]
 name = "zstd"
