@@ -16,7 +16,7 @@ env:
 name: bench
 jobs:
   codspeed:
-    runs-on: depot-ubuntu-latest
+    runs-on: depot-ubuntu-latest-32
     strategy:
       matrix:
         partition: [1, 2]

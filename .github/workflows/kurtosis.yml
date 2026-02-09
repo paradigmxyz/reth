@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
     name: run kurtosis
-    runs-on: depot-ubuntu-latest
+    runs-on: depot-ubuntu-latest-32
     needs:
       - prepare-reth
     steps:
