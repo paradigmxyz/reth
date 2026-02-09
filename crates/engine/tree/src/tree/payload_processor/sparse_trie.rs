@@ -623,6 +623,7 @@ where
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
         // Process all storage updates in parallel, skipping tries with no pending updates.
+        let span = tracing::Span::current();
         let storage_results = storage_updates
             .iter_mut()
             .filter(|(_, updates)| !updates.is_empty())
@@ -634,6 +635,7 @@ where
             })
             .par_bridge_buffered()
             .map(|(address, updates, mut fetched, mut trie)| {
+                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie leaf updates", ?address).entered();
                 let mut targets = Vec::new();
 
                 trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
@@ -652,6 +654,8 @@ where
                 SparseTrieResult::Ok((address, targets, fetched, trie))
             })
             .collect::<Result<Vec<_>, _>>()?;
+
+        drop(span);
 
         for (address, targets, fetched, trie) in storage_results {
             self.fetched_storage_targets.insert(*address, fetched);
@@ -720,7 +724,8 @@ where
         }
 
         let span = debug_span!("compute_storage_roots").entered();
-        self.trie
+        self
+            .trie
             .storage_tries_mut()
             .iter_mut()
             .filter(|(address, trie)| {
@@ -729,8 +734,7 @@ where
             })
             .par_bridge_buffered()
             .for_each(|(address, trie)| {
-                let _span = debug_span!(parent: &span, "compute_storage_root", address = ?address)
-                    .entered();
+                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage root", ?address).entered();
                 trie.root().expect("updates are drained, trie should be revealed by now");
             });
         drop(span);
