@@ -18,18 +18,16 @@ jobs:
   prepare-reth-stable:
     uses: ./.github/workflows/prepare-reth.yml
     with:
-      image_tag: ghcr.io/paradigmxyz/reth:latest
-      binary_name: reth
-      cargo_features: "asm-keccak"
+      hive_target: hive-stable
       artifact_name: "reth-stable"
+    secrets: inherit
 
   prepare-reth-edge:
     uses: ./.github/workflows/prepare-reth.yml
     with:
-      image_tag: ghcr.io/paradigmxyz/reth:latest
-      binary_name: reth
-      cargo_features: "asm-keccak edge"
+      hive_target: hive-edge
       artifact_name: "reth-edge"
+    secrets: inherit
 
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'

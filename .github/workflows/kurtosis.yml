@@ -22,8 +22,8 @@ jobs:
   prepare-reth:
     uses: ./.github/workflows/prepare-reth.yml
     with:
-      image_tag: ghcr.io/paradigmxyz/reth:kurtosis-ci
-      binary_name: reth
+      hive_target: kurtosis
+    secrets: inherit
 
   test:
     timeout-minutes: 60
