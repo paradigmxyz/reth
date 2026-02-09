@@ -113,10 +113,10 @@ const DEFAULT_MAX_BACKGROUND_JOBS: i32 = 6;
 
 /// Default max open file descriptors for `RocksDB`.
 ///
-/// Caps the number of SST file handles RocksDB keeps open simultaneously.
+/// Caps the number of SST file handles `RocksDB` keeps open simultaneously.
 /// Set to 512 to stay within the common default OS `ulimit -n` of 1024,
 /// leaving headroom for MDBX, static files, and other I/O.
-/// RocksDB uses an internal table cache and re-opens files on demand,
+/// `RocksDB` uses an internal table cache and re-opens files on demand,
 /// so this has negligible performance impact on read-heavy workloads.
 const DEFAULT_MAX_OPEN_FILES: i32 = 512;
 
