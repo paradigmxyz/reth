@@ -227,6 +227,21 @@ impl SparseTrie for ParallelSparseTrie {
                     );
                     continue;
                 }
+                // For boundary leaves, check reachability from upper subtrie's parent branch
+                if node.path.len() == UPPER_TRIE_MAX_DEPTH &&
+                    !Self::is_boundary_leaf_reachable(
+                        &self.upper_subtrie.nodes,
+                        &node.path,
+                        &node.node,
+                    )
+                {
+                    trace!(
+                        target: "trie::parallel_sparse",
+                        path = ?node.path,
+                        "Boundary leaf not reachable from upper subtrie, skipping",
+                    );
+                    continue;
+                }
                 self.lower_subtries[idx].reveal(&node.path);
                 self.subtrie_heat.mark_modified(idx);
                 self.lower_subtries[idx]
@@ -244,6 +259,9 @@ impl SparseTrie for ParallelSparseTrie {
         // Reveal lower subtrie nodes in parallel
         {
             use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+
+            // Capture reference to upper subtrie nodes for boundary leaf reachability checks
+            let upper_nodes = &self.upper_subtrie.nodes;
 
             // Group the nodes by lower subtrie. This must be collected into a Vec in order for
             // rayon's `zip` to be happy.
@@ -296,6 +314,22 @@ impl SparseTrie for ParallelSparseTrie {
                     subtrie.nodes.reserve(nodes.len());
 
                     for node in nodes {
+                        // For boundary leaves, check reachability from upper subtrie's parent
+                        // branch
+                        if node.path.len() == UPPER_TRIE_MAX_DEPTH &&
+                            !Self::is_boundary_leaf_reachable(
+                                upper_nodes,
+                                &node.path,
+                                &node.node,
+                            )
+                        {
+                            trace!(
+                                target: "trie::parallel_sparse",
+                                path = ?node.path,
+                                "Boundary leaf not reachable from upper subtrie, skipping",
+                            );
+                            continue;
+                        }
                         // Reveal each node in the subtrie, returning early on any errors
                         let res = subtrie.reveal_node(node.path, &node.node, node.masks);
                         if res.is_err() {
@@ -2224,6 +2258,31 @@ impl ParallelSparseTrie {
         true
     }
 
+    /// Checks if a boundary leaf (at `path.len() == UPPER_TRIE_MAX_DEPTH`) is reachable from its
+    /// parent branch in the upper subtrie.
+    ///
+    /// This is used for leaves that sit at the upper/lower subtrie boundary, where the leaf is
+    /// in a lower subtrie but its parent branch is in the upper subtrie.
+    fn is_boundary_leaf_reachable(
+        upper_nodes: &HashMap<Nibbles, SparseNode>,
+        path: &Nibbles,
+        node: &TrieNode,
+    ) -> bool {
+        debug_assert_eq!(path.len(), UPPER_TRIE_MAX_DEPTH);
+
+        if !matches!(node, TrieNode::Leaf(_)) {
+            return true
+        }
+
+        let parent_path = path.slice(..path.len() - 1);
+        let leaf_nibble = path.get_unchecked(path.len() - 1);
+
+        match upper_nodes.get(&parent_path) {
+            Some(SparseNode::Branch { state_mask, .. }) => state_mask.is_bit_set(leaf_nibble),
+            _ => false,
+        }
+    }
+
     /// Returns a bitset of all subtries that are reachable from the upper trie. If subtrie is not
     /// reachable it means that it does not exist.
     fn reachable_subtries(&self) -> SubtriesBitmap {
@@ -2394,6 +2453,28 @@ impl SparseSubtrie {
         let current_level = core::mem::discriminant(&SparseSubtrieType::from_path(current_path));
         let child_level = core::mem::discriminant(&SparseSubtrieType::from_path(child_path));
         current_level == child_level
+    }
+
+    /// Checks if a leaf node at the given path is reachable from its parent branch node.
+    ///
+    /// Returns `true` if:
+    /// - The path is at the root (no parent to check)
+    /// - The parent branch node has the corresponding `state_mask` bit set for this leaf
+    ///
+    /// Returns `false` if the parent is a branch node that doesn't have the `state_mask` bit set
+    /// for this leaf's nibble, meaning the leaf is not reachable.
+    fn is_leaf_reachable_from_parent(&self, path: &Nibbles) -> bool {
+        if path.is_empty() {
+            return true
+        }
+
+        let parent_path = path.slice(..path.len() - 1);
+        let leaf_nibble = path.get_unchecked(path.len() - 1);
+
+        match self.nodes.get(&parent_path) {
+            Some(SparseNode::Branch { state_mask, .. }) => state_mask.is_bit_set(leaf_nibble),
+            _ => false,
+        }
     }
 
     /// Updates or inserts a leaf node at the specified key path with the provided RLP-encoded
@@ -2714,18 +2795,6 @@ impl SparseSubtrie {
                 self.nodes.insert(path, SparseNode::Empty);
             }
             TrieNode::Branch(branch) => {
-                // For a branch node, iterate over all children
-                let mut stack_ptr = branch.as_ref().first_child_index();
-                for idx in branch.state_mask.iter() {
-                    let mut child_path = path;
-                    child_path.push_unchecked(idx);
-                    if Self::is_child_same_level(&path, &child_path) {
-                        // Reveal each child node or hash it has, but only if the child is on
-                        // the same level as the parent.
-                        self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
-                    }
-                    stack_ptr += 1;
-                }
                 // Update the branch node entry in the nodes map, handling cases where a blinded
                 // node is now replaced with a revealed node.
                 match self.nodes.entry(path) {
@@ -2747,6 +2816,20 @@ impl SparseSubtrie {
                     Entry::Vacant(entry) => {
                         entry.insert(SparseNode::new_branch(branch.state_mask));
                     }
+                }
+
+                // For a branch node, iterate over all children. This must happen second so leaf
+                // children can check connectivity with parent branch.
+                let mut stack_ptr = branch.as_ref().first_child_index();
+                for idx in branch.state_mask.iter() {
+                    let mut child_path = path;
+                    child_path.push_unchecked(idx);
+                    if Self::is_child_same_level(&path, &child_path) {
+                        // Reveal each child node or hash it has, but only if the child is on
+                        // the same level as the parent.
+                        self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+                    }
+                    stack_ptr += 1;
                 }
             }
             TrieNode::Extension(ext) => match self.nodes.entry(path) {
@@ -2777,29 +2860,57 @@ impl SparseSubtrie {
                     }
                 }
             },
-            TrieNode::Leaf(leaf) => match self.nodes.entry(path) {
-                Entry::Occupied(mut entry) => match entry.get() {
-                    // Replace a hash node with a revealed leaf node and store leaf node value.
-                    SparseNode::Hash(hash) => {
-                        let mut full = *entry.key();
-                        full.extend(&leaf.key);
-                        self.inner.values.insert(full, leaf.value.clone());
-                        entry.insert(SparseNode::Leaf {
-                            key: leaf.key,
-                            // Memoize the hash of a previously blinded node in a new leaf
-                            // node.
-                            hash: Some(*hash),
-                        });
-                    }
-                    _ => unreachable!("checked that node is either a hash or non-existent"),
-                },
-                Entry::Vacant(entry) => {
-                    let mut full = *entry.key();
-                    full.extend(&leaf.key);
-                    entry.insert(SparseNode::new_leaf(leaf.key));
-                    self.inner.values.insert(full, leaf.value.clone());
+            TrieNode::Leaf(leaf) => {
+                // Skip the reachability check when path.len() == UPPER_TRIE_MAX_DEPTH because
+                // at that boundary the leaf is in the lower subtrie but its parent branch is in
+                // the upper subtrie. The subtrie cannot check connectivity across the upper/lower
+                // boundary, so that check happens in `reveal_nodes` instead.
+                if path.len() != UPPER_TRIE_MAX_DEPTH && !self.is_leaf_reachable_from_parent(&path)
+                {
+                    trace!(
+                        target: "trie::parallel_sparse",
+                        ?path,
+                        "Leaf not reachable from parent branch, skipping",
+                    );
+                    return Ok(false)
                 }
-            },
+
+                let mut full_key = path;
+                full_key.extend(&leaf.key);
+
+                match self.inner.values.entry(full_key) {
+                    Entry::Occupied(_) => {
+                        trace!(
+                            target: "trie::parallel_sparse",
+                            ?path,
+                            ?full_key,
+                            "Leaf full key value already present, skipping",
+                        );
+                        return Ok(false)
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(leaf.value.clone());
+                    }
+                }
+
+                match self.nodes.entry(path) {
+                    Entry::Occupied(mut entry) => match entry.get() {
+                        // Replace a hash node with a revealed leaf node and store leaf node value.
+                        SparseNode::Hash(hash) => {
+                            entry.insert(SparseNode::Leaf {
+                                key: leaf.key,
+                                // Memoize the hash of a previously blinded node in a new leaf
+                                // node.
+                                hash: Some(*hash),
+                            });
+                        }
+                        _ => unreachable!("checked that node is either a hash or non-existent"),
+                    },
+                    Entry::Vacant(entry) => {
+                        entry.insert(SparseNode::new_leaf(leaf.key));
+                    }
+                }
+            }
         }
 
         Ok(true)
