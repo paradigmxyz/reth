@@ -93,7 +93,9 @@ impl Command {
                 }
                 (account, entries)
             } else {
+                // Get account info
                 let account = tx.get::<tables::PlainAccountState>(address)?;
+                // Get storage entries
                 let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
                 let walker = cursor.walk_dup(Some(address), None)?;
                 let mut entries = Vec::new();

@@ -64,11 +64,13 @@ impl Command {
                 let mut total_value_bytes = 0usize;
                 let mut last_log = Instant::now();
 
+                // Walk all storage entries for this address
                 let walker = cursor.walk_dup(Some(address), None)?;
                 for entry in walker {
                     let (_, storage_entry) = entry?;
                     count += 1;
                     let mut buf = Vec::new();
+                    // StorageEntry encodes as: 32 bytes (key/subkey uncompressed) + compressed U256
                     let entry_len = storage_entry.to_compact(&mut buf);
                     total_value_bytes += entry_len;
 
@@ -84,6 +86,7 @@ impl Command {
                     }
                 }
 
+                // Add 20 bytes for the Address key (stored once per account in dupsort)
                 let total_size = if count > 0 { 20 + total_value_bytes } else { 0 };
 
                 Ok::<_, eyre::Report>((count, total_size))
@@ -98,6 +101,7 @@ impl Command {
         if use_hashed_state {
             println!("Hashed storage size: {} (estimated)", human_bytes(storage_size as f64));
         } else {
+            // Estimate hashed storage size: 32-byte B256 key instead of 20-byte Address
             let hashed_size_estimate = if slot_count > 0 { storage_size + 12 } else { 0 };
             let total_estimate = storage_size + hashed_size_estimate;
             println!("Plain storage size: {} (estimated)", human_bytes(storage_size as f64));

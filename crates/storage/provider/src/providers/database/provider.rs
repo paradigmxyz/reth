@@ -1252,9 +1252,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     }
 
     /// Like [`populate_bundle_state`](Self::populate_bundle_state), but reads current values from
-    /// `HashedAccounts`/`HashedStorages` by hashing the plain keys from changesets. The output
-    /// `BundleStateInit`/`RevertsInit` structures remain keyed by plain address — only the DB
-    /// lookups use hashed keys.
+    /// `HashedAccounts`/`HashedStorages`. Addresses are hashed via `keccak256` for DB lookups,
+    /// while storage keys from changesets are assumed to already be hashed and are used as-is.
+    /// The output `BundleStateInit`/`RevertsInit` structures remain keyed by plain address.
     fn populate_bundle_state_hashed(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
@@ -3115,6 +3115,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         &self,
         changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<B256Map<BTreeSet<B256>>> {
+        // Aggregate all block changesets and make list of accounts that have been changed.
         let use_hashed_state = self.cached_storage_settings().use_hashed_state;
         let mut hashed_storages = changesets
             .into_iter()
