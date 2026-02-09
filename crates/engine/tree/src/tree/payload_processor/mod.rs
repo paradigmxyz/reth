@@ -270,7 +270,7 @@ where
         } else {
             // Send withdrawal prefetch targets immediately since addresses are known upfront
             if let Some(withdrawals) = &env.withdrawals &&
-                withdrawals.iter().any(|w| w.amount > 0)
+                !withdrawals.is_empty()
             {
                 let targets = multiproof_targets_from_withdrawals(withdrawals, v2_proofs_enabled);
                 let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));

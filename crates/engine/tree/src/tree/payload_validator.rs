@@ -408,7 +408,7 @@ where
             parent_hash: input.parent_hash(),
             parent_state_root: parent_block.state_root(),
             transaction_count: input.transaction_count(),
-            withdrawals: input.withdrawals(),
+            withdrawals: input.withdrawals().map(|w| w.to_vec()),
         };
 
         // Plan the strategy used for state root computation.
@@ -1559,13 +1559,13 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     }
 
     /// Returns the withdrawals from the payload or block.
-    pub fn withdrawals(&self) -> Option<Vec<Withdrawal>>
+    pub fn withdrawals(&self) -> Option<&[Withdrawal]>
     where
         T::ExecutionData: ExecutionPayload,
     {
         match self {
-            Self::Payload(payload) => payload.withdrawals().cloned(),
-            Self::Block(block) => block.body().withdrawals().map(|w| w.to_vec()),
+            Self::Payload(payload) => payload.withdrawals().map(|w| w.as_slice()),
+            Self::Block(block) => block.body().withdrawals().map(|w| w.as_slice()),
         }
     }
 }

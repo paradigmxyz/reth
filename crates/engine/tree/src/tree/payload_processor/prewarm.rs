@@ -852,11 +852,7 @@ fn multiproof_targets_legacy_from_withdrawals(
     withdrawals: &[Withdrawal],
 ) -> VersionedMultiProofTargets {
     VersionedMultiProofTargets::Legacy(
-        withdrawals
-            .iter()
-            .filter(|w| w.amount > 0)
-            .map(|w| (keccak256(w.address), Default::default()))
-            .collect(),
+        withdrawals.iter().map(|w| (keccak256(w.address), Default::default())).collect(),
     )
 }
 
@@ -875,7 +871,7 @@ fn multiproof_targets_v2_from_withdrawals(
     VersionedMultiProofTargets::V2(MultiProofTargetsV2 {
         account_targets: withdrawals
             .iter()
-            .filter(|w| w.amount > 0 && seen.insert(w.address))
+            .filter(|w| seen.insert(w.address))
             .map(|w| keccak256(w.address).into())
             .collect(),
         ..Default::default()
