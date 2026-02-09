@@ -303,8 +303,6 @@ impl EngineNodeLauncher {
             // the CL
             loop {
                 tokio::select! {
-                    biased;
-
                     shutdown_req = &mut shutdown_rx => {
                         if let Ok(req) = shutdown_req {
                             debug!(target: "reth::cli", "received engine shutdown request");
