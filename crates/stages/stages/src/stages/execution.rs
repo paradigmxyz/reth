@@ -22,6 +22,7 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
+use reth_trie::KeccakKeyHasher;
 use std::{
     cmp::{max, Ordering},
     collections::BTreeMap,
@@ -463,6 +464,11 @@ where
 
         // write output
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
+
+        if provider.cached_storage_settings().use_hashed_state {
+            let hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
+            provider.write_hashed_state(&hashed_state.into_sorted())?;
+        }
 
         let db_write_duration = time.elapsed();
         debug!(
