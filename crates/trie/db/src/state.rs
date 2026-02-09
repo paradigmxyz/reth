@@ -7,12 +7,14 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_execution_errors::StateRootError;
-use reth_storage_api::{BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader};
+use reth_storage_api::{
+    BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache,
+};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, KeccakKeyHasher, KeyHasher,
-    StateRoot, StateRootProgress, TrieInputSorted,
+    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, IdentityKeyHasher,
+    KeccakKeyHasher, KeyHasher, StateRoot, StateRootProgress, TrieInputSorted,
 };
 use std::{
     collections::HashSet,
@@ -32,7 +34,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// An instance of state root calculator with account and storage prefixes loaded.
     fn incremental_root_calculator(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError>;
 
@@ -43,7 +45,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The updated state root.
     fn incremental_root(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError>;
 
@@ -56,7 +58,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The updated state root and the trie updates.
     fn incremental_root_with_updates(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 
@@ -67,7 +69,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The intermediate progress of state root computation.
     fn incremental_root_with_progress(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError>;
 
@@ -144,16 +146,19 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 
     fn incremental_root_calculator(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let loaded_prefix_sets =
-            load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, range)?;
+        let loaded_prefix_sets = if provider.cached_storage_settings().use_hashed_state {
+            load_prefix_sets_with_provider::<_, IdentityKeyHasher>(provider, range)?
+        } else {
+            load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, range)?
+        };
         Ok(Self::from_tx(provider.tx_ref()).with_prefix_sets(loaded_prefix_sets))
     }
 
     fn incremental_root(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root");
@@ -161,7 +166,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 
     fn incremental_root_with_updates(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root");
@@ -169,7 +174,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 
     fn incremental_root_with_progress(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root with progress");

@@ -1297,10 +1297,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             match account_state.2.entry(old_storage.key) {
                 hash_map::Entry::Vacant(entry) => {
                     let hashed_address = keccak256(address);
-                    let hashed_slot = keccak256(old_storage.key);
                     let new_storage = hashed_storage_cursor
-                        .seek_by_key_subkey(hashed_address, hashed_slot)?
-                        .filter(|storage| storage.key == hashed_slot)
+                        .seek_by_key_subkey(hashed_address, old_storage.key)?
+                        .filter(|storage| storage.key == old_storage.key)
                         .unwrap_or_default();
                     entry.insert((old_storage.value, new_storage.value));
                 }
@@ -2714,12 +2713,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 for (storage_key, (old_storage_value, _new_storage_value)) in storage {
                     let hashed_address = keccak256(address);
-                    let hashed_slot = keccak256(storage_key);
                     let storage_entry =
-                        StorageEntry { key: hashed_slot, value: *old_storage_value };
+                        StorageEntry { key: *storage_key, value: *old_storage_value };
                     if hashed_storage_cursor
-                        .seek_by_key_subkey(hashed_address, hashed_slot)?
-                        .filter(|s| s.key == hashed_slot)
+                        .seek_by_key_subkey(hashed_address, *storage_key)?
+                        .filter(|s| s.key == *storage_key)
                         .is_some()
                     {
                         hashed_storage_cursor.delete_current()?
@@ -2879,12 +2877,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 for (storage_key, (old_storage_value, _new_storage_value)) in storage {
                     let hashed_address = keccak256(address);
-                    let hashed_slot = keccak256(storage_key);
                     let storage_entry =
-                        StorageEntry { key: hashed_slot, value: *old_storage_value };
+                        StorageEntry { key: *storage_key, value: *old_storage_value };
                     if hashed_storage_cursor
-                        .seek_by_key_subkey(hashed_address, hashed_slot)?
-                        .filter(|s| s.key == hashed_slot)
+                        .seek_by_key_subkey(hashed_address, *storage_key)?
+                        .filter(|s| s.key == *storage_key)
                         .is_some()
                     {
                         hashed_storage_cursor.delete_current()?
