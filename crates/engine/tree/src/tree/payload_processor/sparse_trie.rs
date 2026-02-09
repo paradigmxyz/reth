@@ -6,13 +6,17 @@ use crate::tree::{
         dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
         VersionedMultiProofTargets, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
     },
-    payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate},
+    payload_processor::{
+        bal::bal_to_hashed_post_state,
+        multiproof::{MultiProofTaskMetrics, SparseTrieUpdate},
+    },
 };
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, ParallelBridgeBuffered};
+use reth_provider::StateProviderBox;
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, Nibbles,
     TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
@@ -288,6 +292,7 @@ where
         metrics: MultiProofTaskMetrics,
         trie: SparseStateTrie<A, S>,
         chunk_size: Option<usize>,
+        provider: Option<StateProviderBox>,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
@@ -295,7 +300,7 @@ where
         let parent_span = tracing::Span::current();
         executor.spawn_blocking(move || {
             let _span = debug_span!(parent: parent_span, "run_hashing_task").entered();
-            Self::run_hashing_task(updates, hashed_state_tx)
+            Self::run_hashing_task(updates, hashed_state_tx, provider)
         });
 
         Self {
@@ -326,6 +331,7 @@ where
     fn run_hashing_task(
         updates: CrossbeamReceiver<MultiProofMessage>,
         hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
+        provider: Option<StateProviderBox>,
     ) {
         while let Ok(message) = updates.recv() {
             let msg = match message {
@@ -340,9 +346,40 @@ where
                 MultiProofMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
-                MultiProofMessage::EmptyProof { .. } | MultiProofMessage::BlockAccessList(_) => {
-                    continue
+                MultiProofMessage::BlockAccessList(bal) => {
+                    let Some(ref provider) = provider else {
+                        error!(target: "engine::tree::payload_processor::sparse_trie", "Received BAL but no provider available");
+                        break;
+                    };
+                    match bal_to_hashed_post_state(&bal, provider.as_ref()) {
+                        Ok(hashed_state) => {
+                            debug!(
+                                target: "engine::tree::payload_processor::sparse_trie",
+                                accounts = hashed_state.accounts.len(),
+                                storages = hashed_state.storages.len(),
+                                "Processing BAL state update"
+                            );
+                            if hashed_state_tx
+                                .send(SparseTrieTaskMessage::HashedState(hashed_state))
+                                .is_err()
+                            {
+                                break;
+                            }
+                            if hashed_state_tx
+                                .send(SparseTrieTaskMessage::FinishedStateUpdates)
+                                .is_err()
+                            {
+                                break;
+                            }
+                            return;
+                        }
+                        Err(err) => {
+                            error!(target: "engine::tree::payload_processor::sparse_trie", ?err, "Failed to convert BAL to hashed state");
+                            return;
+                        }
+                    }
                 }
+                MultiProofMessage::EmptyProof { .. } => continue,
             };
             if hashed_state_tx.send(msg).is_err() {
                 break;
@@ -1028,4 +1065,74 @@ where
     );
 
     Ok(elapsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eip7928::{AccountChanges, BalanceChange, NonceChange, SlotChanges, StorageChange};
+    use alloy_primitives::{keccak256, Address, U256};
+    use reth_revm::test_utils::StateProviderTest;
+    use reth_trie_sparse_parallel::ParallelSparseTrie;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_run_hashing_task_bal() {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
+
+        let provider = StateProviderTest::default();
+        let provider_box: StateProviderBox = Box::new(provider);
+
+        let address = Address::random();
+        let slot = U256::from(42);
+        let value = U256::from(999);
+
+        let account_changes = AccountChanges {
+            address,
+            storage_changes: vec![SlotChanges {
+                slot,
+                changes: vec![StorageChange::new(0, value)],
+            }],
+            storage_reads: vec![],
+            balance_changes: vec![BalanceChange::new(0, U256::from(100))],
+            nonce_changes: vec![NonceChange::new(0, 1)],
+            code_changes: vec![],
+        };
+
+        let bal: Vec<AccountChanges> = vec![account_changes];
+
+        let handle = std::thread::spawn(move || {
+            SparseTrieCacheTask::<ParallelSparseTrie, ParallelSparseTrie>::run_hashing_task(
+                updates_rx,
+                hashed_state_tx,
+                Some(provider_box),
+            );
+        });
+
+        updates_tx.send(MultiProofMessage::BlockAccessList(Arc::new(bal))).unwrap();
+        drop(updates_tx);
+
+        let first = hashed_state_rx.recv().unwrap();
+        let hashed_state = match first {
+            SparseTrieTaskMessage::HashedState(state) => state,
+            _ => panic!("expected HashedState message"),
+        };
+
+        let hashed_address = keccak256(address);
+        let account = hashed_state.accounts.get(&hashed_address).unwrap().unwrap();
+        assert_eq!(account.balance, U256::from(100));
+        assert_eq!(account.nonce, 1);
+
+        let storage = hashed_state.storages.get(&hashed_address).unwrap();
+        let hashed_slot = keccak256(slot.to_be_bytes::<32>());
+        assert_eq!(*storage.storage.get(&hashed_slot).unwrap(), value);
+
+        let second = hashed_state_rx.recv().unwrap();
+        assert!(matches!(second, SparseTrieTaskMessage::FinishedStateUpdates));
+
+        assert!(hashed_state_rx.recv().is_err());
+
+        handle.join().unwrap();
+    }
 }
