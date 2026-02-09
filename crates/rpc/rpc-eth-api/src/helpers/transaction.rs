@@ -82,7 +82,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
             let recovered = recover_raw_transaction::<PoolPooledTx<Self::Pool>>(&tx)?;
-            self.send_transaction(TransactionOrigin::Local, WithEncoded::new(tx, recovered)).await
+            self.send_transaction(TransactionOrigin::External, WithEncoded::new(tx, recovered))
+                .await
         }
     }
 
