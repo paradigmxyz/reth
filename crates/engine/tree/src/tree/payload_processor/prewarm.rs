@@ -344,7 +344,8 @@ where
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
     }
 
-    /// Converts the BAL to [`HashedPostState`] and sends it to the multiproof task.
+    /// Converts the BAL to [`HashedPostState`](reth_trie::HashedPostState) and sends it to the
+    /// multiproof task.
     fn send_bal_hashed_state(&self, bal: &BlockAccessList) {
         let Some(to_multi_proof) = &self.to_multi_proof else { return };
 
