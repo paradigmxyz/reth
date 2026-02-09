@@ -47,7 +47,7 @@ pub struct InitStateCommand<C: ChainSpecParser> {
     /// Specifies whether to initialize the state without relying on EVM historical data.
     ///
     /// When enabled, and before inserting the state, it creates a dummy chain up to the last EVM
-    /// block specified. It then, appends the first block provided block.
+    /// block specified. It then appends the first provided block.
     ///
     /// - **Note**: **Do not** import receipts and blocks beforehand, or this will fail or be
     ///   ignored.
