@@ -147,9 +147,6 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     }
 
     /// Lookup a storage key in the `StoragesHistory` table using `EitherReader`.
-    ///
-    /// Accepts a [`StorageSlotKey`] so callers do not need to pre-hash; the
-    /// correct lookup key is derived internally based on the storage mode.
     pub fn storage_history_lookup(
         &self,
         address: Address,
