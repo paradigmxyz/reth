@@ -12,8 +12,7 @@ use rand::Rng;
 use reth_chainspec::ChainSpec;
 use reth_db_common::init::init_genesis;
 use reth_engine_tree::tree::{
-    executor::WorkloadExecutor, precompile_cache::PrecompileCacheMap, PayloadProcessor,
-    StateProviderBuilder, TreeConfig,
+    precompile_cache::PrecompileCacheMap, PayloadProcessor, StateProviderBuilder, TreeConfig,
 };
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::OnStateHook;
@@ -219,7 +218,7 @@ fn bench_state_root(c: &mut Criterion) {
                         setup_provider(&factory, &state_updates).expect("failed to setup provider");
 
                         let payload_processor = PayloadProcessor::new(
-                            WorkloadExecutor::new(reth_tasks::Runtime::test()),
+                            reth_tasks::Runtime::test(),
                             EthEvmConfig::new(factory.chain_spec()),
                             &TreeConfig::default(),
                             PrecompileCacheMap::default(),

@@ -4,7 +4,7 @@ use crate::tree::{
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::InstrumentedStateProvider,
-    payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
+    payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
     EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
@@ -172,7 +172,7 @@ where
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::new(runtime.clone()),
+            runtime.clone(),
             evm_config.clone(),
             &config,
             precompile_cache_map.clone(),
@@ -739,7 +739,7 @@ where
         let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor.executor().spawn_blocking(move || task_handle.run(receipts_len));
+        self.payload_processor.executor().spawn_blocking_fn(move || task_handle.run(receipts_len));
 
         let transaction_count = input.transaction_count();
         let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));
@@ -1353,7 +1353,7 @@ where
         };
 
         // Spawn task that computes trie data asynchronously.
-        self.payload_processor.executor().spawn_blocking(compute_trie_input_task);
+        self.payload_processor.executor().spawn_blocking_fn(compute_trie_input_task);
 
         ExecutedBlock::with_deferred_trie_data(
             Arc::new(block),

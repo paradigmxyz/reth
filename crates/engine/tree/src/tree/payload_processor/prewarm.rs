@@ -15,7 +15,6 @@ use crate::tree::{
     cached_state::{CachedStateProvider, SavedCache},
     payload_processor::{
         bal::{total_slots, BALSlotIter},
-        executor::WorkloadExecutor,
         multiproof::{MultiProofMessage, VersionedMultiProofTargets},
         PayloadExecutionCache,
     },
@@ -37,6 +36,7 @@ use reth_provider::{
     StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
+use reth_tasks::Runtime;
 use reth_trie::MultiProofTargets;
 use std::{
     ops::Range,
@@ -78,7 +78,7 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     /// The executor used to spawn execution tasks.
-    executor: WorkloadExecutor,
+    executor: Runtime,
     /// Shared execution cache.
     execution_cache: PayloadExecutionCache,
     /// Context provided to execution tasks
@@ -101,7 +101,7 @@ where
 {
     /// Initializes the task with the given transactions pending execution
     pub fn new(
-        executor: WorkloadExecutor,
+        executor: Runtime,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
@@ -148,7 +148,7 @@ where
         let max_concurrency = self.max_concurrency;
         let span = Span::current();
 
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_fn(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
 
             let (done_tx, done_rx) = mpsc::channel();
@@ -629,7 +629,7 @@ where
     fn spawn_workers<Tx>(
         self,
         workers_needed: usize,
-        task_executor: &WorkloadExecutor,
+        task_executor: &Runtime,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         done_tx: Sender<()>,
     ) -> CrossbeamSender<IndexedTransaction<Tx>>
@@ -641,7 +641,7 @@ where
         // Spawn workers that all pull from the shared receiver
         let executor = task_executor.clone();
         let span = Span::current();
-        task_executor.spawn_blocking(move || {
+        task_executor.spawn_blocking_fn(move || {
             let _enter = span.entered();
             for idx in 0..workers_needed {
                 let ctx = self.clone();
@@ -649,7 +649,7 @@ where
                 let done_tx = done_tx.clone();
                 let rx = tx_receiver.clone();
                 let span = debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm worker", idx);
-                executor.spawn_blocking(move || {
+                executor.spawn_blocking_fn(move || {
                     let _enter = span.entered();
                     ctx.transact_batch(rx, to_multi_proof, done_tx);
                 });
@@ -666,7 +666,7 @@ where
     fn spawn_bal_worker(
         &self,
         idx: usize,
-        executor: &WorkloadExecutor,
+        executor: &Runtime,
         bal: Arc<BlockAccessList>,
         range: Range<usize>,
         done_tx: Sender<()>,
@@ -680,7 +680,7 @@ where
             range_end = range.end
         );
 
-        executor.spawn_blocking(move || {
+        executor.spawn_blocking_fn(move || {
             let _enter = span.entered();
             ctx.prefetch_bal_slots(bal, range, done_tx);
         });

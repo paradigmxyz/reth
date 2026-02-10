@@ -1,6 +1,6 @@
 //! Sparse Trie task related functionality.
 
-use super::executor::WorkloadExecutor;
+use reth_tasks::Runtime;
 use crate::tree::{
     multiproof::{
         dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
@@ -282,7 +282,7 @@ where
 {
     /// Creates a new sparse trie, pre-populating with an existing [`SparseStateTrie`].
     pub(super) fn new_with_trie(
-        executor: &WorkloadExecutor,
+        executor: &Runtime,
         updates: CrossbeamReceiver<MultiProofMessage>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,
@@ -293,7 +293,7 @@ where
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
-        executor.spawn_blocking(move || {
+        executor.spawn_blocking_fn(move || {
             let _span = debug_span!(parent: parent_span, "run_hashing_task").entered();
             Self::run_hashing_task(updates, hashed_state_tx)
         });

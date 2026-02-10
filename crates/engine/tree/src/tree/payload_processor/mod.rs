@@ -15,7 +15,7 @@ use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use executor::WorkloadExecutor;
+use reth_tasks::Runtime;
 use metrics::{Counter, Histogram};
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
@@ -55,7 +55,7 @@ use std::{
 use tracing::{debug, debug_span, instrument, warn, Span};
 
 pub mod bal;
-pub mod executor;
+
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
@@ -109,7 +109,7 @@ where
     Evm: ConfigureEvm,
 {
     /// The executor used by to spawn tasks.
-    executor: WorkloadExecutor,
+    executor: Runtime,
     /// The most recent cache used for execution.
     execution_cache: PayloadExecutionCache,
     /// Metrics for trie operations
@@ -146,13 +146,13 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     /// Returns a reference to the workload executor driving payload tasks.
-    pub const fn executor(&self) -> &WorkloadExecutor {
+    pub const fn executor(&self) -> &Runtime {
         &self.executor
     }
 
     /// Creates a new payload processor.
     pub fn new(
-        executor: WorkloadExecutor,
+        executor: Runtime,
         evm_config: Evm,
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
@@ -282,7 +282,7 @@ where
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
         let proof_handle = ProofWorkerHandle::new(
-            self.executor.runtime(),
+            &self.executor,
             task_ctx,
             storage_worker_count,
             account_worker_count,
@@ -302,7 +302,7 @@ where
             // spawn multi-proof task
             let parent_span = span.clone();
             let saved_cache = prewarm_handle.saved_cache.clone();
-            self.executor.spawn_blocking(move || {
+            self.executor.spawn_blocking_fn(move || {
                 let _enter = parent_span.entered();
                 // Build a state provider for the multiproof task
                 let provider = provider_builder.build().expect("failed to build provider");
@@ -398,7 +398,7 @@ where
 
         // Spawn a task that processes out-of-order transactions from the task above and sends them
         // to the execution task in order.
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_fn(move || {
             let mut next_for_execution = 0;
             let mut queue = BTreeMap::new();
             while let Ok((idx, tx)) = ooo_rx.recv() {
@@ -466,7 +466,7 @@ where
         // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            self.executor.spawn_blocking(move || {
+            self.executor.spawn_blocking_fn(move || {
                 let mode = if let Some(bal) = bal {
                     PrewarmMode::BlockAccessList(bal)
                 } else {
@@ -521,7 +521,7 @@ where
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_fn(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 
@@ -1004,7 +1004,7 @@ mod tests {
     use crate::tree::{
         cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
         payload_processor::{
-            evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
+            evm_state_to_hashed_post_state, PayloadProcessor,
         },
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
@@ -1107,7 +1107,7 @@ mod tests {
     #[test]
     fn on_inserted_executed_block_populates_cache() {
         let payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::new(reth_tasks::Runtime::test()),
+            reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
@@ -1136,7 +1136,7 @@ mod tests {
     #[test]
     fn on_inserted_executed_block_skips_on_parent_mismatch() {
         let payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::new(reth_tasks::Runtime::test()),
+            reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
@@ -1271,7 +1271,7 @@ mod tests {
         }
 
         let mut payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::new(reth_tasks::Runtime::test()),
+            reth_tasks::Runtime::test(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
