@@ -748,17 +748,6 @@ impl PeersManager {
         }
     }
 
-    /// Called as follow-up for a discovered peer.
-    ///
-    /// The [`ForkId`] is retrieved from an ENR record that the peer announces over the discovery
-    /// protocol
-    pub(crate) fn set_discovered_fork_id(&mut self, peer_id: PeerId, fork_id: ForkId) {
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            trace!(target: "net::peers", ?peer_id, ?fork_id, "set discovered fork id");
-            peer.fork_id = Some(Box::new(fork_id));
-        }
-    }
-
     /// Called for a newly discovered peer.
     ///
     /// If the peer already exists, then the address, kind and `fork_id` will be updated.

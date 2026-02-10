@@ -172,7 +172,7 @@ pub struct PeersConfig {
     /// IPs within the specified CIDR ranges will be allowed.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub ip_filter: IpFilter,
-    /// If true, discovered peers without a confirmed ENR [`ForkId`] (EIP-868) will not be added
+    /// If true, discovered peers without a confirmed ENR [`ForkId`](alloy_eip2124::ForkId) (EIP-868) will not be added
     /// to the peer set until their fork ID is verified.
     ///
     /// This filters out peers from other networks that pollute the discovery table.
@@ -320,8 +320,8 @@ impl PeersConfig {
         self
     }
 
-    /// If set, discovered peers without a confirmed ENR [`ForkId`] will not be added to the peer
-    /// set until their fork ID is verified via EIP-868.
+    /// If set, discovered peers without a confirmed ENR [`ForkId`](alloy_eip2124::ForkId) will not
+    /// be added to the peer set until their fork ID is verified via EIP-868.
     pub const fn with_enforce_enr_fork_id(mut self, enforce: bool) -> Self {
         self.enforce_enr_fork_id = enforce;
         self

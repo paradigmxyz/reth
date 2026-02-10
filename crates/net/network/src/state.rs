@@ -340,8 +340,11 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 }
                 let udp_addr = record.udp_addr();
                 let addr = PeerAddr::new(tcp_addr, Some(udp_addr));
-                self.queued_messages
-                    .push_back(StateAction::DiscoveredEnrForkId { peer_id, addr, fork_id });
+                self.queued_messages.push_back(StateAction::DiscoveredEnrForkId {
+                    peer_id,
+                    addr,
+                    fork_id,
+                });
             }
         }
     }
