@@ -221,8 +221,6 @@ impl TaskManager {
     ///
     /// This must be polled for the duration of the program.
     ///
-    /// To obtain the current [`Runtime`] see [`Runtime::current`].
-    ///
     /// # Panics
     ///
     /// This will panic if called outside the context of a Tokio runtime.
