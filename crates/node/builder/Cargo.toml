@@ -96,6 +96,7 @@ reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = []
+debug-jitter = ["reth-engine-tree/debug-jitter"]
 js-tracer = [
     "reth-rpc/js-tracer",
     "reth-node-ethereum/js-tracer",

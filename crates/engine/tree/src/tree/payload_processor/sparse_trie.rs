@@ -723,8 +723,8 @@ where
             return Ok(());
         }
 
-        let span = debug_span!("compute_storage_roots").entered();
-        self
+        let span = tracing::Span::current();
+        let roots = self
             .trie
             .storage_tries_mut()
             .iter_mut()
@@ -732,12 +732,35 @@ where
                 self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty()) &&
                     !trie.is_root_cached()
             })
-            .par_bridge_buffered()
-            .for_each(|(address, trie)| {
+            .map(|(address, trie)| {
                 let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage root", ?address).entered();
-                trie.root().expect("updates are drained, trie should be revealed by now");
-            });
-        drop(span);
+                let root =
+                    trie.root().expect("updates are drained, trie should be revealed by now");
+
+                (address, root)
+            })
+            .collect::<Vec<_>>();
+
+        for (addr, storage_root) in roots {
+            if let Entry::Occupied(entry) = self.pending_account_updates.entry(*addr) &&
+                entry.get().is_some()
+            {
+                let account = entry.remove().expect("just checked, should be Some");
+                let encoded = if account.is_none_or(|account| account.is_empty()) &&
+                    storage_root == EMPTY_ROOT_HASH
+                {
+                    Vec::new()
+                } else {
+                    self.account_rlp_buf.clear();
+                    account
+                        .unwrap_or_default()
+                        .into_trie_account(storage_root)
+                        .encode(&mut self.account_rlp_buf);
+                    self.account_rlp_buf.clone()
+                };
+                self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+            }
+        }
 
         loop {
             let span = debug_span!("promote_updates", promoted = tracing::field::Empty).entered();
