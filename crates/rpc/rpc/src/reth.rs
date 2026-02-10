@@ -1,12 +1,17 @@
 use std::{future::Future, sync::Arc};
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
-use reth_chain_state::{CanonStateSubscriptions, PersistedBlockSubscriptions};
+use reth_chain_state::{
+    CanonStateNotification, CanonStateSubscriptions, ForkChoiceSubscriptions,
+    PersistedBlockSubscriptions,
+};
 use reth_errors::RethResult;
+use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::RethApiServer;
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
@@ -92,6 +97,7 @@ where
         + ChangeSetReader
         + StateProviderFactory
         + CanonStateSubscriptions
+        + ForkChoiceSubscriptions<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
         + PersistedBlockSubscriptions
         + 'static,
 {
@@ -126,6 +132,23 @@ where
 
         Ok(())
     }
+
+    /// Handler for `reth_subscribeFinalizedChainNotifications`
+    async fn reth_subscribe_finalized_chain_notifications(
+        &self,
+        pending: PendingSubscriptionSink,
+    ) -> jsonrpsee::core::SubscriptionResult {
+        let sink = pending.accept().await?;
+        let canon_stream = self.provider().canonical_state_stream();
+        let finalized_stream = self.provider().finalized_block_stream();
+        self.inner.task_spawner.spawn(Box::pin(finalized_chain_notifications(
+            sink,
+            canon_stream,
+            finalized_stream,
+        )));
+
+        Ok(())
+    }
 }
 
 /// Pipes all stream items to the subscription sink.
@@ -147,6 +170,71 @@ where
                     Ok(msg) => msg,
                     Err(err) => {
                         tracing::error!(target: "rpc::reth", %err, "Failed to serialize subscription message");
+                        break
+                    }
+                };
+                if sink.send(msg).await.is_err() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Buffers committed chain notifications and emits them when a new finalized block is received.
+async fn finalized_chain_notifications<N>(
+    sink: SubscriptionSink,
+    mut canon_stream: reth_chain_state::CanonStateNotificationStream<N>,
+    mut finalized_stream: reth_chain_state::ForkChoiceStream<SealedHeader<N::BlockHeader>>,
+) where
+    N: NodePrimitives,
+{
+    let mut buffered: Vec<CanonStateNotification<N>> = Vec::new();
+
+    loop {
+        tokio::select! {
+            _ = sink.closed() => {
+                break
+            }
+            maybe_canon = canon_stream.next() => {
+                let Some(notification) = maybe_canon else { break };
+                match &notification {
+                    CanonStateNotification::Commit { .. } => {
+                        buffered.push(notification);
+                    }
+                    CanonStateNotification::Reorg { .. } => {
+                        buffered.clear();
+                    }
+                }
+            }
+            maybe_finalized = finalized_stream.next() => {
+                let Some(finalized_header) = maybe_finalized else { break };
+                let finalized_num = finalized_header.number();
+
+                let mut committed = Vec::new();
+                buffered.retain(|n| {
+                    if *n.committed().range().end() <= finalized_num {
+                        committed.push(n.clone());
+                        false
+                    } else {
+                        true
+                    }
+                });
+
+                if committed.is_empty() {
+                    continue;
+                }
+
+                committed.sort_by_key(|n| *n.committed().range().start());
+
+                let msg = match SubscriptionMessage::new(
+                    sink.method_name(),
+                    sink.subscription_id(),
+                    &committed,
+                ) {
+                    Ok(msg) => msg,
+                    Err(err) => {
+                        tracing::error!(target: "rpc::reth", %err, "Failed to serialize finalized chain notification");
                         break
                     }
                 };

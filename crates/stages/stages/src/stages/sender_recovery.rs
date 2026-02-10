@@ -202,13 +202,16 @@ where
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        // Lookup the next tx id after unwind_to block (first tx to remove)
-        let unwind_tx_from = provider
-            .block_body_indices(unwind_to)?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
-            .next_tx_num();
+        if self.prune_mode.is_none_or(|mode| !mode.is_full()) {
+            // Lookup the next tx id after unwind_to block (first tx to remove)
+            let unwind_tx_from = provider
+                .block_body_indices(unwind_to)?
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
+                .next_tx_num();
 
-        EitherWriter::new_senders(provider, unwind_to)?.prune_senders(unwind_tx_from, unwind_to)?;
+            EitherWriter::new_senders(provider, unwind_to)?
+                .prune_senders(unwind_tx_from, unwind_to)?;
+        }
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)

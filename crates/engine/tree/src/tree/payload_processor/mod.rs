@@ -11,7 +11,7 @@ use crate::tree::{
     StateProviderBuilder, TreeConfig,
 };
 use alloy_eip7928::BlockAccessList;
-use alloy_eips::eip1898::BlockWithParent;
+use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -39,8 +39,9 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{RevealableSparseTrie, SparseStateTrie};
-use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
+use reth_trie_sparse::{
+    ParallelSparseTrie, ParallelismThresholds, RevealableSparseTrie, SparseStateTrie,
+};
 use std::{
     collections::BTreeMap,
     ops::Not,
@@ -252,15 +253,13 @@ where
             // When BAL is present, use BAL prewarming and send BAL to multiproof
             debug!(target: "engine::tree::payload_processor", "BAL present, using BAL prewarming");
 
-            // Send BAL message immediately to MultiProofTask
-            let _ = to_multi_proof.send(MultiProofMessage::BlockAccessList(Arc::clone(&bal)));
-
-            // Spawn with BAL prewarming
+            // The prewarm task converts the BAL to HashedPostState and sends it on
+            // to_multi_proof after slot prefetching completes.
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
                 provider_builder.clone(),
-                None, // Don't send proof targets when BAL is present
+                Some(to_multi_proof.clone()),
                 Some(bal),
                 v2_proofs_enabled,
             )
@@ -288,7 +287,7 @@ where
             v2_proofs_enabled,
         );
 
-        if !config.enable_sparse_trie_as_cache() {
+        if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(
                 proof_handle.clone(),
                 to_sparse_trie,
@@ -512,7 +511,7 @@ where
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
-        let disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
+        let disable_trie_cache = config.disable_trie_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
         let chunk_size =
@@ -552,7 +551,7 @@ where
                         .with_updates(true)
                 });
 
-            let mut task = if disable_sparse_trie_as_cache {
+            let mut task = if disable_trie_cache {
                 SpawnedSparseTrieTask::Cleared(SparseTrieTask::new(
                     sparse_trie_rx,
                     proof_worker_handle,
@@ -976,6 +975,9 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used to determine parallel worker count for prewarming.
     /// A value of 0 indicates the count is unknown.
     pub transaction_count: usize,
+    /// Withdrawals included in the block.
+    /// Used to generate prefetch targets for withdrawal addresses.
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
@@ -989,6 +991,7 @@ where
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
             transaction_count: 0,
+            withdrawals: None,
         }
     }
 }

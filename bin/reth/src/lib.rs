@@ -15,6 +15,7 @@
 //! - `asm-keccak`: Replaces the default, pure-Rust implementation of Keccak256 with one implemented
 //!   in assembly; see [the `keccak-asm` crate](https://github.com/DaniPopes/keccak-asm) for more
 //!   details and supported targets.
+//! - `min-debug-logs`: Disables all logs below `debug` level.
 //!
 //! ### Allocator Features
 //!

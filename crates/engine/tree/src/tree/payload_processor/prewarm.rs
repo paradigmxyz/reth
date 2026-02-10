@@ -14,7 +14,7 @@
 use crate::tree::{
     cached_state::{CachedStateProvider, SavedCache},
     payload_processor::{
-        bal::{total_slots, BALSlotIter},
+        bal::{self, total_slots, BALSlotIter},
         executor::WorkloadExecutor,
         multiproof::{MultiProofMessage, VersionedMultiProofTargets},
         PayloadExecutionCache,
@@ -24,6 +24,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::BlockAccessList;
+use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -163,7 +164,7 @@ where
             };
 
             // Spawn workers
-            let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor, to_multi_proof, done_tx.clone());
+            let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor,  to_multi_proof.clone(), done_tx.clone());
 
             // Distribute transactions to workers
             let mut tx_index = 0usize;
@@ -185,6 +186,16 @@ where
                 let _ = tx_sender.send(indexed_tx);
 
                 tx_index += 1;
+            }
+
+            // Send withdrawal prefetch targets after all transactions have been distributed
+            if let Some(to_multi_proof) = to_multi_proof
+                && let Some(withdrawals) = &ctx.env.withdrawals
+                && !withdrawals.is_empty()
+            {
+                let targets =
+                    multiproof_targets_from_withdrawals(withdrawals, ctx.v2_proofs_enabled);
+                let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
             }
 
             // drop sender and wait for all tasks to finish
@@ -273,6 +284,7 @@ where
                 target: "engine::tree::payload_processor::prewarm",
                 "Skipping BAL prewarm - no cache available"
             );
+            self.send_bal_hashed_state(&bal);
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
             return;
@@ -288,7 +300,7 @@ where
         );
 
         if total_slots == 0 {
-            // No slots to prefetch, signal completion immediately
+            self.send_bal_hashed_state(&bal);
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
             return;
@@ -333,8 +345,49 @@ where
             "All BAL prewarm workers completed"
         );
 
+        // Convert BAL to HashedPostState and send to multiproof task
+        self.send_bal_hashed_state(&bal);
+
         // Signal that execution has finished
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
+    }
+
+    /// Converts the BAL to [`HashedPostState`](reth_trie::HashedPostState) and sends it to the
+    /// multiproof task.
+    fn send_bal_hashed_state(&self, bal: &BlockAccessList) {
+        let Some(to_multi_proof) = &self.to_multi_proof else { return };
+
+        let provider = match self.ctx.provider.build() {
+            Ok(provider) => provider,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    ?err,
+                    "Failed to build provider for BAL hashed state conversion"
+                );
+                return;
+            }
+        };
+
+        match bal::bal_to_hashed_post_state(bal, &provider) {
+            Ok(hashed_state) => {
+                debug!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    accounts = hashed_state.accounts.len(),
+                    storages = hashed_state.storages.len(),
+                    "Converted BAL to hashed post state"
+                );
+                let _ = to_multi_proof.send(MultiProofMessage::HashedStateUpdate(hashed_state));
+                let _ = to_multi_proof.send(MultiProofMessage::FinishedStateUpdates);
+            }
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    ?err,
+                    "Failed to convert BAL to hashed state"
+                );
+            }
+        }
     }
 
     /// Executes the task.
@@ -486,6 +539,10 @@ where
         // we must disable the nonce check so that we can execute the transaction even if the nonce
         // doesn't match what's on chain.
         evm_env.cfg_env.disable_nonce_check = true;
+
+        // disable the balance check so that transactions from senders who were funded by earlier
+        // transactions in the block can still be prewarmed
+        evm_env.cfg_env.disable_balance_check = true;
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
@@ -822,6 +879,27 @@ fn multiproof_targets_v2_from_state(state: EvmState) -> (VersionedMultiProofTarg
     }
 
     (VersionedMultiProofTargets::V2(targets), storage_target_count)
+}
+
+/// Returns [`VersionedMultiProofTargets`] for withdrawal addresses.
+///
+/// Withdrawals only modify account balances (no storage), so the targets contain
+/// only account-level entries with empty storage sets.
+fn multiproof_targets_from_withdrawals(
+    withdrawals: &[Withdrawal],
+    v2_enabled: bool,
+) -> VersionedMultiProofTargets {
+    use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+    if v2_enabled {
+        VersionedMultiProofTargets::V2(MultiProofTargetsV2 {
+            account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
+            ..Default::default()
+        })
+    } else {
+        VersionedMultiProofTargets::Legacy(
+            withdrawals.iter().map(|w| (keccak256(w.address), Default::default())).collect(),
+        )
+    }
 }
 
 /// The events the pre-warm task can handle.

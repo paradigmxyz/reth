@@ -556,10 +556,11 @@ where
     #[inline]
     pub async fn add_pool_transaction(
         &self,
+        origin: reth_transaction_pool::TransactionOrigin,
         transaction: <N::Pool as TransactionPool>::Transaction,
     ) -> Result<AddedTransactionOutcome, EthApiError> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        let request = reth_transaction_pool::BatchTxRequest::new(transaction, response_tx);
+        let request = reth_transaction_pool::BatchTxRequest::new(origin, transaction, response_tx);
 
         self.tx_batch_sender()
             .send(request)
