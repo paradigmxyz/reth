@@ -65,7 +65,6 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
-    maybe_hash_key,
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, StoredNibbles,
 };
@@ -3120,7 +3119,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         let mut hashed_storages = changesets
             .into_iter()
             .map(|(BlockNumberAddress((_, address)), storage_entry)| {
-                let hashed_key = maybe_hash_key(storage_entry.key, use_hashed_state);
+                let hashed_key = if use_hashed_state { storage_entry.key } else { keccak256(storage_entry.key) };
                 (keccak256(address), hashed_key, storage_entry.value)
             })
             .collect::<Vec<_>>();

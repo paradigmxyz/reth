@@ -14,7 +14,6 @@ use reth_primitives_traits::StorageEntry;
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
-    maybe_hash_key,
     prefix_set::{PrefixSetMut, TriePrefixSets},
     Nibbles,
 };
@@ -62,7 +61,7 @@ where
         storage_prefix_sets
             .entry(hashed_address)
             .or_default()
-            .insert(Nibbles::unpack(maybe_hash_key(key, use_hashed_state)));
+            .insert(Nibbles::unpack(if use_hashed_state { key } else { keccak256(key) }));
     }
 
     Ok(TriePrefixSets {

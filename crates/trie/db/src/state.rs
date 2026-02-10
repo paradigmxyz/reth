@@ -10,9 +10,9 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, maybe_hash_key,
-    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostStateSorted,
-    HashedStorageSorted, StateRoot, StateRootProgress, TrieInputSorted,
+    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
+    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, StateRoot,
+    StateRootProgress, TrieInputSorted,
 };
 use std::{
     collections::HashSet,
@@ -335,7 +335,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
                     storages
                         .entry(hashed_address)
                         .or_default()
-                        .push((maybe_hash_key(storage.key, use_hashed_state), storage.value));
+                        .push((if use_hashed_state { storage.key } else { keccak256(storage.key) }, storage.value));
                 }
             }
         }
