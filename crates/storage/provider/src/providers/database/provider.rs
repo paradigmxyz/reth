@@ -3186,12 +3186,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         &self,
         storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageEntry>)>,
     ) -> ProviderResult<B256Map<BTreeSet<B256>>> {
-        debug_assert!(
-            !self.cached_storage_settings().use_hashed_state,
-            "insert_storage_for_hashing expects plain (unhashed) storage keys; \
-             in v2 mode, HashedStorages is written directly by execution"
-        );
-
         // hash values
         let hashed_storages =
             storages.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
