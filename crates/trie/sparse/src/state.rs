@@ -366,42 +366,18 @@ where
         &mut self,
         multiproof: reth_trie_common::DecodedMultiProofV2,
     ) -> SparseStateTrieResult<()> {
-        // Reveal the account proof nodes.
-        //
-        // Skip revealing account nodes if this result only contains storage proofs.
-        // `reveal_account_v2_proof_nodes` will return an error if empty `nodes` are passed into it
-        // before the accounts trie root was revealed. This might happen in cases when first account
-        // trie proof arrives later than first storage trie proof even though the account trie proof
-        // was requested first.
-        if !multiproof.account_proofs.is_empty() {
-            self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
-        }
-
-        #[cfg(not(feature = "std"))]
-        // If nostd then serially reveal storage proof nodes for each storage trie
-        {
-            for (account, storage_proofs) in multiproof.storage_proofs {
-                self.reveal_storage_v2_proof_nodes(account, storage_proofs)?;
-                // Mark this storage trie as hot (accessed this tick)
-                self.storage.modifications.mark_accessed(account);
-            }
-
-            Ok(())
-        }
-
         #[cfg(feature = "std")]
-        // If std then reveal storage proofs in parallel
-        {
+        if multiproof.account_proofs.len() + multiproof.storage_proofs.len() > 128 {
             use rayon::iter::ParallelIterator;
             use reth_primitives_traits::ParallelBridgeBuffered;
 
             let retain_updates = self.retain_updates;
             let skip_filtering = self.skip_proof_node_filtering;
 
-            // Process all storage trie revealings in parallel, having first removed the
-            // `reveal_nodes` tracking and `RevealableSparseTrie`s for each account from their
-            // HashMaps. These will be returned after processing.
-            let results: Vec<_> = multiproof
+            let has_account_proofs = !multiproof.account_proofs.is_empty();
+
+            // Prepare storage data by taking tries/paths out of maps before parallel work.
+            let storage_inputs: Vec<_> = multiproof
                 .storage_proofs
                 .into_iter()
                 .map(|(account, storage_proofs)| {
@@ -409,27 +385,67 @@ where
                     let trie = self.storage.take_or_create_trie(&account);
                     (account, storage_proofs, revealed_nodes, trie)
                 })
-                .par_bridge_buffered()
-                .map(|(account, storage_proofs, mut revealed_nodes, mut trie)| {
+                .collect();
+
+            // Split self into disjoint borrows for rayon::join.
+            let state = &mut self.state;
+            let revealed_account_paths = &mut self.revealed_account_paths;
+
+            // Run account and storage reveals in parallel using rayon::join.
+            let (account_result, storage_results) = rayon::join(
+                || {
+                    if !has_account_proofs {
+                        return Ok((ProofNodesMetricValues { total_nodes: 0, skipped_nodes: 0 }, Vec::new()))
+                            as SparseStateTrieResult<_>;
+                    }
                     let mut bufs = Vec::new();
-                    let result = Self::reveal_storage_v2_proof_nodes_inner(
-                        account,
-                        storage_proofs,
-                        &mut revealed_nodes,
-                        &mut trie,
+                    let metric_values = Self::reveal_account_v2_proof_nodes_inner(
+                        multiproof.account_proofs,
+                        revealed_account_paths,
+                        state,
                         &mut bufs,
                         retain_updates,
                         skip_filtering,
-                    );
-                    (account, result, revealed_nodes, trie, bufs)
-                })
-                .collect();
+                    )?;
+                    Ok((metric_values, bufs))
+                },
+                || {
+                    storage_inputs
+                        .into_iter()
+                        .par_bridge_buffered()
+                        .map(|(account, storage_proofs, mut revealed_nodes, mut trie)| {
+                            let mut bufs = Vec::new();
+                            let result = Self::reveal_storage_v2_proof_nodes_inner(
+                                account,
+                                storage_proofs,
+                                &mut revealed_nodes,
+                                &mut trie,
+                                &mut bufs,
+                                retain_updates,
+                                skip_filtering,
+                            );
+                            (account, result, revealed_nodes, trie, bufs)
+                        })
+                        .collect::<Vec<_>>()
+                },
+            );
 
+            // Process account result.
+            let (_account_metric_values, account_bufs) = account_result?;
+            #[cfg(feature = "metrics")]
+            {
+                self.metrics
+                    .increment_total_account_nodes(_account_metric_values.total_nodes as u64);
+                self.metrics
+                    .increment_skipped_account_nodes(_account_metric_values.skipped_nodes as u64);
+            }
+            self.deferred_drops.proof_nodes_bufs.extend(account_bufs);
+
+            // Process storage results.
             let mut any_err = Ok(());
-            for (account, result, revealed_nodes, trie, bufs) in results {
+            for (account, result, revealed_nodes, trie, bufs) in storage_results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
-                // Mark this storage trie as hot (accessed this tick)
                 self.storage.modifications.mark_accessed(account);
                 if let Ok(_metric_values) = result {
                     #[cfg(feature = "metrics")]
@@ -442,13 +458,22 @@ where
                 } else {
                     any_err = result.map(|_| ());
                 }
-
-                // Keep buffers for deferred dropping
                 self.deferred_drops.proof_nodes_bufs.extend(bufs);
             }
 
-            any_err
+            return any_err
         }
+
+        if !multiproof.account_proofs.is_empty() {
+            self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
+        }
+
+        for (account, storage_proofs) in multiproof.storage_proofs {
+            self.reveal_storage_v2_proof_nodes(account, storage_proofs)?;
+            self.storage.modifications.mark_accessed(account);
+        }
+
+        Ok(())
     }
 
     /// Reveals an account multiproof.
@@ -509,59 +534,78 @@ where
     /// V2 proofs already include the masks in the `ProofTrieNode` structure,
     /// so no separate masks map is needed.
     pub fn reveal_account_v2_proof_nodes(
-        &mut self,
-        mut nodes: Vec<ProofTrieNode>,
+       &mut self,
+       nodes: Vec<ProofTrieNode>,
     ) -> SparseStateTrieResult<()> {
-        if self.skip_proof_node_filtering {
-            let capacity = estimate_v2_proof_capacity(&nodes);
+       let mut bufs = Vec::new();
+       let _metric_values = Self::reveal_account_v2_proof_nodes_inner(
+           nodes,
+           &mut self.revealed_account_paths,
+           &mut self.state,
+           &mut bufs,
+           self.retain_updates,
+           self.skip_proof_node_filtering,
+       )?;
 
-            #[cfg(feature = "metrics")]
-            self.metrics.increment_total_account_nodes(nodes.len() as u64);
+       #[cfg(feature = "metrics")]
+       {
+           self.metrics.increment_total_account_nodes(_metric_values.total_nodes as u64);
+           self.metrics.increment_skipped_account_nodes(_metric_values.skipped_nodes as u64);
+       }
 
-            let root_node = nodes.iter().find(|n| n.path.is_empty());
-            let trie = if let Some(root_node) = root_node {
-                trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
-                self.state.reveal_root(
-                    root_node.node.clone(),
-                    root_node.masks,
-                    self.retain_updates,
-                )?
-            } else {
-                self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
-            };
-            trie.reserve_nodes(capacity);
-            trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof (unfiltered)");
-            trie.reveal_nodes(&mut nodes)?;
+       self.deferred_drops.proof_nodes_bufs.extend(bufs);
 
-            self.deferred_drops.proof_nodes_bufs.push(nodes);
-            return Ok(())
-        }
+       Ok(())
+    }
 
-        let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values: _metric_values } =
-            filter_revealed_v2_proof_nodes(nodes, &mut self.revealed_account_paths)?;
+    /// Reveals account V2 proof nodes. This is an internal static function
+    /// designed to be callable from parallel contexts.
+    fn reveal_account_v2_proof_nodes_inner(
+       mut nodes: Vec<ProofTrieNode>,
+       revealed_nodes: &mut HashSet<Nibbles>,
+       trie: &mut RevealableSparseTrie<A>,
+       bufs: &mut Vec<Vec<ProofTrieNode>>,
+       retain_updates: bool,
+       skip_filtering: bool,
+    ) -> SparseStateTrieResult<ProofNodesMetricValues> {
+       if skip_filtering {
+           let capacity = estimate_v2_proof_capacity(&nodes);
+           let metric_values =
+               ProofNodesMetricValues { total_nodes: nodes.len(), skipped_nodes: 0 };
 
-        #[cfg(feature = "metrics")]
-        {
-            self.metrics.increment_total_account_nodes(_metric_values.total_nodes as u64);
-            self.metrics.increment_skipped_account_nodes(_metric_values.skipped_nodes as u64);
-        }
+           let root_node = nodes.iter().find(|n| n.path.is_empty());
+           let trie = if let Some(root_node) = root_node {
+               trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
+               trie.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
+           } else {
+               trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+           };
+           trie.reserve_nodes(capacity);
+           trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof (unfiltered)");
+           trie.reveal_nodes(&mut nodes)?;
 
-        let trie = if let Some(root_node) = root_node {
-            trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
-            self.state.reveal_root(root_node.node, root_node.masks, self.retain_updates)?
-        } else {
-            self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
-        };
+           bufs.push(nodes);
+           return Ok(metric_values)
+       }
 
-        trie.reserve_nodes(new_nodes);
+       let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values } =
+           filter_revealed_v2_proof_nodes(nodes, revealed_nodes)?;
 
-        trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
-        trie.reveal_nodes(&mut nodes)?;
+       let trie = if let Some(root_node) = root_node {
+           trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
+           trie.reveal_root(root_node.node, root_node.masks, retain_updates)?
+       } else {
+           trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+       };
 
-        // Keep buffer for deferred dropping
-        self.deferred_drops.proof_nodes_bufs.push(nodes);
+       trie.reserve_nodes(new_nodes);
 
-        Ok(())
+       trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
+       trie.reveal_nodes(&mut nodes)?;
+
+       bufs.push(nodes);
+
+       Ok(metric_values)
     }
 
     /// Reveals storage proof nodes from a V2 proof for the given address.
