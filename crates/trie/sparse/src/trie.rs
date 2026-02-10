@@ -164,6 +164,11 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         Some(self.as_revealed_mut()?.root())
     }
 
+    /// Returns true if the root node is cached and does not need any recomputation.
+    pub fn is_root_cached(&self) -> bool {
+        self.as_revealed_ref().is_some_and(|trie| trie.is_root_cached())
+    }
+
     /// Returns the root hash along with any accumulated update information.
     ///
     /// This is useful for when you need both the root hash and information about
