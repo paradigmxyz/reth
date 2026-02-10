@@ -332,21 +332,6 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_get_block_access_lists_version_support() {
-        let (tx, _rx) = oneshot::channel();
-        let req: PeerRequest<EthNetworkPrimitives> =
-            PeerRequest::GetBlockAccessLists { request: GetBlockAccessLists(vec![]), response: tx };
-
-        assert!(!req.is_supported_by_eth_version(EthVersion::Eth70));
-        assert!(req.is_supported_by_eth_version(EthVersion::Eth71));
-    }
-}
-
 /// A Cloneable connection for sending _requests_ directly to the session of a peer.
 pub struct PeerRequestSender<R = PeerRequest> {
     /// id of the remote node.
@@ -383,5 +368,20 @@ impl<R> PeerRequestSender<R> {
 impl<R> fmt::Debug for PeerRequestSender<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PeerRequestSender").field("peer_id", &self.peer_id).finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_block_access_lists_version_support() {
+        let (tx, _rx) = oneshot::channel();
+        let req: PeerRequest<EthNetworkPrimitives> =
+            PeerRequest::GetBlockAccessLists { request: GetBlockAccessLists(vec![]), response: tx };
+
+        assert!(!req.is_supported_by_eth_version(EthVersion::Eth70));
+        assert!(req.is_supported_by_eth_version(EthVersion::Eth71));
     }
 }
