@@ -102,6 +102,16 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             s = s.with_storage_changesets_in_static_files(v);
         }
 
+        // Warn if rocksdb args were explicitly set but the feature is not available
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        if self.rocksdb.all ||
+            self.rocksdb.tx_hash.is_some() ||
+            self.rocksdb.storages_history.is_some() ||
+            self.rocksdb.account_history.is_some()
+        {
+            warn!(target: "reth::cli", "Provided RocksDB arguments do not have effect, compile with the `rocksdb` feature on a supported (Unix) platform");
+        }
+
         // Apply rocksdb overrides
         // --rocksdb.all sets all rocksdb flags to true
         if self.rocksdb.all {
