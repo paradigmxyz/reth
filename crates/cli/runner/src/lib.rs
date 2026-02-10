@@ -61,13 +61,10 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
     {
-        let AsyncCliRunner { context, mut task_manager, runtime } =
-            AsyncCliRunner::new(self.runtime);
-
-        let handle = runtime.handle().clone();
+        let (context, mut task_manager) = cli_context(&self.runtime);
 
         // Executes the command until it finished or ctrl-c was fired
-        let command_res = handle.block_on(run_to_completion_or_panic(
+        let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
             &mut task_manager,
             run_until_ctrl_c(command(context)),
         ));
@@ -82,7 +79,7 @@ impl CliRunner {
             task_manager.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
         }
 
-        runtime_shutdown(runtime, true);
+        runtime_shutdown(self.runtime, true);
 
         command_res
     }
@@ -98,17 +95,16 @@ impl CliRunner {
         F: Future<Output = Result<(), E>> + Send + 'static,
         E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
     {
-        let AsyncCliRunner { context, mut task_manager, runtime } =
-            AsyncCliRunner::new(self.runtime);
+        let (context, mut task_manager) = cli_context(&self.runtime);
 
         // Spawn the command on the blocking thread pool
-        let handle = runtime.handle().clone();
+        let handle = self.runtime.handle().clone();
         let handle2 = handle.clone();
         let command_handle =
             handle.spawn_blocking(move || handle2.block_on(command(context)));
 
         // Wait for the command to complete or ctrl-c
-        let command_res = runtime.handle().block_on(run_to_completion_or_panic(
+        let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
             &mut task_manager,
             run_until_ctrl_c(
                 async move { command_handle.await.expect("Failed to join blocking task") },
@@ -122,7 +118,7 @@ impl CliRunner {
             task_manager.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
         }
 
-        runtime_shutdown(runtime, true);
+        runtime_shutdown(self.runtime, true);
 
         command_res
     }
@@ -170,24 +166,11 @@ impl CliRunner {
     }
 }
 
-/// [`CliRunner`] configuration when executing commands asynchronously
-struct AsyncCliRunner {
-    context: CliContext,
-    task_manager: TaskManager,
-    runtime: reth_tasks::Runtime,
-}
-
-// === impl AsyncCliRunner ===
-
-impl AsyncCliRunner {
-    /// Given a [`Runtime`](reth_tasks::Runtime), extracts the [`TaskManager`] and creates
-    /// the [`CliContext`].
-    fn new(runtime: reth_tasks::Runtime) -> Self {
-        let task_manager =
-            runtime.take_task_manager().expect("Runtime must contain a TaskManager");
-        let task_executor = runtime.clone();
-        Self { context: CliContext { task_executor }, task_manager, runtime }
-    }
+/// Extracts the [`TaskManager`] from the runtime and creates the [`CliContext`].
+fn cli_context(runtime: &reth_tasks::Runtime) -> (CliContext, TaskManager) {
+    let task_manager = runtime.take_task_manager().expect("Runtime must contain a TaskManager");
+    let context = CliContext { task_executor: runtime.clone() };
+    (context, task_manager)
 }
 
 /// Additional context provided by the [`CliRunner`] when executing commands
