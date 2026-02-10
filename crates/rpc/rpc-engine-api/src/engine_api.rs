@@ -532,7 +532,7 @@ where
         let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
 
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking_task(Box::pin(async move {
             if count > MAX_PAYLOAD_BODIES_LIMIT {
                 tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count })).ok();
                 return;
@@ -659,7 +659,7 @@ where
         let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
 
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking_task(Box::pin(async move {
             let mut result = Vec::with_capacity(hashes.len());
             for hash in hashes {
                 let block_result = inner.provider.block(BlockHashOrNumber::Hash(hash));

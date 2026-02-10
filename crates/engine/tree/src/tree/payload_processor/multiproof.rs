@@ -618,7 +618,7 @@ pub(crate) struct MultiProofTaskMetrics {
 /// │              ProofWorkerHandle                                │ │
 /// │  ┌─────────────────────┐   ┌────────────────────────┐        │ │
 /// │  │ Storage Worker Pool │   │ Account Worker Pool     │        │ │
-/// │  │ (spawn_blocking)    │   │ (spawn_blocking)        │        │ │
+/// │  │ (spawn_blocking)         │   │ (spawn_blocking)             │        │ │
 /// │  └─────────────────────┘   └────────────────────────┘        │ │
 /// └──┬───────────────────────────────────────────────────────────┘ │
 ///    │                                                             │

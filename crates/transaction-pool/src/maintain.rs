@@ -229,7 +229,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 .boxed()
             };
             reload_accounts_fut = rx.fuse();
-            task_spawner.spawn_blocking(fut);
+            task_spawner.spawn_blocking_task(fut);
         }
 
         // check if we have a new finalized block
@@ -243,7 +243,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
             pool.delete_blobs(blobs);
             // and also do periodic cleanup
             let pool = pool.clone();
-            task_spawner.spawn_blocking(Box::pin(async move {
+            task_spawner.spawn_blocking_task(Box::pin(async move {
                 debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
                 pool.cleanup_blobs();
             }));
@@ -517,7 +517,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     let pool = pool.clone();
                     let spawner = task_spawner.clone();
                     let client = client.clone();
-                    task_spawner.spawn(Box::pin(async move {
+                    task_spawner.spawn_task(Box::pin(async move {
                         // Start converting not eaerlier than 4 seconds into current slot to ensure
                         // that our pool only contains valid transactions for the next block (as
                         // it's not Osaka yet).
@@ -565,7 +565,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                                 let converter = BlobSidecarConverter::new();
                                 let pool = pool.clone();
-                                spawner.spawn(Box::pin(async move {
+                                spawner.spawn_task(Box::pin(async move {
                                     // Convert sidecar to EIP-7594 format
                                     let Some(sidecar) = converter.convert(sidecar).await else {
                                         return;

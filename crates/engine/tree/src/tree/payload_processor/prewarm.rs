@@ -148,7 +148,7 @@ where
         let max_concurrency = self.max_concurrency;
         let span = Span::current();
 
-        self.executor.spawn_blocking_fn(move || {
+        self.executor.spawn_blocking(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
 
             let (done_tx, done_rx) = mpsc::channel();
@@ -641,7 +641,7 @@ where
         // Spawn workers that all pull from the shared receiver
         let executor = task_executor.clone();
         let span = Span::current();
-        task_executor.spawn_blocking_fn(move || {
+        task_executor.spawn_blocking(move || {
             let _enter = span.entered();
             for idx in 0..workers_needed {
                 let ctx = self.clone();
@@ -649,7 +649,7 @@ where
                 let done_tx = done_tx.clone();
                 let rx = tx_receiver.clone();
                 let span = debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm worker", idx);
-                executor.spawn_blocking_fn(move || {
+                executor.spawn_blocking(move || {
                     let _enter = span.entered();
                     ctx.transact_batch(rx, to_multi_proof, done_tx);
                 });
@@ -680,7 +680,7 @@ where
             range_end = range.end
         );
 
-        executor.spawn_blocking_fn(move || {
+        executor.spawn_blocking(move || {
             let _enter = span.entered();
             ctx.prefetch_bal_slots(bal, range, done_tx);
         });

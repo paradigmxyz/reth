@@ -65,7 +65,7 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
         ..Default::default()
     };
 
-    executor.spawn_critical(
+    executor.spawn_critical_task(
         "txpool maintenance task",
         reth_transaction_pool::maintain::maintain_transaction_pool_future(
             node.inner.provider.clone(),
@@ -139,7 +139,7 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
     let w1 = wallets.first().unwrap();
     let w2 = wallets.last().unwrap();
 
-    executor.spawn_critical(
+    executor.spawn_critical_task(
         "txpool maintenance task",
         reth_transaction_pool::maintain::maintain_transaction_pool_future(
             node.inner.provider.clone(),
@@ -271,7 +271,7 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
 
     let wallet = Wallet::default();
 
-    executor.spawn_critical(
+    executor.spawn_critical_task(
         "txpool maintenance task",
         reth_transaction_pool::maintain::maintain_transaction_pool_future(
             node.inner.provider.clone(),

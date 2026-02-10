@@ -448,7 +448,7 @@ impl Runtime {
     /// The given future resolves as soon as the [Shutdown] signal is received.
     ///
     /// See also [`Handle::spawn`].
-    pub fn spawn<F>(&self, fut: F) -> JoinHandle<()>
+    pub fn spawn_task<F>(&self, fut: F) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -459,7 +459,7 @@ impl Runtime {
     /// The given future resolves as soon as the [Shutdown] signal is received.
     ///
     /// See also [`Handle::spawn_blocking`].
-    pub fn spawn_blocking<F>(&self, fut: F) -> JoinHandle<()>
+    pub fn spawn_blocking_task<F>(&self, fut: F) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -468,7 +468,7 @@ impl Runtime {
 
     /// Spawns a blocking closure directly on the tokio runtime, bypassing shutdown
     /// awareness. Useful for raw CPU-bound work.
-    pub fn spawn_blocking_fn<F, R>(&self, func: F) -> JoinHandle<R>
+    pub fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
@@ -528,7 +528,7 @@ impl Runtime {
     /// The given future resolves as soon as the [Shutdown] signal is received.
     ///
     /// If this task panics, the [`TaskManager`] is notified.
-    pub fn spawn_critical<F>(&self, name: &'static str, fut: F) -> JoinHandle<()>
+    pub fn spawn_critical_task<F>(&self, name: &'static str, fut: F) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -539,7 +539,7 @@ impl Runtime {
     /// The given future resolves as soon as the [Shutdown] signal is received.
     ///
     /// If this task panics, the [`TaskManager`] is notified.
-    pub fn spawn_critical_blocking<F>(&self, name: &'static str, fut: F) -> JoinHandle<()>
+    pub fn spawn_critical_blocking_task<F>(&self, name: &'static str, fut: F) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -680,28 +680,32 @@ impl Runtime {
 // ── TaskSpawner impl ──────────────────────────────────────────────────
 
 impl crate::TaskSpawner for Runtime {
-    fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+    fn spawn_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         self.0.metrics.inc_regular_tasks();
-        Self::spawn(self, fut)
+        Self::spawn_task(self, fut)
     }
 
-    fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.0.metrics.inc_critical_tasks();
-        Self::spawn_critical(self, name, fut)
-    }
-
-    fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.0.metrics.inc_regular_blocking_tasks();
-        Self::spawn_blocking(self, fut)
-    }
-
-    fn spawn_critical_blocking(
+    fn spawn_critical_task(
         &self,
         name: &'static str,
         fut: BoxFuture<'static, ()>,
     ) -> JoinHandle<()> {
         self.0.metrics.inc_critical_tasks();
-        Self::spawn_critical_blocking(self, name, fut)
+        Self::spawn_critical_task(self, name, fut)
+    }
+
+    fn spawn_blocking_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        self.0.metrics.inc_regular_blocking_tasks();
+        Self::spawn_blocking_task(self, fut)
+    }
+
+    fn spawn_critical_blocking_task(
+        &self,
+        name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> JoinHandle<()> {
+        self.0.metrics.inc_critical_tasks();
+        Self::spawn_critical_blocking_task(self, name, fut)
     }
 }
 

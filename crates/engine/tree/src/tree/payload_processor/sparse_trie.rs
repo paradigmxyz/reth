@@ -293,7 +293,7 @@ where
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
-        executor.spawn_blocking_fn(move || {
+        executor.spawn_blocking(move || {
             let _span = debug_span!(parent: parent_span, "run_hashing_task").entered();
             Self::run_hashing_task(updates, hashed_state_tx)
         });

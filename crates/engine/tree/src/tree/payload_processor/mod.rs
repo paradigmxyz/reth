@@ -302,7 +302,7 @@ where
             // spawn multi-proof task
             let parent_span = span.clone();
             let saved_cache = prewarm_handle.saved_cache.clone();
-            self.executor.spawn_blocking_fn(move || {
+            self.executor.spawn_blocking(move || {
                 let _enter = parent_span.entered();
                 // Build a state provider for the multiproof task
                 let provider = provider_builder.build().expect("failed to build provider");
@@ -398,7 +398,7 @@ where
 
         // Spawn a task that processes out-of-order transactions from the task above and sends them
         // to the execution task in order.
-        self.executor.spawn_blocking_fn(move || {
+        self.executor.spawn_blocking(move || {
             let mut next_for_execution = 0;
             let mut queue = BTreeMap::new();
             while let Ok((idx, tx)) = ooo_rx.recv() {
@@ -466,7 +466,7 @@ where
         // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            self.executor.spawn_blocking_fn(move || {
+            self.executor.spawn_blocking(move || {
                 let mode = if let Some(bal) = bal {
                     PrewarmMode::BlockAccessList(bal)
                 } else {
@@ -521,7 +521,7 @@ where
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
-        self.executor.spawn_blocking_fn(move || {
+        self.executor.spawn_blocking(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 

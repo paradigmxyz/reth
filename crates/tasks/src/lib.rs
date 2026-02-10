@@ -107,7 +107,7 @@ where
 /// use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 /// let executor = TokioTaskExecutor::default();
 ///
-/// let task = executor.spawn(Box::pin(async {
+/// let task = executor.spawn_task(Box::pin(async {
 ///     // -- snip --
 /// }));
 /// task.await.unwrap();
@@ -124,7 +124,7 @@ where
 /// let runtime = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(rt.handle().clone()))
 ///     .build()
 ///     .unwrap();
-/// let task = TaskSpawner::spawn(&runtime, Box::pin(async {
+/// let task = TaskSpawner::spawn_task(&runtime, Box::pin(async {
 ///     // -- snip --
 /// }));
 /// rt.block_on(task).unwrap();
@@ -136,16 +136,20 @@ where
 pub trait TaskSpawner: Send + Sync + Unpin + std::fmt::Debug + DynClone {
     /// Spawns the task onto the runtime.
     /// See also [`Handle::spawn`].
-    fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
+    fn spawn_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
 
     /// This spawns a critical task onto the runtime.
-    fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
+    fn spawn_critical_task(
+        &self,
+        name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> JoinHandle<()>;
 
     /// Spawns a blocking task onto the runtime.
-    fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
+    fn spawn_blocking_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
 
     /// This spawns a critical blocking task onto the runtime.
-    fn spawn_critical_blocking(
+    fn spawn_critical_blocking_task(
         &self,
         name: &'static str,
         fut: BoxFuture<'static, ()>,
@@ -167,19 +171,23 @@ impl TokioTaskExecutor {
 }
 
 impl TaskSpawner for TokioTaskExecutor {
-    fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+    fn spawn_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         tokio::task::spawn(fut)
     }
 
-    fn spawn_critical(&self, _name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+    fn spawn_critical_task(
+        &self,
+        _name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> JoinHandle<()> {
         tokio::task::spawn(fut)
     }
 
-    fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+    fn spawn_blocking_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         tokio::task::spawn_blocking(move || tokio::runtime::Handle::current().block_on(fut))
     }
 
-    fn spawn_critical_blocking(
+    fn spawn_critical_blocking_task(
         &self,
         _name: &'static str,
         fut: BoxFuture<'static, ()>,
@@ -192,7 +200,7 @@ impl TaskSpawner for TokioTaskExecutor {
 ///
 /// The main purpose of this type is to be able to monitor if a critical task panicked, for
 /// diagnostic purposes, since tokio tasks essentially fail silently. Therefore, this type is a
-/// Future that resolves with the name of the panicked task. See [`Runtime::spawn_critical`].
+/// Future that resolves with the name of the panicked task. See [`Runtime::spawn_critical_task`].
 ///
 /// Use [`Runtime::take_task_manager`] to extract a `TaskManager` from a built [`Runtime`].
 #[derive(Debug)]
@@ -257,7 +265,7 @@ impl TaskManager {
 
 /// An endless future that resolves if a critical task panicked.
 ///
-/// See [`Runtime::spawn_critical`]
+/// See [`Runtime::spawn_critical_task`]
 impl std::future::Future for TaskManager {
     type Output = Result<(), PanickedTaskError>;
 
@@ -368,7 +376,7 @@ mod tests {
             .unwrap();
         let manager = rt.take_task_manager().unwrap();
 
-        rt.spawn_critical("this is a critical task", async { panic!("intentionally panic") });
+        rt.spawn_critical_task("this is a critical task", async { panic!("intentionally panic") });
 
         runtime.block_on(async move {
             let err_result = manager.await;
@@ -391,7 +399,7 @@ mod tests {
 
         let (signal, shutdown) = signal();
 
-        rt.spawn_critical("this is a critical task", async move {
+        rt.spawn_critical_task("this is a critical task", async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
             drop(signal);
         });
@@ -412,7 +420,7 @@ mod tests {
 
         let (signal, shutdown) = signal();
 
-        rt.spawn(Box::pin(async move {
+        rt.spawn_task(Box::pin(async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
             drop(signal);
         }));

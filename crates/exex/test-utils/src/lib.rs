@@ -271,7 +271,7 @@ pub async fn test_exex_context_with_chain_spec(
             .build()
             .unwrap();
     let task_executor = exec.clone();
-    exec.spawn(network_manager);
+    exec.spawn_task(network_manager);
 
     let (_, payload_builder_handle) = NoopPayloadBuilderService::<EthEngineTypes>::new();
 

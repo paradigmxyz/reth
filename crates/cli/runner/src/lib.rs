@@ -142,7 +142,7 @@ impl CliRunner {
     /// The provided closure receives a [`TaskExecutor`] that can be used to spawn tasks or
     /// threaded through to subsystems that need it.
     ///
-    /// See [`Runtime::spawn_blocking`](tokio::runtime::Runtime::spawn_blocking) .
+    /// See [`Runtime::spawn_blocking`](tokio::runtime::Runtime::spawn_blocking).
     pub fn run_blocking_until_ctrl_c<F, E>(
         self,
         f: impl FnOnce(TaskExecutor) -> F + Send + 'static,
