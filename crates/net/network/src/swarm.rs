@@ -246,10 +246,16 @@ impl<N: NetworkPrimitives> Swarm<N> {
             StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
             StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
             StateAction::DiscoveredNode { peer_id, addr, fork_id } => {
-                // Don't try to connect to peer if node is shutting down
                 if self.is_shutting_down() {
                     return None
                 }
+
+                // When `enforce_enr_fork_id` is enabled, peers discovered without a confirmed
+                // fork ID (via EIP-868 ENR) are deferred — they'll only be added once a
+                // `DiscoveredEnrForkId` event arrives with a validated fork ID.
+                //
+                // When disabled (default), peers without a fork ID are admitted immediately.
+                // Peers that *do* carry a fork ID are always validated against ours.
                 let enforce = self.state().peers().enforce_enr_fork_id();
                 let allow = match fork_id {
                     Some(f) => self.sessions.is_valid_fork_id(f),
