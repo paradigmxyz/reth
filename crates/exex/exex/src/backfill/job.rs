@@ -405,7 +405,7 @@ mod tests {
         Ok(())
     }
 
-    /// Same as above but for the batch `BackfillJob` path (execute_range), which also uses
+    /// Same as above but for the batch `BackfillJob` path (`execute_range`), which also uses
     /// `history_by_block_number`. Verifies the batch execution outcome matches what the pipeline
     /// produced block-by-block.
     #[test]
