@@ -125,7 +125,6 @@ impl EthereumNode {
     ///     .chainspec(ChainSpecBuilder::mainnet().build().into())
     ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
     ///     .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())
-    ///     .runtime(reth_tasks::Runtime::current())
     ///     .build_provider_factory();
     /// ```
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {

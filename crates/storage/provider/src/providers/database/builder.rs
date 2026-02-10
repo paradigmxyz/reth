@@ -110,7 +110,6 @@ impl<N> ProviderFactoryBuilder<N> {
             .chainspec(chainspec)
             .static_file(StaticFileProvider::read_only(static_files_dir, watch_static_files)?)
             .rocksdb_provider(RocksDBProvider::builder(&rocksdb_dir).with_default_tables().build()?)
-            .runtime(reth_tasks::Runtime::current())
             .build_provider_factory()
             .map_err(Into::into)
     }
@@ -366,6 +365,13 @@ where
     N: NodeTypesForProvider,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
+    /// Creates the [`ProviderFactory`] using [`Runtime::current()`](reth_tasks::Runtime::current).
+    pub fn build_provider_factory(
+        self,
+    ) -> ProviderResult<ProviderFactory<NodeTypesWithDBAdapter<N, DB>>> {
+        self.runtime(reth_tasks::Runtime::current()).build_provider_factory()
+    }
+
     /// Sets the task runtime for the provider factory.
     #[allow(clippy::type_complexity)]
     pub fn runtime(
