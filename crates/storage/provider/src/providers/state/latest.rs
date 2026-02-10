@@ -221,6 +221,15 @@ reth_storage_api::macros::delegate_provider_impls!(LatestStateProvider<Provider>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::create_test_provider_factory;
+    use alloy_primitives::{address, b256, keccak256, U256};
+    use reth_db_api::{
+        models::StorageSettings,
+        tables,
+        transaction::{DbTx, DbTxMut},
+    };
+    use reth_primitives_traits::StorageEntry;
+    use reth_storage_api::StorageSettingsCache;
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
@@ -228,5 +237,112 @@ mod tests {
         T: DBProvider + BlockHashReader + StorageSettingsCache,
     >() {
         assert_state_provider::<LatestStateProvider<T>>();
+    }
+
+    #[test]
+    fn test_latest_storage_hashed_state() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1().with_use_hashed_state(true));
+
+        let address = address!("0x0000000000000000000000000000000000000001");
+        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(slot);
+
+        let tx = factory.provider_rw().unwrap().into_tx();
+        tx.put::<tables::HashedStorages>(
+            hashed_address,
+            StorageEntry { key: hashed_slot, value: U256::from(42) },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        let provider_ref = LatestStateProviderRef::new(&db);
+
+        assert_eq!(provider_ref.storage(address, slot).unwrap(), Some(U256::from(42)));
+
+        let other_address = address!("0x0000000000000000000000000000000000000099");
+        let other_slot =
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000099");
+        assert_eq!(provider_ref.storage(other_address, other_slot).unwrap(), None);
+
+        let tx = factory.provider_rw().unwrap().into_tx();
+        let plain_address = address!("0x0000000000000000000000000000000000000002");
+        let plain_slot =
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000002");
+        tx.put::<tables::PlainStorageState>(
+            plain_address,
+            StorageEntry { key: plain_slot, value: U256::from(99) },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        let provider_ref = LatestStateProviderRef::new(&db);
+        assert_eq!(provider_ref.storage(plain_address, plain_slot).unwrap(), None);
+    }
+
+    #[test]
+    fn test_latest_storage_hashed_state_returns_none_for_missing() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1().with_use_hashed_state(true));
+
+        let address = address!("0x0000000000000000000000000000000000000001");
+        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+
+        let db = factory.provider().unwrap();
+        let provider_ref = LatestStateProviderRef::new(&db);
+        assert_eq!(provider_ref.storage(address, slot).unwrap(), None);
+    }
+
+    #[test]
+    fn test_latest_storage_legacy() {
+        let factory = create_test_provider_factory();
+        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state);
+
+        let address = address!("0x0000000000000000000000000000000000000001");
+        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000005");
+
+        let tx = factory.provider_rw().unwrap().into_tx();
+        tx.put::<tables::PlainStorageState>(
+            address,
+            StorageEntry { key: slot, value: U256::from(42) },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        let provider_ref = LatestStateProviderRef::new(&db);
+
+        assert_eq!(provider_ref.storage(address, slot).unwrap(), Some(U256::from(42)));
+
+        let other_slot =
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000099");
+        assert_eq!(provider_ref.storage(address, other_slot).unwrap(), None);
+    }
+
+    #[test]
+    fn test_latest_storage_legacy_does_not_read_hashed() {
+        let factory = create_test_provider_factory();
+        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state);
+
+        let address = address!("0x0000000000000000000000000000000000000001");
+        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000005");
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(slot);
+
+        let tx = factory.provider_rw().unwrap().into_tx();
+        tx.put::<tables::HashedStorages>(
+            hashed_address,
+            StorageEntry { key: hashed_slot, value: U256::from(42) },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        let provider_ref = LatestStateProviderRef::new(&db);
+        assert_eq!(provider_ref.storage(address, slot).unwrap(), None);
     }
 }
