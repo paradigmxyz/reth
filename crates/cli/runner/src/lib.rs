@@ -133,6 +133,7 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
+        let _task_manager = TaskManager::new(self.tokio_runtime.handle().clone());
         self.tokio_runtime.block_on(run_until_ctrl_c(fut))?;
         Ok(())
     }
@@ -147,6 +148,7 @@ impl CliRunner {
         E: Send + Sync + From<std::io::Error> + 'static,
     {
         let tokio_runtime = self.tokio_runtime;
+        let _task_manager = TaskManager::new(tokio_runtime.handle().clone());
         let handle = tokio_runtime.handle().clone();
         let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(fut));
         tokio_runtime
