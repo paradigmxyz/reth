@@ -681,10 +681,7 @@ where
                                     .as_ref()
                                     .map(|i| i.balance)
                                     .unwrap_or_default(),
-                                last_nonce: pre_info
-                                    .as_ref()
-                                    .map(|i| i.nonce)
-                                    .unwrap_or_default(),
+                                last_nonce: pre_info.as_ref().map(|i| i.nonce).unwrap_or_default(),
                                 last_code_hash: pre_info
                                     .as_ref()
                                     .map(|i| i.code_hash)
@@ -707,12 +704,8 @@ where
                     // + writes). revm's state diff only includes modified slots, so
                     // the inspector is needed to identify read-only slots.
                     let mut al_inspector = AccessListInspector::new(Default::default());
-                    let res = eth_api.inspect(
-                        &mut db,
-                        evm_env.clone(),
-                        tx_env,
-                        &mut al_inspector,
-                    )?;
+                    let res =
+                        eth_api.inspect(&mut db, evm_env.clone(), tx_env, &mut al_inspector)?;
                     let access_list = al_inspector.into_access_list();
 
                     // Process state modifications from the execution result
@@ -721,19 +714,17 @@ where
 
                         // Balance change
                         if account.info.balance != entry.last_balance {
-                            entry.balance_changes.push(BalanceChange::new(
-                                block_access_index,
-                                account.info.balance,
-                            ));
+                            entry
+                                .balance_changes
+                                .push(BalanceChange::new(block_access_index, account.info.balance));
                             entry.last_balance = account.info.balance;
                         }
 
                         // Nonce change
                         if account.info.nonce != entry.last_nonce {
-                            entry.nonce_changes.push(NonceChange::new(
-                                block_access_index,
-                                account.info.nonce,
-                            ));
+                            entry
+                                .nonce_changes
+                                .push(NonceChange::new(block_access_index, account.info.nonce));
                             entry.last_nonce = account.info.nonce;
                         }
 
@@ -745,23 +736,16 @@ where
                                 .as_ref()
                                 .map(|c| c.original_bytes())
                                 .unwrap_or_default();
-                            entry.code_changes.push(CodeChange::new(
-                                block_access_index,
-                                new_code,
-                            ));
+                            entry.code_changes.push(CodeChange::new(block_access_index, new_code));
                             entry.last_code_hash = account.info.code_hash;
                         }
 
                         // Storage modifications (revm only returns modified slots)
                         for (slot, storage) in &account.storage {
-                            entry
-                                .slot_changes
-                                .entry(*slot)
-                                .or_default()
-                                .push(StorageChange::new(
-                                    block_access_index,
-                                    storage.present_value,
-                                ));
+                            entry.slot_changes.entry(*slot).or_default().push(StorageChange::new(
+                                block_access_index,
+                                storage.present_value,
+                            ));
                             // If previously recorded as read-only, promote to modified
                             entry.read_only_slots.remove(slot);
                         }
