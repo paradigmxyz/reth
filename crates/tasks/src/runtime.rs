@@ -21,7 +21,7 @@ use futures_util::{
 use std::thread::available_parallelism;
 use std::{
     pin::pin,
-    sync::{atomic::AtomicUsize, Arc, Mutex, OnceLock},
+    sync::{atomic::AtomicUsize, Arc, Mutex},
     time::Duration,
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
@@ -31,9 +31,6 @@ use tracing::error;
 use tracing_futures::Instrument;
 
 use tokio::runtime::Runtime as TokioRuntime;
-
-/// Global [`Runtime`] instance set by [`TaskManager::new`].
-pub(crate) static GLOBAL_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 /// Default thread keep-alive duration for the tokio runtime.
 pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(15);
@@ -391,15 +388,6 @@ impl Runtime {
                 max_blocking_tasks: 16,
             },
         }
-    }
-}
-
-// ── Global access ─────────────────────────────────────────────────────
-
-impl Runtime {
-    /// Attempts to get the current [`Runtime`] if one has been set globally.
-    pub(crate) fn try_current() -> Result<Self, crate::NoCurrentTaskExecutorError> {
-        GLOBAL_RUNTIME.get().cloned().ok_or_else(crate::NoCurrentTaskExecutorError::default)
     }
 }
 

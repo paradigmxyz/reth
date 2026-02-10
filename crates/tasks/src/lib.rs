@@ -31,7 +31,7 @@ use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
-use tracing::{debug, error};
+use tracing::debug;
 
 pub mod metrics;
 pub mod runtime;
@@ -43,8 +43,6 @@ pub mod pool;
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
 pub use runtime::{Runtime, RuntimeBuildError, RuntimeBuilder, RuntimeConfig, TokioConfig};
-
-use crate::runtime::GLOBAL_RUNTIME;
 
 /// A [`TaskExecutor`] is now an alias for [`Runtime`].
 pub type TaskExecutor = Runtime;
@@ -242,9 +240,6 @@ impl TaskManager {
             RuntimeBuilder::new(config).build().expect("failed to build Runtime from TaskManager");
         let mut task_manager =
             runtime.take_task_manager().expect("freshly built Runtime must contain a TaskManager");
-        let _ = GLOBAL_RUNTIME
-            .set(runtime.clone())
-            .inspect_err(|_| error!("Global runtime already set"));
         task_manager.runtime = Some(runtime);
         task_manager
     }
@@ -385,12 +380,6 @@ pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
     where
         F: std::future::Future<Output = ()> + Send + 'static;
 }
-
-/// Error returned by `try_current` when no task executor has been configured.
-#[derive(Debug, Default, thiserror::Error)]
-#[error("No current task executor available.")]
-#[non_exhaustive]
-pub struct NoCurrentTaskExecutorError;
 
 #[cfg(test)]
 mod tests {
@@ -539,8 +528,8 @@ mod tests {
     fn can_access_global() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let handle = runtime.handle().clone();
-        let _manager = TaskManager::new(handle);
-        let _executor = TaskExecutor::try_current().unwrap();
+        let manager = TaskManager::new(handle);
+        let _executor = manager.executor();
     }
 
     #[test]
