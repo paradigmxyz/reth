@@ -277,8 +277,8 @@ impl Args {
     /// Get the default RPC URL for a given chain
     const fn get_default_rpc_url(chain: &Chain) -> &'static str {
         match chain.id() {
-            27082 => "https://rpc.hoodi.ethpandaops.io",    // hoodi
-            _ => "https://ethereum.reth.rs/rpc",            // mainnet and fallback
+            27082 => "https://rpc.hoodi.ethpandaops.io", // hoodi
+            _ => "https://ethereum.reth.rs/rpc",         // mainnet and fallback
         }
     }
 
