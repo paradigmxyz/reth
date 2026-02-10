@@ -3844,7 +3844,7 @@ mod tests {
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         BlockWriter,
     };
-    use alloy_primitives::map::B256Map;
+    use alloy_primitives::{map::B256Map, U256};
     use reth_ethereum_primitives::Receipt;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{Nibbles, StoredNibblesSubKey};
@@ -4487,5 +4487,50 @@ mod tests {
             Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
             Ok(_) => panic!("Expected error, got Ok"),
         }
+    }
+
+    #[test]
+    fn test_unwind_storage_hashing_with_hashed_state() {
+        let factory = create_test_provider_factory();
+        let storage_settings = StorageSettings::v1().with_use_hashed_state(true);
+        factory.set_storage_settings_cache(storage_settings);
+
+        let address = Address::random();
+        let hashed_address = keccak256(address);
+
+        let slot_key_already_hashed = B256::random();
+
+        let current_value = U256::from(100);
+        let old_value = U256::from(42);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx
+            .cursor_dup_write::<tables::HashedStorages>()
+            .unwrap()
+            .upsert(
+                hashed_address,
+                &StorageEntry { key: slot_key_already_hashed, value: current_value },
+            )
+            .unwrap();
+
+        let changesets = vec![(
+            BlockNumberAddress((1, address)),
+            StorageEntry { key: slot_key_already_hashed, value: old_value },
+        )];
+
+        let result = provider_rw.unwind_storage_hashing(changesets.into_iter()).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key(&hashed_address));
+        assert!(result[&hashed_address].contains(&slot_key_already_hashed));
+
+        let mut cursor = provider_rw.tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+        let entry = cursor
+            .seek_by_key_subkey(hashed_address, slot_key_already_hashed)
+            .unwrap()
+            .expect("entry should exist");
+        assert_eq!(entry.key, slot_key_already_hashed);
+        assert_eq!(entry.value, old_value);
     }
 }

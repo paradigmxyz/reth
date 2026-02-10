@@ -69,4 +69,3 @@ where
         destroyed_accounts,
     })
 }
-

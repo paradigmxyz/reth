@@ -11,8 +11,8 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, PreHashedKeyHasher,
-    KeccakKeyHasher, KeyHasher, StateRoot, StateRootProgress, TrieInputSorted,
+    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, KeccakKeyHasher, KeyHasher,
+    PreHashedKeyHasher, StateRoot, StateRootProgress, TrieInputSorted,
 };
 use std::{
     collections::HashSet,
@@ -32,7 +32,10 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// An instance of state root calculator with account and storage prefixes loaded.
     fn incremental_root_calculator(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader
+                 + StorageChangeSetReader
+                 + StorageSettingsCache
+                 + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError>;
 
@@ -43,7 +46,10 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The updated state root.
     fn incremental_root(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader
+                 + StorageChangeSetReader
+                 + StorageSettingsCache
+                 + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError>;
 
@@ -56,7 +62,10 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The updated state root and the trie updates.
     fn incremental_root_with_updates(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader
+                 + StorageChangeSetReader
+                 + StorageSettingsCache
+                 + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 
@@ -67,7 +76,10 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The intermediate progress of state root computation.
     fn incremental_root_with_progress(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader
+                 + StorageChangeSetReader
+                 + StorageSettingsCache
+                 + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError>;
 
@@ -144,20 +156,29 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 
     fn incremental_root_calculator(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader
+                 + StorageChangeSetReader
+                 + StorageSettingsCache
+                 + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let loaded_prefix_sets =
-            if provider.cached_storage_settings().use_hashed_state {
-                crate::prefix_set::load_prefix_sets_with_provider::<_, PreHashedKeyHasher>(provider, range)?
-            } else {
-                crate::prefix_set::load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, range)?
-            };
+        let loaded_prefix_sets = if provider.cached_storage_settings().use_hashed_state {
+            crate::prefix_set::load_prefix_sets_with_provider::<_, PreHashedKeyHasher>(
+                provider, range,
+            )?
+        } else {
+            crate::prefix_set::load_prefix_sets_with_provider::<_, KeccakKeyHasher>(
+                provider, range,
+            )?
+        };
         Ok(Self::from_tx(provider.tx_ref()).with_prefix_sets(loaded_prefix_sets))
     }
 
     fn incremental_root(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader
+                 + StorageChangeSetReader
+                 + StorageSettingsCache
+                 + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root");
@@ -165,7 +186,10 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 
     fn incremental_root_with_updates(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader
+                 + StorageChangeSetReader
+                 + StorageSettingsCache
+                 + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root");
@@ -173,7 +197,10 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 
     fn incremental_root_with_progress(
-        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader
+                 + StorageChangeSetReader
+                 + StorageSettingsCache
+                 + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root with progress");
@@ -240,9 +267,14 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 }
 
-/// Calls [`HashedPostStateSorted::from_reverts`] with the correct [`KeyHasher`] based on storage settings.
+/// Calls [`HashedPostStateSorted::from_reverts`] with the correct [`KeyHasher`] based on storage
+/// settings.
 pub fn from_reverts_auto(
-    provider: &(impl ChangeSetReader + StorageChangeSetReader + BlockNumReader + DBProvider + StorageSettingsCache),
+    provider: &(impl ChangeSetReader
+          + StorageChangeSetReader
+          + BlockNumReader
+          + DBProvider
+          + StorageSettingsCache),
     range: impl RangeBounds<BlockNumber> + Clone,
 ) -> Result<HashedPostStateSorted, ProviderError> {
     if provider.cached_storage_settings().use_hashed_state {
@@ -325,7 +357,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{hex, map::HashMap, Address, B256, U256};
+    use alloy_primitives::{hex, keccak256, map::HashMap, Address, B256, U256};
     use reth_db::test_utils::create_test_rw_db;
     use reth_db_api::{
         database::Database,
@@ -335,7 +367,7 @@ mod tests {
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::test_utils::create_test_provider_factory;
-    use reth_trie::{HashedPostState, HashedStorage, KeccakKeyHasher};
+    use reth_trie::{HashedPostState, HashedStorage, KeccakKeyHasher, PreHashedKeyHasher};
     use revm::state::AccountInfo;
     use revm_database::BundleState;
 
@@ -495,5 +527,98 @@ mod tests {
             HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(&*provider, 1..=10).unwrap();
         assert!(sorted.accounts.is_empty());
         assert!(sorted.storages.is_empty());
+    }
+
+    #[test]
+    fn from_reverts_with_pre_hashed_key_hasher() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+
+        let address1 = Address::with_last_byte(1);
+        let address2 = Address::with_last_byte(2);
+
+        let pre_hashed_slot1 = keccak256(B256::from(U256::from(11)));
+        let pre_hashed_slot2 = keccak256(B256::from(U256::from(22)));
+
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(
+                1,
+                AccountBeforeTx {
+                    address: address1,
+                    info: Some(Account { nonce: 1, ..Default::default() }),
+                },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(
+                2,
+                AccountBeforeTx {
+                    address: address1,
+                    info: Some(Account { nonce: 2, ..Default::default() }),
+                },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(3, AccountBeforeTx { address: address2, info: None })
+            .unwrap();
+
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((1, address1)),
+                StorageEntry { key: pre_hashed_slot2, value: U256::from(200) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((2, address1)),
+                StorageEntry { key: pre_hashed_slot1, value: U256::from(100) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((3, address1)),
+                StorageEntry { key: pre_hashed_slot1, value: U256::from(999) },
+            )
+            .unwrap();
+
+        let sorted =
+            HashedPostStateSorted::from_reverts::<PreHashedKeyHasher>(&*provider, 1..=3).unwrap();
+
+        assert_eq!(sorted.accounts.len(), 2);
+
+        let hashed_addr1 = KeccakKeyHasher::hash_key(address1);
+        let hashed_addr2 = KeccakKeyHasher::hash_key(address2);
+        assert_eq!(hashed_addr1, PreHashedKeyHasher::hash_key(address1));
+        assert_eq!(hashed_addr2, PreHashedKeyHasher::hash_key(address2));
+
+        let account1 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr1).unwrap();
+        assert_eq!(account1.1.unwrap().nonce, 1);
+
+        let account2 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr2).unwrap();
+        assert!(account2.1.is_none());
+
+        assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
+
+        let storage = sorted.storages.get(&hashed_addr1).expect("storage for address1");
+        assert_eq!(storage.storage_slots.len(), 2);
+
+        let found_slot1 =
+            storage.storage_slots.iter().find(|(k, _)| *k == pre_hashed_slot1).unwrap();
+        assert_eq!(found_slot1.1, U256::from(100));
+
+        let found_slot2 =
+            storage.storage_slots.iter().find(|(k, _)| *k == pre_hashed_slot2).unwrap();
+        assert_eq!(found_slot2.1, U256::from(200));
+
+        assert_ne!(pre_hashed_slot1, keccak256(pre_hashed_slot1));
+        assert_ne!(pre_hashed_slot2, keccak256(pre_hashed_slot2));
+
+        assert!(storage.storage_slots.windows(2).all(|w| w[0].0 <= w[1].0));
     }
 }

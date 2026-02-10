@@ -18,9 +18,7 @@ use reth_trie::{
     updates::TrieUpdatesSorted,
     HashedPostStateSorted,
 };
-use reth_trie_db::{
-    ChangesetCache, DatabaseHashedCursorFactory, DatabaseTrieCursorFactory,
-};
+use reth_trie_db::{ChangesetCache, DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -337,8 +335,7 @@ where
                 let _guard = debug_span!(target: "providers::state::overlay", "Retrieving hashed state reverts").entered();
 
                 let start = Instant::now();
-                let res =
-                    reth_trie_db::from_reverts_auto(provider, from_block + 1..)?;
+                let res = reth_trie_db::from_reverts_auto(provider, from_block + 1..)?;
                 retrieve_hashed_state_reverts_duration = start.elapsed();
                 res
             };

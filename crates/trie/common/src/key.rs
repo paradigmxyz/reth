@@ -46,3 +46,40 @@ impl KeyHasher for PreHashedKeyHasher {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::Address;
+
+    #[test]
+    fn test_maybe_hash_key_passthrough() {
+        let key = B256::repeat_byte(0xab);
+        assert_eq!(maybe_hash_key(key, true), key);
+    }
+
+    #[test]
+    fn test_maybe_hash_key_hashes() {
+        let key = B256::repeat_byte(0xab);
+        assert_eq!(maybe_hash_key(key, false), keccak256(key));
+    }
+
+    #[test]
+    fn test_pre_hashed_key_hasher_32_bytes_passthrough() {
+        let key = B256::repeat_byte(0xcd);
+        assert_eq!(PreHashedKeyHasher::hash_key(key), key);
+    }
+
+    #[test]
+    fn test_pre_hashed_key_hasher_20_bytes_hashes() {
+        let addr = Address::repeat_byte(0x01);
+        assert_eq!(PreHashedKeyHasher::hash_key(addr), KeccakKeyHasher::hash_key(addr),);
+    }
+
+    #[test]
+    fn test_pre_hashed_key_hasher_other_lengths() {
+        for input in [vec![], vec![0xff], vec![0xaa; 16], vec![0xbb; 31]] {
+            assert_eq!(PreHashedKeyHasher::hash_key(&input), keccak256(&input));
+        }
+    }
+}

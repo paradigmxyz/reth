@@ -83,8 +83,7 @@ where
         crate::state::from_reverts_auto(provider, block_number..=block_number)?;
 
     // This reverts all changes from db tip back to just after block was processed
-    let cumulative_state_revert =
-        crate::state::from_reverts_auto(provider, (block_number + 1)..)?;
+    let cumulative_state_revert = crate::state::from_reverts_auto(provider, (block_number + 1)..)?;
 
     // This reverts all changes from db tip back to just after block-1 was processed
     let mut cumulative_state_revert_prev = cumulative_state_revert.clone();

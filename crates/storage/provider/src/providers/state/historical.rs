@@ -26,8 +26,8 @@ use reth_trie::{
     TrieInputSorted,
 };
 use reth_trie_db::{
-    hashed_storage_from_reverts_with_provider, DatabaseProof,
-    DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
+    hashed_storage_from_reverts_with_provider, DatabaseProof, DatabaseStateRoot,
+    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
 };
 
 use std::fmt::Debug;
@@ -147,6 +147,9 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     }
 
     /// Lookup a storage key in the `StoragesHistory` table using `EitherReader`.
+    ///
+    /// When `use_hashed_state` is enabled, `storage_key` must be the keccak256-hashed slot
+    /// (callers are responsible for hashing before calling this method).
     pub fn storage_history_lookup(
         &self,
         address: Address,
@@ -986,6 +989,105 @@ mod tests {
         // Not before first write → check changeset or plain state
         assert_eq!(HistoryInfo::from_lookup(Some(10), false, None), HistoryInfo::InChangeset(10));
         assert_eq!(HistoryInfo::from_lookup(None, false, None), HistoryInfo::InPlainState);
+    }
+
+    #[test]
+    fn history_provider_get_storage_hashed_state() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            reth_db_api::models::StorageSettings::default().with_use_hashed_state(true),
+        );
+        let tx = factory.provider_rw().unwrap().into_tx();
+
+        let hashed_storage = alloy_primitives::keccak256(STORAGE);
+
+        tx.put::<tables::StoragesHistory>(
+            StorageShardedKey {
+                address: ADDRESS,
+                sharded_key: ShardedKey { key: hashed_storage, highest_block_number: 7 },
+            },
+            BlockNumberList::new([3, 7]).unwrap(),
+        )
+        .unwrap();
+        tx.put::<tables::StoragesHistory>(
+            StorageShardedKey {
+                address: ADDRESS,
+                sharded_key: ShardedKey { key: hashed_storage, highest_block_number: u64::MAX },
+            },
+            BlockNumberList::new([10, 15]).unwrap(),
+        )
+        .unwrap();
+        tx.put::<tables::StoragesHistory>(
+            StorageShardedKey {
+                address: HIGHER_ADDRESS,
+                sharded_key: ShardedKey { key: hashed_storage, highest_block_number: u64::MAX },
+            },
+            BlockNumberList::new([4]).unwrap(),
+        )
+        .unwrap();
+
+        let higher_entry_at4 = StorageEntry { key: hashed_storage, value: U256::from(0) };
+        let entry_at3 = StorageEntry { key: hashed_storage, value: U256::from(0) };
+        let entry_at7 = StorageEntry { key: hashed_storage, value: U256::from(7) };
+        let entry_at10 = StorageEntry { key: hashed_storage, value: U256::from(10) };
+        let entry_at15 = StorageEntry { key: hashed_storage, value: U256::from(15) };
+
+        tx.put::<tables::StorageChangeSets>((3, ADDRESS).into(), entry_at3).unwrap();
+        tx.put::<tables::StorageChangeSets>((4, HIGHER_ADDRESS).into(), higher_entry_at4).unwrap();
+        tx.put::<tables::StorageChangeSets>((7, ADDRESS).into(), entry_at7).unwrap();
+        tx.put::<tables::StorageChangeSets>((10, ADDRESS).into(), entry_at10).unwrap();
+        tx.put::<tables::StorageChangeSets>((15, ADDRESS).into(), entry_at15).unwrap();
+
+        let hashed_address = alloy_primitives::keccak256(ADDRESS);
+        let hashed_higher_address = alloy_primitives::keccak256(HIGHER_ADDRESS);
+        let entry_plain = StorageEntry { key: hashed_storage, value: U256::from(100) };
+        let higher_entry_plain = StorageEntry { key: hashed_storage, value: U256::from(1000) };
+        tx.put::<tables::HashedStorages>(hashed_address, entry_plain).unwrap();
+        tx.put::<tables::HashedStorages>(hashed_higher_address, higher_entry_plain).unwrap();
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 0).storage(ADDRESS, STORAGE),
+            Ok(None)
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 3).storage(ADDRESS, STORAGE),
+            Ok(Some(U256::ZERO))
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 4).storage(ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == entry_at7.value
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 7).storage(ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == entry_at7.value
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 9).storage(ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == entry_at10.value
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 10).storage(ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == entry_at10.value
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 11).storage(ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == entry_at15.value
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 16).storage(ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == entry_plain.value
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 1).storage(HIGHER_ADDRESS, STORAGE),
+            Ok(None)
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 1000).storage(HIGHER_ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == higher_entry_plain.value
+        ));
     }
 
     #[test]
