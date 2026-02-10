@@ -21,7 +21,7 @@ use futures_util::{
 use std::thread::available_parallelism;
 use std::{
     pin::pin,
-    sync::{atomic::AtomicUsize, Arc, OnceLock},
+    sync::{atomic::AtomicUsize, Arc, Mutex, OnceLock},
     time::Duration,
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
@@ -243,6 +243,9 @@ struct RuntimeInner {
     /// Rate limiter for expensive RPC operations.
     #[cfg(feature = "rayon")]
     blocking_guard: BlockingTaskGuard,
+    /// Keeps the [`TaskManager`] alive when the runtime owns it (e.g. in tests).
+    /// Dropping this fires the shutdown signal for all spawned tasks.
+    _task_manager: Mutex<Option<TaskManager>>,
 }
 
 // ── Runtime ───────────────────────────────────────────────────────────
@@ -269,10 +272,9 @@ impl Default for Runtime {
             Ok(handle) => RuntimeConfig::with_existing_handle(handle),
             Err(_) => RuntimeConfig::default(),
         };
-        let (runtime, _task_manager) =
+        let (runtime, task_manager) =
             RuntimeBuilder::new(config).build().expect("failed to build default Runtime");
-        // Leak the TaskManager so the Runtime remains usable (shutdown signal never fires).
-        std::mem::forget(_task_manager);
+        runtime.keep_task_manager(task_manager);
         runtime
     }
 }
@@ -280,6 +282,12 @@ impl Default for Runtime {
 // ── Pool accessors ────────────────────────────────────────────────────
 
 impl Runtime {
+    /// Stores the [`TaskManager`] inside this runtime so it stays alive
+    /// as long as any [`Runtime`] clone exists.
+    fn keep_task_manager(&self, task_manager: TaskManager) {
+        *self.0._task_manager.lock().unwrap() = Some(task_manager);
+    }
+
     /// Returns the tokio runtime [`Handle`].
     pub fn handle(&self) -> &Handle {
         &self.0.handle
@@ -351,18 +359,18 @@ impl Runtime {
 impl Runtime {
     /// Creates a lightweight [`Runtime`] for tests with minimal thread pools.
     pub fn test() -> Self {
-        let (runtime, _task_manager) =
+        let (runtime, task_manager) =
             RuntimeBuilder::new(Self::test_config()).build().expect("failed to build test Runtime");
-        std::mem::forget(_task_manager);
+        runtime.keep_task_manager(task_manager);
         runtime
     }
 
     /// Creates a lightweight [`Runtime`] for tests, attaching to the given tokio handle.
     pub fn test_with_handle(handle: Handle) -> Self {
         let config = Self::test_config().with_tokio(TokioConfig::existing_handle(handle));
-        let (runtime, _task_manager) =
+        let (runtime, task_manager) =
             RuntimeBuilder::new(config).build().expect("failed to build test Runtime");
-        std::mem::forget(_task_manager);
+        runtime.keep_task_manager(task_manager);
         runtime
     }
 
@@ -844,6 +852,7 @@ impl RuntimeBuilder {
             storage_pool,
             #[cfg(feature = "rayon")]
             blocking_guard,
+            _task_manager: Mutex::new(None),
         };
 
         let runtime = Runtime(Arc::new(inner));
