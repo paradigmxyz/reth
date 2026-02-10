@@ -98,7 +98,8 @@ impl Command {
                         )?;
 
                         if let Some(entry) = entry {
-                            println!("{}", serde_json::to_string_pretty(&entry)?);
+                            let se: reth_primitives_traits::StorageEntry = entry.into();
+                            println!("{}", serde_json::to_string_pretty(&se)?);
                         } else {
                             error!(target: "reth::cli", "No content for the given table key.");
                         }
@@ -106,7 +107,14 @@ impl Command {
                     }
 
                     let changesets = provider.storage_changeset(key.block_number())?;
-                    println!("{}", serde_json::to_string_pretty(&changesets)?);
+                    let serializable: Vec<_> = changesets
+                        .into_iter()
+                        .map(|(addr, entry)| {
+                            let se: reth_primitives_traits::StorageEntry = entry.into();
+                            (addr, se)
+                        })
+                        .collect();
+                    println!("{}", serde_json::to_string_pretty(&serializable)?);
                     return Ok(());
                 }
 

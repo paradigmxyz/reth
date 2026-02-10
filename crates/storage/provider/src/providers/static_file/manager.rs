@@ -34,7 +34,7 @@ use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{
     dashmap::DashMap, AlloyBlockHeader as _, BlockBody as _, StorageSlotKey, RecoveredBlock,
-    SealedHeader, SignedTransaction, StorageEntry,
+    SealedHeader, SignedTransaction,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_types::PipelineTarget;
@@ -43,7 +43,7 @@ use reth_static_file_types::{
     SegmentRangeInclusive, StaticFileMap, StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
 use reth_storage_api::{
-    BlockBodyIndicesProvider, ChangeSetReader, DBProvider, PruneCheckpointReader,
+    BlockBodyIndicesProvider, ChangeSetReader, ChangesetEntry, DBProvider, PruneCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
@@ -395,6 +395,8 @@ pub struct StaticFileProviderInner<N> {
     _lock_file: Option<StorageLock>,
     /// Genesis block number, default is 0;
     genesis_block_number: u64,
+    /// Whether storage keys in changesets are keccak256-hashed.
+    use_hashed_state: std::sync::atomic::AtomicBool,
 }
 
 impl<N: NodePrimitives> StaticFileProviderInner<N> {
@@ -422,6 +424,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             blocks_per_file,
             _lock_file,
             genesis_block_number: 0,
+            use_hashed_state: std::sync::atomic::AtomicBool::new(false),
         };
 
         Ok(provider)
@@ -498,6 +501,16 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     /// Get genesis block number
     pub const fn genesis_block_number(&self) -> u64 {
         self.genesis_block_number
+    }
+
+    /// Returns whether storage changeset keys are keccak256-hashed.
+    pub fn use_hashed_state(&self) -> bool {
+        self.use_hashed_state.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Sets whether storage changeset keys are keccak256-hashed.
+    pub fn set_use_hashed_state(&self, val: bool) {
+        self.use_hashed_state.store(val, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -2522,7 +2535,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberAddress, ChangesetEntry)>> {
         let provider = match self.get_segment_provider_for_block(
             StaticFileSegment::StorageChangeSets,
             block_number,
@@ -2533,6 +2546,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
             Err(err) => return Err(err),
         };
 
+        let use_hashed = self.use_hashed_state();
         if let Some(offset) = provider.read_changeset_offset(block_number)? {
             let mut cursor = provider.cursor()?;
             let mut changeset = Vec::with_capacity(offset.num_changes() as usize);
@@ -2540,7 +2554,10 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
             for i in offset.changeset_range() {
                 if let Some(change) = cursor.get_one::<StorageChangesetMask>(i.into())? {
                     let block_address = BlockNumberAddress((block_number, change.address));
-                    let entry = StorageEntry { key: change.key, value: change.value };
+                    let entry = ChangesetEntry {
+                        key: StorageSlotKey::from_raw(change.key, use_hashed),
+                        value: change.value,
+                    };
                     changeset.push((block_address, entry));
                 }
             }
@@ -2555,7 +2572,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
         block_number: BlockNumber,
         address: Address,
         storage_key: B256,
-    ) -> ProviderResult<Option<StorageEntry>> {
+    ) -> ProviderResult<Option<ChangesetEntry>> {
         let provider = match self.get_segment_provider_for_block(
             StaticFileSegment::StorageChangeSets,
             block_number,
@@ -2570,6 +2587,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
             return Ok(None);
         };
 
+        let use_hashed = self.use_hashed_state();
         let mut cursor = provider.cursor()?;
         let range = offset.changeset_range();
         let mut low = range.start;
@@ -2604,7 +2622,10 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
                 .get_one::<StorageChangesetMask>(low.into())?
                 .filter(|change| change.address == address && change.key == storage_key)
         {
-            return Ok(Some(StorageEntry { key: change.key, value: change.value }));
+            return Ok(Some(ChangesetEntry {
+                key: StorageSlotKey::from_raw(change.key, use_hashed),
+                value: change.value,
+            }));
         }
 
         Ok(None)
@@ -2613,7 +2634,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
     fn storage_changesets_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(BlockNumberAddress, ChangesetEntry)>> {
         let range = self.bound_range(range, StaticFileSegment::StorageChangeSets);
         self.walk_storage_changeset_range(range).collect()
     }

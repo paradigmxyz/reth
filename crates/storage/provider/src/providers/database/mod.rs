@@ -179,6 +179,7 @@ impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
     }
 
     fn set_storage_settings_cache(&self, settings: StorageSettings) {
+        self.static_file_provider.set_use_hashed_state(settings.use_hashed_state);
         *self.storage_settings.write() = settings;
     }
 }
