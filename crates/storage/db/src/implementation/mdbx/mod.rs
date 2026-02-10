@@ -380,11 +380,7 @@ impl DatabaseEnv {
 
         let mode = match kind {
             DatabaseEnvKind::RO => Mode::ReadOnly,
-            DatabaseEnvKind::RW => {
-                // enable writemap mode in RW mode
-                inner_env.write_map();
-                Mode::ReadWrite { sync_mode: args.sync_mode }
-            }
+            DatabaseEnvKind::RW => Mode::ReadWrite { sync_mode: args.sync_mode },
         };
 
         // Note: We set max dbs to 256 here to allow for custom tables. This needs to be set on
