@@ -32,7 +32,7 @@ use revm::{
 /// Error code for execution reverted in `eth_simulateV1`.
 ///
 /// <https://github.com/ethereum/execution-apis>
-pub const SIMULATE_REVERT_CODE: i32 = -32000;
+pub const SIMULATE_REVERT_CODE: i32 = 3;
 
 /// Error code for VM execution errors (e.g., out of gas) in `eth_simulateV1`.
 ///
