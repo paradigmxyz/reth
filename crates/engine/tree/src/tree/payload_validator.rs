@@ -309,7 +309,7 @@ where
         input: BlockOrPayload<T>,
         execution_err: InsertBlockErrorKind,
         parent_block: &SealedHeader<N::BlockHeader>,
-    ) -> Result<ExecutedBlock<N>, InsertPayloadError<N::Block>>
+    ) -> Result<(ExecutedBlock<N>, Option<ExecutionTimingStats>), InsertPayloadError<N::Block>>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
@@ -362,7 +362,7 @@ where
         &mut self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
-    ) -> ValidationOutcome<N, InsertPayloadError<N::Block>>
+    ) -> Result<(ExecutedBlock<N>, Option<ExecutionTimingStats>), InsertPayloadError<N::Block>>
     where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
@@ -677,13 +677,13 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        Ok(self.spawn_deferred_trie_task(
+        let executed_block = self.spawn_deferred_trie_task(
             block,
             output,
             &ctx,
             TrieCtx::new(hashed_state, trie_output, overlay_factory),
-            timing_stats,
-        ))
+        );
+        Ok((executed_block, timing_stats))
     }
 
     /// Return sealed block header from database or in-memory state by hash.
@@ -1293,7 +1293,6 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
         trie_ctx: TrieCtx<P>,
-        timing_stats: Option<ExecutionTimingStats>,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
         let (anchor_hash, overlay_blocks) = ctx
@@ -1401,18 +1400,11 @@ where
         // Spawn task that computes trie data asynchronously.
         self.payload_processor.executor().spawn_blocking(compute_trie_input_task);
 
-        let executed_block = ExecutedBlock::with_deferred_trie_data(
+        ExecutedBlock::with_deferred_trie_data(
             Arc::new(block),
             execution_outcome,
             deferred_trie_data,
-        );
-
-        // Attach timing stats if present (for slow block logging after commit)
-        if let Some(stats) = timing_stats {
-            executed_block.with_timing_stats(stats)
-        } else {
-            executed_block
-        }
+        )
     }
 
     fn calculate_timing_stats(
@@ -1583,7 +1575,8 @@ where
 }
 
 /// Output of block or payload validation.
-pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> = Result<ExecutedBlock<N>, E>;
+pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
+    Result<(ExecutedBlock<N>, Option<ExecutionTimingStats>), E>;
 
 /// Strategy describing how to compute the state root.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
