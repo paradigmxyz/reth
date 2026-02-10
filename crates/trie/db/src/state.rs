@@ -539,8 +539,8 @@ mod tests {
         let address1 = Address::with_last_byte(1);
         let address2 = Address::with_last_byte(2);
 
-        let pre_hashed_slot1 = keccak256(B256::from(U256::from(11)));
-        let pre_hashed_slot2 = keccak256(B256::from(U256::from(22)));
+        let plain_slot1 = B256::from(U256::from(11));
+        let plain_slot2 = B256::from(U256::from(22));
 
         provider
             .tx_ref()
@@ -571,21 +571,21 @@ mod tests {
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((1, address1)),
-                StorageEntry { key: pre_hashed_slot2, value: U256::from(200) },
+                StorageEntry { key: plain_slot2, value: U256::from(200) },
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((2, address1)),
-                StorageEntry { key: pre_hashed_slot1, value: U256::from(100) },
+                StorageEntry { key: plain_slot1, value: U256::from(100) },
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((3, address1)),
-                StorageEntry { key: pre_hashed_slot1, value: U256::from(999) },
+                StorageEntry { key: plain_slot1, value: U256::from(999) },
             )
             .unwrap();
 
@@ -604,19 +604,22 @@ mod tests {
 
         assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
 
+        let expected_hashed_slot1 = keccak256(plain_slot1);
+        let expected_hashed_slot2 = keccak256(plain_slot2);
+
         let storage = sorted.storages.get(&hashed_addr1).expect("storage for address1");
         assert_eq!(storage.storage_slots.len(), 2);
 
         let found_slot1 =
-            storage.storage_slots.iter().find(|(k, _)| *k == pre_hashed_slot1).unwrap();
+            storage.storage_slots.iter().find(|(k, _)| *k == expected_hashed_slot1).unwrap();
         assert_eq!(found_slot1.1, U256::from(100));
 
         let found_slot2 =
-            storage.storage_slots.iter().find(|(k, _)| *k == pre_hashed_slot2).unwrap();
+            storage.storage_slots.iter().find(|(k, _)| *k == expected_hashed_slot2).unwrap();
         assert_eq!(found_slot2.1, U256::from(200));
 
-        assert_ne!(pre_hashed_slot1, keccak256(pre_hashed_slot1));
-        assert_ne!(pre_hashed_slot2, keccak256(pre_hashed_slot2));
+        assert_ne!(expected_hashed_slot1, plain_slot1);
+        assert_ne!(expected_hashed_slot2, plain_slot2);
 
         assert!(storage.storage_slots.windows(2).all(|w| w[0].0 <= w[1].0));
     }

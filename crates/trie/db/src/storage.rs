@@ -187,8 +187,8 @@ mod tests {
         assert!(provider.cached_storage_settings().use_hashed_state);
 
         let address = Address::with_last_byte(42);
-        let pre_hashed_slot1 = keccak256(B256::from(U256::from(100)));
-        let pre_hashed_slot2 = keccak256(B256::from(U256::from(200)));
+        let slot1 = B256::from(U256::from(100));
+        let slot2 = B256::from(U256::from(200));
 
         append_headers_to_static_files(&factory, 5);
 
@@ -196,28 +196,31 @@ mod tests {
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((1, address)),
-                StorageEntry { key: pre_hashed_slot1, value: U256::from(10) },
+                StorageEntry { key: slot1, value: U256::from(10) },
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((2, address)),
-                StorageEntry { key: pre_hashed_slot2, value: U256::from(20) },
+                StorageEntry { key: slot2, value: U256::from(20) },
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((3, address)),
-                StorageEntry { key: pre_hashed_slot1, value: U256::from(999) },
+                StorageEntry { key: slot1, value: U256::from(999) },
             )
             .unwrap();
 
         let result = hashed_storage_from_reverts_with_provider(&*provider, address, 1).unwrap();
 
+        let hashed_slot1 = keccak256(slot1);
+        let hashed_slot2 = keccak256(slot2);
+
         assert_eq!(result.storage.len(), 2);
-        assert_eq!(result.storage.get(&pre_hashed_slot1), Some(&U256::from(10)));
-        assert_eq!(result.storage.get(&pre_hashed_slot2), Some(&U256::from(20)));
+        assert_eq!(result.storage.get(&hashed_slot1), Some(&U256::from(10)));
+        assert_eq!(result.storage.get(&hashed_slot2), Some(&U256::from(20)));
     }
 }
