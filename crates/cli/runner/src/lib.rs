@@ -128,29 +128,40 @@ impl CliRunner {
     }
 
     /// Executes a regular future until completion or until external signal received.
-    pub fn run_until_ctrl_c<F, E>(self, fut: F) -> Result<(), E>
+    ///
+    /// The provided closure receives a [`TaskExecutor`] that can be used to spawn tasks or
+    /// threaded through to subsystems that need it.
+    pub fn run_until_ctrl_c<F, E>(self, f: impl FnOnce(TaskExecutor) -> F) -> Result<(), E>
     where
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        let _task_manager = TaskManager::new(self.tokio_runtime.handle().clone());
-        self.tokio_runtime.block_on(run_until_ctrl_c(fut))?;
+        let task_manager = TaskManager::new(self.tokio_runtime.handle().clone());
+        let executor = task_manager.executor();
+        self.tokio_runtime.block_on(run_until_ctrl_c(f(executor)))?;
         Ok(())
     }
 
     /// Executes a regular future as a spawned blocking task until completion or until external
     /// signal received.
     ///
+    /// The provided closure receives a [`TaskExecutor`] that can be used to spawn tasks or
+    /// threaded through to subsystems that need it.
+    ///
     /// See [`Runtime::spawn_blocking`](tokio::runtime::Runtime::spawn_blocking) .
-    pub fn run_blocking_until_ctrl_c<F, E>(self, fut: F) -> Result<(), E>
+    pub fn run_blocking_until_ctrl_c<F, E>(
+        self,
+        f: impl FnOnce(TaskExecutor) -> F + Send + 'static,
+    ) -> Result<(), E>
     where
         F: Future<Output = Result<(), E>> + Send + 'static,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
         let tokio_runtime = self.tokio_runtime;
-        let _task_manager = TaskManager::new(tokio_runtime.handle().clone());
+        let task_manager = TaskManager::new(tokio_runtime.handle().clone());
+        let executor = task_manager.executor();
         let handle = tokio_runtime.handle().clone();
-        let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(fut));
+        let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(f(executor)));
         tokio_runtime
             .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
 

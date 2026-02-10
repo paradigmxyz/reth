@@ -24,6 +24,7 @@ pub(crate) async fn dump_execution_stage<N, E, C>(
     should_run: bool,
     evm_config: E,
     consensus: C,
+    runtime: reth_tasks::Runtime,
 ) -> eyre::Result<()>
 where
     N: ProviderNodeTypes<DB = DatabaseEnv>,
@@ -43,7 +44,7 @@ where
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
-                reth_tasks::Runtime::current(),
+                runtime,
             )?,
             to,
             from,

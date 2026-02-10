@@ -49,11 +49,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         Comp: CliNodeComponents<N>,
     {
+        let runtime = ctx.task_executor.clone();
         match self.command {
             Subcommands::Run(command) => command.execute::<N, _, _>(ctx, components).await,
-            Subcommands::Drop(command) => command.execute::<N>().await,
-            Subcommands::Dump(command) => command.execute::<N, _, _>(components).await,
-            Subcommands::Unwind(command) => command.execute::<N, _, _>(components).await,
+            Subcommands::Drop(command) => command.execute::<N>(runtime).await,
+            Subcommands::Dump(command) => command.execute::<N, _, _>(components, runtime).await,
+            Subcommands::Unwind(command) => command.execute::<N, _, _>(components, runtime).await,
         }
     }
 }

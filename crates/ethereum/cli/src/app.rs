@@ -157,27 +157,35 @@ where
                 command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
             })
         }
-        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::Import(command) => {
-            runner.run_blocking_until_ctrl_c(command.execute::<N, _>(components))
+        Commands::Init(command) => runner.run_blocking_until_ctrl_c(|rt| command.execute::<N>(rt)),
+        Commands::InitState(command) => {
+            runner.run_blocking_until_ctrl_c(|rt| command.execute::<N>(rt))
         }
-        Commands::ImportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::ExportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::Import(command) => {
+            runner.run_blocking_until_ctrl_c(|rt| command.execute::<N, _>(components, rt))
+        }
+        Commands::ImportEra(command) => {
+            runner.run_blocking_until_ctrl_c(|rt| command.execute::<N>(rt))
+        }
+        Commands::ExportEra(command) => {
+            runner.run_blocking_until_ctrl_c(|rt| command.execute::<N>(rt))
+        }
+        Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(|_| command.execute()),
         Commands::Db(command) => {
             runner.run_blocking_command_until_exit(|ctx| command.execute::<N>(ctx))
         }
-        Commands::Download(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::Download(command) => runner.run_blocking_until_ctrl_c(|_| command.execute::<N>()),
         Commands::Stage(command) => {
             runner.run_command_until_exit(|ctx| command.execute::<N, _>(ctx, components))
         }
-        Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<N>()),
-        Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::P2P(command) => runner.run_until_ctrl_c(|_| command.execute::<N>()),
+        Commands::Config(command) => runner.run_until_ctrl_c(|_| command.execute()),
         Commands::Prune(command) => runner.run_command_until_exit(|ctx| command.execute::<N>(ctx)),
         #[cfg(feature = "dev")]
-        Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::ReExecute(command) => runner.run_until_ctrl_c(command.execute::<N>(components)),
+        Commands::TestVectors(command) => runner.run_until_ctrl_c(|_| command.execute()),
+        Commands::ReExecute(command) => {
+            runner.run_until_ctrl_c(|rt| command.execute::<N>(components, rt))
+        }
         Commands::Ext(command) => command.execute(runner),
     }
 }

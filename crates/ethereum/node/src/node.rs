@@ -107,9 +107,11 @@ impl EthereumNode {
     /// use reth_chainspec::MAINNET;
     /// use reth_node_ethereum::EthereumNode;
     ///
-    /// let factory = EthereumNode::provider_factory_builder()
-    ///     .open_read_only(MAINNET.clone(), "datadir")
-    ///     .unwrap();
+    /// fn demo(runtime: reth_tasks::Runtime) {
+    ///     let factory = EthereumNode::provider_factory_builder()
+    ///         .open_read_only(MAINNET.clone(), "datadir", runtime)
+    ///         .unwrap();
+    /// }
     /// ```
     ///
     /// # Open a Providerfactory manually with all required components
@@ -120,12 +122,15 @@ impl EthereumNode {
     /// use reth_node_ethereum::EthereumNode;
     /// use reth_provider::providers::{RocksDBProvider, StaticFileProvider};
     ///
-    /// let factory = EthereumNode::provider_factory_builder()
-    ///     .db(open_db_read_only("db", Default::default()).unwrap())
-    ///     .chainspec(ChainSpecBuilder::mainnet().build().into())
-    ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
-    ///     .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())
-    ///     .build_provider_factory();
+    /// fn demo(runtime: reth_tasks::Runtime) {
+    ///     let factory = EthereumNode::provider_factory_builder()
+    ///         .db(open_db_read_only("db", Default::default()).unwrap())
+    ///         .chainspec(ChainSpecBuilder::mainnet().build().into())
+    ///         .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
+    ///         .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())
+    ///         .runtime(runtime)
+    ///         .build_provider_factory();
+    /// }
     /// ```
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
         ProviderFactoryBuilder::default()

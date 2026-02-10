@@ -127,7 +127,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
-    pub fn init<N: CliNodeTypes>(&self, access: AccessRights) -> eyre::Result<Environment<N>>
+    pub fn init<N: CliNodeTypes>(
+        &self,
+        access: AccessRights,
+        runtime: reth_tasks::Runtime,
+    ) -> eyre::Result<Environment<N>>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
@@ -186,7 +190,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             .build()?;
 
         let provider_factory =
-            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
+            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access, runtime)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis_with_settings(&provider_factory, self.storage_settings())?;
@@ -207,6 +211,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
         access: AccessRights,
+        runtime: reth_tasks::Runtime,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
@@ -217,7 +222,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             self.chain.clone(),
             static_file_provider,
             rocksdb_provider,
-            reth_tasks::Runtime::current(),
+            runtime,
         )?
         .with_prune_modes(prune_modes.clone());
 

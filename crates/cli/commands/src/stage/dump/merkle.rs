@@ -32,6 +32,7 @@ pub(crate) async fn dump_merkle_stage<N>(
     should_run: bool,
     evm_config: impl ConfigureEvm<Primitives = N::Primitives>,
     consensus: impl FullConsensus<N::Primitives> + 'static,
+    runtime: reth_tasks::Runtime,
 ) -> Result<()>
 where
     N: ProviderNodeTypes<DB = DatabaseEnv>,
@@ -63,7 +64,7 @@ where
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
-                reth_tasks::Runtime::current(),
+                runtime,
             )?,
             to,
             from,

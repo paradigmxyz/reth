@@ -398,17 +398,8 @@ impl Runtime {
 
 impl Runtime {
     /// Attempts to get the current [`Runtime`] if one has been set globally.
-    pub fn try_current() -> Result<Self, crate::NoCurrentTaskExecutorError> {
+    pub(crate) fn try_current() -> Result<Self, crate::NoCurrentTaskExecutorError> {
         GLOBAL_RUNTIME.get().cloned().ok_or_else(crate::NoCurrentTaskExecutorError::default)
-    }
-
-    /// Returns the current global [`Runtime`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if no global runtime has been set via [`TaskManager`].
-    pub fn current() -> Self {
-        Self::try_current().unwrap()
     }
 }
 

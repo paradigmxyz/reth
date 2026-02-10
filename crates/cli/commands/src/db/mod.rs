@@ -73,8 +73,8 @@ pub enum Subcommands {
 /// Initializes a provider factory with specified access rights, and then execute with the provided
 /// command
 macro_rules! db_exec {
-    ($env:expr, $tool:ident, $N:ident, $access_rights:expr, $command:block) => {
-        let Environment { provider_factory, .. } = $env.init::<$N>($access_rights)?;
+    ($env:expr, $tool:ident, $N:ident, $access_rights:expr, $runtime:expr, $command:block) => {
+        let Environment { provider_factory, .. } = $env.init::<$N>($access_rights, $runtime)?;
 
         let $tool = DbTool::new(provider_factory)?;
         $command;
@@ -110,27 +110,27 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 } else {
                     AccessRights::RO
                 };
-                db_exec!(self.env, tool, N, access_rights, {
+                db_exec!(self.env, tool, N, access_rights, ctx.task_executor.clone(), {
                     command.execute(data_dir, &tool)?;
                 });
             }
             Subcommands::List(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
+                db_exec!(self.env, tool, N, AccessRights::RO, ctx.task_executor.clone(), {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Checksum(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
+                db_exec!(self.env, tool, N, AccessRights::RO, ctx.task_executor.clone(), {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Diff(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
+                db_exec!(self.env, tool, N, AccessRights::RO, ctx.task_executor.clone(), {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Get(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
+                db_exec!(self.env, tool, N, AccessRights::RO, ctx.task_executor.clone(), {
                     command.execute(&tool)?;
                 });
             }
@@ -152,26 +152,33 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     }
                 }
 
-                db_exec!(self.env, tool, N, AccessRights::RW, {
+                db_exec!(self.env, tool, N, AccessRights::RW, ctx.task_executor.clone(), {
                     tool.drop(db_path, static_files_path, exex_wal_path)?;
                 });
             }
             Subcommands::Clear(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RW, {
+                db_exec!(self.env, tool, N, AccessRights::RW, ctx.task_executor.clone(), {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::RepairTrie(command) => {
                 let access_rights =
                     if command.dry_run { AccessRights::RO } else { AccessRights::RW };
-                db_exec!(self.env, tool, N, access_rights, {
+                db_exec!(self.env, tool, N, access_rights, ctx.task_executor.clone(), {
                     command.execute(&tool, ctx.task_executor, &data_dir)?;
                 });
             }
             Subcommands::StaticFileHeader(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RoInconsistent, {
-                    command.execute(&tool)?;
-                });
+                db_exec!(
+                    self.env,
+                    tool,
+                    N,
+                    AccessRights::RoInconsistent,
+                    ctx.task_executor.clone(),
+                    {
+                        command.execute(&tool)?;
+                    }
+                );
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {
@@ -192,17 +199,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 println!("{}", db_path.display());
             }
             Subcommands::Settings(command) => {
-                db_exec!(self.env, tool, N, command.access_rights(), {
+                db_exec!(self.env, tool, N, command.access_rights(), ctx.task_executor.clone(), {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::AccountStorage(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
+                db_exec!(self.env, tool, N, AccessRights::RO, ctx.task_executor.clone(), {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::State(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
+                db_exec!(self.env, tool, N, AccessRights::RO, ctx.task_executor.clone(), {
                     command.execute(&tool)?;
                 });
             }
