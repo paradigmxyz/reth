@@ -15,7 +15,7 @@ use pin_project::pin_project;
 use std::{
     future::Future,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
     time::Duration,
 };
 use tokio::{
@@ -190,7 +190,8 @@ where
                 }
             }
 
-            // 2. Early return if buffer is empty
+            // 2. Early return if buffer is empty — no need to poll the interval
+            //    since there is nothing buffered to flush
             if this.buf.is_empty() {
                 return Poll::Pending
             }
@@ -206,28 +207,16 @@ where
             }
 
             // 4. Batch not full - check if we should flush based on mode
-            let should_flush = if let Some(mut interval) = this.interval.as_mut().as_pin_mut() {
-                // Batch-and-timeout mode: flush only if interval ticked
-                interval.as_mut().poll_tick(cx).is_ready()
-            } else {
-                // Immediate mode: always flush if we have items (greedy processing)
-                true
-            };
-
-            if should_flush {
-                Self::spawn_batch(this.pool, this.buf);
-                // Reset interval if present
-                if let Some(mut interval) = this.interval.as_mut().as_pin_mut() {
-                    interval.as_mut().reset();
-                }
-                continue
+            if let Some(mut interval) = this.interval.as_mut().as_pin_mut() {
+                // Batch-and-timeout mode: wait for interval tick before flushing.
+                // If poll_tick returns Pending, we fall through to return Pending below.
+                ready!(interval.as_mut().poll_tick(cx));
             }
+            // Immediate mode (no interval) always falls through to flush.
 
-            // 5. Batch not full and interval not ready - wait for more items or timeout
-            // Wakers are registered by:
-            // - poll_recv_many returning Pending
-            // - interval.poll_tick returning Pending
-            return Poll::Pending
+            // Note: wakers are already registered by poll_recv_many and
+            // interval.poll_tick returning Pending above.
+            Self::spawn_batch(this.pool, this.buf);
         }
     }
 }
