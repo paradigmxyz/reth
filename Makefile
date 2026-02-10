@@ -12,7 +12,6 @@ FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 CARGO_TARGET_DIR ?= target
 
 # List of features to use when building. Can be overridden via the environment.
-# jemalloc, asm-keccak, and min-debug-logs are already default features.
 FEATURES ?=
 
 # Cargo profile for builds. Default is for local builds, CI uses an override.
@@ -242,7 +241,7 @@ maxperf: ## Builds `reth` with the most aggressive optimisations.
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-debug-logs,otlp,otlp-logs,reth-revm/portable,js-tracer,keccak-cache-global,rocksdb
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
 
 
 fmt:
