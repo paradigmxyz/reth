@@ -78,7 +78,7 @@ use reth_stages::{
     StageId,
 };
 use reth_static_file::StaticFileProducer;
-use reth_tasks::{RayonConfig, RuntimeBuilder, RuntimeConfig, TaskExecutor, TokioConfig};
+use reth_tasks::TaskExecutor;
 use reth_tracing::{
     throttle,
     tracing::{debug, error, info, warn},
@@ -215,7 +215,6 @@ impl LaunchContext {
     /// Configure global settings this includes:
     ///
     /// - Raising the file descriptor limit
-    /// - Initializing the global [`reth_tasks::Runtime`] with dedicated rayon thread pools
     /// - Configuring the global rayon thread pool for implicit `par_iter` usage
     pub fn configure_globals(&self, reserved_cpu_cores: usize) {
         // Raise the fd limit of the process.
@@ -226,19 +225,6 @@ impl LaunchContext {
             }
             Ok(fdlimit::Outcome::Unsupported) => {}
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
-        }
-
-        // Initialize the global Runtime with the tokio handle and dedicated rayon pools.
-        let handle = self.task_executor.handle().clone();
-        let rayon_config = RayonConfig::default().with_reserved_cpu_cores(reserved_cpu_cores);
-        let config = RuntimeConfig::default()
-            .with_tokio(TokioConfig::existing_handle(handle))
-            .with_rayon(rayon_config);
-        match RuntimeBuilder::new(config).build() {
-            Ok(_runtime) => {}
-            Err(err) => {
-                warn!(%err, "Failed to initialize Runtime");
-            }
         }
 
         // Configure the implicit global rayon pool for `par_iter` usage.
