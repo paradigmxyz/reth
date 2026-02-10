@@ -1,4 +1,5 @@
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{keccak256, B256, U256};
+use core::marker::PhantomData;
 
 /// Trait for `DupSort` table values that contain a subkey.
 ///
@@ -10,6 +11,107 @@ pub trait ValueWithSubKey {
 
     /// Extract the subkey from the value.
     fn get_subkey(&self) -> Self::SubKey;
+}
+
+/// Marker type for an unhashed (plain) EVM storage slot.
+#[derive(Debug)]
+pub enum PlainSlot {}
+
+/// Marker type for a keccak256-hashed storage slot.
+#[derive(Debug)]
+pub enum HashedSlot {}
+
+/// A storage slot key tagged with its hashing status.
+///
+/// This is a zero-cost wrapper around [`B256`] that uses a marker type parameter
+/// to distinguish plain slots from hashed slots at the type level. The on-disk
+/// encoding is identical to a raw [`B256`] — the marker exists only in the Rust
+/// type system to prevent double-hashing bugs at compile time.
+#[repr(transparent)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+pub struct StorageSlotKey<K> {
+    inner: B256,
+    _marker: PhantomData<K>,
+}
+
+/// A plain (unhashed) storage slot key.
+pub type PlainSlotKey = StorageSlotKey<PlainSlot>;
+
+/// A keccak256-hashed storage slot key.
+pub type HashedSlotKey = StorageSlotKey<HashedSlot>;
+
+impl<K> StorageSlotKey<K> {
+    /// Wrap a raw [`B256`] as a typed slot key.
+    ///
+    /// The caller is responsible for ensuring that the value matches the marker
+    /// type `K` (i.e. that a plain B256 is wrapped as [`PlainSlotKey`] and a
+    /// hashed B256 is wrapped as [`HashedSlotKey`]).
+    pub const fn new_unchecked(inner: B256) -> Self {
+        Self { inner, _marker: PhantomData }
+    }
+
+    /// Returns a reference to the inner [`B256`].
+    pub const fn as_b256(&self) -> &B256 {
+        &self.inner
+    }
+
+    /// Consumes self and returns the inner [`B256`].
+    pub const fn into_b256(self) -> B256 {
+        self.inner
+    }
+}
+
+impl PlainSlotKey {
+    /// Hash this plain slot key with keccak256, producing a [`HashedSlotKey`].
+    pub fn hash(self) -> HashedSlotKey {
+        HashedSlotKey::new_unchecked(keccak256(self.inner))
+    }
+}
+
+impl<K> From<StorageSlotKey<K>> for B256 {
+    fn from(key: StorageSlotKey<K>) -> Self {
+        key.inner
+    }
+}
+
+/// A typed in-memory view of a [`StorageEntry`] whose slot key is tagged as
+/// either [`PlainSlot`] or [`HashedSlot`].
+///
+/// The raw [`StorageEntry`] remains the on-disk / codec type used by DB tables.
+/// This wrapper is used at provider boundaries to carry provenance information
+/// through higher-level code without changing the storage format.
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default)]
+pub struct TypedStorageEntry<K> {
+    /// Typed storage slot key.
+    pub key: StorageSlotKey<K>,
+    /// Value at this storage slot.
+    pub value: U256,
+}
+
+/// A [`TypedStorageEntry`] with a plain (unhashed) slot key.
+pub type PlainStorageEntry = TypedStorageEntry<PlainSlot>;
+
+/// A [`TypedStorageEntry`] with a keccak256-hashed slot key.
+pub type HashedStorageEntry = TypedStorageEntry<HashedSlot>;
+
+impl<K> From<TypedStorageEntry<K>> for StorageEntry {
+    fn from(e: TypedStorageEntry<K>) -> Self {
+        Self { key: e.key.into_b256(), value: e.value }
+    }
+}
+
+impl<K> From<StorageEntry> for TypedStorageEntry<K> {
+    fn from(e: StorageEntry) -> Self {
+        Self { key: StorageSlotKey::new_unchecked(e.key), value: e.value }
+    }
+}
+
+impl<K> ValueWithSubKey for TypedStorageEntry<K> {
+    type SubKey = B256;
+
+    fn get_subkey(&self) -> Self::SubKey {
+        *self.key.as_b256()
+    }
 }
 
 /// Account storage entry.
@@ -30,6 +132,14 @@ impl StorageEntry {
     /// Create a new `StorageEntry` with given key and value.
     pub const fn new(key: B256, value: U256) -> Self {
         Self { key, value }
+    }
+
+    /// Interpret this entry as a [`TypedStorageEntry`] with the given marker.
+    ///
+    /// This is a zero-cost conversion that tags the key with provenance
+    /// information. The caller must ensure the marker matches reality.
+    pub const fn into_typed<K>(self) -> TypedStorageEntry<K> {
+        TypedStorageEntry { key: StorageSlotKey::new_unchecked(self.key), value: self.value }
     }
 }
 
