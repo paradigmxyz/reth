@@ -432,7 +432,7 @@ mod tests {
             response_bytes: 1000,
         });
 
-        let encoded = inner.encode_snap_message(snap_msg.clone());
+        let encoded = inner.encode_snap_message(snap_msg);
         assert_eq!(encoded[0], EthMessageID::message_count(EthVersion::Eth70));
 
         let decoded = inner.decode_message(BytesMut::from(&encoded[..])).unwrap();
