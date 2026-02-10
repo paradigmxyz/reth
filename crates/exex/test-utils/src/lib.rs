@@ -55,7 +55,7 @@ use reth_provider::{
     providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider},
     BlockReader, EthStorage, ProviderFactory,
 };
-use reth_tasks::TaskManager;
+use reth_tasks::{Runtime, RuntimeBuilder, RuntimeConfig};
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use tempfile::TempDir;
 use thiserror::Error;
@@ -175,8 +175,8 @@ pub struct TestExExHandle {
     pub events_rx: UnboundedReceiver<ExExEvent>,
     /// Channel for sending notifications to the Execution Extension
     pub notifications_tx: Sender<ExExNotification>,
-    /// Node task manager
-    pub tasks: TaskManager,
+    /// Node task runtime
+    pub tasks: Runtime,
     /// WAL temp directory handle
     _wal_directory: TempDir,
 }
@@ -266,9 +266,13 @@ pub async fn test_exex_context_with_chain_spec(
     )
     .await?;
     let network = network_manager.handle().clone();
-    let tasks = TaskManager::current();
-    let task_executor = tasks.executor();
-    tasks.executor().spawn(network_manager);
+    let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
+        tokio::runtime::Handle::current(),
+    ))
+    .build()
+    .unwrap();
+    let task_executor = exec.clone();
+    exec.spawn(network_manager);
 
     let (_, payload_builder_handle) = NoopPayloadBuilderService::<EthEngineTypes>::new();
 
@@ -321,7 +325,7 @@ pub async fn test_exex_context_with_chain_spec(
             provider_factory,
             events_rx,
             notifications_tx,
-            tasks,
+            tasks: exec,
             _wal_directory: wal_directory,
         },
     ))

@@ -10,7 +10,7 @@ use reth_ethereum_primitives::PooledTransactionVariant;
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
-use reth_tasks::TaskManager;
+use reth_tasks::{RuntimeBuilder, RuntimeConfig};
 use reth_transaction_pool::TransactionPool;
 use std::{
     sync::Arc,
@@ -20,8 +20,11 @@ use std::{
 #[tokio::test]
 async fn can_handle_blobs() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let tasks = TaskManager::current();
-    let exec = tasks.executor();
+    let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
+        tokio::runtime::Handle::current(),
+    ))
+    .build()
+    .unwrap();
 
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
@@ -92,8 +95,11 @@ async fn can_handle_blobs() -> eyre::Result<()> {
 #[tokio::test]
 async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let tasks = TaskManager::current();
-    let exec = tasks.executor();
+    let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
+        tokio::runtime::Handle::current(),
+    ))
+    .build()
+    .unwrap();
 
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
@@ -146,8 +152,11 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
 #[tokio::test]
 async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let tasks = TaskManager::current();
-    let exec = tasks.executor();
+    let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
+        tokio::runtime::Handle::current(),
+    ))
+    .build()
+    .unwrap();
 
     let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     // Osaka activates in 2 slots

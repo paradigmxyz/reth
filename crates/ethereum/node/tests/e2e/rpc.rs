@@ -21,7 +21,7 @@ use reth_node_core::{
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
 use reth_rpc_api::servers::AdminApiServer;
-use reth_tasks::TaskManager;
+use reth_tasks::{RuntimeBuilder, RuntimeConfig};
 use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -344,8 +344,11 @@ async fn test_eth_config() -> eyre::Result<()> {
 async fn test_admin_external_ip() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let exec = TaskManager::current();
-    let exec = exec.executor();
+    let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
+        tokio::runtime::Handle::current(),
+    ))
+    .build()
+    .unwrap();
 
     // Chain spec with test allocs
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();

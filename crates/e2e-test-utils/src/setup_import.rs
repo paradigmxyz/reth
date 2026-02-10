@@ -15,7 +15,7 @@ use reth_provider::{
 };
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_stages_types::StageId;
-use reth_tasks::TaskManager;
+use reth_tasks::{RuntimeBuilder, RuntimeConfig, TaskManager};
 use std::{path::Path, sync::Arc};
 use tempfile::TempDir;
 use tracing::{debug, info, span, Level};
@@ -68,8 +68,11 @@ pub async fn setup_engine_with_chain_import(
         + Copy
         + 'static,
 ) -> eyre::Result<ChainImportResult> {
-    let tasks = TaskManager::current();
-    let exec = tasks.executor();
+    let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
+        tokio::runtime::Handle::current(),
+    ))
+    .build()?;
+    let tasks = exec.take_task_manager().unwrap();
 
     let network_config = NetworkArgs {
         discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },

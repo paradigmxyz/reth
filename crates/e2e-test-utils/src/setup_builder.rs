@@ -14,7 +14,7 @@ use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_server_types::RpcModuleSelection;
-use reth_tasks::TaskManager;
+use reth_tasks::{RuntimeBuilder, RuntimeConfig, TaskManager};
 use std::sync::Arc;
 use tracing::{span, Instrument, Level};
 
@@ -113,8 +113,11 @@ where
         TaskManager,
         Wallet,
     )> {
-        let tasks = TaskManager::current();
-        let exec = tasks.executor();
+        let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
+            tokio::runtime::Handle::current(),
+        ))
+        .build()?;
+        let tasks = exec.take_task_manager().unwrap();
 
         let network_config = NetworkArgs {
             discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },

@@ -286,7 +286,7 @@ where
 fn runtime_shutdown(rt: reth_tasks::Runtime, wait: bool) {
     let (tx, rx) = mpsc::channel();
     std::thread::Builder::new()
-        .name("tokio-shutdown".to_string())
+        .name("rt-shutdown".to_string())
         .spawn(move || {
             drop(rt);
             let _ = tx.send(());
@@ -295,7 +295,7 @@ fn runtime_shutdown(rt: reth_tasks::Runtime, wait: bool) {
 
     if wait {
         let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
-            debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
+            debug!(target: "reth::cli", %err, "runtime shutdown timed out");
         });
     }
 }
