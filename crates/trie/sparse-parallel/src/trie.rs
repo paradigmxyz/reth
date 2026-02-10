@@ -19,7 +19,7 @@ use reth_trie_sparse::{
 };
 use smallvec::SmallVec;
 use std::cmp::{Ord, Ordering, PartialOrd};
-use tracing::{debug, instrument, trace};
+use tracing::{debug, debug_span, instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
 /// [`ParallelSparseTrie`]. All longer paths belong to a lower subtrie.
@@ -182,6 +182,7 @@ impl SparseTrie for ParallelSparseTrie {
 
         // Sort nodes first by their subtrie, and secondarily by their path. This allows for
         // grouping nodes by their subtrie using `chunk_by`.
+        let span = debug_span!(target: "trie::parallel_sparse", "sort_nodes").entered();
         nodes.sort_unstable_by(
             |ProofTrieNode { path: path_a, .. }, ProofTrieNode { path: path_b, .. }| {
                 let subtrie_type_a = SparseSubtrieType::from_path(path_a);
@@ -189,6 +190,7 @@ impl SparseTrie for ParallelSparseTrie {
                 subtrie_type_a.cmp(&subtrie_type_b).then_with(|| path_a.cmp(path_b))
             },
         );
+        drop(span);
 
         // Update the top-level branch node masks. This is simple and can't be done in parallel.
         self.branch_node_masks.reserve(nodes.len());
@@ -209,14 +211,17 @@ impl SparseTrie for ParallelSparseTrie {
 
         // Reserve the capacity of the upper subtrie's `nodes` HashMap before iterating, so we don't
         // end up making many small capacity changes as we loop.
+        let span = debug_span!(target: "trie::parallel_sparse", "reveal_upper_nodes").entered();
         self.upper_subtrie.nodes.reserve(upper_nodes.len());
         for node in upper_nodes {
             self.reveal_upper_node(node.path, &node.node, node.masks)?;
         }
+        drop(span);
 
         let reachable_subtries = self.reachable_subtries();
 
         if !self.is_reveal_parallelism_enabled(lower_nodes.len()) {
+            let _span = debug_span!(target: "trie::parallel_sparse", "reveal_lower_nodes_sequential").entered();
             for node in lower_nodes {
                 let idx = path_subtrie_index_unchecked(&node.path);
                 if !reachable_subtries.get(idx) {
@@ -259,10 +264,9 @@ impl SparseTrie for ParallelSparseTrie {
         // Reveal lower subtrie nodes in parallel
         {
             use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-            use tracing::Span;
 
             // Capture the current span so it can be propagated to rayon worker threads
-            let parent_span = Span::current();
+            let parent_span = debug_span!(target: "trie::parallel_sparse", "reveal_lower_nodes_parallel").entered();
 
             // Capture reference to upper subtrie nodes for boundary leaf reachability checks
             let upper_nodes = &self.upper_subtrie.nodes;
@@ -315,7 +319,7 @@ impl SparseTrie for ParallelSparseTrie {
                 .map(|((subtrie_idx, mut subtrie), nodes)| {
                     // Enter the parent span to propagate context (e.g., hashed_address for storage
                     // tries) to the worker thread
-                    let _guard = parent_span.enter();
+                    let _span = debug_span!(target: "trie::parallel_sparse", parent: &parent_span, "reveal_subtrie_nodes").entered();
 
                     // reserve space in the HashMap ahead of time; doing it on a node-by-node basis
                     // can cause multiple re-allocations as the hashmap grows.

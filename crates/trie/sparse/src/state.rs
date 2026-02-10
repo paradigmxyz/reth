@@ -12,6 +12,7 @@ use alloy_rlp::{Decodable, Encodable};
 use alloy_trie::proof::DecodedProofNodes;
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
+use tracing::debug_span;
 use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
@@ -398,6 +399,7 @@ where
             let retain_updates = self.retain_updates;
             let skip_filtering = self.skip_proof_node_filtering;
 
+            let span = debug_span!(target: "trie::sparse", "reveal_storage_nodes").entered();
             // Process all storage trie revealings in parallel, having first removed the
             // `reveal_nodes` tracking and `RevealableSparseTrie`s for each account from their
             // HashMaps. These will be returned after processing.
@@ -411,6 +413,7 @@ where
                 })
                 .par_bridge_buffered()
                 .map(|(account, storage_proofs, mut revealed_nodes, mut trie)| {
+                    let _enter = debug_span!(target: "trie::sparse", parent: &span, "reveal_storage_nodes", ?account).entered();
                     let mut bufs = Vec::new();
                     let result = Self::reveal_storage_v2_proof_nodes_inner(
                         account,
@@ -424,6 +427,8 @@ where
                     (account, result, revealed_nodes, trie, bufs)
                 })
                 .collect();
+
+            drop(span);
 
             let mut any_err = Ok(());
             for (account, result, revealed_nodes, trie, bufs) in results {
@@ -508,13 +513,6 @@ where
     ///
     /// V2 proofs already include the masks in the `ProofTrieNode` structure,
     /// so no separate masks map is needed.
-    #[instrument(
-        target = "trie::sparse",
-        skip_all,
-        fields(
-            nodes = nodes.len()
-        )
-    )]
     pub fn reveal_account_v2_proof_nodes(
         &mut self,
         mut nodes: Vec<ProofTrieNode>,
