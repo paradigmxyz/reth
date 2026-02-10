@@ -96,7 +96,7 @@ where
 
         // Check where transaction hash numbers are stored
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb() {
+        if provider.cached_storage_settings().storage_v2 {
             return self.prune_rocksdb(provider, input, start, end);
         }
 

@@ -76,7 +76,7 @@ where
 
         // Check where storage history indices are stored
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().storages_history_in_rocksdb() {
+        if provider.cached_storage_settings().storage_v2 {
             return self.prune_rocksdb(provider, input, range, range_end);
         }
 

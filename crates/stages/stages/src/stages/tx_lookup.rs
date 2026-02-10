@@ -200,7 +200,7 @@ where
         }
 
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb() {
+        if provider.cached_storage_settings().storage_v2 {
             provider.commit_pending_rocksdb_batches()?;
             provider.rocksdb_provider().flush(&[Tables::TransactionHashNumbers.name()])?;
         }

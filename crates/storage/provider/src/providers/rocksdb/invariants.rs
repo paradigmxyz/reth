@@ -62,21 +62,21 @@ impl RocksDBProvider {
         let mut unwind_target: Option<BlockNumber> = None;
 
         // Heal TransactionHashNumbers if stored in RocksDB
-        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb() &&
+        if provider.cached_storage_settings().storage_v2 &&
             let Some(target) = self.heal_transaction_hash_numbers(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
         // Heal StoragesHistory if stored in RocksDB
-        if provider.cached_storage_settings().storages_history_in_rocksdb() &&
+        if provider.cached_storage_settings().storage_v2 &&
             let Some(target) = self.heal_storages_history(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
         // Heal AccountsHistory if stored in RocksDB
-        if provider.cached_storage_settings().account_history_in_rocksdb() &&
+        if provider.cached_storage_settings().storage_v2 &&
             let Some(target) = self.heal_accounts_history(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));

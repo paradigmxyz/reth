@@ -39,7 +39,7 @@ pub trait RocksDBProviderFactory {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         {
-            if self.cached_storage_settings().any_in_rocksdb() {
+            if self.cached_storage_settings().storage_v2 {
                 let rocksdb = self.rocksdb_provider();
                 let tx = rocksdb.tx();
                 return f(Some(&tx));
