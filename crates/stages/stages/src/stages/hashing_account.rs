@@ -250,12 +250,6 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        // If use_hashed_state is enabled, execution manages HashedAccounts directly,
-        // so this stage becomes a no-op.
-        if provider.cached_storage_settings().use_hashed_state {
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) });
-        }
-
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
