@@ -278,7 +278,6 @@ impl Default for Runtime {
 impl Runtime {
     /// Takes the [`TaskManager`] out of this runtime, if one is stored.
     ///
-    /// This is used by [`TaskManager::new`] to extract the manager after building a runtime.
     /// Once taken, the runtime no longer owns the manager's shutdown signal.
     pub fn take_task_manager(&self) -> Option<TaskManager> {
         self.0._task_manager.lock().unwrap().take()
