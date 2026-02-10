@@ -1353,7 +1353,7 @@ impl SerialSparseTrie {
         let remaining_child_node = match self.nodes.get(remaining_child_path).unwrap() {
             SparseNode::Hash(_) => {
                 debug!(
-                    target: "trie::parallel_sparse",
+                    target: "trie::sparse",
                     child_path = ?remaining_child_path,
                     leaf_full_path = ?full_path,
                     "Node child not revealed in remove_leaf, falling back to db",
@@ -1363,7 +1363,7 @@ impl SerialSparseTrie {
                 {
                     let decoded = TrieNode::decode(&mut &node[..])?;
                     trace!(
-                        target: "trie::parallel_sparse",
+                        target: "trie::sparse",
                         ?remaining_child_path,
                         ?decoded,
                         ?tree_mask,
@@ -1394,7 +1394,7 @@ impl SerialSparseTrie {
             remaining_grandchild_path.extend(key);
 
             trace!(
-                target: "trie::parallel_sparse",
+                target: "trie::sparse",
                 remaining_grandchild_path = ?remaining_grandchild_path,
                 child_path = ?remaining_child_path,
                 leaf_full_path = ?full_path,
