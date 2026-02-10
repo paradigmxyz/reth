@@ -188,23 +188,16 @@ impl TaskSpawner for TokioTaskExecutor {
     }
 }
 
-/// Many reth components require to spawn tasks for long-running jobs. For example `discovery`
-/// spawns tasks to handle egress and ingress of udp traffic or `network` that spawns session tasks
-/// that handle the traffic to and from a peer.
-///
-/// To unify how tasks are created, the [`TaskManager`] provides access to the configured Tokio
-/// runtime. A [`TaskManager`] stores the [`tokio::runtime::Handle`] it is associated with. In this
-/// way it is possible to configure on which runtime a task is executed.
+/// Monitors critical tasks for panics and manages graceful shutdown.
 ///
 /// The main purpose of this type is to be able to monitor if a critical task panicked, for
-/// diagnostic purposes, since tokio task essentially fail silently. Therefore, this type is a
-/// Stream that yields the name of panicked task, See [`Runtime::spawn_critical`]. In order to
-/// execute Tasks use the [`Runtime`] type [`TaskManager::executor`].
+/// diagnostic purposes, since tokio tasks essentially fail silently. Therefore, this type is a
+/// Future that resolves with the name of the panicked task. See [`Runtime::spawn_critical`].
+///
+/// Use [`Runtime::take_task_manager`] to extract a `TaskManager` from a built [`Runtime`].
 #[derive(Debug)]
 #[must_use = "TaskManager must be polled to monitor critical tasks"]
 pub struct TaskManager {
-    /// The associated [`Runtime`], set after construction.
-    runtime: Option<Runtime>,
     /// Receiver for task events.
     task_events_rx: UnboundedReceiver<TaskEvent>,
     /// The [Signal] to fire when all tasks should be shutdown.
@@ -218,31 +211,6 @@ pub struct TaskManager {
 // === impl TaskManager ===
 
 impl TaskManager {
-    /// Returns a __new__ [`TaskManager`] over the currently running Runtime.
-    ///
-    /// This must be polled for the duration of the program.
-    ///
-    /// # Panics
-    ///
-    /// This will panic if called outside the context of a Tokio runtime.
-    pub fn current() -> Self {
-        let handle = Handle::current();
-        Self::new(handle)
-    }
-
-    /// Create a new instance connected to the given handle's tokio runtime.
-    ///
-    /// This also sets the global [`Runtime`].
-    pub fn new(handle: Handle) -> Self {
-        let config = RuntimeConfig::with_existing_handle(handle);
-        let runtime =
-            RuntimeBuilder::new(config).build().expect("failed to build Runtime from TaskManager");
-        let mut task_manager =
-            runtime.take_task_manager().expect("freshly built Runtime must contain a TaskManager");
-        task_manager.runtime = Some(runtime);
-        task_manager
-    }
-
     /// Create a new [`TaskManager`] without an associated [`Runtime`], returning
     /// the shutdown/event primitives for [`RuntimeBuilder`] to wire up.
     pub(crate) fn new_parts(
@@ -251,19 +219,9 @@ impl TaskManager {
         let (task_events_tx, task_events_rx) = unbounded_channel();
         let (signal, on_shutdown) = signal();
         let graceful_tasks = Arc::new(AtomicUsize::new(0));
-        let manager = Self {
-            runtime: None,
-            task_events_rx,
-            signal: Some(signal),
-            graceful_tasks: Arc::clone(&graceful_tasks),
-        };
+        let manager =
+            Self { task_events_rx, signal: Some(signal), graceful_tasks: Arc::clone(&graceful_tasks) };
         (manager, on_shutdown, task_events_tx, graceful_tasks)
-    }
-
-    /// Returns a new [`Runtime`] that can spawn new tasks onto the tokio runtime this type is
-    /// connected to.
-    pub fn executor(&self) -> Runtime {
-        self.runtime.clone().expect("TaskManager has no associated Runtime")
     }
 
     /// Fires the shutdown signal and awaits until all tasks are shutdown.
