@@ -17,12 +17,15 @@ use reth_ethereum::{
     },
     provider::CanonStateSubscriptions,
     rpc::api::eth::helpers::EthTransactions,
-    tasks::TaskManager,
+    tasks::{RuntimeBuilder, RuntimeConfig},
 };
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    let tasks = TaskManager::current();
+    let runtime = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
+        tokio::runtime::Handle::current(),
+    ))
+    .build()?;
 
     // create node config
     let node_config = NodeConfig::test()
@@ -31,7 +34,7 @@ async fn main() -> eyre::Result<()> {
         .with_chain(custom_chain());
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(tasks.executor())
+        .testing_node(runtime)
         .node(EthereumNode::default())
         .launch_with_debug_capabilities()
         .await?;
