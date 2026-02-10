@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=gas-traces#044e81183da85ea3f0120883d3c7acb79db9b2d9"
+source = "git+https://github.com/Soubhik-10/evm?branch=gas-traces#817de6c5f2cd48bbb175a439041443cfe0edf1ed"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -415,7 +415,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=gas-traces#044e81183da85ea3f0120883d3c7acb79db9b2d9"
+source = "git+https://github.com/Soubhik-10/evm?branch=gas-traces#817de6c5f2cd48bbb175a439041443cfe0edf1ed"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
