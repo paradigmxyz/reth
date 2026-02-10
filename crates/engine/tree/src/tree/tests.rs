@@ -1971,6 +1971,29 @@ mod forkchoice_updated_tests {
         assert!(result.is_some(), "OpStack should handle canonical head");
     }
 
+    #[test]
+    fn test_update_reorg_metrics() {
+        let chain_spec = MAINNET.clone();
+        let test_harness = TestHarness::new(chain_spec);
+
+        let seal_header = |number: u64| {
+            SealedHeader::seal_slow(alloy_consensus::Header { number, ..Default::default() })
+        };
+
+        // Set finalized=30, safe=50 to test all three commitment levels
+        test_harness.tree.canonical_in_memory_state.set_finalized(seal_header(30));
+        test_harness.tree.canonical_in_memory_state.set_safe(seal_header(50));
+
+        // Reorg at block 20 (below finalized=30) -> finalized reorg
+        test_harness.tree.update_reorg_metrics(5, Some(NumHash::new(20, B256::random())));
+
+        // Reorg at block 40 (below safe=50, above finalized=30) -> safe reorg
+        test_harness.tree.update_reorg_metrics(3, Some(NumHash::new(40, B256::random())));
+
+        // Reorg at block 60 (above safe=50) -> head reorg
+        test_harness.tree.update_reorg_metrics(2, Some(NumHash::new(60, B256::random())));
+    }
+
     /// Test that engine termination persists all blocks and signals completion.
     #[test]
     fn test_engine_termination_with_everything_persisted() {
