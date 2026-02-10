@@ -388,8 +388,12 @@ pub fn insert_genesis_hashes<'a, 'b, Provider>(
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
 ) -> ProviderResult<()>
 where
-    Provider: DBProvider<Tx: DbTxMut> + HashingWriter,
+    Provider: DBProvider<Tx: DbTxMut> + HashingWriter + StorageSettingsCache,
 {
+    if provider.cached_storage_settings().use_hashed_state {
+        return Ok(())
+    }
+
     // insert and hash accounts to hashing table
     let alloc_accounts = alloc.clone().map(|(addr, account)| (*addr, Some(Account::from(account))));
     provider.insert_account_for_hashing(alloc_accounts)?;
