@@ -56,7 +56,8 @@ RUN --mount=type=secret,id=DEPOT_TOKEN,env=SCCACHE_WEBDAV_TOKEN \
     elif [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
         export RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq"; \
     fi && \
-    cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml
+    cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml && \
+    sccache --show-stats
 
 # Copy binary to a known location (ARG not resolved in COPY)
 # Note: Custom profiles like maxperf/profiling output to target/<profile>/, not target/release/
