@@ -37,7 +37,7 @@ use reth_storage_api::{
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::DatabaseCommit;
+use revm::{Database, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
@@ -622,6 +622,186 @@ where
             })
             .await
     }
+
+    /// Re-executes a block and returns the Block Access List (BAL) as defined in EIP-7928.
+    ///
+    /// The BAL tracks all account and storage changes per transaction within the block,
+    /// including balance, nonce, code, and storage modifications, as well as storage reads.
+    pub async fn debug_get_block_access_list(
+        &self,
+        block_id: BlockId,
+    ) -> Result<BlockAccessList, Eth::Error> {
+        let block_hash = self
+            .provider()
+            .block_hash_for_id(block_id)
+            .map_err(Eth::Error::from_eth_err)?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+
+        let ((evm_env, _), block) = futures::try_join!(
+            self.eth_api().evm_env_at(block_hash.into()),
+            self.eth_api().recovered_block(block_hash.into()),
+        )?;
+
+        let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+
+        self.eth_api()
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                use alloy_eip7928::{
+                    AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges,
+                    StorageChange,
+                };
+                use alloy_primitives::U256;
+                use revm_inspectors::access_list::AccessListInspector;
+                use std::collections::{HashMap, HashSet};
+
+                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+
+                // Per-account accumulator for tracking changes across transactions
+                struct AccumEntry {
+                    last_balance: U256,
+                    last_nonce: u64,
+                    last_code_hash: B256,
+                    balance_changes: Vec<BalanceChange>,
+                    nonce_changes: Vec<NonceChange>,
+                    code_changes: Vec<CodeChange>,
+                    slot_changes: HashMap<U256, Vec<StorageChange>>,
+                    read_only_slots: HashSet<U256>,
+                }
+
+                let mut accumulators: HashMap<Address, AccumEntry> = HashMap::new();
+
+                // Helper: ensure an AccumEntry exists for the given address,
+                // initializing from the current db state if needed.
+                macro_rules! ensure_entry {
+                    ($accumulators:expr, $db:expr, $address:expr) => {
+                        $accumulators.entry($address).or_insert_with(|| {
+                            let pre_info = Database::basic($db, $address).ok().flatten();
+                            AccumEntry {
+                                last_balance: pre_info
+                                    .as_ref()
+                                    .map(|i| i.balance)
+                                    .unwrap_or_default(),
+                                last_nonce: pre_info
+                                    .as_ref()
+                                    .map(|i| i.nonce)
+                                    .unwrap_or_default(),
+                                last_code_hash: pre_info
+                                    .as_ref()
+                                    .map(|i| i.code_hash)
+                                    .unwrap_or(alloy_consensus::constants::KECCAK_EMPTY),
+                                balance_changes: Vec::new(),
+                                nonce_changes: Vec::new(),
+                                code_changes: Vec::new(),
+                                slot_changes: HashMap::new(),
+                                read_only_slots: HashSet::new(),
+                            }
+                        })
+                    };
+                }
+
+                for (tx_index, tx) in block.transactions_recovered().enumerate() {
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    let block_access_index = tx_index as u64;
+
+                    // Use AccessListInspector to capture all storage accesses (reads
+                    // + writes). revm's state diff only includes modified slots, so
+                    // the inspector is needed to identify read-only slots.
+                    let mut al_inspector = AccessListInspector::new(Default::default());
+                    let res = eth_api.inspect(
+                        &mut db,
+                        evm_env.clone(),
+                        tx_env,
+                        &mut al_inspector,
+                    )?;
+                    let access_list = al_inspector.into_access_list();
+
+                    // Process state modifications from the execution result
+                    for (address, account) in &res.state {
+                        let entry = ensure_entry!(accumulators, &mut db, *address);
+
+                        // Balance change
+                        if account.info.balance != entry.last_balance {
+                            entry.balance_changes.push(BalanceChange::new(
+                                block_access_index,
+                                account.info.balance,
+                            ));
+                            entry.last_balance = account.info.balance;
+                        }
+
+                        // Nonce change
+                        if account.info.nonce != entry.last_nonce {
+                            entry.nonce_changes.push(NonceChange::new(
+                                block_access_index,
+                                account.info.nonce,
+                            ));
+                            entry.last_nonce = account.info.nonce;
+                        }
+
+                        // Code change
+                        if account.info.code_hash != entry.last_code_hash {
+                            let new_code = account
+                                .info
+                                .code
+                                .as_ref()
+                                .map(|c| c.original_bytes())
+                                .unwrap_or_default();
+                            entry.code_changes.push(CodeChange::new(
+                                block_access_index,
+                                new_code,
+                            ));
+                            entry.last_code_hash = account.info.code_hash;
+                        }
+
+                        // Storage modifications (revm only returns modified slots)
+                        for (slot, storage) in &account.storage {
+                            entry
+                                .slot_changes
+                                .entry(*slot)
+                                .or_default()
+                                .push(StorageChange::new(
+                                    block_access_index,
+                                    storage.present_value,
+                                ));
+                            // If previously recorded as read-only, promote to modified
+                            entry.read_only_slots.remove(slot);
+                        }
+                    }
+
+                    // Process access list for read-only storage slots.
+                    // The AccessListInspector captures all SLOAD/SSTORE accesses;
+                    // slots not present in the state diff were only read.
+                    for item in access_list.iter() {
+                        let entry = ensure_entry!(accumulators, &mut db, item.address);
+                        for key in &item.storage_keys {
+                            let slot = U256::from_be_bytes(key.0);
+                            if !entry.slot_changes.contains_key(&slot) {
+                                entry.read_only_slots.insert(slot);
+                            }
+                        }
+                    }
+
+                    db.commit(res.state);
+                }
+
+                // Build the final BlockAccessList from accumulated data
+                Ok(accumulators
+                    .into_iter()
+                    .map(|(address, entry)| AccountChanges {
+                        address,
+                        balance_changes: entry.balance_changes,
+                        nonce_changes: entry.nonce_changes,
+                        code_changes: entry.code_changes,
+                        storage_changes: entry
+                            .slot_changes
+                            .into_iter()
+                            .map(|(slot, changes)| SlotChanges::new(slot, changes))
+                            .collect(),
+                        storage_reads: entry.read_only_slots.into_iter().collect(),
+                    })
+                    .collect())
+            })
+            .await
+    }
 }
 
 #[async_trait]
@@ -828,8 +1008,9 @@ where
         Self::debug_execution_witness_by_block_hash(self, hash).await.map_err(Into::into)
     }
 
-    async fn debug_get_block_access_list(&self, _block_id: BlockId) -> RpcResult<BlockAccessList> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn debug_get_block_access_list(&self, block_id: BlockId) -> RpcResult<BlockAccessList> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_get_block_access_list(self, block_id).await.map_err(Into::into)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
