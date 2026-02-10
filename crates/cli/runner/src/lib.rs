@@ -276,10 +276,13 @@ where
     Ok(())
 }
 
+/// Default timeout for waiting on the tokio runtime to shut down.
+const DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Shut down the given [`Runtime`](reth_tasks::Runtime), and wait for it if `wait` is set.
 ///
 /// Dropping the runtime on the current thread could block due to tokio pool teardown.
-/// Instead, we drop it on a separate thread and optionally wait up to 5 seconds.
+/// Instead, we drop it on a separate thread and optionally wait for completion.
 fn runtime_shutdown(rt: reth_tasks::Runtime, wait: bool) {
     let (tx, rx) = mpsc::channel();
     std::thread::Builder::new()
@@ -291,8 +294,8 @@ fn runtime_shutdown(rt: reth_tasks::Runtime, wait: bool) {
         .unwrap();
 
     if wait {
-        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
-            debug!(target: "reth::cli", %err, "runtime shutdown timed out");
+        let _ = rx.recv_timeout(DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT).inspect_err(|err| {
+            tracing::warn!(target: "reth::cli", %err, "runtime shutdown timed out");
         });
     }
 }

@@ -12,17 +12,14 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use crate::shutdown::{signal, GracefulShutdown, Shutdown, Signal};
+use crate::shutdown::{signal, GracefulShutdown, GracefulShutdownCounter, Shutdown, Signal};
 use dyn_clone::DynClone;
 use futures_util::future::BoxFuture;
 use std::{
     any::Any,
     fmt::{Display, Formatter},
     pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+    sync::Arc,
     task::{ready, Context, Poll},
     thread,
 };
@@ -214,8 +211,8 @@ pub struct TaskManager {
     ///
     /// This is fired when dropped.
     signal: Option<Signal>,
-    /// How many [`GracefulShutdown`] tasks are currently active.
-    graceful_tasks: Arc<AtomicUsize>,
+    /// Tracks active [`GracefulShutdown`] tasks.
+    graceful_tasks: Arc<GracefulShutdownCounter>,
 }
 
 // === impl TaskManager ===
@@ -225,10 +222,10 @@ impl TaskManager {
     /// the shutdown/event primitives for [`RuntimeBuilder`] to wire up.
     pub(crate) fn new_parts(
         _handle: Handle,
-    ) -> (Self, Shutdown, UnboundedSender<TaskEvent>, Arc<AtomicUsize>) {
+    ) -> (Self, Shutdown, UnboundedSender<TaskEvent>, Arc<GracefulShutdownCounter>) {
         let (task_events_tx, task_events_rx) = unbounded_channel();
         let (signal, on_shutdown) = signal();
-        let graceful_tasks = Arc::new(AtomicUsize::new(0));
+        let graceful_tasks = Arc::new(GracefulShutdownCounter::new());
         let manager = Self {
             task_events_rx,
             signal: Some(signal),
@@ -251,17 +248,18 @@ impl TaskManager {
 
     fn do_graceful_shutdown(self, timeout: Option<std::time::Duration>) -> bool {
         drop(self.signal);
-        let when = timeout.map(|t| std::time::Instant::now() + t);
-        while self.graceful_tasks.load(Ordering::Relaxed) > 0 {
-            if when.map(|when| std::time::Instant::now() > when).unwrap_or(false) {
-                debug!("graceful shutdown timed out");
-                return false
-            }
-            std::hint::spin_loop();
+        let completed = if let Some(timeout) = timeout {
+            self.graceful_tasks.wait_timeout(timeout)
+        } else {
+            self.graceful_tasks.wait();
+            true
+        };
+        if completed {
+            debug!("gracefully shut down");
+        } else {
+            debug!("graceful shutdown timed out");
         }
-
-        debug!("gracefully shut down");
-        true
+        completed
     }
 }
 
@@ -354,7 +352,10 @@ pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{sync::atomic::AtomicBool, time::Duration};
+    use std::{
+        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+        time::Duration,
+    };
 
     #[test]
     fn test_cloneable() {

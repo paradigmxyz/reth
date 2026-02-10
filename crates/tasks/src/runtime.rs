@@ -10,7 +10,7 @@
 use crate::pool::{BlockingTaskGuard, BlockingTaskPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
-    shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
+    shutdown::{GracefulShutdown, GracefulShutdownCounter, GracefulShutdownGuard, Shutdown},
     PanickedTaskError, TaskEvent, TaskManager,
 };
 use futures_util::{
@@ -21,13 +21,11 @@ use futures_util::{
 use std::thread::available_parallelism;
 use std::{
     pin::pin,
-    sync::{atomic::AtomicUsize, Arc, Mutex},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
-#[cfg(feature = "rayon")]
-use tracing::debug;
-use tracing::error;
+use tracing::{debug, error};
 use tracing_futures::Instrument;
 
 use tokio::runtime::Runtime as TokioRuntime;
@@ -213,8 +211,9 @@ pub enum RuntimeBuildError {
 // ── RuntimeInner ──────────────────────────────────────────────────────
 
 struct RuntimeInner {
-    /// Owned tokio runtime, if we built one.
-    _tokio_runtime: Option<TokioRuntime>,
+    /// Owned tokio runtime, if we built one. Kept alive via the `Arc<RuntimeInner>`.
+    #[allow(dead_code)]
+    owned_tokio_runtime: Option<TokioRuntime>,
     /// Handle to the tokio runtime.
     handle: Handle,
     /// Receiver of the shutdown signal.
@@ -223,8 +222,8 @@ struct RuntimeInner {
     task_events_tx: UnboundedSender<TaskEvent>,
     /// Task executor metrics.
     metrics: TaskExecutorMetrics,
-    /// How many [`GracefulShutdown`] tasks are currently active.
-    graceful_tasks: Arc<AtomicUsize>,
+    /// Tracks active [`GracefulShutdown`] tasks and provides condvar-based waiting.
+    graceful_tasks: Arc<GracefulShutdownCounter>,
     /// General-purpose rayon CPU pool.
     #[cfg(feature = "rayon")]
     cpu_pool: rayon::ThreadPool,
@@ -243,7 +242,7 @@ struct RuntimeInner {
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
-    _task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
+    task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
 }
 
 // ── Runtime ───────────────────────────────────────────────────────────
@@ -283,7 +282,7 @@ impl Runtime {
     /// or `Ok(())` if shutdown was requested. If not taken, the background task still
     /// runs and logs panics at `debug!` level.
     pub fn take_task_manager_handle(&self) -> Option<JoinHandle<Result<(), PanickedTaskError>>> {
-        self.0._task_manager_handle.lock().unwrap().take()
+        self.0.task_manager_handle.lock().unwrap().take()
     }
 
     /// Returns the tokio runtime [`Handle`].
@@ -694,16 +693,18 @@ impl Runtime {
 
     fn do_graceful_shutdown(&self, timeout: Option<Duration>) -> bool {
         let _ = self.0.task_events_tx.send(TaskEvent::GracefulShutdown);
-        let when = timeout.map(|t| std::time::Instant::now() + t);
-        while self.0.graceful_tasks.load(std::sync::atomic::Ordering::Relaxed) > 0 {
-            if when.is_some_and(|when| std::time::Instant::now() > when) {
-                debug!("graceful shutdown timed out");
-                return false;
-            }
-            std::hint::spin_loop();
+        let completed = if let Some(timeout) = timeout {
+            self.0.graceful_tasks.wait_timeout(timeout)
+        } else {
+            self.0.graceful_tasks.wait();
+            true
+        };
+        if completed {
+            debug!("gracefully shut down");
+        } else {
+            debug!("graceful shutdown timed out");
         }
-        debug!("gracefully shut down");
-        true
+        completed
     }
 }
 
@@ -860,7 +861,7 @@ impl RuntimeBuilder {
         });
 
         let inner = RuntimeInner {
-            _tokio_runtime: owned_runtime,
+            owned_tokio_runtime: owned_runtime,
             handle,
             on_shutdown,
             task_events_tx,
@@ -876,7 +877,7 @@ impl RuntimeBuilder {
             storage_pool,
             #[cfg(feature = "rayon")]
             blocking_guard,
-            _task_manager_handle: Mutex::new(Some(task_manager_handle)),
+            task_manager_handle: Mutex::new(Some(task_manager_handle)),
         };
 
         Ok(Runtime(Arc::new(inner)))
