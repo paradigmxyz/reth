@@ -1037,7 +1037,7 @@ where
 mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, U256};
-    use reth_trie_sparse_parallel::ParallelSparseTrie;
+    use reth_trie_sparse::ParallelSparseTrie;
 
     #[test]
     fn test_run_hashing_task_hashed_state_update_forwards() {
