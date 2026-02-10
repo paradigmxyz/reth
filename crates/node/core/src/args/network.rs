@@ -227,6 +227,14 @@ pub struct NetworkArgs {
     /// Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
     #[arg(long, value_name = "NETRESTRICT")]
     pub netrestrict: Option<String>,
+
+    /// Enforce EIP-868 ENR fork ID validation for discovered peers.
+    ///
+    /// When enabled, peers discovered without a confirmed fork ID are not added to the peer set
+    /// until their fork ID is verified via EIP-868 ENR request. This filters out peers from other
+    /// networks that pollute the discovery table.
+    #[arg(long)]
+    pub enforce_enr_fork_id: bool,
 }
 
 impl NetworkArgs {
@@ -333,7 +341,8 @@ impl NetworkArgs {
             )
             .with_max_inbound_opt(self.resolved_max_inbound_peers())
             .with_max_outbound_opt(self.resolved_max_outbound_peers())
-            .with_ip_filter(ip_filter);
+            .with_ip_filter(ip_filter)
+            .with_enforce_enr_fork_id(self.enforce_enr_fork_id);
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key)
@@ -491,6 +500,7 @@ impl Default for NetworkArgs {
             required_block_hashes: vec![],
             network_id: None,
             netrestrict: None,
+            enforce_enr_fork_id: false,
         }
     }
 }
