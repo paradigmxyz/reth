@@ -389,17 +389,6 @@ where
         self.pool.validator().validate_transaction(origin, transaction).await
     }
 
-    /// Returns future that validates all transactions in the given iterator.
-    ///
-    /// This returns the validated transactions in the iterator's order.
-    async fn validate_all(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = V::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<V::Transaction>> {
-        self.pool.validator().validate_transactions_with_origin(origin, transactions).await
-    }
-
     /// Number of transactions in the entire pool
     pub fn len(&self) -> usize {
         self.pool.len()
@@ -513,17 +502,17 @@ where
         results.pop().expect("result length is the same as the input")
     }
 
-    async fn add_transactions(
+    async fn add_transactions_with_origins(
         &self,
-        origin: TransactionOrigin,
-        transactions: Vec<Self::Transaction>,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        let transactions: Vec<_> = transactions.into_iter().collect();
         if transactions.is_empty() {
             return Vec::new()
         }
-        let validated = self.validate_all(origin, transactions).await;
-
-        self.pool.add_transactions(origin, validated.into_iter())
+        let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
+        let validated = self.pool.validator().validate_transactions(transactions).await;
+        self.pool.add_transactions_with_origins(origins.into_iter().zip(validated))
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
@@ -663,6 +652,13 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.remove_transactions_by_sender(sender)
+    }
+
+    fn prune_transactions(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.prune_transactions(hashes)
     }
 
     fn retain_unknown<A>(&self, announcement: &mut A)

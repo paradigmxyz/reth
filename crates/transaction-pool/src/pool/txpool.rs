@@ -1041,6 +1041,21 @@ impl<T: TransactionOrdering> TxPool<T> {
         removed
     }
 
+    /// Prunes and returns all matching transactions from the pool.
+    ///
+    /// This uses [`Self::prune_transaction_by_hash`] which does **not** park descendant
+    /// transactions, so they remain in their current sub-pool and can be included in subsequent
+    /// blocks.
+    pub(crate) fn prune_transactions(
+        &mut self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let txs =
+            hashes.into_iter().filter_map(|hash| self.prune_transaction_by_hash(&hash)).collect();
+        self.update_size_metrics();
+        txs
+    }
+
     /// Remove the transaction from the __entire__ pool.
     ///
     /// This includes the total set of transaction and the subpool it currently resides in.
