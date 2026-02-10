@@ -49,7 +49,7 @@ where
         provider.storage_changesets_range(from..=tip)?
     {
         if storage_address == address {
-            let hashed_slot = if use_hashed { storage_change.key } else { keccak256(storage_change.key) };
+            let hashed_slot = storage_change.changeset_key_to_hashed_slot(use_hashed);
             if let hash_map::Entry::Vacant(entry) = storage.storage.entry(hashed_slot) {
                 entry.insert(storage_change.value);
             }

@@ -335,7 +335,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
                     storages
                         .entry(hashed_address)
                         .or_default()
-                        .push((if use_hashed_state { storage.key } else { keccak256(storage.key) }, storage.value));
+                        .push((storage.changeset_key_to_hashed_slot(use_hashed_state), storage.value));
                 }
             }
         }

@@ -62,9 +62,33 @@ impl<K> StorageSlotKey<K> {
 }
 
 impl PlainSlotKey {
+    /// Create a [`PlainSlotKey`] from a REVM [`U256`] storage index.
+    pub const fn from_u256(slot: U256) -> Self {
+        Self::new_unchecked(B256::new(slot.to_be_bytes()))
+    }
+
     /// Hash this plain slot key with keccak256, producing a [`HashedSlotKey`].
     pub fn hash(self) -> HashedSlotKey {
         HashedSlotKey::new_unchecked(keccak256(self.inner))
+    }
+
+    /// Conditionally hash based on mode: returns [`HashedSlotKey`] (hashed) if
+    /// `use_hashed_state` is true, otherwise wraps the plain key as-is.
+    ///
+    /// This is the typed replacement for the `if use_hashed { keccak256(key) } else { key }`
+    /// pattern at REVM→changeset boundaries.
+    pub fn to_changeset_key(self, use_hashed_state: bool) -> B256 {
+        if use_hashed_state { self.hash().into_b256() } else { self.into_b256() }
+    }
+}
+
+impl HashedSlotKey {
+    /// Use a changeset key that is already hashed as-is for hashed-state lookups.
+    ///
+    /// This is the typed replacement for the `if use_hashed { key } else { keccak256(key) }`
+    /// pattern at changeset→trie boundaries in v2 mode.
+    pub const fn as_hashed(self) -> B256 {
+        self.inner
     }
 }
 
@@ -136,10 +160,17 @@ impl StorageEntry {
 
     /// Interpret this entry as a [`TypedStorageEntry`] with the given marker.
     ///
-    /// This is a zero-cost conversion that tags the key with provenance
-    /// information. The caller must ensure the marker matches reality.
+    /// The caller must ensure the marker matches reality.
     pub const fn into_typed<K>(self) -> TypedStorageEntry<K> {
         TypedStorageEntry { key: StorageSlotKey::new_unchecked(self.key), value: self.value }
+    }
+
+    /// Convert the changeset key to a hashed slot key for trie lookups.
+    ///
+    /// When `use_hashed_state` is true the key is already hashed (passthrough).
+    /// When false the key is plain and needs keccak256 hashing.
+    pub fn changeset_key_to_hashed_slot(&self, use_hashed_state: bool) -> B256 {
+        if use_hashed_state { self.key } else { keccak256(self.key) }
     }
 }
 

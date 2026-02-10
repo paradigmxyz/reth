@@ -13,7 +13,6 @@ use alloy_eips::{
     HashOrNumber,
 };
 use alloy_primitives::{
-    keccak256,
     map::{hash_map, HashMap},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
@@ -22,7 +21,9 @@ use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
-use reth_primitives_traits::{Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry};
+use reth_primitives_traits::{
+    Account, BlockBody, PlainSlotKey, RecoveredBlock, SealedHeader, StorageEntry,
+};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -1328,8 +1329,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .flatten()
                 .flat_map(|revert: PlainStorageRevert| {
                     revert.storage_revert.into_iter().map(move |(key, value)| {
-                        let raw_key: B256 = key.into();
-                        let final_key = if use_hashed { keccak256(raw_key) } else { raw_key };
+                        let final_key = PlainSlotKey::new_unchecked(key.into()).to_changeset_key(use_hashed);
                         (
                             BlockNumberAddress((block_number, revert.address)),
                             StorageEntry { key: final_key, value: value.to_previous_value() },
@@ -1387,8 +1387,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                         return None
                     }
                     revert.storage_revert.into_iter().find_map(|(key, value)| {
-                        let raw_key: B256 = key.into();
-                        let key = if use_hashed { keccak256(raw_key) } else { raw_key };
+                        let key = PlainSlotKey::new_unchecked(key.into()).to_changeset_key(use_hashed);
                         (key == storage_key)
                             .then(|| StorageEntry { key, value: value.to_previous_value() })
                     })
@@ -1439,8 +1438,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .flatten()
                     .flat_map(|revert: PlainStorageRevert| {
                         revert.storage_revert.into_iter().map(move |(key, value)| {
-                            let raw_key: B256 = key.into();
-                            let final_key = if use_hashed { keccak256(raw_key) } else { raw_key };
+                            let final_key = PlainSlotKey::new_unchecked(key.into()).to_changeset_key(use_hashed);
                             (
                                 BlockNumberAddress((state.number(), revert.address)),
                                 StorageEntry { key: final_key, value: value.to_previous_value() },

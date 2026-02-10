@@ -51,7 +51,8 @@ use reth_db_api::{
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
-    Account, Block as _, BlockBody as _, Bytecode, RecoveredBlock, SealedHeader, StorageEntry,
+    Account, Block as _, BlockBody as _, Bytecode, PlainSlotKey, RecoveredBlock, SealedHeader,
+    StorageEntry,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -2455,12 +2456,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     let mut storage = storage_revert
                         .into_iter()
                         .map(|(k, v)| {
-                            let key = B256::new(k.to_be_bytes());
-                            if use_hashed_state {
-                                (keccak256(key), v)
-                            } else {
-                                (key, v)
-                            }
+                            (PlainSlotKey::from_u256(k).to_changeset_key(use_hashed_state), v)
                         })
                         .collect::<Vec<_>>();
                     // sort storage slots by key.
@@ -3119,7 +3115,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         let mut hashed_storages = changesets
             .into_iter()
             .map(|(BlockNumberAddress((_, address)), storage_entry)| {
-                let hashed_key = if use_hashed_state { storage_entry.key } else { keccak256(storage_entry.key) };
+                let hashed_key = storage_entry.changeset_key_to_hashed_slot(use_hashed_state);
                 (keccak256(address), hashed_key, storage_entry.value)
             })
             .collect::<Vec<_>>();
@@ -3602,8 +3598,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 for (address, account_revert) in block_reverts {
                     account_transitions.entry(*address).or_default().push(block_number);
                     for storage_key in account_revert.storage.keys() {
-                        let key = B256::new(storage_key.to_be_bytes());
-                        let key = if use_hashed { keccak256(key) } else { key };
+                        let key = PlainSlotKey::from_u256(*storage_key).to_changeset_key(use_hashed);
                         storage_transitions.entry((*address, key)).or_default().push(block_number);
                     }
                 }

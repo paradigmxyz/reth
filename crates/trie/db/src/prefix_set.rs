@@ -10,7 +10,6 @@ use reth_db_api::{
     tables,
     transaction::DbTx,
 };
-use reth_primitives_traits::StorageEntry;
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
@@ -55,13 +54,13 @@ where
 
     // Walk storage changesets using the provider (handles static files + database)
     let storage_changesets = provider.storage_changesets_range(range)?;
-    for (BlockNumberAddress((_, address)), StorageEntry { key, .. }) in storage_changesets {
+    for (BlockNumberAddress((_, address)), storage_entry) in storage_changesets {
         let hashed_address = keccak256(address);
         account_prefix_set.insert(Nibbles::unpack(hashed_address));
         storage_prefix_sets
             .entry(hashed_address)
             .or_default()
-            .insert(Nibbles::unpack(if use_hashed_state { key } else { keccak256(key) }));
+            .insert(Nibbles::unpack(storage_entry.changeset_key_to_hashed_slot(use_hashed_state)));
     }
 
     Ok(TriePrefixSets {
