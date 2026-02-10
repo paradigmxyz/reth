@@ -35,6 +35,18 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
     fn tx(&self) -> &Provider::Tx {
         self.0.tx_ref()
     }
+
+    fn hashed_storage_lookup(
+        &self,
+        hashed_address: B256,
+        hashed_slot: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        let mut cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
+        Ok(cursor
+            .seek_by_key_subkey(hashed_address, hashed_slot)?
+            .filter(|e| e.key == hashed_slot)
+            .map(|e| e.value))
+    }
 }
 
 impl<Provider: DBProvider + StorageSettingsCache> AccountReader
@@ -169,14 +181,10 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         if self.0.cached_storage_settings().use_hashed_state {
-            let hashed_address = alloy_primitives::keccak256(account);
-            let hashed_slot = alloy_primitives::keccak256(storage_key);
-            let mut cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
-            if let Some(entry) = cursor.seek_by_key_subkey(hashed_address, hashed_slot)? &&
-                entry.key == hashed_slot
-            {
-                return Ok(Some(entry.value));
-            }
+            self.hashed_storage_lookup(
+                alloy_primitives::keccak256(account),
+                alloy_primitives::keccak256(storage_key),
+            )
         } else {
             let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
             if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? &&
@@ -184,8 +192,20 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
             {
                 return Ok(Some(entry.value));
             }
+            Ok(None)
         }
-        Ok(None)
+    }
+
+    fn storage_by_hashed_key(
+        &self,
+        address: Address,
+        hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        if self.0.cached_storage_settings().use_hashed_state {
+            self.hashed_storage_lookup(alloy_primitives::keccak256(address), hashed_storage_key)
+        } else {
+            unreachable!("storage_by_hashed_key called without use_hashed_state enabled")
+        }
     }
 }
 

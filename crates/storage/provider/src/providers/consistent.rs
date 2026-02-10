@@ -13,6 +13,7 @@ use alloy_eips::{
     HashOrNumber,
 };
 use alloy_primitives::{
+    keccak256,
     map::{hash_map, HashMap},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
@@ -27,7 +28,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProvider,
-    StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    StateProviderBox, StorageChangeSetReader, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use revm_database::states::PlainStorageRevert;
@@ -214,9 +215,12 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         )))
     }
 
-    /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
-    /// [`reth_db::PlainAccountState`] and [`reth_db::PlainStorageState`] tables, based on the given
-    /// storage and account changesets.
+    /// Populate a [`BundleStateInit`] and [`RevertsInit`] based on the given storage and account
+    /// changesets.
+    ///
+    /// When `use_hashed_state` is enabled, storage changeset keys are already hashed, so current
+    /// values are read directly from [`reth_db_api::tables::HashedStorages`]. Otherwise, values
+    /// are read via [`StateProvider::storage`] which queries plain state tables.
     fn populate_bundle_state(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
@@ -244,6 +248,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
         }
 
+        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state;
+
         // add storage changeset changes
         for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
             let BlockNumberAddress((block_number, address)) = block_and_address;
@@ -259,8 +265,13 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             // match storage.
             match account_state.2.entry(old_storage.key) {
                 hash_map::Entry::Vacant(entry) => {
-                    let new_storage_value =
-                        state_provider.storage(address, old_storage.key)?.unwrap_or_default();
+                    let new_storage_value = if use_hashed {
+                        state_provider
+                            .storage_by_hashed_key(address, old_storage.key)?
+                            .unwrap_or_default()
+                    } else {
+                        state_provider.storage(address, old_storage.key)?.unwrap_or_default()
+                    };
                     entry.insert((old_storage.value, new_storage_value));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
@@ -1301,6 +1312,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state;
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
@@ -1316,9 +1328,11 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .flatten()
                 .flat_map(|revert: PlainStorageRevert| {
                     revert.storage_revert.into_iter().map(move |(key, value)| {
+                        let raw_key: B256 = key.into();
+                        let final_key = if use_hashed { keccak256(raw_key) } else { raw_key };
                         (
                             BlockNumberAddress((block_number, revert.address)),
-                            StorageEntry { key: key.into(), value: value.to_previous_value() },
+                            StorageEntry { key: final_key, value: value.to_previous_value() },
                         )
                     })
                 })
@@ -1354,6 +1368,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         address: Address,
         storage_key: B256,
     ) -> ProviderResult<Option<StorageEntry>> {
+        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state;
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
@@ -1372,7 +1387,8 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                         return None
                     }
                     revert.storage_revert.into_iter().find_map(|(key, value)| {
-                        let key = key.into();
+                        let raw_key: B256 = key.into();
+                        let key = if use_hashed { keccak256(raw_key) } else { raw_key };
                         (key == storage_key)
                             .then(|| StorageEntry { key, value: value.to_previous_value() })
                     })
@@ -1404,6 +1420,8 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         let database_start = range.start;
         let mut database_end = range.end;
 
+        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state;
+
         if let Some(head_block) = &self.head_block {
             database_end = head_block.anchor().number;
 
@@ -1421,9 +1439,11 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .flatten()
                     .flat_map(|revert: PlainStorageRevert| {
                         revert.storage_revert.into_iter().map(move |(key, value)| {
+                            let raw_key: B256 = key.into();
+                            let final_key = if use_hashed { keccak256(raw_key) } else { raw_key };
                             (
                                 BlockNumberAddress((state.number(), revert.address)),
-                                StorageEntry { key: key.into(), value: value.to_previous_value() },
+                                StorageEntry { key: final_key, value: value.to_previous_value() },
                             )
                         })
                     });
@@ -2146,6 +2166,93 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn test_get_state_storage_value_hashed_state_historical() -> eyre::Result<()> {
+        use alloy_primitives::{keccak256, U256};
+        use reth_db_api::{models::StorageSettings, tables, transaction::DbTxMut};
+        use reth_primitives_traits::StorageEntry;
+        use reth_storage_api::StorageSettingsCache;
+        use std::collections::HashMap;
+
+        let address = alloy_primitives::Address::with_last_byte(1);
+        let account = reth_primitives_traits::Account {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: None,
+        };
+        let slot = U256::from(0x42);
+        let slot_b256 = B256::from(slot);
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(slot_b256);
+
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let blocks = random_block_range(
+            &mut rng,
+            0..=3,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.append_blocks_with_state(
+            blocks
+                .into_iter()
+                .map(|b| b.try_recover().expect("failed to seal block with senders"))
+                .collect(),
+            &ExecutionOutcome {
+                bundle: BundleState::new(
+                    [(address, None, Some(account.into()), {
+                        let mut s = HashMap::default();
+                        s.insert(slot, (U256::ZERO, U256::from(300)));
+                        s
+                    })],
+                    [
+                        Vec::new(),
+                        vec![(address, Some(Some(account.into())), vec![(slot, U256::ZERO)])],
+                        vec![(address, Some(Some(account.into())), vec![(slot, U256::from(100))])],
+                        vec![(address, Some(Some(account.into())), vec![(slot, U256::from(200))])],
+                    ],
+                    [],
+                ),
+                first_block: 0,
+                ..Default::default()
+            },
+            Default::default(),
+        )?;
+
+        provider_rw.tx_ref().put::<tables::HashedStorages>(
+            hashed_address,
+            StorageEntry { key: hashed_slot, value: U256::from(300) },
+        )?;
+        provider_rw.tx_ref().put::<tables::HashedAccounts>(hashed_address, account)?;
+
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+        let consistent_provider = provider.consistent_provider()?;
+
+        let outcome =
+            consistent_provider.get_state(1..=2)?.expect("should return execution outcome");
+
+        let state = &outcome.bundle.state;
+        let account_state = state.get(&address).expect("should have account in bundle state");
+        let storage = &account_state.storage;
+
+        let slot_as_u256 = U256::from_be_bytes(*hashed_slot);
+        let storage_slot = storage.get(&slot_as_u256).expect("should have the slot in storage");
+
+        assert_eq!(
+            storage_slot.present_value,
+            U256::from(200),
+            "present_value should be 200 (the value at block 2, not 300 which is the latest)"
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn test_get_state_storage_value_plain_state() -> eyre::Result<()> {
         use alloy_primitives::U256;
         use reth_db_api::{models::StorageSettings, tables, transaction::DbTxMut};
@@ -2427,7 +2534,6 @@ mod tests {
     fn test_storage_changesets_range_consistent_keys_hashed_state() -> eyre::Result<()> {
         use alloy_primitives::U256;
         use reth_db_api::models::StorageSettings;
-        use reth_primitives_traits::StorageEntry;
         use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
         use std::collections::HashMap;
 
@@ -2523,7 +2629,6 @@ mod tests {
     fn test_storage_changesets_range_consistent_keys_plain_state() -> eyre::Result<()> {
         use alloy_primitives::U256;
         use reth_db_api::models::StorageSettings;
-        use reth_primitives_traits::StorageEntry;
         use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
         use std::collections::HashMap;
 

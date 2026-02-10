@@ -173,6 +173,51 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         })
     }
 
+    /// Resolves a storage value by looking up the given `lookup_key` in history, changesets, or
+    /// plain state.
+    fn storage_by_lookup_key(
+        &self,
+        address: Address,
+        lookup_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>>
+    where
+        Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
+    {
+        match self.storage_history_lookup(address, lookup_key)? {
+            HistoryInfo::NotYetWritten => Ok(None),
+            HistoryInfo::InChangeset(changeset_block_number) => self
+                .provider
+                .get_storage_before_block(changeset_block_number, address, lookup_key)?
+                .ok_or_else(|| ProviderError::StorageChangesetNotFound {
+                    block_number: changeset_block_number,
+                    address,
+                    storage_key: Box::new(lookup_key),
+                })
+                .map(|entry| entry.value)
+                .map(Some),
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                if self.provider.cached_storage_settings().use_hashed_state {
+                    let hashed_address = alloy_primitives::keccak256(address);
+                    Ok(self
+                        .tx()
+                        .cursor_dup_read::<tables::HashedStorages>()?
+                        .seek_by_key_subkey(hashed_address, lookup_key)?
+                        .filter(|entry| entry.key == lookup_key)
+                        .map(|entry| entry.value)
+                        .or(Some(StorageValue::ZERO)))
+                } else {
+                    Ok(self
+                        .tx()
+                        .cursor_dup_read::<tables::PlainStorageState>()?
+                        .seek_by_key_subkey(address, lookup_key)?
+                        .filter(|entry| entry.key == lookup_key)
+                        .map(|entry| entry.value)
+                        .or(Some(StorageValue::ZERO)))
+                }
+            }
+        }
+    }
+
     /// Checks and returns `true` if distance to historical block exceeds the provided limit.
     fn check_distance_against_limit(&self, limit: u64) -> ProviderResult<bool> {
         let tip = self.provider.last_block_number()?;
@@ -441,7 +486,6 @@ impl<
             + NodePrimitivesProvider,
     > StateProvider for HistoricalStateProviderRef<'_, Provider>
 {
-    /// Get storage.
     fn storage(
         &self,
         address: Address,
@@ -452,40 +496,18 @@ impl<
         } else {
             storage_key
         };
+        self.storage_by_lookup_key(address, lookup_key)
+    }
 
-        match self.storage_history_lookup(address, lookup_key)? {
-            HistoryInfo::NotYetWritten => Ok(None),
-            HistoryInfo::InChangeset(changeset_block_number) => self
-                .provider
-                .get_storage_before_block(changeset_block_number, address, lookup_key)?
-                .ok_or_else(|| ProviderError::StorageChangesetNotFound {
-                    block_number: changeset_block_number,
-                    address,
-                    storage_key: Box::new(storage_key),
-                })
-                .map(|entry| entry.value)
-                .map(Some),
-            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                if self.provider.cached_storage_settings().use_hashed_state {
-                    let hashed_address = alloy_primitives::keccak256(address);
-                    Ok(self
-                        .tx()
-                        .cursor_dup_read::<tables::HashedStorages>()?
-                        .seek_by_key_subkey(hashed_address, lookup_key)?
-                        .filter(|entry| entry.key == lookup_key)
-                        .map(|entry| entry.value)
-                        .or(Some(StorageValue::ZERO)))
-                } else {
-                    Ok(self
-                        .tx()
-                        .cursor_dup_read::<tables::PlainStorageState>()?
-                        .seek_by_key_subkey(address, storage_key)?
-                        .filter(|entry| entry.key == storage_key)
-                        .map(|entry| entry.value)
-                        .or(Some(StorageValue::ZERO)))
-                }
-            }
+    fn storage_by_hashed_key(
+        &self,
+        address: Address,
+        hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        if !self.provider.cached_storage_settings().use_hashed_state {
+            unreachable!("storage_by_hashed_key called without use_hashed_state enabled")
         }
+        self.storage_by_lookup_key(address, hashed_storage_key)
     }
 }
 

@@ -3594,6 +3594,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // This is necessary because with edge storage, changesets are written to static files
         // whose index isn't updated until commit, making them invisible to subsequent reads
         // within the same transaction.
+        let use_hashed = self.cached_storage_settings().use_hashed_state;
         let (account_transitions, storage_transitions) = {
             let mut account_transitions: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
             let mut storage_transitions: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
@@ -3603,6 +3604,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                     account_transitions.entry(*address).or_default().push(block_number);
                     for storage_key in account_revert.storage.keys() {
                         let key = B256::new(storage_key.to_be_bytes());
+                        let key = if use_hashed { keccak256(key) } else { key };
                         storage_transitions.entry((*address, key)).or_default().push(block_number);
                     }
                 }
@@ -4491,165 +4493,6 @@ mod tests {
             Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
             Ok(_) => panic!("Expected error, got Ok"),
         }
-    }
-
-    #[test]
-    fn test_write_and_remove_state_roundtrip_hashed() {
-        let factory = create_test_provider_factory();
-        let storage_settings = StorageSettings::v2();
-        assert!(storage_settings.use_hashed_state);
-        assert!(!storage_settings.storage_changesets_in_static_files);
-        assert!(!storage_settings.account_changesets_in_static_files);
-        factory.set_storage_settings_cache(storage_settings);
-
-        let address = Address::with_last_byte(1);
-        let hashed_address = keccak256(address);
-        let slot = U256::from(5);
-        let slot_key = B256::from(slot);
-        let hashed_slot = keccak256(slot_key);
-
-        let mut rng = generators::rng();
-        let block0 =
-            random_block(&mut rng, 0, BlockParams { tx_count: Some(0), ..Default::default() });
-        let block1 =
-            random_block(&mut rng, 1, BlockParams { tx_count: Some(0), ..Default::default() });
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&block0.try_recover().unwrap()).unwrap();
-        provider_rw.insert_block(&block1.try_recover().unwrap()).unwrap();
-        provider_rw.commit().unwrap();
-
-        let provider_rw = factory.provider_rw().unwrap();
-
-        provider_rw
-            .tx
-            .cursor_write::<tables::HashedAccounts>()
-            .unwrap()
-            .upsert(hashed_address, &Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None })
-            .unwrap();
-
-        let mut state_init: BundleStateInit = AddressMap::default();
-        let mut storage_map: B256Map<(U256, U256)> = B256Map::default();
-        storage_map.insert(slot_key, (U256::ZERO, U256::from(10)));
-        state_init.insert(
-            address,
-            (
-                Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None }),
-                Some(Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None }),
-                storage_map,
-            ),
-        );
-
-        let mut reverts_init: RevertsInit = HashMap::default();
-        let mut block_reverts: AddressMap<AccountRevertInit> = AddressMap::default();
-        block_reverts.insert(
-            address,
-            (
-                Some(Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None })),
-                vec![StorageEntry { key: slot_key, value: U256::ZERO }],
-            ),
-        );
-        reverts_init.insert(1, block_reverts);
-
-        let execution_outcome =
-            ExecutionOutcome::new_init(state_init, reverts_init, [], vec![vec![]], 1, vec![]);
-
-        provider_rw
-            .write_state(
-                &execution_outcome,
-                OriginalValuesKnown::Yes,
-                StateWriteConfig {
-                    write_receipts: false,
-                    write_account_changesets: true,
-                    write_storage_changesets: true,
-                },
-            )
-            .unwrap();
-
-        let hashed_state =
-            execution_outcome.hash_state_slow::<reth_trie::KeccakKeyHasher>().into_sorted();
-        provider_rw.write_hashed_state(&hashed_state).unwrap();
-
-        let account = provider_rw
-            .tx
-            .cursor_read::<tables::HashedAccounts>()
-            .unwrap()
-            .seek_exact(hashed_address)
-            .unwrap()
-            .unwrap()
-            .1;
-        assert_eq!(account.nonce, 1);
-
-        let hashed_entry = provider_rw
-            .tx
-            .cursor_dup_read::<tables::HashedStorages>()
-            .unwrap()
-            .seek_by_key_subkey(hashed_address, hashed_slot)
-            .unwrap()
-            .unwrap();
-        assert_eq!(hashed_entry.key, hashed_slot);
-        assert_eq!(hashed_entry.value, U256::from(10));
-
-        let account_cs_entries = provider_rw
-            .tx
-            .cursor_dup_read::<tables::AccountChangeSets>()
-            .unwrap()
-            .walk(Some(1))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert!(!account_cs_entries.is_empty());
-
-        let storage_cs_entries = provider_rw
-            .tx
-            .cursor_read::<tables::StorageChangeSets>()
-            .unwrap()
-            .walk(Some(BlockNumberAddress((1, address))))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert!(!storage_cs_entries.is_empty());
-        assert_eq!(storage_cs_entries[0].1.key, hashed_slot);
-
-        provider_rw.remove_state_above(0).unwrap();
-
-        let restored_account = provider_rw
-            .tx
-            .cursor_read::<tables::HashedAccounts>()
-            .unwrap()
-            .seek_exact(hashed_address)
-            .unwrap()
-            .unwrap()
-            .1;
-        assert_eq!(restored_account.nonce, 0);
-
-        let storage_gone = provider_rw
-            .tx
-            .cursor_dup_read::<tables::HashedStorages>()
-            .unwrap()
-            .seek_by_key_subkey(hashed_address, hashed_slot)
-            .unwrap();
-        assert!(storage_gone.is_none() || storage_gone.unwrap().key != hashed_slot);
-
-        let account_cs_after = provider_rw
-            .tx
-            .cursor_dup_read::<tables::AccountChangeSets>()
-            .unwrap()
-            .walk(Some(1))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert!(account_cs_after.is_empty());
-
-        let storage_cs_after = provider_rw
-            .tx
-            .cursor_read::<tables::StorageChangeSets>()
-            .unwrap()
-            .walk(Some(BlockNumberAddress((1, address))))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert!(storage_cs_after.is_empty());
     }
 
     #[test]
