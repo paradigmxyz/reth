@@ -1,8 +1,7 @@
 use crate::metrics::PersistenceMetrics;
-use alloy_consensus::constants::MGAS_TO_GAS;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
-use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
+use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
@@ -22,7 +21,16 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
-use tracing::{debug, error, instrument, warn};
+use tracing::{debug, error, instrument};
+
+/// Result of a persistence save-blocks operation, returned to the engine tree.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SaveBlocksResult {
+    /// The last block that was persisted.
+    pub last_block: BlockNumHash,
+    /// Total duration of the database commit for this batch of blocks.
+    pub commit_duration: Duration,
+}
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -52,9 +60,6 @@ where
     /// Pending safe block number to be committed with the next block save.
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
-    /// Optional slow block threshold. When set, blocks exceeding this threshold
-    /// will be logged with detailed metrics.
-    slow_block_threshold: Option<Duration>,
 }
 
 impl<N> PersistenceService<N>
@@ -67,7 +72,6 @@ where
         incoming: Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
-        slow_block_threshold: Option<Duration>,
     ) -> Self {
         Self {
             provider,
@@ -77,7 +81,6 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
-            slow_block_threshold,
         }
     }
 }
@@ -102,13 +105,9 @@ where
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
-                    let result_number = result.map(|r| r.number);
-
-                    // we ignore the error because the caller may or may not care about the result
+                    let result_number = result.as_ref().map(|r| r.last_block.number);
                     let _ = sender.send(result);
-
                     if let Some(block_number) = result_number {
-                        // send new sync metrics based on saved blocks
                         let _ = self
                             .sync_metrics_tx
                             .send(MetricEvent::SyncHeight { height: block_number });
@@ -147,7 +146,7 @@ where
     fn on_save_blocks(
         &mut self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
-    ) -> Result<Option<BlockNumHash>, PersistenceError> {
+    ) -> Result<Option<SaveBlocksResult>, PersistenceError> {
         let Some(first_block) = blocks.first().map(|b| b.recovered_block.num_hash()) else {
             return Ok(None)
         };
@@ -160,13 +159,6 @@ where
         let pending_safe = self.pending_safe_block.take();
 
         debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
-
-        // Extract timing stats before consuming blocks (for slow block logging after commit)
-        let timing_stats: Vec<ExecutionTimingStats> = if self.slow_block_threshold.is_some() {
-            blocks.iter().filter_map(|b| b.timing_stats()).collect()
-        } else {
-            Vec::new()
-        };
 
         let total_commit_duration = {
             let start = Instant::now();
@@ -190,93 +182,13 @@ where
             provider_rw.commit()?;
             start.elapsed()
         };
-        // We calculate an estimated commit duration per block by dividing the total commit duration
-        // for a batch by the number of blocks in the batch
-        let commit_duration = total_commit_duration.div_f64(block_count as f64);
 
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         self.metrics.save_blocks_batch_size.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(total_commit_duration);
 
-        // Emit unified slow block logs after commit completes
-        for stats in timing_stats {
-            let total_duration = stats.execution_duration +
-                stats.state_read_duration +
-                stats.state_hash_duration +
-                commit_duration;
-
-            // Check if total time exceeds threshold
-            if let Some(threshold) = self.slow_block_threshold &&
-                total_duration > threshold
-            {
-                self.log_slow_block(stats, commit_duration, total_duration);
-            }
-        }
-
-        Ok(Some(last_block))
-    }
-
-    /// Logs slow block execution in JSON format for cross-client performance analysis.
-    ///
-    /// This method outputs a standardized log entry when block execution
-    /// exceeds the slow block threshold, including all timing phases.
-    fn log_slow_block(&self, stats: ExecutionTimingStats, commit: Duration, total: Duration) {
-        /// Calculates the cache hit rate as a percentage (0-100).
-        fn calculate_hit_rate(hits: usize, misses: usize) -> f64 {
-            let total = hits + misses;
-            if total > 0 {
-                (hits as f64 / total as f64) * 100.0
-            } else {
-                0.0
-            }
-        }
-
-        let mgas_per_sec = (stats.gas_used as f64 / MGAS_TO_GAS as f64) /
-            (stats.execution_duration.as_secs_f64() + stats.state_hash_duration.as_secs_f64());
-
-        // Calculate cache hit rates
-        let account_hit_rate =
-            calculate_hit_rate(stats.account_cache_hits, stats.account_cache_misses);
-        let storage_hit_rate =
-            calculate_hit_rate(stats.storage_cache_hits, stats.storage_cache_misses);
-        let code_hit_rate = calculate_hit_rate(stats.code_cache_hits, stats.code_cache_misses);
-
-        warn!(
-            target: "reth::slow_block",
-            message = "Slow block",
-            block.number = stats.block_number,
-            block.hash = ?stats.block_hash,
-            block.gas_used = stats.gas_used,
-            block.tx_count = stats.tx_count,
-            timing.execution_ms = stats.execution_duration.as_millis(),
-            timing.state_read_ms = stats.state_read_duration.as_millis(),
-            timing.state_hash_ms = stats.state_hash_duration.as_millis(),
-            timing.commit_ms = commit.as_millis(),
-            timing.total_ms = total.as_millis(),
-            throughput.mgas_per_sec = format!("{:.2}", mgas_per_sec),
-            state_reads.accounts = stats.accounts_read,
-            state_reads.storage_slots = stats.storage_read,
-            state_reads.code = stats.code_read,
-            state_reads.code_bytes = stats.code_bytes_read,
-            state_writes.accounts = stats.accounts_changed,
-            state_writes.accounts_deleted = stats.accounts_deleted,
-            state_writes.storage_slots = stats.storage_slots_changed,
-            state_writes.storage_slots_deleted = stats.storage_slots_deleted,
-            state_writes.code = stats.bytecodes_changed,
-            state_writes.code_bytes = stats.code_bytes_written,
-            state_writes.eip7702_delegations_set = stats.eip7702_delegations_set,
-            state_writes.eip7702_delegations_cleared = stats.eip7702_delegations_cleared,
-            cache.account.hits = stats.account_cache_hits,
-            cache.account.misses = stats.account_cache_misses,
-            cache.account.hit_rate = format!("{:.2}", account_hit_rate),
-            cache.storage.hits = stats.storage_cache_hits,
-            cache.storage.misses = stats.storage_cache_misses,
-            cache.storage.hit_rate = format!("{:.2}", storage_hit_rate),
-            cache.code.hits = stats.code_cache_hits,
-            cache.code.misses = stats.code_cache_misses,
-            cache.code.hit_rate = format!("{:.2}", code_hit_rate),
-        );
+        Ok(Some(SaveBlocksResult { last_block, commit_duration: total_commit_duration }))
     }
 }
 
@@ -300,7 +212,7 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<Option<BlockNumHash>>),
+    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<Option<SaveBlocksResult>>),
 
     /// Removes block data above the given block number from the database.
     ///
@@ -343,7 +255,6 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
-        slow_block_threshold: Option<Duration>,
     ) -> PersistenceHandle<N::Primitives>
     where
         N: ProviderNodeTypes,
@@ -352,13 +263,8 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
 
         // spawn the persistence service
-        let db_service = PersistenceService::new(
-            provider_factory,
-            db_service_rx,
-            pruner,
-            sync_metrics_tx,
-            slow_block_threshold,
-        );
+        let db_service =
+            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
         let join_handle = spawn_os_thread("persistence", || {
             if let Err(err) = db_service.run() {
                 error!(target: "engine::persistence", ?err, "Persistence service failed");
@@ -391,7 +297,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_blocks(
         &self,
         blocks: Vec<ExecutedBlock<T>>,
-        tx: CrossbeamSender<Option<BlockNumHash>>,
+        tx: CrossbeamSender<Option<SaveBlocksResult>>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
     }
@@ -473,7 +379,7 @@ mod tests {
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx, None)
+        PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
     }
 
     #[test]
@@ -505,12 +411,12 @@ mod tests {
 
         handle.save_blocks(blocks, tx).unwrap();
 
-        let BlockNumHash { hash: actual_hash, number: _ } = rx
+        let result = rx
             .recv_timeout(std::time::Duration::from_secs(10))
             .expect("test timed out")
-            .expect("no hash returned");
+            .expect("no result returned");
 
-        assert_eq!(block_hash, actual_hash);
+        assert_eq!(block_hash, result.last_block.hash);
     }
 
     #[test]
@@ -524,8 +430,8 @@ mod tests {
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
-        let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
-        assert_eq!(last_hash, actual_hash);
+        let result = rx.recv().unwrap().unwrap();
+        assert_eq!(last_hash, result.last_block.hash);
     }
 
     #[test]
@@ -542,8 +448,8 @@ mod tests {
 
             handle.save_blocks(blocks, tx).unwrap();
 
-            let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
-            assert_eq!(last_hash, actual_hash);
+            let result = rx.recv().unwrap().unwrap();
+            assert_eq!(last_hash, result.last_block.hash);
         }
     }
 }
