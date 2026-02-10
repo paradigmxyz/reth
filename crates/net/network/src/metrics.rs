@@ -2,7 +2,7 @@ use metrics::Histogram;
 use reth_eth_wire::DisconnectReason;
 use reth_ethereum_primitives::TxType;
 use reth_metrics::{
-    metrics::{Counter, Gauge},
+    metrics::{self, Counter, Gauge},
     Metrics,
 };
 
@@ -75,6 +75,45 @@ pub struct NetworkMetrics {
     ///
     /// Duration in seconds.
     pub(crate) acc_duration_poll_swarm: Gauge,
+}
+
+/// Metrics for closed sessions, split by direction.
+#[derive(Debug)]
+pub struct ClosedSessionsMetrics {
+    /// Sessions closed from active (established) connections.
+    pub active: Counter,
+    /// Sessions closed from incoming pending connections.
+    pub incoming_pending: Counter,
+    /// Sessions closed from outgoing pending connections.
+    pub outgoing_pending: Counter,
+}
+
+impl Default for ClosedSessionsMetrics {
+    fn default() -> Self {
+        Self {
+            active: metrics::counter!("network_closed_sessions", "direction" => "active"),
+            incoming_pending: metrics::counter!("network_closed_sessions", "direction" => "incoming_pending"),
+            outgoing_pending: metrics::counter!("network_closed_sessions", "direction" => "outgoing_pending"),
+        }
+    }
+}
+
+/// Metrics for pending session failures, split by direction.
+#[derive(Debug)]
+pub struct PendingSessionFailureMetrics {
+    /// Failures on incoming pending sessions.
+    pub inbound: Counter,
+    /// Failures on outgoing pending sessions.
+    pub outbound: Counter,
+}
+
+impl Default for PendingSessionFailureMetrics {
+    fn default() -> Self {
+        Self {
+            inbound: metrics::counter!("network_pending_session_failures", "direction" => "inbound"),
+            outbound: metrics::counter!("network_pending_session_failures", "direction" => "outbound"),
+        }
+    }
 }
 
 /// Metrics for `SessionManager`
