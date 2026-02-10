@@ -10,7 +10,6 @@ use reth_db_api::{
     tables,
     transaction::DbTx,
 };
-use reth_primitives_traits::StorageEntry;
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
@@ -21,12 +20,13 @@ use reth_trie::{
 /// Load prefix sets using a provider that implements [`ChangeSetReader`]. This function can read
 /// changesets from both static files and database.
 ///
-/// When `use_hashed_state` is true, storage keys from changesets are already keccak256-hashed
-/// and are used as-is. When false, they are hashed via keccak256. Addresses are always hashed.
+/// Storage keys from changesets are tagged as
+/// [`Plain`](reth_primitives_traits::StorageSlotKey::Plain)
+/// or [`Hashed`](reth_primitives_traits::StorageSlotKey::Hashed) by the reader, so callers need
+/// not pass a `use_hashed_state` flag. Addresses are always hashed.
 pub fn load_prefix_sets_with_provider<Provider>(
     provider: &Provider,
     range: RangeInclusive<BlockNumber>,
-    use_hashed_state: bool,
 ) -> Result<TriePrefixSets, ProviderError>
 where
     Provider: ChangeSetReader + StorageChangeSetReader + DBProvider,
@@ -55,13 +55,13 @@ where
 
     // Walk storage changesets using the provider (handles static files + database)
     let storage_changesets = provider.storage_changesets_range(range)?;
-    for (BlockNumberAddress((_, address)), StorageEntry { key, .. }) in storage_changesets {
+    for (BlockNumberAddress((_, address)), storage_entry) in storage_changesets {
         let hashed_address = keccak256(address);
         account_prefix_set.insert(Nibbles::unpack(hashed_address));
         storage_prefix_sets
             .entry(hashed_address)
             .or_default()
-            .insert(Nibbles::unpack(if use_hashed_state { key } else { keccak256(key) }));
+            .insert(Nibbles::unpack(storage_entry.key.to_hashed()));
     }
 
     Ok(TriePrefixSets {

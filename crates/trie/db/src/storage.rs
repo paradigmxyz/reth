@@ -2,7 +2,7 @@ use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use alloy_primitives::{keccak256, map::hash_map, Address, BlockNumber, B256};
 use reth_db_api::{models::BlockNumberAddress, transaction::DbTx};
 use reth_execution_errors::StorageRootError;
-use reth_storage_api::{BlockNumReader, StorageChangeSetReader, StorageSettingsCache};
+use reth_storage_api::{BlockNumReader, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
@@ -34,7 +34,7 @@ pub fn hashed_storage_from_reverts_with_provider<P>(
     from: BlockNumber,
 ) -> ProviderResult<HashedStorage>
 where
-    P: StorageChangeSetReader + BlockNumReader + StorageSettingsCache,
+    P: StorageChangeSetReader + BlockNumReader,
 {
     let mut storage = HashedStorage::new(false);
     let tip = provider.last_block_number()?;
@@ -43,13 +43,11 @@ where
         return Ok(storage)
     }
 
-    let use_hashed = provider.cached_storage_settings().use_hashed_state;
-
     for (BlockNumberAddress((_, storage_address)), storage_change) in
         provider.storage_changesets_range(from..=tip)?
     {
         if storage_address == address {
-            let hashed_slot = if use_hashed { storage_change.key } else { keccak256(storage_change.key) };
+            let hashed_slot = storage_change.key.to_hashed();
             if let hash_map::Entry::Vacant(entry) = storage.storage.entry(hashed_slot) {
                 entry.insert(storage_change.value);
             }
@@ -116,6 +114,20 @@ mod tests {
         StaticFileWriter, StorageSettingsCache,
     };
 
+    fn append_storage_changesets_to_static_files(
+        factory: &impl StaticFileProviderFactory<
+            Primitives: reth_primitives_traits::NodePrimitives<BlockHeader = Header>,
+        >,
+        changesets: Vec<(u64, Vec<reth_db_api::models::StorageBeforeTx>)>,
+    ) {
+        let sf = factory.static_file_provider();
+        let mut writer = sf.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+        for (block_number, changeset) in changesets {
+            writer.append_storage_changeset(changeset, block_number).unwrap();
+        }
+        writer.commit().unwrap();
+    }
+
     fn append_headers_to_static_files(
         factory: &impl StaticFileProviderFactory<
             Primitives: reth_primitives_traits::NodePrimitives<BlockHeader = Header>,
@@ -179,47 +191,41 @@ mod tests {
 
     #[test]
     fn test_hashed_storage_from_reverts_hashed_state() {
+        use reth_db_api::models::StorageBeforeTx;
+
         let factory = create_test_provider_factory();
 
         let mut settings = factory.cached_storage_settings();
         settings.use_hashed_state = true;
+        settings.storage_changesets_in_static_files = true;
         factory.set_storage_settings_cache(settings);
 
         let provider = factory.provider_rw().unwrap();
         assert!(provider.cached_storage_settings().use_hashed_state);
+        assert!(provider.cached_storage_settings().storage_changesets_in_static_files);
 
         let address = Address::with_last_byte(42);
-        let pre_hashed_slot1 = keccak256(B256::from(U256::from(100)));
-        let pre_hashed_slot2 = keccak256(B256::from(U256::from(200)));
+        let plain_slot1 = B256::from(U256::from(100));
+        let plain_slot2 = B256::from(U256::from(200));
+        let hashed_slot1 = keccak256(plain_slot1);
+        let hashed_slot2 = keccak256(plain_slot2);
 
         append_headers_to_static_files(&factory, 5);
 
-        provider
-            .tx_ref()
-            .put::<tables::StorageChangeSets>(
-                BlockNumberAddress((1, address)),
-                StorageEntry { key: pre_hashed_slot1, value: U256::from(10) },
-            )
-            .unwrap();
-        provider
-            .tx_ref()
-            .put::<tables::StorageChangeSets>(
-                BlockNumberAddress((2, address)),
-                StorageEntry { key: pre_hashed_slot2, value: U256::from(20) },
-            )
-            .unwrap();
-        provider
-            .tx_ref()
-            .put::<tables::StorageChangeSets>(
-                BlockNumberAddress((3, address)),
-                StorageEntry { key: pre_hashed_slot1, value: U256::from(999) },
-            )
-            .unwrap();
+        append_storage_changesets_to_static_files(
+            &factory,
+            vec![
+                (0, vec![]),
+                (1, vec![StorageBeforeTx { address, key: hashed_slot1, value: U256::from(10) }]),
+                (2, vec![StorageBeforeTx { address, key: hashed_slot2, value: U256::from(20) }]),
+                (3, vec![StorageBeforeTx { address, key: hashed_slot1, value: U256::from(999) }]),
+            ],
+        );
 
         let result = hashed_storage_from_reverts_with_provider(&*provider, address, 1).unwrap();
 
         assert_eq!(result.storage.len(), 2);
-        assert_eq!(result.storage.get(&pre_hashed_slot1), Some(&U256::from(10)));
-        assert_eq!(result.storage.get(&pre_hashed_slot2), Some(&U256::from(20)));
+        assert_eq!(result.storage.get(&hashed_slot1), Some(&U256::from(10)));
+        assert_eq!(result.storage.get(&hashed_slot2), Some(&U256::from(20)));
     }
 }

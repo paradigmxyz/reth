@@ -7,6 +7,8 @@ use reth_db_models::AccountBeforeTx;
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
 
+use crate::ChangesetEntry;
+
 /// Hashing Writer
 #[auto_impl(&, Box)]
 pub trait HashingWriter: Send {
@@ -47,7 +49,7 @@ pub trait HashingWriter: Send {
     /// Mapping of hashed keys of updated accounts to their respective updated hashed slots.
     fn unwind_storage_hashing(
         &self,
-        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, ChangesetEntry)>,
     ) -> ProviderResult<B256Map<BTreeSet<B256>>>;
 
     /// Unwind and clear storage hashing in a given block range.
