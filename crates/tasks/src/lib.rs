@@ -238,8 +238,10 @@ impl TaskManager {
     /// This also sets the global [`Runtime`].
     pub fn new(handle: Handle) -> Self {
         let config = RuntimeConfig::with_existing_handle(handle);
-        let (runtime, mut task_manager) =
+        let runtime =
             RuntimeBuilder::new(config).build().expect("failed to build Runtime from TaskManager");
+        let mut task_manager =
+            runtime.take_task_manager().expect("freshly built Runtime must contain a TaskManager");
         let _ = GLOBAL_RUNTIME
             .set(runtime.clone())
             .inspect_err(|_| error!("Global runtime already set"));

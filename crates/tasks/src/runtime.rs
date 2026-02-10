@@ -272,20 +272,19 @@ impl Default for Runtime {
             Ok(handle) => RuntimeConfig::with_existing_handle(handle),
             Err(_) => RuntimeConfig::default(),
         };
-        let (runtime, task_manager) =
-            RuntimeBuilder::new(config).build().expect("failed to build default Runtime");
-        runtime.keep_task_manager(task_manager);
-        runtime
+        RuntimeBuilder::new(config).build().expect("failed to build default Runtime")
     }
 }
 
 // ── Pool accessors ────────────────────────────────────────────────────
 
 impl Runtime {
-    /// Stores the [`TaskManager`] inside this runtime so it stays alive
-    /// as long as any [`Runtime`] clone exists.
-    fn keep_task_manager(&self, task_manager: TaskManager) {
-        *self.0._task_manager.lock().unwrap() = Some(task_manager);
+    /// Takes the [`TaskManager`] out of this runtime, if one is stored.
+    ///
+    /// This is used by [`TaskManager::new`] to extract the manager after building a runtime.
+    /// Once taken, the runtime no longer owns the manager's shutdown signal.
+    pub fn take_task_manager(&self) -> Option<TaskManager> {
+        self.0._task_manager.lock().unwrap().take()
     }
 
     /// Returns the tokio runtime [`Handle`].
@@ -366,19 +365,13 @@ impl Runtime {
             Ok(handle) => Self::test_config().with_tokio(TokioConfig::existing_handle(handle)),
             Err(_) => Self::test_config(),
         };
-        let (runtime, task_manager) =
-            RuntimeBuilder::new(config).build().expect("failed to build test Runtime");
-        runtime.keep_task_manager(task_manager);
-        runtime
+        RuntimeBuilder::new(config).build().expect("failed to build test Runtime")
     }
 
     /// Creates a lightweight [`Runtime`] for tests, attaching to the given tokio handle.
     pub fn test_with_handle(handle: Handle) -> Self {
         let config = Self::test_config().with_tokio(TokioConfig::existing_handle(handle));
-        let (runtime, task_manager) =
-            RuntimeBuilder::new(config).build().expect("failed to build test Runtime");
-        runtime.keep_task_manager(task_manager);
-        runtime
+        RuntimeBuilder::new(config).build().expect("failed to build test Runtime")
     }
 
     const fn test_config() -> RuntimeConfig {
@@ -773,8 +766,11 @@ impl RuntimeBuilder {
         Self { config }
     }
 
-    /// Build the [`Runtime`] and [`TaskManager`].
-    pub fn build(self) -> Result<(Runtime, TaskManager), RuntimeBuildError> {
+    /// Build the [`Runtime`].
+    ///
+    /// The [`TaskManager`] is stored inside the runtime. Use
+    /// [`Runtime::take_task_manager`] to extract it when needed.
+    pub fn build(self) -> Result<Runtime, RuntimeBuildError> {
         let config = self.config;
 
         let (owned_runtime, handle) = match &config.tokio {
@@ -859,11 +855,10 @@ impl RuntimeBuilder {
             storage_pool,
             #[cfg(feature = "rayon")]
             blocking_guard,
-            _task_manager: Mutex::new(None),
+            _task_manager: Mutex::new(Some(task_manager)),
         };
 
-        let runtime = Runtime(Arc::new(inner));
-        Ok((runtime, task_manager))
+        Ok(Runtime(Arc::new(inner)))
     }
 }
 
@@ -896,7 +891,7 @@ mod tests {
     fn test_runtime_builder() {
         let rt = TokioRuntime::new().unwrap();
         let config = RuntimeConfig::with_existing_handle(rt.handle().clone());
-        let (runtime, _manager) = RuntimeBuilder::new(config).build().unwrap();
+        let runtime = RuntimeBuilder::new(config).build().unwrap();
         let _ = runtime.handle();
     }
 }

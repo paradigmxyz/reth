@@ -235,11 +235,7 @@ impl LaunchContext {
             .with_tokio(TokioConfig::existing_handle(handle))
             .with_rayon(rayon_config);
         match RuntimeBuilder::new(config).build() {
-            Ok((_runtime, _task_manager)) => {
-                // The runtime and task manager are stored globally via TaskManager::new.
-                // We leak the task manager here since the node will manage shutdown separately.
-                std::mem::forget(_task_manager);
-            }
+            Ok(_runtime) => {}
             Err(err) => {
                 warn!(%err, "Failed to initialize Runtime");
             }
