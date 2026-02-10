@@ -323,7 +323,7 @@ where
     ///
     /// If your ExEx is memory-constrained, consider setting a lower `max_blocks` value to
     /// reduce the size of each backfill notification.
-    pub fn with_backfill_thresholds(mut self, thresholds: ExecutionStageThresholds) -> Self {
+    pub const fn with_backfill_thresholds(mut self, thresholds: ExecutionStageThresholds) -> Self {
         self.backfill_thresholds = Some(thresholds);
         self
     }
