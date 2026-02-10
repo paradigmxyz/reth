@@ -193,12 +193,14 @@ impl SparseTrie for ParallelSparseTrie {
         drop(span);
 
         // Update the top-level branch node masks. This is simple and can't be done in parallel.
+        let span = debug_span!(target: "trie::parallel_sparse", "update_branch_node_masks").entered();
         self.branch_node_masks.reserve(nodes.len());
         for ProofTrieNode { path, masks, .. } in nodes.iter() {
             if let Some(branch_masks) = masks {
                 self.branch_node_masks.insert(*path, *branch_masks);
             }
         }
+        drop(span);
 
         // Due to the sorting all upper subtrie nodes will be at the front of the slice. We split
         // them off from the rest to be handled specially by
