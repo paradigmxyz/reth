@@ -107,6 +107,14 @@ impl StorageSlotKey {
             self.as_b256()
         }
     }
+
+    /// Like [`to_changeset_key`](Self::to_changeset_key) but returns a tagged
+    /// [`StorageSlotKey`] instead of a raw [`B256`].
+    ///
+    /// Panics (debug) if called on an already-hashed key.
+    pub fn to_changeset(self, use_hashed_state: bool) -> Self {
+        Self::from_raw(self.to_changeset_key(use_hashed_state), use_hashed_state)
+    }
 }
 
 impl From<StorageSlotKey> for B256 {

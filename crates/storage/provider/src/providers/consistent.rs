@@ -1329,10 +1329,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .flatten()
                 .flat_map(|revert: PlainStorageRevert| {
                     revert.storage_revert.into_iter().map(move |(key, value)| {
-                        let tagged_key = StorageSlotKey::from_raw(
-                            StorageSlotKey::from_u256(key).to_changeset_key(use_hashed),
-                            use_hashed,
-                        );
+                        let tagged_key = StorageSlotKey::from_u256(key).to_changeset(use_hashed);
                         (
                             BlockNumberAddress((block_number, revert.address)),
                             ChangesetEntry { key: tagged_key, value: value.to_previous_value() },
@@ -1390,10 +1387,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                         return None
                     }
                     revert.storage_revert.into_iter().find_map(|(key, value)| {
-                        let tagged_key = StorageSlotKey::from_raw(
-                            StorageSlotKey::from_u256(key).to_changeset_key(use_hashed),
-                            use_hashed,
-                        );
+                        let tagged_key = StorageSlotKey::from_u256(key).to_changeset(use_hashed);
                         (tagged_key.as_b256() == storage_key).then(|| ChangesetEntry {
                             key: tagged_key,
                             value: value.to_previous_value(),
@@ -1446,10 +1440,8 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .flatten()
                     .flat_map(|revert: PlainStorageRevert| {
                         revert.storage_revert.into_iter().map(move |(key, value)| {
-                            let tagged_key = StorageSlotKey::from_raw(
-                                StorageSlotKey::from_u256(key).to_changeset_key(use_hashed),
-                                use_hashed,
-                            );
+                            let tagged_key =
+                                StorageSlotKey::from_u256(key).to_changeset(use_hashed);
                             (
                                 BlockNumberAddress((state.number(), revert.address)),
                                 ChangesetEntry {
