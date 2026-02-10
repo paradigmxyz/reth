@@ -157,18 +157,18 @@ where
                 command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
             })
         }
-        Commands::Init(command) => runner.run_blocking_until_ctrl_c(|rt| command.execute::<N>(rt)),
+        Commands::Init(command) => runner.run_blocking_until_ctrl_c(|_| command.execute::<N>()),
         Commands::InitState(command) => {
-            runner.run_blocking_until_ctrl_c(|rt| command.execute::<N>(rt))
+            runner.run_blocking_until_ctrl_c(|_| command.execute::<N>())
         }
         Commands::Import(command) => {
-            runner.run_blocking_until_ctrl_c(|rt| command.execute::<N, _>(components, rt))
+            runner.run_blocking_until_ctrl_c(|_| command.execute::<N, _>(components))
         }
         Commands::ImportEra(command) => {
-            runner.run_blocking_until_ctrl_c(|rt| command.execute::<N>(rt))
+            runner.run_blocking_until_ctrl_c(|_| command.execute::<N>())
         }
         Commands::ExportEra(command) => {
-            runner.run_blocking_until_ctrl_c(|rt| command.execute::<N>(rt))
+            runner.run_blocking_until_ctrl_c(|_| command.execute::<N>())
         }
         Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(|_| command.execute()),
         Commands::Db(command) => {
@@ -184,7 +184,7 @@ where
         #[cfg(feature = "dev")]
         Commands::TestVectors(command) => runner.run_until_ctrl_c(|_| command.execute()),
         Commands::ReExecute(command) => {
-            runner.run_until_ctrl_c(|rt| command.execute::<N>(components, rt))
+            runner.run_until_ctrl_c(|_| command.execute::<N>(components))
         }
         Commands::Ext(command) => command.execute(runner),
     }

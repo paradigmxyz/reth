@@ -46,14 +46,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>, F, Comp>(
         self,
         components: F,
-        runtime: reth_tasks::Runtime,
     ) -> eyre::Result<()>
     where
         Comp: CliNodeComponents<N>,
         F: FnOnce(Arc<C::ChainSpec>) -> Comp,
     {
-        let Environment { provider_factory, config, .. } =
-            self.env.init::<N>(AccessRights::RW, runtime)?;
+        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let target = self.command.unwind_target(provider_factory.clone())?;
 

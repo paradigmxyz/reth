@@ -18,13 +18,10 @@ pub struct InitCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitCommand<C> {
     /// Execute the `init` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
-        self,
-        runtime: reth_tasks::Runtime,
-    ) -> eyre::Result<()> {
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth init starting");
 
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW, runtime)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let genesis_block_number = provider_factory.chain_spec().genesis_header().number();
         let hash = provider_factory

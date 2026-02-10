@@ -76,14 +76,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
-        let rt = ctx.task_executor.clone();
-
         /// Initializes a provider factory with specified access rights, and then executes the
         /// provided command.
         macro_rules! db_exec {
             ($env:expr, $tool:ident, $N:ident, $access_rights:expr, $command:block) => {
-                let Environment { provider_factory, .. } =
-                    $env.init::<$N>($access_rights, rt.clone())?;
+                let Environment { provider_factory, .. } = $env.init::<$N>($access_rights)?;
 
                 let $tool = DbTool::new(provider_factory)?;
                 $command;

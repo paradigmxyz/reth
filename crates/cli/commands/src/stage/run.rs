@@ -120,7 +120,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let _ = fdlimit::raise_fd_limit();
 
         let Environment { provider_factory, config, data_dir } =
-            self.env.init::<N>(AccessRights::RW, ctx.task_executor.clone())?;
+            self.env.init::<N>(AccessRights::RW)?;
 
         let mut provider_rw = provider_factory.database_provider_rw()?;
         let components = components(provider_factory.chain_spec());
