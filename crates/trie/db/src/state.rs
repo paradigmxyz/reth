@@ -528,10 +528,14 @@ mod tests {
 
     #[test]
     fn from_reverts_with_hashed_state() {
+        use reth_db_api::models::StorageBeforeTx;
+        use reth_provider::{StaticFileProviderFactory, StaticFileSegment, StaticFileWriter};
+
         let factory = create_test_provider_factory();
 
         let mut settings = factory.cached_storage_settings();
         settings.use_hashed_state = true;
+        settings.storage_changesets_in_static_files = true;
         factory.set_storage_settings_cache(settings);
 
         let provider = factory.provider_rw().unwrap();
@@ -541,6 +545,8 @@ mod tests {
 
         let plain_slot1 = B256::from(U256::from(11));
         let plain_slot2 = B256::from(U256::from(22));
+        let hashed_slot1 = keccak256(plain_slot1);
+        let hashed_slot2 = keccak256(plain_slot2);
 
         provider
             .tx_ref()
@@ -567,27 +573,42 @@ mod tests {
             .put::<tables::AccountChangeSets>(3, AccountBeforeTx { address: address2, info: None })
             .unwrap();
 
-        provider
-            .tx_ref()
-            .put::<tables::StorageChangeSets>(
-                BlockNumberAddress((1, address1)),
-                StorageEntry { key: plain_slot2, value: U256::from(200) },
-            )
-            .unwrap();
-        provider
-            .tx_ref()
-            .put::<tables::StorageChangeSets>(
-                BlockNumberAddress((2, address1)),
-                StorageEntry { key: plain_slot1, value: U256::from(100) },
-            )
-            .unwrap();
-        provider
-            .tx_ref()
-            .put::<tables::StorageChangeSets>(
-                BlockNumberAddress((3, address1)),
-                StorageEntry { key: plain_slot1, value: U256::from(999) },
-            )
-            .unwrap();
+        {
+            let sf = factory.static_file_provider();
+            let mut writer = sf.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            writer.append_storage_changeset(vec![], 0).unwrap();
+            writer
+                .append_storage_changeset(
+                    vec![StorageBeforeTx {
+                        address: address1,
+                        key: hashed_slot2,
+                        value: U256::from(200),
+                    }],
+                    1,
+                )
+                .unwrap();
+            writer
+                .append_storage_changeset(
+                    vec![StorageBeforeTx {
+                        address: address1,
+                        key: hashed_slot1,
+                        value: U256::from(100),
+                    }],
+                    2,
+                )
+                .unwrap();
+            writer
+                .append_storage_changeset(
+                    vec![StorageBeforeTx {
+                        address: address1,
+                        key: hashed_slot1,
+                        value: U256::from(999),
+                    }],
+                    3,
+                )
+                .unwrap();
+            writer.commit().unwrap();
+        }
 
         let sorted = HashedPostStateSorted::from_reverts(&*provider, 1..=3).unwrap();
 
@@ -604,22 +625,17 @@ mod tests {
 
         assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
 
-        let expected_hashed_slot1 = keccak256(plain_slot1);
-        let expected_hashed_slot2 = keccak256(plain_slot2);
-
         let storage = sorted.storages.get(&hashed_addr1).expect("storage for address1");
         assert_eq!(storage.storage_slots.len(), 2);
 
-        let found_slot1 =
-            storage.storage_slots.iter().find(|(k, _)| *k == expected_hashed_slot1).unwrap();
+        let found_slot1 = storage.storage_slots.iter().find(|(k, _)| *k == hashed_slot1).unwrap();
         assert_eq!(found_slot1.1, U256::from(100));
 
-        let found_slot2 =
-            storage.storage_slots.iter().find(|(k, _)| *k == expected_hashed_slot2).unwrap();
+        let found_slot2 = storage.storage_slots.iter().find(|(k, _)| *k == hashed_slot2).unwrap();
         assert_eq!(found_slot2.1, U256::from(200));
 
-        assert_ne!(expected_hashed_slot1, plain_slot1);
-        assert_ne!(expected_hashed_slot2, plain_slot2);
+        assert_ne!(hashed_slot1, plain_slot1);
+        assert_ne!(hashed_slot2, plain_slot2);
 
         assert!(storage.storage_slots.windows(2).all(|w| w[0].0 <= w[1].0));
     }
