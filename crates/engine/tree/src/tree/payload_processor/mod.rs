@@ -253,15 +253,13 @@ where
             // When BAL is present, use BAL prewarming and send BAL to multiproof
             debug!(target: "engine::tree::payload_processor", "BAL present, using BAL prewarming");
 
-            // Send BAL message immediately to MultiProofTask
-            let _ = to_multi_proof.send(MultiProofMessage::BlockAccessList(Arc::clone(&bal)));
-
-            // Spawn with BAL prewarming
+            // The prewarm task converts the BAL to HashedPostState and sends it on
+            // to_multi_proof after slot prefetching completes.
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
                 provider_builder.clone(),
-                None, // Don't send proof targets when BAL is present
+                Some(to_multi_proof.clone()),
                 Some(bal),
                 v2_proofs_enabled,
             )
