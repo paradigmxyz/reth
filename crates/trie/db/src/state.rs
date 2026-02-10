@@ -1,5 +1,5 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use alloy_primitives::{map::B256Map, BlockNumber, B256};
+use alloy_primitives::{keccak256, map::B256Map, BlockNumber, B256};
 use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress},
     transaction::DbTx,
@@ -10,9 +10,9 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, KeccakKeyHasher, KeyHasher,
-    PreHashedKeyHasher, StateRoot, StateRootProgress, TrieInputSorted,
+    hashed_cursor::HashedPostStateCursorFactory, maybe_hash_key,
+    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostStateSorted,
+    HashedStorageSorted, StateRoot, StateRootProgress, TrieInputSorted,
 };
 use std::{
     collections::HashSet,
@@ -142,9 +142,13 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
 pub trait DatabaseHashedPostState: Sized {
     /// Initializes [`HashedPostStateSorted`] from reverts. Iterates over state reverts in the
     /// specified range and aggregates them into sorted hashed state.
-    fn from_reverts<KH: KeyHasher>(
+    ///
+    /// When `use_hashed_state` is true, storage keys from changesets are already keccak256-hashed
+    /// and are used as-is. When false, they are hashed via keccak256. Addresses are always hashed.
+    fn from_reverts(
         provider: &(impl ChangeSetReader + StorageChangeSetReader + BlockNumReader + DBProvider),
         range: impl RangeBounds<BlockNumber>,
+        use_hashed_state: bool,
     ) -> Result<HashedPostStateSorted, ProviderError>;
 }
 
@@ -162,15 +166,9 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
                  + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let loaded_prefix_sets = if provider.cached_storage_settings().use_hashed_state {
-            crate::prefix_set::load_prefix_sets_with_provider::<_, PreHashedKeyHasher>(
-                provider, range,
-            )?
-        } else {
-            crate::prefix_set::load_prefix_sets_with_provider::<_, KeccakKeyHasher>(
-                provider, range,
-            )?
-        };
+        let use_hashed_state = provider.cached_storage_settings().use_hashed_state;
+        let loaded_prefix_sets =
+            crate::prefix_set::load_prefix_sets_with_provider(provider, range, use_hashed_state)?;
         Ok(Self::from_tx(provider.tx_ref()).with_prefix_sets(loaded_prefix_sets))
     }
 
@@ -267,21 +265,18 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 }
 
-/// Calls [`HashedPostStateSorted::from_reverts`] with the correct [`KeyHasher`] based on storage
-/// settings.
+/// Calls [`HashedPostStateSorted::from_reverts`] with the `use_hashed_state` flag read from
+/// the provider's storage settings.
 pub fn from_reverts_auto(
     provider: &(impl ChangeSetReader
           + StorageChangeSetReader
           + BlockNumReader
           + DBProvider
           + StorageSettingsCache),
-    range: impl RangeBounds<BlockNumber> + Clone,
+    range: impl RangeBounds<BlockNumber>,
 ) -> Result<HashedPostStateSorted, ProviderError> {
-    if provider.cached_storage_settings().use_hashed_state {
-        HashedPostStateSorted::from_reverts::<PreHashedKeyHasher>(provider, range)
-    } else {
-        HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(provider, range)
-    }
+    let use_hashed_state = provider.cached_storage_settings().use_hashed_state;
+    HashedPostStateSorted::from_reverts(provider, range, use_hashed_state)
 }
 
 impl DatabaseHashedPostState for HashedPostStateSorted {
@@ -293,9 +288,10 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
     /// - Reads the first occurrence of each changed account/storage slot in the range.
     /// - Hashes keys and returns them already ordered for trie iteration.
     #[instrument(target = "trie::db", skip(provider), fields(range))]
-    fn from_reverts<KH: KeyHasher>(
+    fn from_reverts(
         provider: &(impl ChangeSetReader + StorageChangeSetReader + BlockNumReader + DBProvider),
         range: impl RangeBounds<BlockNumber>,
+        use_hashed_state: bool,
     ) -> Result<Self, ProviderError> {
         // Extract concrete start/end values to use for both account and storage changesets.
         let start = match range.start_bound() {
@@ -316,7 +312,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
         for entry in provider.account_changesets_range(start..end)? {
             let (_, AccountBeforeTx { address, info }) = entry;
             if seen_accounts.insert(address) {
-                accounts.push((KH::hash_key(address), info));
+                accounts.push((keccak256(address), info));
             }
         }
         accounts.sort_unstable_by_key(|(hash, _)| *hash);
@@ -332,11 +328,11 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
                 provider.storage_changesets_range(start..=end_inclusive)?
             {
                 if seen_storage_keys.insert((address, storage.key)) {
-                    let hashed_address = KH::hash_key(address);
+                    let hashed_address = keccak256(address);
                     storages
                         .entry(hashed_address)
                         .or_default()
-                        .push((KH::hash_key(storage.key), storage.value));
+                        .push((maybe_hash_key(storage.key, use_hashed_state), storage.value));
                 }
             }
         }
@@ -367,7 +363,7 @@ mod tests {
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::test_utils::create_test_provider_factory;
-    use reth_trie::{HashedPostState, HashedStorage, KeccakKeyHasher, PreHashedKeyHasher};
+    use reth_trie::{HashedPostState, HashedStorage, KeccakKeyHasher};
     use revm::state::AccountInfo;
     use revm_database::BundleState;
 
@@ -486,12 +482,11 @@ mod tests {
             )
             .unwrap();
 
-        let sorted =
-            HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(&*provider, 1..=3).unwrap();
+        let sorted = HashedPostStateSorted::from_reverts(&*provider, 1..=3, false).unwrap();
 
         // Verify first occurrences were kept (nonce 1, not 2)
         assert_eq!(sorted.accounts.len(), 2);
-        let hashed_addr1 = KeccakKeyHasher::hash_key(address1);
+        let hashed_addr1 = keccak256(address1);
         let account1 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr1).unwrap();
         assert_eq!(account1.1.unwrap().nonce, 1);
 
@@ -523,14 +518,13 @@ mod tests {
             .unwrap();
 
         // Query a range with no data
-        let sorted =
-            HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(&*provider, 1..=10).unwrap();
+        let sorted = HashedPostStateSorted::from_reverts(&*provider, 1..=10, false).unwrap();
         assert!(sorted.accounts.is_empty());
         assert!(sorted.storages.is_empty());
     }
 
     #[test]
-    fn from_reverts_with_pre_hashed_key_hasher() {
+    fn from_reverts_with_hashed_state() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
 
@@ -587,15 +581,12 @@ mod tests {
             )
             .unwrap();
 
-        let sorted =
-            HashedPostStateSorted::from_reverts::<PreHashedKeyHasher>(&*provider, 1..=3).unwrap();
+        let sorted = HashedPostStateSorted::from_reverts(&*provider, 1..=3, true).unwrap();
 
         assert_eq!(sorted.accounts.len(), 2);
 
-        let hashed_addr1 = KeccakKeyHasher::hash_key(address1);
-        let hashed_addr2 = KeccakKeyHasher::hash_key(address2);
-        assert_eq!(hashed_addr1, PreHashedKeyHasher::hash_key(address1));
-        assert_eq!(hashed_addr2, PreHashedKeyHasher::hash_key(address2));
+        let hashed_addr1 = keccak256(address1);
+        let hashed_addr2 = keccak256(address2);
 
         let account1 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr1).unwrap();
         assert_eq!(account1.1.unwrap().nonce, 1);
@@ -685,8 +676,7 @@ mod tests {
             )
             .unwrap();
 
-        let sorted =
-            HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(&*provider, 1..=3).unwrap();
+        let sorted = HashedPostStateSorted::from_reverts(&*provider, 1..=3, false).unwrap();
 
         let expected_hashed_addr1 = keccak256(address1);
         let expected_hashed_addr2 = keccak256(address2);

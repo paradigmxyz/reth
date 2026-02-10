@@ -1,4 +1,5 @@
 use alloy_primitives::{
+    keccak256,
     map::{HashMap, HashSet},
     BlockNumber, B256,
 };
@@ -13,19 +14,23 @@ use reth_primitives_traits::StorageEntry;
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
+    maybe_hash_key,
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    KeyHasher, Nibbles,
+    Nibbles,
 };
 
 /// Load prefix sets using a provider that implements [`ChangeSetReader`]. This function can read
 /// changesets from both static files and database.
-pub fn load_prefix_sets_with_provider<Provider, KH>(
+///
+/// When `use_hashed_state` is true, storage keys from changesets are already keccak256-hashed
+/// and are used as-is. When false, they are hashed via keccak256. Addresses are always hashed.
+pub fn load_prefix_sets_with_provider<Provider>(
     provider: &Provider,
     range: RangeInclusive<BlockNumber>,
+    use_hashed_state: bool,
 ) -> Result<TriePrefixSets, ProviderError>
 where
     Provider: ChangeSetReader + StorageChangeSetReader + DBProvider,
-    KH: KeyHasher,
 {
     let tx = provider.tx_ref();
 
@@ -41,7 +46,7 @@ where
     let mut account_hashed_state_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
     for (_, AccountBeforeTx { address, .. }) in account_changesets {
-        let hashed_address = KH::hash_key(address);
+        let hashed_address = keccak256(address);
         account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
         if account_hashed_state_cursor.seek_exact(hashed_address)?.is_none() {
@@ -52,12 +57,12 @@ where
     // Walk storage changesets using the provider (handles static files + database)
     let storage_changesets = provider.storage_changesets_range(range)?;
     for (BlockNumberAddress((_, address)), StorageEntry { key, .. }) in storage_changesets {
-        let hashed_address = KH::hash_key(address);
+        let hashed_address = keccak256(address);
         account_prefix_set.insert(Nibbles::unpack(hashed_address));
         storage_prefix_sets
             .entry(hashed_address)
             .or_default()
-            .insert(Nibbles::unpack(KH::hash_key(key)));
+            .insert(Nibbles::unpack(maybe_hash_key(key, use_hashed_state)));
     }
 
     Ok(TriePrefixSets {

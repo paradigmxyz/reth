@@ -28,29 +28,10 @@ pub fn maybe_hash_key(key: B256, use_hashed_state: bool) -> B256 {
     }
 }
 
-/// A [`KeyHasher`] for `use_hashed_state` mode where storage slot keys in changesets
-/// are already `keccak256`-hashed (32 bytes) but addresses remain plain (20 bytes).
-///
-/// 32-byte inputs are returned as-is; shorter inputs (addresses) are `keccak256`-hashed.
-#[derive(Clone, Debug, Default)]
-pub struct PreHashedKeyHasher;
-
-impl KeyHasher for PreHashedKeyHasher {
-    #[inline]
-    fn hash_key<T: AsRef<[u8]>>(bytes: T) -> B256 {
-        let b = bytes.as_ref();
-        if b.len() == 32 {
-            B256::from_slice(b)
-        } else {
-            keccak256(b)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, U256};
+    use alloy_primitives::U256;
 
     #[test]
     fn test_maybe_hash_key_passthrough() {
@@ -62,25 +43,6 @@ mod tests {
     fn test_maybe_hash_key_hashes() {
         let key = B256::repeat_byte(0xab);
         assert_eq!(maybe_hash_key(key, false), keccak256(key));
-    }
-
-    #[test]
-    fn test_pre_hashed_key_hasher_32_bytes_passthrough() {
-        let key = B256::repeat_byte(0xcd);
-        assert_eq!(PreHashedKeyHasher::hash_key(key), key);
-    }
-
-    #[test]
-    fn test_pre_hashed_key_hasher_20_bytes_hashes() {
-        let addr = Address::repeat_byte(0x01);
-        assert_eq!(PreHashedKeyHasher::hash_key(addr), KeccakKeyHasher::hash_key(addr),);
-    }
-
-    #[test]
-    fn test_pre_hashed_key_hasher_other_lengths() {
-        for input in [vec![], vec![0xff], vec![0xaa; 16], vec![0xbb; 31]] {
-            assert_eq!(PreHashedKeyHasher::hash_key(&input), keccak256(&input));
-        }
     }
 
     #[test]
@@ -99,6 +61,8 @@ mod tests {
 
     #[test]
     fn test_keccak_key_hasher_always_hashes_regardless_of_length() {
+        use alloy_primitives::Address;
+
         let addr = Address::repeat_byte(0x42);
         assert_eq!(KeccakKeyHasher::hash_key(addr), keccak256(addr));
 
