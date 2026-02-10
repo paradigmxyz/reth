@@ -172,7 +172,7 @@ where
                 let maybe_leaf_value = storage
                     .and_then(|s| s.storage.get(&hashed_slot))
                     .filter(|v| !v.is_zero())
-                    .map(|v| alloy_rlp::encode_fixed_size(v));
+                    .map(alloy_rlp::encode_fixed_size);
 
                 if let Some(value) = maybe_leaf_value {
                     storage_trie.update_leaf(storage_nibbles, &value, &provider).map_err(
