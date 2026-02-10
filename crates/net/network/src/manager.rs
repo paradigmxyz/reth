@@ -875,7 +875,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     self.swarm.state_mut().peers_mut().on_active_session_gracefully_closed(peer_id);
                     None
                 };
-                self.metrics.closed_sessions.increment(1);
                 self.closed_sessions_metrics.active.increment(1);
                 self.update_active_connection_metrics();
 
@@ -901,7 +900,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         .state_mut()
                         .peers_mut()
                         .on_incoming_pending_session_dropped(remote_addr, err);
-                    self.metrics.pending_session_failures.increment(1);
                     self.pending_session_failure_metrics.inbound.increment(1);
                     if let Some(reason) = err.as_disconnected() {
                         self.disconnect_metrics.increment(reason);
@@ -912,7 +910,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         .peers_mut()
                         .on_incoming_pending_session_gracefully_closed();
                 }
-                self.metrics.closed_sessions.increment(1);
                 self.closed_sessions_metrics.incoming_pending.increment(1);
                 self.metrics
                     .incoming_connections
@@ -936,7 +933,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         &peer_id,
                         err,
                     );
-                    self.metrics.pending_session_failures.increment(1);
                     self.pending_session_failure_metrics.outbound.increment(1);
                     if let Some(reason) = err.as_disconnected() {
                         self.disconnect_metrics.increment(reason);
@@ -947,7 +943,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         .peers_mut()
                         .on_outgoing_pending_session_gracefully_closed(&peer_id);
                 }
-                self.metrics.closed_sessions.increment(1);
                 self.closed_sessions_metrics.outgoing_pending.increment(1);
                 self.update_pending_connection_metrics();
 

@@ -22,12 +22,6 @@ pub struct NetworkMetrics {
     /// Number of peers known to the node
     pub(crate) tracked_peers: Gauge,
 
-    /// Cumulative number of failures of pending sessions
-    pub(crate) pending_session_failures: Counter,
-
-    /// Total number of sessions closed
-    pub(crate) closed_sessions: Counter,
-
     /// Number of active incoming connections
     pub(crate) incoming_connections: Gauge,
 
