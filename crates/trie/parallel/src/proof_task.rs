@@ -745,7 +745,7 @@ pub(crate) enum StorageProofResult {
     },
     V2 {
         /// The calculated V2 proof nodes
-        proof: Vec<ProofTrieNode>,
+        proof: Vec<ProofTrieNodeV2>,
         /// The storage root calculated by the V2 proof
         root: Option<B256>,
     },

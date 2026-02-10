@@ -16,8 +16,8 @@ use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
     BranchNodeMasks, BranchNodeMasksMap, DecodedMultiProof, DecodedStorageMultiProof, MultiProof,
-    Nibbles, ProofTrieNode, RlpNode, StorageMultiProof, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    Nibbles, ProofTrieNode, ProofTrieNodeV2, RlpNode, StorageMultiProof, TrieAccount, TrieNode,
+    TrieNodeV2, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 #[cfg(feature = "std")]
 use tracing::debug;
@@ -30,7 +30,7 @@ use tracing::{instrument, trace};
 #[derive(Debug, Default)]
 pub struct DeferredDrops {
     /// Each nodes reveal operation creates a new buffer, uses it, and pushes it here.
-    pub proof_nodes_bufs: Vec<Vec<ProofTrieNode>>,
+    pub proof_nodes_bufs: Vec<Vec<ProofTrieNodeV2>>,
 }
 
 #[derive(Debug)]
@@ -512,7 +512,7 @@ where
     /// so no separate masks map is needed.
     pub fn reveal_account_v2_proof_nodes(
         &mut self,
-        mut nodes: Vec<ProofTrieNode>,
+        mut nodes: Vec<ProofTrieNodeV2>,
     ) -> SparseStateTrieResult<()> {
         if self.skip_proof_node_filtering {
             let capacity = estimate_v2_proof_capacity(&nodes);
@@ -573,7 +573,7 @@ where
     pub fn reveal_storage_v2_proof_nodes(
         &mut self,
         account: B256,
-        nodes: Vec<ProofTrieNode>,
+        nodes: Vec<ProofTrieNodeV2>,
     ) -> SparseStateTrieResult<()> {
         let (trie, revealed_paths) = self.storage.get_trie_and_revealed_paths_mut(account);
         let _metric_values = Self::reveal_storage_v2_proof_nodes_inner(
@@ -599,10 +599,10 @@ where
     /// designed to handle a variety of associated public functions.
     fn reveal_storage_v2_proof_nodes_inner(
         account: B256,
-        mut nodes: Vec<ProofTrieNode>,
+        mut nodes: Vec<ProofTrieNodeV2>,
         revealed_nodes: &mut HashSet<Nibbles>,
         trie: &mut RevealableSparseTrie<S>,
-        bufs: &mut Vec<Vec<ProofTrieNode>>,
+        bufs: &mut Vec<Vec<ProofTrieNodeV2>>,
         retain_updates: bool,
         skip_filtering: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
@@ -1589,9 +1589,9 @@ fn filter_map_revealed_nodes(
 #[derive(Debug, PartialEq, Eq)]
 struct FilteredV2ProofNodes {
     /// Root node which was pulled out of the original node set to be handled specially.
-    root_node: Option<ProofTrieNode>,
+    root_node: Option<ProofTrieNodeV2>,
     /// Filtered proof nodes. Root node is removed.
-    nodes: Vec<ProofTrieNode>,
+    nodes: Vec<ProofTrieNodeV2>,
     /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
     /// if they are not in the proof.
     new_nodes: usize,
@@ -1604,15 +1604,15 @@ struct FilteredV2ProofNodes {
 /// This counts nodes and their children (for branch and extension nodes) to provide
 /// proper capacity hints for `reserve_nodes`. Used when `skip_proof_node_filtering` is
 /// enabled and no filtering is performed.
-fn estimate_v2_proof_capacity(nodes: &[ProofTrieNode]) -> usize {
+fn estimate_v2_proof_capacity(nodes: &[ProofTrieNodeV2]) -> usize {
     let mut capacity = nodes.len();
 
     for node in nodes {
         match &node.node {
-            TrieNode::Branch(branch) => {
+            TrieNodeV2::Branch(branch) => {
                 capacity += branch.state_mask.count_ones() as usize;
             }
-            TrieNode::Extension(_) => {
+            TrieNodeV2::Extension(_) => {
                 capacity += 1;
             }
             _ => {}
@@ -1628,7 +1628,7 @@ fn estimate_v2_proof_capacity(nodes: &[ProofTrieNode]) -> usize {
 /// Unlike [`filter_map_revealed_nodes`], V2 proof nodes already have masks included in the
 /// `ProofTrieNode` structure, so no separate masks map is needed.
 fn filter_revealed_v2_proof_nodes(
-    proof_nodes: Vec<ProofTrieNode>,
+    proof_nodes: Vec<ProofTrieNodeV2>,
     revealed_nodes: &mut HashSet<Nibbles>,
 ) -> SparseStateTrieResult<FilteredV2ProofNodes> {
     let mut result = FilteredV2ProofNodes {
@@ -1642,7 +1642,7 @@ fn filter_revealed_v2_proof_nodes(
     // duplicate EmptyRoot nodes may appear (e.g., storage proofs split across chunks for an
     // account with empty storage). We only error if there's an EmptyRoot alongside real nodes.
     let non_empty_root_count =
-        proof_nodes.iter().filter(|n| !matches!(n.node, TrieNode::EmptyRoot)).count();
+        proof_nodes.iter().filter(|n| !matches!(n.node, TrieNodeV2::EmptyRoot)).count();
 
     for node in proof_nodes {
         result.metric_values.total_nodes += 1;
@@ -1660,10 +1660,10 @@ fn filter_revealed_v2_proof_nodes(
 
         // Count children for capacity estimation
         match &node.node {
-            TrieNode::Branch(branch) => {
+            TrieNodeV2::Branch(branch) => {
                 result.new_nodes += branch.state_mask.count_ones() as usize;
             }
-            TrieNode::Extension(_) => {
+            TrieNodeV2::Extension(_) => {
                 result.new_nodes += 1;
             }
             _ => {}

@@ -1,6 +1,6 @@
 //! Merkle trie proofs.
 
-use crate::{BranchNodeMasksMap, Nibbles, ProofTrieNode, TrieAccount};
+use crate::{BranchNodeMasksMap, Nibbles, ProofTrieNodeV2, TrieAccount};
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
@@ -448,9 +448,9 @@ impl TryFrom<MultiProof> for DecodedMultiProof {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct DecodedMultiProofV2 {
     /// Account trie proof nodes
-    pub account_proofs: Vec<ProofTrieNode>,
+    pub account_proofs: Vec<ProofTrieNodeV2>,
     /// Storage trie proof nodes indexed by account
-    pub storage_proofs: B256Map<Vec<ProofTrieNode>>,
+    pub storage_proofs: B256Map<Vec<ProofTrieNodeV2>>,
 }
 
 impl DecodedMultiProofV2 {
