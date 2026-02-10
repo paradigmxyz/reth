@@ -391,9 +391,14 @@ where
             let state = &mut self.state;
             let revealed_account_paths = &mut self.revealed_account_paths;
 
+            let num_account_nodes = multiproof.account_proofs.len();
+            let num_storage_tries = storage_inputs.len();
+            let parent_span = tracing::Span::current();
+
             // Run account and storage reveals in parallel using rayon::join.
             let (account_result, storage_results) = rayon::join(
                 || {
+                    let _span = tracing::debug_span!(target: "trie::sparse", parent: &parent_span, "reveal_account_v2", nodes = num_account_nodes).entered();
                     if !has_account_proofs {
                         return Ok((ProofNodesMetricValues { total_nodes: 0, skipped_nodes: 0 }, Vec::new()))
                             as SparseStateTrieResult<_>;
@@ -410,6 +415,7 @@ where
                     Ok((metric_values, bufs))
                 },
                 || {
+                    let _span = tracing::debug_span!(target: "trie::sparse", parent: &parent_span, "reveal_storage_v2", tries = num_storage_tries).entered();
                     storage_inputs
                         .into_iter()
                         .par_bridge_buffered()
@@ -464,13 +470,19 @@ where
             return any_err
         }
 
-        if !multiproof.account_proofs.is_empty() {
-            self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
+        {
+            let _span = tracing::debug_span!(target: "trie::sparse", "reveal_account_v2", nodes = multiproof.account_proofs.len()).entered();
+            if !multiproof.account_proofs.is_empty() {
+                self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
+            }
         }
 
-        for (account, storage_proofs) in multiproof.storage_proofs {
-            self.reveal_storage_v2_proof_nodes(account, storage_proofs)?;
-            self.storage.modifications.mark_accessed(account);
+        {
+            let _span = tracing::debug_span!(target: "trie::sparse", "reveal_storage_v2", tries = multiproof.storage_proofs.len()).entered();
+            for (account, storage_proofs) in multiproof.storage_proofs {
+                self.reveal_storage_v2_proof_nodes(account, storage_proofs)?;
+                self.storage.modifications.mark_accessed(account);
+            }
         }
 
         Ok(())
