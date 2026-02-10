@@ -1,6 +1,6 @@
 use crate::{
     provider::TrieNodeProvider, LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait,
-    SparseTrieExt, SparseTrieUpdates,
+    SparseTrieUpdates,
 };
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
@@ -258,7 +258,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     }
 }
 
-impl<T: SparseTrieExt + Default> RevealableSparseTrie<T> {
+impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// Applies batch leaf updates to the sparse trie.
     ///
     /// For blind tries, all updates are kept in the map and proof targets are emitted

@@ -28,7 +28,7 @@ use reth_trie_parallel::{
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    DeferredDrops, LeafUpdate, ParallelSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt,
+    DeferredDrops, LeafUpdate, ParallelSparseTrie, SparseStateTrie, SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
@@ -44,8 +44,8 @@ where
     BPF: TrieNodeProviderFactory + Send + Sync,
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    A: SparseTrie + SparseTrieExt + Send + Sync + Default,
-    S: SparseTrie + SparseTrieExt + Send + Sync + Default + Clone,
+    A: SparseTrie + Send + Sync + Default,
+    S: SparseTrie + Send + Sync + Default + Clone,
 {
     Cleared(SparseTrieTask<BPF, A, S>),
     Cached(SparseTrieCacheTask<A, S>),
@@ -56,8 +56,8 @@ where
     BPF: TrieNodeProviderFactory + Send + Sync + Clone,
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    A: SparseTrie + SparseTrieExt + Send + Sync + Default,
-    S: SparseTrie + SparseTrieExt + Send + Sync + Default + Clone,
+    A: SparseTrie + Send + Sync + Default,
+    S: SparseTrie + Send + Sync + Default + Clone,
 {
     pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         match self {
@@ -117,8 +117,8 @@ where
     BPF: TrieNodeProviderFactory + Send + Sync + Clone,
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    A: SparseTrie + SparseTrieExt + Send + Sync + Default,
-    S: SparseTrie + SparseTrieExt + Send + Sync + Default + Clone,
+    A: SparseTrie + Send + Sync + Default,
+    S: SparseTrie + Send + Sync + Default + Clone,
 {
     /// Creates a new sparse trie task with the given trie.
     pub(super) const fn new(
@@ -277,8 +277,8 @@ pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparse
 
 impl<A, S> SparseTrieCacheTask<A, S>
 where
-    A: SparseTrieExt + Default,
-    S: SparseTrieExt + Default + Clone,
+    A: SparseTrie + Default,
+    S: SparseTrie + Default + Clone,
 {
     /// Creates a new sparse trie, pre-populating with an existing [`SparseStateTrie`].
     pub(super) fn new_with_trie(
