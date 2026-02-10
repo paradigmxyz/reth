@@ -237,19 +237,6 @@ impl PeersManager {
         self.backed_off_peers.len()
     }
 
-    /// Returns the count of backed off peers grouped by reason.
-    pub(crate) fn backed_off_peers_count_by_reason(&self) -> BackoffCounts {
-        let mut counts = BackoffCounts::default();
-        for (_until, reason) in self.backed_off_peers.values() {
-            match reason {
-                BackoffReason::TooManyPeers => counts.too_many_peers += 1,
-                BackoffReason::GracefulClose => counts.graceful_close += 1,
-                BackoffReason::ConnectionError => counts.connection_error += 1,
-            }
-        }
-        counts
-    }
-
     /// Returns the number of idle trusted peers.
     fn num_idle_trusted_peers(&self) -> usize {
         self.peers.iter().filter(|(_, peer)| peer.kind.is_trusted() && peer.state.is_idle()).count()
@@ -1296,17 +1283,6 @@ impl Display for InboundConnectionError {
     }
 }
 
-/// Count of backed-off peers grouped by reason.
-#[derive(Debug, Default)]
-pub struct BackoffCounts {
-    /// Number of peers backed off because they reported too many peers.
-    pub too_many_peers: usize,
-    /// Number of peers backed off after a graceful session close.
-    pub graceful_close: usize,
-    /// Number of peers backed off due to connection/protocol errors.
-    pub connection_error: usize,
-}
-
 /// The reason a peer was backed off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackoffReason {
@@ -1320,7 +1296,7 @@ pub enum BackoffReason {
 
 impl BackoffReason {
     /// Derives the backoff reason from an optional [`DisconnectReason`].
-    const fn from_disconnect(reason: Option<DisconnectReason>) -> Self {
+    pub const fn from_disconnect(reason: Option<DisconnectReason>) -> Self {
         match reason {
             Some(DisconnectReason::TooManyPeers) => Self::TooManyPeers,
             _ => Self::ConnectionError,

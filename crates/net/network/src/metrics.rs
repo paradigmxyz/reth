@@ -2,7 +2,7 @@ use metrics::Histogram;
 use reth_eth_wire::DisconnectReason;
 use reth_ethereum_primitives::TxType;
 use reth_metrics::{
-    metrics::{self, Counter, Gauge},
+    metrics::{Counter, Gauge},
     Metrics,
 };
 
@@ -111,32 +111,25 @@ impl Default for PendingSessionFailureMetrics {
 }
 
 /// Metrics for backed off peers, split by reason.
-#[derive(Debug)]
+#[derive(Metrics)]
+#[metrics(scope = "network.backed_off_peers")]
 pub struct BackedOffPeersMetrics {
     /// Peers backed off because they reported too many peers.
-    pub too_many_peers: Gauge,
+    pub too_many_peers: Counter,
     /// Peers backed off after a graceful session close.
-    pub graceful_close: Gauge,
+    pub graceful_close: Counter,
     /// Peers backed off due to connection or protocol errors.
-    pub connection_error: Gauge,
-}
-
-impl Default for BackedOffPeersMetrics {
-    fn default() -> Self {
-        Self {
-            too_many_peers: metrics::gauge!("network_backed_off_peers", "reason" => "too_many_peers"),
-            graceful_close: metrics::gauge!("network_backed_off_peers", "reason" => "graceful_close"),
-            connection_error: metrics::gauge!("network_backed_off_peers", "reason" => "connection_error"),
-        }
-    }
+    pub connection_error: Counter,
 }
 
 impl BackedOffPeersMetrics {
-    /// Sets the gauge values from the given counts.
-    pub fn set(&self, counts: &crate::peers::BackoffCounts) {
-        self.too_many_peers.set(counts.too_many_peers as f64);
-        self.graceful_close.set(counts.graceful_close as f64);
-        self.connection_error.set(counts.connection_error as f64);
+    /// Increments the counter for the given backoff reason.
+    pub fn increment_for_reason(&self, reason: crate::peers::BackoffReason) {
+        match reason {
+            crate::peers::BackoffReason::TooManyPeers => self.too_many_peers.increment(1),
+            crate::peers::BackoffReason::GracefulClose => self.graceful_close.increment(1),
+            crate::peers::BackoffReason::ConnectionError => self.connection_error.increment(1),
+        }
     }
 }
 
