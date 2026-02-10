@@ -11,8 +11,8 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, StateRoot,
-    StateRootProgress, TrieInputSorted,
+    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, StateRoot, StateRootProgress,
+    TrieInputSorted,
 };
 use std::{
     collections::HashSet,

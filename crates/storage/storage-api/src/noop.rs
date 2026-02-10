@@ -413,9 +413,7 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
     fn storage_changeset(
         &self,
         _block_number: BlockNumber,
-    ) -> ProviderResult<
-        Vec<(reth_db_api::models::BlockNumberAddress, crate::ChangesetEntry)>,
-    > {
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, crate::ChangesetEntry)>> {
         Ok(Vec::default())
     }
 
@@ -431,9 +429,7 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
     fn storage_changesets_range(
         &self,
         _range: impl core::ops::RangeBounds<BlockNumber>,
-    ) -> ProviderResult<
-        Vec<(reth_db_api::models::BlockNumberAddress, crate::ChangesetEntry)>,
-    > {
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, crate::ChangesetEntry)>> {
         Ok(Vec::default())
     }
 

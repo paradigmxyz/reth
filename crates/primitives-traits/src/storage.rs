@@ -58,7 +58,11 @@ impl StorageSlotKey {
     /// When `use_hashed_state` is true the key is assumed already hashed.
     /// When false it is assumed to be a plain slot.
     pub const fn from_raw(key: B256, use_hashed_state: bool) -> Self {
-        if use_hashed_state { Self::Hashed(key) } else { Self::Plain(key) }
+        if use_hashed_state {
+            Self::Hashed(key)
+        } else {
+            Self::Plain(key)
+        }
     }
 
     /// Returns the raw [`B256`] regardless of variant.
@@ -97,7 +101,11 @@ impl StorageSlotKey {
     /// Panics (debug) if called on an already-hashed key.
     pub fn to_changeset_key(self, use_hashed_state: bool) -> B256 {
         debug_assert!(self.is_plain(), "to_changeset_key called on already-hashed key");
-        if use_hashed_state { self.to_hashed() } else { self.as_b256() }
+        if use_hashed_state {
+            self.to_hashed()
+        } else {
+            self.as_b256()
+        }
     }
 }
 

@@ -266,16 +266,12 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             match account_state.2.entry(old_storage.key.as_b256()) {
                 hash_map::Entry::Vacant(entry) => {
                     let new_storage_value = match old_storage.key {
-                        StorageSlotKey::Hashed(_) => {
-                            state_provider
-                                .storage_by_hashed_key(address, old_storage.key.as_b256())?
-                                .unwrap_or_default()
-                        }
-                        StorageSlotKey::Plain(_) => {
-                            state_provider
-                                .storage(address, old_storage.key.as_b256())?
-                                .unwrap_or_default()
-                        }
+                        StorageSlotKey::Hashed(_) => state_provider
+                            .storage_by_hashed_key(address, old_storage.key.as_b256())?
+                            .unwrap_or_default(),
+                        StorageSlotKey::Plain(_) => state_provider
+                            .storage(address, old_storage.key.as_b256())?
+                            .unwrap_or_default(),
                     };
                     entry.insert((old_storage.value, new_storage_value));
                 }
@@ -1333,9 +1329,10 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .flatten()
                 .flat_map(|revert: PlainStorageRevert| {
                     revert.storage_revert.into_iter().map(move |(key, value)| {
-                        let slot = StorageSlotKey::plain(key.into());
-                        let tagged_key =
-                            if use_hashed { StorageSlotKey::hashed(slot.to_hashed()) } else { slot };
+                        let tagged_key = StorageSlotKey::from_raw(
+                            StorageSlotKey::from_u256(key).to_changeset_key(use_hashed),
+                            use_hashed,
+                        );
                         (
                             BlockNumberAddress((block_number, revert.address)),
                             ChangesetEntry { key: tagged_key, value: value.to_previous_value() },
@@ -1393,9 +1390,10 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                         return None
                     }
                     revert.storage_revert.into_iter().find_map(|(key, value)| {
-                        let slot = StorageSlotKey::plain(key.into());
-                        let tagged_key =
-                            if use_hashed { StorageSlotKey::hashed(slot.to_hashed()) } else { slot };
+                        let tagged_key = StorageSlotKey::from_raw(
+                            StorageSlotKey::from_u256(key).to_changeset_key(use_hashed),
+                            use_hashed,
+                        );
                         (tagged_key.as_b256() == storage_key).then(|| ChangesetEntry {
                             key: tagged_key,
                             value: value.to_previous_value(),
@@ -1448,15 +1446,16 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .flatten()
                     .flat_map(|revert: PlainStorageRevert| {
                         revert.storage_revert.into_iter().map(move |(key, value)| {
-                            let slot = StorageSlotKey::plain(key.into());
-                            let tagged_key = if use_hashed {
-                                StorageSlotKey::hashed(slot.to_hashed())
-                            } else {
-                                slot
-                            };
+                            let tagged_key = StorageSlotKey::from_raw(
+                                StorageSlotKey::from_u256(key).to_changeset_key(use_hashed),
+                                use_hashed,
+                            );
                             (
                                 BlockNumberAddress((state.number(), revert.address)),
-                                ChangesetEntry { key: tagged_key, value: value.to_previous_value() },
+                                ChangesetEntry {
+                                    key: tagged_key,
+                                    value: value.to_previous_value(),
+                                },
                             )
                         })
                     });
