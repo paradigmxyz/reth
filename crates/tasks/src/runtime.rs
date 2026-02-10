@@ -358,9 +358,16 @@ impl Runtime {
 
 impl Runtime {
     /// Creates a lightweight [`Runtime`] for tests with minimal thread pools.
+    ///
+    /// If called from within a tokio runtime (e.g. `#[tokio::test]`), attaches to the existing
+    /// handle to avoid shutdown panics when the test runtime is dropped.
     pub fn test() -> Self {
+        let config = match Handle::try_current() {
+            Ok(handle) => Self::test_config().with_tokio(TokioConfig::existing_handle(handle)),
+            Err(_) => Self::test_config(),
+        };
         let (runtime, task_manager) =
-            RuntimeBuilder::new(Self::test_config()).build().expect("failed to build test Runtime");
+            RuntimeBuilder::new(config).build().expect("failed to build test Runtime");
         runtime.keep_task_manager(task_manager);
         runtime
     }
