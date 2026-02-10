@@ -97,7 +97,12 @@ where
         // the database commit in a previous stage run. So, our only solution is to unwind the
         // static files and proceed from the database expected height.
         Ordering::Greater => {
-            let highest_db_block = provider.tx_ref().entries::<tables::BlockBodyIndices>()? as u64;
+            let highest_db_block = provider
+                .tx_ref()
+                .cursor_read::<tables::BlockBodyIndices>()?
+                .last()?
+                .map(|(number, _)| number)
+                .unwrap_or_default();
             let mut static_file_producer =
                 static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
             static_file_producer
@@ -465,6 +470,72 @@ mod tests {
         );
 
         assert_matches!(runner.validate_unwind(input), Ok(_), "unwind validation");
+    }
+
+    /// Checks that `ensure_consistency` sets the correct static file block range
+    /// when static files are ahead of the database (Ordering::Greater branch).
+    /// Regression test: previously `entries()` (count) was used instead of the
+    /// actual highest block number, causing an off-by-one in the block range.
+    #[tokio::test]
+    async fn ensure_consistency_static_files_ahead() {
+        use crate::test_utils::{StorageKind, TestStageDB};
+        use reth_db_api::cursor::DbCursorRO;
+        use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
+
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+
+        let highest_block = 5u64;
+
+        // Generate blocks [0..=5] with 1-2 transactions each
+        let blocks = random_block_range(
+            &mut rng,
+            0..=highest_block,
+            BlockRangeParams {
+                parent: Some(test_utils::GENESIS_HASH),
+                tx_count: 1..3,
+                ..Default::default()
+            },
+        );
+
+        // Insert blocks into DB and static files
+        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("failed to insert blocks");
+
+        let static_file_provider = db.factory.static_file_provider();
+
+        // Verify initial state: static files and DB are in sync
+        let last_tx_num = db
+            .query(|tx| {
+                Ok(tx
+                    .cursor_read::<tables::TransactionBlocks>()?
+                    .last()?
+                    .map(|(id, _)| id)
+                    .unwrap())
+            })
+            .unwrap();
+
+        // Add an extra transaction to static files to simulate an interrupted commit
+        // (static files got written but DB did not)
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Transactions).unwrap();
+            let extra_tx = reth_testing_utils::generators::random_signed_tx(&mut rng);
+            writer.append_transaction(last_tx_num + 1, &extra_tx).unwrap();
+            writer.commit().unwrap();
+        }
+
+        // Static files are now ahead by 1 transaction
+        let provider = db.factory.provider_rw().unwrap();
+        ensure_consistency(&*provider, None).expect("ensure_consistency failed");
+        provider.commit().unwrap();
+
+        // After consistency fix, the static file block range should end at `highest_block`,
+        // NOT at `highest_block + 1` (which was the bug with `entries()`)
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Transactions),
+            Some(highest_block),
+            "Static file block range end should equal the highest DB block number"
+        );
     }
 
     mod test_utils {
