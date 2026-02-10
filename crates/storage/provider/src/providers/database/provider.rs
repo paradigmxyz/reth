@@ -4759,8 +4759,9 @@ mod tests {
         use revm_state::AccountInfo;
 
         let factory = create_test_provider_factory();
-        let storage_settings = StorageSettings::v2();
-        factory.set_storage_settings_cache(storage_settings);
+        let mut settings = StorageSettings::v1();
+        settings.use_hashed_state = true;
+        factory.set_storage_settings_cache(settings);
 
         let provider_rw = factory.provider_rw().unwrap();
 
