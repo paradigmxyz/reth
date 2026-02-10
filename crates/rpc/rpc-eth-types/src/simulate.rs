@@ -362,7 +362,7 @@ where
                         code: SIMULATE_VM_ERROR_CODE,
                         ..SimulateError::invalid_params()
                     }),
-                    gas_used: gas.gas_used(),
+                    gas_used: gas.gas_used,
                     logs: Vec::new(),
                     status: false,
                 }
@@ -377,7 +377,7 @@ where
                         code: SIMULATE_REVERT_CODE,
                         ..SimulateError::invalid_params()
                     }),
-                    gas_used: gas.gas_used(),
+                    gas_used: gas.gas_used,
                     status: false,
                     logs: Vec::new(),
                 }
@@ -385,7 +385,7 @@ where
             ExecutionResult::Success { output, gas, logs, .. } => SimCallResult {
                 return_data: output.into_data(),
                 error: None,
-                gas_used: gas.gas_used(),
+                gas_used: gas.gas_used,
                 logs: logs
                     .into_iter()
                     .map(|log| {
