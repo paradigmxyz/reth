@@ -4496,7 +4496,7 @@ mod tests {
     #[test]
     fn test_write_and_remove_state_roundtrip_hashed() {
         let factory = create_test_provider_factory();
-        let storage_settings = StorageSettings::v1().with_use_hashed_state(true);
+        let storage_settings = StorageSettings::v2();
         assert!(storage_settings.use_hashed_state);
         assert!(!storage_settings.storage_changesets_in_static_files);
         assert!(!storage_settings.account_changesets_in_static_files);
@@ -4655,7 +4655,7 @@ mod tests {
     #[test]
     fn test_unwind_storage_hashing_with_hashed_state() {
         let factory = create_test_provider_factory();
-        let storage_settings = StorageSettings::v1().with_use_hashed_state(true);
+        let storage_settings = StorageSettings::v2();
         factory.set_storage_settings_cache(storage_settings);
 
         let address = Address::random();
@@ -4917,7 +4917,7 @@ mod tests {
         use revm_state::AccountInfo;
 
         let factory = create_test_provider_factory();
-        let storage_settings = StorageSettings::v1().with_use_hashed_state(true);
+        let storage_settings = StorageSettings::v2();
         factory.set_storage_settings_cache(storage_settings);
 
         let provider_rw = factory.provider_rw().unwrap();

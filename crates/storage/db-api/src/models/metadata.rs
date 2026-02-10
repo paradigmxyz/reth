@@ -65,7 +65,7 @@ impl StorageSettings {
             storages_history_in_rocksdb: true,
             transaction_hash_numbers_in_rocksdb: true,
             account_history_in_rocksdb: true,
-            use_hashed_state: false,
+            use_hashed_state: true,
         }
     }
 

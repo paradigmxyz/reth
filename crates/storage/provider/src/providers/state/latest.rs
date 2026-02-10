@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn test_latest_storage_hashed_state() {
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v1().with_use_hashed_state(true));
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let address = address!("0x0000000000000000000000000000000000000001");
         let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn test_latest_storage_hashed_state_returns_none_for_missing() {
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v1().with_use_hashed_state(true));
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let address = address!("0x0000000000000000000000000000000000000001");
         let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
