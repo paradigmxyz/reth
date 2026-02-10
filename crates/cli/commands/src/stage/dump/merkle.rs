@@ -24,6 +24,7 @@ use reth_stages::{
 };
 use tracing::info;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn dump_merkle_stage<N>(
     db_tool: &DbTool<N>,
     from: BlockNumber,
