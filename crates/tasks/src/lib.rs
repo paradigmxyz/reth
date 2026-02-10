@@ -117,13 +117,14 @@ where
 /// Use the [`Runtime`] that spawns task directly onto the tokio runtime via the [Handle].
 ///
 /// ```
-/// # use reth_tasks::TaskManager;
+/// # use reth_tasks::{RuntimeBuilder, RuntimeConfig};
 /// fn t() {
 ///  use reth_tasks::TaskSpawner;
 /// let rt = tokio::runtime::Runtime::new().unwrap();
-/// let manager = TaskManager::new(rt.handle().clone());
-/// let executor = manager.executor();
-/// let task = TaskSpawner::spawn(&executor, Box::pin(async {
+/// let runtime = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(rt.handle().clone()))
+///     .build()
+///     .unwrap();
+/// let task = TaskSpawner::spawn(&runtime, Box::pin(async {
 ///     // -- snip --
 /// }));
 /// rt.block_on(task).unwrap();
@@ -202,7 +203,7 @@ impl TaskSpawner for TokioTaskExecutor {
 #[derive(Debug)]
 #[must_use = "TaskManager must be polled to monitor critical tasks"]
 pub struct TaskManager {
-    /// The associated [`Runtime`], set after construction via [`TaskManager::new`].
+    /// The associated [`Runtime`], set after construction.
     runtime: Option<Runtime>,
     /// Receiver for task events.
     task_events_rx: UnboundedReceiver<TaskEvent>,
@@ -401,11 +402,12 @@ mod tests {
     #[test]
     fn test_critical() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let handle = runtime.handle().clone();
-        let manager = TaskManager::new(handle);
-        let executor = manager.executor();
+        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
+            .build()
+            .unwrap();
+        let manager = rt.take_task_manager().unwrap();
 
-        executor.spawn_critical("this is a critical task", async { panic!("intentionally panic") });
+        rt.spawn_critical("this is a critical task", async { panic!("intentionally panic") });
 
         runtime.block_on(async move {
             let err_result = manager.await;
@@ -421,52 +423,55 @@ mod tests {
     #[test]
     fn test_manager_shutdown_critical() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let handle = runtime.handle().clone();
-        let manager = TaskManager::new(handle.clone());
-        let executor = manager.executor();
+        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
+            .build()
+            .unwrap();
+        let manager = rt.take_task_manager().unwrap();
 
         let (signal, shutdown) = signal();
 
-        executor.spawn_critical("this is a critical task", async move {
+        rt.spawn_critical("this is a critical task", async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
             drop(signal);
         });
 
         drop(manager);
 
-        handle.block_on(shutdown);
+        runtime.handle().block_on(shutdown);
     }
 
     // Tests that spawned tasks are terminated if the `TaskManager` drops
     #[test]
     fn test_manager_shutdown() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let handle = runtime.handle().clone();
-        let manager = TaskManager::new(handle.clone());
-        let executor = manager.executor();
+        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
+            .build()
+            .unwrap();
+        let manager = rt.take_task_manager().unwrap();
 
         let (signal, shutdown) = signal();
 
-        executor.spawn(Box::pin(async move {
+        rt.spawn(Box::pin(async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
             drop(signal);
         }));
 
         drop(manager);
 
-        handle.block_on(shutdown);
+        runtime.handle().block_on(shutdown);
     }
 
     #[test]
     fn test_manager_graceful_shutdown() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let handle = runtime.handle().clone();
-        let manager = TaskManager::new(handle);
-        let executor = manager.executor();
+        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
+            .build()
+            .unwrap();
+        let manager = rt.take_task_manager().unwrap();
 
         let val = Arc::new(AtomicBool::new(false));
         let c = val.clone();
-        executor.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
+        rt.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
             let _guard = shutdown.await;
             tokio::time::sleep(Duration::from_millis(200)).await;
             c.store(true, Ordering::Relaxed);
@@ -479,15 +484,16 @@ mod tests {
     #[test]
     fn test_manager_graceful_shutdown_many() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let handle = runtime.handle().clone();
-        let manager = TaskManager::new(handle);
-        let executor = manager.executor();
+        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
+            .build()
+            .unwrap();
+        let manager = rt.take_task_manager().unwrap();
 
         let counter = Arc::new(AtomicUsize::new(0));
         let num = 10;
         for _ in 0..num {
             let c = counter.clone();
-            executor.spawn_critical_with_graceful_shutdown_signal(
+            rt.spawn_critical_with_graceful_shutdown_signal(
                 "grace",
                 move |shutdown| async move {
                     let _guard = shutdown.await;
@@ -504,14 +510,15 @@ mod tests {
     #[test]
     fn test_manager_graceful_shutdown_timeout() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let handle = runtime.handle().clone();
-        let manager = TaskManager::new(handle);
-        let executor = manager.executor();
+        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
+            .build()
+            .unwrap();
+        let manager = rt.take_task_manager().unwrap();
 
         let timeout = Duration::from_millis(500);
         let val = Arc::new(AtomicBool::new(false));
         let val2 = val.clone();
-        executor.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
+        rt.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
             let _guard = shutdown.await;
             tokio::time::sleep(timeout * 3).await;
             val2.store(true, Ordering::Relaxed);
@@ -523,30 +530,33 @@ mod tests {
     }
 
     #[test]
-    fn can_access_global() {
+    fn can_build_runtime() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let handle = runtime.handle().clone();
-        let manager = TaskManager::new(handle);
-        let _executor = manager.executor();
+        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
+            .build()
+            .unwrap();
+        let _handle = rt.handle();
     }
 
     #[test]
     fn test_graceful_shutdown_triggered_by_executor() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let task_manager = TaskManager::new(runtime.handle().clone());
-        let executor = task_manager.executor();
+        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
+            .build()
+            .unwrap();
+        let task_manager = rt.take_task_manager().unwrap();
 
         let task_did_shutdown_flag = Arc::new(AtomicBool::new(false));
         let flag_clone = task_did_shutdown_flag.clone();
 
-        let spawned_task_handle = executor.spawn_with_signal(|shutdown_signal| async move {
+        let spawned_task_handle = rt.spawn_with_signal(|shutdown_signal| async move {
             shutdown_signal.await;
             flag_clone.store(true, Ordering::SeqCst);
         });
 
         let manager_future_handle = runtime.spawn(task_manager);
 
-        let send_result = executor.initiate_graceful_shutdown();
+        let send_result = rt.initiate_graceful_shutdown();
         assert!(send_result.is_ok(), "Sending the graceful shutdown signal should succeed and return a GracefulShutdown future");
 
         let manager_final_result = runtime.block_on(manager_future_handle);
