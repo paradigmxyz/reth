@@ -215,7 +215,7 @@ impl LaunchContext {
     /// Configure global settings this includes:
     ///
     /// - Raising the file descriptor limit
-    /// - Initializing the global [`Runtime`] with dedicated rayon thread pools
+    /// - Initializing the global [`reth_tasks::Runtime`] with dedicated rayon thread pools
     /// - Configuring the global rayon thread pool for implicit `par_iter` usage
     pub fn configure_globals(&self, reserved_cpu_cores: usize) {
         // Raise the fd limit of the process.

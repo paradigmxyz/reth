@@ -64,6 +64,7 @@ test-utils = [
     "reth-trie-db/test-utils",
     "reth-trie-sparse/test-utils",
     "reth-trie/test-utils",
+    "reth-tasks/test-utils",
 ]
 
 [[bench]]

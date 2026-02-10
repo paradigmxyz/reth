@@ -105,4 +105,5 @@ test-utils = [
     "reth-stages-types/test-utils",
     "revm-state",
     "tokio",
+    "reth-tasks/test-utils",
 ]

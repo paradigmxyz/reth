@@ -120,6 +120,7 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
     "reth-node-ethereum/test-utils",
     "reth-primitives-traits/test-utils",
+    "reth-tasks/test-utils",
 ]
 op = [
     "reth-db/op",
