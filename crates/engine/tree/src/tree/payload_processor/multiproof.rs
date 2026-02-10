@@ -1541,6 +1541,12 @@ mod tests {
     use revm_primitives::{B256, U256};
     use std::sync::Arc;
 
+    fn test_runtime() -> &'static reth_tasks::Runtime {
+        use std::sync::OnceLock;
+        static RT: OnceLock<reth_tasks::Runtime> = OnceLock::new();
+        RT.get_or_init(reth_tasks::Runtime::test)
+    }
+
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
     where
         F: DatabaseProviderFactory<
@@ -1557,8 +1563,8 @@ mod tests {
         let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let runtime = reth_tasks::Runtime::test();
-        let proof_handle = ProofWorkerHandle::new(&runtime, task_ctx, 1, 1, false);
+        let runtime = test_runtime();
+        let proof_handle = ProofWorkerHandle::new(runtime, task_ctx, 1, 1, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 
