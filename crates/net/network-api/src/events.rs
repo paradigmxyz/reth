@@ -1,10 +1,11 @@
 //! API related to listening for network events.
 
 use reth_eth_wire_types::{
-    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
-    EthNetworkPrimitives, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetPooledTransactions, GetReceipts, GetReceipts70, NetworkPrimitives, NodeData,
-    PooledTransactions, Receipts, Receipts69, Receipts70, UnifiedStatus,
+    message::RequestPair, BlockAccessLists, BlockBodies, BlockHeaders, Capabilities,
+    DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, GetBlockAccessLists,
+    GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
+    GetReceipts70, NetworkPrimitives, NodeData, PooledTransactions, Receipts, Receipts69,
+    Receipts70, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -247,6 +248,15 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The channel to send the response for receipts.
         response: oneshot::Sender<RequestResult<Receipts70<N::Receipt>>>,
     },
+    /// Requests block access lists from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetBlockAccessLists {
+        /// The request for block access lists.
+        request: GetBlockAccessLists,
+        /// The channel to send the response for block access lists.
+        response: oneshot::Sender<RequestResult<BlockAccessLists>>,
+    },
 }
 
 // === impl PeerRequest ===
@@ -267,7 +277,17 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetReceipts { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts69 { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts70 { response, .. } => response.send(Err(err)).ok(),
+            Self::GetBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
         };
+    }
+
+    /// Returns true if this request is supported for the negotiated eth protocol version.
+    #[inline]
+    pub fn is_supported_by_eth_version(&self, version: EthVersion) -> bool {
+        match self {
+            Self::GetBlockAccessLists { .. } => version >= EthVersion::Eth71,
+            _ => true,
+        }
     }
 
     /// Returns the [`EthMessage`] for this type
@@ -294,6 +314,12 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetReceipts70 { request, .. } => {
                 EthMessage::GetReceipts70(RequestPair { request_id, message: request.clone() })
             }
+            Self::GetBlockAccessLists { request, .. } => {
+                EthMessage::GetBlockAccessLists(RequestPair {
+                    request_id,
+                    message: request.clone(),
+                })
+            }
         }
     }
 
@@ -303,6 +329,21 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetPooledTransactions { request, .. } => Some(request),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_block_access_lists_version_support() {
+        let (tx, _rx) = oneshot::channel();
+        let req: PeerRequest<EthNetworkPrimitives> =
+            PeerRequest::GetBlockAccessLists { request: GetBlockAccessLists(vec![]), response: tx };
+
+        assert!(!req.is_supported_by_eth_version(EthVersion::Eth70));
+        assert!(req.is_supported_by_eth_version(EthVersion::Eth71));
     }
 }
 

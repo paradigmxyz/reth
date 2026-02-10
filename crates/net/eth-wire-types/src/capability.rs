@@ -110,6 +110,11 @@ impl Capability {
         Self::eth(EthVersion::Eth70)
     }
 
+    /// Returns the [`EthVersion::Eth71`] capability.
+    pub const fn eth_71() -> Self {
+        Self::eth(EthVersion::Eth71)
+    }
+
     /// Whether this is eth v66 protocol.
     #[inline]
     pub fn is_eth_v66(&self) -> bool {
@@ -140,6 +145,12 @@ impl Capability {
         self.name == "eth" && self.version == 70
     }
 
+    /// Whether this is eth v71.
+    #[inline]
+    pub fn is_eth_v71(&self) -> bool {
+        self.name == "eth" && self.version == 71
+    }
+
     /// Whether this is any eth version.
     #[inline]
     pub fn is_eth(&self) -> bool {
@@ -147,7 +158,8 @@ impl Capability {
             self.is_eth_v67() ||
             self.is_eth_v68() ||
             self.is_eth_v69() ||
-            self.is_eth_v70()
+            self.is_eth_v70() ||
+            self.is_eth_v71()
     }
 }
 
@@ -167,7 +179,7 @@ impl From<EthVersion> for Capability {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for Capability {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let version = u.int_in_range(66..=70)?; // Valid eth protocol versions are 66-70
+        let version = u.int_in_range(66..=71)?; // Valid eth protocol versions are 66-71
                                                 // Only generate valid eth protocol name for now since it's the only supported protocol
         Ok(Self::new_static("eth", version))
     }
@@ -183,6 +195,7 @@ pub struct Capabilities {
     eth_68: bool,
     eth_69: bool,
     eth_70: bool,
+    eth_71: bool,
 }
 
 impl Capabilities {
@@ -194,6 +207,7 @@ impl Capabilities {
             eth_68: value.iter().any(Capability::is_eth_v68),
             eth_69: value.iter().any(Capability::is_eth_v69),
             eth_70: value.iter().any(Capability::is_eth_v70),
+            eth_71: value.iter().any(Capability::is_eth_v71),
             inner: value,
         }
     }
@@ -212,7 +226,7 @@ impl Capabilities {
     /// Whether the peer supports `eth` sub-protocol.
     #[inline]
     pub const fn supports_eth(&self) -> bool {
-        self.eth_70 || self.eth_69 || self.eth_68 || self.eth_67 || self.eth_66
+        self.eth_71 || self.eth_70 || self.eth_69 || self.eth_68 || self.eth_67 || self.eth_66
     }
 
     /// Whether this peer supports eth v66 protocol.
@@ -244,6 +258,12 @@ impl Capabilities {
     pub const fn supports_eth_v70(&self) -> bool {
         self.eth_70
     }
+
+    /// Whether this peer supports eth v71 protocol.
+    #[inline]
+    pub const fn supports_eth_v71(&self) -> bool {
+        self.eth_71
+    }
 }
 
 impl From<Vec<Capability>> for Capabilities {
@@ -268,6 +288,7 @@ impl Decodable for Capabilities {
             eth_68: inner.iter().any(Capability::is_eth_v68),
             eth_69: inner.iter().any(Capability::is_eth_v69),
             eth_70: inner.iter().any(Capability::is_eth_v70),
+            eth_71: inner.iter().any(Capability::is_eth_v71),
             inner,
         })
     }

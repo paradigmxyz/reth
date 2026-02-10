@@ -3,7 +3,7 @@
 //! An `RLPx` stream is multiplexed via the prepended message-id of a framed message.
 //! Capabilities are exchanged via the `RLPx` `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
-use crate::types::{Receipts69, Receipts70};
+use crate::types::{BlockAccessLists, Receipts69, Receipts70};
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
@@ -121,6 +121,11 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a receipts request.
         response: oneshot::Receiver<RequestResult<Receipts70<N::Receipt>>>,
     },
+    /// Represents a response to a request for block access lists.
+    BlockAccessLists {
+        /// The receiver channel for the response to a block access lists request.
+        response: oneshot::Receiver<RequestResult<BlockAccessLists>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -160,6 +165,10 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
                 Ok(res) => PeerResponseResult::Receipts70(res),
                 Err(err) => PeerResponseResult::Receipts70(Err(err.into())),
             },
+            Self::BlockAccessLists { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::BlockAccessLists(res),
+                Err(err) => PeerResponseResult::BlockAccessLists(Err(err.into())),
+            },
         };
         Poll::Ready(res)
     }
@@ -182,6 +191,8 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     Receipts69(RequestResult<Vec<Vec<N::Receipt>>>),
     /// Represents a result containing receipts or an error for eth/70.
     Receipts70(RequestResult<Receipts70<N::Receipt>>),
+    /// Represents a result containing block access lists or an error.
+    BlockAccessLists(RequestResult<BlockAccessLists>),
 }
 
 // === impl PeerResponseResult ===
@@ -226,6 +237,13 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
                 }
                 Err(err) => Err(err),
             },
+            Self::BlockAccessLists(resp) => match resp {
+                Ok(res) => {
+                    let request = RequestPair { request_id: id, message: res };
+                    Ok(EthMessage::BlockAccessLists(request))
+                }
+                Err(err) => Err(err),
+            },
         }
     }
 
@@ -239,6 +257,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts(res) => res.as_ref().err(),
             Self::Receipts69(res) => res.as_ref().err(),
             Self::Receipts70(res) => res.as_ref().err(),
+            Self::BlockAccessLists(res) => res.as_ref().err(),
         }
     }
 

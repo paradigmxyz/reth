@@ -8546,6 +8546,7 @@ version = "1.10.2"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-genesis",
  "alloy-hardforks",
