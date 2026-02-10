@@ -1,9 +1,8 @@
 use alloy_eips::BlockId;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{map::AddressMap, U256};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use std::collections::HashMap;
 
-// Required for the subscription attribute below
+// Required for the subscription attributes below
 use reth_chain_state as _;
 
 /// Reth API namespace for reth-specific methods
@@ -15,7 +14,7 @@ pub trait RethApi {
     async fn reth_get_balance_changes_in_block(
         &self,
         block_id: BlockId,
-    ) -> RpcResult<HashMap<Address, U256>>;
+    ) -> RpcResult<AddressMap<U256>>;
 
     /// Subscribe to json `ChainNotifications`
     #[subscription(
@@ -34,4 +33,17 @@ pub trait RethApi {
         item = alloy_eips::BlockNumHash
     )]
     async fn reth_subscribe_persisted_block(&self) -> jsonrpsee::core::SubscriptionResult;
+
+    /// Subscribe to finalized chain notifications.
+    ///
+    /// Buffers committed chain notifications and emits them once a new finalized block is received.
+    /// Each notification contains all committed chain segments up to the finalized block.
+    #[subscription(
+        name = "subscribeFinalizedChainNotifications",
+        unsubscribe = "unsubscribeFinalizedChainNotifications",
+        item = Vec<reth_chain_state::CanonStateNotification>
+    )]
+    async fn reth_subscribe_finalized_chain_notifications(
+        &self,
+    ) -> jsonrpsee::core::SubscriptionResult;
 }

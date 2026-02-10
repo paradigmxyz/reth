@@ -21,12 +21,15 @@ pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
-    PruneShardOutcome, SaveBlocksMode, StaticFileAccess, StaticFileProviderBuilder,
+    PruneShardOutcome, PrunedIndices, SaveBlocksMode, StaticFileAccess, StaticFileProviderBuilder,
     StaticFileWriteCtx, StaticFileWriter,
 };
 
 pub mod changeset_walker;
 pub mod changesets_utils;
+
+mod storage_threadpool;
+use storage_threadpool::STORAGE_POOL;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking the Provider.

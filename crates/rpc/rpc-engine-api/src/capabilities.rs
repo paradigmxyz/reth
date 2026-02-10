@@ -71,12 +71,12 @@ impl EngineCapabilities {
             .filter(|cap| !self.inner.contains(cap.as_str()))
             .cloned()
             .collect();
-        missing_in_el.sort();
+        missing_in_el.sort_unstable();
 
         // EL has methods CL doesn't support
         let mut missing_in_cl: Vec<_> =
             self.inner.iter().filter(|cap| !cl_set.contains(cap.as_str())).cloned().collect();
-        missing_in_cl.sort();
+        missing_in_cl.sort_unstable();
 
         CapabilityMismatches { missing_in_el, missing_in_cl }
     }

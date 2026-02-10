@@ -307,7 +307,7 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::{Address, TxHash, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
@@ -316,7 +316,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{HeaderTy, Recovered};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
@@ -387,17 +387,6 @@ where
         transaction: V::Transaction,
     ) -> TransactionValidationOutcome<V::Transaction> {
         self.pool.validator().validate_transaction(origin, transaction).await
-    }
-
-    /// Returns future that validates all transactions in the given iterator.
-    ///
-    /// This returns the validated transactions in the iterator's order.
-    async fn validate_all(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = V::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<V::Transaction>> {
-        self.pool.validator().validate_transactions_with_origin(origin, transactions).await
     }
 
     /// Number of transactions in the entire pool
@@ -513,17 +502,17 @@ where
         results.pop().expect("result length is the same as the input")
     }
 
-    async fn add_transactions(
+    async fn add_transactions_with_origins(
         &self,
-        origin: TransactionOrigin,
-        transactions: Vec<Self::Transaction>,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        let transactions: Vec<_> = transactions.into_iter().collect();
         if transactions.is_empty() {
             return Vec::new()
         }
-        let validated = self.validate_all(origin, transactions).await;
-
-        self.pool.add_transactions(origin, validated.into_iter())
+        let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
+        let validated = self.pool.validator().validate_transactions(transactions).await;
+        self.pool.add_transactions_with_origins(origins.into_iter().zip(validated))
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
@@ -665,6 +654,13 @@ where
         self.pool.remove_transactions_by_sender(sender)
     }
 
+    fn prune_transactions(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.prune_transactions(hashes)
+    }
+
     fn retain_unknown<A>(&self, announcement: &mut A)
     where
         A: HandleMempoolData,
@@ -752,7 +748,7 @@ where
         self.pool.get_pending_transactions_by_origin(origin)
     }
 
-    fn unique_senders(&self) -> HashSet<Address> {
+    fn unique_senders(&self) -> AddressSet {
         self.pool.unique_senders()
     }
 

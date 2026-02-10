@@ -18,6 +18,7 @@ reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true
 reth-tracing.workspace = true
+tracing.workspace = true
 reth-static-file-types.workspace = true
 
 # ethereum

@@ -64,27 +64,23 @@ jobs:
 
           if [[ "${{ github.event_name }}" == "push" ]]; then
             VERSION="${GITHUB_REF#refs/tags/}"
-            echo "targets=ethereum optimism" >> "$GITHUB_OUTPUT"
+            echo "targets=ethereum" >> "$GITHUB_OUTPUT"
 
             # Add 'latest' tag for non-RC releases
             if [[ ! "$VERSION" =~ -rc ]]; then
               echo "ethereum_tags=${REGISTRY}/reth:${VERSION},${REGISTRY}/reth:latest" >> "$GITHUB_OUTPUT"
-              echo "optimism_tags=${REGISTRY}/op-reth:${VERSION},${REGISTRY}/op-reth:latest" >> "$GITHUB_OUTPUT"
             else
               echo "ethereum_tags=${REGISTRY}/reth:${VERSION}" >> "$GITHUB_OUTPUT"
-              echo "optimism_tags=${REGISTRY}/op-reth:${VERSION}" >> "$GITHUB_OUTPUT"
             fi
 
           elif [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_type }}" == "nightly" ]]; then
             echo "targets=nightly" >> "$GITHUB_OUTPUT"
             echo "ethereum_tags=${REGISTRY}/reth:nightly" >> "$GITHUB_OUTPUT"
-            echo "optimism_tags=${REGISTRY}/op-reth:nightly" >> "$GITHUB_OUTPUT"
 
           else
             # git-sha build
-            echo "targets=ethereum optimism" >> "$GITHUB_OUTPUT"
+            echo "targets=ethereum" >> "$GITHUB_OUTPUT"
             echo "ethereum_tags=${REGISTRY}/reth:${{ github.sha }}" >> "$GITHUB_OUTPUT"
-            echo "optimism_tags=${REGISTRY}/op-reth:${{ github.sha }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build and push images
@@ -100,7 +96,26 @@ jobs:
           targets: ${{ steps.params.outputs.targets }}
           push: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
           set: |
-            ethereum-amd64.tags=${{ steps.params.outputs.ethereum_tags }}
-            ethereum-arm64.tags=${{ steps.params.outputs.ethereum_tags }}
-            optimism-amd64.tags=${{ steps.params.outputs.optimism_tags }}
-            optimism-arm64.tags=${{ steps.params.outputs.optimism_tags }}
+            ethereum.tags=${{ steps.params.outputs.ethereum_tags }}
+
+      - name: Verify image architectures
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          ./.github/scripts/verify_image_arch.sh \
+            "${{ steps.params.outputs.targets }}" \
+            "ghcr.io/${{ github.repository_owner }}" \
+            "${{ steps.params.outputs.ethereum_tags }}"
+
+  notify:
+    name: Notify on failure
+    runs-on: ubuntu-latest
+    needs: build
+    if: failure() && github.event_name == 'schedule'
+    steps:
+      - name: Slack Webhook Action
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}

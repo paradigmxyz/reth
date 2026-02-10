@@ -11,12 +11,12 @@ use crate::tree::{
     StateProviderBuilder, TreeConfig,
 };
 use alloy_eip7928::BlockAccessList;
-use alloy_eips::eip1898::BlockWithParent;
+use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use executor::WorkloadExecutor;
-use metrics::Counter;
+use metrics::{Counter, Histogram};
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
@@ -39,8 +39,9 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{RevealableSparseTrie, SparseStateTrie};
-use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
+use reth_trie_sparse::{
+    ParallelSparseTrie, ParallelismThresholds, RevealableSparseTrie, SparseStateTrie,
+};
 use std::{
     collections::BTreeMap,
     ops::Not,
@@ -288,7 +289,7 @@ where
             v2_proofs_enabled,
         );
 
-        if !config.enable_sparse_trie_as_cache() {
+        if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(
                 proof_handle.clone(),
                 to_sparse_trie,
@@ -501,7 +502,6 @@ where
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
@@ -513,22 +513,29 @@ where
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
-        let span = Span::current();
-        let disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
+        let disable_trie_cache = config.disable_trie_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
         let chunk_size =
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
+        let executor = self.executor.clone();
 
+        let parent_span = Span::current();
         self.executor.spawn_blocking(move || {
-            let _enter = span.entered();
+            let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
+                .entered();
 
             // Reuse a stored SparseStateTrie if available, applying continuation logic.
             // If this payload's parent state root matches the preserved trie's anchor,
             // we can reuse the pruned trie structure. Otherwise, we clear the trie but
             // keep allocations.
-            let sparse_state_trie = preserved_sparse_trie
-                .take()
+            let start = Instant::now();
+            let preserved = preserved_sparse_trie.take();
+            trie_metrics
+                .sparse_trie_cache_wait_duration_histogram
+                .record(start.elapsed().as_secs_f64());
+
+            let sparse_state_trie = preserved
                 .map(|preserved| preserved.into_trie_for(parent_state_root))
                 .unwrap_or_else(|| {
                     debug!(
@@ -546,7 +553,7 @@ where
                         .with_updates(true)
                 });
 
-            let mut task = if disable_sparse_trie_as_cache {
+            let mut task = if disable_trie_cache {
                 SpawnedSparseTrieTask::Cleared(SparseTrieTask::new(
                     sparse_trie_rx,
                     proof_worker_handle,
@@ -555,10 +562,11 @@ where
                 ))
             } else {
                 SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_trie(
+                    &executor,
                     from_multi_proof,
                     proof_worker_handle,
                     trie_metrics.clone(),
-                    sparse_state_trie,
+                    sparse_state_trie.with_skip_proof_node_filtering(true),
                     chunk_size,
                 ))
             };
@@ -582,11 +590,14 @@ where
                     target: "engine::tree::payload_processor",
                     "State root receiver dropped, clearing trie"
                 );
-                let trie = task.into_cleared_trie(
+                let (trie, deferred) = task.into_cleared_trie(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
                 guard.store(PreservedSparseTrie::cleared(trie));
+                // Drop guard before deferred to release lock before expensive deallocations
+                drop(guard);
+                drop(deferred);
                 return;
             }
 
@@ -594,9 +605,9 @@ where
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            if let Some(state_root) = computed_state_root {
+            let deferred = if let Some(state_root) = computed_state_root {
                 let start = std::time::Instant::now();
-                let trie = task.into_trie_for_reuse(
+                let (trie, deferred) = task.into_trie_for_reuse(
                     prune_depth,
                     max_storage_tries,
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
@@ -606,17 +617,22 @@ where
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
                 guard.store(PreservedSparseTrie::anchored(trie, state_root));
+                deferred
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
                     "State root computation failed, clearing trie"
                 );
-                let trie = task.into_cleared_trie(
+                let (trie, deferred) = task.into_cleared_trie(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
                 guard.store(PreservedSparseTrie::cleared(trie));
-            }
+                deferred
+            };
+            // Drop guard before deferred to release lock before expensive deallocations
+            drop(guard);
+            drop(deferred);
         });
     }
 
@@ -862,6 +878,7 @@ impl PayloadExecutionCache {
         let cache = self.inner.read();
 
         let elapsed = start.elapsed();
+        self.metrics.execution_cache_wait_duration.record(elapsed.as_secs_f64());
         if elapsed.as_millis() > 5 {
             warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
         }
@@ -939,6 +956,8 @@ pub(crate) struct ExecutionCacheMetrics {
     /// Counter for when the execution cache was unavailable because other threads
     /// (e.g., prewarming) are still using it.
     pub(crate) execution_cache_in_use: Counter,
+    /// Time spent waiting for execution cache mutex to become available.
+    pub(crate) execution_cache_wait_duration: Histogram,
 }
 
 /// EVM context required to execute a block.
@@ -958,6 +977,9 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used to determine parallel worker count for prewarming.
     /// A value of 0 indicates the count is unknown.
     pub transaction_count: usize,
+    /// Withdrawals included in the block.
+    /// Used to generate prefetch targets for withdrawal addresses.
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
@@ -971,6 +993,7 @@ where
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
             transaction_count: 0,
+            withdrawals: None,
         }
     }
 }

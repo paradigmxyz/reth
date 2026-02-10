@@ -31,35 +31,23 @@ variable "VERGEN_GIT_DIRTY" {
 
 // Common settings for all targets
 group "default" {
-  targets = [
-    "ethereum-amd64",
-    "ethereum-arm64",
-    "optimism-amd64",
-    "optimism-arm64"
-  ]
+  targets = ["ethereum"]
 }
 
 group "nightly" {
-  targets = [
-    "ethereum-amd64",
-    "ethereum-arm64",
-    "ethereum-profiling",
-    "ethereum-edge-profiling",
-    "optimism-amd64",
-    "optimism-arm64",
-    "optimism-profiling"
-  ]
+  targets = ["ethereum", "ethereum-profiling", "ethereum-edge-profiling"]
 }
 
 // Base target with shared configuration
 target "_base" {
   dockerfile = "Dockerfile.depot"
+  platforms  = ["linux/amd64", "linux/arm64"]
   args = {
-    BUILD_PROFILE       = "${BUILD_PROFILE}"
-    FEATURES            = "${FEATURES}"
-    VERGEN_GIT_SHA      = "${VERGEN_GIT_SHA}"
+    BUILD_PROFILE      = "${BUILD_PROFILE}"
+    FEATURES           = "${FEATURES}"
+    VERGEN_GIT_SHA     = "${VERGEN_GIT_SHA}"
     VERGEN_GIT_DESCRIBE = "${VERGEN_GIT_DESCRIBE}"
-    VERGEN_GIT_DIRTY    = "${VERGEN_GIT_DIRTY}"
+    VERGEN_GIT_DIRTY   = "${VERGEN_GIT_DIRTY}"
   }
   secret = [
     {
@@ -68,42 +56,14 @@ target "_base" {
     }
   ]
 }
-
-// amd64 base with x86-64-v3 optimizations
-target "_base_amd64" {
-  inherits  = ["_base"]
-  platforms = ["linux/amd64"]
-  args = {
-    # `x86-64-v3` features match the 2013 Intel Haswell architecture, excluding Intel-specific instructions;
-    # see: https://en.wikipedia.org/wiki/X86-64
-    #
-    # `pclmulqdq` is required for rocksdb: https://github.com/rust-rocksdb/rust-rocksdb/issues/1069
-    RUSTFLAGS = "-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq"
-  }
-}
-
-// arm64 base
-target "_base_arm64" {
-  inherits  = ["_base"]
-  platforms = ["linux/arm64"]
-}
-
 target "_base_profiling" {
-  inherits  = ["_base_amd64"]
+  inherits = ["_base"]
+  platforms  = ["linux/amd64"]
 }
 
 // Ethereum (reth)
-target "ethereum-amd64" {
-  inherits = ["_base_amd64"]
-  args = {
-    BINARY        = "reth"
-    MANIFEST_PATH = "bin/reth"
-  }
-  tags = ["${REGISTRY}/reth:${TAG}"]
-}
-
-target "ethereum-arm64" {
-  inherits = ["_base_arm64"]
+target "ethereum" {
+  inherits = ["_base"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
@@ -133,43 +93,50 @@ target "ethereum-edge-profiling" {
   tags = ["${REGISTRY}/reth:nightly-edge-profiling"]
 }
 
-// Optimism (op-reth)
-target "optimism-amd64" {
-  inherits = ["_base_amd64"]
+// Hive test targets — single-platform, hivetests profile, tar output
+target "_base_hive" {
+  inherits  = ["_base"]
+  platforms = ["linux/amd64"]
   args = {
-    BINARY        = "op-reth"
-    MANIFEST_PATH = "crates/optimism/bin"
+    BUILD_PROFILE = "hivetests"
   }
-  tags = ["${REGISTRY}/op-reth:${TAG}"]
 }
 
-target "optimism-arm64" {
-  inherits = ["_base_arm64"]
-  args = {
-    BINARY        = "op-reth"
-    MANIFEST_PATH = "crates/optimism/bin"
-  }
-  tags = ["${REGISTRY}/op-reth:${TAG}"]
+variable "HIVE_OUTPUT_DIR" {
+  default = "./artifacts"
 }
 
-target "optimism-profiling" {
-  inherits = ["_base_profiling"]
+target "hive-stable" {
+  inherits = ["_base_hive"]
   args = {
-    BINARY        = "op-reth"
-    MANIFEST_PATH = "crates/optimism/bin"
-    BUILD_PROFILE = "profiling"
-    FEATURES      = "jemalloc jemalloc-prof asm-keccak min-debug-logs"
+    BINARY        = "reth"
+    MANIFEST_PATH = "bin/reth"
+    FEATURES      = "asm-keccak"
   }
-  tags = ["${REGISTRY}/op-reth:nightly-profiling"]
+  tags   = ["reth:local"]
+  output = ["type=docker,dest=${HIVE_OUTPUT_DIR}/reth_image.tar"]
 }
 
-target "optimism-edge-profiling" {
-  inherits = ["_base_profiling"]
+target "hive-edge" {
+  inherits = ["_base_hive"]
   args = {
-    BINARY        = "op-reth"
-    MANIFEST_PATH = "crates/optimism/bin"
-    BUILD_PROFILE = "profiling"
-    FEATURES      = "jemalloc jemalloc-prof asm-keccak min-debug-logs edge"
+    BINARY        = "reth"
+    MANIFEST_PATH = "bin/reth"
+    FEATURES      = "asm-keccak edge"
   }
-  tags = ["${REGISTRY}/op-reth:nightly-edge-profiling"]
+  tags   = ["reth:local"]
+  output = ["type=docker,dest=${HIVE_OUTPUT_DIR}/reth_image.tar"]
 }
+
+// Kurtosis test target
+target "kurtosis" {
+  inherits  = ["_base_hive"]
+  args = {
+    BINARY        = "reth"
+    MANIFEST_PATH = "bin/reth"
+    FEATURES      = "asm-keccak"
+  }
+  tags   = ["ghcr.io/paradigmxyz/reth:kurtosis-ci"]
+  output = ["type=docker,dest=${HIVE_OUTPUT_DIR}/reth_image.tar"]
+}
+
