@@ -159,7 +159,7 @@ impl CliRunner {
     }
 }
 
-/// Extracts the [`TaskManager`] handle from the runtime and creates the [`CliContext`].
+/// Extracts the task manager handle from the runtime and creates the [`CliContext`].
 fn cli_context(
     runtime: &reth_tasks::Runtime,
 ) -> (CliContext, JoinHandle<Result<(), PanickedTaskError>>) {
