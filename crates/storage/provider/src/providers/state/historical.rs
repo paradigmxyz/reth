@@ -1109,59 +1109,101 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(unix, feature = "rocksdb"))]
     fn history_provider_get_storage_hashed_state() {
+        use crate::BlockWriter;
+        use alloy_primitives::keccak256;
+        use reth_db_api::models::StorageSettings;
+        use reth_execution_types::ExecutionOutcome;
+        use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
+        use revm_database::BundleState;
+        use std::collections::HashMap;
+
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            reth_db_api::models::StorageSettings::default().with_use_hashed_state(true),
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let slot = U256::from_be_bytes(*STORAGE);
+        let account: revm_state::AccountInfo =
+            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None }.into();
+        let higher_account: revm_state::AccountInfo =
+            Account { nonce: 1, balance: U256::from(2000), bytecode_hash: None }.into();
+
+        let mut rng = generators::rng();
+        let blocks = random_block_range(
+            &mut rng,
+            0..=15,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
         );
-        let tx = factory.provider_rw().unwrap().into_tx();
 
-        let hashed_storage = alloy_primitives::keccak256(STORAGE);
+        let mut addr_storage = HashMap::default();
+        addr_storage.insert(slot, (U256::ZERO, U256::from(100)));
+        let mut higher_storage = HashMap::default();
+        higher_storage.insert(slot, (U256::ZERO, U256::from(1000)));
 
-        tx.put::<tables::StoragesHistory>(
-            StorageShardedKey {
-                address: ADDRESS,
-                sharded_key: ShardedKey { key: hashed_storage, highest_block_number: 7 },
-            },
-            BlockNumberList::new([3, 7]).unwrap(),
-        )
-        .unwrap();
-        tx.put::<tables::StoragesHistory>(
-            StorageShardedKey {
-                address: ADDRESS,
-                sharded_key: ShardedKey { key: hashed_storage, highest_block_number: u64::MAX },
-            },
-            BlockNumberList::new([10, 15]).unwrap(),
-        )
-        .unwrap();
-        tx.put::<tables::StoragesHistory>(
-            StorageShardedKey {
-                address: HIGHER_ADDRESS,
-                sharded_key: ShardedKey { key: hashed_storage, highest_block_number: u64::MAX },
-            },
-            BlockNumberList::new([4]).unwrap(),
-        )
-        .unwrap();
+        type Revert = Vec<(Address, Option<Option<revm_state::AccountInfo>>, Vec<(U256, U256)>)>;
+        let mut reverts: Vec<Revert> = vec![Vec::new(); 16];
 
-        let higher_entry_at4 = StorageEntry { key: hashed_storage, value: U256::from(0) };
-        let entry_at3 = StorageEntry { key: hashed_storage, value: U256::from(0) };
-        let entry_at7 = StorageEntry { key: hashed_storage, value: U256::from(7) };
-        let entry_at10 = StorageEntry { key: hashed_storage, value: U256::from(10) };
-        let entry_at15 = StorageEntry { key: hashed_storage, value: U256::from(15) };
+        reverts[3] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::ZERO)])];
+        reverts[4] =
+            vec![(HIGHER_ADDRESS, Some(Some(higher_account.clone())), vec![(slot, U256::ZERO)])];
+        reverts[7] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::from(7))])];
+        reverts[10] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::from(10))])];
+        reverts[15] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::from(15))])];
 
-        tx.put::<tables::StorageChangeSets>((3, ADDRESS).into(), entry_at3).unwrap();
-        tx.put::<tables::StorageChangeSets>((4, HIGHER_ADDRESS).into(), higher_entry_at4).unwrap();
-        tx.put::<tables::StorageChangeSets>((7, ADDRESS).into(), entry_at7).unwrap();
-        tx.put::<tables::StorageChangeSets>((10, ADDRESS).into(), entry_at10).unwrap();
-        tx.put::<tables::StorageChangeSets>((15, ADDRESS).into(), entry_at15).unwrap();
+        let bundle = BundleState::new(
+            [
+                (ADDRESS, None, Some(account), addr_storage),
+                (HIGHER_ADDRESS, None, Some(higher_account), higher_storage),
+            ],
+            reverts,
+            [],
+        );
 
-        let hashed_address = alloy_primitives::keccak256(ADDRESS);
-        let hashed_higher_address = alloy_primitives::keccak256(HIGHER_ADDRESS);
-        let entry_plain = StorageEntry { key: hashed_storage, value: U256::from(100) };
-        let higher_entry_plain = StorageEntry { key: hashed_storage, value: U256::from(1000) };
-        tx.put::<tables::HashedStorages>(hashed_address, entry_plain).unwrap();
-        tx.put::<tables::HashedStorages>(hashed_higher_address, higher_entry_plain).unwrap();
-        tx.commit().unwrap();
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .append_blocks_with_state(
+                blocks
+                    .into_iter()
+                    .map(|b| b.try_recover().expect("failed to seal block with senders"))
+                    .collect(),
+                &ExecutionOutcome { bundle, first_block: 0, ..Default::default() },
+                Default::default(),
+            )
+            .unwrap();
+
+        let hashed_address = keccak256(ADDRESS);
+        let hashed_higher_address = keccak256(HIGHER_ADDRESS);
+        let hashed_storage = keccak256(STORAGE);
+
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: hashed_storage, value: U256::from(100) },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_higher_address,
+                StorageEntry { key: hashed_storage, value: U256::from(1000) },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedAccounts>(
+                hashed_address,
+                Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedAccounts>(
+                hashed_higher_address,
+                Account { nonce: 1, balance: U256::from(2000), bytecode_hash: None },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
 
         let db = factory.provider().unwrap();
 
@@ -1175,27 +1217,27 @@ mod tests {
         ));
         assert!(matches!(
             HistoricalStateProviderRef::new(&db, 4).storage(ADDRESS, STORAGE),
-            Ok(Some(expected_value)) if expected_value == entry_at7.value
+            Ok(Some(v)) if v == U256::from(7)
         ));
         assert!(matches!(
             HistoricalStateProviderRef::new(&db, 7).storage(ADDRESS, STORAGE),
-            Ok(Some(expected_value)) if expected_value == entry_at7.value
+            Ok(Some(v)) if v == U256::from(7)
         ));
         assert!(matches!(
             HistoricalStateProviderRef::new(&db, 9).storage(ADDRESS, STORAGE),
-            Ok(Some(expected_value)) if expected_value == entry_at10.value
+            Ok(Some(v)) if v == U256::from(10)
         ));
         assert!(matches!(
             HistoricalStateProviderRef::new(&db, 10).storage(ADDRESS, STORAGE),
-            Ok(Some(expected_value)) if expected_value == entry_at10.value
+            Ok(Some(v)) if v == U256::from(10)
         ));
         assert!(matches!(
             HistoricalStateProviderRef::new(&db, 11).storage(ADDRESS, STORAGE),
-            Ok(Some(expected_value)) if expected_value == entry_at15.value
+            Ok(Some(v)) if v == U256::from(15)
         ));
         assert!(matches!(
             HistoricalStateProviderRef::new(&db, 16).storage(ADDRESS, STORAGE),
-            Ok(Some(expected_value)) if expected_value == entry_plain.value
+            Ok(Some(v)) if v == U256::from(100)
         ));
         assert!(matches!(
             HistoricalStateProviderRef::new(&db, 1).storage(HIGHER_ADDRESS, STORAGE),
@@ -1203,7 +1245,7 @@ mod tests {
         ));
         assert!(matches!(
             HistoricalStateProviderRef::new(&db, 1000).storage(HIGHER_ADDRESS, STORAGE),
-            Ok(Some(expected_value)) if expected_value == higher_entry_plain.value
+            Ok(Some(v)) if v == U256::from(1000)
         ));
     }
 
