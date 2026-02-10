@@ -286,7 +286,10 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
     /// This avoids intermediate `HashMap` allocations since MDBX data is already sorted.
     ///
     /// - Reads the first occurrence of each changed account/storage slot in the range.
-    /// - Hashes keys and returns them already ordered for trie iteration.
+    /// - Addresses are always keccak256-hashed.
+    /// - Storage keys are used as-is when `use_hashed_state` is true (already hashed), or
+    ///   keccak256-hashed when false (legacy plain keys).
+    /// - Returns keys already ordered for trie iteration.
     #[instrument(target = "trie::db", skip(provider), fields(range))]
     fn from_reverts(
         provider: &(impl ChangeSetReader + StorageChangeSetReader + BlockNumReader + DBProvider),
