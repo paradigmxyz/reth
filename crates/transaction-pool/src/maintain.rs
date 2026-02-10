@@ -911,7 +911,6 @@ mod tests {
         ))
         .build()
         .unwrap();
-        let manager = rt.take_task_manager().unwrap();
         let config = LocalTransactionBackupConfig::with_local_txs_backup(transactions_path.clone());
         rt.spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
             backup_local_transactions_task(shutdown, txpool.clone(), config)
@@ -922,8 +921,7 @@ mod tests {
 
         assert_eq!(*tx_to_cmp.hash(), *tx_on_finish.hash());
 
-        // shutdown the executor
-        manager.graceful_shutdown();
+        rt.graceful_shutdown();
 
         let data = fs::read(transactions_path).unwrap();
 

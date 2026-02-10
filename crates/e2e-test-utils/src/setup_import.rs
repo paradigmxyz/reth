@@ -15,7 +15,7 @@ use reth_provider::{
 };
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_stages_types::StageId;
-use reth_tasks::{RuntimeBuilder, RuntimeConfig, TaskManager};
+use reth_tasks::{RuntimeBuilder, RuntimeConfig};
 use std::{path::Path, sync::Arc};
 use tempfile::TempDir;
 use tracing::{debug, info, span, Level};
@@ -24,8 +24,6 @@ use tracing::{debug, info, span, Level};
 pub struct ChainImportResult {
     /// The nodes that were created
     pub nodes: Vec<NodeHelperType<EthereumNode>>,
-    /// The task manager
-    pub task_manager: TaskManager,
     /// The wallet for testing
     pub wallet: Wallet,
     /// Temporary directories that must be kept alive for the duration of the test
@@ -71,7 +69,6 @@ pub async fn setup_engine_with_chain_import(
     let exec =
         RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
             .build()?;
-    let tasks = exec.take_task_manager().unwrap();
 
     let network_config = NetworkArgs {
         discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
@@ -246,7 +243,6 @@ pub async fn setup_engine_with_chain_import(
 
     Ok(ChainImportResult {
         nodes,
-        task_manager: tasks,
         wallet: crate::Wallet::default().with_chain_id(chain_spec.chain.id()),
         _temp_dirs: temp_dirs,
     })

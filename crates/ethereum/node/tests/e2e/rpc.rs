@@ -57,7 +57,7 @@ async fn test_fee_history() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         1,
         chain_spec.clone(),
         false,
@@ -142,7 +142,7 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         1,
         chain_spec.clone(),
         false,
@@ -224,7 +224,7 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         1,
         chain_spec.clone(),
         false,
@@ -314,7 +314,7 @@ async fn test_eth_config() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         1,
         chain_spec.clone(),
         false,

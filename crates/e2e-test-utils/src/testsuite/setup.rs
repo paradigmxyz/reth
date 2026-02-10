@@ -210,20 +210,14 @@ where
 
         let mut node_clients = Vec::new();
         match result {
-            Ok((nodes, executor, _wallet)) => {
-                // create HTTP clients for each node's RPC and Engine API endpoints
+            Ok((nodes, _wallet)) => {
                 for node in &nodes {
                     node_clients.push(node.to_node_client()?);
                 }
 
-                // spawn a separate task just to handle the shutdown
                 tokio::spawn(async move {
-                    // keep nodes and executor in scope to ensure they're not dropped
                     let _nodes = nodes;
-                    let _executor = executor;
-                    // Wait for shutdown signal
                     let _ = shutdown_rx.recv().await;
-                    // nodes and executor will be dropped here when the test completes
                 });
             }
             Err(e) => {

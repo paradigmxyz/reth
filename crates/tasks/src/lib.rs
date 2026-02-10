@@ -202,7 +202,9 @@ impl TaskSpawner for TokioTaskExecutor {
 /// diagnostic purposes, since tokio tasks essentially fail silently. Therefore, this type is a
 /// Future that resolves with the name of the panicked task. See [`Runtime::spawn_critical_task`].
 ///
-/// Use [`Runtime::take_task_manager`] to extract a `TaskManager` from a built [`Runtime`].
+/// Automatically spawned as a background task when building a [`Runtime`]. Use
+/// [`Runtime::take_task_manager_handle`] to extract the join handle if you need to poll for
+/// panic errors directly.
 #[derive(Debug)]
 #[must_use = "TaskManager must be polled to monitor critical tasks"]
 pub struct TaskManager {
@@ -374,12 +376,12 @@ mod tests {
         let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
             .build()
             .unwrap();
-        let manager = rt.take_task_manager().unwrap();
+        let handle = rt.take_task_manager_handle().unwrap();
 
         rt.spawn_critical_task("this is a critical task", async { panic!("intentionally panic") });
 
         runtime.block_on(async move {
-            let err_result = manager.await;
+            let err_result = handle.await.unwrap();
             assert!(err_result.is_err(), "Expected TaskManager to return an error due to panic");
             let panicked_err = err_result.unwrap_err();
 
@@ -388,14 +390,12 @@ mod tests {
         })
     }
 
-    // Tests that spawned tasks are terminated if the `TaskManager` drops
     #[test]
     fn test_manager_shutdown_critical() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
             .build()
             .unwrap();
-        let manager = rt.take_task_manager().unwrap();
 
         let (signal, shutdown) = signal();
 
@@ -404,19 +404,17 @@ mod tests {
             drop(signal);
         });
 
-        drop(manager);
+        rt.graceful_shutdown();
 
         runtime.handle().block_on(shutdown);
     }
 
-    // Tests that spawned tasks are terminated if the `TaskManager` drops
     #[test]
     fn test_manager_shutdown() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
             .build()
             .unwrap();
-        let manager = rt.take_task_manager().unwrap();
 
         let (signal, shutdown) = signal();
 
@@ -425,7 +423,7 @@ mod tests {
             drop(signal);
         }));
 
-        drop(manager);
+        rt.graceful_shutdown();
 
         runtime.handle().block_on(shutdown);
     }
@@ -436,7 +434,6 @@ mod tests {
         let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
             .build()
             .unwrap();
-        let manager = rt.take_task_manager().unwrap();
 
         let val = Arc::new(AtomicBool::new(false));
         let c = val.clone();
@@ -446,7 +443,7 @@ mod tests {
             c.store(true, Ordering::Relaxed);
         });
 
-        manager.graceful_shutdown();
+        rt.graceful_shutdown();
         assert!(val.load(Ordering::Relaxed));
     }
 
@@ -456,7 +453,6 @@ mod tests {
         let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
             .build()
             .unwrap();
-        let manager = rt.take_task_manager().unwrap();
 
         let counter = Arc::new(AtomicUsize::new(0));
         let num = 10;
@@ -469,7 +465,7 @@ mod tests {
             });
         }
 
-        manager.graceful_shutdown();
+        rt.graceful_shutdown();
         assert_eq!(counter.load(Ordering::Relaxed), num);
     }
 
@@ -479,7 +475,6 @@ mod tests {
         let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
             .build()
             .unwrap();
-        let manager = rt.take_task_manager().unwrap();
 
         let timeout = Duration::from_millis(500);
         let val = Arc::new(AtomicBool::new(false));
@@ -491,7 +486,7 @@ mod tests {
             unreachable!("should not be reached");
         });
 
-        manager.graceful_shutdown_with_timeout(timeout);
+        rt.graceful_shutdown_with_timeout(timeout);
         assert!(!val.load(Ordering::Relaxed));
     }
 
@@ -510,7 +505,7 @@ mod tests {
         let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
             .build()
             .unwrap();
-        let task_manager = rt.take_task_manager().unwrap();
+        let task_manager_handle = rt.take_task_manager_handle().unwrap();
 
         let task_did_shutdown_flag = Arc::new(AtomicBool::new(false));
         let flag_clone = task_did_shutdown_flag.clone();
@@ -520,26 +515,16 @@ mod tests {
             flag_clone.store(true, Ordering::SeqCst);
         });
 
-        let manager_future_handle = runtime.spawn(task_manager);
-
         let send_result = rt.initiate_graceful_shutdown();
-        assert!(send_result.is_ok(), "Sending the graceful shutdown signal should succeed and return a GracefulShutdown future");
+        assert!(send_result.is_ok());
 
-        let manager_final_result = runtime.block_on(manager_future_handle);
-
+        let manager_final_result = runtime.block_on(task_manager_handle);
         assert!(manager_final_result.is_ok(), "TaskManager task should not panic");
-        assert_eq!(
-            manager_final_result.unwrap(),
-            Ok(()),
-            "TaskManager should resolve cleanly with Ok(()) after graceful shutdown request"
-        );
+        assert_eq!(manager_final_result.unwrap(), Ok(()));
 
         let task_join_result = runtime.block_on(spawned_task_handle);
-        assert!(task_join_result.is_ok(), "Spawned task should complete without panic");
+        assert!(task_join_result.is_ok());
 
-        assert!(
-            task_did_shutdown_flag.load(Ordering::Relaxed),
-            "Task should have received the shutdown signal and set the flag"
-        );
+        assert!(task_did_shutdown_flag.load(Ordering::Relaxed));
     }
 }

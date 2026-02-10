@@ -240,9 +240,10 @@ struct RuntimeInner {
     /// Rate limiter for expensive RPC operations.
     #[cfg(feature = "rayon")]
     blocking_guard: BlockingTaskGuard,
-    /// Keeps the [`TaskManager`] alive when the runtime owns it (e.g. in tests).
-    /// Dropping this fires the shutdown signal for all spawned tasks.
-    _task_manager: Mutex<Option<TaskManager>>,
+    /// Handle to the spawned [`TaskManager`] background task.
+    /// The task monitors critical tasks for panics and fires the shutdown signal.
+    /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
+    _task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
 }
 
 // ── Runtime ───────────────────────────────────────────────────────────
@@ -276,11 +277,13 @@ impl Default for Runtime {
 // ── Pool accessors ────────────────────────────────────────────────────
 
 impl Runtime {
-    /// Takes the [`TaskManager`] out of this runtime, if one is stored.
+    /// Takes the [`TaskManager`] handle out of this runtime, if one is stored.
     ///
-    /// Once taken, the runtime no longer owns the manager's shutdown signal.
-    pub fn take_task_manager(&self) -> Option<TaskManager> {
-        self.0._task_manager.lock().unwrap().take()
+    /// The handle resolves with `Err(PanickedTaskError)` if a critical task panicked,
+    /// or `Ok(())` if shutdown was requested. If not taken, the background task still
+    /// runs and logs panics at `debug!` level.
+    pub fn take_task_manager_handle(&self) -> Option<JoinHandle<Result<(), PanickedTaskError>>> {
+        self.0._task_manager_handle.lock().unwrap().take()
     }
 
     /// Returns the tokio runtime [`Handle`].
@@ -675,6 +678,33 @@ impl Runtime {
             GracefulShutdownGuard::new(Arc::clone(&self.0.graceful_tasks)),
         ))
     }
+
+    /// Fires the shutdown signal and waits until all graceful tasks complete.
+    pub fn graceful_shutdown(&self) {
+        let _ = self.do_graceful_shutdown(None);
+    }
+
+    /// Fires the shutdown signal and waits until all graceful tasks complete or the timeout
+    /// elapses.
+    ///
+    /// Returns `true` if all tasks completed before the timeout.
+    pub fn graceful_shutdown_with_timeout(&self, timeout: Duration) -> bool {
+        self.do_graceful_shutdown(Some(timeout))
+    }
+
+    fn do_graceful_shutdown(&self, timeout: Option<Duration>) -> bool {
+        let _ = self.0.task_events_tx.send(TaskEvent::GracefulShutdown);
+        let when = timeout.map(|t| std::time::Instant::now() + t);
+        while self.0.graceful_tasks.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+            if when.is_some_and(|when| std::time::Instant::now() > when) {
+                debug!("graceful shutdown timed out");
+                return false;
+            }
+            std::hint::spin_loop();
+        }
+        debug!("gracefully shut down");
+        true
+    }
 }
 
 // ── TaskSpawner impl ──────────────────────────────────────────────────
@@ -750,8 +780,9 @@ impl RuntimeBuilder {
 
     /// Build the [`Runtime`].
     ///
-    /// The [`TaskManager`] is stored inside the runtime. Use
-    /// [`Runtime::take_task_manager`] to extract it when needed.
+    /// The [`TaskManager`] is automatically spawned as a background task that monitors
+    /// critical tasks for panics. Use [`Runtime::take_task_manager_handle`] to extract
+    /// the join handle if you need to poll for panic errors.
     pub fn build(self) -> Result<Runtime, RuntimeBuildError> {
         let config = self.config;
 
@@ -820,6 +851,14 @@ impl RuntimeBuilder {
             (cpu_pool, rpc_pool, trie_pool, storage_pool, blocking_guard)
         };
 
+        let task_manager_handle = handle.spawn(async move {
+            let result = task_manager.await;
+            if let Err(ref err) = result {
+                debug!("{err}");
+            }
+            result
+        });
+
         let inner = RuntimeInner {
             _tokio_runtime: owned_runtime,
             handle,
@@ -837,7 +876,7 @@ impl RuntimeBuilder {
             storage_pool,
             #[cfg(feature = "rayon")]
             blocking_guard,
-            _task_manager: Mutex::new(Some(task_manager)),
+            _task_manager_handle: Mutex::new(Some(task_manager_handle)),
         };
 
         Ok(Runtime(Arc::new(inner)))

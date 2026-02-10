@@ -10,8 +10,9 @@
 
 //! Entrypoint for running commands.
 
-use reth_tasks::{TaskExecutor, TaskManager};
+use reth_tasks::{PanickedTaskError, TaskExecutor};
 use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
+use tokio::task::JoinHandle;
 use tracing::{debug, error, trace};
 
 /// Executes CLI commands.
@@ -61,11 +62,10 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
     {
-        let (context, mut task_manager) = cli_context(&self.runtime);
+        let (context, task_manager_handle) = cli_context(&self.runtime);
 
-        // Executes the command until it finished or ctrl-c was fired
         let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
-            &mut task_manager,
+            task_manager_handle,
             run_until_ctrl_c(command(context)),
         ));
 
@@ -73,10 +73,7 @@ impl CliRunner {
             error!(target: "reth::cli", "shutting down due to error");
         } else {
             debug!(target: "reth::cli", "shutting down gracefully");
-            // after the command has finished or exit signal was received we shutdown the task
-            // manager which fires the shutdown signal to all tasks spawned via the task
-            // executor and awaiting on tasks spawned with graceful shutdown
-            task_manager.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
+            self.runtime.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
         }
 
         runtime_shutdown(self.runtime, true);
@@ -95,16 +92,14 @@ impl CliRunner {
         F: Future<Output = Result<(), E>> + Send + 'static,
         E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
     {
-        let (context, mut task_manager) = cli_context(&self.runtime);
+        let (context, task_manager_handle) = cli_context(&self.runtime);
 
-        // Spawn the command on the blocking thread pool
         let handle = self.runtime.handle().clone();
         let handle2 = handle.clone();
         let command_handle = handle.spawn_blocking(move || handle2.block_on(command(context)));
 
-        // Wait for the command to complete or ctrl-c
         let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
-            &mut task_manager,
+            task_manager_handle,
             run_until_ctrl_c(
                 async move { command_handle.await.expect("Failed to join blocking task") },
             ),
@@ -114,7 +109,7 @@ impl CliRunner {
             error!(target: "reth::cli", "shutting down due to error");
         } else {
             debug!(target: "reth::cli", "shutting down gracefully");
-            task_manager.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
+            self.runtime.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
         }
 
         runtime_shutdown(self.runtime, true);
@@ -164,11 +159,14 @@ impl CliRunner {
     }
 }
 
-/// Extracts the [`TaskManager`] from the runtime and creates the [`CliContext`].
-fn cli_context(runtime: &reth_tasks::Runtime) -> (CliContext, TaskManager) {
-    let task_manager = runtime.take_task_manager().expect("Runtime must contain a TaskManager");
+/// Extracts the [`TaskManager`] handle from the runtime and creates the [`CliContext`].
+fn cli_context(
+    runtime: &reth_tasks::Runtime,
+) -> (CliContext, JoinHandle<Result<(), PanickedTaskError>>) {
+    let handle =
+        runtime.take_task_manager_handle().expect("Runtime must contain a TaskManager handle");
     let context = CliContext { task_executor: runtime.clone() };
-    (context, task_manager)
+    (context, handle)
 }
 
 /// Additional context provided by the [`CliRunner`] when executing commands
@@ -213,21 +211,22 @@ impl CliRunnerConfig {
 /// Runs the given future to completion or until a critical task panicked.
 ///
 /// Returns the error if a task panicked, or the given future returned an error.
-async fn run_to_completion_or_panic<F, E>(tasks: &mut TaskManager, fut: F) -> Result<(), E>
+async fn run_to_completion_or_panic<F, E>(
+    task_manager_handle: JoinHandle<Result<(), PanickedTaskError>>,
+    fut: F,
+) -> Result<(), E>
 where
     F: Future<Output = Result<(), E>>,
     E: Send + Sync + From<reth_tasks::PanickedTaskError> + 'static,
 {
-    {
-        let fut = pin!(fut);
-        tokio::select! {
-            task_manager_result = tasks => {
-                if let Err(panicked_error) = task_manager_result {
-                    return Err(panicked_error.into());
-                }
-            },
-            res = fut => res?,
-        }
+    let fut = pin!(fut);
+    tokio::select! {
+        task_manager_result = task_manager_handle => {
+            if let Ok(Err(panicked_error)) = task_manager_result {
+                return Err(panicked_error.into());
+            }
+        },
+        res = fut => res?,
     }
     Ok(())
 }
