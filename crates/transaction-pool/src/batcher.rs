@@ -368,7 +368,9 @@ mod tests {
         for i in 0..5 {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-            request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("Could not send batch tx");
+            request_tx
+                .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+                .expect("Could not send batch tx");
             responses.push(response_rx);
         }
 
@@ -405,7 +407,9 @@ mod tests {
         for i in 0..max_batch_size {
             let tx = MockTransaction::legacy().with_nonce(i as u64).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-            request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("Could not send batch tx");
+            request_tx
+                .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+                .expect("Could not send batch tx");
             responses.push(response_rx);
         }
 
@@ -436,7 +440,9 @@ mod tests {
         // Send a single transaction
         let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("Could not send batch tx");
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("Could not send batch tx");
 
         // Should be processed immediately (within a few ms)
         let result = timeout(Duration::from_millis(10), response_rx)
@@ -487,7 +493,9 @@ mod tests {
         for i in 0..max_batch_size {
             let tx = MockTransaction::legacy().with_nonce(i as u64).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-            request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("send failed");
+            request_tx
+                .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+                .expect("send failed");
             responses.push(response_rx);
         }
 
@@ -523,7 +531,9 @@ mod tests {
         // Send fewer items than max_batch_size
         let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
         let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
-        request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("send failed");
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("send failed");
 
         // Poll once - should return Pending (waiting for interval)
         let waker = futures::task::noop_waker();
@@ -552,7 +562,9 @@ mod tests {
         // Send a single item (partial batch)
         let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
         let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
-        request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("send failed");
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("send failed");
 
         // Poll once - should spawn batch immediately in immediate mode
         let waker = futures::task::noop_waker();
@@ -583,7 +595,9 @@ mod tests {
         // Send a partial batch
         let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
         let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
-        request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("send failed");
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("send failed");
 
         // Poll once to receive the item
         let waker = futures::task::noop_waker();
