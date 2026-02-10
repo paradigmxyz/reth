@@ -240,7 +240,7 @@ impl Discovery {
                 self.on_node_record_update(record, None);
             }
             DiscoveryUpdate::EnrForkId(node, fork_id) => {
-                self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
+                self.queued_events.push_back(DiscoveryEvent::EnrForkId(node, fork_id))
             }
             DiscoveryUpdate::Removed(peer_id) => {
                 self.discovered_nodes.remove(&peer_id);

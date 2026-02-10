@@ -250,14 +250,18 @@ impl<N: NetworkPrimitives> Swarm<N> {
                 if self.is_shutting_down() {
                     return None
                 }
-                // Insert peer only if no fork id or a valid fork id
-                if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
+                let enforce = self.state().peers().enforce_enr_fork_id();
+                let allow = match fork_id {
+                    Some(f) => self.sessions.is_valid_fork_id(f),
+                    None => !enforce,
+                };
+                if allow {
                     self.state_mut().peers_mut().add_peer(peer_id, addr, fork_id);
                 }
             }
-            StateAction::DiscoveredEnrForkId { peer_id, fork_id } => {
+            StateAction::DiscoveredEnrForkId { peer_id, addr, fork_id } => {
                 if self.sessions.is_valid_fork_id(fork_id) {
-                    self.state_mut().peers_mut().set_discovered_fork_id(peer_id, fork_id);
+                    self.state_mut().peers_mut().add_peer(peer_id, addr, Some(fork_id));
                 } else {
                     trace!(target: "net", ?peer_id, remote_fork_id=?fork_id, our_fork_id=?self.sessions.fork_id(), "fork id mismatch, removing peer");
                     self.state_mut().peers_mut().remove_peer(peer_id);
