@@ -190,8 +190,8 @@ where
                 }
             }
 
-            // 2. Early return if buffer is empty — no need to poll the interval
-            //    since there is nothing buffered to flush
+            // 2. Early return if buffer is empty — no need to poll the interval since there is
+            //    nothing buffered to flush
             if this.buf.is_empty() {
                 return Poll::Pending
             }
