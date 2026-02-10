@@ -20,21 +20,18 @@ use tracing::{debug, error, trace};
 #[derive(Debug)]
 pub struct CliRunner {
     config: CliRunnerConfig,
-    tokio_runtime: tokio::runtime::Runtime,
+    runtime: reth_tasks::Runtime,
 }
 
 impl CliRunner {
-    /// Attempts to create a new [`CliRunner`] using the default tokio
-    /// [`Runtime`](tokio::runtime::Runtime).
+    /// Attempts to create a new [`CliRunner`] using the default
+    /// [`Runtime`](reth_tasks::Runtime).
     ///
-    /// The default tokio runtime is multi-threaded, with both I/O and time drivers enabled.
-    pub fn try_default_runtime() -> Result<Self, std::io::Error> {
-        Ok(Self { config: CliRunnerConfig::default(), tokio_runtime: tokio_runtime()? })
-    }
-
-    /// Create a new [`CliRunner`] from a provided tokio [`Runtime`](tokio::runtime::Runtime).
-    pub const fn from_runtime(tokio_runtime: tokio::runtime::Runtime) -> Self {
-        Self { config: CliRunnerConfig::new(), tokio_runtime }
+    /// The default runtime is multi-threaded, with both I/O and time drivers enabled.
+    pub fn try_default_runtime() -> Result<Self, reth_tasks::RuntimeBuildError> {
+        let runtime = reth_tasks::RuntimeBuilder::new(reth_tasks::RuntimeConfig::default())
+            .build()?;
+        Ok(Self { config: CliRunnerConfig::default(), runtime })
     }
 
     /// Sets the [`CliRunnerConfig`] for this runner.
@@ -48,7 +45,7 @@ impl CliRunner {
     where
         F: Future<Output = T>,
     {
-        self.tokio_runtime.block_on(fut)
+        self.runtime.handle().block_on(fut)
     }
 
     /// Executes the given _async_ command on the tokio runtime until the command future resolves or
@@ -64,11 +61,13 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
     {
-        let AsyncCliRunner { context, mut task_manager, tokio_runtime } =
-            AsyncCliRunner::new(self.tokio_runtime);
+        let AsyncCliRunner { context, mut task_manager, runtime } =
+            AsyncCliRunner::new(self.runtime);
+
+        let handle = runtime.handle().clone();
 
         // Executes the command until it finished or ctrl-c was fired
-        let command_res = tokio_runtime.block_on(run_to_completion_or_panic(
+        let command_res = handle.block_on(run_to_completion_or_panic(
             &mut task_manager,
             run_until_ctrl_c(command(context)),
         ));
@@ -83,7 +82,7 @@ impl CliRunner {
             task_manager.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
         }
 
-        tokio_shutdown(tokio_runtime, true);
+        runtime_shutdown(runtime, true);
 
         command_res
     }
@@ -99,16 +98,17 @@ impl CliRunner {
         F: Future<Output = Result<(), E>> + Send + 'static,
         E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
     {
-        let AsyncCliRunner { context, mut task_manager, tokio_runtime } =
-            AsyncCliRunner::new(self.tokio_runtime);
+        let AsyncCliRunner { context, mut task_manager, runtime } =
+            AsyncCliRunner::new(self.runtime);
 
         // Spawn the command on the blocking thread pool
-        let handle = tokio_runtime.handle().clone();
+        let handle = runtime.handle().clone();
+        let handle2 = handle.clone();
         let command_handle =
-            tokio_runtime.handle().spawn_blocking(move || handle.block_on(command(context)));
+            handle.spawn_blocking(move || handle2.block_on(command(context)));
 
         // Wait for the command to complete or ctrl-c
-        let command_res = tokio_runtime.block_on(run_to_completion_or_panic(
+        let command_res = runtime.handle().block_on(run_to_completion_or_panic(
             &mut task_manager,
             run_until_ctrl_c(
                 async move { command_handle.await.expect("Failed to join blocking task") },
@@ -122,7 +122,7 @@ impl CliRunner {
             task_manager.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
         }
 
-        tokio_shutdown(tokio_runtime, true);
+        runtime_shutdown(runtime, true);
 
         command_res
     }
@@ -136,9 +136,8 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        let task_manager = TaskManager::new(self.tokio_runtime.handle().clone());
-        let executor = task_manager.executor();
-        self.tokio_runtime.block_on(run_until_ctrl_c(f(executor)))?;
+        let executor = self.runtime.clone();
+        self.runtime.handle().block_on(run_until_ctrl_c(f(executor)))?;
         Ok(())
     }
 
@@ -157,15 +156,15 @@ impl CliRunner {
         F: Future<Output = Result<(), E>> + Send + 'static,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        let tokio_runtime = self.tokio_runtime;
-        let task_manager = TaskManager::new(tokio_runtime.handle().clone());
-        let executor = task_manager.executor();
-        let handle = tokio_runtime.handle().clone();
-        let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(f(executor)));
-        tokio_runtime
-            .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
+        let executor = self.runtime.clone();
+        let handle = self.runtime.handle().clone();
+        let fut =
+            self.runtime.handle().spawn_blocking(move || handle.block_on(f(executor)));
+        self.runtime.handle().block_on(run_until_ctrl_c(async move {
+            fut.await.expect("Failed to join task")
+        }))?;
 
-        tokio_shutdown(tokio_runtime, false);
+        runtime_shutdown(self.runtime, false);
 
         Ok(())
     }
@@ -175,18 +174,19 @@ impl CliRunner {
 struct AsyncCliRunner {
     context: CliContext,
     task_manager: TaskManager,
-    tokio_runtime: tokio::runtime::Runtime,
+    runtime: reth_tasks::Runtime,
 }
 
 // === impl AsyncCliRunner ===
 
 impl AsyncCliRunner {
-    /// Given a tokio [`Runtime`](tokio::runtime::Runtime), creates additional context required to
-    /// execute commands asynchronously.
-    fn new(tokio_runtime: tokio::runtime::Runtime) -> Self {
-        let task_manager = TaskManager::new(tokio_runtime.handle().clone());
-        let task_executor = task_manager.executor();
-        Self { context: CliContext { task_executor }, task_manager, tokio_runtime }
+    /// Given a [`Runtime`](reth_tasks::Runtime), extracts the [`TaskManager`] and creates
+    /// the [`CliContext`].
+    fn new(runtime: reth_tasks::Runtime) -> Self {
+        let task_manager =
+            runtime.take_task_manager().expect("Runtime must contain a TaskManager");
+        let task_executor = runtime.clone();
+        Self { context: CliContext { task_executor }, task_manager, runtime }
     }
 }
 
@@ -227,19 +227,6 @@ impl CliRunnerConfig {
         self.graceful_shutdown_timeout = timeout;
         self
     }
-}
-
-/// Creates a new default tokio multi-thread [Runtime](tokio::runtime::Runtime) with all features
-/// enabled
-pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        // Keep the threads alive for at least the block time (12 seconds) plus buffer.
-        // This prevents the costly process of spawning new threads on every
-        // new block, and instead reuses the existing threads.
-        .thread_keep_alive(Duration::from_secs(15))
-        .thread_name("tokio-rt")
-        .build()
 }
 
 /// Runs the given future to completion or until a critical task panicked.
@@ -309,14 +296,11 @@ where
     Ok(())
 }
 
-/// Shut down the given Tokio runtime, and wait for it if `wait` is set.
+/// Shut down the given [`Runtime`](reth_tasks::Runtime), and wait for it if `wait` is set.
 ///
-/// `drop(tokio_runtime)` would block the current thread until its pools
-/// (including blocking pool) are shutdown. Since we want to exit as soon as possible, drop
-/// it on a separate thread and wait for up to 5 seconds for this operation to
-/// complete.
-fn tokio_shutdown(rt: tokio::runtime::Runtime, wait: bool) {
-    // Shutdown the runtime on a separate thread
+/// Dropping the runtime on the current thread could block due to tokio pool teardown.
+/// Instead, we drop it on a separate thread and optionally wait up to 5 seconds.
+fn runtime_shutdown(rt: reth_tasks::Runtime, wait: bool) {
     let (tx, rx) = mpsc::channel();
     std::thread::Builder::new()
         .name("tokio-shutdown".to_string())
