@@ -14,6 +14,7 @@
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
     bench::{
+        helpers::parse_duration,
         output::{
             write_benchmark_results, CombinedResult, GasRampPayloadFile, NewPayloadResult,
             TotalGasOutput, TotalGasRow,
@@ -30,7 +31,6 @@ use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV4, ForkchoiceState, JwtSecret};
 use clap::Parser;
 use eyre::Context;
-use humantime::parse_duration;
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_api::EngineApiMessageVersion;
@@ -78,6 +78,9 @@ pub struct Command {
     output: Option<PathBuf>,
 
     /// How long to wait after a forkchoice update before sending the next payload.
+    ///
+    /// Accepts a duration string (e.g. `100ms`, `2s`) or a bare integer treated as
+    /// milliseconds (e.g. `400`).
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
 
