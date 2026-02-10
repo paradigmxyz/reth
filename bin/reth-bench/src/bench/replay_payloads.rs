@@ -166,7 +166,7 @@ impl Command {
         let mut waiter = match (self.wait_time, self.wait_for_persistence) {
             (Some(duration), true) => {
                 let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
-                let sub = setup_persistence_subscription(ws_url).await?;
+                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
                 Some(PersistenceWaiter::with_duration_and_subscription(
                     duration,
                     sub,
@@ -177,7 +177,7 @@ impl Command {
             (Some(duration), false) => Some(PersistenceWaiter::with_duration(duration)),
             (None, true) => {
                 let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
-                let sub = setup_persistence_subscription(ws_url).await?;
+                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
                 Some(PersistenceWaiter::with_subscription(
                     sub,
                     self.persistence_threshold,
