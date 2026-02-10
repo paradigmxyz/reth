@@ -867,7 +867,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_fs_util as fs;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use reth_tasks::TaskManager;
+    use reth_tasks::{RuntimeBuilder, RuntimeConfig};
 
     #[test]
     fn changed_acc_entry() {
@@ -906,10 +906,14 @@ mod tests {
 
         txpool.add_transaction(TransactionOrigin::Local, transaction.clone()).await.unwrap();
 
-        let handle = tokio::runtime::Handle::current();
-        let manager = TaskManager::new(handle);
+        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
+            tokio::runtime::Handle::current(),
+        ))
+        .build()
+        .unwrap();
+        let manager = rt.take_task_manager().unwrap();
         let config = LocalTransactionBackupConfig::with_local_txs_backup(transactions_path.clone());
-        manager.executor().spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
+        rt.spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
             backup_local_transactions_task(shutdown, txpool.clone(), config)
         });
 
