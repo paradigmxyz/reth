@@ -14,7 +14,7 @@
 use crate::tree::{
     cached_state::{CachedStateProvider, SavedCache},
     payload_processor::{
-        bal::{total_slots, BALSlotIter},
+        bal::{self, total_slots, BALSlotIter},
         executor::WorkloadExecutor,
         multiproof::{MultiProofMessage, VersionedMultiProofTargets},
         PayloadExecutionCache,
@@ -287,6 +287,7 @@ where
                 target: "engine::tree::payload_processor::prewarm",
                 "Skipping BAL prewarm - no cache available"
             );
+            self.send_bal_hashed_state(&bal);
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
             return;
@@ -302,7 +303,7 @@ where
         );
 
         if total_slots == 0 {
-            // No slots to prefetch, signal completion immediately
+            self.send_bal_hashed_state(&bal);
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
             return;
@@ -347,8 +348,49 @@ where
             "All BAL prewarm workers completed"
         );
 
+        // Convert BAL to HashedPostState and send to multiproof task
+        self.send_bal_hashed_state(&bal);
+
         // Signal that execution has finished
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
+    }
+
+    /// Converts the BAL to [`HashedPostState`](reth_trie::HashedPostState) and sends it to the
+    /// multiproof task.
+    fn send_bal_hashed_state(&self, bal: &BlockAccessList) {
+        let Some(to_multi_proof) = &self.to_multi_proof else { return };
+
+        let provider = match self.ctx.provider.build() {
+            Ok(provider) => provider,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    ?err,
+                    "Failed to build provider for BAL hashed state conversion"
+                );
+                return;
+            }
+        };
+
+        match bal::bal_to_hashed_post_state(bal, &provider) {
+            Ok(hashed_state) => {
+                debug!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    accounts = hashed_state.accounts.len(),
+                    storages = hashed_state.storages.len(),
+                    "Converted BAL to hashed post state"
+                );
+                let _ = to_multi_proof.send(MultiProofMessage::HashedStateUpdate(hashed_state));
+                let _ = to_multi_proof.send(MultiProofMessage::FinishedStateUpdates);
+            }
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    ?err,
+                    "Failed to convert BAL to hashed state"
+                );
+            }
+        }
     }
 
     /// Executes the task.

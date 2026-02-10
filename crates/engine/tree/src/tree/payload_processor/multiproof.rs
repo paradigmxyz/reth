@@ -115,6 +115,8 @@ pub enum MultiProofMessage {
         /// The state update that was used to calculate the proof
         state: HashedPostState,
     },
+    /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
+    HashedStateUpdate(HashedPostState),
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
     ///
     /// When received, the task generates a single state update from the BAL and processes it.
@@ -1187,6 +1189,11 @@ impl MultiProofTask {
                     );
                     return true;
                 }
+                false
+            }
+            MultiProofMessage::HashedStateUpdate(hashed_state) => {
+                batch_metrics.state_update_proofs_requested +=
+                    self.on_hashed_state_update(Source::BlockAccessList, hashed_state);
                 false
             }
         }
