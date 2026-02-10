@@ -239,10 +239,6 @@ profiling: ## Builds `reth` with optimisations, but also symbols.
 maxperf: ## Builds `reth` with the most aggressive optimisations.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
 
-.PHONY: maxperf-no-asm
-maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
-
 
 fmt:
 	cargo +nightly fmt
