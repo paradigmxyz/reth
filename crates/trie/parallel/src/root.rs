@@ -328,7 +328,7 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
-        let runtime = reth_tasks::Runtime::test_with_handle(tokio::runtime::Handle::current());
+        let runtime = reth_tasks::Runtime::test();
         assert_eq!(
             ParallelStateRoot::new(overlay_factory.clone(), Default::default(), runtime.clone())
                 .incremental_root()
