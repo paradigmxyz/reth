@@ -945,7 +945,7 @@ where
     pub fn update_account_leaf(
         &mut self,
         path: Nibbles,
-        value: Vec<u8>,
+        value: &[u8],
         provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<()> {
         if !self.revealed_account_paths.contains(&path) {
@@ -962,7 +962,7 @@ where
         &mut self,
         address: B256,
         slot: Nibbles,
-        value: Vec<u8>,
+        value: &[u8],
         provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<()> {
         let provider = provider_factory.storage_node_provider(address);
@@ -1012,7 +1012,10 @@ where
         let nibbles = Nibbles::unpack(address);
         self.account_rlp_buf.clear();
         account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+        let value = core::mem::take(&mut self.account_rlp_buf);
+        let result = self.update_account_leaf(nibbles, &value, provider_factory);
+        self.account_rlp_buf = value;
+        result?;
 
         Ok(true)
     }
@@ -1065,7 +1068,10 @@ where
         let nibbles = Nibbles::unpack(address);
         self.account_rlp_buf.clear();
         trie_account.encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+        let value = core::mem::take(&mut self.account_rlp_buf);
+        let result = self.update_account_leaf(nibbles, &value, provider_factory);
+        self.account_rlp_buf = value;
+        result?;
 
         Ok(true)
     }
@@ -2090,7 +2096,7 @@ mod tests {
         sparse
             .update_account_leaf(
                 address_path_3,
-                alloy_rlp::encode(trie_account_3),
+                &alloy_rlp::encode(trie_account_3),
                 &provider_factory,
             )
             .unwrap();
@@ -2099,7 +2105,7 @@ mod tests {
             .update_storage_leaf(
                 address_1,
                 slot_path_3,
-                alloy_rlp::encode(value_3),
+                &alloy_rlp::encode(value_3),
                 &provider_factory,
             )
             .unwrap();
@@ -2107,7 +2113,7 @@ mod tests {
         sparse
             .update_account_leaf(
                 address_path_1,
-                alloy_rlp::encode(trie_account_1),
+                &alloy_rlp::encode(trie_account_1),
                 &provider_factory,
             )
             .unwrap();
@@ -2117,7 +2123,7 @@ mod tests {
         sparse
             .update_account_leaf(
                 address_path_2,
-                alloy_rlp::encode(trie_account_2),
+                &alloy_rlp::encode(trie_account_2),
                 &provider_factory,
             )
             .unwrap();

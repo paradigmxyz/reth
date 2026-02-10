@@ -2,7 +2,7 @@ use crate::{
     provider::TrieNodeProvider, LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait,
     SparseTrieExt, SparseTrieUpdates,
 };
-use alloc::{boxed::Box, vec::Vec};
+use alloc::boxed::Box;
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNode};
@@ -211,7 +211,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     pub fn update_leaf(
         &mut self,
         path: Nibbles,
-        value: Vec<u8>,
+        value: &[u8],
         provider: impl TrieNodeProvider,
     ) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;

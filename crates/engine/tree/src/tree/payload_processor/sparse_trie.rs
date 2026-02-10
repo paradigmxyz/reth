@@ -947,7 +947,7 @@ where
                 trace!(target: "engine::tree::payload_processor::sparse_trie", ?slot_nibbles, "Updating storage slot");
                 storage_trie.update_leaf(
                     slot_nibbles,
-                    alloy_rlp::encode_fixed_size(&value).to_vec(),
+                    &alloy_rlp::encode_fixed_size(&value),
                     &storage_provider,
                 )?;
             }
