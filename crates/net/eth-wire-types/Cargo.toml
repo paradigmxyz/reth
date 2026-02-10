@@ -21,7 +21,6 @@ reth-primitives-traits.workspace = true
 # ethereum
 alloy-chains = { workspace = true, features = ["rlp"] }
 alloy-eips.workspace = true
-alloy-eip7928 = { workspace = true, features = ["rlp"] }
 alloy-primitives = { workspace = true, features = ["map"] }
 alloy-rlp = { workspace = true, features = ["derive"] }
 alloy-consensus.workspace = true
@@ -69,7 +68,6 @@ std = [
 arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "alloy-chains/arbitrary",
-    "alloy-eip7928/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-arbitrary-interop",
@@ -83,7 +81,6 @@ serde = [
     "dep:serde",
     "alloy-chains/serde",
     "alloy-consensus/serde",
-    "alloy-eip7928/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "bytes/serde",

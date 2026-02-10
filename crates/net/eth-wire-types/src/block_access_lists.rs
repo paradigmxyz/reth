@@ -1,8 +1,7 @@
 //! Implements the `GetBlockAccessLists` and `BlockAccessLists` message types.
 
 use alloc::vec::Vec;
-use alloy_eip7928::BlockAccessList;
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs_derive::add_arbitrary_tests;
 
@@ -22,6 +21,7 @@ pub struct GetBlockAccessLists(
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
 pub struct BlockAccessLists(
-    /// The requested block access lists. Unavailable entries are represented by empty BALs.
-    pub Vec<BlockAccessList>,
+    /// The requested block access lists as opaque bytes. Unavailable entries are represented by
+    /// empty byte slices.
+    pub Vec<Bytes>,
 );

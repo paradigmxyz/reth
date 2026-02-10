@@ -6,6 +6,7 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::Bytes;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
@@ -290,7 +291,7 @@ where
         request: GetBlockAccessLists,
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     ) {
-        let access_lists = request.0.into_iter().map(|_| Default::default()).collect();
+        let access_lists = request.0.into_iter().map(|_| Bytes::new()).collect();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
 
