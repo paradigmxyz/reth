@@ -4533,4 +4533,48 @@ mod tests {
         assert_eq!(entry.key, slot_key_already_hashed);
         assert_eq!(entry.value, old_value);
     }
+
+    #[test]
+    fn test_unwind_storage_hashing_legacy() {
+        let factory = create_test_provider_factory();
+        let storage_settings = StorageSettings::v1();
+        assert!(!storage_settings.use_hashed_state);
+        factory.set_storage_settings_cache(storage_settings);
+
+        let address = Address::random();
+        let hashed_address = keccak256(address);
+
+        let plain_slot = B256::random();
+        let hashed_slot = keccak256(plain_slot);
+
+        let current_value = U256::from(100);
+        let old_value = U256::from(42);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx
+            .cursor_dup_write::<tables::HashedStorages>()
+            .unwrap()
+            .upsert(hashed_address, &StorageEntry { key: hashed_slot, value: current_value })
+            .unwrap();
+
+        let changesets = vec![(
+            BlockNumberAddress((1, address)),
+            StorageEntry { key: plain_slot, value: old_value },
+        )];
+
+        let result = provider_rw.unwind_storage_hashing(changesets.into_iter()).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key(&hashed_address));
+        assert!(result[&hashed_address].contains(&hashed_slot));
+
+        let mut cursor = provider_rw.tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+        let entry = cursor
+            .seek_by_key_subkey(hashed_address, hashed_slot)
+            .unwrap()
+            .expect("entry should exist");
+        assert_eq!(entry.key, hashed_slot);
+        assert_eq!(entry.value, old_value);
+    }
 }

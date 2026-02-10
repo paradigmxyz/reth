@@ -104,3 +104,123 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
         .root()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::U256;
+    use reth_db_api::{models::BlockNumberAddress, tables, transaction::DbTxMut};
+    use reth_primitives_traits::StorageEntry;
+    use reth_provider::{
+        test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
+        StaticFileWriter, StorageSettingsCache,
+    };
+
+    fn append_headers_to_static_files(
+        factory: &impl StaticFileProviderFactory<
+            Primitives: reth_primitives_traits::NodePrimitives<BlockHeader = Header>,
+        >,
+        up_to_block: u64,
+    ) {
+        let sf = factory.static_file_provider();
+        let mut writer = sf.latest_writer(StaticFileSegment::Headers).unwrap();
+        let mut header = Header::default();
+        for num in 0..=up_to_block {
+            header.number = num;
+            writer.append_header(&header, &B256::ZERO).unwrap();
+        }
+        writer.commit().unwrap();
+    }
+
+    #[test]
+    fn test_hashed_storage_from_reverts_legacy() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+
+        assert!(!provider.cached_storage_settings().use_hashed_state);
+
+        let address = Address::with_last_byte(42);
+        let slot1 = B256::from(U256::from(100));
+        let slot2 = B256::from(U256::from(200));
+
+        append_headers_to_static_files(&factory, 5);
+
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((1, address)),
+                StorageEntry { key: slot1, value: U256::from(10) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((2, address)),
+                StorageEntry { key: slot2, value: U256::from(20) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((3, address)),
+                StorageEntry { key: slot1, value: U256::from(999) },
+            )
+            .unwrap();
+
+        let result = hashed_storage_from_reverts_with_provider(&*provider, address, 1).unwrap();
+
+        let hashed_slot1 = keccak256(slot1);
+        let hashed_slot2 = keccak256(slot2);
+
+        assert_eq!(result.storage.len(), 2);
+        assert_eq!(result.storage.get(&hashed_slot1), Some(&U256::from(10)));
+        assert_eq!(result.storage.get(&hashed_slot2), Some(&U256::from(20)));
+    }
+
+    #[test]
+    fn test_hashed_storage_from_reverts_hashed_state() {
+        let factory = create_test_provider_factory();
+
+        let mut settings = factory.cached_storage_settings();
+        settings.use_hashed_state = true;
+        factory.set_storage_settings_cache(settings);
+
+        let provider = factory.provider_rw().unwrap();
+        assert!(provider.cached_storage_settings().use_hashed_state);
+
+        let address = Address::with_last_byte(42);
+        let pre_hashed_slot1 = keccak256(B256::from(U256::from(100)));
+        let pre_hashed_slot2 = keccak256(B256::from(U256::from(200)));
+
+        append_headers_to_static_files(&factory, 5);
+
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((1, address)),
+                StorageEntry { key: pre_hashed_slot1, value: U256::from(10) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((2, address)),
+                StorageEntry { key: pre_hashed_slot2, value: U256::from(20) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((3, address)),
+                StorageEntry { key: pre_hashed_slot1, value: U256::from(999) },
+            )
+            .unwrap();
+
+        let result = hashed_storage_from_reverts_with_provider(&*provider, address, 1).unwrap();
+
+        assert_eq!(result.storage.len(), 2);
+        assert_eq!(result.storage.get(&pre_hashed_slot1), Some(&U256::from(10)));
+        assert_eq!(result.storage.get(&pre_hashed_slot2), Some(&U256::from(20)));
+    }
+}

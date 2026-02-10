@@ -992,6 +992,101 @@ mod tests {
     }
 
     #[test]
+    fn history_provider_get_storage_legacy() {
+        let factory = create_test_provider_factory();
+
+        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state);
+
+        let tx = factory.provider_rw().unwrap().into_tx();
+
+        tx.put::<tables::StoragesHistory>(
+            StorageShardedKey {
+                address: ADDRESS,
+                sharded_key: ShardedKey { key: STORAGE, highest_block_number: 7 },
+            },
+            BlockNumberList::new([3, 7]).unwrap(),
+        )
+        .unwrap();
+        tx.put::<tables::StoragesHistory>(
+            StorageShardedKey {
+                address: ADDRESS,
+                sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },
+            },
+            BlockNumberList::new([10, 15]).unwrap(),
+        )
+        .unwrap();
+        tx.put::<tables::StoragesHistory>(
+            StorageShardedKey {
+                address: HIGHER_ADDRESS,
+                sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },
+            },
+            BlockNumberList::new([4]).unwrap(),
+        )
+        .unwrap();
+
+        let higher_entry_plain = StorageEntry { key: STORAGE, value: U256::from(1000) };
+        let higher_entry_at4 = StorageEntry { key: STORAGE, value: U256::from(0) };
+        let entry_plain = StorageEntry { key: STORAGE, value: U256::from(100) };
+        let entry_at15 = StorageEntry { key: STORAGE, value: U256::from(15) };
+        let entry_at10 = StorageEntry { key: STORAGE, value: U256::from(10) };
+        let entry_at7 = StorageEntry { key: STORAGE, value: U256::from(7) };
+        let entry_at3 = StorageEntry { key: STORAGE, value: U256::from(0) };
+
+        tx.put::<tables::StorageChangeSets>((3, ADDRESS).into(), entry_at3).unwrap();
+        tx.put::<tables::StorageChangeSets>((4, HIGHER_ADDRESS).into(), higher_entry_at4).unwrap();
+        tx.put::<tables::StorageChangeSets>((7, ADDRESS).into(), entry_at7).unwrap();
+        tx.put::<tables::StorageChangeSets>((10, ADDRESS).into(), entry_at10).unwrap();
+        tx.put::<tables::StorageChangeSets>((15, ADDRESS).into(), entry_at15).unwrap();
+
+        tx.put::<tables::PlainStorageState>(ADDRESS, entry_plain).unwrap();
+        tx.put::<tables::PlainStorageState>(HIGHER_ADDRESS, higher_entry_plain).unwrap();
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 0).storage(ADDRESS, STORAGE),
+            Ok(None)
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 3).storage(ADDRESS, STORAGE),
+            Ok(Some(U256::ZERO))
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 4).storage(ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == entry_at7.value
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 7).storage(ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == entry_at7.value
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 9).storage(ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == entry_at10.value
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 10).storage(ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == entry_at10.value
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 11).storage(ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == entry_at15.value
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 16).storage(ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == entry_plain.value
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 1).storage(HIGHER_ADDRESS, STORAGE),
+            Ok(None)
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 1000).storage(HIGHER_ADDRESS, STORAGE),
+            Ok(Some(expected_value)) if expected_value == higher_entry_plain.value
+        ));
+    }
+
+    #[test]
     fn history_provider_get_storage_hashed_state() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(

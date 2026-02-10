@@ -621,4 +621,108 @@ mod tests {
 
         assert!(storage.storage_slots.windows(2).all(|w| w[0].0 <= w[1].0));
     }
+
+    #[test]
+    fn from_reverts_legacy_keccak_hashes_all_keys() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+
+        let address1 = Address::with_last_byte(1);
+        let address2 = Address::with_last_byte(2);
+        let plain_slot1 = B256::from(U256::from(11));
+        let plain_slot2 = B256::from(U256::from(22));
+
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(
+                1,
+                AccountBeforeTx {
+                    address: address1,
+                    info: Some(Account { nonce: 10, ..Default::default() }),
+                },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(
+                2,
+                AccountBeforeTx {
+                    address: address2,
+                    info: Some(Account { nonce: 20, ..Default::default() }),
+                },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(
+                3,
+                AccountBeforeTx {
+                    address: address1,
+                    info: Some(Account { nonce: 99, ..Default::default() }),
+                },
+            )
+            .unwrap();
+
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((1, address1)),
+                StorageEntry { key: plain_slot1, value: U256::from(100) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((2, address1)),
+                StorageEntry { key: plain_slot2, value: U256::from(200) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((3, address2)),
+                StorageEntry { key: plain_slot1, value: U256::from(300) },
+            )
+            .unwrap();
+
+        let sorted =
+            HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(&*provider, 1..=3).unwrap();
+
+        let expected_hashed_addr1 = keccak256(address1);
+        let expected_hashed_addr2 = keccak256(address2);
+        assert_eq!(sorted.accounts.len(), 2);
+
+        let account1 =
+            sorted.accounts.iter().find(|(addr, _)| *addr == expected_hashed_addr1).unwrap();
+        assert_eq!(account1.1.unwrap().nonce, 10);
+
+        let account2 =
+            sorted.accounts.iter().find(|(addr, _)| *addr == expected_hashed_addr2).unwrap();
+        assert_eq!(account2.1.unwrap().nonce, 20);
+
+        assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
+
+        let expected_hashed_slot1 = keccak256(plain_slot1);
+        let expected_hashed_slot2 = keccak256(plain_slot2);
+
+        assert_ne!(expected_hashed_slot1, plain_slot1);
+        assert_ne!(expected_hashed_slot2, plain_slot2);
+
+        let storage1 = sorted.storages.get(&expected_hashed_addr1).expect("storage for address1");
+        assert_eq!(storage1.storage_slots.len(), 2);
+        assert!(storage1
+            .storage_slots
+            .iter()
+            .any(|(k, v)| *k == expected_hashed_slot1 && *v == U256::from(100)));
+        assert!(storage1
+            .storage_slots
+            .iter()
+            .any(|(k, v)| *k == expected_hashed_slot2 && *v == U256::from(200)));
+        assert!(storage1.storage_slots.windows(2).all(|w| w[0].0 <= w[1].0));
+
+        let storage2 = sorted.storages.get(&expected_hashed_addr2).expect("storage for address2");
+        assert_eq!(storage2.storage_slots.len(), 1);
+        assert_eq!(storage2.storage_slots[0].0, expected_hashed_slot1);
+        assert_eq!(storage2.storage_slots[0].1, U256::from(300));
+    }
 }
