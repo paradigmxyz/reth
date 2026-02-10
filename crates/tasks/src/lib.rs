@@ -219,8 +219,11 @@ impl TaskManager {
         let (task_events_tx, task_events_rx) = unbounded_channel();
         let (signal, on_shutdown) = signal();
         let graceful_tasks = Arc::new(AtomicUsize::new(0));
-        let manager =
-            Self { task_events_rx, signal: Some(signal), graceful_tasks: Arc::clone(&graceful_tasks) };
+        let manager = Self {
+            task_events_rx,
+            signal: Some(signal),
+            graceful_tasks: Arc::clone(&graceful_tasks),
+        };
         (manager, on_shutdown, task_events_tx, graceful_tasks)
     }
 
@@ -451,14 +454,11 @@ mod tests {
         let num = 10;
         for _ in 0..num {
             let c = counter.clone();
-            rt.spawn_critical_with_graceful_shutdown_signal(
-                "grace",
-                move |shutdown| async move {
-                    let _guard = shutdown.await;
-                    tokio::time::sleep(Duration::from_millis(200)).await;
-                    c.fetch_add(1, Ordering::SeqCst);
-                },
-            );
+            rt.spawn_critical_with_graceful_shutdown_signal("grace", move |shutdown| async move {
+                let _guard = shutdown.await;
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                c.fetch_add(1, Ordering::SeqCst);
+            });
         }
 
         manager.graceful_shutdown();

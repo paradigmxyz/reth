@@ -15,11 +15,10 @@ use std::sync::Arc;
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
-        tokio::runtime::Handle::current(),
-    ))
-    .build()
-    .unwrap();
+    let exec =
+        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
+            .build()
+            .unwrap();
 
     let node_config = NodeConfig::test()
         .with_chain(custom_chain())
@@ -40,11 +39,10 @@ async fn can_run_dev_node() -> eyre::Result<()> {
 #[tokio::test]
 async fn can_run_dev_node_custom_attributes() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
-        tokio::runtime::Handle::current(),
-    ))
-    .build()
-    .unwrap();
+    let exec =
+        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
+            .build()
+            .unwrap();
 
     let node_config = NodeConfig::test()
         .with_chain(custom_chain())

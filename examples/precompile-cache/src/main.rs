@@ -187,10 +187,9 @@ where
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
-    let runtime = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
-        tokio::runtime::Handle::current(),
-    ))
-    .build()?;
+    let runtime =
+        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
+            .build()?;
 
     // create a custom chain spec
     let spec = ChainSpec::builder()

@@ -29,8 +29,8 @@ impl CliRunner {
     ///
     /// The default runtime is multi-threaded, with both I/O and time drivers enabled.
     pub fn try_default_runtime() -> Result<Self, reth_tasks::RuntimeBuildError> {
-        let runtime = reth_tasks::RuntimeBuilder::new(reth_tasks::RuntimeConfig::default())
-            .build()?;
+        let runtime =
+            reth_tasks::RuntimeBuilder::new(reth_tasks::RuntimeConfig::default()).build()?;
         Ok(Self { config: CliRunnerConfig::default(), runtime })
     }
 
@@ -100,8 +100,7 @@ impl CliRunner {
         // Spawn the command on the blocking thread pool
         let handle = self.runtime.handle().clone();
         let handle2 = handle.clone();
-        let command_handle =
-            handle.spawn_blocking(move || handle2.block_on(command(context)));
+        let command_handle = handle.spawn_blocking(move || handle2.block_on(command(context)));
 
         // Wait for the command to complete or ctrl-c
         let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
@@ -154,11 +153,10 @@ impl CliRunner {
     {
         let executor = self.runtime.clone();
         let handle = self.runtime.handle().clone();
-        let fut =
-            self.runtime.handle().spawn_blocking(move || handle.block_on(f(executor)));
-        self.runtime.handle().block_on(run_until_ctrl_c(async move {
-            fut.await.expect("Failed to join task")
-        }))?;
+        let fut = self.runtime.handle().spawn_blocking(move || handle.block_on(f(executor)));
+        self.runtime
+            .handle()
+            .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
 
         runtime_shutdown(self.runtime, false);
 

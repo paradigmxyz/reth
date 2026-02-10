@@ -46,11 +46,10 @@ fn test_basic_setup() {
 
 #[tokio::test]
 async fn test_eth_launcher() {
-    let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
-        tokio::runtime::Handle::current(),
-    ))
-    .build()
-    .unwrap();
+    let exec =
+        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
+            .build()
+            .unwrap();
     let config = NodeConfig::test();
     let db = create_test_rw_db();
     let _builder =

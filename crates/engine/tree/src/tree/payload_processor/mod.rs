@@ -15,7 +15,6 @@ use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use reth_tasks::Runtime;
 use metrics::{Counter, Histogram};
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
@@ -34,6 +33,7 @@ use reth_provider::{
     StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
+use reth_tasks::Runtime;
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -1003,9 +1003,7 @@ mod tests {
     use super::PayloadExecutionCache;
     use crate::tree::{
         cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
-        payload_processor::{
-            evm_state_to_hashed_post_state, PayloadProcessor,
-        },
+        payload_processor::{evm_state_to_hashed_post_state, PayloadProcessor},
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };

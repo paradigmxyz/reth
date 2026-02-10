@@ -22,10 +22,9 @@ use reth_ethereum::{
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    let runtime = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
-        tokio::runtime::Handle::current(),
-    ))
-    .build()?;
+    let runtime =
+        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
+            .build()?;
 
     // create node config
     let node_config = NodeConfig::test()

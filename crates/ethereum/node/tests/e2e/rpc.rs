@@ -344,11 +344,10 @@ async fn test_eth_config() -> eyre::Result<()> {
 async fn test_admin_external_ip() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
-        tokio::runtime::Handle::current(),
-    ))
-    .build()
-    .unwrap();
+    let exec =
+        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
+            .build()
+            .unwrap();
 
     // Chain spec with test allocs
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();

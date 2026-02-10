@@ -68,10 +68,9 @@ pub async fn setup_engine_with_chain_import(
         + Copy
         + 'static,
 ) -> eyre::Result<ChainImportResult> {
-    let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
-        tokio::runtime::Handle::current(),
-    ))
-    .build()?;
+    let exec =
+        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
+            .build()?;
     let tasks = exec.take_task_manager().unwrap();
 
     let network_config = NetworkArgs {
