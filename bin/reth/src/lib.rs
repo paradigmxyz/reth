@@ -15,6 +15,7 @@
 //! - `asm-keccak`: Replaces the default, pure-Rust implementation of Keccak256 with one implemented
 //!   in assembly; see [the `keccak-asm` crate](https://github.com/DaniPopes/keccak-asm) for more
 //!   details and supported targets.
+//! - `min-debug-logs`: Disables all logs below `debug` level.
 //!
 //! ### Allocator Features
 //!
@@ -36,7 +37,6 @@
 //! - `min-warn-logs`: Disables all logs below `warn` level.
 //! - `min-info-logs`: Disables all logs below `info` level. This can speed up the node, since fewer
 //!   calls to the logging component are made.
-//! - `min-debug-logs`: Disables all logs below `debug` level.
 //! - `min-trace-logs`: Disables all logs below `trace` level.
 //!
 //! ### Development Features

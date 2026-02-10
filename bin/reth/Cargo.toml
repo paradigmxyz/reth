@@ -89,6 +89,7 @@ default = [
     "js-tracer",
     "keccak-cache-global",
     "asm-keccak",
+    "min-debug-logs",
     "rocksdb",
 ]
 
