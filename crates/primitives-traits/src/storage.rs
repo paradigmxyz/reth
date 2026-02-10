@@ -1,5 +1,4 @@
 use alloy_primitives::{keccak256, B256, U256};
-use core::marker::PhantomData;
 
 /// Trait for `DupSort` table values that contain a subkey.
 ///
@@ -13,128 +12,98 @@ pub trait ValueWithSubKey {
     fn get_subkey(&self) -> Self::SubKey;
 }
 
-/// Marker type for an unhashed (plain) EVM storage slot.
-#[derive(Debug)]
-pub enum PlainSlot {}
-
-/// Marker type for a keccak256-hashed storage slot.
-#[derive(Debug)]
-pub enum HashedSlot {}
-
-/// A storage slot key tagged with its hashing status.
+/// A storage slot key that tracks whether it holds a plain (unhashed) EVM slot
+/// or a keccak256-hashed slot.
 ///
-/// This is a zero-cost wrapper around [`B256`] that uses a marker type parameter
-/// to distinguish plain slots from hashed slots at the type level. The on-disk
-/// encoding is identical to a raw [`B256`] — the marker exists only in the Rust
-/// type system to prevent double-hashing bugs at compile time.
-#[repr(transparent)]
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
-pub struct StorageSlotKey<K> {
-    inner: B256,
-    _marker: PhantomData<K>,
+/// This enum replaces the `use_hashed_state: bool` parameter pattern by carrying
+/// provenance with the key itself. Once tagged at a read/write boundary, downstream
+/// code can call [`Self::to_hashed`] without risk of double-hashing — hashing a
+/// [`StorageSlotKey::Hashed`] is a no-op.
+///
+/// The on-disk encoding is unchanged (raw 32-byte [`B256`]). The variant is set
+/// by the code that knows the context (which table, which storage mode).
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StorageSlotKey {
+    /// An unhashed EVM storage slot, as produced by REVM execution.
+    Plain(B256),
+    /// A keccak256-hashed storage slot, as stored in `HashedStorages` and
+    /// in v2-mode `StorageChangeSets`.
+    Hashed(B256),
 }
 
-/// A plain (unhashed) storage slot key.
-pub type PlainSlotKey = StorageSlotKey<PlainSlot>;
-
-/// A keccak256-hashed storage slot key.
-pub type HashedSlotKey = StorageSlotKey<HashedSlot>;
-
-impl<K> StorageSlotKey<K> {
-    /// Wrap a raw [`B256`] as a typed slot key.
-    ///
-    /// The caller is responsible for ensuring that the value matches the marker
-    /// type `K` (i.e. that a plain B256 is wrapped as [`PlainSlotKey`] and a
-    /// hashed B256 is wrapped as [`HashedSlotKey`]).
-    pub const fn new_unchecked(inner: B256) -> Self {
-        Self { inner, _marker: PhantomData }
-    }
-
-    /// Returns a reference to the inner [`B256`].
-    pub const fn as_b256(&self) -> &B256 {
-        &self.inner
-    }
-
-    /// Consumes self and returns the inner [`B256`].
-    pub const fn into_b256(self) -> B256 {
-        self.inner
+impl Default for StorageSlotKey {
+    fn default() -> Self {
+        Self::Plain(B256::ZERO)
     }
 }
 
-impl PlainSlotKey {
-    /// Create a [`PlainSlotKey`] from a REVM [`U256`] storage index.
+impl StorageSlotKey {
+    /// Create a plain slot key from a REVM [`U256`] storage index.
     pub const fn from_u256(slot: U256) -> Self {
-        Self::new_unchecked(B256::new(slot.to_be_bytes()))
+        Self::Plain(B256::new(slot.to_be_bytes()))
     }
 
-    /// Hash this plain slot key with keccak256, producing a [`HashedSlotKey`].
-    pub fn hash(self) -> HashedSlotKey {
-        HashedSlotKey::new_unchecked(keccak256(self.inner))
+    /// Create a plain slot key from a raw [`B256`].
+    pub const fn plain(key: B256) -> Self {
+        Self::Plain(key)
     }
 
-    /// Conditionally hash based on mode: returns [`HashedSlotKey`] (hashed) if
-    /// `use_hashed_state` is true, otherwise wraps the plain key as-is.
+    /// Create a hashed slot key from a raw [`B256`].
+    pub const fn hashed(key: B256) -> Self {
+        Self::Hashed(key)
+    }
+
+    /// Tag a raw [`B256`] based on the storage mode.
     ///
-    /// This is the typed replacement for the `if use_hashed { keccak256(key) } else { key }`
-    /// pattern at REVM→changeset boundaries.
+    /// When `use_hashed_state` is true the key is assumed already hashed.
+    /// When false it is assumed to be a plain slot.
+    pub const fn from_raw(key: B256, use_hashed_state: bool) -> Self {
+        if use_hashed_state { Self::Hashed(key) } else { Self::Plain(key) }
+    }
+
+    /// Returns the raw [`B256`] regardless of variant.
+    pub const fn as_b256(&self) -> B256 {
+        match *self {
+            Self::Plain(b) | Self::Hashed(b) => b,
+        }
+    }
+
+    /// Returns `true` if this key is already hashed.
+    pub const fn is_hashed(&self) -> bool {
+        matches!(self, Self::Hashed(_))
+    }
+
+    /// Returns `true` if this key is plain (unhashed).
+    pub const fn is_plain(&self) -> bool {
+        matches!(self, Self::Plain(_))
+    }
+
+    /// Produce the keccak256-hashed form of this slot key.
+    ///
+    /// - If already [`Hashed`](Self::Hashed), returns the inner value as-is (no double-hash).
+    /// - If [`Plain`](Self::Plain), applies keccak256 and returns the result.
+    pub fn to_hashed(&self) -> B256 {
+        match *self {
+            Self::Hashed(b) => b,
+            Self::Plain(b) => keccak256(b),
+        }
+    }
+
+    /// Convert a plain slot to its changeset representation.
+    ///
+    /// In v2 mode (`use_hashed_state = true`), the changeset stores hashed keys,
+    /// so the plain key is hashed. In v1 mode, the plain key is stored as-is.
+    ///
+    /// Panics (debug) if called on an already-hashed key.
     pub fn to_changeset_key(self, use_hashed_state: bool) -> B256 {
-        if use_hashed_state { self.hash().into_b256() } else { self.into_b256() }
+        debug_assert!(self.is_plain(), "to_changeset_key called on already-hashed key");
+        if use_hashed_state { self.to_hashed() } else { self.as_b256() }
     }
 }
 
-impl HashedSlotKey {
-    /// Use a changeset key that is already hashed as-is for hashed-state lookups.
-    ///
-    /// This is the typed replacement for the `if use_hashed { key } else { keccak256(key) }`
-    /// pattern at changeset→trie boundaries in v2 mode.
-    pub const fn as_hashed(self) -> B256 {
-        self.inner
-    }
-}
-
-impl<K> From<StorageSlotKey<K>> for B256 {
-    fn from(key: StorageSlotKey<K>) -> Self {
-        key.inner
-    }
-}
-
-/// A typed in-memory view of a [`StorageEntry`] whose slot key is tagged as
-/// either [`PlainSlot`] or [`HashedSlot`].
-///
-/// The raw [`StorageEntry`] remains the on-disk / codec type used by DB tables.
-/// This wrapper is used at provider boundaries to carry provenance information
-/// through higher-level code without changing the storage format.
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default)]
-pub struct TypedStorageEntry<K> {
-    /// Typed storage slot key.
-    pub key: StorageSlotKey<K>,
-    /// Value at this storage slot.
-    pub value: U256,
-}
-
-/// A [`TypedStorageEntry`] with a plain (unhashed) slot key.
-pub type PlainStorageEntry = TypedStorageEntry<PlainSlot>;
-
-/// A [`TypedStorageEntry`] with a keccak256-hashed slot key.
-pub type HashedStorageEntry = TypedStorageEntry<HashedSlot>;
-
-impl<K> From<TypedStorageEntry<K>> for StorageEntry {
-    fn from(e: TypedStorageEntry<K>) -> Self {
-        Self { key: e.key.into_b256(), value: e.value }
-    }
-}
-
-impl<K> From<StorageEntry> for TypedStorageEntry<K> {
-    fn from(e: StorageEntry) -> Self {
-        Self { key: StorageSlotKey::new_unchecked(e.key), value: e.value }
-    }
-}
-
-impl<K> ValueWithSubKey for TypedStorageEntry<K> {
-    type SubKey = B256;
-
-    fn get_subkey(&self) -> Self::SubKey {
-        *self.key.as_b256()
+impl From<StorageSlotKey> for B256 {
+    fn from(key: StorageSlotKey) -> Self {
+        key.as_b256()
     }
 }
 
@@ -158,19 +127,12 @@ impl StorageEntry {
         Self { key, value }
     }
 
-    /// Interpret this entry as a [`TypedStorageEntry`] with the given marker.
+    /// Tag this entry's key as a [`StorageSlotKey`] based on the storage mode.
     ///
-    /// The caller must ensure the marker matches reality.
-    pub const fn into_typed<K>(self) -> TypedStorageEntry<K> {
-        TypedStorageEntry { key: StorageSlotKey::new_unchecked(self.key), value: self.value }
-    }
-
-    /// Convert the changeset key to a hashed slot key for trie lookups.
-    ///
-    /// When `use_hashed_state` is true the key is already hashed (passthrough).
-    /// When false the key is plain and needs keccak256 hashing.
-    pub fn changeset_key_to_hashed_slot(&self, use_hashed_state: bool) -> B256 {
-        if use_hashed_state { self.key } else { keccak256(self.key) }
+    /// When `use_hashed_state` is true, the key is tagged as already-hashed.
+    /// When false, it is tagged as plain.
+    pub const fn slot_key(&self, use_hashed_state: bool) -> StorageSlotKey {
+        StorageSlotKey::from_raw(self.key, use_hashed_state)
     }
 }
 

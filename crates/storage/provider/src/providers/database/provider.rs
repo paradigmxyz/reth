@@ -51,7 +51,7 @@ use reth_db_api::{
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
-    Account, Block as _, BlockBody as _, Bytecode, PlainSlotKey, RecoveredBlock, SealedHeader,
+    Account, Block as _, BlockBody as _, Bytecode, StorageSlotKey, RecoveredBlock, SealedHeader,
     StorageEntry,
 };
 use reth_prune_types::{
@@ -2456,7 +2456,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     let mut storage = storage_revert
                         .into_iter()
                         .map(|(k, v)| {
-                            (PlainSlotKey::from_u256(k).to_changeset_key(use_hashed_state), v)
+                            (StorageSlotKey::from_u256(k).to_changeset_key(use_hashed_state), v)
                         })
                         .collect::<Vec<_>>();
                     // sort storage slots by key.
@@ -3115,7 +3115,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         let mut hashed_storages = changesets
             .into_iter()
             .map(|(BlockNumberAddress((_, address)), storage_entry)| {
-                let hashed_key = storage_entry.changeset_key_to_hashed_slot(use_hashed_state);
+                let hashed_key = storage_entry.slot_key(use_hashed_state).to_hashed();
                 (keccak256(address), hashed_key, storage_entry.value)
             })
             .collect::<Vec<_>>();
@@ -3598,7 +3598,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 for (address, account_revert) in block_reverts {
                     account_transitions.entry(*address).or_default().push(block_number);
                     for storage_key in account_revert.storage.keys() {
-                        let key = PlainSlotKey::from_u256(*storage_key).to_changeset_key(use_hashed);
+                        let key = StorageSlotKey::from_u256(*storage_key).to_changeset_key(use_hashed);
                         storage_transitions.entry((*address, key)).or_default().push(block_number);
                     }
                 }

@@ -22,7 +22,7 @@ use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIn
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{
-    Account, BlockBody, PlainSlotKey, RecoveredBlock, SealedHeader, StorageEntry,
+    Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry, StorageSlotKey,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -266,12 +266,16 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             // match storage.
             match account_state.2.entry(old_storage.key) {
                 hash_map::Entry::Vacant(entry) => {
-                    let new_storage_value = if use_hashed {
-                        state_provider
-                            .storage_by_hashed_key(address, old_storage.key)?
-                            .unwrap_or_default()
-                    } else {
-                        state_provider.storage(address, old_storage.key)?.unwrap_or_default()
+                    let slot = StorageSlotKey::from_raw(old_storage.key, use_hashed);
+                    let new_storage_value = match slot {
+                        StorageSlotKey::Hashed(_) => {
+                            state_provider
+                                .storage_by_hashed_key(address, old_storage.key)?
+                                .unwrap_or_default()
+                        }
+                        StorageSlotKey::Plain(_) => {
+                            state_provider.storage(address, old_storage.key)?.unwrap_or_default()
+                        }
                     };
                     entry.insert((old_storage.value, new_storage_value));
                 }
@@ -1329,7 +1333,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .flatten()
                 .flat_map(|revert: PlainStorageRevert| {
                     revert.storage_revert.into_iter().map(move |(key, value)| {
-                        let final_key = PlainSlotKey::new_unchecked(key.into()).to_changeset_key(use_hashed);
+                        let final_key = StorageSlotKey::plain(key.into()).to_changeset_key(use_hashed);
                         (
                             BlockNumberAddress((block_number, revert.address)),
                             StorageEntry { key: final_key, value: value.to_previous_value() },
@@ -1387,7 +1391,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                         return None
                     }
                     revert.storage_revert.into_iter().find_map(|(key, value)| {
-                        let key = PlainSlotKey::new_unchecked(key.into()).to_changeset_key(use_hashed);
+                        let key = StorageSlotKey::plain(key.into()).to_changeset_key(use_hashed);
                         (key == storage_key)
                             .then(|| StorageEntry { key, value: value.to_previous_value() })
                     })
@@ -1438,7 +1442,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .flatten()
                     .flat_map(|revert: PlainStorageRevert| {
                         revert.storage_revert.into_iter().map(move |(key, value)| {
-                            let final_key = PlainSlotKey::new_unchecked(key.into()).to_changeset_key(use_hashed);
+                            let final_key = StorageSlotKey::plain(key.into()).to_changeset_key(use_hashed);
                             (
                                 BlockNumberAddress((state.number(), revert.address)),
                                 StorageEntry { key: final_key, value: value.to_previous_value() },

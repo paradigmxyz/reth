@@ -60,7 +60,7 @@ where
         storage_prefix_sets
             .entry(hashed_address)
             .or_default()
-            .insert(Nibbles::unpack(storage_entry.changeset_key_to_hashed_slot(use_hashed_state)));
+            .insert(Nibbles::unpack(storage_entry.slot_key(use_hashed_state).to_hashed()));
     }
 
     Ok(TriePrefixSets {

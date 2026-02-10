@@ -335,7 +335,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
                     storages
                         .entry(hashed_address)
                         .or_default()
-                        .push((storage.changeset_key_to_hashed_slot(use_hashed_state), storage.value));
+                        .push((storage.slot_key(use_hashed_state).to_hashed(), storage.value));
                 }
             }
         }

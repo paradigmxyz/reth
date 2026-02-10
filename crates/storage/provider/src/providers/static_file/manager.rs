@@ -33,7 +33,7 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{
-    dashmap::DashMap, AlloyBlockHeader as _, BlockBody as _, PlainSlotKey, RecoveredBlock,
+    dashmap::DashMap, AlloyBlockHeader as _, BlockBody as _, StorageSlotKey, RecoveredBlock,
     SealedHeader, SignedTransaction, StorageEntry,
 };
 use reth_prune_types::PruneSegment;
@@ -646,7 +646,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
                         StorageBeforeTx {
                             address: revert.address,
-                            key: PlainSlotKey::from_u256(key).to_changeset_key(use_hashed_state),
+                            key: StorageSlotKey::from_u256(key).to_changeset_key(use_hashed_state),
                             value: revert_to_slot.to_previous_value(),
                         }
                     })
