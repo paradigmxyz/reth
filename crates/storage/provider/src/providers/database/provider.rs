@@ -4759,17 +4759,33 @@ mod tests {
         use revm_state::AccountInfo;
 
         let factory = create_test_provider_factory();
-        let mut settings = StorageSettings::v1();
-        settings.use_hashed_state = true;
-        factory.set_storage_settings_cache(settings);
-
-        let provider_rw = factory.provider_rw().unwrap();
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let address = Address::with_last_byte(1);
         let slot = U256::from(5);
         let slot_key = B256::from(slot);
         let hashed_address = keccak256(address);
         let hashed_slot = keccak256(slot_key);
+
+        {
+            let sf = factory.static_file_provider();
+            let mut hw = sf.latest_writer(StaticFileSegment::Headers).unwrap();
+            let h0 = alloy_consensus::Header { number: 0, ..Default::default() };
+            hw.append_header(&h0, &B256::ZERO).unwrap();
+            let h1 = alloy_consensus::Header { number: 1, ..Default::default() };
+            hw.append_header(&h1, &B256::ZERO).unwrap();
+            hw.commit().unwrap();
+
+            let mut aw = sf.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            aw.append_account_changeset(vec![], 0).unwrap();
+            aw.commit().unwrap();
+
+            let mut sw = sf.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            sw.append_storage_changeset(vec![], 0).unwrap();
+            sw.commit().unwrap();
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
 
         let bundle = BundleState::builder(1..=1)
             .state_present_account_info(
@@ -4807,14 +4823,6 @@ mod tests {
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
         provider_rw.write_hashed_state(&hashed_state).unwrap();
 
-        provider_rw
-            .tx
-            .put::<tables::StoragesHistory>(
-                StorageShardedKey::new(address, hashed_slot, u64::MAX),
-                BlockNumberList::new_pre_sorted([1]),
-            )
-            .unwrap();
-
         let plain_storage_entries = provider_rw
             .tx
             .cursor_dup_read::<tables::PlainStorageState>()
@@ -4835,16 +4843,16 @@ mod tests {
         assert_eq!(hashed_entry.key, hashed_slot);
         assert_eq!(hashed_entry.value, U256::from(10));
 
-        let storage_cs_entries = provider_rw
-            .tx
-            .cursor_read::<tables::StorageChangeSets>()
-            .unwrap()
-            .walk(Some(BlockNumberAddress((1, address))))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert!(!storage_cs_entries.is_empty());
-        assert_eq!(storage_cs_entries[0].1.key, hashed_slot);
+        provider_rw.static_file_provider().commit().unwrap();
+
+        let sf = factory.static_file_provider();
+        let storage_cs = sf.storage_changeset(1).unwrap();
+        assert!(!storage_cs.is_empty());
+        assert_eq!(storage_cs[0].1.key, hashed_slot);
+
+        let account_cs = sf.account_block_changeset(1).unwrap();
+        assert!(!account_cs.is_empty());
+        assert_eq!(account_cs[0].address, address);
 
         let historical_value =
             HistoricalStateProviderRef::new(&*provider_rw, 0).storage(address, slot_key).unwrap();
