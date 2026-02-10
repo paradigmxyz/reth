@@ -248,6 +248,14 @@ maxperf: ## Builds `reth` with the most aggressive optimisations.
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc
 
+.PHONY: pgo-bolt
+pgo-bolt: ## Builds `reth` with PGO+BOLT optimizations (Linux only).
+	BINARY=reth FEATURES=$(FEATURES) PROFILE=$(PROFILE) .github/scripts/build_pgo_bolt.sh
+
+.PHONY: pgo-bolt-op
+pgo-bolt-op: ## Builds `op-reth` with PGO+BOLT optimizations (Linux only).
+	BINARY=op-reth FEATURES=$(FEATURES) PROFILE=$(PROFILE) .github/scripts/build_pgo_bolt.sh
+
 
 fmt:
 	cargo +nightly fmt
