@@ -149,7 +149,7 @@ mod tests {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
 
-        assert!(!provider.cached_storage_settings().use_hashed_state);
+        assert!(!provider.cached_storage_settings().use_hashed_state());
 
         let address = Address::with_last_byte(42);
         let slot1 = B256::from(U256::from(100));
@@ -196,12 +196,12 @@ mod tests {
         let factory = create_test_provider_factory();
 
         let mut settings = factory.cached_storage_settings();
-        settings.use_hashed_state = true;
+        settings.storage_v2 = true;
         settings.storage_changesets_in_static_files = true;
         factory.set_storage_settings_cache(settings);
 
         let provider = factory.provider_rw().unwrap();
-        assert!(provider.cached_storage_settings().use_hashed_state);
+        assert!(provider.cached_storage_settings().use_hashed_state());
         assert!(provider.cached_storage_settings().storage_changesets_in_static_files);
 
         let address = Address::with_last_byte(42);

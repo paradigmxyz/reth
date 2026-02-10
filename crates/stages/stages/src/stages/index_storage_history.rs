@@ -107,7 +107,7 @@ where
 
         let mut range = input.next_block_range();
         let first_sync = input.checkpoint().block_number == 0;
-        let use_rocksdb = provider.cached_storage_settings().storages_history_in_rocksdb;
+        let use_rocksdb = provider.cached_storage_settings().storages_history_in_rocksdb();
 
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
@@ -125,7 +125,7 @@ where
         }
 
         info!(target: "sync::stages::index_storage_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
-        let collector = if provider.cached_storage_settings().storage_changesets_in_static_files {
+        let collector = if provider.cached_storage_settings().storage_changesets_in_static_files() {
             collect_storage_history_indices(provider, range.clone(), &self.etl_config)?
         } else {
             collect_history_indices::<_, tables::StorageChangeSets, tables::StoragesHistory, _>(
@@ -703,9 +703,7 @@ mod tests {
         async fn execute_writes_to_rocksdb_when_enabled() {
             let db = TestStageDB::default();
 
-            db.factory.set_storage_settings_cache(
-                StorageSettings::v1().with_storages_history_in_rocksdb(true),
-            );
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
 
             db.commit(|tx| {
                 for block in 0..=10 {
@@ -749,9 +747,7 @@ mod tests {
         async fn unwind_works_when_rocksdb_enabled() {
             let db = TestStageDB::default();
 
-            db.factory.set_storage_settings_cache(
-                StorageSettings::v1().with_storages_history_in_rocksdb(true),
-            );
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
 
             db.commit(|tx| {
                 for block in 0..=10 {
@@ -804,9 +800,7 @@ mod tests {
         async fn unwind_to_zero_keeps_block_zero() {
             let db = TestStageDB::default();
 
-            db.factory.set_storage_settings_cache(
-                StorageSettings::v1().with_storages_history_in_rocksdb(true),
-            );
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
 
             db.commit(|tx| {
                 for block in 0..=5 {
@@ -853,9 +847,7 @@ mod tests {
         async fn execute_incremental_sync() {
             let db = TestStageDB::default();
 
-            db.factory.set_storage_settings_cache(
-                StorageSettings::v1().with_storages_history_in_rocksdb(true),
-            );
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
 
             db.commit(|tx| {
                 for block in 0..=5 {
@@ -920,9 +912,7 @@ mod tests {
 
             let db = TestStageDB::default();
 
-            db.factory.set_storage_settings_cache(
-                StorageSettings::v1().with_storages_history_in_rocksdb(true),
-            );
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
 
             let num_blocks = (NUM_OF_INDICES_IN_SHARD * 2 + 100) as u64;
 

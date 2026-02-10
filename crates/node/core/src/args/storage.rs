@@ -25,16 +25,6 @@ pub struct StorageArgs {
     /// flags.
     #[arg(long = "storage.v2", action = ArgAction::SetTrue)]
     pub v2: bool,
-
-    /// Use hashed state tables (`HashedAccounts`/`HashedStorages`) as canonical state
-    /// representation instead of plain state tables.
-    ///
-    /// When enabled, execution writes directly to hashed tables, eliminating the need for
-    /// separate hashing stages. This should only be enabled for new databases.
-    ///
-    /// WARNING: Changing this setting on an existing database requires a full resync.
-    #[arg(long = "storage.use-hashed-state", default_value_t = false)]
-    pub use_hashed_state: bool,
 }
 
 #[cfg(test)]

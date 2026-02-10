@@ -8024,6 +8024,7 @@ dependencies = [
  "reth-trie-common",
  "roaring",
  "serde",
+ "serde_json",
  "test-fuzz",
 ]
 

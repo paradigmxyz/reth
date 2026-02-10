@@ -54,7 +54,7 @@ impl<Provider: DBProvider + StorageSettingsCache> AccountReader
 {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if self.0.cached_storage_settings().use_hashed_state {
+        if self.0.cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
             self.tx()
                 .get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)
@@ -180,7 +180,7 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        if self.0.cached_storage_settings().use_hashed_state {
+        if self.0.cached_storage_settings().use_hashed_state() {
             self.hashed_storage_lookup(
                 alloy_primitives::keccak256(account),
                 alloy_primitives::keccak256(storage_key),
@@ -201,7 +201,7 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
         address: Address,
         hashed_storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        if self.0.cached_storage_settings().use_hashed_state {
+        if self.0.cached_storage_settings().use_hashed_state() {
             self.hashed_storage_lookup(alloy_primitives::keccak256(address), hashed_storage_key)
         } else {
             Err(ProviderError::UnsupportedProvider)
@@ -321,7 +321,7 @@ mod tests {
     #[test]
     fn test_latest_storage_legacy() {
         let factory = create_test_provider_factory();
-        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state);
+        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state());
 
         let address = address!("0x0000000000000000000000000000000000000001");
         let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000005");
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn test_latest_storage_legacy_does_not_read_hashed() {
         let factory = create_test_provider_factory();
-        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state);
+        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state());
 
         let address = address!("0x0000000000000000000000000000000000000001");
         let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000005");
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn test_latest_storage_by_hashed_key_unsupported_in_v1() {
         let factory = create_test_provider_factory();
-        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state);
+        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state());
 
         let address = address!("0x0000000000000000000000000000000000000001");
         let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");

@@ -78,7 +78,7 @@ pub use static_files::{StaticFilesArgs, MINIMAL_BLOCKS_PER_FILE};
 
 /// `RocksDbArgs` for configuring RocksDB table routing.
 mod rocksdb;
-pub use rocksdb::{RocksDbArgs, RocksDbArgsError};
+pub use rocksdb::RocksDbArgs;
 
 /// `StorageArgs` for configuring storage settings.
 mod storage;

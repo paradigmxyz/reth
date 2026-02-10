@@ -369,49 +369,13 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self.pruning.prune_config(&self.chain)
     }
 
-    /// Returns the effective storage settings derived from `--storage.v2`, static-file, and
-    /// `RocksDB` CLI args.
+    /// Returns the effective storage settings derived from `--storage.v2`.
     ///
     /// The base storage mode is determined by `--storage.v2`:
     /// - When `--storage.v2` is set: uses [`StorageSettings::v2()`] defaults
-    /// - Otherwise: uses [`StorageSettings::v1()`] defaults
-    ///
-    /// Individual `--static-files.*` and `--rocksdb.*` flags override the base when explicitly set.
+    /// - Otherwise: uses [`StorageSettings::base()`] defaults
     pub const fn storage_settings(&self) -> StorageSettings {
-        let mut s = if self.storage.v2 { StorageSettings::v2() } else { StorageSettings::base() };
-
-        // Apply static files overrides (only when explicitly set)
-        s = s
-            .with_receipts_in_static_files_opt(self.static_files.receipts)
-            .with_transaction_senders_in_static_files_opt(self.static_files.transaction_senders)
-            .with_account_changesets_in_static_files_opt(self.static_files.account_changesets)
-            .with_storage_changesets_in_static_files_opt(self.static_files.storage_changesets);
-
-        // Apply rocksdb overrides
-        // --rocksdb.all sets all rocksdb flags to true
-        if self.rocksdb.all {
-            s = s
-                .with_transaction_hash_numbers_in_rocksdb(true)
-                .with_storages_history_in_rocksdb(true)
-                .with_account_history_in_rocksdb(true);
-        }
-
-        // Individual rocksdb flags override --rocksdb.all when explicitly set
-        s = s
-            .with_transaction_hash_numbers_in_rocksdb_opt(self.rocksdb.tx_hash)
-            .with_storages_history_in_rocksdb_opt(self.rocksdb.storages_history)
-            .with_account_history_in_rocksdb_opt(self.rocksdb.account_history);
-
-        s = s.with_use_hashed_state(self.storage.use_hashed_state);
-
-        if s.use_hashed_state {
-            s = s.with_storage_changesets_in_static_files(true);
-        }
-        if s.storage_changesets_in_static_files {
-            s = s.with_use_hashed_state(true);
-        }
-
-        s
+        if self.storage.v2 { StorageSettings::v2() } else { StorageSettings::base() }
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if

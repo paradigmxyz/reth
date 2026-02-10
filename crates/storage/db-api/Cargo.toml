@@ -35,6 +35,7 @@ modular-bitfield.workspace = true
 roaring.workspace = true
 parity-scale-codec = { workspace = true, features = ["bytes"] }
 serde = { workspace = true, default-features = false }
+serde_json.workspace = true
 
 # metrics
 metrics.workspace = true

@@ -183,9 +183,6 @@ where
             ext,
         } = self;
 
-        // Validate RocksDB arguments
-        rocksdb.validate()?;
-
         // set up node config
         let mut node_config = NodeConfig {
             datadir,

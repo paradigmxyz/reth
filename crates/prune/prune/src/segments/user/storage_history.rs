@@ -76,7 +76,7 @@ where
 
         // Check where storage history indices are stored
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().storages_history_in_rocksdb {
+        if provider.cached_storage_settings().storages_history_in_rocksdb() {
             return self.prune_rocksdb(provider, input, range, range_end);
         }
 
@@ -413,9 +413,7 @@ mod tests {
             let segment = StorageHistory::new(prune_mode);
 
             let provider = db.factory.database_provider_rw().unwrap();
-            provider.set_storage_settings_cache(
-                StorageSettings::default().with_storage_changesets_in_static_files(false),
-            );
+            provider.set_storage_settings_cache(StorageSettings::v1());
             let result = segment.prune(&provider, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 
@@ -577,9 +575,7 @@ mod tests {
             let segment = StorageHistory::new(prune_mode);
 
             let provider = db.factory.database_provider_rw().unwrap();
-            provider.set_storage_settings_cache(
-                StorageSettings::default().with_storage_changesets_in_static_files(true),
-            );
+            provider.set_storage_settings_cache(StorageSettings::v2());
             let result = segment.prune(&provider, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 
@@ -739,9 +735,7 @@ mod tests {
         let segment = StorageHistory::new(prune_mode);
 
         let provider = db.factory.database_provider_rw().unwrap();
-        provider.set_storage_settings_cache(
-            StorageSettings::default().with_storage_changesets_in_static_files(false),
-        );
+        provider.set_storage_settings_cache(StorageSettings::v1());
         let result = segment.prune(&provider, input).unwrap();
 
         // Should report that there's more data
@@ -793,9 +787,7 @@ mod tests {
         };
 
         let provider2 = db.factory.database_provider_rw().unwrap();
-        provider2.set_storage_settings_cache(
-            StorageSettings::default().with_storage_changesets_in_static_files(false),
-        );
+        provider2.set_storage_settings_cache(StorageSettings::v1());
         let result2 = segment.prune(&provider2, input2).unwrap();
 
         assert!(result2.progress.is_finished(), "Second run should complete");
@@ -895,11 +887,7 @@ mod tests {
         let segment = StorageHistory::new(prune_mode);
 
         let provider = db.factory.database_provider_rw().unwrap();
-        provider.set_storage_settings_cache(
-            StorageSettings::default()
-                .with_storage_changesets_in_static_files(true)
-                .with_storages_history_in_rocksdb(true),
-        );
+        provider.set_storage_settings_cache(StorageSettings::v2());
         let result = segment.prune(&provider, input).unwrap();
         provider.commit().expect("commit");
 

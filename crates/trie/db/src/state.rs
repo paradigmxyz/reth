@@ -534,7 +534,7 @@ mod tests {
         let factory = create_test_provider_factory();
 
         let mut settings = factory.cached_storage_settings();
-        settings.use_hashed_state = true;
+        settings.storage_v2 = true;
         settings.storage_changesets_in_static_files = true;
         factory.set_storage_settings_cache(settings);
 

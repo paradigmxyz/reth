@@ -62,21 +62,21 @@ impl RocksDBProvider {
         let mut unwind_target: Option<BlockNumber> = None;
 
         // Heal TransactionHashNumbers if stored in RocksDB
-        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
+        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb() &&
             let Some(target) = self.heal_transaction_hash_numbers(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
         // Heal StoragesHistory if stored in RocksDB
-        if provider.cached_storage_settings().storages_history_in_rocksdb &&
+        if provider.cached_storage_settings().storages_history_in_rocksdb() &&
             let Some(target) = self.heal_storages_history(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
         // Heal AccountsHistory if stored in RocksDB
-        if provider.cached_storage_settings().account_history_in_rocksdb &&
+        if provider.cached_storage_settings().account_history_in_rocksdb() &&
             let Some(target) = self.heal_accounts_history(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
@@ -504,11 +504,7 @@ mod tests {
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1()
-                .with_transaction_hash_numbers_in_rocksdb(true)
-                .with_storages_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let provider = factory.database_provider_ro().unwrap();
 
@@ -527,9 +523,7 @@ mod tests {
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Set a checkpoint indicating we should have processed up to block 100
         {
@@ -559,9 +553,7 @@ mod tests {
             .unwrap();
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Generate blocks with real transactions and insert them
         let mut rng = generators::rng();
@@ -627,9 +619,7 @@ mod tests {
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_storages_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Set a checkpoint indicating we should have processed up to block 100
         {
@@ -667,9 +657,7 @@ mod tests {
 
         // Create a test provider factory for MDBX with NO checkpoint
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_storages_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let provider = factory.database_provider_ro().unwrap();
 
@@ -693,9 +681,7 @@ mod tests {
             .unwrap();
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Generate blocks with real transactions (blocks 0-2, 6 transactions total)
         let mut rng = generators::rng();
@@ -749,9 +735,7 @@ mod tests {
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Generate blocks with real transactions:
         // Blocks 0-5, each with 2 transactions = 12 total transactions (0-11)
@@ -861,9 +845,7 @@ mod tests {
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_storages_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Set a checkpoint indicating we should have processed up to block 100
         {
@@ -905,9 +887,7 @@ mod tests {
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_account_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Set a checkpoint indicating we should have processed up to block 100
         {
@@ -940,9 +920,7 @@ mod tests {
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Generate random blocks with unique transactions
         // Block 0 (genesis) has no transactions
@@ -1053,9 +1031,7 @@ mod tests {
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_account_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Set a checkpoint indicating we should have processed up to block 100
         {
@@ -1095,9 +1071,7 @@ mod tests {
 
         // Create a test provider factory for MDBX with NO checkpoint
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_account_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let provider = factory.database_provider_ro().unwrap();
 
@@ -1143,9 +1117,7 @@ mod tests {
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_account_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Write account changesets to static files for blocks 0-100
         {
@@ -1230,11 +1202,7 @@ mod tests {
             .unwrap();
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1()
-                .with_storages_history_in_rocksdb(true)
-                .with_storage_changesets_in_static_files(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Helper to generate address from block number (reuses stack arrays)
         #[inline]
@@ -1354,11 +1322,7 @@ mod tests {
             .unwrap();
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1()
-                .with_storages_history_in_rocksdb(true)
-                .with_storage_changesets_in_static_files(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let checkpoint_addr = Address::repeat_byte(0xAA);
         let checkpoint_slot = B256::repeat_byte(0xBB);
@@ -1460,11 +1424,7 @@ mod tests {
 
         // Create test provider factory
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1()
-                .with_account_history_in_rocksdb(true)
-                .with_account_changesets_in_static_files(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         const TOTAL_BLOCKS: u64 = 15_000;
         const CHECKPOINT_BLOCK: u64 = 5_000;
@@ -1581,11 +1541,7 @@ mod tests {
             .unwrap();
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1()
-                .with_account_history_in_rocksdb(true)
-                .with_account_changesets_in_static_files(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let checkpoint_addr = Address::repeat_byte(0xAA);
         let stale_addr = Address::repeat_byte(0xCC);
@@ -1671,9 +1627,7 @@ mod tests {
 
         // Create a test provider factory
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::v1().with_storages_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Write storage changesets to static files for blocks 0-100
         {

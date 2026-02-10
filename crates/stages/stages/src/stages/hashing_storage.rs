@@ -89,7 +89,7 @@ where
 
         // If use_hashed_state is enabled, execution writes directly to `HashedStorages`,
         // so this stage becomes a no-op.
-        if provider.cached_storage_settings().use_hashed_state {
+        if provider.cached_storage_settings().use_hashed_state() {
             return Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())));
         }
 

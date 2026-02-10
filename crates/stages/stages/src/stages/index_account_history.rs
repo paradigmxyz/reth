@@ -103,7 +103,7 @@ where
 
         let mut range = input.next_block_range();
         let first_sync = input.checkpoint().block_number == 0;
-        let use_rocksdb = provider.cached_storage_settings().account_history_in_rocksdb;
+        let use_rocksdb = provider.cached_storage_settings().account_history_in_rocksdb();
 
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
@@ -122,7 +122,7 @@ where
 
         info!(target: "sync::stages::index_account_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
 
-        let collector = if provider.cached_storage_settings().account_changesets_in_static_files {
+        let collector = if provider.cached_storage_settings().account_changesets_in_static_files() {
             // Use the provider-based collection that can read from static files.
             collect_account_history_indices(provider, range.clone(), &self.etl_config)?
         } else {
@@ -677,9 +677,7 @@ mod tests {
             let db = TestStageDB::default();
 
             // Enable RocksDB for account history
-            db.factory.set_storage_settings_cache(
-                StorageSettings::v1().with_account_history_in_rocksdb(true),
-            );
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
 
             db.commit(|tx| {
                 for block in 0..=10 {
@@ -722,9 +720,7 @@ mod tests {
         async fn unwind_works_when_rocksdb_enabled() {
             let db = TestStageDB::default();
 
-            db.factory.set_storage_settings_cache(
-                StorageSettings::v1().with_account_history_in_rocksdb(true),
-            );
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
 
             db.commit(|tx| {
                 for block in 0..=10 {
@@ -773,9 +769,7 @@ mod tests {
         async fn execute_incremental_sync() {
             let db = TestStageDB::default();
 
-            db.factory.set_storage_settings_cache(
-                StorageSettings::v1().with_account_history_in_rocksdb(true),
-            );
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
 
             db.commit(|tx| {
                 for block in 0..=5 {

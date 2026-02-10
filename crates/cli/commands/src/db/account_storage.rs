@@ -23,7 +23,7 @@ impl Command {
     /// Execute `db account-storage` command
     pub fn execute<N: NodeTypesWithDB>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         let address = self.address;
-        let use_hashed_state = tool.provider_factory.cached_storage_settings().use_hashed_state;
+        let use_hashed_state = tool.provider_factory.cached_storage_settings().use_hashed_state();
 
         let (slot_count, storage_size) = if use_hashed_state {
             let hashed_address = keccak256(address);

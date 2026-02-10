@@ -540,9 +540,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let runner = SenderRecoveryTestRunner::default();
-        runner.db.factory.set_storage_settings_cache(
-            StorageSettings::v1().with_transaction_senders_in_static_files(true),
-        );
+        runner.db.factory.set_storage_settings_cache(StorageSettings::v2());
         let input = ExecInput {
             target: Some(target),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
