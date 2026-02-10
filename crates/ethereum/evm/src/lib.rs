@@ -34,14 +34,12 @@ use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::{context::BlockEnv, primitives::hardfork::SpecId};
 
 #[cfg(feature = "std")]
-use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
-#[allow(unused_imports)]
 use {
     alloy_eips::Decodable2718,
     alloy_primitives::{Bytes, U256},
     alloy_rpc_types_engine::ExecutionData,
     reth_chainspec::EthereumHardforks,
-    reth_evm::{EvmEnvFor, ExecutionCtxFor},
+    reth_evm::{ConfigureEngineEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor},
     reth_primitives_traits::{constants::MAX_TX_GAS_LIMIT_OSAKA, SignedTransaction, TxTy},
     reth_storage_errors::any::AnyError,
     revm::context::CfgEnv,
