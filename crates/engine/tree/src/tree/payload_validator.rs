@@ -12,7 +12,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::BlockAccessList;
-use alloy_eips::{eip1898::BlockWithParent, NumHash};
+use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
 
@@ -408,6 +408,7 @@ where
             parent_hash: input.parent_hash(),
             parent_state_root: parent_block.state_root(),
             transaction_count: input.transaction_count(),
+            withdrawals: input.withdrawals().map(|w| w.to_vec()),
         };
 
         // Plan the strategy used for state root computation.
@@ -1554,6 +1555,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.transaction_count(),
             Self::Block(block) => block.transaction_count(),
+        }
+    }
+
+    /// Returns the withdrawals from the payload or block.
+    pub fn withdrawals(&self) -> Option<&[Withdrawal]>
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.withdrawals().map(|w| w.as_slice()),
+            Self::Block(block) => block.body().withdrawals().map(|w| w.as_slice()),
         }
     }
 }
