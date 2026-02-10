@@ -19,7 +19,8 @@ use tracing::error;
 pub struct Command {
     /// The table name
     table: Tables,
-    /// Skip first N entries
+    /// Skip first N entries. When used with --start-key, skips relative to the seek position
+    /// rather than the table start.
     #[arg(long, short, default_value_t = 0)]
     skip: usize,
     /// Reverse the order of the entries. If enabled last table entries are read.
@@ -53,13 +54,16 @@ pub struct Command {
     /// Output bytes instead of human-readable decoded value
     #[arg(long)]
     raw: bool,
-    /// Start key for range query (inclusive). The query will start from this key using O(log n)
-    /// seek instead of scanning from the beginning. Format: JSON value matching the table's key
-    /// type. Examples: `123` for numeric keys, `"0xabc..."` for hash keys.
+    /// Start key for range query (inclusive). Defines the lower bound of the range.
+    /// The query will seek to this key using O(log n) instead of scanning from the beginning.
+    /// When used with --reverse, iteration goes from end-key (or table end) backwards to this key.
+    /// Format: JSON value matching the table's key type. Examples: `123` for numeric keys,
+    /// `"0xabc..."` for hash keys.
     #[arg(long, value_parser = maybe_json_value_parser)]
     start_key: Option<String>,
-    /// End key for range query (exclusive). The query will stop before this key. Format: JSON
-    /// value matching the table's key type.
+    /// End key for range query (exclusive). Defines the upper bound of the range.
+    /// When used with --reverse, this key is the starting point for backward iteration.
+    /// Format: JSON value matching the table's key type.
     #[arg(long, value_parser = maybe_json_value_parser)]
     end_key: Option<String>,
 }
@@ -146,6 +150,13 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
                 let key: T::Key = serde_json::from_str(end_key_str)
                     .wrap_err("Failed to parse end-key as JSON")?;
                 list_filter.end_key = Some(T::Key::encode(key).into_vec());
+            }
+
+            // Validate start_key < end_key when both are provided
+            if let (Some(start), Some(end)) = (&list_filter.start_key, &list_filter.end_key) {
+                if start >= end {
+                    eyre::bail!("start-key must be less than end-key");
+                }
             }
 
             if self.args.json || self.args.count {

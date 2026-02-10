@@ -44,20 +44,27 @@ impl<N: NodeTypesWithDB> DbTool<N> {
 
         let mut hits = 0;
 
-        // Clone end_key for use in the closure
-        let end_key = filter.end_key.clone();
-
         let data = self.provider_factory.db_ref().view(|tx| {
             let mut cursor =
                 tx.cursor_read::<RawTable<T>>().expect("Was not able to obtain a cursor.");
+
+            let end_key = filter.end_key.as_ref();
+            let start_key = filter.start_key.as_ref();
 
             let map_filter = |row: Result<TableRawRow<T>, _>| {
                 if let Ok((k, v)) = row {
                     let (key, value) = (k.into_key(), v.into_value());
 
                     // Check end_key boundary (exclusive)
-                    if let Some(ref end) = end_key &&
+                    if let Some(end) = end_key &&
                         &key >= end
+                    {
+                        return None
+                    }
+
+                    // Check start_key boundary (inclusive)
+                    if let Some(start) = start_key &&
+                        &key < start
                     {
                         return None
                     }
@@ -100,19 +107,21 @@ impl<N: NodeTypesWithDB> DbTool<N> {
                 None
             };
 
-            // Convert start_key to RawKey if provided
-            let start_key: Option<RawKey<T::Key>> = filter.start_key.clone().map(RawKey::from_vec);
-
             if filter.reverse {
+                // Reverse: seek to end_key and walk backwards toward start_key
+                let seek_key: Option<RawKey<T::Key>> = filter.end_key.clone().map(RawKey::from_vec);
                 Ok(cursor
-                    .walk_back(start_key)?
+                    .walk_back(seek_key)?
                     .skip(filter.skip)
                     .filter_map(map_filter)
                     .take(filter.len)
                     .collect::<Vec<(_, _)>>())
             } else {
+                // Forward: seek to start_key and walk forward toward end_key
+                let seek_key: Option<RawKey<T::Key>> =
+                    filter.start_key.clone().map(RawKey::from_vec);
                 Ok(cursor
-                    .walk(start_key)?
+                    .walk(seek_key)?
                     .skip(filter.skip)
                     .filter_map(map_filter)
                     .take(filter.len)
