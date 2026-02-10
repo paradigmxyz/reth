@@ -943,13 +943,13 @@ where
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
     pub fn check_pipeline_consistency(&self) -> ProviderResult<Option<B256>> {
-        // We skip the era stage if it's not enabled
+        // Only check stages that are active based on configuration
         let era_enabled = self.era_import_source().is_some();
-        let mut all_stages =
-            StageId::ALL.into_iter().filter(|id| era_enabled || id != &StageId::Era);
+        let prune_modes = self.prune_modes();
+        let mut active_stages = StageId::active(era_enabled, &prune_modes);
 
         // Get the expected first stage based on config.
-        let first_stage = all_stages.next().expect("there must be at least one stage");
+        let first_stage = active_stages.next().expect("there must be at least one stage");
 
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
@@ -960,7 +960,7 @@ where
             .block_number;
 
         // Compare all other stages against the first
-        for stage_id in all_stages {
+        for stage_id in active_stages {
             let stage_checkpoint = self
                 .blockchain_db()
                 .get_stage_checkpoint(stage_id)?
