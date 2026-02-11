@@ -533,12 +533,7 @@ impl PeersManager {
         peer_id: &PeerId,
         err: &PendingSessionHandshakeError,
     ) {
-        self.on_connection_failure(
-            remote_addr,
-            peer_id,
-            err,
-            ReputationChangeKind::FailedToConnect,
-        )
+        self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::FailedToConnect)
     }
 
     /// Gracefully disconnected an active session
@@ -625,12 +620,7 @@ impl PeersManager {
             }
         }
 
-        self.on_connection_failure(
-            remote_addr,
-            peer_id,
-            err,
-            ReputationChangeKind::FailedToConnect,
-        )
+        self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::FailedToConnect)
     }
 
     fn on_connection_failure(
