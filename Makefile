@@ -153,7 +153,7 @@ COV_FILE := lcov.info
 .PHONY: test-unit
 test-unit: ## Run unit tests.
 	cargo install cargo-nextest --locked
-	cargo nextest run $(UNIT_TEST_ARGS)
+	cargo nextest run --no-fail-fast $(UNIT_TEST_ARGS)
 
 
 .PHONY: cov-unit
@@ -186,7 +186,7 @@ $(EEST_TESTS_DIR):
 
 .PHONY: ef-tests
 ef-tests: $(EF_TESTS_DIR) $(EEST_TESTS_DIR) ## Runs Legacy and EEST tests.
-	cargo nextest run -p ef-tests --release --features ef-tests
+	cargo nextest run --no-fail-fast -p ef-tests --release --features ef-tests
 
 ##@ reth-bench
 

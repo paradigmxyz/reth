@@ -46,6 +46,7 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
+            --no-fail-fast \
             --locked --features "asm-keccak ${{ matrix.network }} ${{ matrix.storage == 'edge' && 'edge' || '' }}" \
             --workspace --exclude ef-tests \
             -E "kind(test) and not binary(e2e_testsuite)"
@@ -76,4 +77,4 @@ jobs:
         with:
           cache-on-failure: true
       - name: run era1 files integration tests
-        run: cargo nextest run --release --package reth-era --test it -- --ignored
+        run: cargo nextest run --no-fail-fast --release --package reth-era --test it -- --ignored
