@@ -3874,14 +3874,19 @@ mod tests {
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         BlockWriter,
     };
+    use alloy_consensus::Header;
     use alloy_primitives::{
         map::{AddressMap, B256Map},
         U256,
     };
+    use reth_chain_state::ExecutedBlock;
     use reth_ethereum_primitives::Receipt;
-    use reth_execution_types::AccountRevertInit;
+    use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
+    use reth_primitives_traits::SealedBlock;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
-    use reth_trie::{Nibbles, StoredNibblesSubKey};
+    use reth_trie::{HashedPostState, KeccakKeyHasher, Nibbles, StoredNibblesSubKey};
+    use revm_database::BundleState;
+    use revm_state::AccountInfo;
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {
@@ -4889,5 +4894,287 @@ mod tests {
         let historical_value =
             HistoricalStateProviderRef::new(&*provider_rw, 0).storage(address, slot_key).unwrap();
         assert_eq!(historical_value, None);
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum StorageMode {
+        V1,
+        V2,
+    }
+
+    fn run_save_blocks_and_verify(mode: StorageMode) {
+        use alloy_primitives::map::HashMap;
+
+        let factory = create_test_provider_factory();
+
+        match mode {
+            StorageMode::V1 => factory.set_storage_settings_cache(StorageSettings::v1()),
+            StorageMode::V2 => factory.set_storage_settings_cache(StorageSettings::v2()),
+        }
+
+        let num_blocks = 3u64;
+        let accounts_per_block = 5usize;
+        let slots_per_account = 3usize;
+
+        let genesis = SealedBlock::<reth_ethereum_primitives::Block>::from_sealed_parts(
+            SealedHeader::new(
+                Header { number: 0, difficulty: U256::from(1), ..Default::default() },
+                B256::ZERO,
+            ),
+            Default::default(),
+        );
+
+        let genesis_executed = ExecutedBlock::new(
+            Arc::new(genesis.try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
+            ComputedTrieData::default(),
+        );
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        let mut blocks: Vec<ExecutedBlock> = Vec::new();
+        let mut parent_hash = B256::ZERO;
+
+        for block_num in 1..=num_blocks {
+            let mut builder = BundleState::builder(block_num..=block_num);
+
+            for acct_idx in 0..accounts_per_block {
+                let address = Address::with_last_byte((block_num * 10 + acct_idx as u64) as u8);
+                let info = AccountInfo {
+                    nonce: block_num,
+                    balance: U256::from(block_num * 100 + acct_idx as u64),
+                    ..Default::default()
+                };
+
+                let storage: HashMap<U256, (U256, U256)> = (1..=slots_per_account as u64)
+                    .map(|s| {
+                        (
+                            U256::from(s + acct_idx as u64 * 100),
+                            (U256::ZERO, U256::from(block_num * 1000 + s)),
+                        )
+                    })
+                    .collect();
+
+                let revert_storage: Vec<(U256, U256)> = (1..=slots_per_account as u64)
+                    .map(|s| (U256::from(s + acct_idx as u64 * 100), U256::ZERO))
+                    .collect();
+
+                builder = builder
+                    .state_present_account_info(address, info)
+                    .revert_account_info(block_num, address, Some(None))
+                    .state_storage(address, storage)
+                    .revert_storage(block_num, address, revert_storage);
+            }
+
+            let bundle = builder.build();
+
+            let hashed_state =
+                HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
+
+            let header = Header {
+                number: block_num,
+                parent_hash,
+                difficulty: U256::from(1),
+                ..Default::default()
+            };
+            let block = SealedBlock::<reth_ethereum_primitives::Block>::seal_parts(
+                header,
+                Default::default(),
+            );
+            parent_hash = block.hash();
+
+            let executed = ExecutedBlock::new(
+                Arc::new(block.try_recover().unwrap()),
+                Arc::new(BlockExecutionOutput {
+                    result: BlockExecutionResult {
+                        receipts: vec![],
+                        requests: Default::default(),
+                        gas_used: 0,
+                        blob_gas_used: 0,
+                    },
+                    state: bundle,
+                }),
+                ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
+            );
+            blocks.push(executed);
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(blocks, SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+
+        for block_num in 1..=num_blocks {
+            for acct_idx in 0..accounts_per_block {
+                let address = Address::with_last_byte((block_num * 10 + acct_idx as u64) as u8);
+                let hashed_address = keccak256(address);
+
+                let ha_entry = provider
+                    .tx_ref()
+                    .cursor_read::<tables::HashedAccounts>()
+                    .unwrap()
+                    .seek_exact(hashed_address)
+                    .unwrap();
+                assert!(
+                    ha_entry.is_some(),
+                    "HashedAccounts missing for block {block_num} acct {acct_idx}"
+                );
+
+                for s in 1..=slots_per_account as u64 {
+                    let slot = U256::from(s + acct_idx as u64 * 100);
+                    let slot_key = B256::from(slot);
+                    let hashed_slot = keccak256(slot_key);
+
+                    let hs_entry = provider
+                        .tx_ref()
+                        .cursor_dup_read::<tables::HashedStorages>()
+                        .unwrap()
+                        .seek_by_key_subkey(hashed_address, hashed_slot)
+                        .unwrap();
+                    assert!(
+                        hs_entry.is_some(),
+                        "HashedStorages missing for block {block_num} acct {acct_idx} slot {s}"
+                    );
+                    let entry = hs_entry.unwrap();
+                    assert_eq!(entry.key, hashed_slot);
+                    assert_eq!(entry.value, U256::from(block_num * 1000 + s));
+                }
+            }
+        }
+
+        for block_num in 1..=num_blocks {
+            let header = provider.header_by_number(block_num).unwrap();
+            assert!(header.is_some(), "Header missing for block {block_num}");
+
+            let indices = provider.block_body_indices(block_num).unwrap();
+            assert!(indices.is_some(), "BlockBodyIndices missing for block {block_num}");
+        }
+
+        let plain_accounts = provider.tx_ref().entries::<tables::PlainAccountState>().unwrap();
+        let plain_storage = provider.tx_ref().entries::<tables::PlainStorageState>().unwrap();
+
+        if mode == StorageMode::V2 {
+            assert_eq!(plain_accounts, 0, "v2: PlainAccountState should be empty");
+            assert_eq!(plain_storage, 0, "v2: PlainStorageState should be empty");
+
+            let mdbx_account_cs = provider.tx_ref().entries::<tables::AccountChangeSets>().unwrap();
+            assert_eq!(mdbx_account_cs, 0, "v2: AccountChangeSets in MDBX should be empty");
+
+            let mdbx_storage_cs = provider.tx_ref().entries::<tables::StorageChangeSets>().unwrap();
+            assert_eq!(mdbx_storage_cs, 0, "v2: StorageChangeSets in MDBX should be empty");
+
+            provider.static_file_provider().commit().unwrap();
+            let sf = factory.static_file_provider();
+
+            for block_num in 1..=num_blocks {
+                let account_cs = sf.account_block_changeset(block_num).unwrap();
+                assert!(
+                    !account_cs.is_empty(),
+                    "v2: static file AccountChangeSets should exist for block {block_num}"
+                );
+
+                let storage_cs = sf.storage_changeset(block_num).unwrap();
+                assert!(
+                    !storage_cs.is_empty(),
+                    "v2: static file StorageChangeSets should exist for block {block_num}"
+                );
+
+                for (_, entry) in &storage_cs {
+                    assert!(
+                        entry.key.is_hashed(),
+                        "v2: static file storage changeset should have hashed slot keys"
+                    );
+                }
+            }
+
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let rocksdb = factory.rocksdb_provider();
+                for block_num in 1..=num_blocks {
+                    for acct_idx in 0..accounts_per_block {
+                        let address =
+                            Address::with_last_byte((block_num * 10 + acct_idx as u64) as u8);
+                        let shards = rocksdb.account_history_shards(address).unwrap();
+                        assert!(
+                            !shards.is_empty(),
+                            "v2: RocksDB AccountsHistory missing for block {block_num} acct {acct_idx}"
+                        );
+
+                        for s in 1..=slots_per_account as u64 {
+                            let slot = U256::from(s + acct_idx as u64 * 100);
+                            let slot_key = B256::from(slot);
+                            let hashed_slot = keccak256(slot_key);
+
+                            let shards =
+                                rocksdb.storage_history_shards(address, hashed_slot).unwrap();
+                            assert!(
+                                !shards.is_empty(),
+                                "v2: RocksDB StoragesHistory missing for block {block_num} acct {acct_idx} slot {s}"
+                            );
+                        }
+                    }
+                }
+            }
+        } else {
+            assert!(plain_accounts > 0, "v1: PlainAccountState should not be empty");
+            assert!(plain_storage > 0, "v1: PlainStorageState should not be empty");
+
+            let mdbx_account_cs = provider.tx_ref().entries::<tables::AccountChangeSets>().unwrap();
+            assert!(mdbx_account_cs > 0, "v1: AccountChangeSets in MDBX should not be empty");
+
+            let mdbx_storage_cs = provider.tx_ref().entries::<tables::StorageChangeSets>().unwrap();
+            assert!(mdbx_storage_cs > 0, "v1: StorageChangeSets in MDBX should not be empty");
+
+            for block_num in 1..=num_blocks {
+                let storage_entries: Vec<_> = provider
+                    .tx_ref()
+                    .cursor_dup_read::<tables::StorageChangeSets>()
+                    .unwrap()
+                    .walk_range(BlockNumberAddress::range(block_num..=block_num))
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+                assert!(
+                    !storage_entries.is_empty(),
+                    "v1: MDBX StorageChangeSets should have entries for block {block_num}"
+                );
+
+                for (_, entry) in &storage_entries {
+                    let slot_key = B256::from(entry.key);
+                    assert!(
+                        slot_key != keccak256(slot_key),
+                        "v1: storage changeset keys should be plain (not hashed)"
+                    );
+                }
+            }
+
+            let mdbx_account_history =
+                provider.tx_ref().entries::<tables::AccountsHistory>().unwrap();
+            assert!(mdbx_account_history > 0, "v1: AccountsHistory in MDBX should not be empty");
+
+            let mdbx_storage_history =
+                provider.tx_ref().entries::<tables::StoragesHistory>().unwrap();
+            assert!(mdbx_storage_history > 0, "v1: StoragesHistory in MDBX should not be empty");
+        }
+    }
+
+    #[test]
+    fn test_save_blocks_v1_table_assertions() {
+        run_save_blocks_and_verify(StorageMode::V1);
+    }
+
+    #[test]
+    fn test_save_blocks_v2_table_assertions() {
+        run_save_blocks_and_verify(StorageMode::V2);
     }
 }
