@@ -208,7 +208,8 @@ where
 ///    - ETH transfer to a recipient (account state changes)
 ///    - Counter `increment()` call (storage state changes)
 /// 3. Runs the full pipeline with ALL stages enabled
-/// 4. Forward syncs to `num_blocks`, unwinds to `unwind_target`
+/// 4. Forward syncs to `num_blocks`, unwinds to `unwind_target`, then re-syncs back to
+///    `num_blocks`
 ///
 /// When `storage_settings` is `Some`, the pipeline provider factory is configured with the given
 /// settings before genesis initialization (e.g. v2 storage mode).
@@ -394,6 +395,7 @@ async fn run_pipeline_forward_and_unwind(
         pipeline_provider_factory.sealed_header(0)?.expect("genesis should exist");
     let pipeline_consensus = NoopConsensus::arc();
 
+    let blocks_clone = blocks.clone();
     let file_client = create_file_client_from_blocks(blocks);
     let max_block = file_client.max_block().unwrap();
     let tip = file_client.tip().expect("tip");
@@ -498,6 +500,77 @@ async fn run_pipeline_forward_and_unwind(
         );
     }
 
+    // Re-sync: build a new pipeline starting from unwind_target and sync back to num_blocks
+    let resync_file_client = create_file_client_from_blocks(blocks_clone);
+    let resync_consensus = NoopConsensus::arc();
+    let resync_stages_config = StageConfig::default();
+
+    let unwind_head = pipeline_provider_factory
+        .sealed_header(unwind_target)?
+        .expect("unwind target header should exist");
+
+    let mut resync_header_downloader =
+        ReverseHeadersDownloaderBuilder::new(resync_stages_config.headers)
+            .build(resync_file_client.clone(), resync_consensus.clone())
+            .into_task();
+    resync_header_downloader.update_local_head(unwind_head);
+    resync_header_downloader.update_sync_target(SyncTarget::Tip(tip));
+
+    let mut resync_body_downloader =
+        BodiesDownloaderBuilder::new(resync_stages_config.bodies)
+            .build(resync_file_client, resync_consensus, pipeline_provider_factory.clone())
+            .into_task();
+    resync_body_downloader
+        .set_download_range(unwind_target + 1..=max_block)
+        .expect("set download range");
+
+    let resync_pipeline = build_pipeline(
+        pipeline_provider_factory.clone(),
+        resync_header_downloader,
+        resync_body_downloader,
+        max_block,
+        tip,
+    );
+
+    let (_resync_pipeline, resync_result) = resync_pipeline.run_as_fut(None).await;
+    resync_result?;
+
+    // Verify re-sync
+    {
+        let provider = pipeline_provider_factory.provider()?;
+        let last_block = provider.last_block_number()?;
+        assert_eq!(last_block, num_blocks, "should have re-synced to {num_blocks} blocks");
+
+        for stage_id in [
+            StageId::Headers,
+            StageId::Bodies,
+            StageId::SenderRecovery,
+            StageId::Execution,
+            StageId::AccountHashing,
+            StageId::StorageHashing,
+            StageId::MerkleExecute,
+            StageId::TransactionLookup,
+            StageId::IndexAccountHistory,
+            StageId::IndexStorageHistory,
+            StageId::Finish,
+        ] {
+            let checkpoint = provider.get_stage_checkpoint(stage_id)?;
+            assert_eq!(
+                checkpoint.map(|c| c.block_number),
+                Some(num_blocks),
+                "{stage_id} checkpoint should be at block {num_blocks} after re-sync"
+            );
+        }
+
+        let state = provider.latest();
+        let counter_storage = state.storage(CONTRACT_ADDRESS, B256::ZERO)?;
+        assert_eq!(
+            counter_storage,
+            Some(U256::from(num_blocks)),
+            "Counter storage slot 0 should be {num_blocks} after re-sync"
+        );
+    }
+
     Ok(())
 }
 
@@ -509,7 +582,7 @@ async fn run_pipeline_forward_and_unwind(
 ///    - ETH transfer to a recipient (account state changes)
 ///    - Counter `increment()` call (storage state changes)
 /// 3. Runs the full pipeline with ALL stages enabled
-/// 4. Forward syncs to block 5, unwinds to block 2
+/// 4. Forward syncs to block 5, unwinds to block 2, then re-syncs to block 5
 ///
 /// This exercises both account and storage hashing/history stages.
 #[tokio::test(flavor = "multi_thread")]
