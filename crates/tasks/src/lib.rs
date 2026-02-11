@@ -402,7 +402,7 @@ mod tests {
 
         rt.graceful_shutdown();
 
-        runtime.handle().block_on(shutdown);
+        runtime.block_on(shutdown);
     }
 
     #[test]
@@ -419,7 +419,7 @@ mod tests {
 
         rt.graceful_shutdown();
 
-        runtime.handle().block_on(shutdown);
+        runtime.block_on(shutdown);
     }
 
     #[test]
