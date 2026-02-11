@@ -164,14 +164,16 @@ where
                 provider_rw.save_safe_block_number(safe)?;
             }
 
+            provider_rw.commit()?;
+
             if self.pruner.is_pruning_needed(last.number) {
                 debug!(target: "engine::persistence", block_num=?last.number, "Running pruner");
                 let prune_start = Instant::now();
+                let provider_rw = self.provider.database_provider_rw()?;
                 let _ = self.pruner.run_with_provider(&provider_rw, last.number)?;
+                provider_rw.commit()?;
                 self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
             }
-
-            provider_rw.commit()?;
         }
 
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
