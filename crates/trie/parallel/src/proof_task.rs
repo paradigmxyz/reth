@@ -190,7 +190,7 @@ impl ProofWorkerHandle {
                 .entered();
             // Spawn storage workers
             for worker_id in 0..storage_worker_count {
-                let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
+                let span = debug_span!(target: "trie::proof_task", "storage worker");
                 let task_ctx_clone = task_ctx_for_storage.clone();
                 let work_rx_clone = storage_work_rx.clone();
                 let storage_available_workers_clone = storage_available_workers.clone();
@@ -234,7 +234,7 @@ impl ProofWorkerHandle {
                 .entered();
             // Spawn account workers
             for worker_id in 0..account_worker_count {
-                let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
+                let span = debug_span!(target: "trie::proof_task", "account worker");
                 let task_ctx_clone = task_ctx.clone();
                 let work_rx_clone = account_work_rx.clone();
                 let storage_work_tx_clone = storage_work_tx.clone();
@@ -482,9 +482,7 @@ where
         let span = debug_span!(
             target: "trie::proof_task",
             "Storage proof calculation",
-            ?hashed_address,
             target_slots = ?target_slots.len(),
-            worker_id = self.id,
         );
         let _span_guard = span.enter();
 
@@ -532,9 +530,7 @@ where
         let span = debug_span!(
             target: "trie::proof_task",
             "V2 Storage proof calculation",
-            ?hashed_address,
             targets = ?targets.len(),
-            worker_id = self.id,
         );
         let _span_guard = span.enter();
 
@@ -1316,7 +1312,6 @@ where
             "Account multiproof calculation",
             targets = targets.len(),
             num_slots = targets.values().map(|slots| slots.len()).sum::<usize>(),
-            worker_id=self.worker_id,
         );
         let _span_guard = span.enter();
 
@@ -1382,7 +1377,6 @@ where
             "Account V2 multiproof calculation",
             account_targets = account_targets.len(),
             storage_targets = storage_targets.values().map(|t| t.len()).sum::<usize>(),
-            worker_id = self.worker_id,
         );
         let _span_guard = span.enter();
 
@@ -1531,7 +1525,6 @@ where
             target: "trie::proof_task",
             "Blinded account node calculation",
             ?path,
-            worker_id,
         );
         let _span_guard = span.enter();
 
@@ -1639,7 +1632,6 @@ where
                         let _guard = debug_span!(
                             target: "trie::proof_task",
                             "Waiting for storage proof",
-                            ?hashed_address,
                         );
                         // Block on this specific storage proof receiver - enables interleaved
                         // parallelism

@@ -833,21 +833,18 @@ where
 
             let tx = tx_result.map_err(BlockExecutionError::other)?;
             let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
-            let tx_hash = <Tx as alloy_evm::RecoveredTx<InnerTx>>::tx(&tx).tx_hash();
 
             senders.push(tx_signer);
 
-            let span = debug_span!(
+            let _enter = debug_span!(
                 target: "engine::tree",
                 "execute tx",
-                ?tx_hash,
-                gas_used = tracing::field::Empty,
-            );
-            let enter = span.entered();
+            )
+            .entered();
             trace!(target: "engine::tree", "Executing transaction");
 
             let tx_start = Instant::now();
-            let gas_used = executor.execute_transaction(tx)?;
+            let _gas_used = executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
             let current_len = executor.receipts().len();
@@ -859,8 +856,6 @@ where
                     let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
                 }
             }
-
-            enter.record("gas_used", gas_used);
         }
         drop(exec_span);
 
