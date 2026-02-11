@@ -3189,9 +3189,7 @@ impl SparseSubtrieInner {
             SparseNode::Leaf { key, state } => {
                 let mut path = path;
                 path.extend(key);
-                if let Some(rlp_node) =
-                    state.cached_rlp_node().filter(|_| !prefix_set_contains(&path))
-                {
+                if let Some(rlp_node) = state.cached_rlp_node() {
                     // If the RlpNode is already computed, and the node path is not in the prefix
                     // set
                     (rlp_node.clone(), SparseNodeType::Leaf)
