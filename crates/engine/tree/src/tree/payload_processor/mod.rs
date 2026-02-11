@@ -101,9 +101,9 @@ pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 /// fixed overhead of spawning prewarm workers (building state providers, creating EVM instances,
 /// wrapping precompiles) which exceeds execution time on small blocks.
 ///
-/// 20M gas is used as the threshold because ~23% of recent mainnet blocks fall under this level
-/// where prewarming overhead dominates.
-pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
+/// 5M gas is used as a more conservative threshold to only skip prewarming on the smallest blocks
+/// where the overhead most clearly dominates.
+pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 5_000_000;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
