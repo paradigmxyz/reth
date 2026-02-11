@@ -365,7 +365,7 @@ where
 
     /// Below this threshold, transactions are converted via rayon's order-preserving `collect()`
     /// in a single task, eliminating the out-of-order channel and BTreeMap reorder task.
-    const PARALLEL_REORDER_TX_THRESHOLD: usize = 128;
+    const PARALLEL_REORDER_TX_THRESHOLD: usize = 30;
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     #[expect(clippy::type_complexity)]
