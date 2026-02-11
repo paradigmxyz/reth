@@ -171,11 +171,12 @@ impl TrieUpdates {
         account_nodes.extend(self.removed_nodes.drain().map(|path| (path, None)));
         account_nodes.sort_unstable_by_key(|a| a.0);
 
-        let storage_tries = self
+        let mut storage_tries: Vec<_> = self
             .storage_tries
             .drain()
             .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
             .collect();
+        storage_tries.sort_unstable_by_key(|(addr, _)| *addr);
         TrieUpdatesSorted { account_nodes, storage_tries }
     }
 
@@ -197,11 +198,12 @@ impl TrieUpdates {
         );
         account_nodes.sort_unstable_by_key(|a| a.0);
 
-        let storage_tries = self
+        let mut storage_tries: Vec<_> = self
             .storage_tries
             .iter()
             .map(|(&hashed_address, updates)| (hashed_address, updates.clone_into_sorted()))
             .collect();
+        storage_tries.sort_unstable_by_key(|(addr, _)| *addr);
         TrieUpdatesSorted { account_nodes, storage_tries }
     }
 
@@ -551,8 +553,8 @@ pub struct TrieUpdatesSorted {
     /// Sorted collection of updated state nodes with corresponding paths. None indicates that a
     /// node was removed.
     account_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
-    /// Storage tries stored by hashed address of the account the trie belongs to.
-    storage_tries: B256Map<StorageTrieUpdatesSorted>,
+    /// Storage tries sorted by hashed address (B256 key).
+    storage_tries: Vec<(B256, StorageTrieUpdatesSorted)>,
 }
 
 impl TrieUpdatesSorted {
@@ -561,17 +563,22 @@ impl TrieUpdatesSorted {
     /// # Panics
     ///
     /// In debug mode, panics if `account_nodes` is not sorted by the `Nibbles` key,
+    /// if `storage_tries` is not sorted by the `B256` key,
     /// or if any storage trie's `storage_nodes` is not sorted by its `Nibbles` key.
     pub fn new(
         account_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
-        storage_tries: B256Map<StorageTrieUpdatesSorted>,
+        storage_tries: Vec<(B256, StorageTrieUpdatesSorted)>,
     ) -> Self {
         debug_assert!(
             account_nodes.is_sorted_by_key(|item| &item.0),
             "account_nodes must be sorted by Nibbles key"
         );
         debug_assert!(
-            storage_tries.values().all(|storage_trie| {
+            storage_tries.is_sorted_by_key(|(addr, _)| addr),
+            "storage_tries must be sorted by B256 key"
+        );
+        debug_assert!(
+            storage_tries.iter().all(|(_, storage_trie)| {
                 storage_trie.storage_nodes.is_sorted_by_key(|item| &item.0)
             }),
             "all storage_nodes in storage_tries must be sorted by Nibbles key"
@@ -589,15 +596,23 @@ impl TrieUpdatesSorted {
         &self.account_nodes
     }
 
-    /// Returns reference to updated storage tries.
-    pub const fn storage_tries_ref(&self) -> &B256Map<StorageTrieUpdatesSorted> {
+    /// Returns reference to updated storage tries as a sorted slice.
+    pub fn storage_tries_ref(&self) -> &[(B256, StorageTrieUpdatesSorted)] {
         &self.storage_tries
+    }
+
+    /// Looks up a storage trie by hashed address using binary search.
+    pub fn storage_trie_for(&self, hashed_address: &B256) -> Option<&StorageTrieUpdatesSorted> {
+        self.storage_tries
+            .binary_search_by_key(hashed_address, |(addr, _)| *addr)
+            .ok()
+            .map(|idx| &self.storage_tries[idx].1)
     }
 
     /// Returns the total number of updates including account nodes and all storage updates.
     pub fn total_len(&self) -> usize {
         self.account_nodes.len() +
-            self.storage_tries.values().map(|storage| storage.len()).sum::<usize>()
+            self.storage_tries.iter().map(|(_, storage)| storage.len()).sum::<usize>()
     }
 
     /// Extends the trie updates with another set of sorted updates.
@@ -612,12 +627,49 @@ impl TrieUpdatesSorted {
         // Extend account nodes
         extend_sorted_vec(&mut self.account_nodes, &other.account_nodes);
 
-        // Merge storage tries
-        for (hashed_address, storage_trie) in &other.storage_tries {
-            self.storage_tries
-                .entry(*hashed_address)
-                .and_modify(|existing| existing.extend_ref(storage_trie))
-                .or_insert_with(|| storage_trie.clone());
+        // Merge storage tries (both are sorted by B256 key)
+        if other.storage_tries.is_empty() {
+            return;
+        }
+        if self.storage_tries.is_empty() {
+            self.storage_tries = other.storage_tries.clone();
+            return;
+        }
+
+        let cap = self.storage_tries.len() + other.storage_tries.len();
+        let self_tries = core::mem::replace(&mut self.storage_tries, Vec::with_capacity(cap));
+        let mut self_iter = self_tries.into_iter().peekable();
+        let mut other_iter = other.storage_tries.iter().peekable();
+
+        loop {
+            match (self_iter.peek(), other_iter.peek()) {
+                (Some((a_addr, _)), Some((b_addr, _))) => {
+                    match a_addr.cmp(b_addr) {
+                        core::cmp::Ordering::Less => {
+                            self.storage_tries.push(self_iter.next().unwrap());
+                        }
+                        core::cmp::Ordering::Greater => {
+                            let (addr, st) = other_iter.next().unwrap();
+                            self.storage_tries.push((*addr, st.clone()));
+                        }
+                        core::cmp::Ordering::Equal => {
+                            let (addr, mut existing) = self_iter.next().unwrap();
+                            let (_, other_st) = other_iter.next().unwrap();
+                            existing.extend_ref(other_st);
+                            self.storage_tries.push((addr, existing));
+                        }
+                    }
+                }
+                (Some(_), None) => {
+                    self.storage_tries.extend(self_iter);
+                    break;
+                }
+                (None, Some(_)) => {
+                    self.storage_tries.extend(other_iter.map(|(addr, st)| (*addr, st.clone())));
+                    break;
+                }
+                (None, None) => break,
+            }
         }
     }
 
@@ -687,13 +739,14 @@ impl TrieUpdatesSorted {
             }
         }
 
-        let storage_tries = acc
+        let mut storage_tries: Vec<_> = acc
             .into_iter()
             .map(|(addr, entry)| {
                 let storage_nodes = kway_merge_sorted(entry.slices);
                 (addr, StorageTrieUpdatesSorted { is_deleted: entry.is_deleted, storage_nodes })
             })
             .collect();
+        storage_tries.sort_unstable_by_key(|(addr, _)| *addr);
 
         Self { account_nodes, storage_tries }.into()
     }
@@ -855,14 +908,14 @@ mod tests {
                 (Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default())),
                 (Nibbles::from_nibbles_unchecked([0x03]), None),
             ],
-            storage_tries: B256Map::default(),
+            storage_tries: Vec::new(),
         };
         let updates2 = TrieUpdatesSorted {
             account_nodes: vec![
                 (Nibbles::from_nibbles_unchecked([0x02]), Some(BranchNodeCompact::default())),
                 (Nibbles::from_nibbles_unchecked([0x03]), Some(BranchNodeCompact::default())), /* Override */
             ],
-            storage_tries: B256Map::default(),
+            storage_tries: Vec::new(),
         };
         updates1.extend_ref_and_sort(&updates2);
         assert_eq!(updates1.account_nodes.len(), 3);
@@ -891,21 +944,25 @@ mod tests {
 
         let mut updates1 = TrieUpdatesSorted {
             account_nodes: vec![],
-            storage_tries: B256Map::from_iter([(hashed_address1, storage_trie1.clone())]),
+            storage_tries: vec![(hashed_address1, storage_trie1.clone())],
         };
         let updates2 = TrieUpdatesSorted {
             account_nodes: vec![],
-            storage_tries: B256Map::from_iter([
-                (hashed_address1, storage_trie2),
-                (hashed_address2, storage_trie1),
-            ]),
+            storage_tries: {
+                let mut v = vec![
+                    (hashed_address1, storage_trie2),
+                    (hashed_address2, storage_trie1),
+                ];
+                v.sort_unstable_by_key(|(addr, _)| *addr);
+                v
+            },
         };
         updates1.extend_ref_and_sort(&updates2);
         assert_eq!(updates1.storage_tries.len(), 2);
-        assert!(updates1.storage_tries.contains_key(&hashed_address1));
-        assert!(updates1.storage_tries.contains_key(&hashed_address2));
+        assert!(updates1.storage_trie_for(&hashed_address1).is_some());
+        assert!(updates1.storage_trie_for(&hashed_address2).is_some());
         // Check that storage trie for hashed_address1 was extended
-        let merged_storage = &updates1.storage_tries[&hashed_address1];
+        let merged_storage = updates1.storage_trie_for(&hashed_address1).unwrap();
         assert_eq!(merged_storage.storage_nodes.len(), 2);
     }
 
@@ -981,7 +1038,7 @@ mod tests {
 
         let sorted = TrieUpdatesSorted {
             account_nodes: vec![],
-            storage_tries: B256Map::from_iter([(hashed_address, storage_trie)]),
+            storage_tries: vec![(hashed_address, storage_trie)],
         };
 
         updates.extend_from_sorted(&sorted);
@@ -1021,7 +1078,7 @@ mod tests {
 
         let sorted = TrieUpdatesSorted {
             account_nodes: vec![],
-            storage_tries: B256Map::from_iter([(hashed_address, storage_trie)]),
+            storage_tries: vec![(hashed_address, storage_trie)],
         };
 
         updates.extend_from_sorted(&sorted);
@@ -1098,7 +1155,7 @@ mod tests {
                 (Nibbles::default(), Some(BranchNodeCompact::default())), // Empty nibbles
                 (Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default())),
             ],
-            storage_tries: B256Map::default(),
+            storage_tries: Vec::new(),
         };
 
         updates.extend_from_sorted(&sorted);
@@ -1115,7 +1172,7 @@ mod tests {
 pub mod serde_bincode_compat {
     use crate::{BranchNodeCompact, Nibbles};
     use alloc::borrow::Cow;
-    use alloy_primitives::map::{B256Map, HashMap, HashSet};
+    use alloy_primitives::{map::{B256Map, HashMap, HashSet}, B256};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -1264,7 +1321,7 @@ pub mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct TrieUpdatesSorted<'a> {
         account_nodes: Cow<'a, [(Nibbles, Option<BranchNodeCompact>)]>,
-        storage_tries: B256Map<StorageTrieUpdatesSorted<'a>>,
+        storage_tries: Vec<(B256, StorageTrieUpdatesSorted<'a>)>,
     }
 
     impl<'a> From<&'a super::TrieUpdatesSorted> for TrieUpdatesSorted<'a> {
@@ -1283,7 +1340,7 @@ pub mod serde_bincode_compat {
                 storage_tries: value
                     .storage_tries
                     .into_iter()
-                    .map(|(k, v)| (k, v.into()))
+                    .map(|(k, v)| (k, super::StorageTrieUpdatesSorted::from(v)))
                     .collect(),
             }
         }

@@ -226,7 +226,7 @@ where
     }
 
     // Step 6: Collect all storage trie nodes that changed in the target block
-    let mut storage_tries = B256Map::default();
+    let mut storage_tries = Vec::new();
 
     // Iterate over the storage tries from the changesets
     for (hashed_address, storage_changeset) in changesets.storage_tries_ref() {
@@ -241,11 +241,13 @@ where
             storage_nodes.push((*nibbles, node_value));
         }
 
-        storage_tries.insert(
+        storage_tries.push((
             *hashed_address,
             StorageTrieUpdatesSorted { storage_nodes, is_deleted: storage_changeset.is_deleted },
-        );
+        ));
     }
+
+    storage_tries.sort_unstable_by_key(|(addr, _)| *addr);
 
     Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
 }
@@ -678,11 +680,11 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::map::{B256Map, HashMap};
+    use alloy_primitives::map::HashMap;
 
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
-        Arc::new(TrieUpdatesSorted::new(vec![], B256Map::default()))
+        Arc::new(TrieUpdatesSorted::new(vec![], vec![]))
     }
 
     #[test]

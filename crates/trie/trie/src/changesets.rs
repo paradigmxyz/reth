@@ -19,7 +19,7 @@
 //! And returns `TrieUpdatesSorted` containing the old node values.
 
 use crate::trie_cursor::TrieCursorIter;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::B256;
 use itertools::{merge_join_by, EitherOrBoth};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{
@@ -58,7 +58,7 @@ where
     let account_nodes = compute_account_changesets(factory, trie_updates)?;
 
     // Compute storage trie changesets
-    let mut storage_tries = B256Map::default();
+    let mut storage_tries = Vec::new();
 
     // Create storage cursor once and reuse it for all addresses
     let mut storage_cursor = factory.storage_trie_cursor(B256::default())?;
@@ -75,15 +75,17 @@ where
         };
 
         if !storage_changesets.is_empty() {
-            storage_tries.insert(
+            storage_tries.push((
                 *hashed_address,
                 StorageTrieUpdatesSorted {
                     is_deleted: storage_updates.is_deleted(),
                     storage_nodes: storage_changesets,
                 },
-            );
+            ));
         }
     }
+
+    storage_tries.sort_unstable_by_key(|(addr, _)| *addr);
 
     // Build and return the result
     Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
@@ -252,7 +254,7 @@ mod tests {
         let factory = MockTrieCursorFactory::new(BTreeMap::new(), storage_tries);
 
         // Create empty updates
-        let updates = TrieUpdatesSorted::new(vec![], B256Map::default());
+        let updates = TrieUpdatesSorted::new(vec![], vec![]);
 
         // Compute changesets
         let changesets = compute_trie_changesets(&factory, &updates).unwrap();
@@ -287,7 +289,7 @@ mod tests {
 
         let updates = TrieUpdatesSorted::new(
             vec![(path1, Some(new_node1)), (path3, Some(new_node3))],
-            B256Map::default(),
+            vec![],
         );
 
         // Compute changesets
@@ -330,14 +332,13 @@ mod tests {
         let new_node1 = BranchNodeCompact::new(0b1111, 0b1000, 0, vec![], None);
         let new_node3 = BranchNodeCompact::new(0b1111, 0b0000, 0, vec![], None);
 
-        let mut storage_updates = B256Map::default();
-        storage_updates.insert(
+        let storage_updates = vec![(
             hashed_address,
             StorageTrieUpdatesSorted {
                 is_deleted: false,
                 storage_nodes: vec![(path1, Some(new_node1)), (path3, Some(new_node3))],
             },
-        );
+        )];
 
         let updates = TrieUpdatesSorted::new(vec![], storage_updates);
 
@@ -346,7 +347,7 @@ mod tests {
 
         // Check storage changesets
         assert_eq!(changesets.storage_tries_ref().len(), 1);
-        let storage_changesets = changesets.storage_tries_ref().get(&hashed_address).unwrap();
+        let storage_changesets = changesets.storage_trie_for(&hashed_address).unwrap();
         assert!(!storage_changesets.is_deleted);
         assert_eq!(storage_changesets.storage_nodes.len(), 2);
 
@@ -385,14 +386,13 @@ mod tests {
         // Create updates that modify path1 and mark storage as wiped
         let new_node1 = BranchNodeCompact::new(0b1111, 0b1000, 0, vec![], None);
 
-        let mut storage_updates = B256Map::default();
-        storage_updates.insert(
+        let storage_updates = vec![(
             hashed_address,
             StorageTrieUpdatesSorted {
                 is_deleted: true,
                 storage_nodes: vec![(path1, Some(new_node1))],
             },
-        );
+        )];
 
         let updates = TrieUpdatesSorted::new(vec![], storage_updates);
 
@@ -401,7 +401,7 @@ mod tests {
 
         // Check storage changesets
         assert_eq!(changesets.storage_tries_ref().len(), 1);
-        let storage_changesets = changesets.storage_tries_ref().get(&hashed_address).unwrap();
+        let storage_changesets = changesets.storage_trie_for(&hashed_address).unwrap();
         assert!(storage_changesets.is_deleted);
 
         // Should include all three nodes (changed path1 + wiped path2 and path3)
@@ -442,14 +442,13 @@ mod tests {
         let path2 = Nibbles::from_nibbles([0x3, 0x4]);
         let new_node2 = BranchNodeCompact::new(0b1111, 0b0101, 0, vec![], None);
 
-        let mut storage_updates = B256Map::default();
-        storage_updates.insert(
+        let storage_updates = vec![(
             hashed_address,
             StorageTrieUpdatesSorted {
                 is_deleted: true,
                 storage_nodes: vec![(path2, Some(new_node2))],
             },
-        );
+        )];
 
         let updates = TrieUpdatesSorted::new(vec![], storage_updates);
 
@@ -457,7 +456,7 @@ mod tests {
         let changesets = compute_trie_changesets(&factory, &updates).unwrap();
 
         // Check storage changesets
-        let storage_changesets = changesets.storage_tries_ref().get(&hashed_address).unwrap();
+        let storage_changesets = changesets.storage_trie_for(&hashed_address).unwrap();
         assert!(storage_changesets.is_deleted);
 
         // Should include all three paths: existing path1, new path2, existing path3

@@ -2822,7 +2822,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         }
 
         num_entries +=
-            self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
+            self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter().map(|(addr, st)| (addr, st)))?;
 
         Ok(num_entries)
     }
@@ -2839,8 +2839,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
-        let mut storage_tries = storage_tries.collect::<Vec<_>>();
-        storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
         let mut cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
         for (hashed_address, storage_trie_updates) in storage_tries {
             let mut db_storage_trie_cursor =
