@@ -2808,6 +2808,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
             match updated_node {
                 Some(node) => {
                     if !nibbles.0.is_empty() {
+                        let existing = account_trie_cursor.seek_exact(nibbles.clone())?;
+                        if existing.as_ref().map(|(_, v)| v) == Some(node) {
+                            continue;
+                        }
                         num_entries += 1;
                         account_trie_cursor.upsert(nibbles, node)?;
                     }
