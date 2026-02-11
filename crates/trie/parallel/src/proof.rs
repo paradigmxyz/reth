@@ -172,7 +172,7 @@ mod tests {
     use alloy_primitives::{
         keccak256,
         map::{B256Set, DefaultHashBuilder, HashMap},
-        Address, U256,
+        Address, B256, U256,
     };
     use rand::Rng;
     use reth_primitives_traits::{Account, StorageEntry};

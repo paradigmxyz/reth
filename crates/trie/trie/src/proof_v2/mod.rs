@@ -1664,7 +1664,7 @@ mod tests {
     /// combine it with the extension.
     fn convert_legacy_proofs_to_v2(legacy_proofs: &[ProofTrieNode]) -> Vec<ProofTrieNodeV2> {
         ProofTrieNodeV2::from_sorted_trie_nodes(
-            legacy_proofs.iter().map(|p| (p.path.clone(), p.node.clone(), p.masks)),
+            legacy_proofs.iter().map(|p| (p.path, p.node.clone(), p.masks)),
         )
     }
 

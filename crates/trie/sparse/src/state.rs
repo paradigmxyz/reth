@@ -1317,7 +1317,8 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNode, BranchNodeMasks, BranchNodeMasksMap, LeafNode, StorageMultiProof, TrieMask,
+        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
+        TrieMask,
     };
 
     #[test]
@@ -1326,11 +1327,11 @@ mod tests {
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let leaf_1 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+        let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
             Nibbles::default(),
             leaf_value.clone(),
         )));
-        let leaf_2 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+        let leaf_2 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
             Nibbles::default(),
             leaf_value.clone(),
         )));
@@ -1339,7 +1340,8 @@ mod tests {
             account_subtree: ProofNodes::from_iter([
                 (
                     Nibbles::default(),
-                    alloy_rlp::encode(TrieNode::Branch(BranchNode {
+                    alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
+                        key: Nibbles::default(),
                         stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
                         state_mask: TrieMask::new(0b11),
                     }))
@@ -1395,11 +1397,11 @@ mod tests {
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let leaf_1 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+        let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
             Nibbles::default(),
             leaf_value.clone(),
         )));
-        let leaf_2 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+        let leaf_2 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
             Nibbles::default(),
             leaf_value.clone(),
         )));
@@ -1412,7 +1414,8 @@ mod tests {
                     subtree: ProofNodes::from_iter([
                         (
                             Nibbles::default(),
-                            alloy_rlp::encode(TrieNode::Branch(BranchNode {
+                            alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
+                                key: Nibbles::default(),
                                 stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
                                 state_mask: TrieMask::new(0b11),
                             }))
@@ -1485,10 +1488,11 @@ mod tests {
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let leaf_1_node = TrieNode::Leaf(LeafNode::new(Nibbles::default(), leaf_value.clone()));
-        let leaf_2_node = TrieNode::Leaf(LeafNode::new(Nibbles::default(), leaf_value.clone()));
+        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), leaf_value.clone()));
+        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), leaf_value.clone()));
 
-        let branch_node = TrieNode::Branch(BranchNode {
+        let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
+            key: Nibbles::default(),
             stack: vec![
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1_node)),
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
@@ -1498,7 +1502,7 @@ mod tests {
 
         // Create V2 proof nodes with masks already included
         let v2_proof_nodes = vec![
-            ProofTrieNode {
+            ProofTrieNodeV2 {
                 path: Nibbles::default(),
                 node: branch_node,
                 masks: Some(BranchNodeMasks {
@@ -1506,8 +1510,8 @@ mod tests {
                     tree_mask: TrieMask::default(),
                 }),
             },
-            ProofTrieNode { path: Nibbles::from_nibbles([0x0]), node: leaf_1_node, masks: None },
-            ProofTrieNode { path: Nibbles::from_nibbles([0x1]), node: leaf_2_node, masks: None },
+            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x0]), node: leaf_1_node, masks: None },
+            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x1]), node: leaf_2_node, masks: None },
         ];
 
         // Reveal V2 proof nodes
@@ -1546,10 +1550,13 @@ mod tests {
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
         let storage_value: Vec<u8> = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
-        let leaf_1_node = TrieNode::Leaf(LeafNode::new(Nibbles::default(), storage_value.clone()));
-        let leaf_2_node = TrieNode::Leaf(LeafNode::new(Nibbles::default(), storage_value.clone()));
+        let leaf_1_node =
+            TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), storage_value.clone()));
+        let leaf_2_node =
+            TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), storage_value.clone()));
 
-        let branch_node = TrieNode::Branch(BranchNode {
+        let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
+            key: Nibbles::default(),
             stack: vec![
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1_node)),
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
@@ -1558,9 +1565,9 @@ mod tests {
         });
 
         let v2_proof_nodes = vec![
-            ProofTrieNode { path: Nibbles::default(), node: branch_node, masks: None },
-            ProofTrieNode { path: Nibbles::from_nibbles([0x0]), node: leaf_1_node, masks: None },
-            ProofTrieNode { path: Nibbles::from_nibbles([0x1]), node: leaf_2_node, masks: None },
+            ProofTrieNodeV2 { path: Nibbles::default(), node: branch_node, masks: None },
+            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x0]), node: leaf_1_node, masks: None },
+            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x1]), node: leaf_2_node, masks: None },
         ];
 
         // Reveal V2 storage proof nodes for account
@@ -1752,53 +1759,6 @@ mod tests {
                     }
                 )]),
                 removed_nodes: HashSet::default()
-            }
-        );
-    }
-
-    #[test]
-    fn test_filter_map_revealed_nodes() {
-        let mut revealed_nodes = HashSet::from_iter([Nibbles::from_nibbles([0x0])]);
-        let leaf = TrieNode::Leaf(LeafNode::new(Nibbles::default(), alloy_rlp::encode([])));
-        let leaf_encoded = alloy_rlp::encode(&leaf);
-        let branch = TrieNode::Branch(BranchNode::new(
-            vec![RlpNode::from_rlp(&leaf_encoded), RlpNode::from_rlp(&leaf_encoded)],
-            TrieMask::new(0b11),
-        ));
-        let proof_nodes = alloy_trie::proof::DecodedProofNodes::from_iter([
-            (Nibbles::default(), branch.clone()),
-            (Nibbles::from_nibbles([0x0]), leaf.clone()),
-            (Nibbles::from_nibbles([0x1]), leaf.clone()),
-        ]);
-
-        let branch_node_masks = BranchNodeMasksMap::default();
-
-        let decoded =
-            filter_map_revealed_nodes(proof_nodes, &mut revealed_nodes, &branch_node_masks)
-                .unwrap();
-
-        assert_eq!(
-            decoded,
-            FilterMappedProofNodes {
-                root_node: Some(ProofTrieNode {
-                    path: Nibbles::default(),
-                    node: branch,
-                    masks: None,
-                }),
-                nodes: vec![ProofTrieNode {
-                    path: Nibbles::from_nibbles([0x1]),
-                    node: leaf,
-                    masks: None,
-                }],
-                // Branch, two of its children, one leaf
-                new_nodes: 4,
-                // Metric values
-                metric_values: ProofNodesMetricValues {
-                    // Branch, leaf, leaf
-                    total_nodes: 3,
-                    // Revealed leaf node with path 0x1
-                    skipped_nodes: 1,
-                },
             }
         );
     }
