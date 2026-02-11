@@ -154,13 +154,12 @@ where
                 Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre!("{e}"))?;
             }
 
-            let mut rayon_config = RayonConfig::default();
-            if let Some(n) = command.engine.storage_worker_count {
-                rayon_config = rayon_config.with_proof_storage_worker_threads(n);
-            }
-            if let Some(n) = command.engine.account_worker_count {
-                rayon_config = rayon_config.with_proof_account_worker_threads(n);
-            }
+            let rayon_config = RayonConfig {
+                reserved_cpu_cores: command.engine.reserved_cpu_cores,
+                proof_storage_worker_threads: command.engine.storage_worker_count,
+                proof_account_worker_threads: command.engine.account_worker_count,
+                ..Default::default()
+            };
             let runner = CliRunner::try_with_runtime_config(
                 reth_tasks::RuntimeConfig::default().with_rayon(rayon_config),
             )?;
