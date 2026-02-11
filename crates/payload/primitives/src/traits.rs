@@ -8,7 +8,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
-use core::fmt;
+use core::{fmt, future::Future, pin::Pin};
 use either::Either;
 use reth_chain_state::ComputedTrieData;
 use reth_execution_types::BlockExecutionOutput;
@@ -200,17 +200,25 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
 pub trait PayloadAttributesBuilder<Attributes, Header = alloy_consensus::Header>:
     Send + Sync + 'static
 {
-    /// Constructs new payload attributes for the given timestamp.
-    fn build(&self, parent: &SealedHeader<Header>) -> Attributes;
+    /// Constructs new payload attributes for the given parent header.
+    fn build<'a>(
+        &'a self,
+        parent: &'a SealedHeader<Header>,
+    ) -> Pin<Box<dyn Future<Output = Attributes> + Send + 'a>>;
 }
 
-impl<Attributes, Header, F> PayloadAttributesBuilder<Attributes, Header> for F
+impl<Attributes, Header, F, Fut> PayloadAttributesBuilder<Attributes, Header> for F
 where
-    Header: Clone,
-    F: Fn(SealedHeader<Header>) -> Attributes + Send + Sync + 'static,
+    Header: Clone + Send + Sync + 'static,
+    F: Fn(SealedHeader<Header>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Attributes> + Send + 'static,
 {
-    fn build(&self, parent: &SealedHeader<Header>) -> Attributes {
-        self(parent.clone())
+    fn build<'a>(
+        &'a self,
+        parent: &'a SealedHeader<Header>,
+    ) -> Pin<Box<dyn Future<Output = Attributes> + Send + 'a>> {
+        let parent = parent.clone();
+        Box::pin((self)(parent))
     }
 }
 
@@ -219,7 +227,10 @@ where
     L: PayloadAttributesBuilder<Attributes, Header>,
     R: PayloadAttributesBuilder<Attributes, Header>,
 {
-    fn build(&self, parent: &SealedHeader<Header>) -> Attributes {
+    fn build<'a>(
+        &'a self,
+        parent: &'a SealedHeader<Header>,
+    ) -> Pin<Box<dyn Future<Output = Attributes> + Send + 'a>> {
         match self {
             Self::Left(l) => l.build(parent),
             Self::Right(r) => r.build(parent),
@@ -233,7 +244,10 @@ where
     Header: 'static,
     Attributes: 'static,
 {
-    fn build(&self, parent: &SealedHeader<Header>) -> Attributes {
+    fn build<'a>(
+        &'a self,
+        parent: &'a SealedHeader<Header>,
+    ) -> Pin<Box<dyn Future<Output = Attributes> + Send + 'a>> {
         self.as_ref().build(parent)
     }
 }

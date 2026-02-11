@@ -12,6 +12,7 @@ use reth_node_api::{
     BlockTy, FullNodeComponents, FullNodeTypes, HeaderTy, PayloadAttrTy, PayloadAttributesBuilder,
     PayloadTypes,
 };
+use reth_primitives_traits::SealedHeader;
 use std::{
     future::{Future, IntoFuture},
     pin::Pin,
@@ -284,7 +285,13 @@ where
             } else {
                 let local = N::Types::local_payload_attributes_builder(&chain_spec);
                 let builder = if let Some(f) = map_attributes {
-                    Either::Left(move |parent| f(local.build(&parent)))
+                    let local = Arc::new(local);
+                    let f = Arc::new(f);
+                    Either::Left(move |parent: SealedHeader<HeaderTy<N::Types>>| {
+                        let local = Arc::clone(&local);
+                        let f = Arc::clone(&f);
+                        async move { f(local.build(&parent).await) }
+                    })
                 } else {
                     Either::Right(local)
                 };

@@ -196,11 +196,12 @@ where
     /// Generates payload attributes for a new block, passes them to FCU and inserts built payload
     /// through newPayload.
     async fn advance(&mut self) -> eyre::Result<()> {
+        let attributes = self.payload_attributes_builder.build(&self.last_header).await;
         let res = self
             .to_engine
             .fork_choice_updated(
                 self.forkchoice_state(),
-                Some(self.payload_attributes_builder.build(&self.last_header)),
+                Some(attributes),
                 EngineApiMessageVersion::default(),
             )
             .await?;
