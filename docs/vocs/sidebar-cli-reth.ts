@@ -104,6 +104,10 @@ export const rethCliSidebar: SidebarItem = {
                     ]
                 },
                 {
+                    text: "reth db compress",
+                    link: "/cli/reth/db/compress"
+                },
+                {
                     text: "reth db repair-trie",
                     link: "/cli/reth/db/repair-trie"
                 },
