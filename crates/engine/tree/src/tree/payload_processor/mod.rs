@@ -94,16 +94,16 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 /// 144MB.
 pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
-/// Gas used threshold below which prewarming is skipped for small blocks.
+/// Transaction count threshold below which prewarming is skipped for small blocks.
 ///
-/// Based on analysis of 100 mainnet blocks (starting at block 24,425,210), reth's `new_payload`
-/// winrate drops from 88% on 40-50M gas blocks to 49% on 0-10M gas blocks. The root cause is the
-/// fixed overhead of spawning prewarm workers (building state providers, creating EVM instances,
-/// wrapping precompiles) which exceeds execution time on small blocks.
+/// Based on analysis of mainnet blocks, reth's `new_payload` winrate drops significantly on
+/// small blocks. The root cause is the fixed overhead of spawning prewarm workers (building state
+/// providers, creating EVM instances, wrapping precompiles) which exceeds execution time on small
+/// blocks.
 ///
-/// 20M gas is used as the threshold because ~23% of recent mainnet blocks fall under this level
-/// where prewarming overhead dominates.
-pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
+/// 30 transactions is used as the threshold because blocks with fewer transactions don't benefit
+/// from prewarming parallelism.
+pub const SMALL_BLOCK_TX_THRESHOLD: usize = 30;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
@@ -443,7 +443,7 @@ where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let skip_prewarm = self.disable_transaction_prewarming ||
-            (env.gas_used > 0 && env.gas_used < SMALL_BLOCK_GAS_THRESHOLD);
+            (env.transaction_count > 0 && env.transaction_count < SMALL_BLOCK_TX_THRESHOLD);
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -996,10 +996,6 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used to determine parallel worker count for prewarming.
     /// A value of 0 indicates the count is unknown.
     pub transaction_count: usize,
-    /// Total gas used in the block.
-    /// Used to skip prewarming for small blocks (see [`SMALL_BLOCK_GAS_THRESHOLD`]).
-    /// A value of 0 indicates the gas used is unknown.
-    pub gas_used: u64,
     /// Withdrawals included in the block.
     /// Used to generate prefetch targets for withdrawal addresses.
     pub withdrawals: Option<Vec<Withdrawal>>,
@@ -1016,7 +1012,6 @@ where
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
             transaction_count: 0,
-            gas_used: 0,
             withdrawals: None,
         }
     }
