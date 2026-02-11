@@ -674,6 +674,15 @@ impl SparseTrie for ParallelSparseTrie {
             match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
                 FindNextToLeafOutcome::NotFound => return Ok(()), // leaf isn't in the trie
                 FindNextToLeafOutcome::BlindedNode(hash) => {
+                    // If we hit a blinded node that is a child of an extension node, we need to
+                    // request reveal for the extension as proof workers consider branch and
+                    // extension nodes to be coupled.
+                    if let Some(ext_path) = ext_grandparent_path &&
+                        branch_parent_path.is_none_or(|path| path.len() < ext_path.len())
+                    {
+                        return Err(SparseTrieErrorKind::BlindedNode { path: ext_path, hash }.into())
+                    }
+
                     return Err(SparseTrieErrorKind::BlindedNode { path: curr_path, hash }.into())
                 }
                 FindNextToLeafOutcome::Found => {
@@ -1084,6 +1093,7 @@ impl SparseTrie for ParallelSparseTrie {
         let mut curr_path = Nibbles::new(); // start traversal from root
         let mut curr_subtrie = self.upper_subtrie.as_ref();
         let mut curr_subtrie_is_upper = true;
+        let mut prev_node = None;
 
         loop {
             let curr_node = curr_subtrie.nodes.get(&curr_path).unwrap();
@@ -1091,7 +1101,16 @@ impl SparseTrie for ParallelSparseTrie {
             match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
                 FindNextToLeafOutcome::NotFound => return Ok(LeafLookup::NonExistent),
                 FindNextToLeafOutcome::BlindedNode(hash) => {
-                    // We hit a blinded node - cannot determine if leaf exists
+                    if let Some(&SparseNode::Extension { key, .. }) = prev_node {
+                        // If we hit a blinded node that is a child of an extension node, we need to
+                        // request reveal for the extension as proof workers consider branch and
+                        // extension nodes to be coupled.
+                        return Err(LeafLookupError::BlindedNode {
+                            path: curr_path.slice(0..curr_path.len() - key.len()),
+                            hash,
+                        });
+                    }
+
                     return Err(LeafLookupError::BlindedNode { path: curr_path, hash });
                 }
                 FindNextToLeafOutcome::Found => {
@@ -1109,6 +1128,7 @@ impl SparseTrie for ParallelSparseTrie {
                     }
                 }
             }
+            prev_node = Some(curr_node);
         }
     }
 
@@ -2759,17 +2779,23 @@ impl SparseSubtrie {
                 ))
             }
             SparseNode::Extension { key, .. } => {
-                current.extend(key);
+                let mut child_path = current;
+                child_path.extend(key);
 
-                if !path.starts_with(&current) {
+                if !path.starts_with(&child_path) {
                     // find the common prefix
-                    let common = current.common_prefix_length(path);
-                    *key = current.slice(current.len() - key.len()..common);
+                    let common = child_path.common_prefix_length(path);
+                    *key = child_path.slice(child_path.len() - key.len()..common);
 
                     // If branch node updates retention is enabled, we need to query the
                     // extension node child to later set the hash mask for a parent branch node
                     // correctly.
+                    //
+                    // We request reveal for the extension node's path as proof workers consider branch and
+                    // extension nodes coupled.
                     let reveal_path = retain_updates.then_some(current);
+
+                    current = child_path;
 
                     // create state mask for new branch node
                     // NOTE: this might overwrite the current extension node
@@ -2800,7 +2826,7 @@ impl SparseSubtrie {
                     return Ok(LeafUpdateStep::complete_with_insertions(inserted_nodes, reveal_path))
                 }
 
-                Ok(LeafUpdateStep::continue_with(current))
+                Ok(LeafUpdateStep::continue_with(child_path))
             }
             SparseNode::Branch { state_mask, .. } => {
                 let nibble = path.get_unchecked(current.len());
