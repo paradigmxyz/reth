@@ -107,7 +107,8 @@ pub struct TaskManager {
     ///
     /// This is fired when dropped.
     signal: Option<Signal>,
-    /// How many [`GracefulShutdown`] tasks are currently active.
+    /// How many [`GracefulShutdown`](crate::shutdown::GracefulShutdown) tasks are currently
+    /// active.
     graceful_tasks: Arc<AtomicUsize>,
 }
 
