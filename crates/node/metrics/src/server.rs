@@ -433,7 +433,7 @@ mod tests {
         listener.local_addr().unwrap()
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_metrics_endpoint() {
         let chain_spec_info = ChainSpecInfo { name: "test".to_string() };
         let version_info = VersionInfo {
