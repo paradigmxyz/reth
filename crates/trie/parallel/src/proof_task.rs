@@ -123,8 +123,6 @@ pub struct ProofWorkerHandle {
     account_worker_count: usize,
     /// Whether V2 storage proofs are enabled
     v2_proofs_enabled: bool,
-    /// Runtime handle that owns the proof worker pools.
-    _runtime: Runtime,
 }
 
 impl ProofWorkerHandle {
@@ -258,7 +256,6 @@ impl ProofWorkerHandle {
             storage_worker_count,
             account_worker_count,
             v2_proofs_enabled,
-            _runtime: runtime.clone(),
         }
     }
 
