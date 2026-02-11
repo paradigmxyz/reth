@@ -483,7 +483,7 @@ where
     }
 
     #[instrument(
-        level = "debug",
+        level = "trace",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
@@ -515,7 +515,7 @@ where
 
     /// Processes a hashed state update and encodes all state changes as trie updates.
     #[instrument(
-        level = "debug",
+        level = "trace",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]

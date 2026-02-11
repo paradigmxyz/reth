@@ -548,11 +548,7 @@ where
             return
         };
 
-        while let Ok(IndexedTransaction { index, tx }) = {
-            let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", "recv tx")
-                .entered();
-            txs.recv()
-        } {
+        while let Ok(IndexedTransaction { index, tx }) = txs.recv() {
             let enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 "prewarm tx",
