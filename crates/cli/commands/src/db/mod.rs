@@ -12,6 +12,7 @@ use std::{
 mod account_storage;
 mod checksum;
 mod clear;
+mod compress;
 mod diff;
 mod get;
 mod list;
@@ -54,6 +55,8 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
+    /// LZ4-compresses all values of a table and writes compressed output to a file
+    Compress(compress::Command),
     /// Verifies trie consistency and outputs any inconsistencies
     RepairTrie(repair_trie::Command),
     /// Reads and displays the static file segment header
@@ -158,6 +161,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             Subcommands::Clear(command) => {
                 db_exec!(self.env, tool, N, AccessRights::RW, {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::Compress(command) => {
+                db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
                 });
             }
