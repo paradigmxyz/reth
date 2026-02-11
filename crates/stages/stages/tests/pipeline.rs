@@ -208,8 +208,7 @@ where
 ///    - ETH transfer to a recipient (account state changes)
 ///    - Counter `increment()` call (storage state changes)
 /// 3. Runs the full pipeline with ALL stages enabled
-/// 4. Forward syncs to `num_blocks`, unwinds to `unwind_target`, then re-syncs back to
-///    `num_blocks`
+/// 4. Forward syncs to `num_blocks`, unwinds to `unwind_target`, then re-syncs back to `num_blocks`
 ///
 /// When `storage_settings` is `Some`, the pipeline provider factory is configured with the given
 /// settings before genesis initialization (e.g. v2 storage mode).
@@ -516,10 +515,9 @@ async fn run_pipeline_forward_and_unwind(
     resync_header_downloader.update_local_head(unwind_head);
     resync_header_downloader.update_sync_target(SyncTarget::Tip(tip));
 
-    let mut resync_body_downloader =
-        BodiesDownloaderBuilder::new(resync_stages_config.bodies)
-            .build(resync_file_client, resync_consensus, pipeline_provider_factory.clone())
-            .into_task();
+    let mut resync_body_downloader = BodiesDownloaderBuilder::new(resync_stages_config.bodies)
+        .build(resync_file_client, resync_consensus, pipeline_provider_factory.clone())
+        .into_task();
     resync_body_downloader
         .set_download_range(unwind_target + 1..=max_block)
         .expect("set download range");
