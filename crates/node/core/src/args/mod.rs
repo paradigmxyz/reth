@@ -68,10 +68,6 @@ pub use benchmark_args::BenchmarkArgs;
 mod engine;
 pub use engine::{DefaultEngineValues, EngineArgs};
 
-/// `RessArgs` for configuring ress subprotocol.
-mod ress_args;
-pub use ress_args::RessArgs;
-
 /// `EraArgs` for configuring ERA files import.
 mod era;
 pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
