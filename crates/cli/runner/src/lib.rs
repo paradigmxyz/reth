@@ -30,8 +30,14 @@ impl CliRunner {
     ///
     /// The default runtime is multi-threaded, with both I/O and time drivers enabled.
     pub fn try_default_runtime() -> Result<Self, reth_tasks::RuntimeBuildError> {
-        let runtime =
-            reth_tasks::RuntimeBuilder::new(reth_tasks::RuntimeConfig::default()).build()?;
+        Self::try_with_runtime_config(reth_tasks::RuntimeConfig::default())
+    }
+
+    /// Creates a new [`CliRunner`] with the given [`RuntimeConfig`](reth_tasks::RuntimeConfig).
+    pub fn try_with_runtime_config(
+        config: reth_tasks::RuntimeConfig,
+    ) -> Result<Self, reth_tasks::RuntimeBuildError> {
+        let runtime = reth_tasks::RuntimeBuilder::new(config).build()?;
         Ok(Self { config: CliRunnerConfig::default(), runtime })
     }
 
