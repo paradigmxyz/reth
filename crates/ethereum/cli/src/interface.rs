@@ -156,11 +156,7 @@ impl<
         N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        self.with_runner_and_components(
-            CliRunner::try_default_runtime()?,
-            components,
-            launcher,
-        )
+        self.with_runner_and_components(CliRunner::try_default_runtime()?, components, launcher)
     }
 
     /// Execute the configured cli command with the provided [`CliRunner`].
