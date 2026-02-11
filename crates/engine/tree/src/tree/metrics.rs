@@ -248,9 +248,9 @@ impl ForkchoiceUpdatedMetrics {
 #[metrics(scope = "consensus.engine.beacon")]
 pub(crate) struct NewPayloadGasBucketMetrics {
     /// Latency for new payload calls in this gas bucket.
-    pub(crate) new_payload_latency: Histogram,
+    pub(crate) new_payload_gas_bucket_latency: Histogram,
     /// Gas per second for new payload calls in this gas bucket.
-    pub(crate) new_payload_gas_per_second: Histogram,
+    pub(crate) new_payload_gas_bucket_gas_per_second: Histogram,
 }
 
 /// Holds pre-initialized [`NewPayloadGasBucketMetrics`] instances, one per gas bucket.
@@ -273,9 +273,9 @@ impl Default for GasBucketMetrics {
 impl GasBucketMetrics {
     fn record(&self, gas_used: u64, elapsed: Duration) {
         let idx = Self::bucket_index(gas_used);
-        self.buckets[idx].new_payload_latency.record(elapsed);
+        self.buckets[idx].new_payload_gas_bucket_latency.record(elapsed);
         self.buckets[idx]
-            .new_payload_gas_per_second
+            .new_payload_gas_bucket_gas_per_second
             .record(gas_used as f64 / elapsed.as_secs_f64());
     }
 
