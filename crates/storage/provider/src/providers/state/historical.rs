@@ -1264,4 +1264,105 @@ mod tests {
         assert!(!needs_prev_shard_check(0, Some(5), 5)); // found_block == block_number
         assert!(!needs_prev_shard_check(1, Some(10), 5)); // rank > 0
     }
+
+    #[test]
+    fn test_historical_storage_by_hashed_key_unsupported_in_v1() {
+        let factory = create_test_provider_factory();
+        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state);
+
+        let db = factory.provider().unwrap();
+        let provider = HistoricalStateProviderRef::new(&db, 1);
+
+        assert!(matches!(
+            provider.storage_by_hashed_key(ADDRESS, STORAGE),
+            Err(ProviderError::UnsupportedProvider)
+        ));
+    }
+
+    #[test]
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn test_historical_storage_by_hashed_key_v2() {
+        use crate::BlockWriter;
+        use alloy_primitives::keccak256;
+        use reth_db_api::models::StorageSettings;
+        use reth_execution_types::ExecutionOutcome;
+        use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
+        use revm_database::BundleState;
+        use std::collections::HashMap;
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let slot = U256::from_be_bytes(*STORAGE);
+        let hashed_storage = keccak256(STORAGE);
+        let account: revm_state::AccountInfo =
+            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None }.into();
+
+        let mut rng = generators::rng();
+        let blocks = random_block_range(
+            &mut rng,
+            0..=5,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+
+        let mut addr_storage = HashMap::default();
+        addr_storage.insert(slot, (U256::ZERO, U256::from(100)));
+
+        type Revert = Vec<(Address, Option<Option<revm_state::AccountInfo>>, Vec<(U256, U256)>)>;
+        let mut reverts: Vec<Revert> = vec![Vec::new(); 6];
+        reverts[3] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::ZERO)])];
+        reverts[5] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::from(50))])];
+
+        let bundle = BundleState::new([(ADDRESS, None, Some(account), addr_storage)], reverts, []);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .append_blocks_with_state(
+                blocks
+                    .into_iter()
+                    .map(|b| b.try_recover().expect("failed to seal block with senders"))
+                    .collect(),
+                &ExecutionOutcome { bundle, first_block: 0, ..Default::default() },
+                Default::default(),
+            )
+            .unwrap();
+
+        let hashed_address = keccak256(ADDRESS);
+
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: hashed_storage, value: U256::from(100) },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedAccounts>(
+                hashed_address,
+                Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 0).storage_by_hashed_key(ADDRESS, hashed_storage),
+            Ok(None)
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 3).storage_by_hashed_key(ADDRESS, hashed_storage),
+            Ok(Some(U256::ZERO))
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 4).storage_by_hashed_key(ADDRESS, hashed_storage),
+            Ok(Some(v)) if v == U256::from(50)
+        ));
+
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 4).storage_by_hashed_key(ADDRESS, STORAGE),
+            Ok(None) | Ok(Some(U256::ZERO))
+        ));
+    }
 }

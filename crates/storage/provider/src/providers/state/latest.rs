@@ -250,6 +250,7 @@ mod tests {
     };
     use reth_primitives_traits::StorageEntry;
     use reth_storage_api::StorageSettingsCache;
+    use reth_storage_errors::provider::ProviderError;
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
@@ -364,5 +365,52 @@ mod tests {
         let db = factory.provider().unwrap();
         let provider_ref = LatestStateProviderRef::new(&db);
         assert_eq!(provider_ref.storage(address, slot).unwrap(), None);
+    }
+
+    #[test]
+    fn test_latest_storage_by_hashed_key_v2() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let address = address!("0x0000000000000000000000000000000000000001");
+        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(slot);
+
+        let tx = factory.provider_rw().unwrap().into_tx();
+        tx.put::<tables::HashedStorages>(
+            hashed_address,
+            StorageEntry { key: hashed_slot, value: U256::from(42) },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        let provider_ref = LatestStateProviderRef::new(&db);
+
+        assert_eq!(
+            provider_ref.storage_by_hashed_key(address, hashed_slot).unwrap(),
+            Some(U256::from(42))
+        );
+
+        assert_eq!(provider_ref.storage_by_hashed_key(address, slot).unwrap(), None);
+    }
+
+    #[test]
+    fn test_latest_storage_by_hashed_key_unsupported_in_v1() {
+        let factory = create_test_provider_factory();
+        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state);
+
+        let address = address!("0x0000000000000000000000000000000000000001");
+        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+
+        let db = factory.provider().unwrap();
+        let provider_ref = LatestStateProviderRef::new(&db);
+
+        assert!(matches!(
+            provider_ref.storage_by_hashed_key(address, slot),
+            Err(ProviderError::UnsupportedProvider)
+        ));
     }
 }

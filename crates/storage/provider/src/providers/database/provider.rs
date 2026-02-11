@@ -5177,4 +5177,286 @@ mod tests {
     fn test_save_blocks_v2_table_assertions() {
         run_save_blocks_and_verify(StorageMode::V2);
     }
+
+    #[test]
+    fn test_write_and_remove_state_roundtrip_v2() {
+        let factory = create_test_provider_factory();
+        let storage_settings = StorageSettings::v2();
+        assert!(storage_settings.use_hashed_state);
+        factory.set_storage_settings_cache(storage_settings);
+
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let slot = U256::from(5);
+        let slot_key = B256::from(slot);
+        let hashed_slot = keccak256(slot_key);
+
+        {
+            let sf = factory.static_file_provider();
+            let mut hw = sf.latest_writer(StaticFileSegment::Headers).unwrap();
+            let h0 = alloy_consensus::Header { number: 0, ..Default::default() };
+            hw.append_header(&h0, &B256::ZERO).unwrap();
+            let h1 = alloy_consensus::Header { number: 1, ..Default::default() };
+            hw.append_header(&h1, &B256::ZERO).unwrap();
+            hw.commit().unwrap();
+
+            let mut aw = sf.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            aw.append_account_changeset(vec![], 0).unwrap();
+            aw.commit().unwrap();
+
+            let mut sw = sf.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            sw.append_storage_changeset(vec![], 0).unwrap();
+            sw.commit().unwrap();
+        }
+
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw
+                .tx
+                .put::<tables::BlockBodyIndices>(
+                    0,
+                    StoredBlockBodyIndices { first_tx_num: 0, tx_count: 0 },
+                )
+                .unwrap();
+            provider_rw
+                .tx
+                .put::<tables::BlockBodyIndices>(
+                    1,
+                    StoredBlockBodyIndices { first_tx_num: 0, tx_count: 0 },
+                )
+                .unwrap();
+            provider_rw
+                .tx
+                .cursor_write::<tables::HashedAccounts>()
+                .unwrap()
+                .upsert(
+                    hashed_address,
+                    &Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None },
+                )
+                .unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let bundle = BundleState::builder(1..=1)
+            .state_present_account_info(
+                address,
+                AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() },
+            )
+            .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]))
+            .revert_account_info(1, address, Some(None))
+            .revert_storage(1, address, vec![(slot, U256::ZERO)])
+            .build();
+
+        let execution_outcome = ExecutionOutcome::new(bundle.clone(), vec![vec![]], 1, Vec::new());
+
+        provider_rw
+            .write_state(
+                &execution_outcome,
+                OriginalValuesKnown::Yes,
+                StateWriteConfig {
+                    write_receipts: false,
+                    write_account_changesets: true,
+                    write_storage_changesets: true,
+                },
+            )
+            .unwrap();
+
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
+        provider_rw.write_hashed_state(&hashed_state).unwrap();
+
+        let hashed_account = provider_rw
+            .tx
+            .cursor_read::<tables::HashedAccounts>()
+            .unwrap()
+            .seek_exact(hashed_address)
+            .unwrap()
+            .unwrap()
+            .1;
+        assert_eq!(hashed_account.nonce, 1);
+
+        let hashed_entry = provider_rw
+            .tx
+            .cursor_dup_read::<tables::HashedStorages>()
+            .unwrap()
+            .seek_by_key_subkey(hashed_address, hashed_slot)
+            .unwrap()
+            .unwrap();
+        assert_eq!(hashed_entry.key, hashed_slot);
+        assert_eq!(hashed_entry.value, U256::from(10));
+
+        let plain_accounts = provider_rw.tx.entries::<tables::PlainAccountState>().unwrap();
+        assert_eq!(plain_accounts, 0, "v2: PlainAccountState should be empty");
+
+        let plain_storage = provider_rw.tx.entries::<tables::PlainStorageState>().unwrap();
+        assert_eq!(plain_storage, 0, "v2: PlainStorageState should be empty");
+
+        provider_rw.static_file_provider().commit().unwrap();
+
+        let sf = factory.static_file_provider();
+        let storage_cs = sf.storage_changeset(1).unwrap();
+        assert!(!storage_cs.is_empty(), "v2: storage changesets should be in static files");
+        assert_eq!(
+            storage_cs[0].1.key.as_b256(),
+            hashed_slot,
+            "v2: changeset key should be hashed"
+        );
+
+        provider_rw.remove_state_above(0).unwrap();
+
+        let restored_account = provider_rw
+            .tx
+            .cursor_read::<tables::HashedAccounts>()
+            .unwrap()
+            .seek_exact(hashed_address)
+            .unwrap();
+        assert!(
+            restored_account.is_none(),
+            "v2: account should be removed (didn't exist before block 1)"
+        );
+
+        let storage_gone = provider_rw
+            .tx
+            .cursor_dup_read::<tables::HashedStorages>()
+            .unwrap()
+            .seek_by_key_subkey(hashed_address, hashed_slot)
+            .unwrap();
+        assert!(
+            storage_gone.is_none() || storage_gone.unwrap().key != hashed_slot,
+            "v2: storage should be reverted (removed or different key)"
+        );
+
+        let mdbx_storage_cs = provider_rw.tx.entries::<tables::StorageChangeSets>().unwrap();
+        assert_eq!(mdbx_storage_cs, 0, "v2: MDBX StorageChangeSets should remain empty");
+
+        let mdbx_account_cs = provider_rw.tx.entries::<tables::AccountChangeSets>().unwrap();
+        assert_eq!(mdbx_account_cs, 0, "v2: MDBX AccountChangeSets should remain empty");
+    }
+
+    #[test]
+    fn test_populate_bundle_state_hashed_with_hashed_keys() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let slot_key = B256::from(U256::from(42));
+        let hashed_slot = keccak256(slot_key);
+        let current_value = U256::from(100);
+        let old_value = U256::from(50);
+
+        let provider_rw = factory.provider_rw().unwrap();
+
+        provider_rw
+            .tx
+            .cursor_write::<tables::HashedAccounts>()
+            .unwrap()
+            .upsert(hashed_address, &Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None })
+            .unwrap();
+        provider_rw
+            .tx
+            .cursor_dup_write::<tables::HashedStorages>()
+            .unwrap()
+            .upsert(hashed_address, &StorageEntry { key: hashed_slot, value: current_value })
+            .unwrap();
+
+        let storage_changeset = vec![(
+            BlockNumberAddress((1, address)),
+            ChangesetEntry { key: StorageSlotKey::Hashed(hashed_slot), value: old_value },
+        )];
+
+        let account_changeset = vec![(
+            1u64,
+            AccountBeforeTx {
+                address,
+                info: Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None }),
+            },
+        )];
+
+        let mut hashed_accounts_cursor =
+            provider_rw.tx.cursor_read::<tables::HashedAccounts>().unwrap();
+        let mut hashed_storage_cursor =
+            provider_rw.tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+
+        let (state, reverts) = provider_rw
+            .populate_bundle_state_hashed(
+                account_changeset,
+                storage_changeset,
+                &mut hashed_accounts_cursor,
+                &mut hashed_storage_cursor,
+            )
+            .unwrap();
+
+        let (_, new_account, storage_map) =
+            state.get(&address).expect("address should be in state");
+        assert!(new_account.is_some());
+        assert_eq!(new_account.unwrap().nonce, 1);
+
+        let (old_val, new_val) =
+            storage_map.get(&hashed_slot).expect("hashed slot should be in storage map");
+        assert_eq!(*old_val, old_value);
+        assert_eq!(*new_val, current_value);
+
+        let block_reverts = reverts.get(&1).expect("block 1 should have reverts");
+        let (_, storage_reverts) =
+            block_reverts.get(&address).expect("address should have reverts");
+        assert_eq!(storage_reverts.len(), 1);
+        assert_eq!(storage_reverts[0].key, hashed_slot);
+        assert_eq!(storage_reverts[0].value, old_value);
+    }
+
+    #[test]
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn test_unwind_storage_history_indices_v2() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let address = Address::with_last_byte(1);
+        let slot_key = B256::from(U256::from(42));
+        let hashed_slot = keccak256(slot_key);
+
+        {
+            let rocksdb = factory.rocksdb_provider();
+            let mut batch = rocksdb.batch();
+            batch
+                .append_storage_history_shard(address, hashed_slot, vec![3u64, 7, 10].into_iter())
+                .unwrap();
+            batch.commit().unwrap();
+
+            let shards = rocksdb.storage_history_shards(address, hashed_slot).unwrap();
+            assert!(!shards.is_empty(), "history should be written to rocksdb");
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let changesets = vec![
+            (
+                BlockNumberAddress((7, address)),
+                ChangesetEntry { key: StorageSlotKey::Hashed(hashed_slot), value: U256::from(5) },
+            ),
+            (
+                BlockNumberAddress((10, address)),
+                ChangesetEntry { key: StorageSlotKey::Hashed(hashed_slot), value: U256::from(8) },
+            ),
+        ];
+
+        let count = provider_rw.unwind_storage_history_indices(changesets.into_iter()).unwrap();
+        assert_eq!(count, 2);
+
+        provider_rw.commit().unwrap();
+
+        let rocksdb = factory.rocksdb_provider();
+        let shards = rocksdb.storage_history_shards(address, hashed_slot).unwrap();
+
+        if shards.is_empty() {
+            panic!("history shards should still exist with block 3 after partial unwind");
+        }
+
+        let all_blocks: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
+        assert!(all_blocks.contains(&3), "block 3 should remain");
+        assert!(!all_blocks.contains(&7), "block 7 should be unwound");
+        assert!(!all_blocks.contains(&10), "block 10 should be unwound");
+    }
 }

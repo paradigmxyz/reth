@@ -39,6 +39,14 @@ fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
         )
 }
 
+/// Creates a v2 storage mode setup for engine tree e2e tests.
+///
+/// v2 mode uses keccak256-hashed slot keys in static file changesets and rocksdb history
+/// instead of plain keys in MDBX.
+fn v2_engine_tree_setup() -> Setup<EthEngineTypes> {
+    default_engine_tree_setup().with_storage_v2()
+}
+
 /// Test that verifies forkchoice update and canonical chain insertion functionality.
 #[tokio::test]
 async fn test_engine_tree_fcu_canon_chain_insertion_e2e() -> Result<()> {
@@ -329,6 +337,66 @@ async fn test_engine_tree_live_sync_transition_eventually_canonical_e2e() -> Res
         .with_action(WaitForSync::new(0, 1).with_timeout(60))
         // Verify both nodes end up with the same canonical chain
         .with_action(CompareNodeChainTips::expect_same(0, 1));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+// ==================== v2 storage mode variants ====================
+
+/// v2 variant: Verifies forkchoice update and canonical chain insertion in v2 storage mode.
+///
+/// Exercises the full save_blocks → write_state → static file changeset path with hashed keys.
+#[tokio::test]
+async fn test_engine_tree_fcu_canon_chain_insertion_v2_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let test = TestBuilder::new()
+        .with_setup(v2_engine_tree_setup())
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(MakeCanonical::new())
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
+        .with_action(MakeCanonical::new());
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+/// v2 variant: Verifies forkchoice update with a reorg where all blocks are already available.
+///
+/// Exercises write_state_reverts path with hashed changeset keys during CL-driven reorgs.
+#[tokio::test]
+async fn test_engine_tree_fcu_reorg_with_all_blocks_v2_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let test = TestBuilder::new()
+        .with_setup(v2_engine_tree_setup())
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
+        .with_action(MakeCanonical::new())
+        .with_action(CreateFork::<EthEngineTypes>::new(2, 3))
+        .with_action(CaptureBlock::new("fork_tip"))
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_tip"));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+/// v2 variant: Verifies progressive canonical chain extension in v2 storage mode.
+#[tokio::test]
+async fn test_engine_tree_fcu_extends_canon_chain_v2_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let test = TestBuilder::new()
+        .with_setup(v2_engine_tree_setup())
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(MakeCanonical::new())
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(10))
+        .with_action(CaptureBlock::new("target_block"))
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("target_block"))
+        .with_action(MakeCanonical::new());
 
     test.run::<EthereumNode>().await?;
 
