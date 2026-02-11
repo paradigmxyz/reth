@@ -135,6 +135,74 @@ impl StorageSettings {
         self
     }
 
+    /// Sets `receipts_in_static_files` if `value` is `Some`.
+    pub const fn with_receipts_in_static_files_opt(mut self, value: Option<bool>) -> Self {
+        if let Some(v) = value {
+            self.receipts_in_static_files = v;
+        }
+        self
+    }
+
+    /// Sets `transaction_senders_in_static_files` if `value` is `Some`.
+    pub const fn with_transaction_senders_in_static_files_opt(
+        mut self,
+        value: Option<bool>,
+    ) -> Self {
+        if let Some(v) = value {
+            self.transaction_senders_in_static_files = v;
+        }
+        self
+    }
+
+    /// Sets `account_changesets_in_static_files` if `value` is `Some`.
+    pub const fn with_account_changesets_in_static_files_opt(
+        mut self,
+        value: Option<bool>,
+    ) -> Self {
+        if let Some(v) = value {
+            self.account_changesets_in_static_files = v;
+        }
+        self
+    }
+
+    /// Sets `storage_changesets_in_static_files` if `value` is `Some`.
+    pub const fn with_storage_changesets_in_static_files_opt(
+        mut self,
+        value: Option<bool>,
+    ) -> Self {
+        if let Some(v) = value {
+            self.storage_changesets_in_static_files = v;
+        }
+        self
+    }
+
+    /// Sets `transaction_hash_numbers_in_rocksdb` if `value` is `Some`.
+    pub const fn with_transaction_hash_numbers_in_rocksdb_opt(
+        mut self,
+        value: Option<bool>,
+    ) -> Self {
+        if let Some(v) = value {
+            self.transaction_hash_numbers_in_rocksdb = v;
+        }
+        self
+    }
+
+    /// Sets `storages_history_in_rocksdb` if `value` is `Some`.
+    pub const fn with_storages_history_in_rocksdb_opt(mut self, value: Option<bool>) -> Self {
+        if let Some(v) = value {
+            self.storages_history_in_rocksdb = v;
+        }
+        self
+    }
+
+    /// Sets `account_history_in_rocksdb` if `value` is `Some`.
+    pub const fn with_account_history_in_rocksdb_opt(mut self, value: Option<bool>) -> Self {
+        if let Some(v) = value {
+            self.account_history_in_rocksdb = v;
+        }
+        self
+    }
+
     /// Returns `true` if any tables are configured to be stored in `RocksDB`.
     pub const fn any_in_rocksdb(&self) -> bool {
         self.transaction_hash_numbers_in_rocksdb ||

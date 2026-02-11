@@ -375,18 +375,11 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         let mut s = if self.storage.v2 { StorageSettings::v2() } else { StorageSettings::base() };
 
         // Apply static files overrides (only when explicitly set)
-        if let Some(v) = self.static_files.receipts {
-            s = s.with_receipts_in_static_files(v);
-        }
-        if let Some(v) = self.static_files.transaction_senders {
-            s = s.with_transaction_senders_in_static_files(v);
-        }
-        if let Some(v) = self.static_files.account_changesets {
-            s = s.with_account_changesets_in_static_files(v);
-        }
-        if let Some(v) = self.static_files.storage_changesets {
-            s = s.with_storage_changesets_in_static_files(v);
-        }
+        s = s
+            .with_receipts_in_static_files_opt(self.static_files.receipts)
+            .with_transaction_senders_in_static_files_opt(self.static_files.transaction_senders)
+            .with_account_changesets_in_static_files_opt(self.static_files.account_changesets)
+            .with_storage_changesets_in_static_files_opt(self.static_files.storage_changesets);
 
         // Apply rocksdb overrides
         // --rocksdb.all sets all rocksdb flags to true
@@ -398,15 +391,10 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         }
 
         // Individual rocksdb flags override --rocksdb.all when explicitly set
-        if let Some(v) = self.rocksdb.tx_hash {
-            s = s.with_transaction_hash_numbers_in_rocksdb(v);
-        }
-        if let Some(v) = self.rocksdb.storages_history {
-            s = s.with_storages_history_in_rocksdb(v);
-        }
-        if let Some(v) = self.rocksdb.account_history {
-            s = s.with_account_history_in_rocksdb(v);
-        }
+        s = s
+            .with_transaction_hash_numbers_in_rocksdb_opt(self.rocksdb.tx_hash)
+            .with_storages_history_in_rocksdb_opt(self.rocksdb.storages_history)
+            .with_account_history_in_rocksdb_opt(self.rocksdb.account_history);
 
         s = s.with_use_hashed_state(self.storage.use_hashed_state);
 
