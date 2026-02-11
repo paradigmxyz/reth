@@ -70,8 +70,8 @@ pub struct PeersManager {
     connection_info: ConnectionInfo,
     /// Tracks unwanted ips/peer ids.
     ban_list: BanList,
-    /// Tracks currently backed off peers and the reason for backing off.
-    backed_off_peers: HashMap<PeerId, (std::time::Instant, BackoffReason)>,
+    /// Tracks currently backed off peers.
+    backed_off_peers: HashMap<PeerId, std::time::Instant>,
     /// Interval at which to check for peers to unban and release from the backoff map.
     release_interval: Interval,
     /// How long to ban bad peers.
@@ -420,17 +420,12 @@ impl PeersManager {
     }
 
     /// Temporarily puts the peer in timeout by inserting it into the backedoff peers set
-    fn backoff_peer_until(
-        &mut self,
-        peer_id: PeerId,
-        until: std::time::Instant,
-        reason: BackoffReason,
-    ) {
-        trace!(target: "net::peers", ?peer_id, ?reason, "backing off");
+    fn backoff_peer_until(&mut self, peer_id: PeerId, until: std::time::Instant) {
+        trace!(target: "net::peers", ?peer_id, "backing off");
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.backed_off = true;
-            self.backed_off_peers.insert(peer_id, (until, reason));
+            self.backed_off_peers.insert(peer_id, until);
         }
     }
 
@@ -538,13 +533,11 @@ impl PeersManager {
         peer_id: &PeerId,
         err: &PendingSessionHandshakeError,
     ) {
-        let reason = BackoffReason::from_disconnect(err.as_disconnected());
         self.on_connection_failure(
             remote_addr,
             peer_id,
             err,
             ReputationChangeKind::FailedToConnect,
-            reason,
         )
     }
 
@@ -574,10 +567,7 @@ impl PeersManager {
                     peer.backed_off = true;
                     self.backed_off_peers.insert(
                         peer_id,
-                        (
-                            std::time::Instant::now() + self.incoming_ip_throttle_duration,
-                            BackoffReason::GracefulClose,
-                        ),
+                        std::time::Instant::now() + self.incoming_ip_throttle_duration,
                     );
                     trace!(target: "net::peers", ?peer_id, kind=?peer.kind, duration=?self.incoming_ip_throttle_duration, "backing off on gracefully closed session");
                 }
@@ -608,8 +598,7 @@ impl PeersManager {
         peer_id: &PeerId,
         err: &EthStreamError,
     ) {
-        let reason = BackoffReason::from_disconnect(err.as_disconnected());
-        self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::Dropped, reason)
+        self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::Dropped)
     }
 
     /// Called when an attempt to create an _outgoing_ pending session failed while setting up a tcp
@@ -641,7 +630,6 @@ impl PeersManager {
             peer_id,
             err,
             ReputationChangeKind::FailedToConnect,
-            BackoffReason::ConnectionError,
         )
     }
 
@@ -651,7 +639,6 @@ impl PeersManager {
         peer_id: &PeerId,
         err: impl SessionError,
         reputation_change: ReputationChangeKind,
-        backoff_reason: BackoffReason,
     ) {
         trace!(target: "net::peers", ?remote_addr, ?peer_id, %err, "handling failed connection");
 
@@ -736,7 +723,7 @@ impl PeersManager {
                 self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
             } else if let Some(backoff_until) = backoff_until {
                 // otherwise, backoff the peer if marked as such
-                self.backoff_peer_until(*peer_id, backoff_until, backoff_reason);
+                self.backoff_peer_until(*peer_id, backoff_until);
             }
         }
 
@@ -1099,7 +1086,7 @@ impl PeersManager {
 
                 // clear the backoff list of expired backoffs, and mark the relevant peers as
                 // ready to be dialed
-                self.backed_off_peers.retain(|peer_id, (until, _reason)| {
+                self.backed_off_peers.retain(|peer_id, until| {
                     if now > *until {
                         if let Some(peer) = self.peers.get_mut(peer_id) {
                             peer.backed_off = false;
