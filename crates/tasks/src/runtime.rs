@@ -374,7 +374,6 @@ impl Runtime {
     pub fn proof_account_worker_pool(&self) -> &rayon::ThreadPool {
         &self.0.proof_account_worker_pool
     }
-
 }
 
 // ── Test helpers ──────────────────────────────────────────────────────
