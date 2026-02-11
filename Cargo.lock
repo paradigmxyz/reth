@@ -186,9 +186,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-dyn-abi"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14ff5ee5f27aa305bda825c735f686ad71bb65508158f059f513895abe69b8c3"
+checksum = "2e32bfc0f3833662c8ffe619c88a729270afec29cc6f28b3cd9ac600cf8e884b"
 dependencies = [
  "alloy-json-abi",
  "alloy-primitives",
@@ -353,9 +353,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-json-abi"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8708475665cc00e081c085886e68eada2f64cfa08fc668213a9231655093d4de"
+checksum = "7677b2646354ae19105e77f429a98023a1718f67aa5aa8f0e77ed2ade78d3c03"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-type-parser",
@@ -453,9 +453,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-primitives"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b88cf92ed20685979ed1d8472422f0c6c2d010cec77caf63aaa7669cc1a7bc2"
+checksum = "ca5de724d1d8ab866fc84fe45fcbf08708a002f7e9f7cc27256e94149cc193f7"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -465,7 +465,7 @@ dependencies = [
  "derive_more",
  "fixed-cache",
  "foldhash 0.2.0",
- "getrandom 0.3.4",
+ "getrandom 0.4.1",
  "hashbrown 0.16.1",
  "indexmap 2.13.0",
  "itoa",
@@ -473,7 +473,7 @@ dependencies = [
  "keccak-asm",
  "paste",
  "proptest",
- "proptest-derive 0.6.0",
+ "proptest-derive",
  "rand 0.9.2",
  "rapidhash",
  "ruint",
@@ -809,9 +809,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-macro"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5fa1ca7e617c634d2bd9fa71f9ec8e47c07106e248b9fcbd3eaddc13cabd625"
+checksum = "8c8fde85e0e0d043034565c12f30b3053cc50d78d70d6e9e60ede1197e849368"
 dependencies = [
  "alloy-sol-macro-expander",
  "alloy-sol-macro-input",
@@ -823,9 +823,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-macro-expander"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27c00c0c3a75150a9dc7c8c679ca21853a137888b4e1c5569f92d7e2b15b5102"
+checksum = "19876f48b1da8bfa883b645eb511672d21da9619fe6d9eac31368ba7255950a9"
 dependencies = [
  "alloy-sol-macro-input",
  "const-hex",
@@ -841,9 +841,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-macro-input"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "297db260eb4d67c105f68d6ba11b8874eec681caec5505eab8fbebee97f790bc"
+checksum = "82e9c970830100a5c33362194268923b9120fb5fb2c516c519cc9581adaf637a"
 dependencies = [
  "const-hex",
  "dunce",
@@ -857,9 +857,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-type-parser"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94b91b13181d3bcd23680fd29d7bc861d1f33fbe90fdd0af67162434aeba902d"
+checksum = "6f2bda52eb4d66adb9fa02f0a919d7df1584c6410f87f315fc4125dc79ece94d"
 dependencies = [
  "serde",
  "winnow",
@@ -867,9 +867,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-types"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc442cc2a75207b708d481314098a0f8b6f7b58e3148dd8d8cc7407b0d6f9385"
+checksum = "2e0b1f348acd1524890aa46f6aa02359dcbf39b86631202d86288bd45a097822"
 dependencies = [
  "alloy-json-abi",
  "alloy-primitives",
@@ -967,7 +967,7 @@ dependencies = [
  "derive_more",
  "nybbles",
  "proptest",
- "proptest-derive 0.7.0",
+ "proptest-derive",
  "serde",
  "smallvec",
  "thiserror 2.0.18",
@@ -7009,17 +7009,6 @@ dependencies = [
 
 [[package]]
 name = "proptest-derive"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "095a99f75c69734802359b682be8daaf8980296731f6470434ea2c652af1dd30"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.114",
-]
-
-[[package]]
-name = "proptest-derive"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb6dc647500e84a25a85b100e76c85b8ace114c209432dc174f20aac11d4ed6c"
@@ -11913,9 +11902,9 @@ dependencies = [
 
 [[package]]
 name = "syn-solidity"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2379beea9476b89d0237078be761cf8e012d92d5ae4ae0c9a329f974838870fc"
+checksum = "70946cbe0f08e1b779dd08afa11b14279b5d8e93a4c74496cd8cbad6b0514262"
 dependencies = [
  "paste",
  "proc-macro2",
