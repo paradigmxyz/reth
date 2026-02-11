@@ -235,30 +235,41 @@ impl ForkchoiceUpdatedMetrics {
     }
 }
 
-/// Gas-bucket-labeled newPayload metrics.
-///
-/// Records latency and gas/s histograms with a `gas_bucket` label so operators can break down
-/// new-payload performance by payload size.
+/// Per-gas-bucket newPayload metrics, initialized once via [`Self::new_with_labels`].
+#[derive(Clone, Metrics)]
+#[metrics(scope = "consensus.engine.beacon")]
+pub(crate) struct NewPayloadGasBucketMetrics {
+    /// Latency for new payload calls in this gas bucket.
+    pub(crate) new_payload_latency: Histogram,
+    /// Gas per second for new payload calls in this gas bucket.
+    pub(crate) new_payload_gas_per_second: Histogram,
+}
+
+/// Holds the five pre-initialized [`NewPayloadGasBucketMetrics`] instances.
 #[derive(Debug)]
 pub(crate) struct GasBucketMetrics {
-    latency: [Histogram; 5],
-    gas_per_second: [Histogram; 5],
+    buckets: [NewPayloadGasBucketMetrics; 5],
 }
 
 impl Default for GasBucketMetrics {
     fn default() -> Self {
-        const BUCKETS: [&str; 5] = ["<10M", "10-20M", "20-30M", "30-40M", ">40M"];
-        let latency = BUCKETS.map(|b| {
-            metrics::histogram!("consensus.engine.beacon.new_payload_latency_by_gas_bucket", "gas_bucket" => b)
-        });
-        let gas_per_second = BUCKETS.map(|b| {
-            metrics::histogram!("consensus.engine.beacon.new_payload_gas_per_second_by_gas_bucket", "gas_bucket" => b)
-        });
-        Self { latency, gas_per_second }
+        const LABELS: [&str; 5] = ["<10M", "10-20M", "20-30M", "30-40M", ">40M"];
+        Self {
+            buckets: LABELS
+                .map(|l| NewPayloadGasBucketMetrics::new_with_labels(&[("gas_bucket", l)])),
+        }
     }
 }
 
 impl GasBucketMetrics {
+    fn record(&self, gas_used: u64, elapsed: Duration) {
+        let idx = Self::bucket_index(gas_used);
+        self.buckets[idx].new_payload_latency.record(elapsed);
+        self.buckets[idx]
+            .new_payload_gas_per_second
+            .record(gas_used as f64 / elapsed.as_secs_f64());
+    }
+
     fn bucket_index(gas_used: u64) -> usize {
         const M10: u64 = 10_000_000;
         const M20: u64 = 20_000_000;
@@ -271,12 +282,6 @@ impl GasBucketMetrics {
             M30..M40 => 3,
             _ => 4,
         }
-    }
-
-    fn record(&self, gas_used: u64, elapsed: Duration) {
-        let idx = Self::bucket_index(gas_used);
-        self.latency[idx].record(elapsed);
-        self.gas_per_second[idx].record(gas_used as f64 / elapsed.as_secs_f64());
     }
 }
 
