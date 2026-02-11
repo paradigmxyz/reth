@@ -114,22 +114,23 @@ impl EthereumNode {
     /// }
     /// ```
     ///
-    /// # Open a Providerfactory manually with all required components
+    /// # Open a [`ProviderFactory`](reth_provider::ProviderFactory) manually with all required components
     ///
     /// ```no_run
     /// use reth_chainspec::ChainSpecBuilder;
     /// use reth_db::open_db_read_only;
-    /// use reth_node_ethereum::EthereumNode;
-    /// use reth_provider::providers::{RocksDBProvider, StaticFileProvider};
+    /// use reth_provider::{
+    ///     providers::{RocksDBProvider, StaticFileProvider},
+    ///     ProviderFactory,
+    /// };
+    /// use std::sync::Arc;
     ///
     /// fn demo(runtime: reth_tasks::Runtime) {
-    ///     let factory = EthereumNode::provider_factory_builder()
-    ///         .db(open_db_read_only("db", Default::default()).unwrap())
-    ///         .chainspec(ChainSpecBuilder::mainnet().build().into())
-    ///         .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
-    ///         .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())
-    ///         .runtime(runtime)
-    ///         .build_provider_factory();
+    ///     let db = open_db_read_only("db", Default::default()).unwrap();
+    ///     let chainspec = Arc::new(ChainSpecBuilder::mainnet().build());
+    ///     let static_files = StaticFileProvider::read_only("db/static_files", false).unwrap();
+    ///     let rocksdb = RocksDBProvider::builder("db/rocksdb").build().unwrap();
+    ///     let factory = ProviderFactory::new(db, chainspec, static_files, rocksdb, runtime);
     /// }
     /// ```
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
