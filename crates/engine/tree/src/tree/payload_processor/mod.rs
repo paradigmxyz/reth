@@ -94,6 +94,17 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 /// 144MB.
 pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
+/// Gas used threshold below which prewarming is skipped for small blocks.
+///
+/// Based on analysis of 100 mainnet blocks (starting at block 24,425,210), reth's `new_payload`
+/// winrate drops from 88% on 40-50M gas blocks to 49% on 0-10M gas blocks. The root cause is the
+/// fixed overhead of spawning prewarm workers (building state providers, creating EVM instances,
+/// wrapping precompiles) which exceeds execution time on small blocks.
+///
+/// 20M gas is used as the threshold because ~23% of recent mainnet blocks fall under this level
+/// where prewarming overhead dominates.
+pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
+
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
@@ -414,7 +425,7 @@ where
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
@@ -423,11 +434,8 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        if self.disable_transaction_prewarming {
-            // if no transactions should be executed we clear them but still spawn the task for
-            // caching updates
-            transactions = mpsc::channel().1;
-        }
+        let skip_prewarm = self.disable_transaction_prewarming ||
+            (env.gas_used > 0 && env.gas_used < SMALL_BLOCK_GAS_THRESHOLD);
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -456,7 +464,9 @@ where
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking(move || {
-                let mode = if let Some(bal) = bal {
+                let mode = if skip_prewarm {
+                    PrewarmMode::Skipped
+                } else if let Some(bal) = bal {
                     PrewarmMode::BlockAccessList(bal)
                 } else {
                     PrewarmMode::Transactions(transactions)
@@ -714,6 +724,18 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
             .map_err(|_| ParallelStateRootError::Other("sparse trie task dropped".to_string()))?
     }
 
+    /// Takes the state root receiver out of the handle for use with custom waiting logic
+    /// (e.g., timeout-based waiting).
+    ///
+    /// # Panics
+    ///
+    /// If payload processing was started without background tasks.
+    pub const fn take_state_root_rx(
+        &mut self,
+    ) -> mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
+        self.state_root.take().expect("state_root is None")
+    }
+
     /// Returns a state hook to be used to send state updates to this task.
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
@@ -966,6 +988,10 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used to determine parallel worker count for prewarming.
     /// A value of 0 indicates the count is unknown.
     pub transaction_count: usize,
+    /// Total gas used in the block.
+    /// Used to skip prewarming for small blocks (see [`SMALL_BLOCK_GAS_THRESHOLD`]).
+    /// A value of 0 indicates the gas used is unknown.
+    pub gas_used: u64,
     /// Withdrawals included in the block.
     /// Used to generate prefetch targets for withdrawal addresses.
     pub withdrawals: Option<Vec<Withdrawal>>,
@@ -982,6 +1008,7 @@ where
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
             transaction_count: 0,
+            gas_used: 0,
             withdrawals: None,
         }
     }

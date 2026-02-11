@@ -13,7 +13,7 @@
 use reth_tasks::{PanickedTaskError, TaskExecutor};
 use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info};
 
 /// Executes CLI commands.
 ///
@@ -253,10 +253,10 @@ where
 
         tokio::select! {
             _ = ctrl_c => {
-                trace!(target: "reth::cli", "Received ctrl-c");
+                info!(target: "reth::cli", "Received ctrl-c");
             },
             _ = sigterm => {
-                trace!(target: "reth::cli", "Received SIGTERM");
+                info!(target: "reth::cli", "Received SIGTERM");
             },
             res = fut => res?,
         }
@@ -269,7 +269,7 @@ where
 
         tokio::select! {
             _ = ctrl_c => {
-                trace!(target: "reth::cli", "Received ctrl-c");
+                info!(target: "reth::cli", "Received ctrl-c");
             },
             res = fut => res?,
         }
