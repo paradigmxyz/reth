@@ -94,17 +94,6 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 /// 144MB.
 pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
-/// Gas used threshold below which prewarming is skipped for small blocks.
-///
-/// Based on analysis of 100 mainnet blocks (starting at block 24,425,210), reth's `new_payload`
-/// winrate drops from 88% on 40-50M gas blocks to 49% on 0-10M gas blocks. The root cause is the
-/// fixed overhead of spawning prewarm workers (building state providers, creating EVM instances,
-/// wrapping precompiles) which exceeds execution time on small blocks.
-///
-/// 20M gas is used as the threshold because ~23% of recent mainnet blocks fall under this level
-/// where prewarming overhead dominates.
-pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
-
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
@@ -287,15 +276,7 @@ where
 
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        let storage_worker_count = config.storage_worker_count();
-        let account_worker_count = config.account_worker_count();
-        let proof_handle = ProofWorkerHandle::new(
-            &self.executor,
-            task_ctx,
-            storage_worker_count,
-            account_worker_count,
-            v2_proofs_enabled,
-        );
+        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, v2_proofs_enabled);
 
         if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(
@@ -442,8 +423,7 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let skip_prewarm = self.disable_transaction_prewarming ||
-            (env.gas_used > 0 && env.gas_used < SMALL_BLOCK_GAS_THRESHOLD);
+        let skip_prewarm = self.disable_transaction_prewarming;
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -996,10 +976,6 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used to determine parallel worker count for prewarming.
     /// A value of 0 indicates the count is unknown.
     pub transaction_count: usize,
-    /// Total gas used in the block.
-    /// Used to skip prewarming for small blocks (see [`SMALL_BLOCK_GAS_THRESHOLD`]).
-    /// A value of 0 indicates the gas used is unknown.
-    pub gas_used: u64,
     /// Withdrawals included in the block.
     /// Used to generate prefetch targets for withdrawal addresses.
     pub withdrawals: Option<Vec<Withdrawal>>,
@@ -1016,7 +992,6 @@ where
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
             transaction_count: 0,
-            gas_used: 0,
             withdrawals: None,
         }
     }

@@ -2,7 +2,7 @@
 
 use crate::Compact;
 use alloc::vec::Vec;
-use alloy_primitives::B256;
+use alloy_primitives::{FixedBytesSliceExt, B256};
 use alloy_trie::{
     hash_builder::{HashBuilderValue, HashBuilderValueRef},
     BranchNodeCompact, TrieMask,
@@ -67,10 +67,9 @@ impl Compact for BranchNodeCompact {
             buf.put_slice(root_hash.as_slice());
         }
 
-        for hash in self.hashes.iter() {
-            buf_size += B256::len_bytes();
-            buf.put_slice(hash.as_slice());
-        }
+        let hashes = self.hashes.as_slice().as_flattened();
+        buf_size += hashes.len();
+        buf.put_slice(hashes);
 
         buf_size
     }
@@ -98,10 +97,13 @@ impl Compact for BranchNodeCompact {
         }
 
         // Consume all remaining hashes.
+        let hashes_bytes = hash_len * num_hashes;
         let mut hashes = Vec::<B256>::with_capacity(num_hashes);
-        for _ in 0..num_hashes {
-            hashes.push(B256::from_slice(&buf[..hash_len]));
-            buf.advance(hash_len);
+        // SAFETY: We're copying all the bytes at once into the spare capacity, which is enough.
+        unsafe {
+            hashes.as_mut_ptr().cast::<u8>().copy_from_nonoverlapping(buf.as_ptr(), hashes_bytes);
+            hashes.set_len(num_hashes);
+            buf.advance(hashes_bytes);
         }
 
         (Self::new(state_mask, tree_mask, hash_mask, hashes, root_hash), buf)
