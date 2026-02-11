@@ -155,7 +155,7 @@ impl PersistenceSubscription {
 
 /// Establishes a websocket connection and subscribes to `reth_subscribePersistedBlock`.
 ///
-/// The `keepalive_interval` is set to match `persistence_timeout` so that the WebSocket
+/// The `keepalive_interval` is set to match `persistence_timeout` so that the `WebSocket`
 /// connection is not dropped during long MDBX commits that block the server from responding
 /// to pings.
 pub(crate) async fn setup_persistence_subscription(
