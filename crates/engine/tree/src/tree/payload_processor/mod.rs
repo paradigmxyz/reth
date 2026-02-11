@@ -430,6 +430,10 @@ where
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
+    ///
+    /// When prewarming is disabled (via config or small block gas threshold) and no BAL is
+    /// available, no background task is spawned. The cache is instead committed inline via
+    /// [`PayloadHandle::commit_cache`] after block validation succeeds.
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
@@ -446,6 +450,21 @@ where
             (env.gas_used > 0 && env.gas_used < SMALL_BLOCK_GAS_THRESHOLD);
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
+        let block_hash = env.hash;
+
+        if skip_prewarm && bal.is_none() {
+            debug!(
+                target: "engine::tree::payload_processor",
+                "Skipping prewarm task spawn - prewarming disabled and no BAL"
+            );
+            return CacheTaskHandle {
+                saved_cache,
+                to_prewarm_task: None,
+                execution_cache: Some(self.execution_cache.clone()),
+                block_hash,
+                pending_outcome: None,
+            };
+        }
 
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
@@ -483,7 +502,13 @@ where
             });
         }
 
-        CacheTaskHandle { saved_cache, to_prewarm_task: Some(to_prewarm_task) }
+        CacheTaskHandle {
+            saved_cache,
+            to_prewarm_task: Some(to_prewarm_task),
+            execution_cache: None,
+            block_hash,
+            pending_outcome: None,
+        }
     }
 
     /// Returns the cache for the given parent hash.
@@ -789,6 +814,14 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.prewarm_handle.terminate_caching(execution_outcome)
     }
 
+    /// Commits the execution cache inline when no prewarm task was spawned.
+    ///
+    /// This is a no-op when a background prewarm task handles caching.
+    /// Should be called after block validation succeeds.
+    pub fn commit_cache(&mut self) {
+        self.prewarm_handle.commit_cache()
+    }
+
     /// Returns iterator yielding transactions from the stream.
     pub fn iter_transactions(&mut self) -> impl Iterator<Item = Result<Tx, Err>> + '_ {
         core::iter::repeat_with(|| self.transactions.recv())
@@ -807,6 +840,12 @@ pub struct CacheTaskHandle<R> {
     saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
+    /// Shared execution cache for the inline commit path (no prewarm task).
+    execution_cache: Option<PayloadExecutionCache>,
+    /// Block hash for cache keying in the inline commit path.
+    block_hash: B256,
+    /// Stashed execution outcome for inline cache commit when no prewarm task is spawned.
+    pending_outcome: Option<Arc<BlockExecutionOutput<R>>>,
 }
 
 impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
@@ -823,6 +862,10 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     ///
     /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
+    ///
+    /// When a prewarm task is running, returns `Some(sender)` that must be notified on block
+    /// validation success. When no prewarm task was spawned (prewarming disabled), the
+    /// execution outcome is stashed for [`commit_cache`](Self::commit_cache).
     #[must_use = "sender must be used and notified on block validation success"]
     pub fn terminate_caching(
         &mut self,
@@ -835,8 +878,35 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
 
             Some(valid_block_tx)
         } else {
+            self.pending_outcome = execution_outcome;
             None
         }
+    }
+
+    /// Commits the execution cache inline when no prewarm task was spawned.
+    ///
+    /// This performs the same cache update that [`PrewarmCacheTask::save_cache`] would do in
+    /// the background task path. Should be called after block validation succeeds.
+    pub fn commit_cache(&mut self) {
+        let Some(execution_cache) = self.execution_cache.take() else { return };
+        let Some(saved_cache) = self.saved_cache.take() else { return };
+        let Some(execution_outcome) = self.pending_outcome.take() else { return };
+
+        let block_hash = self.block_hash;
+        execution_cache.update_with_guard(|cached| {
+            let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
+            let new_cache = SavedCache::new(block_hash, caches, cache_metrics)
+                .with_disable_cache_metrics(disable_cache_metrics);
+
+            if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                *cached = None;
+                debug!(target: "engine::caching", "cleared execution cache on inline commit error");
+                return;
+            }
+            new_cache.update_metrics();
+            *cached = Some(new_cache);
+            debug!(target: "engine::caching", ?block_hash, "Committed execution cache inline (no prewarm task)");
+        });
     }
 }
 

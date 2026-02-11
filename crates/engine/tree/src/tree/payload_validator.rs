@@ -640,6 +640,8 @@ where
             let _ = valid_block_tx.send(());
         }
 
+        handle.commit_cache();
+
         Ok(self.spawn_deferred_trie_task(
             block,
             output,
