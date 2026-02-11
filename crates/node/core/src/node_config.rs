@@ -381,6 +381,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             .with_account_changesets_in_static_files_opt(self.static_files.account_changesets)
             .with_storage_changesets_in_static_files_opt(self.static_files.storage_changesets);
 
+        // Apply rocksdb overrides
         // --rocksdb.all sets all rocksdb flags to true
         if self.rocksdb.all {
             s = s
