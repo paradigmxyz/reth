@@ -900,6 +900,7 @@ mod tests {
                 MAINNET.clone(),
                 static_file_provider,
                 rocksdb_provider,
+                reth_tasks::Runtime::test(),
             )
             .unwrap(),
         );

@@ -1,8 +1,5 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
-use crate::{
-    providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo},
-    STORAGE_POOL,
-};
+use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{
     map::{AddressMap, HashMap},
@@ -1204,6 +1201,7 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
         ctx: RocksDBWriteCtx,
+        runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
         if !ctx.storage_settings.any_in_rocksdb() {
             return Ok(());
@@ -1218,7 +1216,7 @@ impl RocksDBProvider {
         let write_account_history = ctx.storage_settings.account_history_in_rocksdb;
         let write_storage_history = ctx.storage_settings.storages_history_in_rocksdb;
 
-        STORAGE_POOL.in_place_scope(|s| {
+        runtime.storage_pool().in_place_scope(|s| {
             if write_tx_hash {
                 s.spawn(|_| {
                     r_tx_hash = Some(self.write_tx_hash_numbers(blocks, tx_nums, &ctx));

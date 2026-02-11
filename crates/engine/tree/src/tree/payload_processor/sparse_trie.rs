@@ -1,6 +1,5 @@
 //! Sparse Trie task related functionality.
 
-use super::executor::WorkloadExecutor;
 use crate::tree::{
     multiproof::{
         dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
@@ -13,6 +12,7 @@ use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, ParallelBridgeBuffered};
+use reth_tasks::Runtime;
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, Nibbles,
     TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
@@ -282,7 +282,7 @@ where
 {
     /// Creates a new sparse trie, pre-populating with an existing [`SparseStateTrie`].
     pub(super) fn new_with_trie(
-        executor: &WorkloadExecutor,
+        executor: &Runtime,
         updates: CrossbeamReceiver<MultiProofMessage>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,

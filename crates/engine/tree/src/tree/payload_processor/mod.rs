@@ -15,7 +15,6 @@ use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use executor::WorkloadExecutor;
 use metrics::{Counter, Histogram};
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
@@ -34,6 +33,7 @@ use reth_provider::{
     StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
+use reth_tasks::Runtime;
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -55,7 +55,6 @@ use std::{
 use tracing::{debug, debug_span, instrument, warn, Span};
 
 pub mod bal;
-pub mod executor;
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
@@ -109,7 +108,7 @@ where
     Evm: ConfigureEvm,
 {
     /// The executor used by to spawn tasks.
-    executor: WorkloadExecutor,
+    executor: Runtime,
     /// The most recent cache used for execution.
     execution_cache: PayloadExecutionCache,
     /// Metrics for trie operations
@@ -146,13 +145,13 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     /// Returns a reference to the workload executor driving payload tasks.
-    pub const fn executor(&self) -> &WorkloadExecutor {
+    pub const fn executor(&self) -> &Runtime {
         &self.executor
     }
 
     /// Creates a new payload processor.
     pub fn new(
-        executor: WorkloadExecutor,
+        executor: Runtime,
         evm_config: Evm,
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
@@ -280,7 +279,7 @@ where
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
         let proof_handle = ProofWorkerHandle::new(
-            self.executor.handle().clone(),
+            &self.executor,
             task_ctx,
             storage_worker_count,
             account_worker_count,
@@ -1001,9 +1000,7 @@ mod tests {
     use super::PayloadExecutionCache;
     use crate::tree::{
         cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
-        payload_processor::{
-            evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
-        },
+        payload_processor::{evm_state_to_hashed_post_state, PayloadProcessor},
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };
@@ -1105,7 +1102,7 @@ mod tests {
     #[test]
     fn on_inserted_executed_block_populates_cache() {
         let payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::default(),
+            reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
@@ -1134,7 +1131,7 @@ mod tests {
     #[test]
     fn on_inserted_executed_block_skips_on_parent_mismatch() {
         let payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::default(),
+            reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
@@ -1269,7 +1266,7 @@ mod tests {
         }
 
         let mut payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::default(),
+            reth_tasks::Runtime::test(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),

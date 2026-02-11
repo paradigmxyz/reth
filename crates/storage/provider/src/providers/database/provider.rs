@@ -18,7 +18,7 @@ use crate::{
     PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
     RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieWriter, STORAGE_POOL,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -199,6 +199,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     rocksdb_provider: RocksDBProvider,
     /// Changeset cache for trie unwinding
     changeset_cache: ChangesetCache,
+    /// Task runtime for spawning parallel I/O work.
+    runtime: reth_tasks::Runtime,
     /// Pending `RocksDB` batches to be committed at provider commit time.
     #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
     pending_rocksdb_batches: PendingRocksDBBatches,
@@ -221,6 +223,7 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("storage_settings", &self.storage_settings)
             .field("rocksdb_provider", &self.rocksdb_provider)
             .field("changeset_cache", &self.changeset_cache)
+            .field("runtime", &self.runtime)
             .field("pending_rocksdb_batches", &"<pending batches>")
             .field("commit_order", &self.commit_order)
             .field("minimum_pruning_distance", &self.minimum_pruning_distance)
@@ -354,6 +357,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
         changeset_cache: ChangesetCache,
+        runtime: reth_tasks::Runtime,
         commit_order: CommitOrder,
     ) -> Self {
         Self {
@@ -365,6 +369,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             changeset_cache,
+            runtime,
             pending_rocksdb_batches: Default::default(),
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -383,6 +388,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
         changeset_cache: ChangesetCache,
+        runtime: reth_tasks::Runtime,
     ) -> Self {
         Self::new_rw_inner(
             tx,
@@ -393,6 +399,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             changeset_cache,
+            runtime,
             CommitOrder::Normal,
         )
     }
@@ -408,6 +415,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
         changeset_cache: ChangesetCache,
+        runtime: reth_tasks::Runtime,
     ) -> Self {
         Self::new_rw_inner(
             tx,
@@ -418,6 +426,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             changeset_cache,
+            runtime,
             CommitOrder::Unwind,
         )
     }
@@ -556,13 +565,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut rocksdb_result = None;
 
         // Write to all backends in parallel.
-        STORAGE_POOL.in_place_scope(|s| {
+        let runtime = &self.runtime;
+        runtime.storage_pool().in_place_scope(|s| {
             // SF writes
             s.spawn(|_| {
                 let start = Instant::now();
                 sf_result = Some(
                     sf_provider
-                        .write_blocks_data(&blocks, &tx_nums, sf_ctx)
+                        .write_blocks_data(&blocks, &tx_nums, sf_ctx, runtime)
                         .map(|()| start.elapsed()),
                 );
             });
@@ -574,7 +584,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     let start = Instant::now();
                     rocksdb_result = Some(
                         rocksdb_provider
-                            .write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)
+                            .write_blocks_data(&blocks, &tx_nums, rocksdb_ctx, runtime)
                             .map(|()| start.elapsed()),
                     );
                 });
@@ -961,6 +971,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
         changeset_cache: ChangesetCache,
+        runtime: reth_tasks::Runtime,
     ) -> Self {
         Self {
             tx,
@@ -971,6 +982,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             changeset_cache,
+            runtime,
             pending_rocksdb_batches: Default::default(),
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,

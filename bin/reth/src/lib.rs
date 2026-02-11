@@ -15,7 +15,6 @@
 //! - `asm-keccak`: Replaces the default, pure-Rust implementation of Keccak256 with one implemented
 //!   in assembly; see [the `keccak-asm` crate](https://github.com/DaniPopes/keccak-asm) for more
 //!   details and supported targets.
-//! - `min-debug-logs`: Disables all logs below `debug` level.
 //!
 //! ### Allocator Features
 //!
@@ -211,7 +210,7 @@ pub mod ress;
 
 // re-export for convenience
 #[doc(inline)]
-pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
+pub use reth_cli_runner::{CliContext, CliRunner};
 
 // for rendering diagrams
 use aquamarine as _;

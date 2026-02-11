@@ -15,7 +15,6 @@ use crate::tree::{
     cached_state::{CachedStateProvider, SavedCache},
     payload_processor::{
         bal::{self, total_slots, BALSlotIter},
-        executor::WorkloadExecutor,
         multiproof::{MultiProofMessage, VersionedMultiProofTargets},
         PayloadExecutionCache,
     },
@@ -37,6 +36,7 @@ use reth_provider::{
     StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
+use reth_tasks::Runtime;
 use reth_trie::MultiProofTargets;
 use std::{
     ops::Range,
@@ -78,7 +78,7 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     /// The executor used to spawn execution tasks.
-    executor: WorkloadExecutor,
+    executor: Runtime,
     /// Shared execution cache.
     execution_cache: PayloadExecutionCache,
     /// Context provided to execution tasks
@@ -101,7 +101,7 @@ where
 {
     /// Initializes the task with the given transactions pending execution
     pub fn new(
-        executor: WorkloadExecutor,
+        executor: Runtime,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
@@ -667,7 +667,7 @@ where
     fn spawn_workers<Tx>(
         self,
         workers_needed: usize,
-        task_executor: &WorkloadExecutor,
+        task_executor: &Runtime,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         done_tx: Sender<()>,
     ) -> CrossbeamSender<IndexedTransaction<Tx>>
@@ -704,7 +704,7 @@ where
     fn spawn_bal_worker(
         &self,
         idx: usize,
-        executor: &WorkloadExecutor,
+        executor: &Runtime,
         bal: Arc<BlockAccessList>,
         range: Range<usize>,
         done_tx: Sender<()>,

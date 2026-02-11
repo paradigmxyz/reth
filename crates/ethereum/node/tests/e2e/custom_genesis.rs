@@ -27,7 +27,7 @@ async fn can_run_eth_node_with_custom_genesis_number() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) =
+    let (mut nodes, wallet) =
         setup::<EthereumNode>(1, chain_spec, false, eth_payload_attributes).await?;
 
     let mut node = nodes.pop().unwrap();
@@ -81,7 +81,7 @@ async fn custom_genesis_block_query_boundaries() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, _wallet) =
+    let (mut nodes, _wallet) =
         setup::<EthereumNode>(1, chain_spec, false, eth_payload_attributes).await?;
 
     let node = nodes.pop().unwrap();
