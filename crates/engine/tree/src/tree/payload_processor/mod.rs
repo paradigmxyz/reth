@@ -380,7 +380,9 @@ where
         let (execute_tx, execute_rx) = mpsc::channel();
 
         // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
+        let parent_span = Span::current();
         rayon::spawn(move || {
+            let _enter = parent_span.entered();
             let (transactions, convert) = transactions.into();
             transactions.into_par_iter().enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
                 let tx = convert(tx);
