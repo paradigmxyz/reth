@@ -454,7 +454,7 @@ mod tests {
             listen_addr,
             version_info,
             chain_spec_info,
-            runtime,
+            runtime.clone(),
             hooks,
             std::env::temp_dir(),
         );
@@ -470,5 +470,8 @@ mod tests {
         let body = response.text().await.unwrap();
         assert!(body.contains("reth_process_cpu_seconds_total"));
         assert!(body.contains("reth_process_start_time_seconds"));
+
+        // Make sure the runtime is dropped after the test runs.
+        drop(runtime);
     }
 }
