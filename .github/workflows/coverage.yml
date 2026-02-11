@@ -1,0 +1,172 @@
+# Runs unit, integration, and e2e tests with coverage instrumentation,
+# merges the results, and uploads an HTML report as a downloadable artifact.
+
+name: coverage
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  SEED: rustethereumethereumrust
+  RUSTC_WRAPPER: ""
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: coverage / unit
+    runs-on: depot-ubuntu-latest-4
+    env:
+      RUST_BACKTRACE: 1
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: rui314/setup-mold@v1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
+      - name: Run unit tests with coverage
+        run: |
+          cargo llvm-cov nextest \
+            --no-fail-fast \
+            --features "asm-keccak ethereum" --locked \
+            --workspace \
+            --exclude ef-tests --no-tests=warn \
+            -E "!kind(test) and not binary(e2e_testsuite)" \
+            --lcov --output-path unit.lcov
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cov-unit
+          path: unit.lcov
+
+  integration:
+    name: coverage / integration
+    runs-on: depot-ubuntu-latest-4
+    env:
+      RUST_BACKTRACE: 1
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+      - uses: rui314/setup-mold@v1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Install Geth
+        run: .github/scripts/install_geth.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
+      - name: Run integration tests with coverage
+        run: |
+          cargo llvm-cov nextest \
+            --no-fail-fast \
+            --locked --features "asm-keccak ethereum" \
+            --workspace --exclude ef-tests \
+            -E "kind(test) and not binary(e2e_testsuite)" \
+            --lcov --output-path integration.lcov
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cov-integration
+          path: integration.lcov
+
+  e2e:
+    name: coverage / e2e
+    runs-on: depot-ubuntu-latest-4
+    env:
+      RUST_BACKTRACE: 1
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
+      - name: Run e2e tests with coverage
+        run: |
+          cargo llvm-cov nextest \
+            --no-fail-fast \
+            --locked --features "asm-keccak" \
+            --workspace \
+            --exclude 'example-*' \
+            --exclude 'exex-subscription' \
+            --exclude 'reth-bench' \
+            --exclude 'ef-tests' \
+            --exclude 'reth' \
+            -E 'binary(e2e_testsuite)' \
+            --lcov --output-path e2e.lcov
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cov-e2e
+          path: e2e.lcov
+
+  report:
+    name: coverage / report
+    runs-on: ubuntu-latest
+    needs: [unit, integration, e2e]
+    if: always()
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install lcov
+        run: sudo apt-get update && sudo apt-get install -y lcov
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cov-*
+          path: coverage-parts
+          merge-multiple: false
+      - name: Merge lcov reports
+        run: |
+          set -euo pipefail
+
+          # Collect all lcov files (null-delimited to handle special chars)
+          LCOV_FILES=()
+          while IFS= read -r -d '' f; do
+            LCOV_FILES+=("--add-tracefile" "$f")
+          done < <(find coverage-parts -name "*.lcov" -type f -print0)
+
+          if [ ${#LCOV_FILES[@]} -eq 0 ]; then
+            echo "No lcov files found"
+            exit 1
+          fi
+
+          # Merge into a single report
+          lcov "${LCOV_FILES[@]}" --output-file merged.lcov --ignore-errors inconsistent
+
+          # Generate HTML report
+          genhtml merged.lcov \
+            --output-directory htmlcov \
+            --title "reth test coverage" \
+            --legend \
+            --branch-coverage \
+            --ignore-errors inconsistent
+
+          echo "## Coverage Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          lcov --summary merged.lcov --ignore-errors inconsistent 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            htmlcov
+            merged.lcov
