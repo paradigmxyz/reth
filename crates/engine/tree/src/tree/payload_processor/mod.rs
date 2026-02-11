@@ -235,7 +235,8 @@ where
             + 'static,
     {
         // start preparing transactions immediately
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx) =
+            self.spawn_tx_iterator(transactions, env.gas_used);
 
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
@@ -342,7 +343,8 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx) =
+            self.spawn_tx_iterator(transactions, env.gas_used);
         // This path doesn't use multiproof, so V2 proofs flag doesn't matter
         let prewarm_handle =
             self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal, false);
@@ -356,10 +358,15 @@ where
     }
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
+    ///
+    /// For blocks with less than [`SMALL_BLOCK_GAS_THRESHOLD`] gas, uses sequential iteration
+    /// to avoid rayon overhead. Inspired by Nethermind's `RecoverSignature` which uses sequential
+    /// `foreach` for small blocks.
     #[expect(clippy::type_complexity)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
+        gas_used: u64,
     ) -> (
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
@@ -368,22 +375,49 @@ where
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
 
-        // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
-        rayon::spawn(move || {
-            let (transactions, convert) = transactions.into_parts();
-            transactions.into_par_iter().enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
-                let tx = convert.convert(tx);
-                let tx = tx.map(|tx| {
-                    let (tx_env, tx) = tx.into_parts();
-                    WithTxEnv { tx_env, tx: Arc::new(tx) }
-                });
-                // Only send Ok(_) variants to prewarming task.
-                if let Ok(tx) = &tx {
-                    let _ = prewarm_tx.send(tx.clone());
+        if gas_used > 0 && gas_used < SMALL_BLOCK_GAS_THRESHOLD {
+            // Sequential path for small blocks — avoids rayon work-stealing setup and
+            // channel-based reorder overhead when it costs more than the ECDSA recovery itself.
+            debug!(
+                target: "engine::tree::payload_processor",
+                gas_used,
+                "using sequential sig recovery for small block"
+            );
+            self.executor.spawn_blocking(move || {
+                let (transactions, convert) = transactions.into_parts();
+                for (idx, tx) in transactions.into_iter().enumerate() {
+                    let tx = convert.convert(tx);
+                    let tx = tx.map(|tx| {
+                        let (tx_env, tx) = tx.into_parts();
+                        WithTxEnv { tx_env, tx: Arc::new(tx) }
+                    });
+                    if let Ok(tx) = &tx {
+                        let _ = prewarm_tx.send(tx.clone());
+                    }
+                    let _ = ooo_tx.send((idx, tx));
                 }
-                let _ = ooo_tx.send((idx, tx));
             });
-        });
+        } else {
+            // Parallel path — spawn on rayon for parallel signature recovery.
+            rayon::spawn(move || {
+                let (transactions, convert) = transactions.into_parts();
+                transactions.into_par_iter().enumerate().for_each_with(
+                    ooo_tx,
+                    |ooo_tx, (idx, tx)| {
+                        let tx = convert.convert(tx);
+                        let tx = tx.map(|tx| {
+                            let (tx_env, tx) = tx.into_parts();
+                            WithTxEnv { tx_env, tx: Arc::new(tx) }
+                        });
+                        // Only send Ok(_) variants to prewarming task.
+                        if let Ok(tx) = &tx {
+                            let _ = prewarm_tx.send(tx.clone());
+                        }
+                        let _ = ooo_tx.send((idx, tx));
+                    },
+                );
+            });
+        }
 
         // Spawn a task that processes out-of-order transactions from the task above and sends them
         // to the execution task in order.

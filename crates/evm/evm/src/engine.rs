@@ -83,6 +83,7 @@ pub trait ExecutableTxTuple: Send + 'static {
 
     /// Iterator over [`ExecutableTxTuple::Tx`].
     type IntoIter: IntoParallelIterator<Item = Self::RawTx, Iter: IndexedParallelIterator>
+        + IntoIterator<Item = Self::RawTx>
         + Send
         + 'static;
     /// Converter that can be used to convert a [`ExecutableTxTuple::RawTx`] to a
@@ -99,7 +100,10 @@ where
     RawTx: Send + Sync + 'static,
     Tx: Clone + Send + Sync + 'static,
     Err: core::error::Error + Send + Sync + 'static,
-    I: IntoParallelIterator<Item = RawTx, Iter: IndexedParallelIterator> + Send + 'static,
+    I: IntoParallelIterator<Item = RawTx, Iter: IndexedParallelIterator>
+        + IntoIterator<Item = RawTx>
+        + Send
+        + 'static,
     F: Fn(RawTx) -> Result<Tx, Err> + Send + Sync + 'static,
 {
     type RawTx = RawTx;
@@ -134,39 +138,20 @@ impl<A: ExecutableTxTuple, B: ExecutableTxTuple> ExecutableTxTuple for Either<A,
     type RawTx = Either<A::RawTx, B::RawTx>;
     type Tx = Either<A::Tx, B::Tx>;
     type Error = Either<A::Error, B::Error>;
-    type IntoIter = Either<
-        rayon::iter::Map<
-            <A::IntoIter as IntoParallelIterator>::Iter,
-            fn(A::RawTx) -> Either<A::RawTx, B::RawTx>,
-        >,
-        rayon::iter::Map<
-            <B::IntoIter as IntoParallelIterator>::Iter,
-            fn(B::RawTx) -> Either<A::RawTx, B::RawTx>,
-        >,
-    >;
+    type IntoIter = Vec<Either<A::RawTx, B::RawTx>>;
     type Convert = Either<A::Convert, B::Convert>;
 
     fn into_parts(self) -> (Self::IntoIter, Self::Convert) {
         match self {
             Self::Left(a) => {
                 let (iter, convert) = a.into_parts();
-                (
-                    Either::Left(
-                        iter.into_par_iter()
-                            .map(Either::Left as fn(A::RawTx) -> Either<A::RawTx, B::RawTx>),
-                    ),
-                    Either::Left(convert),
-                )
+                let items: Vec<_> = iter.into_iter().map(Either::Left).collect();
+                (items, Either::Left(convert))
             }
             Self::Right(b) => {
                 let (iter, convert) = b.into_parts();
-                (
-                    Either::Right(
-                        iter.into_par_iter()
-                            .map(Either::Right as fn(B::RawTx) -> Either<A::RawTx, B::RawTx>),
-                    ),
-                    Either::Right(convert),
-                )
+                let items: Vec<_> = iter.into_iter().map(Either::Right).collect();
+                (items, Either::Right(convert))
             }
         }
     }
