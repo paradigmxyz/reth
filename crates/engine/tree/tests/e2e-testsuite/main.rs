@@ -349,7 +349,7 @@ async fn test_engine_tree_live_sync_transition_eventually_canonical_e2e() -> Res
 
 /// v2 variant: Verifies forkchoice update and canonical chain insertion in v2 storage mode.
 ///
-/// Exercises the full save_blocks → write_state → static file changeset path with hashed keys.
+/// Exercises the full `save_blocks` → `write_state` → static file changeset path with hashed keys.
 #[tokio::test]
 async fn test_engine_tree_fcu_canon_chain_insertion_v2_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
@@ -368,7 +368,7 @@ async fn test_engine_tree_fcu_canon_chain_insertion_v2_e2e() -> Result<()> {
 
 /// v2 variant: Verifies forkchoice update with a reorg where all blocks are already available.
 ///
-/// Exercises write_state_reverts path with hashed changeset keys during CL-driven reorgs.
+/// Exercises `write_state_reverts` path with hashed changeset keys during CL-driven reorgs.
 #[tokio::test]
 async fn test_engine_tree_fcu_reorg_with_all_blocks_v2_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
@@ -409,7 +409,7 @@ async fn test_engine_tree_fcu_extends_canon_chain_v2_e2e() -> Result<()> {
 ///
 /// Uses unconnected nodes so fork blocks can be produced independently on Node 1 and then
 /// sent to Node 0 via newPayload only (no FCU), keeping Node 0's persisted chain intact
-/// until the final ReorgTo triggers `find_disk_reorg`.
+/// until the final `ReorgTo` triggers `find_disk_reorg`.
 fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
     let mut setup = Setup::default()
         .with_chain_spec(Arc::new(
