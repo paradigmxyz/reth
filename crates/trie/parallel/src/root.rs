@@ -17,7 +17,7 @@ use reth_trie::{
     walker::TrieWalker,
     HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use std::{collections::HashMap, sync::mpsc};
+use std::collections::HashMap;
 use thiserror::Error;
 use tracing::*;
 
@@ -105,25 +105,20 @@ where
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
-            let (tx, rx) = mpsc::sync_channel(1);
-
             // Spawn a blocking task to calculate account's storage root from database I/O
-            drop(handle.spawn_blocking(move || {
-                let result = (|| -> Result<_, ParallelStateRootError> {
-                    let provider = factory.database_provider_ro()?;
-                    Ok(StorageRoot::new_hashed(
-                        &provider,
-                        &provider,
-                        hashed_address,
-                        prefix_set,
-                        #[cfg(feature = "metrics")]
-                        metrics,
-                    )
-                    .calculate(retain_updates)?)
-                })();
-                let _ = tx.send(result);
-            }));
-            storage_roots.insert(hashed_address, rx);
+            let task = handle.spawn_blocking(move || -> Result<_, ParallelStateRootError> {
+                let provider = factory.database_provider_ro()?;
+                Ok(StorageRoot::new_hashed(
+                    &provider,
+                    &provider,
+                    hashed_address,
+                    prefix_set,
+                    #[cfg(feature = "metrics")]
+                    metrics,
+                )
+                .calculate(retain_updates)?)
+            });
+            storage_roots.insert(hashed_address, task);
         }
 
         trace!(target: "trie::parallel_state_root", "calculating state root");
@@ -150,13 +145,14 @@ where
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let storage_root_result = match storage_roots.remove(&hashed_address) {
-                        Some(rx) => rx.recv().map_err(|_| {
-                            ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                DatabaseError::Other(format!(
-                                    "channel closed for {hashed_address}"
-                                )),
-                            ))
-                        })??,
+                        Some(task) => tokio::task::block_in_place(|| handle.block_on(task))
+                            .map_err(|_| {
+                                ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                                    DatabaseError::Other(format!(
+                                        "storage root task panicked for {hashed_address}"
+                                    )),
+                                ))
+                            })??,
                         // Since we do not store all intermediate nodes in the database, there might
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
@@ -279,7 +275,7 @@ mod tests {
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
     use std::sync::Arc;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn random_parallel_root() {
         let factory = create_test_provider_factory();
         let changeset_cache = reth_trie_db::ChangesetCache::new();
