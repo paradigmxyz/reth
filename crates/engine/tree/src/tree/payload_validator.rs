@@ -974,7 +974,6 @@ where
                                 target: "engine::tree::payload_validator",
                                 "State root task dropped, waiting for sequential fallback"
                             );
-                            handle.terminate_state_root_task();
                             let result = seq_rx.recv().map_err(|_| {
                                 ProviderError::other(std::io::Error::other(
                                     "both state root computations failed",
@@ -992,8 +991,6 @@ where
                             source = "sequential",
                             "State root timeout race won"
                         );
-                        handle.terminate_state_root_task();
-                        drop(task_rx);
                         let (state_root, trie_updates) = result?;
                         return Ok(Ok(StateRootComputeOutcome { state_root, trie_updates }));
                     }
