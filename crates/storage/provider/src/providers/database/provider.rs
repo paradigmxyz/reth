@@ -2451,12 +2451,25 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // sort storage slots by key.
             storage.par_sort_unstable_by_key(|a| a.key);
 
+            if storage.is_empty() {
+                continue;
+            }
+
+            let mut db_entry =
+                storages_cursor.seek_by_key_subkey(address, storage[0].key)?;
+
             for entry in storage {
                 tracing::trace!(?address, ?entry.key, "Updating plain state storage");
-                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
+                while let Some(ref existing) = db_entry {
+                    if existing.key >= entry.key {
+                        break;
+                    }
+                    db_entry = storages_cursor.next_dup_val()?;
+                }
+
+                if db_entry.as_ref().is_some_and(|e| e.key == entry.key) {
                     storages_cursor.delete_current()?;
+                    db_entry = storages_cursor.next_dup_val()?;
                 }
 
                 if !entry.value.is_zero() {
