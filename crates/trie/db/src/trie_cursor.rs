@@ -135,22 +135,29 @@ where
         {
             num_entries += 1;
             let nibbles = StoredNibblesSubKey(*nibbles);
-            // Delete the old entry if it exists.
-            if self
+            let entry_exists = self
                 .cursor
                 .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
                 .filter(|e| e.nibbles == nibbles)
-                .is_some()
-            {
-                self.cursor.delete_current()?;
-            }
+                .is_some();
 
-            // There is an updated version of this node, insert new entry.
-            if let Some(node) = maybe_updated {
-                self.cursor.upsert(
-                    self.hashed_address,
-                    &StorageTrieEntry { nibbles, node: node.clone() },
-                )?;
+            match (entry_exists, maybe_updated) {
+                (true, Some(node)) => {
+                    self.cursor.put_current(
+                        self.hashed_address,
+                        &StorageTrieEntry { nibbles, node: node.clone() },
+                    )?;
+                }
+                (true, None) => {
+                    self.cursor.delete_current()?;
+                }
+                (false, Some(node)) => {
+                    self.cursor.upsert(
+                        self.hashed_address,
+                        &StorageTrieEntry { nibbles, node: node.clone() },
+                    )?;
+                }
+                (false, None) => {}
             }
         }
 

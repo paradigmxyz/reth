@@ -211,6 +211,8 @@ pub(crate) enum Operation {
     CursorAppend,
     /// Database cursor append duplicates operation.
     CursorAppendDup,
+    /// Database cursor put current operation.
+    CursorPutCurrent,
     /// Database cursor delete current operation.
     CursorDeleteCurrent,
     /// Database cursor delete current duplicates operation.
@@ -229,6 +231,7 @@ impl Operation {
             Self::CursorInsert => "cursor-insert",
             Self::CursorAppend => "cursor-append",
             Self::CursorAppendDup => "cursor-append-dup",
+            Self::CursorPutCurrent => "cursor-put-current",
             Self::CursorDeleteCurrent => "cursor-delete-current",
             Self::CursorDeleteCurrentDuplicates => "cursor-delete-current-duplicates",
         }
