@@ -1,16 +1,8 @@
 #![allow(missing_docs)]
 
-use std::{
-    net::TcpListener,
-    process::{Command, Stdio},
-    time::Duration,
-};
+use std::process::Command;
 
 const RETH: &str = env!("CARGO_BIN_EXE_reth");
-
-fn unused_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
-}
 
 #[test]
 fn help() {
@@ -52,100 +44,21 @@ fn unknown_flag() {
     assert!(stderr.contains("--no-such-flag"), "stderr: {stderr}");
 }
 
-#[test]
-#[ignore = "heavy test: starts a full dev node and queries RPC"]
-fn dev_node_rpc() {
-    let http_port = unused_port();
-    let authrpc_port = unused_port();
-    let datadir = tempfile::tempdir().unwrap();
+#[tokio::test]
+async fn dev_node_eth_syncing() {
+    use alloy_node_bindings::Reth;
+    use alloy_provider::{Provider, ProviderBuilder};
 
-    let mut child = Command::new(RETH)
-        .args([
-            "node",
-            "--dev",
-            "--http.port",
-            &http_port.to_string(),
-            "--authrpc.port",
-            &authrpc_port.to_string(),
-            "--port",
-            "0",
-            "--ipcdisable",
-            "--no-persist-peers",
-            "--datadir",
-        ])
-        .arg(datadir.path())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let reth = Reth::at(RETH)
+        .dev()
+        .disable_discovery()
+        .args(["--max-outbound-peers", "0", "--max-inbound-peers", "0"])
+        .spawn();
 
-    let url = format!("http://127.0.0.1:{http_port}");
+    let provider = ProviderBuilder::new().connect_http(reth.endpoint().parse().unwrap());
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let client =
-            reqwest::blocking::Client::builder().timeout(Duration::from_secs(5)).build().unwrap();
-
-        let deadline = std::time::Instant::now() + Duration::from_secs(60);
-        let mut ready = false;
-
-        while std::time::Instant::now() < deadline {
-            let req = serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "web3_clientVersion",
-                "params": [],
-                "id": 1,
-            });
-
-            match client.post(&url).json(&req).send() {
-                Ok(resp) if resp.status().is_success() => {
-                    let body: serde_json::Value = resp.json().unwrap();
-                    let version = body["result"].as_str().unwrap();
-                    assert!(version.contains("reth"), "unexpected client version: {version}");
-                    ready = true;
-                    break;
-                }
-                _ => std::thread::sleep(Duration::from_millis(500)),
-            }
-        }
-        assert!(ready, "node did not become ready within 60s at {url}");
-
-        let resp = client
-            .post(&url)
-            .json(&serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "eth_chainId",
-                "params": [],
-                "id": 2,
-            }))
-            .send()
-            .unwrap();
-        assert!(resp.status().is_success());
-        let body: serde_json::Value = resp.json().unwrap();
-        let chain_id = body["result"].as_str().unwrap();
-        assert!(chain_id.starts_with("0x"), "unexpected chain id: {chain_id}");
-
-        let resp = client
-            .post(&url)
-            .json(&serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "eth_blockNumber",
-                "params": [],
-                "id": 3,
-            }))
-            .send()
-            .unwrap();
-        assert!(resp.status().is_success());
-        let body: serde_json::Value = resp.json().unwrap();
-        let block_number = body["result"].as_str().unwrap();
-        assert!(block_number.starts_with("0x"), "unexpected block number: {block_number}");
-    }));
-
-    let _ = child.kill();
-    let _ = child.wait();
-
-    if let Err(panic) = result {
-        std::panic::resume_unwind(panic);
-    }
+    // eth_syncing should not fail on a dev node
+    let _syncing = provider.syncing().await.expect("eth_syncing failed");
 }
 
 const fn main() {}
