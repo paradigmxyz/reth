@@ -2485,22 +2485,36 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut hashed_storage_cursor =
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
+            let wiped = storage.is_wiped()
+                && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some();
+            if wiped {
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
-            for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
+            let slots = storage.storage_slots_ref();
+            if slots.is_empty() {
+                continue;
+            }
 
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
+            // Phase 1: Delete existing entries for slots that will be updated.
+            // Skip this phase if the address was wiped (no entries to delete).
+            if !wiped {
+                for &(hashed_slot, _) in slots {
+                    if let Some(db_entry) =
+                        hashed_storage_cursor
+                            .seek_by_key_subkey(*hashed_address, hashed_slot)?
+                        && db_entry.key == hashed_slot
+                    {
+                        hashed_storage_cursor.delete_current()?;
+                    }
                 }
+            }
 
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+            // Phase 2: Insert all non-zero values.
+            for &(hashed_slot, value) in slots {
+                if !value.is_zero() {
+                    hashed_storage_cursor
+                        .upsert(*hashed_address, &StorageEntry { key: hashed_slot, value })?;
                 }
             }
         }
