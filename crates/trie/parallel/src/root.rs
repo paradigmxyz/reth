@@ -96,7 +96,7 @@ where
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
 
-        let trie_pool = self.runtime.trie_pool();
+        let handle = self.runtime.handle().clone();
 
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
@@ -107,7 +107,8 @@ where
 
             let (tx, rx) = mpsc::sync_channel(1);
 
-            trie_pool.spawn(move || {
+            // Spawn a blocking task to calculate account's storage root from database I/O
+            drop(handle.spawn_blocking(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider = factory.database_provider_ro()?;
                     Ok(StorageRoot::new_hashed(
@@ -121,7 +122,7 @@ where
                     .calculate(retain_updates)?)
                 })();
                 let _ = tx.send(result);
-            });
+            }));
             storage_roots.insert(hashed_address, rx);
         }
 

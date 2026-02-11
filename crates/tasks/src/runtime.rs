@@ -99,9 +99,6 @@ pub struct RayonConfig {
     /// Number of threads for the RPC blocking pool (trace calls, `eth_getProof`, etc.).
     /// If `None`, uses the same as `cpu_threads`.
     pub rpc_threads: Option<usize>,
-    /// Number of threads for the trie proof computation pool.
-    /// If `None`, uses the same as `cpu_threads`.
-    pub trie_threads: Option<usize>,
     /// Number of threads for the storage I/O pool (static file, `RocksDB` writes in
     /// `save_blocks`). If `None`, uses [`DEFAULT_STORAGE_POOL_THREADS`].
     pub storage_threads: Option<usize>,
@@ -122,7 +119,6 @@ impl Default for RayonConfig {
             cpu_threads: None,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             rpc_threads: None,
-            trie_threads: None,
             storage_threads: None,
             max_blocking_tasks: DEFAULT_MAX_BLOCKING_TASKS,
             proof_storage_worker_threads: None,
@@ -148,12 +144,6 @@ impl RayonConfig {
     /// Set the number of threads for the RPC blocking pool.
     pub const fn with_rpc_threads(mut self, rpc_threads: usize) -> Self {
         self.rpc_threads = Some(rpc_threads);
-        self
-    }
-
-    /// Set the number of threads for the trie proof pool.
-    pub const fn with_trie_threads(mut self, trie_threads: usize) -> Self {
-        self.trie_threads = Some(trie_threads);
         self
     }
 
@@ -258,9 +248,6 @@ struct RuntimeInner {
     /// RPC blocking pool.
     #[cfg(feature = "rayon")]
     rpc_pool: BlockingTaskPool,
-    /// Trie proof computation pool.
-    #[cfg(feature = "rayon")]
-    trie_pool: rayon::ThreadPool,
     /// Storage I/O pool.
     #[cfg(feature = "rayon")]
     storage_pool: rayon::ThreadPool,
@@ -345,12 +332,6 @@ impl Runtime {
         &self.0.rpc_pool
     }
 
-    /// Get the trie proof computation pool.
-    #[cfg(feature = "rayon")]
-    pub fn trie_pool(&self) -> &rayon::ThreadPool {
-        &self.0.trie_pool
-    }
-
     /// Get the storage I/O pool.
     #[cfg(feature = "rayon")]
     pub fn storage_pool(&self) -> &rayon::ThreadPool {
@@ -409,7 +390,6 @@ impl Runtime {
                 cpu_threads: Some(2),
                 reserved_cpu_cores: 0,
                 rpc_threads: Some(2),
-                trie_threads: Some(2),
                 storage_threads: Some(2),
                 max_blocking_tasks: 16,
                 proof_storage_worker_threads: Some(2),
@@ -838,7 +818,6 @@ impl RuntimeBuilder {
         let (
             cpu_pool,
             rpc_pool,
-            trie_pool,
             storage_pool,
             blocking_guard,
             proof_storage_worker_pool,
@@ -846,7 +825,6 @@ impl RuntimeBuilder {
         ) = {
             let default_threads = config.rayon.default_thread_count();
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
-            let trie_threads = config.rayon.trie_threads.unwrap_or(default_threads);
 
             let cpu_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(default_threads)
@@ -858,11 +836,6 @@ impl RuntimeBuilder {
                 .thread_name(|i| format!("rpc-{i}"))
                 .build()?;
             let rpc_pool = BlockingTaskPool::new(rpc_raw);
-
-            let trie_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(trie_threads)
-                .thread_name(|i| format!("trie-{i}"))
-                .build()?;
 
             let storage_threads =
                 config.rayon.storage_threads.unwrap_or(DEFAULT_STORAGE_POOL_THREADS);
@@ -890,7 +863,6 @@ impl RuntimeBuilder {
             debug!(
                 default_threads,
                 rpc_threads,
-                trie_threads,
                 storage_threads,
                 proof_storage_worker_threads,
                 proof_account_worker_threads,
@@ -901,7 +873,6 @@ impl RuntimeBuilder {
             (
                 cpu_pool,
                 rpc_pool,
-                trie_pool,
                 storage_pool,
                 blocking_guard,
                 proof_storage_worker_pool,
@@ -928,8 +899,6 @@ impl RuntimeBuilder {
             cpu_pool,
             #[cfg(feature = "rayon")]
             rpc_pool,
-            #[cfg(feature = "rayon")]
-            trie_pool,
             #[cfg(feature = "rayon")]
             storage_pool,
             #[cfg(feature = "rayon")]
