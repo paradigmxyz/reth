@@ -12,6 +12,7 @@ use std::{
 mod account_storage;
 mod checksum;
 mod clear;
+mod copy;
 mod diff;
 mod get;
 mod list;
@@ -42,6 +43,8 @@ pub enum Subcommands {
     List(list::Command),
     /// Calculates the content checksum of a table or static file segment
     Checksum(checksum::Command),
+    /// Copies the MDBX database to a new location (bundled mdbx_copy)
+    Copy(copy::Command),
     /// Create a diff between two database tables or two entire databases.
     Diff(diff::Command),
     /// Gets the content of a table for the given key
@@ -122,6 +125,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             Subcommands::Checksum(command) => {
                 db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
+                });
+            }
+            Subcommands::Copy(command) => {
+                db_exec!(self.env, tool, N, AccessRights::RO, {
+                    command.execute(tool.provider_factory.db_ref())?;
                 });
             }
             Subcommands::Diff(command) => {
