@@ -1362,7 +1362,7 @@ mod tests {
 
         assert!(matches!(
             HistoricalStateProviderRef::new(&db, 4).storage_by_hashed_key(ADDRESS, STORAGE),
-            Ok(None) | Ok(Some(U256::ZERO))
+            Ok(None | Some(U256::ZERO))
         ));
     }
 }

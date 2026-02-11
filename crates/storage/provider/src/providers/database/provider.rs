@@ -5421,7 +5421,7 @@ mod tests {
             let rocksdb = factory.rocksdb_provider();
             let mut batch = rocksdb.batch();
             batch
-                .append_storage_history_shard(address, hashed_slot, vec![3u64, 7, 10].into_iter())
+                .append_storage_history_shard(address, hashed_slot, vec![3u64, 7, 10])
                 .unwrap();
             batch.commit().unwrap();
 
@@ -5450,9 +5450,7 @@ mod tests {
         let rocksdb = factory.rocksdb_provider();
         let shards = rocksdb.storage_history_shards(address, hashed_slot).unwrap();
 
-        if shards.is_empty() {
-            panic!("history shards should still exist with block 3 after partial unwind");
-        }
+        assert!(!shards.is_empty(), "history shards should still exist with block 3 after partial unwind");
 
         let all_blocks: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
         assert!(all_blocks.contains(&3), "block 3 should remain");
