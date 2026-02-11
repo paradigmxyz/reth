@@ -33,6 +33,8 @@ pub struct EngineApiMetrics {
     /// Metrics for EIP-7928 Block-Level Access Lists (BAL).
     #[allow(dead_code)]
     pub(crate) bal: BalMetrics,
+    /// Metrics for state fetch IO latencies during block execution.
+    pub(crate) state_fetch: StateFetchMetrics,
 }
 
 impl EngineApiMetrics {
@@ -89,6 +91,21 @@ impl EngineApiMetrics {
     /// Records the duration of a single transaction execution.
     pub fn record_transaction_execution(&self, elapsed: Duration) {
         self.executor.transaction_execution_histogram.record(elapsed);
+    }
+
+    /// Records total state fetch IO latencies for a block execution.
+    pub fn record_state_fetch_latencies(
+        &self,
+        storage: Duration,
+        account: Duration,
+        code: Duration,
+    ) {
+        let total_io = storage + account + code;
+        self.state_fetch.storage_io_duration.record(storage);
+        self.state_fetch.account_io_duration.record(account);
+        self.state_fetch.code_io_duration.record(code);
+        self.state_fetch.total_io_duration.record(total_io);
+        self.state_fetch.total_io_duration_gauge.set(total_io.as_secs_f64());
     }
 }
 
@@ -477,6 +494,22 @@ impl BlockValidationMetrics {
         self.payload_validation_duration.set(elapsed_as_secs);
         self.payload_validation_histogram.record(elapsed_as_secs);
     }
+}
+
+/// Per-block IO latency metrics for state fetches during execution.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "sync.execution.state_fetch")]
+pub(crate) struct StateFetchMetrics {
+    /// Histogram of total storage fetch duration per block.
+    pub storage_io_duration: Histogram,
+    /// Histogram of total account fetch duration per block.
+    pub account_io_duration: Histogram,
+    /// Histogram of total code fetch duration per block.
+    pub code_io_duration: Histogram,
+    /// Histogram of total IO duration (storage + account + code) per block.
+    pub total_io_duration: Histogram,
+    /// Gauge of the latest total IO duration.
+    pub total_io_duration_gauge: Gauge,
 }
 
 /// Metrics for the blockchain tree block buffer

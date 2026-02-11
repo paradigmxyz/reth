@@ -464,9 +464,14 @@ where
                 Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics));
         };
 
-        if self.config.state_provider_metrics() {
-            state_provider = Box::new(InstrumentedStateProvider::new(state_provider, "engine"));
-        }
+        let fetch_latencies = if self.config.state_provider_metrics() {
+            let (instrumented, latencies) =
+                InstrumentedStateProvider::new_with_latencies(state_provider, "engine");
+            state_provider = Box::new(instrumented);
+            Some(latencies)
+        } else {
+            None
+        };
 
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
@@ -476,6 +481,28 @@ where
                 Ok(output) => output,
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
             };
+
+        if let Some(latencies) = &fetch_latencies {
+            let io_duration = latencies.total_io_duration();
+            let storage_duration = latencies.storage_duration();
+            let account_duration = latencies.account_duration();
+            let code_duration = latencies.code_duration();
+
+            debug!(
+                target: "engine::tree::payload_validator",
+                ?io_duration,
+                ?storage_duration,
+                ?account_duration,
+                ?code_duration,
+                "State fetch IO latencies during block execution"
+            );
+
+            self.metrics.record_state_fetch_latencies(
+                storage_duration,
+                account_duration,
+                code_duration,
+            );
+        }
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
