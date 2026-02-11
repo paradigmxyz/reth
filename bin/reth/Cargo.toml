@@ -68,8 +68,11 @@ aquamarine.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 
 [dev-dependencies]
+alloy-node-bindings = "1.6.3"
+alloy-provider = { workspace = true, features = ["reqwest"] }
 backon.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
 default = [
