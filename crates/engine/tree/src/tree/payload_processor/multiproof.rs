@@ -1546,7 +1546,19 @@ mod tests {
     use reth_trie_db::ChangesetCache;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
-    use std::sync::Arc;
+    use std::sync::{Arc, OnceLock};
+    use tokio::runtime::{Handle, Runtime};
+
+    /// Get a handle to the test runtime, creating it if necessary
+    fn get_test_runtime_handle() -> Handle {
+        static TEST_RT: OnceLock<Runtime> = OnceLock::new();
+        TEST_RT
+            .get_or_init(|| {
+                tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()
+            })
+            .handle()
+            .clone()
+    }
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
     where
@@ -1561,11 +1573,11 @@ mod tests {
             + Send
             + 'static,
     {
-        let runtime = reth_tasks::Runtime::test();
+        let rt_handle = get_test_runtime_handle();
         let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(&runtime, task_ctx, 1, 1, false);
+        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 
