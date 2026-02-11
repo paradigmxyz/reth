@@ -2191,14 +2191,12 @@ impl ParallelSparseTrie {
                 // but all of its children will be in a lower trie. Check if a child node would be
                 // in the lower subtrie, and reveal accordingly.
                 if !SparseSubtrieType::path_len_is_upper(path.len() + 1) {
-                    let mut stack_ptr = 0;
-                    for idx in branch.state_mask.iter() {
+                    for (stack_ptr, idx) in branch.state_mask.iter().enumerate() {
                         let mut child_path = branch_path;
                         child_path.push_unchecked(idx);
                         self.lower_subtrie_for_path_mut(&child_path)
                             .expect("child_path must have a lower subtrie")
                             .reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
-                        stack_ptr += 1;
                     }
                 }
             }
@@ -2857,8 +2855,7 @@ impl SparseSubtrie {
 
         // For a branch node, iterate over all children. This must happen second so leaf
         // children can check connectivity with parent branch.
-        let mut stack_ptr = 0;
-        for idx in state_mask.iter() {
+        for (stack_ptr, idx) in state_mask.iter().enumerate() {
             let mut child_path = path;
             child_path.push_unchecked(idx);
             if Self::is_child_same_level(&path, &child_path) {
@@ -2866,7 +2863,6 @@ impl SparseSubtrie {
                 // the same level as the parent.
                 self.reveal_node_or_hash(child_path, &children[stack_ptr])?;
             }
-            stack_ptr += 1;
         }
 
         Ok(())

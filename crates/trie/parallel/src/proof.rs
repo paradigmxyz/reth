@@ -1,19 +1,13 @@
 use crate::{
     metrics::ParallelTrieMetrics,
-    proof_task::{
-        AccountMultiproofInput, ProofResult, ProofResultContext, ProofWorkerHandle,
-        StorageProofInput, StorageProofResultMessage,
-    },
+    proof_task::{AccountMultiproofInput, ProofResult, ProofResultContext, ProofWorkerHandle},
     root::ParallelStateRootError,
     StorageRootTargets,
 };
-use alloy_primitives::{map::B256Set, B256};
-use crossbeam_channel::{unbounded as crossbeam_unbounded, Receiver as CrossbeamReceiver};
-use reth_execution_errors::StorageRootError;
-use reth_storage_errors::db::DatabaseError;
+use crossbeam_channel::unbounded as crossbeam_unbounded;
 use reth_trie::{
-    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
-    DecodedMultiProof, DecodedStorageMultiProof, HashedPostState, MultiProofTargets, Nibbles,
+    prefix_set::{PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
+    DecodedMultiProof, HashedPostState, MultiProofTargets, Nibbles,
 };
 use reth_trie_common::added_removed_keys::MultiAddedRemovedKeys;
 use std::{sync::Arc, time::Instant};

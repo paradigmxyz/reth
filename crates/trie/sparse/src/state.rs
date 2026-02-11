@@ -9,15 +9,12 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
-use alloy_trie::proof::DecodedProofNodes;
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_trie_common::{
-    proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
-    BranchNodeMasks, BranchNodeMasksMap, DecodedMultiProof, DecodedStorageMultiProof, MultiProof,
-    Nibbles, ProofTrieNode, ProofTrieNodeV2, StorageMultiProof, TrieAccount, TrieNode, TrieNodeV2,
-    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    BranchNodeMasks, DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount,
+    TrieNodeV2, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 #[cfg(feature = "std")]
 use tracing::debug;
@@ -1209,90 +1206,6 @@ struct ProofNodesMetricValues {
     skipped_nodes: usize,
 }
 
-/// Result of [`filter_map_revealed_nodes`].
-#[derive(Debug, PartialEq, Eq)]
-struct FilterMappedProofNodes {
-    /// Root node which was pulled out of the original node set to be handled specially.
-    root_node: Option<ProofTrieNode>,
-    /// Filtered, decoded and unsorted proof nodes. Root node is removed.
-    nodes: Vec<ProofTrieNode>,
-    /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
-    /// if they are not in the proof.
-    new_nodes: usize,
-    /// Values which are being returned so they can be incremented into metrics.
-    metric_values: ProofNodesMetricValues,
-}
-
-/// Filters the decoded nodes that are already revealed, maps them to `SparseTrieNode`s,
-/// separates the root node if present, and returns additional information about the number of
-/// total, skipped, and new nodes.
-fn filter_map_revealed_nodes(
-    proof_nodes: DecodedProofNodes,
-    revealed_nodes: &mut HashSet<Nibbles>,
-    branch_node_masks: &BranchNodeMasksMap,
-) -> SparseStateTrieResult<FilterMappedProofNodes> {
-    let mut result = FilterMappedProofNodes {
-        root_node: None,
-        nodes: Vec::with_capacity(proof_nodes.len()),
-        new_nodes: 0,
-        metric_values: Default::default(),
-    };
-
-    let proof_nodes_len = proof_nodes.len();
-    for (path, proof_node) in proof_nodes.into_inner() {
-        result.metric_values.total_nodes += 1;
-
-        let is_root = path.is_empty();
-
-        // If the node is already revealed, skip it. We don't ever skip the root node, nor do we add
-        // it to `revealed_nodes`.
-        if !is_root && !revealed_nodes.insert(path) {
-            result.metric_values.skipped_nodes += 1;
-            continue
-        }
-
-        result.new_nodes += 1;
-
-        // Extract hash/tree masks based on the node type (only branch nodes have masks). At the
-        // same time increase the new_nodes counter if the node is a type which has children.
-        let masks = match &proof_node {
-            TrieNode::Branch(branch) => {
-                // If it's a branch node, increase the number of new nodes by the number of children
-                // according to the state mask.
-                result.new_nodes += branch.state_mask.count_ones() as usize;
-                branch_node_masks.get(&path).copied()
-            }
-            TrieNode::Extension(_) => {
-                // There is always exactly one child of an extension node.
-                result.new_nodes += 1;
-                None
-            }
-            _ => None,
-        };
-
-        let node = ProofTrieNode { path, node: proof_node, masks };
-
-        if is_root {
-            // Perform sanity check.
-            if matches!(node.node, TrieNode::EmptyRoot) && proof_nodes_len > 1 {
-                return Err(SparseStateTrieErrorKind::InvalidRootNode {
-                    path,
-                    node: alloy_rlp::encode(&node.node).into(),
-                }
-                .into())
-            }
-
-            result.root_node = Some(node);
-
-            continue
-        }
-
-        result.nodes.push(node);
-    }
-
-    Ok(result)
-}
-
 /// Result of [`filter_revealed_v2_proof_nodes`].
 #[derive(Debug, PartialEq, Eq)]
 struct FilteredV2ProofNodes {
@@ -1316,12 +1229,9 @@ fn estimate_v2_proof_capacity(nodes: &[ProofTrieNodeV2]) -> usize {
     let mut capacity = nodes.len();
 
     for node in nodes {
-        match &node.node {
-            TrieNodeV2::Branch(branch) => {
-                capacity += branch.state_mask.count_ones() as usize;
-            }
-            _ => {}
-        };
+        if let TrieNodeV2::Branch(branch) = &node.node {
+            capacity += branch.state_mask.count_ones() as usize;
+        }
     }
 
     capacity
@@ -1364,12 +1274,9 @@ fn filter_revealed_v2_proof_nodes(
         result.new_nodes += 1;
 
         // Count children for capacity estimation
-        match &node.node {
-            TrieNodeV2::Branch(branch) => {
-                result.new_nodes += branch.state_mask.count_ones() as usize;
-            }
-            _ => {}
-        };
+        if let TrieNodeV2::Branch(branch) = &node.node {
+            result.new_nodes += branch.state_mask.count_ones() as usize;
+        }
 
         if is_root {
             // Perform sanity check: EmptyRoot is only valid if there are no other real nodes.
