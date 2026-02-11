@@ -464,8 +464,6 @@ where
                     PrewarmMode::Skipped
                 } else if let Some(bal) = bal {
                     PrewarmMode::BlockAccessList(bal)
-                } else if skip_prewarm {
-                    PrewarmMode::Skipped
                 } else {
                     PrewarmMode::Transactions(transactions)
                 };
