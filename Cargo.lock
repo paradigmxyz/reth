@@ -7514,6 +7514,7 @@ dependencies = [
  "aquamarine",
  "backon",
  "clap",
+ "reqwest",
  "reth-chainspec",
  "reth-cli-runner",
  "reth-cli-util",
@@ -7542,6 +7543,7 @@ dependencies = [
  "reth-rpc-server-types",
  "reth-tasks",
  "reth-transaction-pool",
+ "serde_json",
  "tempfile",
  "tracing",
 ]
