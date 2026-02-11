@@ -140,6 +140,18 @@ pub(crate) struct Args {
     #[arg(long, value_name = "PERSISTENCE_THRESHOLD")]
     pub persistence_threshold: Option<u64>,
 
+    /// Minimum gas_used for a block to be included in benchmark measurements.
+    /// Blocks below this threshold are still executed but excluded from timing stats.
+    /// Accepts short notation: K for thousand, M for million, G for billion.
+    #[arg(long, value_name = "GAS")]
+    pub measure_gas_min: Option<String>,
+
+    /// Maximum gas_used for a block to be included in benchmark measurements.
+    /// Blocks above this threshold are still executed but excluded from timing stats.
+    /// Accepts short notation: K for thousand, M for million, G for billion.
+    #[arg(long, value_name = "GAS")]
+    pub measure_gas_max: Option<String>,
+
     /// Number of blocks to run for cache warmup after clearing caches.
     /// If not specified, defaults to the same as --blocks
     #[arg(long, value_name = "N")]

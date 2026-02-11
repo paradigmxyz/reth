@@ -12,7 +12,7 @@
 use crate::{
     bench::{
         context::BenchContext,
-        helpers::parse_duration,
+        helpers::{parse_duration, parse_gas_limit},
         output::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
@@ -91,6 +91,12 @@ pub struct Command {
         verbatim_doc_comment
     )]
     rpc_block_buffer_size: usize,
+
+    #[arg(long, value_name = "GAS", value_parser = parse_gas_limit)]
+    measure_gas_min: Option<u64>,
+
+    #[arg(long, value_name = "GAS", value_parser = parse_gas_limit)]
+    measure_gas_max: Option<u64>,
 
     #[command(flatten)]
     benchmark: BenchmarkArgs,
@@ -205,7 +211,11 @@ impl Command {
             }
         });
 
+        let measure_gas_min = self.measure_gas_min.unwrap_or(0);
+        let measure_gas_max = self.measure_gas_max.unwrap_or(u64::MAX);
+
         let mut results = Vec::new();
+        let mut total_blocks = 0u64;
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
@@ -247,18 +257,37 @@ impl Command {
                 total_latency,
             };
 
-            // Exclude time spent waiting on the block prefetch channel from the benchmark duration.
-            // We want to measure engine throughput, not RPC fetch latency.
-            let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
-            info!(target: "reth-bench", %combined_result);
+            total_blocks += 1;
 
             if let Some(w) = &mut waiter {
                 w.on_block(block_number).await?;
             }
 
-            let gas_row =
-                TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
-            results.push((gas_row, combined_result));
+            let in_measurement_range = gas_used >= measure_gas_min && gas_used <= measure_gas_max;
+
+            if in_measurement_range {
+                // Exclude time spent waiting on the block prefetch channel from the benchmark
+                // duration. We want to measure engine throughput, not RPC fetch latency.
+                let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
+                info!(target: "reth-bench", %combined_result);
+
+                let gas_row = TotalGasRow {
+                    block_number,
+                    transaction_count,
+                    gas_used,
+                    time: current_duration,
+                };
+                results.push((gas_row, combined_result));
+            } else {
+                debug!(
+                    target: "reth-bench",
+                    ?block_number,
+                    gas_used,
+                    measure_gas_min,
+                    measure_gas_max,
+                    "Skipping block from measurements (gas_used outside range)"
+                );
+            }
         }
 
         // Check if the spawned task encountered an error
@@ -285,7 +314,8 @@ impl Command {
             total_gas_used = gas_output.total_gas_used,
             total_duration = ?gas_output.total_duration,
             execution_duration = ?gas_output.execution_duration,
-            blocks_processed = gas_output.blocks_processed,
+            blocks_measured = gas_output.blocks_processed,
+            blocks_processed = total_blocks,
             wall_clock_ggas_per_second = format_args!("{:.4}", gas_output.total_gigagas_per_second()),
             execution_ggas_per_second = format_args!("{:.4}", gas_output.execution_gigagas_per_second()),
             "Benchmark complete"

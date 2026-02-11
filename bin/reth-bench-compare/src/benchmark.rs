@@ -21,6 +21,8 @@ pub(crate) struct BenchmarkRunner {
     wait_for_persistence: bool,
     persistence_threshold: Option<u64>,
     warmup_blocks: u64,
+    measure_gas_min: Option<String>,
+    measure_gas_max: Option<String>,
 }
 
 impl BenchmarkRunner {
@@ -33,6 +35,8 @@ impl BenchmarkRunner {
             wait_for_persistence: args.wait_for_persistence,
             persistence_threshold: args.persistence_threshold,
             warmup_blocks: args.get_warmup_blocks(),
+            measure_gas_min: args.measure_gas_min.clone(),
+            measure_gas_max: args.measure_gas_max.clone(),
         }
     }
 
@@ -102,6 +106,13 @@ impl BenchmarkRunner {
             &to_block.to_string(),
             "--wait-time=0ms", // Warmup should avoid persistence waits.
         ]);
+
+        if let Some(ref gas_min) = self.measure_gas_min {
+            cmd.args(["--measure-gas-min", gas_min]);
+        }
+        if let Some(ref gas_max) = self.measure_gas_max {
+            cmd.args(["--measure-gas-max", gas_max]);
+        }
 
         cmd.env("RUST_LOG_STYLE", "never")
             .stdout(std::process::Stdio::piped())
@@ -185,6 +196,13 @@ impl BenchmarkRunner {
             "--output",
             &output_dir.to_string_lossy(),
         ]);
+
+        if let Some(ref gas_min) = self.measure_gas_min {
+            cmd.args(["--measure-gas-min", gas_min]);
+        }
+        if let Some(ref gas_max) = self.measure_gas_max {
+            cmd.args(["--measure-gas-max", gas_max]);
+        }
 
         // Configure wait mode: both can be used together
         // When both are set: wait at least wait_time, and also wait for persistence if needed
