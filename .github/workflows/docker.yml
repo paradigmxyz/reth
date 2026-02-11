@@ -31,6 +31,7 @@ on:
 
 jobs:
   build:
+    if: github.repository == 'paradigmxyz/reth'
     name: Build Docker images
     runs-on: ubuntu-24.04
     permissions:

@@ -55,7 +55,7 @@ where
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         let f = c(this);
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking_task(Box::pin(async move {
             let res = f.await;
             let _ = tx.send(res);
         }));
@@ -116,7 +116,7 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().canonical_state_stream();
-        self.inner.task_spawner.spawn(Box::pin(pipe_from_stream(sink, stream)));
+        self.inner.task_spawner.spawn_task(Box::pin(pipe_from_stream(sink, stream)));
 
         Ok(())
     }
@@ -128,7 +128,7 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().persisted_block_stream();
-        self.inner.task_spawner.spawn(Box::pin(pipe_from_stream(sink, stream)));
+        self.inner.task_spawner.spawn_task(Box::pin(pipe_from_stream(sink, stream)));
 
         Ok(())
     }
@@ -141,7 +141,7 @@ where
         let sink = pending.accept().await?;
         let canon_stream = self.provider().canonical_state_stream();
         let finalized_stream = self.provider().finalized_block_stream();
-        self.inner.task_spawner.spawn(Box::pin(finalized_chain_notifications(
+        self.inner.task_spawner.spawn_task(Box::pin(finalized_chain_notifications(
             sink,
             canon_stream,
             finalized_stream,

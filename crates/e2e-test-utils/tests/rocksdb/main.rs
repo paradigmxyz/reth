@@ -119,7 +119,7 @@ async fn test_rocksdb_node_startup() -> Result<()> {
 
     let chain_spec = test_chain_spec();
 
-    let (nodes, _tasks, _wallet) =
+    let (nodes, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
             .with_storage_v2()
             .build()
@@ -147,7 +147,7 @@ async fn test_rocksdb_block_mining() -> Result<()> {
     let chain_spec = test_chain_spec();
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _tasks, _wallet) =
+    let (mut nodes, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
             .with_storage_v2()
             .build()
@@ -201,7 +201,7 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
     let chain_spec = test_chain_spec();
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _tasks, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
         1,
         chain_spec.clone(),
         test_attributes_generator,
@@ -268,7 +268,7 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
     let chain_spec = test_chain_spec();
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _tasks, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
         1,
         chain_spec.clone(),
         test_attributes_generator,
@@ -336,7 +336,7 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
     let chain_spec = test_chain_spec();
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _tasks, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
         1,
         chain_spec.clone(),
         test_attributes_generator,
@@ -421,7 +421,7 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     let chain_spec = test_chain_spec();
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _tasks, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
         1,
         chain_spec.clone(),
         test_attributes_generator,
@@ -485,7 +485,7 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     let chain_spec = test_chain_spec();
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _tasks, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
         1,
         chain_spec.clone(),
         test_attributes_generator,

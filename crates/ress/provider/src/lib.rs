@@ -224,7 +224,7 @@ where
         let _permit = self.witness_semaphore.acquire().await.map_err(ProviderError::other)?;
         let this = self.clone();
         let (tx, rx) = oneshot::channel();
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(Box::pin(async move {
             let result = this.generate_witness(block_hash);
             let _ = tx.send(result);
         }));

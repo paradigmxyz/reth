@@ -210,7 +210,7 @@ pub mod ress;
 
 // re-export for convenience
 #[doc(inline)]
-pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
+pub use reth_cli_runner::{CliContext, CliRunner};
 
 // for rendering diagrams
 use aquamarine as _;
