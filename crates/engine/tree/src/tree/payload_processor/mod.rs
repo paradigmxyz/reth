@@ -55,7 +55,6 @@ use std::{
 use tracing::{debug, debug_span, instrument, warn, Span};
 
 pub mod bal;
-
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
