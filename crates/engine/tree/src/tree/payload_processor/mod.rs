@@ -100,10 +100,10 @@ pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 /// and transaction prewarming is skipped, avoiding fixed overhead that exceeds the benefit
 /// for blocks with few state changes.
 ///
-/// 50 transactions roughly corresponds to ~20M gas for simple transfers. `PandaOps` data shows
+/// 30 transactions roughly corresponds to ~12M gas for simple transfers. `PandaOps` data shows
 /// reth's win rate drops from 88% (40-50M gas) to 49% (0-10M gas), suggesting the parallel
 /// machinery's fixed cost dominates for small blocks.
-pub const SMALL_BLOCK_TX_THRESHOLD: usize = 50;
+pub const SMALL_BLOCK_TX_THRESHOLD: usize = 30;
 
 /// Number of proof workers (storage and account) to use for small blocks.
 ///
