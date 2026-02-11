@@ -23,8 +23,8 @@ use rayon::prelude::*;
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
-    TxEnvFor,
+    ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook,
+    SpecFor, TxEnvFor,
 };
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
@@ -370,9 +370,9 @@ where
 
         // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
         rayon::spawn(move || {
-            let (transactions, convert) = transactions.into();
+            let (transactions, convert) = transactions.into_parts();
             transactions.into_par_iter().enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
-                let tx = convert(tx);
+                let tx = convert.convert(tx);
                 let tx = tx.map(|tx| {
                     let (tx_env, tx) = tx.into_parts();
                     WithTxEnv { tx_env, tx: Arc::new(tx) }
