@@ -18,8 +18,7 @@ use reth_evm::{
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{BlockTy, SealedBlock, SealedHeader};
 use revm::{
-    context::result::{ExecutionResult, Output, ResultAndState, SuccessReason},
-    database::State,
+    context::result::{ExecutionResult, HaltReason, Output, ResultAndState, SuccessReason},
     Inspector,
 };
 

@@ -35,7 +35,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::{context::TxEnv, DatabaseCommit, database::State, primitives::hardfork::SpecId};
+use revm::{context::TxEnv, primitives::hardfork::SpecId, DatabaseCommit};
 
 pub mod either;
 /// EVM environment configuration.
@@ -400,11 +400,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// // Complete block building
     /// let outcome = builder.finish(state_provider)?;
     /// ```
-<<<<<<< HEAD
-    fn builder_for_next_block<'a, DB: Database + 'a>(
-=======
     fn builder_for_next_block<'a, DB: StateDB + DatabaseCommit + Database + 'a>(
->>>>>>> 71397c6c6b (wip: getting everything compiling)
         &'a self,
         db: DB,
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
