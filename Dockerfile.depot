@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y libclang-dev pkg-config
 
 # Install sccache for compilation caching
 RUN cargo install sccache --locked
+ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_DIR=/sccache
 ENV SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev
 
