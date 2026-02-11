@@ -544,7 +544,7 @@ strum_macros = "0.27"
 syn = "2.0"
 thiserror = { version = "2.0.0", default-features = false }
 tar = "0.4.44"
-tracing = { version = "0.1.0", default-features = false }
+tracing = { version = "0.1.0", default-features = false, features = "attributes" }
 tracing-appender = "0.2"
 url = { version = "2.3", default-features = false }
 zstd = "0.13"
