@@ -149,6 +149,7 @@ rocksdb = [
     "reth-stages?/rocksdb",
     "reth-e2e-test-utils/rocksdb",
 ]
+edge = ["rocksdb"]
 
 [[test]]
 name = "e2e_testsuite"
