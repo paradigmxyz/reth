@@ -28,6 +28,17 @@ impl SharedPreservedSparseTrie {
     pub(super) fn lock(&self) -> PreservedTrieGuard<'_> {
         PreservedTrieGuard(self.0.lock())
     }
+
+    /// Shrinks the preserved trie's allocations outside the critical lock window.
+    ///
+    /// This briefly re-acquires the lock to call `shrink_to` on the stored trie.
+    /// Safe to call after `store()` + `drop(guard)` since `shrink_to` only reduces
+    /// allocation capacity without changing trie contents.
+    pub(super) fn shrink_to(&self, max_nodes: usize, max_values: usize) {
+        if let Some(preserved) = self.0.lock().as_mut() {
+            preserved.shrink_to(max_nodes, max_values);
+        }
+    }
 }
 
 /// Guard that holds the lock on the preserved trie.
@@ -76,6 +87,15 @@ impl PreservedSparseTrie {
     /// Creates a cleared preserved trie (allocations preserved, data cleared).
     pub(super) const fn cleared(trie: SparseTrie) -> Self {
         Self::Cleared { trie }
+    }
+
+    /// Shrinks the trie's allocations to the given capacity limits.
+    pub(super) fn shrink_to(&mut self, max_nodes: usize, max_values: usize) {
+        match self {
+            Self::Anchored { trie, .. } | Self::Cleared { trie } => {
+                trie.shrink_to(max_nodes, max_values);
+            }
+        }
     }
 
     /// Consumes self and returns the trie for reuse.

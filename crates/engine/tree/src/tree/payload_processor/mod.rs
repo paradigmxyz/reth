@@ -627,8 +627,14 @@ where
                 guard.store(PreservedSparseTrie::cleared(trie));
                 deferred
             };
-            // Drop guard before deferred to release lock before expensive deallocations
+            // Drop guard before deferred to release lock before expensive deallocations.
+            // shrink_to is deferred outside the lock since it's pure allocation management
+            // that doesn't change trie contents — the next block can start sooner.
             drop(guard);
+            preserved_sparse_trie.shrink_to(
+                SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+            );
             drop(deferred);
         });
     }

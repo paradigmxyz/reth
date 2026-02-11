@@ -75,12 +75,7 @@ where
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         match self {
             Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
-            Self::Cached(task) => task.into_trie_for_reuse(
-                prune_depth,
-                max_storage_tries,
-                max_nodes_capacity,
-                max_values_capacity,
-            ),
+            Self::Cached(task) => task.into_trie_for_reuse(prune_depth, max_storage_tries),
         }
     }
 
@@ -353,19 +348,19 @@ where
         }
     }
 
-    /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
+    /// Prunes the trie for reuse in the next payload built on top of this one.
     ///
     /// Should be called after the state root result has been sent.
+    ///
+    /// Note: `shrink_to` is intentionally deferred to run outside the preserve lock
+    /// so that the next block can start processing sooner.
     pub(super) fn into_trie_for_reuse(
         self,
         prune_depth: usize,
         max_storage_tries: usize,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         let Self { mut trie, .. } = self;
         trie.prune(prune_depth, max_storage_tries);
-        trie.shrink_to(max_nodes_capacity, max_values_capacity);
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
     }
