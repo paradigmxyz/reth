@@ -108,13 +108,13 @@ pub trait TrieWriter: Send {
 /// Storage Trie Writer
 #[auto_impl::auto_impl(&, Box)]
 pub trait StorageTrieWriter: Send {
-    /// Writes storage trie updates from the given storage trie map with already sorted updates.
+    /// Writes storage trie updates from the given pre-sorted storage trie slice.
     ///
-    /// Expects the storage trie updates to already be sorted by the hashed address key.
+    /// The storage tries must already be sorted by hashed address.
     ///
     /// Returns the number of entries modified.
-    fn write_storage_trie_updates_sorted<'a>(
+    fn write_storage_trie_updates_sorted(
         &self,
-        storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
+        storage_tries: &[(B256, StorageTrieUpdatesSorted)],
     ) -> ProviderResult<usize>;
 }

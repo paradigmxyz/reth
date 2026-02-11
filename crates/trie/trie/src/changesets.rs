@@ -346,7 +346,7 @@ mod tests {
 
         // Check storage changesets
         assert_eq!(changesets.storage_tries_ref().len(), 1);
-        let storage_changesets = changesets.storage_tries_ref().get(&hashed_address).unwrap();
+        let storage_changesets = changesets.storage_trie_get(&hashed_address).unwrap();
         assert!(!storage_changesets.is_deleted);
         assert_eq!(storage_changesets.storage_nodes.len(), 2);
 
@@ -401,7 +401,7 @@ mod tests {
 
         // Check storage changesets
         assert_eq!(changesets.storage_tries_ref().len(), 1);
-        let storage_changesets = changesets.storage_tries_ref().get(&hashed_address).unwrap();
+        let storage_changesets = changesets.storage_trie_get(&hashed_address).unwrap();
         assert!(storage_changesets.is_deleted);
 
         // Should include all three nodes (changed path1 + wiped path2 and path3)
@@ -457,7 +457,7 @@ mod tests {
         let changesets = compute_trie_changesets(&factory, &updates).unwrap();
 
         // Check storage changesets
-        let storage_changesets = changesets.storage_tries_ref().get(&hashed_address).unwrap();
+        let storage_changesets = changesets.storage_trie_get(&hashed_address).unwrap();
         assert!(storage_changesets.is_deleted);
 
         // Should include all three paths: existing path1, new path2, existing path3

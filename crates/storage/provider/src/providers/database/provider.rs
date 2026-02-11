@@ -2810,25 +2810,23 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         }
 
         num_entries +=
-            self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
+            self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref())?;
 
         Ok(num_entries)
     }
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseProvider<TX, N> {
-    /// Writes storage trie updates from the given storage trie map with already sorted updates.
+    /// Writes storage trie updates from the given pre-sorted storage trie slice.
     ///
-    /// Expects the storage trie updates to already be sorted by the hashed address key.
+    /// The storage tries must already be sorted by hashed address.
     ///
     /// Returns the number of entries modified.
-    fn write_storage_trie_updates_sorted<'a>(
+    fn write_storage_trie_updates_sorted(
         &self,
-        storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
+        storage_tries: &[(B256, StorageTrieUpdatesSorted)],
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
-        let mut storage_tries = storage_tries.collect::<Vec<_>>();
-        storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
         let mut cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
         for (hashed_address, storage_trie_updates) in storage_tries {
             let mut db_storage_trie_cursor =
