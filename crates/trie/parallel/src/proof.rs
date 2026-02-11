@@ -324,7 +324,8 @@ mod tests {
         let factory =
             reth_provider::providers::OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(factory);
-        let proof_worker_handle = ProofWorkerHandle::new(task_ctx, 1, 1, false);
+        let runtime = reth_tasks::Runtime::test();
+        let proof_worker_handle = ProofWorkerHandle::new(&runtime, task_ctx, 1, 1, false);
 
         let parallel_result = ParallelProof::new(Default::default(), proof_worker_handle.clone())
             .decoded_multiproof(targets.clone())
