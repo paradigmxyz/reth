@@ -10,7 +10,6 @@ static MALLOC_CONF: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0";
 use clap::Parser;
 use reth::cli::Cli;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-use reth_node_builder::NodeHandle;
 use reth_node_ethereum::EthereumNode;
 use tracing::info;
 
@@ -24,10 +23,9 @@ fn main() {
 
     if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(async move |builder, _| {
         info!(target: "reth::cli", "Launching node");
-        let NodeHandle { node_exit_future, .. } =
-            builder.node(EthereumNode::default()).launch_with_debug_capabilities().await?;
+        let handle = builder.node(EthereumNode::default()).launch_with_debug_capabilities().await?;
 
-        node_exit_future.await
+        handle.wait_for_node_exit().await
     }) {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
