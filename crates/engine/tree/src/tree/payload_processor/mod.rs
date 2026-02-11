@@ -736,6 +736,17 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.state_root.take().expect("state_root is None")
     }
 
+    /// Cancels the sparse trie and proof worker pipeline by closing the multi-proof channel.
+    ///
+    /// Dropping the sender cascades: the multi-proof / hashing task exits, which closes the
+    /// sparse trie update channel, causing the sparse trie task to finish, which in turn
+    /// releases the proof workers and their database transactions.
+    ///
+    /// Idempotent: safe to call multiple times.
+    pub fn terminate_state_root_task(&mut self) {
+        let _ = self.to_multi_proof.take();
+    }
+
     /// Returns a state hook to be used to send state updates to this task.
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
