@@ -679,10 +679,32 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 timings.write_trie_updates += start.elapsed();
             }
 
-            // Full mode: update history indices
+            // Full mode: update history indices from in-memory data to avoid
+            // redundant DB cursor walks over changesets that were just written.
             if save_mode.with_state() {
                 let start = Instant::now();
-                self.update_history_indices(first_number..=last_block_number)?;
+                let mut account_changes: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+                let mut storage_changes: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+                for block in &blocks {
+                    let block_number = block.recovered_block().number();
+                    let bundle = &block.execution_outcome().state;
+                    for (address, account) in &bundle.state {
+                        account_changes
+                            .entry(*address)
+                            .or_default()
+                            .push(block_number);
+                        for storage_key in account.storage.keys() {
+                            storage_changes
+                                .entry((*address, B256::new(storage_key.to_be_bytes())))
+                                .or_default()
+                                .push(block_number);
+                        }
+                    }
+                }
+                self.update_history_indices_from_changesets(
+                    account_changes,
+                    storage_changes,
+                )?;
                 timings.update_history_indices = start.elapsed();
             }
 
@@ -3133,6 +3155,27 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         if !storage_settings.storages_history_in_rocksdb {
             let indices = self.changed_storages_and_blocks_with_range(range)?;
             self.insert_storage_history_index(indices)?;
+        }
+
+        Ok(())
+    }
+
+}
+
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn update_history_indices_from_changesets(
+        &self,
+        account_changes: BTreeMap<Address, Vec<u64>>,
+        storage_changes: BTreeMap<(Address, B256), Vec<u64>>,
+    ) -> ProviderResult<()> {
+        let storage_settings = self.cached_storage_settings();
+        if !storage_settings.account_history_in_rocksdb {
+            self.insert_account_history_index(account_changes)?;
+        }
+
+        if !storage_settings.storages_history_in_rocksdb {
+            self.insert_storage_history_index(storage_changes)?;
         }
 
         Ok(())
