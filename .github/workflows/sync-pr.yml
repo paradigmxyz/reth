@@ -29,9 +29,9 @@ jobs:
           - build: install
             bin: reth
             chain: mainnet
-            tip: "0x6dce5920ba2239ea6f70bb988c50af934aa011fcd5829ccb35937b014859d37b"
-            block: 7000
-            unwind-target: "0x95bacfddde3190a2e185f99c42cabed4464fccf39549de73b62f97994956ba86"
+            tip: "0x6b51cf0d0c2e298ef9039c03c3aa2f219aac2ee5f4e446a3097a7834307b9777"
+            block: 3000
+            unwind-target: "0x4976c27e6aca290c2c45d20aa36f81c2df2ada1e7226e4fe0debfb95f6a49ae3"
     steps:
       - uses: actions/checkout@v6
       - uses: rui314/setup-mold@v1
