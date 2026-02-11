@@ -61,6 +61,17 @@ const PREFETCH_MAX_BATCH_TARGETS: usize = 512;
 /// Prevents excessive batching even with small messages.
 const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
 
+/// Maximum number of state updates to buffer for small-block batching.
+///
+/// For blocks with fewer state updates than this threshold, all updates are buffered and
+/// dispatched as a single merged proof request at the end. This eliminates per-update overhead
+/// from partition, dispatch, Arc cloning, and channel operations.
+///
+/// Set to 128 to cover all small blocks (< 50 txs often produce 50-100 state updates
+/// including system-level updates). Above this, the per-update pipeline activates to
+/// overlap proof computation with execution.
+const SMALL_BLOCK_STATE_UPDATE_BATCH_THRESHOLD: usize = 128;
+
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
 pub(crate) const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
@@ -873,6 +884,19 @@ impl MultiProofTask {
         // Update removed keys based on the state update.
         self.multi_added_removed_keys.update_with_state(&hashed_state_update);
 
+        self.on_hashed_state_update_no_removed_keys_update(source, hashed_state_update)
+    }
+
+    /// Like [`Self::on_hashed_state_update`] but skips the
+    /// [`MultiAddedRemovedKeys::update_with_state`] call.
+    ///
+    /// Used by the small-block batching path where removed keys were already tracked
+    /// per-update during buffering.
+    fn on_hashed_state_update_no_removed_keys_update(
+        &mut self,
+        source: Source,
+        hashed_state_update: HashedPostState,
+    ) -> u64 {
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
         let (fetched_state_update, not_fetched_state_update) = hashed_state_update
@@ -1095,20 +1119,64 @@ impl MultiProofTask {
                 }
 
                 let update_len = update.len();
-                batch_metrics.state_update_proofs_requested += self.on_state_update(source, update);
-                trace!(
-                    target: "engine::tree::payload_processor::multiproof",
-                    ?source,
-                    len = update_len,
-                    state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
-                    "Dispatched state update"
-                );
+
+                // Small-block fast path: buffer hashed state updates instead of dispatching
+                // per-tx proofs. This eliminates per-update partition, dispatch, Arc clone,
+                // and channel overhead.
+                if ctx.is_batching_state_updates() {
+                    let hashed_state_update = evm_state_to_hashed_post_state(update);
+                    // Track added/removed keys per update for correctness
+                    self.multi_added_removed_keys.update_with_state(&hashed_state_update);
+
+                    let buffer = ctx.state_update_buffer.as_mut().expect("checked above");
+                    buffer.updates.push(hashed_state_update);
+
+                    // If we exceed the threshold, disable batching and flush all buffered
+                    // updates through the normal per-update pipeline
+                    if buffer.updates.len() >= SMALL_BLOCK_STATE_UPDATE_BATCH_THRESHOLD {
+                        debug!(
+                            target: "engine::tree::payload_processor::multiproof",
+                            buffered = buffer.updates.len(),
+                            "Exceeded small-block batch threshold, flushing to per-update pipeline"
+                        );
+                        if let Some(buffered) = ctx.disable_batching() {
+                            for buffered_update in buffered {
+                                batch_metrics.state_update_proofs_requested += self
+                                    .on_hashed_state_update_no_removed_keys_update(
+                                        source,
+                                        buffered_update,
+                                    );
+                            }
+                        }
+                    }
+
+                    trace!(
+                        target: "engine::tree::payload_processor::multiproof",
+                        ?source,
+                        len = update_len,
+                        buffered = ctx.state_update_buffer.as_ref().map_or(0, |b| b.updates.len()),
+                        "Buffered state update for small-block batch"
+                    );
+                } else {
+                    batch_metrics.state_update_proofs_requested +=
+                        self.on_state_update(source, update);
+                    trace!(
+                        target: "engine::tree::payload_processor::multiproof",
+                        ?source,
+                        len = update_len,
+                        state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
+                        "Dispatched state update"
+                    );
+                }
 
                 false
             }
             // Process Block Access List (BAL) - complete state changes provided upfront
             MultiProofMessage::BlockAccessList(bal) => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::BAL");
+
+                // BAL provides complete state — disable small-block batching
+                ctx.disable_batching();
 
                 if ctx.first_update_time.is_none() {
                     self.metrics
@@ -1155,6 +1223,33 @@ impl MultiProofTask {
             MultiProofMessage::FinishedStateUpdates => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
 
+                // Flush small-block batch: merge all buffered state updates into one and
+                // dispatch a single proof request.
+                if let Some(buffered) = ctx.disable_batching()
+                    && !buffered.is_empty()
+                {
+                    // Merge all buffered updates into a single HashedPostState.
+                    // multi_added_removed_keys was already updated per-update during
+                    // buffering, so we skip that step during dispatch.
+                    let mut merged = HashedPostState::with_capacity(buffered.len());
+                    for update in buffered {
+                        merged.extend(update);
+                    }
+
+                    debug!(
+                        target: "engine::tree::payload_processor::multiproof",
+                        accounts = merged.accounts.len(),
+                        storages = merged.storages.len(),
+                        "Flushing small-block batch as single proof request"
+                    );
+
+                    batch_metrics.state_update_proofs_requested += self
+                        .on_hashed_state_update_no_removed_keys_update(
+                            Source::Evm(StateChangeSource::Transaction(0)),
+                            merged,
+                        );
+                }
+
                 ctx.updates_finished_time = Some(Instant::now());
 
                 if self.is_done(batch_metrics, ctx) {
@@ -1192,6 +1287,8 @@ impl MultiProofTask {
                 false
             }
             MultiProofMessage::HashedStateUpdate(hashed_state) => {
+                // Pre-hashed update from BAL — disable small-block batching
+                ctx.disable_batching();
                 batch_metrics.state_update_proofs_requested +=
                     self.on_hashed_state_update(Source::BlockAccessList, hashed_state);
                 false
@@ -1376,6 +1473,25 @@ struct MultiproofBatchCtx {
     updates_finished_time: Option<Instant>,
     /// Reusable buffer for accumulating prefetch targets during batching.
     accumulated_prefetch_targets: Vec<VersionedMultiProofTargets>,
+    /// Buffer for small-block state update batching.
+    ///
+    /// When active, per-tx hashed state updates are accumulated here instead of being
+    /// dispatched individually. On `FinishedStateUpdates`, all buffered updates are merged
+    /// and dispatched as a single proof request. This eliminates per-update overhead from
+    /// partition, dispatch, Arc cloning, and channel operations.
+    ///
+    /// `None` means batching has been disabled (either because the block exceeded the
+    /// threshold or because a non-EVM source was received).
+    state_update_buffer: Option<SmallBlockBuffer>,
+}
+
+/// Buffer for accumulating state updates during small-block processing.
+///
+/// Instead of dispatching proofs per-transaction, this buffers hashed state updates
+/// so they can be merged into a single proof request at block completion.
+struct SmallBlockBuffer {
+    /// Accumulated hashed state updates, in transaction order.
+    updates: Vec<HashedPostState>,
 }
 
 impl MultiproofBatchCtx {
@@ -1387,12 +1503,25 @@ impl MultiproofBatchCtx {
             start,
             updates_finished_time: None,
             accumulated_prefetch_targets: Vec::with_capacity(PREFETCH_MAX_BATCH_MESSAGES),
+            state_update_buffer: Some(SmallBlockBuffer {
+                updates: Vec::with_capacity(SMALL_BLOCK_STATE_UPDATE_BATCH_THRESHOLD),
+            }),
         }
     }
 
     /// Returns `true` if all state updates have been received.
     const fn updates_finished(&self) -> bool {
         self.updates_finished_time.is_some()
+    }
+
+    /// Returns `true` if small-block state update batching is active.
+    const fn is_batching_state_updates(&self) -> bool {
+        self.state_update_buffer.is_some()
+    }
+
+    /// Disables small-block batching and returns any buffered updates.
+    fn disable_batching(&mut self) -> Option<Vec<HashedPostState>> {
+        self.state_update_buffer.take().map(|buf| buf.updates)
     }
 }
 
