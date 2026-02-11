@@ -12,20 +12,7 @@ use tracing::{level_filters::LevelFilter, Level};
 /// Constant to convert megabytes to bytes
 const MB_TO_BYTES: u64 = 1024 * 1024;
 
-const PROFILER_TRACING_FILTER: &str = concat!(
-    "info",
-    ",engine=debug",
-    ",trie=debug",
-    ",providers=debug",
-    ",rpc=debug",
-    ",sync=debug",
-    ",pruner=debug",
-    ",libmdbx=debug",
-    ",jsonrpsee-server=debug",
-    ",jsonrpsee-core=debug",
-    ",jsonrpsee-http=debug",
-    ",jsonrpsee=debug",
-);
+const PROFILER_TRACING_FILTER: &str = "debug";
 
 /// The log configuration.
 #[derive(Debug, Args)]
