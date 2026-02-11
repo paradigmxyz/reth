@@ -49,13 +49,16 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
-/// Determines the prewarming mode: transaction-based or BAL-based.
+/// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
     /// Prewarm by executing transactions from a stream.
     Transactions(Receiver<Tx>),
     /// Prewarm by prefetching slots from a Block Access List.
     BlockAccessList(Arc<BlockAccessList>),
+    /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
+    /// benefit). No workers are spawned.
+    Skipped,
 }
 
 /// A wrapper for transactions that includes their index in the block.
@@ -415,6 +418,10 @@ where
             }
             PrewarmMode::BlockAccessList(bal) => {
                 self.run_bal_prewarm(bal, actions_tx);
+            }
+            PrewarmMode::Skipped => {
+                let _ = actions_tx
+                    .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
             }
         }
 
