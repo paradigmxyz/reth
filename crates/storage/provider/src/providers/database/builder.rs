@@ -24,7 +24,7 @@ pub struct ProviderFactoryBuilder<N> {
 }
 
 impl<N> ProviderFactoryBuilder<N> {
-    /// Maps the [`NodeTypes`] of this builder.
+    /// Maps the [`reth_node_types::NodeTypes`] of this builder.
     pub fn types<T>(self) -> ProviderFactoryBuilder<T> {
         ProviderFactoryBuilder::default()
     }
