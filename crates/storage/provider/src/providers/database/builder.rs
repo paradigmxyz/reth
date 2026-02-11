@@ -40,8 +40,8 @@ impl<N> ProviderFactoryBuilder<N> {
     }
 
     /// Configures the database.
-    pub fn db<DB>(self, db: DB) -> TypesAnd1<N, DB> {
-        TypesAnd1::new(db)
+    pub fn db<DB>(self, db: DB) -> WithDb<N, DB> {
+        WithDb::new(db)
     }
 
     /// Opens the database with the given chainspec and [`ReadOnlyConfig`].
@@ -272,156 +272,123 @@ where
     }
 }
 
-/// This is staging type that contains the configured types and _one_ value.
+/// Builder stage after configuring the database.
 #[derive(Debug)]
-pub struct TypesAnd1<N, Val1> {
+pub struct WithDb<N, DB> {
     _types: PhantomData<N>,
-    val_1: Val1,
+    db: DB,
 }
 
-impl<N, Val1> TypesAnd1<N, Val1> {
-    /// Creates a new instance with the given types and one value.
-    pub fn new(val_1: Val1) -> Self {
-        Self { _types: Default::default(), val_1 }
+impl<N, DB> WithDb<N, DB> {
+    /// Creates a new instance with the given database.
+    pub fn new(db: DB) -> Self {
+        Self { _types: Default::default(), db }
     }
 
     /// Configures the chainspec.
-    pub fn chainspec<C>(self, chainspec: Arc<C>) -> TypesAnd2<N, Val1, Arc<C>> {
-        TypesAnd2::new(self.val_1, chainspec)
+    pub fn chainspec<C>(self, chainspec: Arc<C>) -> WithChainSpec<N, DB, C> {
+        WithChainSpec { _types: Default::default(), db: self.db, chainspec }
     }
 }
 
-/// This is staging type that contains the configured types and _two_ values.
+/// Builder stage after configuring the database and chainspec.
 #[derive(Debug)]
-pub struct TypesAnd2<N, Val1, Val2> {
+pub struct WithChainSpec<N, DB, C> {
     _types: PhantomData<N>,
-    val_1: Val1,
-    val_2: Val2,
+    db: DB,
+    chainspec: Arc<C>,
 }
 
-impl<N, Val1, Val2> TypesAnd2<N, Val1, Val2> {
-    /// Creates a new instance with the given types and two values.
-    pub fn new(val_1: Val1, val_2: Val2) -> Self {
-        Self { _types: Default::default(), val_1, val_2 }
+impl<N, DB, C> WithChainSpec<N, DB, C> {
+    /// Returns the database.
+    pub const fn db(&self) -> &DB {
+        &self.db
     }
 
-    /// Returns the first value.
-    pub const fn val_1(&self) -> &Val1 {
-        &self.val_1
-    }
-
-    /// Returns the second value.
-    pub const fn val_2(&self) -> &Val2 {
-        &self.val_2
+    /// Returns the chainspec.
+    pub const fn chainspec(&self) -> &Arc<C> {
+        &self.chainspec
     }
 
     /// Configures the [`StaticFileProvider`].
     pub fn static_file(
         self,
         static_file_provider: StaticFileProvider<N::Primitives>,
-    ) -> TypesAnd3<N, Val1, Val2, StaticFileProvider<N::Primitives>>
+    ) -> WithStaticFiles<N, DB, C>
     where
         N: NodeTypes,
     {
-        TypesAnd3::new(self.val_1, self.val_2, static_file_provider)
+        WithStaticFiles {
+            _types: Default::default(),
+            db: self.db,
+            chainspec: self.chainspec,
+            static_file_provider,
+        }
     }
 }
 
-/// This is staging type that contains the configured types and _three_ values.
+/// Builder stage after configuring the database, chainspec, and static file provider.
 #[derive(Debug)]
-pub struct TypesAnd3<N, Val1, Val2, Val3> {
+pub struct WithStaticFiles<N: NodeTypes, DB, C> {
     _types: PhantomData<N>,
-    val_1: Val1,
-    val_2: Val2,
-    val_3: Val3,
+    db: DB,
+    chainspec: Arc<C>,
+    static_file_provider: StaticFileProvider<N::Primitives>,
 }
 
-impl<N, Val1, Val2, Val3> TypesAnd3<N, Val1, Val2, Val3> {
-    /// Creates a new instance with the given types and three values.
-    pub fn new(val_1: Val1, val_2: Val2, val_3: Val3) -> Self {
-        Self { _types: Default::default(), val_1, val_2, val_3 }
-    }
-}
-
-impl<N, DB, C> TypesAnd3<N, DB, Arc<C>, StaticFileProvider<N::Primitives>>
-where
-    N: NodeTypes,
-{
+impl<N: NodeTypes, DB, C> WithStaticFiles<N, DB, C> {
     /// Configures the `RocksDB` provider.
-    pub fn rocksdb_provider(
-        self,
-        rocksdb_provider: RocksDBProvider,
-    ) -> TypesAnd4<N, DB, Arc<C>, StaticFileProvider<N::Primitives>, RocksDBProvider> {
-        TypesAnd4::new(self.val_1, self.val_2, self.val_3, rocksdb_provider)
+    pub fn rocksdb_provider(self, rocksdb_provider: RocksDBProvider) -> WithRocksDb<N, DB, C> {
+        WithRocksDb {
+            _types: Default::default(),
+            db: self.db,
+            chainspec: self.chainspec,
+            static_file_provider: self.static_file_provider,
+            rocksdb_provider,
+        }
     }
 }
 
-/// This is staging type that contains the configured types and _four_ values.
+/// Builder stage after configuring the database, chainspec, static file provider, and `RocksDB`.
 #[derive(Debug)]
-pub struct TypesAnd4<N, Val1, Val2, Val3, Val4> {
+pub struct WithRocksDb<N: NodeTypes, DB, C> {
     _types: PhantomData<N>,
-    val_1: Val1,
-    val_2: Val2,
-    val_3: Val3,
-    val_4: Val4,
+    db: DB,
+    chainspec: Arc<C>,
+    static_file_provider: StaticFileProvider<N::Primitives>,
+    rocksdb_provider: RocksDBProvider,
 }
 
-impl<N, Val1, Val2, Val3, Val4> TypesAnd4<N, Val1, Val2, Val3, Val4> {
-    /// Creates a new instance with the given types and four values.
-    pub fn new(val_1: Val1, val_2: Val2, val_3: Val3, val_4: Val4) -> Self {
-        Self { _types: Default::default(), val_1, val_2, val_3, val_4 }
-    }
-}
-
-impl<N, DB> TypesAnd4<N, DB, Arc<N::ChainSpec>, StaticFileProvider<N::Primitives>, RocksDBProvider>
+impl<N, DB> WithRocksDb<N, DB, N::ChainSpec>
 where
     N: NodeTypesForProvider,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
     /// Sets the task runtime for the provider factory.
-    #[allow(clippy::type_complexity)]
-    pub fn runtime(
-        self,
-        runtime: reth_tasks::Runtime,
-    ) -> TypesAnd5<
-        N,
-        DB,
-        Arc<N::ChainSpec>,
-        StaticFileProvider<N::Primitives>,
-        RocksDBProvider,
-        reth_tasks::Runtime,
-    > {
-        TypesAnd5::new(self.val_1, self.val_2, self.val_3, self.val_4, runtime)
+    pub fn runtime(self, runtime: reth_tasks::Runtime) -> WithRuntime<N, DB> {
+        WithRuntime {
+            _types: Default::default(),
+            db: self.db,
+            chainspec: self.chainspec,
+            static_file_provider: self.static_file_provider,
+            rocksdb_provider: self.rocksdb_provider,
+            runtime,
+        }
     }
 }
 
-/// This is staging type that contains the configured types and _five_ values.
+/// Final builder stage with all components configured, ready to build a [`ProviderFactory`].
 #[derive(Debug)]
-pub struct TypesAnd5<N, Val1, Val2, Val3, Val4, Val5> {
+pub struct WithRuntime<N: NodeTypes, DB> {
     _types: PhantomData<N>,
-    val_1: Val1,
-    val_2: Val2,
-    val_3: Val3,
-    val_4: Val4,
-    val_5: Val5,
+    db: DB,
+    chainspec: Arc<N::ChainSpec>,
+    static_file_provider: StaticFileProvider<N::Primitives>,
+    rocksdb_provider: RocksDBProvider,
+    runtime: reth_tasks::Runtime,
 }
 
-impl<N, Val1, Val2, Val3, Val4, Val5> TypesAnd5<N, Val1, Val2, Val3, Val4, Val5> {
-    /// Creates a new instance with the given types and five values.
-    pub fn new(val_1: Val1, val_2: Val2, val_3: Val3, val_4: Val4, val_5: Val5) -> Self {
-        Self { _types: Default::default(), val_1, val_2, val_3, val_4, val_5 }
-    }
-}
-
-impl<N, DB>
-    TypesAnd5<
-        N,
-        DB,
-        Arc<N::ChainSpec>,
-        StaticFileProvider<N::Primitives>,
-        RocksDBProvider,
-        reth_tasks::Runtime,
-    >
+impl<N, DB> WithRuntime<N, DB>
 where
     N: NodeTypesForProvider,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
@@ -430,7 +397,12 @@ where
     pub fn build_provider_factory(
         self,
     ) -> ProviderResult<ProviderFactory<NodeTypesWithDBAdapter<N, DB>>> {
-        let Self { _types, val_1, val_2, val_3, val_4, val_5 } = self;
-        ProviderFactory::new(val_1, val_2, val_3, val_4, val_5)
+        ProviderFactory::new(
+            self.db,
+            self.chainspec,
+            self.static_file_provider,
+            self.rocksdb_provider,
+            self.runtime,
+        )
     }
 }
