@@ -10431,8 +10431,6 @@ dependencies = [
 name = "reth-tasks"
 version = "1.10.2"
 dependencies = [
- "auto_impl",
- "dyn-clone",
  "futures-util",
  "metrics",
  "pin-project",

@@ -986,7 +986,7 @@ impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext
                 secret_key,
                 default_peers_path,
             )
-            .with_task_executor(Box::new(self.executor.clone()))
+            .with_task_executor(self.executor.clone())
             .set_head(self.head);
 
         Ok(builder)

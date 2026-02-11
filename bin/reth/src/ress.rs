@@ -40,7 +40,7 @@ where
     let provider = RethRessProtocolProvider::new(
         provider,
         evm_config,
-        Box::new(task_executor.clone()),
+        task_executor.clone(),
         args.max_witness_window,
         args.witness_max_parallel,
         args.witness_cache_size,

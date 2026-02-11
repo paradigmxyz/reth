@@ -281,9 +281,12 @@ where
         .sealed_header(last_block_number)?
         .ok_or_else(|| ProviderError::HeaderNotFound(last_block_number.into()))?;
 
+    let runtime = reth_tasks::Runtime::with_existing_handle(tokio::runtime::Handle::current())
+        .expect("failed to create runtime");
+
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
         .build(file_client.clone(), consensus.clone())
-        .into_task();
+        .into_task_with(&runtime);
     // TODO: The pipeline should correctly configure the downloader on its own.
     // Find the possibility to remove unnecessary pre-configuration.
     header_downloader.update_local_head(local_head);
@@ -291,7 +294,7 @@ where
 
     let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
         .build(file_client.clone(), consensus.clone(), provider_factory.clone())
-        .into_task();
+        .into_task_with(&runtime);
     // TODO: The pipeline should correctly configure the downloader on its own.
     // Find the possibility to remove unnecessary pre-configuration.
     body_downloader

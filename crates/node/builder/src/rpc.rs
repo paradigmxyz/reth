@@ -1016,7 +1016,7 @@ where
             .with_provider(node.provider().clone())
             .with_pool(node.pool().clone())
             .with_network(node.network().clone())
-            .with_executor(Box::new(node.task_executor().clone()))
+            .with_executor(node.task_executor().clone())
             .with_evm_config(node.evm_config().clone())
             .with_consensus(node.consensus().clone())
             .build_with_auth_server(module_config, engine_api, eth_api, engine_events.clone());
@@ -1403,7 +1403,7 @@ where
             ctx.beacon_engine_handle.clone(),
             PayloadStore::new(ctx.node.payload_builder_handle().clone()),
             ctx.node.pool().clone(),
-            Box::new(ctx.node.task_executor().clone()),
+            ctx.node.task_executor().clone(),
             client,
             EngineCapabilities::default(),
             engine_validator,

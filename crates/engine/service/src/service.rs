@@ -24,7 +24,7 @@ use reth_provider::{
 };
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use reth_trie_db::ChangesetCache;
 use std::{
     pin::Pin,
@@ -75,7 +75,7 @@ where
         client: Client,
         incoming_requests: EngineMessageStream<N::Payload>,
         pipeline: Pipeline<N>,
-        pipeline_task_spawner: Box<dyn TaskSpawner>,
+        pipeline_task_spawner: Runtime,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
@@ -157,7 +157,7 @@ mod tests {
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
     use reth_prune::Pruner;
-    use reth_tasks::TokioTaskExecutor;
+    use reth_tasks::Runtime;
     use reth_trie_db::ChangesetCache;
     use std::sync::Arc;
     use tokio::sync::{mpsc::unbounded_channel, watch};
@@ -180,7 +180,7 @@ mod tests {
         let incoming_requests = UnboundedReceiverStream::new(rx);
 
         let pipeline = TestPipelineBuilder::new().build(chain_spec.clone());
-        let pipeline_task_spawner = Box::<TokioTaskExecutor>::default();
+        let pipeline_task_spawner = Runtime::test();
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
 
         let blockchain_db =

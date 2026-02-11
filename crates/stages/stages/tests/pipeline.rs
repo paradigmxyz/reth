@@ -143,15 +143,17 @@ fn build_downloaders_from_file_client(
     let min_block = file_client.min_block().expect("file client should have min block");
     let max_block = file_client.max_block().expect("file client should have max block");
 
+    let runtime = reth_tasks::Runtime::test();
+
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(stages_config.headers)
         .build(file_client.clone(), consensus.clone())
-        .into_task();
+        .into_task_with(&runtime);
     header_downloader.update_local_head(genesis);
     header_downloader.update_sync_target(SyncTarget::Tip(tip));
 
     let mut body_downloader = BodiesDownloaderBuilder::new(stages_config.bodies)
         .build(file_client, consensus, provider_factory)
-        .into_task();
+        .into_task_with(&runtime);
     body_downloader.set_download_range(min_block..=max_block).expect("set download range");
 
     (header_downloader, body_downloader)

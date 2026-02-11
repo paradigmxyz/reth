@@ -18,7 +18,7 @@ use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{Block as _, Header, RecoveredBlock};
 use reth_ress_protocol::RessProtocolProvider;
 use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use reth_trie::{MultiProofTargets, Nibbles, TrieInput};
 use schnellru::{ByLength, LruMap};
 use std::{sync::Arc, time::Instant};
@@ -38,7 +38,7 @@ use reth_storage_api::{BlockReader, BlockSource, StateProviderFactory};
 pub struct RethRessProtocolProvider<P, E> {
     provider: P,
     evm_config: E,
-    task_spawner: Box<dyn TaskSpawner>,
+    task_spawner: Runtime,
     max_witness_window: u64,
     witness_semaphore: Arc<Semaphore>,
     witness_cache: Arc<Mutex<LruMap<B256, Arc<Vec<Bytes>>>>>,
@@ -54,7 +54,7 @@ where
     pub fn new(
         provider: P,
         evm_config: E,
-        task_spawner: Box<dyn TaskSpawner>,
+        task_spawner: Runtime,
         max_witness_window: u64,
         witness_max_parallel: usize,
         cache_size: u32,
@@ -224,10 +224,10 @@ where
         let _permit = self.witness_semaphore.acquire().await.map_err(ProviderError::other)?;
         let this = self.clone();
         let (tx, rx) = oneshot::channel();
-        self.task_spawner.spawn_blocking_task(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(async move {
             let result = this.generate_witness(block_hash);
             let _ = tx.send(result);
-        }));
+        });
         match rx.await {
             Ok(Ok(witness)) => {
                 trace!(target: "reth::ress_provider", %block_hash, elapsed = ?started_at.elapsed(), "Computed witness");
