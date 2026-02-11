@@ -2,10 +2,10 @@
 
 use crate::BranchNodeMasks;
 use alloc::vec::Vec;
-use alloy_primitives::{hex, B256};
+use alloy_primitives::hex;
 use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
 use alloy_trie::{
-    nodes::{BranchNodeRef, ExtensionNodeRef, LeafNode, RlpNode, TrieNode},
+    nodes::{BranchNodeRef, ExtensionNode, ExtensionNodeRef, LeafNode, RlpNode, TrieNode},
     Nibbles, TrieMask,
 };
 use core::fmt;
@@ -35,6 +35,12 @@ pub enum TrieNodeV2 {
     Branch(BranchNodeV2),
     /// Variant representing a [`LeafNode`].
     Leaf(LeafNode),
+    /// Variant representing an [`ExtensionNode`].
+    ///
+    /// This will only be used for extension nodes for which child is not inlined. This variant
+    /// will never be produced by proof workers that will always reveal a full path to a requested
+    /// leaf.
+    Extension(ExtensionNode),
 }
 
 impl TrieNodeV2 {
@@ -50,31 +56,28 @@ impl TrieNodeV2 {
                 leaf.as_ref().encode(buf);
             }
             Self::Branch(branch) => branch.encode_rlp(buf),
+            Self::Extension(ext) => {
+                ext.encode(buf);
+            }
         }
     }
+}
 
-    /// Attempts to decode a trie node from the given buffer.
-    ///
-    /// This returns `None` in cases when provided buffer contains a valid RLP node that can't be
-    /// represented as [`TrieNodeV2`]. Specifically, this returns `None` for extension nodes which
-    /// attach to branches that are stored as hashes.
-    pub fn try_decode(buf: &mut &[u8]) -> Result<Option<Self>, alloy_rlp::Error> {
+impl Decodable for TrieNodeV2 {
+    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
         match TrieNode::decode(buf)? {
-            TrieNode::EmptyRoot => Ok(Some(Self::EmptyRoot)),
-            TrieNode::Leaf(leaf) => Ok(Some(Self::Leaf(leaf))),
-            TrieNode::Branch(branch) => Ok(Some(Self::Branch(BranchNodeV2::new(
+            TrieNode::EmptyRoot => Ok(Self::EmptyRoot),
+            TrieNode::Leaf(leaf) => Ok(Self::Leaf(leaf)),
+            TrieNode::Branch(branch) => Ok(Self::Branch(BranchNodeV2::new(
                 Default::default(),
                 branch.stack,
                 branch.state_mask,
-            )))),
+            ))),
             TrieNode::Extension(ext) => {
-                if ext.child.as_ref().len() == B256::len_bytes() + 1 {
-                    // Extension node with a hash child.
-                    Ok(None)
+                if ext.child.is_hash() {
+                    Ok(Self::Extension(ext))
                 } else {
-                    let Self::Branch(mut branch) = Self::try_decode(&mut ext.child.as_ref())?
-                        .ok_or(alloy_rlp::Error::Custom("extension node child is not a branch"))?
-                    else {
+                    let Self::Branch(mut branch) = Self::decode(&mut ext.child.as_ref())? else {
                         return Err(alloy_rlp::Error::Custom(
                             "extension node child is not a branch",
                         ));
@@ -82,7 +85,7 @@ impl TrieNodeV2 {
 
                     branch.key = ext.key;
 
-                    Ok(Some(Self::Branch(branch)))
+                    Ok(Self::Branch(branch))
                 }
             }
         }

@@ -3,7 +3,7 @@ use crate::{
     traits::{SparseTrie as SparseTrieTrait, SparseTrieExt},
     ParallelSparseTrie, RevealableSparseTrie,
 };
-use alloc::{vec::Vec};
+use alloc::vec::Vec;
 use alloy_primitives::{
     map::{B256Map, B256Set, HashSet},
     Bytes, B256,
@@ -16,8 +16,8 @@ use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
     BranchNodeMasks, BranchNodeMasksMap, DecodedMultiProof, DecodedStorageMultiProof, MultiProof,
-    Nibbles, ProofTrieNode, ProofTrieNodeV2, StorageMultiProof, TrieAccount, TrieNode,
-    TrieNodeV2, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    Nibbles, ProofTrieNode, ProofTrieNodeV2, StorageMultiProof, TrieAccount, TrieNode, TrieNodeV2,
+    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 #[cfg(feature = "std")]
 use tracing::debug;
@@ -766,11 +766,11 @@ where
                     .account_node_provider()
                     .trie_node(&Nibbles::default())?
                     .map(|node| {
-                        TrieNode::decode(&mut &node.node[..])
+                        TrieNodeV2::decode(&mut &node.node[..])
                             .map(|decoded| (decoded, node.hash_mask, node.tree_mask))
                     })
                     .transpose()?
-                    .unwrap_or((TrieNode::EmptyRoot, None, None));
+                    .unwrap_or((TrieNodeV2::EmptyRoot, None, None));
                 let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
                 self.state.reveal_root(root_node, masks, self.retain_updates).map_err(Into::into)
             }
@@ -1577,7 +1577,11 @@ fn filter_revealed_v2_proof_nodes(
             if matches!(node.node, TrieNodeV2::EmptyRoot) && non_empty_root_count > 0 {
                 return Err(SparseStateTrieErrorKind::InvalidRootNode {
                     path: node.path,
-                    node: alloy_rlp::encode(&node.node).into(),
+                    node: {
+                        let mut buf = Vec::new();
+                        node.node.encode_rlp(&mut buf);
+                        buf.into()
+                    },
                 }
                 .into())
             }

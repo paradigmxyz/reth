@@ -9,9 +9,7 @@ use alloy_primitives::{
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{
-    BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2,
-};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2};
 
 use crate::provider::TrieNodeProvider;
 
