@@ -43,7 +43,6 @@ use reth_trie_sparse::{
     ParallelSparseTrie, ParallelismThresholds, RevealableSparseTrie, SparseStateTrie,
 };
 use std::{
-    
     ops::Not,
     sync::{
         atomic::AtomicBool,
@@ -364,7 +363,7 @@ where
     }
 
     /// Below this threshold, transactions are converted via rayon's order-preserving `collect()`
-    /// in a single task, eliminating the out-of-order channel and BTreeMap reorder task.
+    /// in a single task, eliminating the out-of-order channel and `BTreeMap` reorder task.
     const PARALLEL_REORDER_TX_THRESHOLD: usize = 30;
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
@@ -421,8 +420,7 @@ where
 
             self.executor.spawn_blocking(move || {
                 let mut next = 0usize;
-                let mut buf: Vec<Option<Result<_, _>>> =
-                    (0..tx_count).map(|_| None).collect();
+                let mut buf: Vec<Option<Result<_, _>>> = (0..tx_count).map(|_| None).collect();
                 while let Ok((idx, tx)) = ooo_rx.recv() {
                     if idx == next {
                         let _ = execute_tx.send(tx);
