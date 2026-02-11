@@ -131,26 +131,50 @@ where
         }
 
         let mut num_entries = 0;
-        for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
-        {
+
+        let mut updates_iter =
+            updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty()).peekable();
+
+        let first_nibbles = match updates_iter.peek() {
+            Some(&(n, _)) => StoredNibblesSubKey(n.clone()),
+            None => return Ok(0),
+        };
+
+        let mut cursor_entry: Option<StorageTrieEntry> =
+            self.cursor.seek_by_key_subkey(self.hashed_address, first_nibbles)?;
+
+        for (nibbles, maybe_updated) in updates_iter {
             num_entries += 1;
             let nibbles = StoredNibblesSubKey(*nibbles);
-            // Delete the old entry if it exists.
-            if self
-                .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .filter(|e| e.nibbles == nibbles)
-                .is_some()
-            {
-                self.cursor.delete_current()?;
+
+            loop {
+                match &cursor_entry {
+                    Some(entry) if entry.nibbles < nibbles => {
+                        cursor_entry = self.cursor.next_dup_val()?;
+                    }
+                    _ => break,
+                }
             }
 
-            // There is an updated version of this node, insert new entry.
+            if cursor_entry.as_ref().is_some_and(|e| e.nibbles == nibbles) {
+                self.cursor.delete_current()?;
+                cursor_entry = self
+                    .cursor
+                    .current()?
+                    .filter(|(k, _)| *k == self.hashed_address)
+                    .map(|(_, v)| v);
+            }
+
             if let Some(node) = maybe_updated {
                 self.cursor.upsert(
                     self.hashed_address,
-                    &StorageTrieEntry { nibbles, node: node.clone() },
+                    &StorageTrieEntry { nibbles: nibbles.clone(), node: node.clone() },
                 )?;
+                cursor_entry =
+                    self.cursor.seek_by_key_subkey(self.hashed_address, nibbles.clone())?;
+                if cursor_entry.as_ref().is_some_and(|e| e.nibbles == nibbles) {
+                    cursor_entry = self.cursor.next_dup_val()?;
+                }
             }
         }
 
