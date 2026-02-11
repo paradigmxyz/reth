@@ -740,6 +740,127 @@ async fn test_connect_peer_in_different_network_should_fail() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_connect_all_trusted_peers() {
+    reth_tracing::init_test_tracing();
+
+    // Create 6 peers that will act as trusted peers
+    let mut trusted_peer_managers = Vec::new();
+    let mut trusted_peer_records = Vec::new();
+
+    for _ in 0..6 {
+        let peer = new_random_peer(10, vec![]).await;
+        let record = TrustedPeer {
+            host: Host::Ipv4(peer.local_addr().ip().to_string().parse().unwrap()),
+            tcp_port: peer.local_addr().port(),
+            udp_port: peer.local_addr().port(),
+            id: *peer.peer_id(),
+        };
+        trusted_peer_records.push(record);
+        trusted_peer_managers.push(peer);
+    }
+
+    // Create the main node with all 6 as trusted peers
+    let node = new_random_peer(10, trusted_peer_records.clone()).await;
+    let node_handle = node.handle().clone();
+    let mut node_events = NetworkEventStream::new(node_handle.event_listener());
+
+    // Spawn all peers
+    for peer in trusted_peer_managers {
+        tokio::task::spawn(peer);
+    }
+    tokio::task::spawn(node);
+
+    // Wait for all 6 trusted peers to connect
+    let mut connected = HashSet::<reth_network_peers::PeerId>::default();
+    let timeout = tokio::time::timeout(Duration::from_secs(30), async {
+        while connected.len() < 6 {
+            let peer_id = node_events.next_session_established().await.unwrap();
+            connected.insert(peer_id);
+        }
+    })
+    .await;
+
+    assert!(
+        timeout.is_ok(),
+        "timed out waiting for trusted peers, only connected to {}/6",
+        connected.len()
+    );
+    assert_eq!(node_handle.num_connected_peers(), 6);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connect_trusted_peers_with_junk_basic_nodes() {
+    reth_tracing::init_test_tracing();
+
+    // Create 6 peers that will act as trusted peers
+    let mut trusted_peer_managers = Vec::new();
+    let mut trusted_peer_records = Vec::new();
+
+    for _ in 0..6 {
+        let peer = new_random_peer(10, vec![]).await;
+        let record = TrustedPeer {
+            host: Host::Ipv4(peer.local_addr().ip().to_string().parse().unwrap()),
+            tcp_port: peer.local_addr().port(),
+            udp_port: peer.local_addr().port(),
+            id: *peer.peer_id(),
+        };
+        trusted_peer_records.push(record);
+        trusted_peer_managers.push(peer);
+    }
+
+    // Generate 50 fake "junk" basic nodes (unreachable addresses) to simulate
+    // stale peers loaded from known_peers.json
+    let mut junk_basic_nodes = std::collections::HashSet::new();
+    for i in 0..50u16 {
+        let key = SecretKey::new(&mut rand_08::thread_rng());
+        let peer_id = reth_network_peers::pk2id(&key.public_key(&secp256k1::Secp256k1::new()));
+        // Use unreachable addresses (high ports on localhost that nothing is listening on)
+        junk_basic_nodes
+            .insert(NodeRecord::new(format!("127.0.0.1:{}", 40000 + i).parse().unwrap(), peer_id));
+    }
+
+    // Create the main node with trusted peers AND junk basic nodes
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    let peers_config = PeersConfig::default()
+        .with_max_inbound(10)
+        .with_trusted_nodes(trusted_peer_records)
+        .with_basic_nodes(junk_basic_nodes);
+
+    let config = NetworkConfigBuilder::new(secret_key)
+        .listener_port(0)
+        .disable_discovery()
+        .peer_config(peers_config)
+        .build_with_noop_provider(MAINNET.clone());
+
+    let node = NetworkManager::new(config).await.unwrap();
+    let node_handle = node.handle().clone();
+    let mut node_events = NetworkEventStream::new(node_handle.event_listener());
+
+    // Spawn all peers
+    for peer in trusted_peer_managers {
+        tokio::task::spawn(peer);
+    }
+    tokio::task::spawn(node);
+
+    // All 6 trusted peers should connect even with 50 junk basic nodes present
+    let mut connected = HashSet::<reth_network_peers::PeerId>::default();
+    let timeout = tokio::time::timeout(Duration::from_secs(30), async {
+        while connected.len() < 6 {
+            let peer_id = node_events.next_session_established().await.unwrap();
+            connected.insert(peer_id);
+        }
+    })
+    .await;
+
+    assert!(
+        timeout.is_ok(),
+        "timed out waiting for trusted peers with junk basic nodes present, only connected to {}/6",
+        connected.len()
+    );
+    assert_eq!(node_handle.num_connected_peers(), 6);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_reconnect_trusted() {
     reth_tracing::init_test_tracing();
 
