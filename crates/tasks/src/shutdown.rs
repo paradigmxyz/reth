@@ -7,10 +7,7 @@ use futures_util::{
 use std::{
     future::Future,
     pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+    sync::{atomic::AtomicUsize, Arc},
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -61,14 +58,14 @@ pub struct GracefulShutdownGuard(Arc<AtomicUsize>);
 
 impl GracefulShutdownGuard {
     pub(crate) fn new(counter: Arc<AtomicUsize>) -> Self {
-        counter.fetch_add(1, Ordering::SeqCst);
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Self(counter)
     }
 }
 
 impl Drop for GracefulShutdownGuard {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
