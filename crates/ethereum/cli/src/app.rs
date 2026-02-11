@@ -157,24 +157,18 @@ where
                 command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
             })
         }
-        Commands::Init(command) => runner.run_blocking_until_ctrl_c(|_| command.execute::<N>()),
-        Commands::InitState(command) => {
-            runner.run_blocking_until_ctrl_c(|_| command.execute::<N>())
-        }
+        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
         Commands::Import(command) => {
-            runner.run_blocking_until_ctrl_c(|_| command.execute::<N, _>(components))
+            runner.run_blocking_until_ctrl_c(command.execute::<N, _>(components))
         }
-        Commands::ImportEra(command) => {
-            runner.run_blocking_until_ctrl_c(|_| command.execute::<N>())
-        }
-        Commands::ExportEra(command) => {
-            runner.run_blocking_until_ctrl_c(|_| command.execute::<N>())
-        }
-        Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(|_| command.execute()),
+        Commands::ImportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::ExportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::Db(command) => {
             runner.run_blocking_command_until_exit(|ctx| command.execute::<N>(ctx))
         }
-        Commands::Download(command) => runner.run_blocking_until_ctrl_c(|_| command.execute::<N>()),
+        Commands::Download(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
         Commands::Stage(command) => {
             runner.run_command_until_exit(|ctx| command.execute::<N, _>(ctx, components))
         }
