@@ -8,6 +8,7 @@ use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
+use reth_primitives_traits::constants::gas_units::MEGAGAS;
 use reth_trie::updates::TrieUpdates;
 use std::time::{Duration, Instant};
 
@@ -234,8 +235,6 @@ impl ForkchoiceUpdatedMetrics {
         }
     }
 }
-
-use reth_primitives_traits::constants::gas_units::MEGAGAS;
 
 /// Width of each gas bucket in gas units (10 Mgas).
 const GAS_BUCKET_SIZE: u64 = 10 * MEGAGAS;
