@@ -2477,6 +2477,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             tracing::trace!("Writing storage changes");
             let mut storages_cursor =
                 self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
+            let mut hashed_storages_cursor =
+                self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
             for (block_index, mut storage_changes) in reverts.storage.into_iter().enumerate() {
                 let block_number = first_block + block_index as BlockNumber;
 
@@ -2496,24 +2498,33 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     // sort storage slots by key.
                     storage.par_sort_unstable_by_key(|a| a.0);
 
-                    // If we are writing the primary storage wipe transition, the pre-existing plain
+                    // If we are writing the primary storage wipe transition, the pre-existing
                     // storage state has to be taken from the database and written to storage
                     // history. See [StorageWipe::Primary] for more details.
                     //
-                    // NOTE: When `use_hashed_state` is enabled, we skip this read entirely.
-                    // We cannot read from `HashedStorages` as a substitute because the entries
-                    // there have `keccak256(slot)` keys, and since keccak256 is irreversible,
-                    // we can't recover the plain slot keys needed for the changeset format.
-                    // This is safe in practice because SELFDESTRUCT is deprecated (EIP-6780)
-                    // and the explicit `storage_revert` entries already cover all accessed slots.
+                    // When `use_hashed_state` is enabled, we read from `HashedStorages`
+                    // instead of `PlainStorageState`. The hashed entries already have
+                    // `keccak256(slot)` keys which is exactly the format needed for hashed
+                    // changesets (static file changesets always use hashed keys when
+                    // `use_hashed_state` is true).
                     //
-                    // TODO(mediocregopher): This could be rewritten in a way which doesn't require
-                    // collecting wiped entries into a Vec like this, see
+                    // TODO(mediocregopher): This could be rewritten in a way which doesn't
+                    // require collecting wiped entries into a Vec like this, see
                     // `write_storage_trie_changesets`.
                     let mut wiped_storage = Vec::new();
-                    if wiped && !use_hashed_state {
+                    if wiped {
                         tracing::trace!(?address, "Wiping storage");
-                        if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
+                        if use_hashed_state {
+                            let hashed_address = keccak256(address);
+                            if let Some((_, entry)) =
+                                hashed_storages_cursor.seek_exact(hashed_address)?
+                            {
+                                wiped_storage.push((entry.key, entry.value));
+                                while let Some(entry) = hashed_storages_cursor.next_dup_val()? {
+                                    wiped_storage.push((entry.key, entry.value))
+                                }
+                            }
+                        } else if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                             wiped_storage.push((entry.key, entry.value));
                             while let Some(entry) = storages_cursor.next_dup_val()? {
                                 wiped_storage.push((entry.key, entry.value))
