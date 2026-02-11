@@ -94,6 +94,16 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 /// 144MB.
 pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
+/// Transaction count threshold below which prewarming is skipped for small blocks.
+///
+/// Based on analysis of mainnet blocks, reth's `new_payload` winrate drops significantly on
+/// small blocks. The root cause is the fixed overhead of spawning prewarm workers (building state
+/// providers, creating EVM instances, wrapping precompiles) which exceeds execution time on small
+/// blocks.
+///
+/// 5 transactions is used as the threshold because blocks with fewer transactions don't benefit
+/// from prewarming parallelism.
+pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
@@ -423,7 +433,8 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let skip_prewarm = self.disable_transaction_prewarming;
+        let skip_prewarm = self.disable_transaction_prewarming ||
+            (env.transaction_count > 0 && env.transaction_count < SMALL_BLOCK_TX_THRESHOLD);
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
