@@ -42,12 +42,16 @@ impl<C: ChainSpecParser> Command<C> {
 
         let tool = DbTool::new(provider_factory)?;
 
-        let static_file_segment = match self.stage {
-            StageEnum::Headers => Some(StaticFileSegment::Headers),
-            StageEnum::Bodies => Some(StaticFileSegment::Transactions),
-            StageEnum::Execution => Some(StaticFileSegment::Receipts),
-            StageEnum::Senders => Some(StaticFileSegment::TransactionSenders),
-            _ => None,
+        let static_file_segments = match self.stage {
+            StageEnum::Headers => vec![StaticFileSegment::Headers],
+            StageEnum::Bodies => vec![StaticFileSegment::Transactions],
+            StageEnum::Execution => vec![
+                StaticFileSegment::Receipts,
+                StaticFileSegment::AccountChangeSets,
+                StaticFileSegment::StorageChangeSets,
+            ],
+            StageEnum::Senders => vec![StaticFileSegment::TransactionSenders],
+            _ => vec![],
         };
 
         // Calling `StaticFileProviderRW::prune_*` will instruct the writer to prune rows only
@@ -55,35 +59,33 @@ impl<C: ChainSpecParser> Command<C> {
         // deleting the jar files, otherwise if the task were to be interrupted after we
         // have deleted them, BUT before we have committed the checkpoints to the database, we'd
         // lose essential data.
-        if let Some(static_file_segment) = static_file_segment {
-            let static_file_provider = tool.provider_factory.static_file_provider();
-            if let Some(highest_block) =
-                static_file_provider.get_highest_static_file_block(static_file_segment)
+        let static_file_provider = tool.provider_factory.static_file_provider();
+        for segment in static_file_segments {
+            if let Some(highest_block) = static_file_provider.get_highest_static_file_block(segment)
             {
-                let mut writer = static_file_provider.latest_writer(static_file_segment)?;
+                let mut writer = static_file_provider.latest_writer(segment)?;
 
-                match static_file_segment {
+                match segment {
                     StaticFileSegment::Headers => {
-                        // Prune all headers leaving genesis intact.
                         writer.prune_headers(highest_block)?;
                     }
                     StaticFileSegment::Transactions => {
                         let to_delete = static_file_provider
-                            .get_highest_static_file_tx(static_file_segment)
+                            .get_highest_static_file_tx(segment)
                             .map(|tx_num| tx_num + 1)
                             .unwrap_or_default();
                         writer.prune_transactions(to_delete, 0)?;
                     }
                     StaticFileSegment::Receipts => {
                         let to_delete = static_file_provider
-                            .get_highest_static_file_tx(static_file_segment)
+                            .get_highest_static_file_tx(segment)
                             .map(|tx_num| tx_num + 1)
                             .unwrap_or_default();
                         writer.prune_receipts(to_delete, 0)?;
                     }
                     StaticFileSegment::TransactionSenders => {
                         let to_delete = static_file_provider
-                            .get_highest_static_file_tx(static_file_segment)
+                            .get_highest_static_file_tx(segment)
                             .map(|tx_num| tx_num + 1)
                             .unwrap_or_default();
                         writer.prune_transaction_senders(to_delete, 0)?;
