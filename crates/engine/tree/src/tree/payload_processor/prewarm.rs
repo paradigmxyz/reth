@@ -56,7 +56,8 @@ pub enum PrewarmMode<Tx> {
     Transactions(Receiver<Tx>),
     /// Prewarm by prefetching slots from a Block Access List.
     BlockAccessList(Arc<BlockAccessList>),
-    /// Transaction prewarming is disabled via config. No workers are spawned.
+    /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
+    /// benefit). No workers are spawned.
     Skipped,
 }
 
@@ -421,6 +422,7 @@ where
             PrewarmMode::Skipped => {
                 let _ = actions_tx
                     .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
+                drop(actions_tx);
             }
         }
 
