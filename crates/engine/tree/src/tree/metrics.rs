@@ -235,6 +235,51 @@ impl ForkchoiceUpdatedMetrics {
     }
 }
 
+/// Gas-bucket-labeled newPayload metrics.
+///
+/// Records latency and gas/s histograms with a `gas_bucket` label so operators can break down
+/// new-payload performance by payload size.
+#[derive(Debug)]
+pub(crate) struct GasBucketMetrics {
+    latency: [Histogram; 5],
+    gas_per_second: [Histogram; 5],
+}
+
+impl Default for GasBucketMetrics {
+    fn default() -> Self {
+        const BUCKETS: [&str; 5] = ["<10M", "10-20M", "20-30M", "30-40M", ">40M"];
+        let latency = BUCKETS.map(|b| {
+            metrics::histogram!("consensus.engine.beacon.new_payload_latency_by_gas_bucket", "gas_bucket" => b)
+        });
+        let gas_per_second = BUCKETS.map(|b| {
+            metrics::histogram!("consensus.engine.beacon.new_payload_gas_per_second_by_gas_bucket", "gas_bucket" => b)
+        });
+        Self { latency, gas_per_second }
+    }
+}
+
+impl GasBucketMetrics {
+    fn bucket_index(gas_used: u64) -> usize {
+        const M10: u64 = 10_000_000;
+        const M20: u64 = 20_000_000;
+        const M30: u64 = 30_000_000;
+        const M40: u64 = 40_000_000;
+        match gas_used {
+            0..M10 => 0,
+            M10..M20 => 1,
+            M20..M30 => 2,
+            M30..M40 => 3,
+            _ => 4,
+        }
+    }
+
+    fn record(&self, gas_used: u64, elapsed: Duration) {
+        let idx = Self::bucket_index(gas_used);
+        self.latency[idx].record(elapsed);
+        self.gas_per_second[idx].record(gas_used as f64 / elapsed.as_secs_f64());
+    }
+}
+
 /// Metrics for engine newPayload responses.
 #[derive(Metrics)]
 #[metrics(scope = "consensus.engine.beacon")]
@@ -245,6 +290,9 @@ pub(crate) struct NewPayloadStatusMetrics {
     /// Start time of the latest new payload call.
     #[metric(skip)]
     pub(crate) latest_start_at: Option<Instant>,
+    /// Gas-bucket-labeled latency and gas/s histograms.
+    #[metric(skip)]
+    pub(crate) gas_bucket: GasBucketMetrics,
     /// The total count of new payload messages received.
     pub(crate) new_payload_messages: Counter,
     /// The total count of new payload messages that we responded to with
@@ -321,6 +369,7 @@ impl NewPayloadStatusMetrics {
         self.new_payload_messages.increment(1);
         self.new_payload_latency.record(elapsed);
         self.new_payload_last.set(elapsed);
+        self.gas_bucket.record(gas_used, elapsed);
         if let Some(latest_forkchoice_updated_at) = latest_forkchoice_updated_at.take() {
             self.forkchoice_updated_new_payload_time_diff
                 .record(start - latest_forkchoice_updated_at);
