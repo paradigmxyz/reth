@@ -742,7 +742,7 @@ where
 
         let execution_start = Instant::now();
 
-        const INLINE_RECEIPT_ROOT_TX_THRESHOLD: usize = 128;
+        const INLINE_RECEIPT_ROOT_TX_THRESHOLD: usize = 30;
 
         if transaction_count < INLINE_RECEIPT_ROOT_TX_THRESHOLD {
             let (executor, senders) = self.execute_transactions_no_stream(
