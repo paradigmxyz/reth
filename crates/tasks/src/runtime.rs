@@ -10,7 +10,7 @@
 use crate::pool::{BlockingTaskGuard, BlockingTaskPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
-    shutdown::{GracefulShutdown, GracefulShutdownCounter, GracefulShutdownGuard, Shutdown},
+    shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
     PanickedTaskError, TaskEvent, TaskManager,
 };
 use futures_util::{
@@ -21,7 +21,10 @@ use futures_util::{
 use std::thread::available_parallelism;
 use std::{
     pin::pin,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
@@ -222,8 +225,8 @@ struct RuntimeInner {
     task_events_tx: UnboundedSender<TaskEvent>,
     /// Task executor metrics.
     metrics: TaskExecutorMetrics,
-    /// Tracks active [`GracefulShutdown`] tasks and provides condvar-based waiting.
-    graceful_tasks: Arc<GracefulShutdownCounter>,
+    /// How many [`GracefulShutdown`] tasks are currently active.
+    graceful_tasks: Arc<AtomicUsize>,
     /// General-purpose rayon CPU pool.
     #[cfg(feature = "rayon")]
     cpu_pool: rayon::ThreadPool,
@@ -693,18 +696,16 @@ impl Runtime {
 
     fn do_graceful_shutdown(&self, timeout: Option<Duration>) -> bool {
         let _ = self.0.task_events_tx.send(TaskEvent::GracefulShutdown);
-        let completed = if let Some(timeout) = timeout {
-            self.0.graceful_tasks.wait_timeout(timeout)
-        } else {
-            self.0.graceful_tasks.wait();
-            true
-        };
-        if completed {
-            debug!("gracefully shut down");
-        } else {
-            debug!("graceful shutdown timed out");
+        let deadline = timeout.map(|t| std::time::Instant::now() + t);
+        while self.0.graceful_tasks.load(Ordering::SeqCst) > 0 {
+            if deadline.is_some_and(|d| std::time::Instant::now() > d) {
+                debug!("graceful shutdown timed out");
+                return false;
+            }
+            std::thread::yield_now();
         }
-        completed
+        debug!("gracefully shut down");
+        true
     }
 }
 

@@ -9,7 +9,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Condvar, Mutex,
+        Arc,
     },
     task::{ready, Context, Poll},
 };
@@ -57,71 +57,18 @@ impl Clone for GracefulShutdown {
 /// [`GracefulShutdown`] has completed.
 #[derive(Debug)]
 #[must_use = "if unused the task will not be gracefully shutdown"]
-pub struct GracefulShutdownGuard(Arc<GracefulShutdownCounter>);
+pub struct GracefulShutdownGuard(Arc<AtomicUsize>);
 
 impl GracefulShutdownGuard {
-    pub(crate) fn new(counter: Arc<GracefulShutdownCounter>) -> Self {
-        counter.count.fetch_add(1, Ordering::SeqCst);
+    pub(crate) fn new(counter: Arc<AtomicUsize>) -> Self {
+        counter.fetch_add(1, Ordering::SeqCst);
         Self(counter)
     }
 }
 
 impl Drop for GracefulShutdownGuard {
     fn drop(&mut self) {
-        if self.0.count.fetch_sub(1, Ordering::SeqCst) == 1 {
-            let _lock = self.0.mutex.lock().unwrap();
-            self.0.cvar.notify_all();
-        }
-    }
-}
-
-/// Tracks the number of active graceful shutdown tasks and provides
-/// a condvar for efficient waiting until all tasks complete.
-#[derive(Debug)]
-pub struct GracefulShutdownCounter {
-    count: AtomicUsize,
-    mutex: Mutex<()>,
-    cvar: Condvar,
-}
-
-impl GracefulShutdownCounter {
-    /// Creates a new counter with zero active tasks.
-    pub fn new() -> Self {
-        Self { count: AtomicUsize::new(0), mutex: Mutex::new(()), cvar: Condvar::new() }
-    }
-
-    /// Returns the current number of active graceful shutdown tasks.
-    pub fn count(&self) -> usize {
-        self.count.load(Ordering::Relaxed)
-    }
-
-    /// Blocks the current thread until all graceful shutdown tasks have completed.
-    pub fn wait(&self) {
-        let mut lock = self.mutex.lock().unwrap();
-        while self.count.load(Ordering::SeqCst) > 0 {
-            lock = self.cvar.wait(lock).unwrap();
-        }
-    }
-
-    /// Blocks the current thread until all graceful shutdown tasks have completed or the
-    /// timeout elapses.
-    ///
-    /// Returns `true` if all tasks completed before the timeout.
-    pub fn wait_timeout(&self, timeout: std::time::Duration) -> bool {
-        let deadline = std::time::Instant::now() + timeout;
-        let mut lock = self.mutex.lock().unwrap();
-        while self.count.load(Ordering::SeqCst) > 0 {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                return false;
-            }
-            let (new_lock, result) = self.cvar.wait_timeout(lock, remaining).unwrap();
-            lock = new_lock;
-            if result.timed_out() && self.count.load(Ordering::SeqCst) > 0 {
-                return false;
-            }
-        }
-        true
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
