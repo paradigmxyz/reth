@@ -627,6 +627,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            let mut account_history_indices: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+            let mut storage_history_indices: BTreeMap<(Address, B256), Vec<u64>> =
+                BTreeMap::new();
+
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -636,6 +640,20 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                 if save_mode.with_state() {
                     let execution_output = block.execution_outcome();
+
+                    let block_number = recovered_block.number();
+                    for (address, bundle_account) in execution_output.state.state() {
+                        account_history_indices
+                            .entry(*address)
+                            .or_default()
+                            .push(block_number);
+                        for storage_key in bundle_account.storage.keys() {
+                            storage_history_indices
+                                .entry((*address, B256::new(storage_key.to_be_bytes())))
+                                .or_default()
+                                .push(block_number);
+                        }
+                    }
 
                     // Write state and changesets to the database.
                     // Must be written after blocks because of the receipt lookup.
@@ -679,10 +697,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 timings.write_trie_updates += start.elapsed();
             }
 
-            // Full mode: update history indices
+            // Full mode: update history indices using pre-collected in-memory maps
             if save_mode.with_state() {
                 let start = Instant::now();
-                self.update_history_indices(first_number..=last_block_number)?;
+                let storage_settings = self.cached_storage_settings();
+                if !storage_settings.account_history_in_rocksdb {
+                    self.insert_account_history_index(account_history_indices)?;
+                }
+                if !storage_settings.storages_history_in_rocksdb {
+                    self.insert_storage_history_index(storage_history_indices)?;
+                }
                 timings.update_history_indices = start.elapsed();
             }
 
