@@ -8659,6 +8659,7 @@ dependencies = [
  "reth-node-ethereum",
  "reth-node-metrics",
  "reth-rpc-server-types",
+ "reth-tasks",
  "reth-tracing",
  "tempfile",
  "tracing",

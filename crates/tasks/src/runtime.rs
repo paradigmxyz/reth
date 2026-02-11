@@ -99,14 +99,17 @@ pub struct RayonConfig {
     /// Number of threads for the RPC blocking pool (trace calls, `eth_getProof`, etc.).
     /// If `None`, uses the same as `cpu_threads`.
     pub rpc_threads: Option<usize>,
-    /// Number of threads for the trie proof computation pool.
-    /// If `None`, uses the same as `cpu_threads`.
-    pub trie_threads: Option<usize>,
     /// Number of threads for the storage I/O pool (static file, `RocksDB` writes in
     /// `save_blocks`). If `None`, uses [`DEFAULT_STORAGE_POOL_THREADS`].
     pub storage_threads: Option<usize>,
     /// Maximum number of concurrent blocking tasks for the RPC guard semaphore.
     pub max_blocking_tasks: usize,
+    /// Number of threads for the proof storage worker pool (trie storage proof workers).
+    /// If `None`, derived from available parallelism.
+    pub proof_storage_worker_threads: Option<usize>,
+    /// Number of threads for the proof account worker pool (trie account proof workers).
+    /// If `None`, derived from available parallelism.
+    pub proof_account_worker_threads: Option<usize>,
 }
 
 #[cfg(feature = "rayon")]
@@ -116,9 +119,10 @@ impl Default for RayonConfig {
             cpu_threads: None,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             rpc_threads: None,
-            trie_threads: None,
             storage_threads: None,
             max_blocking_tasks: DEFAULT_MAX_BLOCKING_TASKS,
+            proof_storage_worker_threads: None,
+            proof_account_worker_threads: None,
         }
     }
 }
@@ -143,15 +147,27 @@ impl RayonConfig {
         self
     }
 
-    /// Set the number of threads for the trie proof pool.
-    pub const fn with_trie_threads(mut self, trie_threads: usize) -> Self {
-        self.trie_threads = Some(trie_threads);
-        self
-    }
-
     /// Set the number of threads for the storage I/O pool.
     pub const fn with_storage_threads(mut self, storage_threads: usize) -> Self {
         self.storage_threads = Some(storage_threads);
+        self
+    }
+
+    /// Set the number of threads for the proof storage worker pool.
+    pub const fn with_proof_storage_worker_threads(
+        mut self,
+        proof_storage_worker_threads: usize,
+    ) -> Self {
+        self.proof_storage_worker_threads = Some(proof_storage_worker_threads);
+        self
+    }
+
+    /// Set the number of threads for the proof account worker pool.
+    pub const fn with_proof_account_worker_threads(
+        mut self,
+        proof_account_worker_threads: usize,
+    ) -> Self {
+        self.proof_account_worker_threads = Some(proof_account_worker_threads);
         self
     }
 
@@ -232,15 +248,18 @@ struct RuntimeInner {
     /// RPC blocking pool.
     #[cfg(feature = "rayon")]
     rpc_pool: BlockingTaskPool,
-    /// Trie proof computation pool.
-    #[cfg(feature = "rayon")]
-    trie_pool: rayon::ThreadPool,
     /// Storage I/O pool.
     #[cfg(feature = "rayon")]
     storage_pool: rayon::ThreadPool,
     /// Rate limiter for expensive RPC operations.
     #[cfg(feature = "rayon")]
     blocking_guard: BlockingTaskGuard,
+    /// Proof storage worker pool (trie storage proof computation).
+    #[cfg(feature = "rayon")]
+    proof_storage_worker_pool: rayon::ThreadPool,
+    /// Proof account worker pool (trie account proof computation).
+    #[cfg(feature = "rayon")]
+    proof_account_worker_pool: rayon::ThreadPool,
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
@@ -313,12 +332,6 @@ impl Runtime {
         &self.0.rpc_pool
     }
 
-    /// Get the trie proof computation pool.
-    #[cfg(feature = "rayon")]
-    pub fn trie_pool(&self) -> &rayon::ThreadPool {
-        &self.0.trie_pool
-    }
-
     /// Get the storage I/O pool.
     #[cfg(feature = "rayon")]
     pub fn storage_pool(&self) -> &rayon::ThreadPool {
@@ -331,34 +344,16 @@ impl Runtime {
         self.0.blocking_guard.clone()
     }
 
-    /// Run a closure on the CPU pool, blocking the current thread until completion.
+    /// Get the proof storage worker pool.
     #[cfg(feature = "rayon")]
-    pub fn install_cpu<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce() -> R + Send,
-        R: Send,
-    {
-        self.cpu_pool().install(f)
+    pub fn proof_storage_worker_pool(&self) -> &rayon::ThreadPool {
+        &self.0.proof_storage_worker_pool
     }
 
-    /// Spawn a CPU-bound task on the RPC pool and return an async handle.
+    /// Get the proof account worker pool.
     #[cfg(feature = "rayon")]
-    pub fn spawn_rpc<F, R>(&self, f: F) -> crate::pool::BlockingTaskHandle<R>
-    where
-        F: FnOnce() -> R + Send + 'static,
-        R: Send + 'static,
-    {
-        self.rpc_pool().spawn(f)
-    }
-
-    /// Run a closure on the trie pool, blocking the current thread until completion.
-    #[cfg(feature = "rayon")]
-    pub fn install_trie<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce() -> R + Send,
-        R: Send,
-    {
-        self.trie_pool().install(f)
+    pub fn proof_account_worker_pool(&self) -> &rayon::ThreadPool {
+        &self.0.proof_account_worker_pool
     }
 }
 
@@ -395,9 +390,10 @@ impl Runtime {
                 cpu_threads: Some(2),
                 reserved_cpu_cores: 0,
                 rpc_threads: Some(2),
-                trie_threads: Some(2),
                 storage_threads: Some(2),
                 max_blocking_tasks: 16,
+                proof_storage_worker_threads: Some(2),
+                proof_account_worker_threads: Some(2),
             },
         }
     }
@@ -821,46 +817,69 @@ impl RuntimeBuilder {
             TaskManager::new_parts(handle.clone());
 
         #[cfg(feature = "rayon")]
-        let (cpu_pool, rpc_pool, trie_pool, storage_pool, blocking_guard) = {
+        let (
+            cpu_pool,
+            rpc_pool,
+            storage_pool,
+            blocking_guard,
+            proof_storage_worker_pool,
+            proof_account_worker_pool,
+        ) = {
             let default_threads = config.rayon.default_thread_count();
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
-            let trie_threads = config.rayon.trie_threads.unwrap_or(default_threads);
 
             let cpu_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(default_threads)
-                .thread_name(|i| format!("reth-cpu-{i}"))
+                .thread_name(|i| format!("cpu-{i}"))
                 .build()?;
 
             let rpc_raw = rayon::ThreadPoolBuilder::new()
                 .num_threads(rpc_threads)
-                .thread_name(|i| format!("reth-rpc-{i}"))
+                .thread_name(|i| format!("rpc-{i}"))
                 .build()?;
             let rpc_pool = BlockingTaskPool::new(rpc_raw);
-
-            let trie_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(trie_threads)
-                .thread_name(|i| format!("reth-trie-{i}"))
-                .build()?;
 
             let storage_threads =
                 config.rayon.storage_threads.unwrap_or(DEFAULT_STORAGE_POOL_THREADS);
             let storage_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(storage_threads)
-                .thread_name(|i| format!("reth-storage-{i}"))
+                .thread_name(|i| format!("storage-{i}"))
                 .build()?;
 
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
+            let proof_storage_worker_threads =
+                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads);
+            let proof_storage_worker_pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(proof_storage_worker_threads)
+                .thread_name(|i| format!("proof-strg-{i}"))
+                .build()?;
+
+            let proof_account_worker_threads =
+                config.rayon.proof_account_worker_threads.unwrap_or(default_threads);
+            let proof_account_worker_pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(proof_account_worker_threads)
+                .thread_name(|i| format!("proof-acct-{i}"))
+                .build()?;
+
             debug!(
                 default_threads,
                 rpc_threads,
-                trie_threads,
                 storage_threads,
+                proof_storage_worker_threads,
+                proof_account_worker_threads,
                 max_blocking_tasks = config.rayon.max_blocking_tasks,
                 "Initialized rayon thread pools"
             );
 
-            (cpu_pool, rpc_pool, trie_pool, storage_pool, blocking_guard)
+            (
+                cpu_pool,
+                rpc_pool,
+                storage_pool,
+                blocking_guard,
+                proof_storage_worker_pool,
+                proof_account_worker_pool,
+            )
         };
 
         let task_manager_handle = handle.spawn(async move {
@@ -883,11 +902,13 @@ impl RuntimeBuilder {
             #[cfg(feature = "rayon")]
             rpc_pool,
             #[cfg(feature = "rayon")]
-            trie_pool,
-            #[cfg(feature = "rayon")]
             storage_pool,
             #[cfg(feature = "rayon")]
             blocking_guard,
+            #[cfg(feature = "rayon")]
+            proof_storage_worker_pool,
+            #[cfg(feature = "rayon")]
+            proof_account_worker_pool,
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
         };
 
