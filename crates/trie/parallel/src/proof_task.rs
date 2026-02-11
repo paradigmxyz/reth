@@ -135,13 +135,11 @@ impl ProofWorkerHandle {
     /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `storage_worker_count`: Number of storage workers to spawn
-    /// - `account_worker_count`: Number of account workers to spawn
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
     pub fn new<Factory>(
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         storage_worker_count: usize,
-        account_worker_count: usize,
         v2_proofs_enabled: bool,
     ) -> Self
     where
@@ -157,6 +155,8 @@ impl ProofWorkerHandle {
         let account_available_workers = Arc::<AtomicUsize>::default();
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
+
+        let account_worker_count = runtime.proof_account_worker_pool().current_num_threads();
 
         debug!(
             target: "trie::proof_task",
@@ -2021,7 +2021,7 @@ mod tests {
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();
-        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, 5, 3, false);
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, 5, false);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();
