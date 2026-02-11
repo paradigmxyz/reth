@@ -231,14 +231,22 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Removes canonical blocks below the upper bound, only if the last persisted hash is
     /// part of the canonical chain.
-    pub fn remove_canonical_until(&mut self, upper_bound: BlockNumber, last_persisted_hash: B256) {
+    ///
+    /// Returns the removed blocks so the caller can defer their drop off the engine thread.
+    pub fn remove_canonical_until(
+        &mut self,
+        upper_bound: BlockNumber,
+        last_persisted_hash: B256,
+    ) -> Vec<ExecutedBlock<N>> {
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removing canonical blocks from the tree");
 
         // If the last persisted hash is not canonical, then we don't want to remove any canonical
         // blocks yet.
         if !self.is_canonical(last_persisted_hash) {
-            return
+            return Vec::new()
         }
+
+        let mut removed_blocks = Vec::new();
 
         // First, let's walk back the canonical chain and remove canonical blocks lower than the
         // upper bound
@@ -248,16 +256,27 @@ impl<N: NodePrimitives> TreeState<N> {
             if executed.recovered_block().number() <= upper_bound {
                 let num_hash = executed.recovered_block().num_hash();
                 debug!(target: "engine::tree", ?num_hash, "Attempting to remove block walking back from the head");
-                self.remove_by_hash(executed.recovered_block().hash());
+                if let Some((block, _)) = self.remove_by_hash(executed.recovered_block().hash()) {
+                    removed_blocks.push(block);
+                }
             }
         }
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removed canonical blocks from the tree");
+
+        removed_blocks
     }
 
     /// Removes all blocks that are below the finalized block, as well as removing non-canonical
     /// sidechains that fork from below the finalized block.
-    pub fn prune_finalized_sidechains(&mut self, finalized_num_hash: BlockNumHash) {
+    ///
+    /// Returns the removed blocks so the caller can defer their drop off the engine thread.
+    pub fn prune_finalized_sidechains(
+        &mut self,
+        finalized_num_hash: BlockNumHash,
+    ) -> Vec<ExecutedBlock<N>> {
         let BlockNumHash { number: finalized_num, hash: finalized_hash } = finalized_num_hash;
+
+        let mut removed_blocks = Vec::new();
 
         // We remove disconnected sidechains in three steps:
         // * first, remove everything with a block number __below__ the finalized block.
@@ -267,14 +286,15 @@ impl<N: NodePrimitives> TreeState<N> {
 
         // We _exclude_ the finalized block because we will be dealing with the blocks __at__
         // the finalized block later.
-        let blocks_to_remove = self
+        let hashes_to_remove = self
             .blocks_by_number
             .range((Bound::Unbounded, Bound::Excluded(finalized_num)))
             .flat_map(|(_, blocks)| blocks.iter().map(|b| b.recovered_block().hash()))
             .collect::<Vec<_>>();
-        for hash in blocks_to_remove {
+        for hash in hashes_to_remove {
             if let Some((removed, _)) = self.remove_by_hash(hash) {
                 debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain block");
+                removed_blocks.push(removed);
             }
         }
 
@@ -284,26 +304,30 @@ impl<N: NodePrimitives> TreeState<N> {
         // For all other blocks, we  first put their children into this vec.
         // Then, we will iterate over them, removing them, adding their children, etc,
         // until the vec is empty.
-        let mut blocks_to_remove = self.blocks_by_number.remove(&finalized_num).unwrap_or_default();
+        let mut blocks_at_finalized =
+            self.blocks_by_number.remove(&finalized_num).unwrap_or_default();
 
         // re-insert the finalized hash if we removed it
         if let Some(position) =
-            blocks_to_remove.iter().position(|b| b.recovered_block().hash() == finalized_hash)
+            blocks_at_finalized.iter().position(|b| b.recovered_block().hash() == finalized_hash)
         {
-            let finalized_block = blocks_to_remove.swap_remove(position);
+            let finalized_block = blocks_at_finalized.swap_remove(position);
             self.blocks_by_number.insert(finalized_num, vec![finalized_block]);
         }
 
-        let mut blocks_to_remove = blocks_to_remove
+        let mut hashes_to_remove = blocks_at_finalized
             .into_iter()
             .map(|e| e.recovered_block().hash())
             .collect::<VecDeque<_>>();
-        while let Some(block) = blocks_to_remove.pop_front() {
+        while let Some(block) = hashes_to_remove.pop_front() {
             if let Some((removed, children)) = self.remove_by_hash(block) {
                 debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain child block");
-                blocks_to_remove.extend(children);
+                hashes_to_remove.extend(children);
+                removed_blocks.push(removed);
             }
         }
+
+        removed_blocks
     }
 
     /// Remove all blocks up to __and including__ the given block number.
@@ -341,16 +365,25 @@ impl<N: NodePrimitives> TreeState<N> {
         // * remove all canonical blocks below the upper bound
         // * fetch the number of the finalized hash, removing any sidechains that are __below__ the
         // finalized block
-        self.remove_canonical_until(upper_bound.number, last_persisted_hash);
+        let mut evicted_blocks =
+            self.remove_canonical_until(upper_bound.number, last_persisted_hash);
 
         // Now, we have removed canonical blocks (assuming the upper bound is above the finalized
         // block) and only have sidechains below the finalized block.
         if let Some(finalized_num_hash) = finalized_num_hash {
-            self.prune_finalized_sidechains(finalized_num_hash);
+            evicted_blocks.extend(self.prune_finalized_sidechains(finalized_num_hash));
         }
 
         // Invalidate the cached overlay since blocks were removed and the anchor may have changed
         self.invalidate_cached_overlay();
+
+        // Defer deallocation of evicted blocks to a background thread to keep the engine
+        // thread free. Dropping ExecutedBlock involves recursive deallocation of trie
+        // updates (Arc<Vec<BranchNodeCompact>> chains) which shows up as ~2% of engine
+        // thread time in profiles.
+        if !evicted_blocks.is_empty() {
+            rayon::spawn(move || drop(evicted_blocks));
+        }
     }
 
     /// Updates the canonical head to the given block.
