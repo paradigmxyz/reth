@@ -598,13 +598,10 @@ where
         };
 
         while let Ok(IndexedTransaction { index, tx }) = txs.recv() {
-            let enter = debug_span!(
+            let _enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 "prewarm tx",
                 index,
-                tx_hash = %tx.tx().tx_hash(),
-                is_success = tracing::field::Empty,
-                gas_used = tracing::field::Empty,
             )
             .entered();
 
@@ -635,12 +632,6 @@ where
             };
             metrics.execution_duration.record(start.elapsed());
 
-            // record some basic information about the transactions
-            enter.record("gas_used", res.result.gas_used());
-            enter.record("is_success", res.result.is_success());
-
-            drop(enter);
-
             // If the task was cancelled, stop execution, and exit.
             if terminate_execution.load(Ordering::Relaxed) {
                 break
@@ -649,16 +640,12 @@ where
             // Only send outcome for transactions after the first txn
             // as the main execution will be just as fast
             if index > 0 {
-                let _enter =
-                    debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm outcome", index, tx_hash=%tx.tx().tx_hash())
-                        .entered();
                 let (targets, storage_targets) =
                     multiproof_targets_from_state(res.state, v2_proofs_enabled);
                 metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_multi_proof) = &to_multi_proof {
                     let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
                 }
-                drop(_enter);
             }
 
             metrics.total_runtime.record(start.elapsed());
