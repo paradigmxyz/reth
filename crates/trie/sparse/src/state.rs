@@ -3,7 +3,7 @@ use crate::{
     traits::{SparseTrie as SparseTrieTrait, SparseTrieExt},
     ParallelSparseTrie, RevealableSparseTrie,
 };
-use alloc::{collections::VecDeque, vec::Vec};
+use alloc::{vec::Vec};
 use alloy_primitives::{
     map::{B256Map, B256Set, HashSet},
     Bytes, B256,
@@ -16,7 +16,7 @@ use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
     BranchNodeMasks, BranchNodeMasksMap, DecodedMultiProof, DecodedStorageMultiProof, MultiProof,
-    Nibbles, ProofTrieNode, ProofTrieNodeV2, RlpNode, StorageMultiProof, TrieAccount, TrieNode,
+    Nibbles, ProofTrieNode, ProofTrieNodeV2, StorageMultiProof, TrieAccount, TrieNode,
     TrieNodeV2, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 #[cfg(feature = "std")]
@@ -724,101 +724,10 @@ where
     /// NOTE: This method does not extensively validate the witness.
     pub fn reveal_witness(
         &mut self,
-        state_root: B256,
-        witness: &B256Map<Bytes>,
+        _state_root: B256,
+        _witness: &B256Map<Bytes>,
     ) -> SparseStateTrieResult<()> {
-        // Create a `(hash, path, maybe_account)` queue for traversing witness trie nodes
-        // starting from the root node.
-        let mut queue = VecDeque::from([(state_root, Nibbles::default(), None)]);
-
-        while let Some((hash, path, maybe_account)) = queue.pop_front() {
-            // Retrieve the trie node and decode it.
-            let Some(trie_node_bytes) = witness.get(&hash) else { continue };
-            let trie_node = TrieNode::decode(&mut &trie_node_bytes[..])?;
-
-            // Push children nodes into the queue.
-            match &trie_node {
-                TrieNode::Branch(branch) => {
-                    for (idx, maybe_child) in branch.as_ref().children() {
-                        if let Some(child_hash) = maybe_child.and_then(RlpNode::as_hash) {
-                            let mut child_path = path;
-                            child_path.push_unchecked(idx);
-                            queue.push_back((child_hash, child_path, maybe_account));
-                        }
-                    }
-                }
-                TrieNode::Extension(ext) => {
-                    if let Some(child_hash) = ext.child.as_hash() {
-                        let mut child_path = path;
-                        child_path.extend(&ext.key);
-                        queue.push_back((child_hash, child_path, maybe_account));
-                    }
-                }
-                TrieNode::Leaf(leaf) => {
-                    let mut full_path = path;
-                    full_path.extend(&leaf.key);
-                    if maybe_account.is_none() {
-                        let hashed_address = B256::from_slice(&full_path.pack());
-                        let account = TrieAccount::decode(&mut &leaf.value[..])?;
-                        if account.storage_root != EMPTY_ROOT_HASH {
-                            queue.push_back((
-                                account.storage_root,
-                                Nibbles::default(),
-                                Some(hashed_address),
-                            ));
-                        }
-                    }
-                }
-                TrieNode::EmptyRoot => {} // nothing to do here
-            };
-
-            // Reveal the node itself.
-            if let Some(account) = maybe_account {
-                // Check that the path was not already revealed.
-                if self
-                    .storage
-                    .revealed_paths
-                    .get(&account)
-                    .is_none_or(|paths| !paths.contains(&path))
-                {
-                    let retain_updates = self.retain_updates;
-                    let (storage_trie_entry, revealed_storage_paths) =
-                        self.storage.get_trie_and_revealed_paths_mut(account);
-
-                    if path.is_empty() {
-                        // Handle special storage state root node case.
-                        storage_trie_entry.reveal_root(trie_node, None, retain_updates)?;
-                    } else {
-                        // Reveal non-root storage trie node.
-                        storage_trie_entry
-                            .as_revealed_mut()
-                            .ok_or(SparseTrieErrorKind::Blind)?
-                            .reveal_node(path, trie_node, None)?;
-                    }
-
-                    // Track the revealed path.
-                    revealed_storage_paths.insert(path);
-                }
-            }
-            // Check that the path was not already revealed.
-            else if !self.revealed_account_paths.contains(&path) {
-                if path.is_empty() {
-                    // Handle special state root node case.
-                    self.state.reveal_root(trie_node, None, self.retain_updates)?;
-                } else {
-                    // Reveal non-root state trie node.
-                    self.state
-                        .as_revealed_mut()
-                        .ok_or(SparseTrieErrorKind::Blind)?
-                        .reveal_node(path, trie_node, None)?;
-                }
-
-                // Track the revealed path.
-                self.revealed_account_paths.insert(path);
-            }
-        }
-
-        Ok(())
+        unimplemented!()
     }
 
     /// Wipe the storage trie at the provided address.
@@ -1612,9 +1521,6 @@ fn estimate_v2_proof_capacity(nodes: &[ProofTrieNodeV2]) -> usize {
             TrieNodeV2::Branch(branch) => {
                 capacity += branch.state_mask.count_ones() as usize;
             }
-            TrieNodeV2::Extension(_) => {
-                capacity += 1;
-            }
             _ => {}
         };
     }
@@ -1663,15 +1569,12 @@ fn filter_revealed_v2_proof_nodes(
             TrieNodeV2::Branch(branch) => {
                 result.new_nodes += branch.state_mask.count_ones() as usize;
             }
-            TrieNodeV2::Extension(_) => {
-                result.new_nodes += 1;
-            }
             _ => {}
         };
 
         if is_root {
             // Perform sanity check: EmptyRoot is only valid if there are no other real nodes.
-            if matches!(node.node, TrieNode::EmptyRoot) && non_empty_root_count > 0 {
+            if matches!(node.node, TrieNodeV2::EmptyRoot) && non_empty_root_count > 0 {
                 return Err(SparseStateTrieErrorKind::InvalidRootNode {
                     path: node.path,
                     node: alloy_rlp::encode(&node.node).into(),
