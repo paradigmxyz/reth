@@ -134,10 +134,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let runtime = reth_tasks::RuntimeBuilder::new(
-            reth_tasks::RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()),
-        )
-        .build()?;
+        let runtime = reth_tasks::Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
