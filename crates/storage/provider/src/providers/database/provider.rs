@@ -627,6 +627,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            let mut merged_plain_state: Option<StateChangeset> = None;
+
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -636,25 +638,85 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                 if save_mode.with_state() {
                     let execution_output = block.execution_outcome();
+                    let block_number = recovered_block.number();
+                    let config = StateWriteConfig {
+                        write_receipts: !sf_ctx.write_receipts,
+                        write_account_changesets: !sf_ctx.write_account_changesets,
+                        write_storage_changesets: !sf_ctx.write_storage_changesets,
+                    };
 
-                    // Write state and changesets to the database.
-                    // Must be written after blocks because of the receipt lookup.
-                    // Skip receipts/account changesets if they're being written to static files.
                     let start = Instant::now();
-                    self.write_state(
-                        WriteStateInput::Single {
+
+                    let (plain_state, reverts) = execution_output
+                        .state
+                        .to_plain_state_and_reverts(OriginalValuesKnown::No);
+
+                    self.write_state_reverts(reverts, block_number, config)?;
+
+                    if config.write_receipts {
+                        let input = WriteStateInput::Single {
                             outcome: execution_output,
-                            block: recovered_block.number(),
-                        },
-                        OriginalValuesKnown::No,
-                        StateWriteConfig {
-                            write_receipts: !sf_ctx.write_receipts,
-                            write_account_changesets: !sf_ctx.write_account_changesets,
-                            write_storage_changesets: !sf_ctx.write_storage_changesets,
-                        },
-                    )?;
+                            block: block_number,
+                        };
+                        self.write_state_receipts(&input)?;
+                    }
+
+                    match &mut merged_plain_state {
+                        Some(merged) => {
+                            for (addr, acct) in plain_state.accounts {
+                                if let Some(pos) =
+                                    merged.accounts.iter().position(|(a, _)| *a == addr)
+                                {
+                                    merged.accounts[pos].1 = acct;
+                                } else {
+                                    merged.accounts.push((addr, acct));
+                                }
+                            }
+                            for storage_change in plain_state.storage {
+                                if let Some(existing) = merged
+                                    .storage
+                                    .iter_mut()
+                                    .find(|s| s.address == storage_change.address)
+                                {
+                                    if storage_change.wipe_storage {
+                                        existing.wipe_storage = true;
+                                        existing.storage = storage_change.storage;
+                                    } else {
+                                        for (key, value) in storage_change.storage {
+                                            if let Some(pos) = existing
+                                                .storage
+                                                .iter()
+                                                .position(|(k, _)| *k == key)
+                                            {
+                                                existing.storage[pos].1 = value;
+                                            } else {
+                                                existing.storage.push((key, value));
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    merged.storage.push(storage_change);
+                                }
+                            }
+                            for (hash, bytecode) in plain_state.contracts {
+                                if !merged.contracts.iter().any(|(h, _)| *h == hash) {
+                                    merged.contracts.push((hash, bytecode));
+                                }
+                            }
+                        }
+                        None => {
+                            merged_plain_state = Some(plain_state);
+                        }
+                    }
+
                     timings.write_state += start.elapsed();
                 }
+            }
+
+            if let Some(merged) = merged_plain_state {
+                let start = Instant::now();
+                self.write_state_changes(merged)?;
+                timings.write_state += start.elapsed();
             }
 
             // Write all hashed state and trie updates in single batches.
@@ -839,6 +901,81 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             self.static_file_provider
                 .latest_writer(StaticFileSegment::Receipts)?
                 .prune_receipts(to_delete, last_block)?;
+        }
+
+        Ok(())
+    }
+
+    fn write_state_receipts<'a>(
+        &self,
+        execution_outcome: &WriteStateInput<'a, ReceiptTy<N>>,
+    ) -> ProviderResult<()> {
+        let first_block = execution_outcome.first_block();
+        let block_count = execution_outcome.len() as u64;
+        let last_block = execution_outcome.last_block();
+        let block_range = first_block..=last_block;
+
+        let tip = self.last_block_number()?.max(last_block);
+
+        let block_indices: Vec<_> = self
+            .block_body_indices_range(block_range)?
+            .into_iter()
+            .map(|b| b.first_tx_num)
+            .collect();
+
+        if block_indices.len() < block_count as usize {
+            let missing_blocks = block_count - block_indices.len() as u64;
+            return Err(ProviderError::BlockBodyIndicesNotFound(
+                last_block.saturating_sub(missing_blocks - 1),
+            ));
+        }
+
+        let mut receipts_writer = EitherWriter::new_receipts(self, first_block)?;
+
+        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
+        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
+
+        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database() ||
+            self.static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_none()) &&
+            PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
+
+        let mut allowed_addresses: AddressSet = AddressSet::default();
+        for (_, addresses) in contract_log_pruner.range(..first_block) {
+            allowed_addresses.extend(addresses.iter().copied());
+        }
+
+        for (idx, (receipts, first_tx_index)) in
+            execution_outcome.receipts().zip(block_indices).enumerate()
+        {
+            let block_number = first_block + idx as u64;
+
+            receipts_writer.increment_block(block_number)?;
+
+            if prunable_receipts &&
+                self.prune_modes
+                    .receipts
+                    .is_some_and(|mode| mode.should_prune(block_number, tip))
+            {
+                continue
+            }
+
+            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+                allowed_addresses.extend(new_addresses.iter().copied());
+            }
+
+            for (idx, receipt) in receipts.iter().enumerate() {
+                let receipt_idx = first_tx_index + idx as u64;
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                {
+                    continue
+                }
+
+                receipts_writer.append_receipt(receipt_idx, receipt)?;
+            }
         }
 
         Ok(())
@@ -2239,90 +2376,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         self.write_state_reverts(reverts, first_block, config)?;
         self.write_state_changes(plain_state)?;
 
-        if !config.write_receipts {
-            return Ok(());
-        }
-
-        let block_count = execution_outcome.len() as u64;
-        let last_block = execution_outcome.last_block();
-        let block_range = first_block..=last_block;
-
-        let tip = self.last_block_number()?.max(last_block);
-
-        // Fetch the first transaction number for each block in the range
-        let block_indices: Vec<_> = self
-            .block_body_indices_range(block_range)?
-            .into_iter()
-            .map(|b| b.first_tx_num)
-            .collect();
-
-        // Ensure all expected blocks are present.
-        if block_indices.len() < block_count as usize {
-            let missing_blocks = block_count - block_indices.len() as u64;
-            return Err(ProviderError::BlockBodyIndicesNotFound(
-                last_block.saturating_sub(missing_blocks - 1),
-            ));
-        }
-
-        let mut receipts_writer = EitherWriter::new_receipts(self, first_block)?;
-
-        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
-        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
-
-        // All receipts from the last 128 blocks are required for blockchain tree, even with
-        // [`PruneSegment::ContractLogs`].
-        //
-        // Receipts can only be skipped if we're dealing with legacy nodes that write them to
-        // Database, OR if receipts_in_static_files is enabled but no receipts exist in static
-        // files yet. Once receipts exist in static files, we must continue writing to maintain
-        // continuity and have no gaps.
-        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database() ||
-            self.static_file_provider()
-                .get_highest_static_file_tx(StaticFileSegment::Receipts)
-                .is_none()) &&
-            PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
-
-        // Prepare set of addresses which logs should not be pruned.
-        let mut allowed_addresses: AddressSet = AddressSet::default();
-        for (_, addresses) in contract_log_pruner.range(..first_block) {
-            allowed_addresses.extend(addresses.iter().copied());
-        }
-
-        for (idx, (receipts, first_tx_index)) in
-            execution_outcome.receipts().zip(block_indices).enumerate()
-        {
-            let block_number = first_block + idx as u64;
-
-            // Increment block number for receipts static file writer
-            receipts_writer.increment_block(block_number)?;
-
-            // Skip writing receipts if pruning configuration requires us to.
-            if prunable_receipts &&
-                self.prune_modes
-                    .receipts
-                    .is_some_and(|mode| mode.should_prune(block_number, tip))
-            {
-                continue
-            }
-
-            // If there are new addresses to retain after this block number, track them
-            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
-                allowed_addresses.extend(new_addresses.iter().copied());
-            }
-
-            for (idx, receipt) in receipts.iter().enumerate() {
-                let receipt_idx = first_tx_index + idx as u64;
-                // Skip writing receipt if log filter is active and it does not have any logs to
-                // retain
-                if prunable_receipts &&
-                    has_contract_log_filter &&
-                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
-                {
-                    continue
-                }
-
-                receipts_writer.append_receipt(receipt_idx, receipt)?;
-            }
+        if config.write_receipts {
+            self.write_state_receipts(&execution_outcome)?;
         }
 
         Ok(())
