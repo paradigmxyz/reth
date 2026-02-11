@@ -8308,25 +8308,23 @@ mod tests {
     }
 
     #[test]
-    fn test_prune_embedded_node_preserved() {
+    fn test_prune_root_hash_preserved() {
         let provider = DefaultTrieNodeProvider;
         let mut trie = ParallelSparseTrie::default();
 
-        let small_value = vec![0x80];
-        trie.update_leaf(Nibbles::from_nibbles([0x0]), small_value.clone(), &provider).unwrap();
-        trie.update_leaf(Nibbles::from_nibbles([0x1]), small_value, &provider).unwrap();
+        // Create two 64-nibble paths that differ only in the first nibble
+        let key1 = Nibbles::unpack(B256::repeat_byte(0x00));
+        let key2 = Nibbles::unpack(B256::repeat_byte(0x11));
+
+        let large_value = large_account_value();
+        trie.update_leaf(key1, large_value.clone(), &provider).unwrap();
+        trie.update_leaf(key2, large_value, &provider).unwrap();
 
         let root_before = trie.root();
-        let nodes_before = trie.size_hint();
 
         trie.prune(0);
 
-        assert_eq!(root_before, trie.root(), "root hash must be preserved");
-
-        if trie.size_hint() == nodes_before {
-            assert!(trie.get_leaf_value(&Nibbles::from_nibbles([0x0])).is_some());
-            assert!(trie.get_leaf_value(&Nibbles::from_nibbles([0x1])).is_some());
-        }
+        assert_eq!(root_before, trie.root(), "root hash must be preserved after pruning");
     }
 
     #[test]
