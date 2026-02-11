@@ -54,7 +54,7 @@ use reth_ethereum::{
     primitives::{Block, SealedBlock},
     provider::{EthStorage, StateProviderFactory},
     rpc::types::engine::ExecutionPayload,
-    tasks::{RuntimeBuilder, RuntimeConfig},
+    tasks::Runtime,
     EthPrimitives, TransactionSigned,
 };
 use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
@@ -391,9 +391,7 @@ where
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
-    let runtime =
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
-            .build()?;
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
 
     // create genesis with canyon at block 2
     let spec = ChainSpec::builder()

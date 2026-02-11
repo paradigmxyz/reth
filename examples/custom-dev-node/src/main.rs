@@ -17,14 +17,12 @@ use reth_ethereum::{
     },
     provider::CanonStateSubscriptions,
     rpc::api::eth::helpers::EthTransactions,
-    tasks::{RuntimeBuilder, RuntimeConfig},
+    tasks::Runtime,
 };
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    let runtime =
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
-            .build()?;
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
 
     // create node config
     let node_config = NodeConfig::test()

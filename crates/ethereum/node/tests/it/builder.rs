@@ -11,7 +11,7 @@ use reth_node_builder::{EngineNodeLauncher, FullNodeComponents, NodeBuilder, Nod
 use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_builder::Identity;
-use reth_tasks::{RuntimeBuilder, RuntimeConfig};
+use reth_tasks::Runtime;
 
 #[test]
 fn test_basic_setup() {
@@ -46,10 +46,7 @@ fn test_basic_setup() {
 
 #[tokio::test]
 async fn test_eth_launcher() {
-    let exec =
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
-            .build()
-            .unwrap();
+    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
     let config = NodeConfig::test();
     let db = create_test_rw_db();
     let _builder =
@@ -84,11 +81,7 @@ fn test_eth_launcher_with_tokio_runtime() {
     let custom_rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     main_rt.block_on(async {
-        let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
-            tokio::runtime::Handle::current(),
-        ))
-        .build()
-        .unwrap();
+        let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
         let config = NodeConfig::test();
         let db = create_test_rw_db();
         let _builder =

@@ -12,7 +12,7 @@ use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::Recovered;
 use reth_provider::CanonStateSubscriptions;
-use reth_tasks::{RuntimeBuilder, RuntimeConfig};
+use reth_tasks::Runtime;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, test_utils::OkValidator, BlockInfo, CoinbaseTipOrdering,
     EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin, TransactionPool,
@@ -24,10 +24,7 @@ use std::{sync::Arc, time::Duration};
 #[tokio::test]
 async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let executor =
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
-            .build()
-            .unwrap();
+    let executor = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -100,10 +97,7 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
 #[tokio::test]
 async fn maintain_txpool_reorg() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let executor =
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
-            .build()
-            .unwrap();
+    let executor = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -235,10 +229,7 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
 #[tokio::test]
 async fn maintain_txpool_commit() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let executor =
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
-            .build()
-            .unwrap();
+    let executor = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let txpool = Pool::new(
         OkValidator::default(),

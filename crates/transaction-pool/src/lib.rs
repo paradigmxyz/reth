@@ -237,7 +237,7 @@
 //! use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_tasks::TaskSpawner;
-//! use reth_tasks::{RuntimeBuilder, RuntimeConfig};
+//! use reth_tasks::Runtime;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
 //! use reth_transaction_pool::maintain::{maintain_transaction_pool_future};
@@ -252,9 +252,7 @@
 //!     {
 //!     let blob_store = InMemoryBlobStore::default();
 //!     let rt = tokio::runtime::Runtime::new().unwrap();
-//!     let runtime = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(rt.handle().clone()))
-//!         .build()
-//!         .unwrap();
+//!     let runtime = Runtime::with_existing_handle(rt.handle().clone()).unwrap();
 //!     let pool = Pool::eth_pool(
 //!         TransactionValidationTaskExecutor::eth(client.clone(), evm_config, blob_store.clone(), runtime.clone()),
 //!         blob_store,

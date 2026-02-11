@@ -14,7 +14,7 @@ use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_server_types::RpcModuleSelection;
-use reth_tasks::{RuntimeBuilder, RuntimeConfig};
+use reth_tasks::Runtime;
 use std::sync::Arc;
 use tracing::{span, Instrument, Level};
 
@@ -112,10 +112,7 @@ where
         Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
         Wallet,
     )> {
-        let exec = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
-            tokio::runtime::Handle::current(),
-        ))
-        .build()?;
+        let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
 
         let network_config = NetworkArgs {
             discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },

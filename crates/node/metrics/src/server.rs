@@ -419,7 +419,7 @@ fn handle_pprof_heap(_pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
 mod tests {
     use super::*;
     use reqwest::Client;
-    use reth_tasks::{RuntimeBuilder, RuntimeConfig};
+    use reth_tasks::Runtime;
     use socket2::{Domain, Socket, Type};
     use std::net::{SocketAddr, TcpListener};
 
@@ -445,11 +445,7 @@ mod tests {
             build_profile: "test",
         };
 
-        let executor = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(
-            tokio::runtime::Handle::current(),
-        ))
-        .build()
-        .unwrap();
+        let executor = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
         let hooks = Hooks::builder().build();
 

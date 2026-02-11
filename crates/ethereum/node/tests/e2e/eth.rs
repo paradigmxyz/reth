@@ -14,7 +14,7 @@ use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::BlockNumReader;
 use reth_rpc_api::TestingBuildBlockRequestV1;
-use reth_tasks::{RuntimeBuilder, RuntimeConfig};
+use reth_tasks::Runtime;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -57,10 +57,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
 #[cfg(unix)]
 async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec =
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
-            .build()
-            .unwrap();
+    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     // Chain spec with test allocs
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
@@ -107,10 +104,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
 #[cfg(unix)]
 async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec =
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
-            .build()
-            .unwrap();
+    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     // Chain spec with test allocs
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
@@ -194,10 +188,7 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec =
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
-            .build()
-            .unwrap();
+    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(

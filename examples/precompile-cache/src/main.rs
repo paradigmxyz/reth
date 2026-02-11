@@ -33,7 +33,7 @@ use reth_ethereum::{
         node::EthereumAddOns,
         EthEvmConfig, EthereumNode,
     },
-    tasks::{RuntimeBuilder, RuntimeConfig},
+    tasks::Runtime,
     EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
@@ -187,9 +187,7 @@ where
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
-    let runtime =
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
-            .build()?;
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
 
     // create a custom chain spec
     let spec = ChainSpec::builder()

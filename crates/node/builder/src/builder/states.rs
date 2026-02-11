@@ -324,7 +324,7 @@ mod test {
     use reth_node_ethereum::EthereumNode;
     use reth_payload_builder::PayloadBuilderHandle;
     use reth_provider::noop::NoopProvider;
-    use reth_tasks::{RuntimeBuilder, RuntimeConfig};
+    use reth_tasks::Runtime;
     use reth_transaction_pool::noop::NoopTransactionPool;
 
     #[test]
@@ -345,9 +345,7 @@ mod test {
 
         let task_executor = {
             let runtime = tokio::runtime::Runtime::new().unwrap();
-            RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
-                .build()
-                .unwrap()
+            Runtime::with_existing_handle(runtime.handle().clone()).unwrap()
         };
 
         let node = NodeAdapter { components, task_executor, provider: NoopProvider::default() };

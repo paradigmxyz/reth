@@ -275,6 +275,15 @@ impl Default for Runtime {
     }
 }
 
+// ── Constructors ──────────────────────────────────────────────────────
+
+impl Runtime {
+    /// Creates a [`Runtime`] that attaches to an existing tokio runtime handle.
+    pub fn with_existing_handle(handle: Handle) -> Result<Self, RuntimeBuildError> {
+        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(handle)).build()
+    }
+}
+
 // ── Pool accessors ────────────────────────────────────────────────────
 
 impl Runtime {

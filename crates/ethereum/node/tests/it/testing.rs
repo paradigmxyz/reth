@@ -13,17 +13,14 @@ use reth_node_core::{
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
-use reth_tasks::{RuntimeBuilder, RuntimeConfig};
+use reth_tasks::Runtime;
 use std::str::FromStr;
 use tempfile::tempdir;
 use tokio::sync::oneshot;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn testing_rpc_build_block_works() -> eyre::Result<()> {
-    let exec =
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
-            .build()
-            .unwrap();
+    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
     let mut rpc_args = reth_node_core::args::RpcServerArgs::default().with_http();
     rpc_args.http_api = Some(RpcModuleSelection::from_iter([RethRpcModule::Testing]));
     let tempdir = tempdir().expect("temp datadir");

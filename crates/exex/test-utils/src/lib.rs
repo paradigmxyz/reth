@@ -55,7 +55,7 @@ use reth_provider::{
     providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider},
     BlockReader, EthStorage, ProviderFactory,
 };
-use reth_tasks::{Runtime, RuntimeBuilder, RuntimeConfig};
+use reth_tasks::Runtime;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use tempfile::TempDir;
 use thiserror::Error;
@@ -266,10 +266,7 @@ pub async fn test_exex_context_with_chain_spec(
     )
     .await?;
     let network = network_manager.handle().clone();
-    let exec =
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(tokio::runtime::Handle::current()))
-            .build()
-            .unwrap();
+    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
     let task_executor = exec.clone();
     exec.spawn_task(network_manager);
 

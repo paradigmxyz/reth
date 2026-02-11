@@ -117,13 +117,11 @@ where
 /// Use the [`Runtime`] that spawns task directly onto the tokio runtime via the [Handle].
 ///
 /// ```
-/// # use reth_tasks::{RuntimeBuilder, RuntimeConfig};
+/// # use reth_tasks::Runtime;
 /// fn t() {
 ///  use reth_tasks::TaskSpawner;
 /// let rt = tokio::runtime::Runtime::new().unwrap();
-/// let runtime = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(rt.handle().clone()))
-///     .build()
-///     .unwrap();
+/// let runtime = Runtime::with_existing_handle(rt.handle().clone()).unwrap();
 /// let task = TaskSpawner::spawn_task(&runtime, Box::pin(async {
 ///     // -- snip --
 /// }));
@@ -375,9 +373,7 @@ mod tests {
     #[test]
     fn test_critical() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
-            .build()
-            .unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
         let handle = rt.take_task_manager_handle().unwrap();
 
         rt.spawn_critical_task("this is a critical task", async { panic!("intentionally panic") });
@@ -395,9 +391,7 @@ mod tests {
     #[test]
     fn test_manager_shutdown_critical() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
-            .build()
-            .unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
 
         let (signal, shutdown) = signal();
 
@@ -414,9 +408,7 @@ mod tests {
     #[test]
     fn test_manager_shutdown() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
-            .build()
-            .unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
 
         let (signal, shutdown) = signal();
 
@@ -433,9 +425,7 @@ mod tests {
     #[test]
     fn test_manager_graceful_shutdown() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
-            .build()
-            .unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
 
         let val = Arc::new(AtomicBool::new(false));
         let c = val.clone();
@@ -452,9 +442,7 @@ mod tests {
     #[test]
     fn test_manager_graceful_shutdown_many() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
-            .build()
-            .unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
 
         let counter = Arc::new(AtomicUsize::new(0));
         let num = 10;
@@ -474,9 +462,7 @@ mod tests {
     #[test]
     fn test_manager_graceful_shutdown_timeout() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
-            .build()
-            .unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
 
         let timeout = Duration::from_millis(500);
         let val = Arc::new(AtomicBool::new(false));
@@ -495,18 +481,14 @@ mod tests {
     #[test]
     fn can_build_runtime() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
-            .build()
-            .unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
         let _handle = rt.handle();
     }
 
     #[test]
     fn test_graceful_shutdown_triggered_by_executor() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = RuntimeBuilder::new(RuntimeConfig::with_existing_handle(runtime.handle().clone()))
-            .build()
-            .unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
         let task_manager_handle = rt.take_task_manager_handle().unwrap();
 
         let task_did_shutdown_flag = Arc::new(AtomicBool::new(false));
