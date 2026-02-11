@@ -598,7 +598,7 @@ where
         };
 
         while let Ok(IndexedTransaction { index, tx }) = txs.recv() {
-            let enter = debug_span!(
+            let _enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 "prewarm tx",
                 index,
@@ -647,8 +647,6 @@ where
                     let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
                 }
             }
-
-            drop(enter);
 
             metrics.total_runtime.record(start.elapsed());
         }

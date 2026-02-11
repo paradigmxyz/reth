@@ -844,7 +844,7 @@ where
             trace!(target: "engine::tree", "Executing transaction");
 
             let tx_start = Instant::now();
-            let _gas_used = executor.execute_transaction(tx)?;
+            executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
             let current_len = executor.receipts().len();

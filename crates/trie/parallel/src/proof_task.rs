@@ -190,7 +190,7 @@ impl ProofWorkerHandle {
                 .entered();
             // Spawn storage workers
             for worker_id in 0..storage_worker_count {
-                let span = debug_span!(target: "trie::proof_task", "storage worker");
+                let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
                 let task_ctx_clone = task_ctx_for_storage.clone();
                 let work_rx_clone = storage_work_rx.clone();
                 let storage_available_workers_clone = storage_available_workers.clone();
@@ -234,7 +234,7 @@ impl ProofWorkerHandle {
                 .entered();
             // Spawn account workers
             for worker_id in 0..account_worker_count {
-                let span = debug_span!(target: "trie::proof_task", "account worker");
+                let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
                 let task_ctx_clone = task_ctx.clone();
                 let work_rx_clone = account_work_rx.clone();
                 let storage_work_tx_clone = storage_work_tx.clone();
