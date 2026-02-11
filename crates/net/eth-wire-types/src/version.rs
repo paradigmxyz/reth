@@ -35,11 +35,10 @@ pub enum EthVersion {
 
 impl EthVersion {
     /// The latest known eth version
-    pub const LATEST: Self = Self::Eth70;
+    pub const LATEST: Self = Self::Eth69;
 
     /// All known eth versions
-    pub const ALL_VERSIONS: &'static [Self] =
-        &[Self::Eth69, Self::Eth68, Self::Eth67, Self::Eth66];
+    pub const ALL_VERSIONS: &'static [Self] = &[Self::Eth69, Self::Eth68, Self::Eth67, Self::Eth66];
 
     /// Returns true if the version is eth/66
     pub const fn is_eth66(&self) -> bool {
