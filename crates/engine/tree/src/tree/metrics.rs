@@ -235,8 +235,10 @@ impl ForkchoiceUpdatedMetrics {
     }
 }
 
-/// Width of each gas bucket in gas units (10 million).
-const GAS_BUCKET_SIZE: u64 = 10_000_000;
+use reth_primitives_traits::constants::gas_units::MEGAGAS;
+
+/// Width of each gas bucket in gas units (10 Mgas).
+const GAS_BUCKET_SIZE: u64 = 10 * MEGAGAS;
 
 /// Number of gas buckets. The last bucket is a catch-all for everything above
 /// `(NUM_GAS_BUCKETS - 1) * GAS_BUCKET_SIZE`.
