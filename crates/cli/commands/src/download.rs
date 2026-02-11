@@ -1,5 +1,5 @@
 use crate::common::EnvironmentArgs;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use eyre::Result;
 use lz4::Decoder;
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
@@ -8,6 +8,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_fs_util as fs;
 use std::{
     borrow::Cow,
+    fmt,
     fs::OpenOptions,
     io::{self, BufWriter, Read, Write},
     path::{Path, PathBuf},
@@ -25,6 +26,44 @@ const MERKLE_BASE_URL: &str = "https://downloads.merkle.io";
 const EXTENSION_TAR_LZ4: &str = ".tar.lz4";
 const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
 
+/// Snapshot type determines which latest manifest file to fetch.
+///
+/// Each variant maps to a different file on the snapshot server:
+/// - `Archive` → `latest.txt` (full archive node data)
+/// - `Full` → `full-latest.txt` (full node data, no ancient history)
+/// - `Minimal` → `minimal-latest.txt` (minimal data for quick sync)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum SnapshotType {
+    /// Archive snapshot — complete historical state
+    #[default]
+    Archive,
+    /// Full snapshot — recent state without ancient blocks
+    Full,
+    /// Minimal snapshot — smallest viable dataset for quick sync
+    Minimal,
+}
+
+impl SnapshotType {
+    /// Returns the filename used to resolve the latest snapshot URL for this type.
+    pub const fn latest_filename(&self) -> &'static str {
+        match self {
+            Self::Archive => "latest.txt",
+            Self::Full => "full-latest.txt",
+            Self::Minimal => "minimal-latest.txt",
+        }
+    }
+}
+
+impl fmt::Display for SnapshotType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Archive => write!(f, "archive"),
+            Self::Full => write!(f, "full"),
+            Self::Minimal => write!(f, "minimal"),
+        }
+    }
+}
+
 /// Global static download defaults
 static DOWNLOAD_DEFAULTS: OnceLock<DownloadDefaults> = OnceLock::new();
 
@@ -39,6 +78,8 @@ pub struct DownloadDefaults {
     pub default_base_url: Cow<'static, str>,
     /// Optional custom long help text that overrides the generated help
     pub long_help: Option<String>,
+    /// Default snapshot type when none is explicitly specified via CLI flags
+    pub default_snapshot_type: SnapshotType,
 }
 
 impl DownloadDefaults {
@@ -61,6 +102,7 @@ impl DownloadDefaults {
             ],
             default_base_url: Cow::Borrowed(MERKLE_BASE_URL),
             long_help: None,
+            default_snapshot_type: SnapshotType::default(),
         }
     }
 
@@ -83,9 +125,9 @@ impl DownloadDefaults {
             help.push('\n');
         }
 
-        help.push_str(
-            "\nIf no URL is provided, the latest mainnet archive snapshot\nwill be proposed for download from ",
-        );
+        help.push_str("\nIf no URL is provided, the latest ");
+        help.push_str(&self.default_snapshot_type.to_string());
+        help.push_str(" snapshot will be proposed for download from ");
         help.push_str(self.default_base_url.as_ref());
         help.push_str(
             ".\n\nLocal file:// URLs are also supported for extracting snapshots from disk.",
@@ -116,6 +158,12 @@ impl DownloadDefaults {
         self.long_help = Some(help.into());
         self
     }
+
+    /// Set the default snapshot type used when no `--archive`/`--full`/`--minimal` flag is given.
+    pub fn with_default_snapshot_type(mut self, snapshot_type: SnapshotType) -> Self {
+        self.default_snapshot_type = snapshot_type;
+        self
+    }
 }
 
 impl Default for DownloadDefaults {
@@ -132,18 +180,47 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     /// Custom URL to download the snapshot from
     #[arg(long, short, long_help = DownloadDefaults::get_global().long_help())]
     url: Option<String>,
+
+    /// Download an archive snapshot (complete historical state).
+    /// Fetches `latest.txt` from the snapshot server.
+    #[arg(long, conflicts_with_all = ["full", "minimal", "url"])]
+    archive: bool,
+
+    /// Download a full snapshot (recent state without ancient blocks).
+    /// Fetches `full-latest.txt` from the snapshot server.
+    #[arg(long, conflicts_with_all = ["archive", "minimal", "url"])]
+    full: bool,
+
+    /// Download a minimal snapshot (smallest viable dataset for quick sync).
+    /// Fetches `minimal-latest.txt` from the snapshot server.
+    #[arg(long, conflicts_with_all = ["archive", "full", "url"])]
+    minimal: bool,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
+    /// Resolves the snapshot type from CLI flags, falling back to the configured default.
+    fn snapshot_type(&self) -> SnapshotType {
+        if self.archive {
+            SnapshotType::Archive
+        } else if self.full {
+            SnapshotType::Full
+        } else if self.minimal {
+            SnapshotType::Minimal
+        } else {
+            DownloadDefaults::get_global().default_snapshot_type
+        }
+    }
+
     pub async fn execute<N>(self) -> Result<()> {
+        let snapshot_type = self.snapshot_type();
         let data_dir = self.env.datadir.resolve_datadir(self.env.chain.chain());
         fs::create_dir_all(&data_dir)?;
 
         let url = match self.url {
             Some(url) => url,
             None => {
-                let url = get_latest_snapshot_url().await?;
-                info!(target: "reth::cli", "Using default snapshot URL: {}", url);
+                let url = get_latest_snapshot_url(snapshot_type).await?;
+                info!(target: "reth::cli", %snapshot_type, "Using default snapshot URL: {}", url);
                 url
             }
         };
@@ -152,6 +229,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             chain = %self.env.chain.chain(),
             dir = ?data_dir.data_dir(),
             url = %url,
+            %snapshot_type,
             "Starting snapshot download and extraction"
         );
 
@@ -508,10 +586,11 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-// Builds default URL for latest mainnet archive snapshot using configured defaults
-async fn get_latest_snapshot_url() -> Result<String> {
+/// Builds default URL for the latest snapshot by fetching the manifest file
+/// corresponding to the given [`SnapshotType`].
+async fn get_latest_snapshot_url(snapshot_type: SnapshotType) -> Result<String> {
     let base_url = &DownloadDefaults::get_global().default_base_url;
-    let latest_url = format!("{base_url}/latest.txt");
+    let latest_url = format!("{base_url}/{}", snapshot_type.latest_filename());
     let filename = Client::new()
         .get(latest_url)
         .send()
@@ -559,6 +638,7 @@ mod tests {
         assert!(help.contains("merkle.io"));
         assert!(help.contains("publicnode.com"));
         assert!(help.contains("file://"));
+        assert!(help.contains("latest archive snapshot"));
     }
 
     #[test]
@@ -582,6 +662,34 @@ mod tests {
         assert_eq!(defaults.default_base_url, "https://custom.example.com");
         assert_eq!(defaults.available_snapshots.len(), 4); // 2 defaults + 2 added
         assert_eq!(defaults.long_help, Some("Custom help for snapshots".to_string()));
+    }
+
+    #[test]
+    fn test_snapshot_type_latest_filename() {
+        assert_eq!(SnapshotType::Archive.latest_filename(), "latest.txt");
+        assert_eq!(SnapshotType::Full.latest_filename(), "full-latest.txt");
+        assert_eq!(SnapshotType::Minimal.latest_filename(), "minimal-latest.txt");
+    }
+
+    #[test]
+    fn test_snapshot_type_display() {
+        assert_eq!(SnapshotType::Archive.to_string(), "archive");
+        assert_eq!(SnapshotType::Full.to_string(), "full");
+        assert_eq!(SnapshotType::Minimal.to_string(), "minimal");
+    }
+
+    #[test]
+    fn test_snapshot_type_default() {
+        assert_eq!(SnapshotType::default(), SnapshotType::Archive);
+    }
+
+    #[test]
+    fn test_download_defaults_snapshot_type() {
+        let defaults = DownloadDefaults::default();
+        assert_eq!(defaults.default_snapshot_type, SnapshotType::Archive);
+
+        let defaults = defaults.with_default_snapshot_type(SnapshotType::Minimal);
+        assert_eq!(defaults.default_snapshot_type, SnapshotType::Minimal);
     }
 
     #[test]
