@@ -17,7 +17,11 @@ use alloy_evm::Evm;
 use alloy_primitives::B256;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
+use alloy_consensus::TxReceipt;
+use alloy_eips::Encodable2718;
+use alloy_primitives::Bloom;
 use rayon::prelude::*;
+use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -733,46 +737,76 @@ where
             });
         }
 
-        // Spawn background task to compute receipt root and logs bloom incrementally.
-        // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
-        let receipts_len = input.transaction_count();
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor.executor().spawn_blocking(move || task_handle.run(receipts_len));
-
         let transaction_count = input.transaction_count();
         let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));
 
         let execution_start = Instant::now();
 
-        // Execute all transactions and finalize
-        let (executor, senders) = self.execute_transactions(
-            executor,
-            transaction_count,
-            handle.iter_transactions(),
-            &receipt_tx,
-        )?;
-        drop(receipt_tx);
+        const INLINE_RECEIPT_ROOT_TX_THRESHOLD: usize = 128;
 
-        // Finish execution and get the result
-        let post_exec_start = Instant::now();
-        let (_evm, result) = debug_span!(target: "engine::tree", "finish")
-            .in_scope(|| executor.finish())
-            .map(|(evm, result)| (evm.into_db(), result))?;
-        self.metrics.record_post_execution(post_exec_start.elapsed());
+        if transaction_count < INLINE_RECEIPT_ROOT_TX_THRESHOLD {
+            let (executor, senders) = self.execute_transactions_no_stream(
+                executor,
+                transaction_count,
+                handle.iter_transactions(),
+            )?;
 
-        // Merge transitions into bundle state
-        debug_span!(target: "engine::tree", "merge transitions")
-            .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
+            let post_exec_start = Instant::now();
+            let (_evm, result) = debug_span!(target: "engine::tree", "finish")
+                .in_scope(|| executor.finish())
+                .map(|(evm, result)| (evm.into_db(), result))?;
+            self.metrics.record_post_execution(post_exec_start.elapsed());
 
-        let output = BlockExecutionOutput { result, state: db.take_bundle() };
+            debug_span!(target: "engine::tree", "merge transitions")
+                .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
-        let execution_duration = execution_start.elapsed();
-        self.metrics.record_block_execution(&output, execution_duration);
+            let receipt_root_bloom =
+                Self::compute_receipt_root_bloom_inline(&result.receipts);
 
-        debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
-        Ok((output, senders, result_rx))
+            let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+            let _ = result_tx.send(receipt_root_bloom);
+
+            let output = BlockExecutionOutput { result, state: db.take_bundle() };
+
+            let execution_duration = execution_start.elapsed();
+            self.metrics.record_block_execution(&output, execution_duration);
+
+            debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block (inline receipt root)");
+            Ok((output, senders, result_rx))
+        } else {
+            let receipts_len = transaction_count;
+            let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+            let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+            let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
+            self.payload_processor
+                .executor()
+                .spawn_blocking(move || task_handle.run(receipts_len));
+
+            let (executor, senders) = self.execute_transactions(
+                executor,
+                transaction_count,
+                handle.iter_transactions(),
+                &receipt_tx,
+            )?;
+            drop(receipt_tx);
+
+            let post_exec_start = Instant::now();
+            let (_evm, result) = debug_span!(target: "engine::tree", "finish")
+                .in_scope(|| executor.finish())
+                .map(|(evm, result)| (evm.into_db(), result))?;
+            self.metrics.record_post_execution(post_exec_start.elapsed());
+
+            debug_span!(target: "engine::tree", "merge transitions")
+                .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
+
+            let output = BlockExecutionOutput { result, state: db.take_bundle() };
+
+            let execution_duration = execution_start.elapsed();
+            self.metrics.record_block_execution(&output, execution_duration);
+
+            debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
+            Ok((output, senders, result_rx))
+        }
     }
 
     /// Executes transactions and collects senders, streaming receipts to a background task.
@@ -854,6 +888,81 @@ where
         drop(exec_span);
 
         Ok((executor, senders))
+    }
+
+    /// Executes transactions without streaming receipts to a background task.
+    ///
+    /// Used for small blocks where inline receipt root computation is cheaper than
+    /// the overhead of spawning a background task + channel synchronization.
+    fn execute_transactions_no_stream<E, Tx, InnerTx, Err>(
+        &self,
+        mut executor: E,
+        transaction_count: usize,
+        transactions: impl Iterator<Item = Result<Tx, Err>>,
+    ) -> Result<(E, Vec<Address>), BlockExecutionError>
+    where
+        E: BlockExecutor<Receipt = N::Receipt>,
+        Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
+        InnerTx: TxHashRef,
+        Err: core::error::Error + Send + Sync + 'static,
+    {
+        let mut senders = Vec::with_capacity(transaction_count);
+
+        let pre_exec_start = Instant::now();
+        debug_span!(target: "engine::tree", "pre execution")
+            .in_scope(|| executor.apply_pre_execution_changes())?;
+        self.metrics.record_pre_execution(pre_exec_start.elapsed());
+
+        let exec_span = debug_span!(target: "engine::tree", "execution").entered();
+        let mut transactions = transactions.into_iter();
+        loop {
+            let wait_start = Instant::now();
+            let Some(tx_result) = transactions.next() else { break };
+            self.metrics.record_transaction_wait(wait_start.elapsed());
+
+            let tx = tx_result.map_err(BlockExecutionError::other)?;
+            let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
+            let tx_hash = <Tx as alloy_evm::RecoveredTx<InnerTx>>::tx(&tx).tx_hash();
+
+            senders.push(tx_signer);
+
+            let span = debug_span!(
+                target: "engine::tree",
+                "execute tx",
+                ?tx_hash,
+                gas_used = tracing::field::Empty,
+            );
+            let enter = span.entered();
+            trace!(target: "engine::tree", "Executing transaction");
+
+            let tx_start = Instant::now();
+            let gas_used = executor.execute_transaction(tx)?;
+            self.metrics.record_transaction_execution(tx_start.elapsed());
+
+            enter.record("gas_used", gas_used);
+        }
+        drop(exec_span);
+
+        Ok((executor, senders))
+    }
+
+    /// Computes receipt root and aggregated bloom inline without spawning a background task.
+    fn compute_receipt_root_bloom_inline(receipts: &[N::Receipt]) -> (B256, Bloom) {
+        let len = receipts.len();
+        let mut builder = OrderedTrieRootEncodedBuilder::new(len);
+        let mut aggregated_bloom = Bloom::ZERO;
+        let mut encode_buf = Vec::new();
+
+        for (index, receipt) in receipts.iter().enumerate() {
+            let receipt_with_bloom = receipt.with_bloom_ref();
+            encode_buf.clear();
+            receipt_with_bloom.encode_2718(&mut encode_buf);
+            aggregated_bloom |= *receipt_with_bloom.bloom_ref();
+            builder.push_unchecked(index, &encode_buf);
+        }
+
+        let root = builder.finalize().expect("all receipts were pushed");
+        (root, aggregated_bloom)
     }
 
     /// Compute state root for the given hashed post state in parallel.
