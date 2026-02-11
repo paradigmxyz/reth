@@ -81,6 +81,12 @@ pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
 /// 120MB.
 pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 
+/// Gas threshold below which transaction prewarming is skipped.
+///
+/// For blocks that use 20 million gas or less, the overhead of spawning parallel prewarming
+/// threads outweighs the benefit of cache warming since sequential execution is fast enough.
+pub const PREWARMING_GAS_THRESHOLD: u64 = 20_000_000;
+
 /// Default value capacity for shrinking the sparse trie. This is used to limit the number of values
 /// in allocated sparse tries.
 ///
@@ -431,7 +437,15 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        if self.disable_transaction_prewarming {
+        if self.disable_transaction_prewarming || env.gas_used <= PREWARMING_GAS_THRESHOLD {
+            if !self.disable_transaction_prewarming {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    gas_used = env.gas_used,
+                    threshold = PREWARMING_GAS_THRESHOLD,
+                    "skipping transaction prewarming for low-gas block"
+                );
+            }
             // if no transactions should be executed we clear them but still spawn the task for
             // caching updates
             transactions = mpsc::channel().1;
@@ -977,6 +991,9 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Withdrawals included in the block.
     /// Used to generate prefetch targets for withdrawal addresses.
     pub withdrawals: Option<Vec<Withdrawal>>,
+    /// Total gas used by the block.
+    /// Used to skip prewarming for low-gas blocks where the overhead is not worth it.
+    pub gas_used: u64,
 }
 
 impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
@@ -991,6 +1008,7 @@ where
             parent_state_root: Default::default(),
             transaction_count: 0,
             withdrawals: None,
+            gas_used: 0,
         }
     }
 }
