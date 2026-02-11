@@ -303,7 +303,7 @@ where
         let block = self.convert_to_block(input)?;
 
         // Validate block consensus rules which includes header validation
-        if let Err(consensus_err) = self.validate_block_inner(&block) {
+        if let Err(consensus_err) = self.validate_block_inner(&block, None) {
             // Header validation error takes precedence over execution error
             return Err(InsertBlockError::new(block, consensus_err.into()).into())
         }
@@ -345,6 +345,23 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        // For payloads, spawn a background task to compute the transaction root from the
+        // raw encoded transactions. This runs concurrently with setup + execution, avoiding
+        // the cost of re-encoding all transactions into an MPT during validation.
+        // Regular blocks skip this since they were already validated when downloaded.
+        let tx_root_rx = match &input {
+            BlockOrPayload::Payload(payload) => {
+                let raw_txs = payload.raw_transactions();
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                self.payload_processor.executor().spawn_blocking(move || {
+                    let root = alloy_trie::root::ordered_trie_root_encoded(raw_txs.as_slice());
+                    let _ = tx.send(root);
+                });
+                Some(rx)
+            }
+            BlockOrPayload::Block(_) => None,
+        };
+
         /// A helper macro that returns the block in case there was an error
         /// This macro is used for early returns before block conversion
         macro_rules! ensure_ok {
@@ -501,13 +518,17 @@ where
             })
             .ok();
 
+        // Await the pre-computed transaction root (for payloads only).
+        let transactions_root = tx_root_rx.and_then(|rx| rx.blocking_recv().ok());
+
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
                 &block,
                 &parent_block,
                 &output,
                 &mut ctx,
-                receipt_root_bloom
+                receipt_root_bloom,
+                transactions_root,
             ),
             block
         );
@@ -658,13 +679,17 @@ where
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    fn validate_block_inner(&self, block: &SealedBlock<N::Block>) -> Result<(), ConsensusError> {
+    fn validate_block_inner(
+        &self,
+        block: &SealedBlock<N::Block>,
+        transactions_root: Option<B256>,
+    ) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_block_pre_execution(block) {
+        if let Err(e) = self.consensus.validate_block_pre_execution(block, transactions_root) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
@@ -979,6 +1004,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
+        transactions_root: Option<B256>,
     ) -> Result<HashedPostState, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -987,7 +1013,7 @@ where
 
         trace!(target: "engine::tree::payload_validator", block=?block.num_hash(), "Validating block consensus");
         // validate block consensus rules
-        if let Err(e) = self.validate_block_inner(block) {
+        if let Err(e) = self.validate_block_inner(block, transactions_root) {
             return Err(e.into())
         }
 

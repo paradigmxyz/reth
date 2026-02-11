@@ -44,6 +44,7 @@ alloy-eip7928.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-trie.workspace = true
 
 revm.workspace = true
 revm-primitives.workspace = true

@@ -288,7 +288,7 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
                 }
 
                 // Validate block against header
-                self.consensus.validate_block_pre_execution(&block)?;
+                self.consensus.validate_block_pre_execution(&block, None)?;
 
                 // add to the internal maps
                 let block_hash = block.hash();

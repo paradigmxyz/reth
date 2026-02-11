@@ -20,6 +20,7 @@
 
 use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use alloc::sync::Arc;
+use alloy_primitives::B256;
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 
@@ -65,7 +66,11 @@ impl<B: Block> Consensus<B> for NoopConsensus {
     }
 
     /// Validates block before execution (no-op implementation).
-    fn validate_block_pre_execution(&self, _block: &SealedBlock<B>) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(
+        &self,
+        _block: &SealedBlock<B>,
+        _transactions_root: Option<B256>,
+    ) -> Result<(), ConsensusError> {
         Ok(())
     }
 }

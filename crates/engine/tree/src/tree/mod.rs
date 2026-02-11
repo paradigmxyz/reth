@@ -2146,7 +2146,7 @@ where
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_block_pre_execution(block) {
+        if let Err(e) = self.consensus.validate_block_pre_execution(block, None) {
             error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
