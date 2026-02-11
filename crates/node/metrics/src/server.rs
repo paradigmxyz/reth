@@ -445,7 +445,7 @@ mod tests {
             build_profile: "test",
         };
 
-        let executor = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+        let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
         let hooks = Hooks::builder().build();
 
@@ -454,7 +454,7 @@ mod tests {
             listen_addr,
             version_info,
             chain_spec_info,
-            executor,
+            runtime,
             hooks,
             std::env::temp_dir(),
         );

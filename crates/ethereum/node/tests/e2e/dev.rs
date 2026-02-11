@@ -15,13 +15,13 @@ use std::sync::Arc;
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let node_config = NodeConfig::test()
         .with_chain(custom_chain())
         .with_dev(DevArgs { dev: true, ..Default::default() });
     let NodeHandle { node, .. } = NodeBuilder::new(node_config.clone())
-        .testing_node(exec.clone())
+        .testing_node(runtime.clone())
         .with_types_and_provider::<EthereumNode, BlockchainProvider<_>>()
         .with_components(EthereumNode::components())
         .with_add_ons(EthereumAddOns::default())
@@ -36,14 +36,14 @@ async fn can_run_dev_node() -> eyre::Result<()> {
 #[tokio::test]
 async fn can_run_dev_node_custom_attributes() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let node_config = NodeConfig::test()
         .with_chain(custom_chain())
         .with_dev(DevArgs { dev: true, ..Default::default() });
     let fee_recipient = Address::random();
     let NodeHandle { node, .. } = NodeBuilder::new(node_config.clone())
-        .testing_node(exec.clone())
+        .testing_node(runtime.clone())
         .with_types_and_provider::<EthereumNode, BlockchainProvider<_>>()
         .with_components(EthereumNode::components())
         .with_add_ons(EthereumAddOns::default())

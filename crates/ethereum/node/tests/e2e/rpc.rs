@@ -344,7 +344,7 @@ async fn test_eth_config() -> eyre::Result<()> {
 async fn test_admin_external_ip() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     // Chain spec with test allocs
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
@@ -362,7 +362,7 @@ async fn test_admin_external_ip() -> eyre::Result<()> {
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(exec)
+        .testing_node(runtime)
         .node(EthereumNode::default())
         .launch()
         .await?;

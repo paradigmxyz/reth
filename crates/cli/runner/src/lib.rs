@@ -132,8 +132,8 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        let executor = self.runtime.clone();
-        self.runtime.handle().block_on(run_until_ctrl_c(f(executor)))?;
+        let rt = self.runtime.clone();
+        self.runtime.handle().block_on(run_until_ctrl_c(f(rt)))?;
         Ok(())
     }
 

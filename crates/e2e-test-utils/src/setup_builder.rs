@@ -112,7 +112,7 @@ where
         Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
         Wallet,
     )> {
-        let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
+        let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
 
         let network_config = NetworkArgs {
             discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
@@ -151,7 +151,7 @@ where
                 let span = span!(Level::INFO, "node", idx);
                 let node = N::default();
                 let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-                    .testing_node(exec.clone())
+                    .testing_node(runtime.clone())
                     .with_types_and_provider::<N, BlockchainProvider<_>>()
                     .with_components(node.components_builder())
                     .with_add_ons(node.add_ons())

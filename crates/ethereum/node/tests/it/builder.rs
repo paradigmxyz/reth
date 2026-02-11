@@ -46,13 +46,13 @@ fn test_basic_setup() {
 
 #[tokio::test]
 async fn test_eth_launcher() {
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
     let config = NodeConfig::test();
     let db = create_test_rw_db();
     let _builder =
         NodeBuilder::new(config)
             .with_database(db)
-            .with_launch_context(exec.clone())
+            .with_launch_context(runtime.clone())
             .with_types_and_provider::<EthereumNode, BlockchainProvider<
                 NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
             >>()
@@ -64,7 +64,7 @@ async fn test_eth_launcher() {
             })
             .launch_with_fn(|builder| {
                 let launcher = EngineNodeLauncher::new(
-                    exec.clone(),
+                    runtime.clone(),
                     builder.config().datadir(),
                     Default::default(),
                 );
@@ -81,13 +81,13 @@ fn test_eth_launcher_with_tokio_runtime() {
     let custom_rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     main_rt.block_on(async {
-        let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+        let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
         let config = NodeConfig::test();
         let db = create_test_rw_db();
         let _builder =
             NodeBuilder::new(config)
                 .with_database(db)
-                .with_launch_context(exec.clone())
+                .with_launch_context(runtime.clone())
                 .with_types_and_provider::<EthereumNode, BlockchainProvider<
                     NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
                 >>()
@@ -101,7 +101,7 @@ fn test_eth_launcher_with_tokio_runtime() {
                 })
                 .launch_with_fn(|builder| {
                     let launcher = EngineNodeLauncher::new(
-                        exec.clone(),
+                        runtime.clone(),
                         builder.config().datadir(),
                         Default::default(),
                     );

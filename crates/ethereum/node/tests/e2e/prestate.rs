@@ -29,7 +29,7 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     let mut genesis: Genesis = MAINNET.genesis().clone();
     genesis.coinbase = address!("0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5");
 
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let expected_frame = expected_snapshot_frame()?;
     let prestate_mode = match &expected_frame {
@@ -62,7 +62,7 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     );
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(exec)
+        .testing_node(runtime)
         .node(EthereumNode::default())
         .launch()
         .await?;

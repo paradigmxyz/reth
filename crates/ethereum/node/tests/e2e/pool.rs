@@ -24,7 +24,7 @@ use std::{sync::Arc, time::Duration};
 #[tokio::test]
 async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let executor = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -48,7 +48,7 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
         .with_unused_ports()
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(executor.clone())
+        .testing_node(runtime.clone())
         .node(EthereumNode::default())
         .launch()
         .await?;
@@ -62,13 +62,13 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
         ..Default::default()
     };
 
-    executor.spawn_critical_task(
+    runtime.spawn_critical_task(
         "txpool maintenance task",
         reth_transaction_pool::maintain::maintain_transaction_pool_future(
             node.inner.provider.clone(),
             txpool.clone(),
             node.inner.provider.clone().canonical_state_stream(),
-            executor.clone(),
+            runtime.clone(),
             config,
         ),
     );
@@ -97,7 +97,7 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
 #[tokio::test]
 async fn maintain_txpool_reorg() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let executor = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -122,7 +122,7 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
         .with_unused_ports()
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(executor.clone())
+        .testing_node(runtime.clone())
         .node(EthereumNode::default())
         .launch()
         .await?;
@@ -133,13 +133,13 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
     let w1 = wallets.first().unwrap();
     let w2 = wallets.last().unwrap();
 
-    executor.spawn_critical_task(
+    runtime.spawn_critical_task(
         "txpool maintenance task",
         reth_transaction_pool::maintain::maintain_transaction_pool_future(
             node.inner.provider.clone(),
             txpool.clone(),
             node.inner.provider.clone().canonical_state_stream(),
-            executor.clone(),
+            runtime.clone(),
             reth_transaction_pool::maintain::MaintainPoolConfig::default(),
         ),
     );
@@ -229,7 +229,7 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
 #[tokio::test]
 async fn maintain_txpool_commit() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let executor = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -253,7 +253,7 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
         .with_unused_ports()
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(executor.clone())
+        .testing_node(runtime.clone())
         .node(EthereumNode::default())
         .launch()
         .await?;
@@ -262,13 +262,13 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
 
     let wallet = Wallet::default();
 
-    executor.spawn_critical_task(
+    runtime.spawn_critical_task(
         "txpool maintenance task",
         reth_transaction_pool::maintain::maintain_transaction_pool_future(
             node.inner.provider.clone(),
             txpool.clone(),
             node.inner.provider.clone().canonical_state_stream(),
-            executor.clone(),
+            runtime.clone(),
             reth_transaction_pool::maintain::MaintainPoolConfig::default(),
         ),
     );

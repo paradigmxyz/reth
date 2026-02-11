@@ -176,7 +176,7 @@ pub struct TestExExHandle {
     /// Channel for sending notifications to the Execution Extension
     pub notifications_tx: Sender<ExExNotification>,
     /// Node task runtime
-    pub tasks: Runtime,
+    pub runtime: Runtime,
     /// WAL temp directory handle
     _wal_directory: TempDir,
 }
@@ -266,9 +266,9 @@ pub async fn test_exex_context_with_chain_spec(
     )
     .await?;
     let network = network_manager.handle().clone();
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
-    let task_executor = exec.clone();
-    exec.spawn_task(network_manager);
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let task_executor = runtime.clone();
+    runtime.spawn_task(network_manager);
 
     let (_, payload_builder_handle) = NoopPayloadBuilderService::<EthEngineTypes>::new();
 
@@ -321,7 +321,7 @@ pub async fn test_exex_context_with_chain_spec(
             provider_factory,
             events_rx,
             notifications_tx,
-            tasks: exec,
+            runtime,
             _wal_directory: wal_directory,
         },
     ))

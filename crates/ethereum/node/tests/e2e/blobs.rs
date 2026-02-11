@@ -20,7 +20,7 @@ use std::{
 #[tokio::test]
 async fn can_handle_blobs() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
@@ -36,7 +36,7 @@ async fn can_handle_blobs() -> eyre::Result<()> {
         .with_unused_ports()
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(exec.clone())
+        .testing_node(runtime.clone())
         .node(EthereumNode::default())
         .launch()
         .await?;
@@ -91,7 +91,7 @@ async fn can_handle_blobs() -> eyre::Result<()> {
 #[tokio::test]
 async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
@@ -105,7 +105,7 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
             .with_force_blob_sidecar_upcasting(),
     );
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(exec.clone())
+        .testing_node(runtime.clone())
         .node(EthereumNode::default())
         .launch()
         .await?;
@@ -144,7 +144,7 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
 #[tokio::test]
 async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     // Osaka activates in 2 slots
@@ -167,7 +167,7 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
             .with_force_blob_sidecar_upcasting(),
     );
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(exec.clone())
+        .testing_node(runtime.clone())
         .node(EthereumNode::default())
         .launch()
         .await?;

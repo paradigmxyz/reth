@@ -66,7 +66,7 @@ pub async fn setup_engine_with_chain_import(
         + Copy
         + 'static,
 ) -> eyre::Result<ChainImportResult> {
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
 
     let network_config = NetworkArgs {
         discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
@@ -219,7 +219,7 @@ pub async fn setup_engine_with_chain_import(
         let node = EthereumNode::default();
 
         let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-            .testing_node_with_datadir(exec.clone(), datadir.clone())
+            .testing_node_with_datadir(runtime.clone(), datadir.clone())
             .with_types_and_provider::<EthereumNode, BlockchainProvider<_>>()
             .with_components(node.components_builder())
             .with_add_ons(node.add_ons())

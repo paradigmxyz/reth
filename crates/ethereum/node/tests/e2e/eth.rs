@@ -57,7 +57,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
 #[cfg(unix)]
 async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     // Chain spec with test allocs
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
@@ -75,7 +75,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http().with_auth_ipc());
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(exec)
+        .testing_node(runtime)
         .node(EthereumNode::default())
         .launch()
         .await?;
@@ -104,7 +104,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
 #[cfg(unix)]
 async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     // Chain spec with test allocs
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
@@ -119,7 +119,7 @@ async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyr
     // Node setup
     let node_config = NodeConfig::test().with_chain(chain_spec);
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(exec)
+        .testing_node(runtime)
         .node(EthereumNode::default())
         .launch()
         .await?;
@@ -188,7 +188,7 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let exec = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
@@ -205,7 +205,7 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
         );
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(exec)
+        .testing_node(runtime)
         .node(EthereumNode::default())
         .launch()
         .await?;
