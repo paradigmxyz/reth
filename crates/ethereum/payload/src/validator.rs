@@ -38,6 +38,16 @@ impl<ChainSpec: EthereumHardforks> EthereumExecutionPayloadValidator<ChainSpec> 
     ) -> Result<SealedBlock<Block<T>>, PayloadError> {
         ensure_well_formed_payload(&self.chain_spec, payload)
     }
+
+    /// Like [`Self::ensure_well_formed_payload`], but reuses already-decoded transactions
+    /// instead of re-decoding from raw payload bytes.
+    pub fn ensure_well_formed_payload_with_transactions<T: SignedTransaction>(
+        &self,
+        payload: ExecutionData,
+        transactions: Vec<T>,
+    ) -> Result<SealedBlock<Block<T>>, PayloadError> {
+        ensure_well_formed_payload_with_transactions(&self.chain_spec, payload, transactions)
+    }
 }
 
 /// Ensures that the given payload does not violate any consensus rules that concern the block's
@@ -79,6 +89,58 @@ where
     let sealed_block = payload.try_into_block_with_sidecar(&sidecar)?.seal_slow();
 
     // Ensure the hash included in the payload matches the block hash
+    if expected_hash != sealed_block.hash() {
+        return Err(PayloadError::BlockHash {
+            execution: sealed_block.hash(),
+            consensus: expected_hash,
+        })
+    }
+
+    shanghai::ensure_well_formed_fields(
+        sealed_block.body(),
+        chain_spec.is_shanghai_active_at_timestamp(sealed_block.timestamp),
+    )?;
+
+    cancun::ensure_well_formed_fields(
+        &sealed_block,
+        sidecar.cancun(),
+        chain_spec.is_cancun_active_at_timestamp(sealed_block.timestamp),
+    )?;
+
+    prague::ensure_well_formed_fields(
+        sealed_block.body(),
+        sidecar.prague(),
+        chain_spec.is_prague_active_at_timestamp(sealed_block.timestamp),
+    )?;
+
+    Ok(sealed_block)
+}
+
+/// Like [`ensure_well_formed_payload`], but reuses already-decoded transactions instead of
+/// re-decoding from raw payload bytes.
+///
+/// This avoids the redundant `decode_2718` call for each transaction when they have already been
+/// decoded and recovered during execution.
+pub fn ensure_well_formed_payload_with_transactions<ChainSpec, T>(
+    chain_spec: ChainSpec,
+    payload: ExecutionData,
+    transactions: Vec<T>,
+) -> Result<SealedBlock<Block<T>>, PayloadError>
+where
+    ChainSpec: EthereumHardforks,
+    T: SignedTransaction,
+{
+    let ExecutionData { payload, sidecar } = payload;
+
+    let expected_hash = payload.block_hash();
+
+    let mut txs_iter = transactions.into_iter();
+    let sealed_block = payload
+        .try_into_block_with_sidecar_with::<T, _, PayloadError>(&sidecar, |_raw_bytes| {
+            txs_iter.next().ok_or(PayloadError::Decode(alloy_rlp::Error::InputTooShort))
+        })?
+        .seal_slow();
+
     if expected_hash != sealed_block.hash() {
         return Err(PayloadError::BlockHash {
             execution: sealed_block.hash(),
