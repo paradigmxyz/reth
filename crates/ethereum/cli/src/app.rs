@@ -177,9 +177,7 @@ where
         Commands::Prune(command) => runner.run_command_until_exit(|ctx| command.execute::<N>(ctx)),
         #[cfg(feature = "dev")]
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::ReExecute(command) => {
-            runner.run_until_ctrl_c(command.execute::<N>(components))
-        }
+        Commands::ReExecute(command) => runner.run_until_ctrl_c(command.execute::<N>(components)),
         Commands::Ext(command) => command.execute(runner),
     }
 }

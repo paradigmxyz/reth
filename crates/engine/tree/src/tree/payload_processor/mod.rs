@@ -1000,9 +1000,7 @@ mod tests {
     use super::PayloadExecutionCache;
     use crate::tree::{
         cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
-        payload_processor::{
-            evm_state_to_hashed_post_state, PayloadProcessor,
-        },
+        payload_processor::{evm_state_to_hashed_post_state, PayloadProcessor},
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };
