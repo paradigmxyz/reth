@@ -16,3 +16,20 @@ impl KeyHasher for KeccakKeyHasher {
         keccak256(bytes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_keccak_key_hasher_always_hashes_regardless_of_length() {
+        use alloy_primitives::Address;
+
+        let addr = Address::repeat_byte(0x42);
+        assert_eq!(KeccakKeyHasher::hash_key(addr), keccak256(addr));
+
+        let slot = B256::repeat_byte(0x42);
+        assert_eq!(KeccakKeyHasher::hash_key(slot), keccak256(slot));
+        assert_ne!(KeccakKeyHasher::hash_key(slot), slot);
+    }
+}

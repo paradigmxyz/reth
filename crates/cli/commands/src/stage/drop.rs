@@ -128,8 +128,13 @@ impl<C: ChainSpecParser> Command<C> {
                 reset_stage_checkpoint(tx, StageId::SenderRecovery)?;
             }
             StageEnum::Execution => {
-                tx.clear::<tables::PlainAccountState>()?;
-                tx.clear::<tables::PlainStorageState>()?;
+                if provider_rw.cached_storage_settings().use_hashed_state {
+                    tx.clear::<tables::HashedAccounts>()?;
+                    tx.clear::<tables::HashedStorages>()?;
+                } else {
+                    tx.clear::<tables::PlainAccountState>()?;
+                    tx.clear::<tables::PlainStorageState>()?;
+                }
                 tx.clear::<tables::AccountChangeSets>()?;
                 tx.clear::<tables::StorageChangeSets>()?;
                 tx.clear::<tables::Bytecodes>()?;

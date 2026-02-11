@@ -5,6 +5,7 @@ use crate::{
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{
+    keccak256,
     map::{AddressMap, HashMap},
     Address, BlockNumber, TxNumber, B256,
 };
@@ -1324,10 +1325,12 @@ impl RocksDBProvider {
 
             // Iterate through storage reverts - these are exactly the slots that have
             // changesets written, ensuring history indices match changeset entries.
+            let use_hashed = ctx.storage_settings.use_hashed_state;
             for storage_block_reverts in reverts.storage {
                 for revert in storage_block_reverts {
                     for (slot, _) in revert.storage_revert {
-                        let key = B256::new(slot.to_be_bytes());
+                        let plain_key = B256::new(slot.to_be_bytes());
+                        let key = if use_hashed { keccak256(plain_key) } else { plain_key };
                         storage_history
                             .entry((revert.address, key))
                             .or_default()
