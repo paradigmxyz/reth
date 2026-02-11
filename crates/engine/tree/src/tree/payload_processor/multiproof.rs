@@ -989,6 +989,93 @@ impl MultiProofTask {
         state_updates + num_chunks as u64
     }
 
+    /// Dispatches a merged hashed state update as a single proof request without chunking.
+    ///
+    /// Used by the small-block batching flush path. Since the merged state originates from
+    /// buffered updates that were already under `SMALL_BLOCK_STATE_UPDATE_BATCH_THRESHOLD`,
+    /// the target count is small enough to process in one proof worker. Skipping
+    /// `dispatch_with_chunking` eliminates the `chunking_length` computation, chunk iterator
+    /// allocation, and potential multi-dispatch overhead.
+    ///
+    /// Also skips `multi_added_removed_keys.update_with_state()` since removed keys were
+    /// tracked per-update during buffering.
+    fn on_batched_state_update_single_dispatch(
+        &mut self,
+        source: Source,
+        hashed_state_update: HashedPostState,
+    ) -> u64 {
+        let (fetched_state_update, not_fetched_state_update) = hashed_state_update
+            .partition_by_targets(&self.fetched_proof_targets, &self.multi_added_removed_keys);
+
+        let mut state_updates = 0;
+        if !fetched_state_update.is_empty() {
+            let _ = self.tx.send(MultiProofMessage::EmptyProof {
+                sequence_number: self.proof_sequencer.next_sequence(),
+                state: fetched_state_update,
+            });
+            state_updates += 1;
+        }
+
+        // Build MultiAddedRemovedKeys scoped to the not-fetched accounts only
+        let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
+            account: self.multi_added_removed_keys.account.clone(),
+            storages: {
+                let mut storages = B256Map::with_capacity_and_hasher(
+                    not_fetched_state_update.storages.len(),
+                    Default::default(),
+                );
+                for account in not_fetched_state_update
+                    .storages
+                    .keys()
+                    .chain(not_fetched_state_update.accounts.keys())
+                {
+                    if let hash_map::Entry::Vacant(entry) = storages.entry(*account) {
+                        entry.insert(
+                            self.multi_added_removed_keys
+                                .storages
+                                .get(account)
+                                .cloned()
+                                .unwrap_or_default(),
+                        );
+                    }
+                }
+                storages
+            },
+        });
+
+        // Single dispatch — no chunking. For small blocks this is always sufficient.
+        let proof_targets = get_proof_targets(
+            &not_fetched_state_update,
+            &self.fetched_proof_targets,
+            &multi_added_removed_keys,
+            self.v2_proofs_enabled,
+        );
+
+        let mut spawned_proof_targets = MultiProofTargets::default();
+        extend_multiproof_targets(&mut spawned_proof_targets, &proof_targets);
+
+        self.multiproof_manager.dispatch(MultiproofInput {
+            source: Some(source),
+            hashed_state_update: not_fetched_state_update,
+            proof_targets,
+            proof_sequence_number: self.proof_sequencer.next_sequence(),
+            state_root_message_sender: self.tx.clone(),
+            multi_added_removed_keys: Some(multi_added_removed_keys),
+        });
+
+        self.metrics
+            .state_update_proof_targets_accounts_histogram
+            .record(spawned_proof_targets.len() as f64);
+        self.metrics
+            .state_update_proof_targets_storages_histogram
+            .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
+        self.metrics.state_update_proof_chunks_histogram.record(1.0);
+
+        self.fetched_proof_targets.extend(spawned_proof_targets);
+
+        state_updates + 1
+    }
+
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
     fn on_proof(
         &mut self,
@@ -1224,9 +1311,9 @@ impl MultiProofTask {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
 
                 // Flush small-block batch: merge all buffered state updates into one and
-                // dispatch a single proof request.
-                if let Some(buffered) = ctx.disable_batching()
-                    && !buffered.is_empty()
+                // dispatch as a single proof request, bypassing chunking entirely.
+                if let Some(buffered) = ctx.disable_batching() &&
+                    !buffered.is_empty()
                 {
                     // Merge all buffered updates into a single HashedPostState.
                     // multi_added_removed_keys was already updated per-update during
@@ -1243,8 +1330,10 @@ impl MultiProofTask {
                         "Flushing small-block batch as single proof request"
                     );
 
+                    // Use single-dispatch path: skips dispatch_with_chunking to
+                    // guarantee exactly one proof request for the merged state.
                     batch_metrics.state_update_proofs_requested += self
-                        .on_hashed_state_update_no_removed_keys_update(
+                        .on_batched_state_update_single_dispatch(
                             Source::Evm(StateChangeSource::Transaction(0)),
                             merged,
                         );
