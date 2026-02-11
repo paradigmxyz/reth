@@ -123,10 +123,8 @@ pub struct ProofWorkerHandle {
     account_worker_count: usize,
     /// Whether V2 storage proofs are enabled
     v2_proofs_enabled: bool,
-    /// Dedicated rayon pool for storage proof workers.
-    _storage_pool: Arc<rayon::ThreadPool>,
-    /// Dedicated rayon pool for account proof workers.
-    _account_pool: Arc<rayon::ThreadPool>,
+    /// Runtime handle that owns the proof worker pools.
+    _runtime: Runtime,
 }
 
 impl ProofWorkerHandle {
@@ -142,7 +140,7 @@ impl ProofWorkerHandle {
     /// - `account_worker_count`: Number of account workers to spawn
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
     pub fn new<Factory>(
-        _runtime: &Runtime,
+        runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         storage_worker_count: usize,
         account_worker_count: usize,
@@ -157,8 +155,6 @@ impl ProofWorkerHandle {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
-        // Initialize availability counters at zero. Each worker will increment when it
-        // successfully initializes, ensuring only healthy workers are counted.
         let storage_available_workers = Arc::<AtomicUsize>::default();
         let account_available_workers = Arc::<AtomicUsize>::default();
 
@@ -172,14 +168,9 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
+        let storage_pool = runtime.proof_storage_worker_pool();
         let task_ctx_for_storage = task_ctx.clone();
         let cached_storage_roots_for_storage = cached_storage_roots.clone();
-
-        let storage_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(storage_worker_count)
-            .thread_name(|i| format!("trie-storage-{i}"))
-            .build()
-            .expect("failed to build storage proof worker pool");
 
         for worker_id in 0..storage_worker_count {
             let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
@@ -218,11 +209,7 @@ impl ProofWorkerHandle {
             });
         }
 
-        let account_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(account_worker_count)
-            .thread_name(|i| format!("trie-account-{i}"))
-            .build()
-            .expect("failed to build account proof worker pool");
+        let account_pool = runtime.proof_account_worker_pool();
 
         for worker_id in 0..account_worker_count {
             let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
@@ -271,8 +258,7 @@ impl ProofWorkerHandle {
             storage_worker_count,
             account_worker_count,
             v2_proofs_enabled,
-            _storage_pool: Arc::new(storage_pool),
-            _account_pool: Arc::new(account_pool),
+            _runtime: runtime.clone(),
         }
     }
 
