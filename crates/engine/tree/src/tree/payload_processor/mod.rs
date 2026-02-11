@@ -422,7 +422,7 @@ where
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
@@ -431,11 +431,7 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        if self.disable_transaction_prewarming {
-            // if no transactions should be executed we clear them but still spawn the task for
-            // caching updates
-            transactions = mpsc::channel().1;
-        }
+        let skip_prewarm = self.disable_transaction_prewarming;
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -464,7 +460,9 @@ where
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking(move || {
-                let mode = if let Some(bal) = bal {
+                let mode = if skip_prewarm {
+                    PrewarmMode::Skipped
+                } else if let Some(bal) = bal {
                     PrewarmMode::BlockAccessList(bal)
                 } else {
                     PrewarmMode::Transactions(transactions)
