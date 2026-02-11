@@ -114,24 +114,9 @@ impl EthereumNode {
     /// }
     /// ```
     ///
-    /// # Open a Providerfactory manually with all required components
-    ///
-    /// ```no_run
-    /// use reth_chainspec::ChainSpecBuilder;
-    /// use reth_db::open_db_read_only;
-    /// use reth_node_ethereum::EthereumNode;
-    /// use reth_provider::providers::{RocksDBProvider, StaticFileProvider};
-    ///
-    /// fn demo(runtime: reth_tasks::Runtime) {
-    ///     let factory = EthereumNode::provider_factory_builder()
-    ///         .db(open_db_read_only("db", Default::default()).unwrap())
-    ///         .chainspec(ChainSpecBuilder::mainnet().build().into())
-    ///         .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
-    ///         .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())
-    ///         .runtime(runtime)
-    ///         .build_provider_factory();
-    /// }
-    /// ```
+    /// See also [`ProviderFactory::new`](reth_provider::ProviderFactory::new) for constructing
+    /// a [`ProviderFactory`](reth_provider::ProviderFactory) manually with all required
+    /// components.
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
         ProviderFactoryBuilder::default()
     }
