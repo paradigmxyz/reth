@@ -24,6 +24,7 @@ use reth_trie_parallel::{
     },
     targets_v2::MultiProofTargetsV2,
 };
+use rayon::prelude::*;
 use revm_primitives::map::{hash_map, B256Map};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
@@ -202,35 +203,31 @@ impl Drop for StateHookSender {
 }
 
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::with_capacity(update.len());
-
-    for (address, account) in update {
-        if account.is_touched() {
+    update
+        .into_par_iter()
+        .filter(|(_address, account)| account.is_touched())
+        .map(|(address, account)| {
             let hashed_address = keccak256(address);
-            trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
-
             let destroyed = account.is_selfdestructed();
             let info = if destroyed { None } else { Some(account.info.into()) };
-            hashed_state.accounts.insert(hashed_address, info);
 
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
+            let hashed_storage = if destroyed {
+                Some(HashedStorage::new(true))
+            } else {
+                let storage = HashedStorage::from_iter(
+                    false,
+                    account
+                        .storage
+                        .into_iter()
+                        .filter(|(_slot, value)| value.is_changed())
+                        .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value)),
+                );
+                (!storage.is_empty()).then_some(storage)
+            };
 
-            if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
-            }
-        }
-    }
-
-    hashed_state
+            (hashed_address, info, hashed_storage)
+        })
+        .collect()
 }
 
 /// Extends a `MultiProofTargets` with the contents of a `VersionedMultiProofTargets`,
