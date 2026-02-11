@@ -124,16 +124,12 @@ impl CliRunner {
     }
 
     /// Executes a regular future until completion or until external signal received.
-    ///
-    /// The provided closure receives a [`TaskExecutor`] that can be used to spawn tasks or
-    /// threaded through to subsystems that need it.
-    pub fn run_until_ctrl_c<F, E>(self, f: impl FnOnce(TaskExecutor) -> F) -> Result<(), E>
+    pub fn run_until_ctrl_c<F, E>(self, fut: F) -> Result<(), E>
     where
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        let rt = self.runtime.clone();
-        self.runtime.handle().block_on(run_until_ctrl_c(f(rt)))?;
+        self.runtime.handle().block_on(run_until_ctrl_c(fut))?;
         Ok(())
     }
 

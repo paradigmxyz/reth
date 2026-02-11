@@ -172,13 +172,13 @@ where
         Commands::Stage(command) => {
             runner.run_command_until_exit(|ctx| command.execute::<N, _>(ctx, components))
         }
-        Commands::P2P(command) => runner.run_until_ctrl_c(|_| command.execute::<N>()),
-        Commands::Config(command) => runner.run_until_ctrl_c(|_| command.execute()),
+        Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<N>()),
+        Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::Prune(command) => runner.run_command_until_exit(|ctx| command.execute::<N>(ctx)),
         #[cfg(feature = "dev")]
-        Commands::TestVectors(command) => runner.run_until_ctrl_c(|_| command.execute()),
+        Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::ReExecute(command) => {
-            runner.run_until_ctrl_c(|_| command.execute::<N>(components))
+            runner.run_until_ctrl_c(command.execute::<N>(components))
         }
         Commands::Ext(command) => command.execute(runner),
     }
