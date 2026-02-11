@@ -21,11 +21,11 @@ impl<T> DatabaseHashedCursorFactory<T> {
 
 impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&TX> {
     type AccountCursor<'a>
-        = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>
+        = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<'a, tables::HashedAccounts>>
     where
         Self: 'a;
     type StorageCursor<'a>
-        = DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>
+        = DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<'a, tables::HashedStorages>>
     where
         Self: 'a;
 
