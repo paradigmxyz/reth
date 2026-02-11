@@ -247,6 +247,30 @@ where
         // Capture parent_state_root before env is moved into spawn_caching_with
         let parent_state_root = env.parent_state_root;
 
+        // Skip transaction prewarming for small blocks (< 3 txs). The overhead
+        // of spawning prewarm workers (each building a full EVM instance + state
+        // provider) exceeds the benefit for 0-2 transactions. Inspired by
+        // Nethermind's conditional prewarming threshold.
+        let transaction_count = env.transaction_count;
+        let skip_prewarming_small_block = transaction_count > 0 && transaction_count < 3;
+
+        // If the block is too small, replace the prewarm receiver with an empty
+        // channel so workers receive nothing and exit immediately.
+        let prewarm_rx = if skip_prewarming_small_block {
+            debug!(
+                target: "engine::tree::payload_processor",
+                transaction_count,
+                "skipping transaction prewarming for small block"
+            );
+            mpsc::channel().1
+        } else {
+            prewarm_rx
+        };
+
+        // For small blocks, also skip BAL prewarming since the overhead is not
+        // worth it.
+        let bal = if skip_prewarming_small_block { None } else { bal };
+
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
             // When BAL is present, use BAL prewarming and send BAL to multiproof

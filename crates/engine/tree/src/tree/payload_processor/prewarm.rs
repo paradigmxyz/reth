@@ -156,8 +156,18 @@ where
             // When transaction_count is 0, it means the count is unknown. In this case, spawn
             // max workers to handle potentially many transactions in parallel rather
             // than bottlenecking on a single worker.
+            //
+            // For blocks with fewer than 3 transactions, skip prewarming entirely
+            // as the overhead of spawning workers exceeds the benefit.
             let transaction_count = ctx.env.transaction_count;
-            let workers_needed = if transaction_count == 0 {
+            let workers_needed = if transaction_count > 0 && transaction_count < 3 {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    transaction_count,
+                    "skipping transaction prewarming for small block"
+                );
+                0
+            } else if transaction_count == 0 {
                 max_concurrency
             } else {
                 transaction_count.min(max_concurrency)
