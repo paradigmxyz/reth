@@ -57,6 +57,9 @@ async fn dev_node_eth_syncing() {
 
     let provider = ProviderBuilder::new().connect_http(reth.endpoint().parse().unwrap());
 
+    // give the node a moment to fully initialize
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     // eth_syncing should not fail on a dev node
     let _syncing = provider.syncing().await.expect("eth_syncing failed");
 }
