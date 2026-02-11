@@ -512,7 +512,7 @@ impl<
         hashed_storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         if !self.provider.cached_storage_settings().use_hashed_state {
-            unreachable!("storage_by_hashed_key called without use_hashed_state enabled")
+            return Err(ProviderError::UnsupportedProvider)
         }
         self.storage_by_lookup_key(address, StorageSlotKey::hashed(hashed_storage_key))
     }

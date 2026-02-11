@@ -204,7 +204,7 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
         if self.0.cached_storage_settings().use_hashed_state {
             self.hashed_storage_lookup(alloy_primitives::keccak256(address), hashed_storage_key)
         } else {
-            unreachable!("storage_by_hashed_key called without use_hashed_state enabled")
+            Err(ProviderError::UnsupportedProvider)
         }
     }
 }

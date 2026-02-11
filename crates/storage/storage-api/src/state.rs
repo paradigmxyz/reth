@@ -58,11 +58,9 @@ pub trait StateProvider:
     /// to avoid double-hashing.
     fn storage_by_hashed_key(
         &self,
-        _address: Address,
-        _hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        unreachable!("storage_by_hashed_key is only supported by providers with hashed state")
-    }
+        address: Address,
+        hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>>;
 
     /// Get account code by its address.
     ///
