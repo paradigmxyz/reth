@@ -795,7 +795,7 @@ impl RuntimeBuilder {
     /// the join handle if you need to poll for panic errors.
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn build(self) -> Result<Runtime, RuntimeBuildError> {
-        debug!(?self.config, "Building runtime");
+        tracing::debug!(?self.config, "Building runtime");
         let config = self.config;
 
         let (owned_runtime, handle) = match &config.tokio {
