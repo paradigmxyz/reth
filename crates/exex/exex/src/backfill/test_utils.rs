@@ -16,9 +16,9 @@ use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProvider,
     ProviderFactory,
 };
-use reth_trie_common::KeccakKeyHasher;
 use reth_revm::database::StateProviderDatabase;
 use reth_testing_utils::generators::sign_tx_with_key_pair;
+use reth_trie_common::KeccakKeyHasher;
 use secp256k1::Keypair;
 
 pub(crate) fn to_execution_outcome(
@@ -80,11 +80,7 @@ where
     // Commit the block's execution outcome to the database
     let hashed_state = execution_outcome.hash_state_slow::<KeccakKeyHasher>().into_sorted();
     let provider_rw = provider_factory.provider_rw()?;
-    provider_rw.append_blocks_with_state(
-        vec![block.clone()],
-        &execution_outcome,
-        hashed_state,
-    )?;
+    provider_rw.append_blocks_with_state(vec![block.clone()], &execution_outcome, hashed_state)?;
     provider_rw.commit()?;
 
     Ok(block_execution_output)
