@@ -64,6 +64,7 @@ impl CliRunner {
     {
         let (context, task_manager_handle) = cli_context(&self.runtime);
 
+        // Executes the command until it finished or ctrl-c was fired
         let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
             task_manager_handle,
             run_until_ctrl_c(command(context)),
@@ -73,6 +74,9 @@ impl CliRunner {
             error!(target: "reth::cli", "shutting down due to error");
         } else {
             debug!(target: "reth::cli", "shutting down gracefully");
+            // after the command has finished or exit signal was received we shutdown the
+            // runtime which fires the shutdown signal to all tasks spawned via the task
+            // executor and awaiting on tasks spawned with graceful shutdown
             self.runtime.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
         }
 
@@ -94,10 +98,12 @@ impl CliRunner {
     {
         let (context, task_manager_handle) = cli_context(&self.runtime);
 
+        // Spawn the command on the blocking thread pool
         let handle = self.runtime.handle().clone();
         let handle2 = handle.clone();
         let command_handle = handle.spawn_blocking(move || handle2.block_on(command(context)));
 
+        // Wait for the command to complete or ctrl-c
         let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
             task_manager_handle,
             run_until_ctrl_c(
