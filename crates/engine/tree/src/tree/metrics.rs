@@ -235,6 +235,13 @@ impl ForkchoiceUpdatedMetrics {
     }
 }
 
+/// Width of each gas bucket in gas units (10 million).
+const GAS_BUCKET_SIZE: u64 = 10_000_000;
+
+/// Number of gas buckets. The last bucket is a catch-all for everything above
+/// `(NUM_GAS_BUCKETS - 1) * GAS_BUCKET_SIZE`.
+const NUM_GAS_BUCKETS: usize = 5;
+
 /// Per-gas-bucket newPayload metrics, initialized once via [`Self::new_with_labels`].
 #[derive(Clone, Metrics)]
 #[metrics(scope = "consensus.engine.beacon")]
@@ -245,18 +252,19 @@ pub(crate) struct NewPayloadGasBucketMetrics {
     pub(crate) new_payload_gas_per_second: Histogram,
 }
 
-/// Holds the five pre-initialized [`NewPayloadGasBucketMetrics`] instances.
+/// Holds pre-initialized [`NewPayloadGasBucketMetrics`] instances, one per gas bucket.
 #[derive(Debug)]
 pub(crate) struct GasBucketMetrics {
-    buckets: [NewPayloadGasBucketMetrics; 5],
+    buckets: [NewPayloadGasBucketMetrics; NUM_GAS_BUCKETS],
 }
 
 impl Default for GasBucketMetrics {
     fn default() -> Self {
-        const LABELS: [&str; 5] = ["<10M", "10-20M", "20-30M", "30-40M", ">40M"];
         Self {
-            buckets: LABELS
-                .map(|l| NewPayloadGasBucketMetrics::new_with_labels(&[("gas_bucket", l)])),
+            buckets: std::array::from_fn(|i| {
+                let label = Self::bucket_label(i);
+                NewPayloadGasBucketMetrics::new_with_labels(&[("gas_bucket", label)])
+            }),
         }
     }
 }
@@ -271,16 +279,22 @@ impl GasBucketMetrics {
     }
 
     fn bucket_index(gas_used: u64) -> usize {
-        const M10: u64 = 10_000_000;
-        const M20: u64 = 20_000_000;
-        const M30: u64 = 30_000_000;
-        const M40: u64 = 40_000_000;
-        match gas_used {
-            0..M10 => 0,
-            M10..M20 => 1,
-            M20..M30 => 2,
-            M30..M40 => 3,
-            _ => 4,
+        let idx = gas_used / GAS_BUCKET_SIZE;
+        (idx as usize).min(NUM_GAS_BUCKETS - 1)
+    }
+
+    /// Returns a human-readable label like `<10M`, `10-20M`, … `>40M`.
+    fn bucket_label(index: usize) -> String {
+        let m = GAS_BUCKET_SIZE / 1_000_000;
+        if index == 0 {
+            format!("<{m}M")
+        } else if index < NUM_GAS_BUCKETS - 1 {
+            let lo = m * index as u64;
+            let hi = lo + m;
+            format!("{lo}-{hi}M")
+        } else {
+            let lo = m * index as u64;
+            format!(">{lo}M")
         }
     }
 }
