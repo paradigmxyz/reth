@@ -22,6 +22,73 @@ pub struct ProofTrieNodeV2 {
     pub masks: Option<BranchNodeMasks>,
 }
 
+impl ProofTrieNodeV2 {
+    /// Converts an iterator of `(path, TrieNode, masks)` tuples into `Vec<ProofTrieNodeV2>`,
+    /// merging extension nodes into their child branch nodes.
+    ///
+    /// The input **must** be sorted in depth-first order (children before parents) for extension
+    /// merging to work correctly.
+    pub fn from_sorted_trie_nodes(
+        iter: impl IntoIterator<Item = (Nibbles, TrieNode, Option<BranchNodeMasks>)>,
+    ) -> Vec<Self> {
+        let iter = iter.into_iter();
+        let mut result = Vec::with_capacity(iter.size_hint().0);
+
+        for (path, node, masks) in iter {
+            match node {
+                TrieNode::EmptyRoot => {
+                    result.push(Self { path, node: TrieNodeV2::EmptyRoot, masks });
+                }
+                TrieNode::Leaf(leaf) => {
+                    result.push(Self { path, node: TrieNodeV2::Leaf(leaf), masks });
+                }
+                TrieNode::Branch(branch) => {
+                    result.push(Self {
+                        path,
+                        node: TrieNodeV2::Branch(BranchNodeV2 {
+                            key: Nibbles::new(),
+                            stack: branch.stack,
+                            state_mask: branch.state_mask,
+                        }),
+                        masks,
+                    });
+                }
+                TrieNode::Extension(ext) => {
+                    // In depth-first order, the child branch comes BEFORE the parent
+                    // extension. The child branch should be the last item we added to
+                    // result, at path extension.path + extension.key.
+                    let expected_branch_path = path.join(&ext.key);
+
+                    // Check if the last item in result is the child branch
+                    if let Some(last) = result.last_mut() {
+                        if last.path == expected_branch_path {
+                            if let TrieNodeV2::Branch(branch_v2) = &mut last.node {
+                                debug_assert!(
+                                    branch_v2.key.is_empty(),
+                                    "Branch at {:?} already has extension key {:?}",
+                                    last.path,
+                                    branch_v2.key
+                                );
+                                branch_v2.key = ext.key;
+                                last.path = path;
+                                continue;
+                            }
+                        }
+                    }
+
+                    // If we reach here, the extension's child is not a branch in the
+                    // result. This happens when the child branch is hashed (not revealed
+                    // in the proof). In V2 format, extension nodes are always combined
+                    // with their child branch, so we skip extension nodes whose child
+                    // isn't revealed.
+                }
+            }
+        }
+
+        result
+    }
+}
+
 /// Enum representing an MPT trie node.
 ///
 /// This is a V2 representiation, differing from [`TrieNode`] in that branch and extension nodes are

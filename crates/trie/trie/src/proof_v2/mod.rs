@@ -1663,76 +1663,9 @@ mod tests {
     /// its child branch has already been processed and is in the result. We need to pop it and
     /// combine it with the extension.
     fn convert_legacy_proofs_to_v2(legacy_proofs: &[ProofTrieNode]) -> Vec<ProofTrieNodeV2> {
-        let mut result = Vec::with_capacity(legacy_proofs.len());
-
-        for current in legacy_proofs {
-            match &current.node {
-                TrieNode::EmptyRoot => {
-                    result.push(ProofTrieNodeV2 {
-                        path: current.path.clone(),
-                        node: TrieNodeV2::EmptyRoot,
-                        masks: current.masks,
-                    });
-                }
-                TrieNode::Leaf(leaf) => {
-                    result.push(ProofTrieNodeV2 {
-                        path: current.path.clone(),
-                        node: TrieNodeV2::Leaf(leaf.clone()),
-                        masks: current.masks,
-                    });
-                }
-                TrieNode::Branch(branch) => {
-                    result.push(ProofTrieNodeV2 {
-                        path: current.path.clone(),
-                        node: TrieNodeV2::Branch(BranchNodeV2 {
-                            key: Nibbles::new(),
-                            stack: branch.stack.clone(),
-                            state_mask: branch.state_mask,
-                        }),
-                        masks: current.masks,
-                    });
-                }
-                TrieNode::Extension(ext) => {
-                    // In depth-first order, the child branch comes BEFORE the parent extension.
-                    // The child branch should be the last item we added to result, at path
-                    // extension.path + extension.key.
-                    let expected_branch_path = current.path.join(&ext.key);
-
-                    // Check if the last item in result is the child branch
-                    if let Some(last) = result.last_mut() {
-                        if last.path == expected_branch_path {
-                            if let TrieNodeV2::Branch(branch_v2) = &mut last.node {
-                                // The branch's key should be empty (hasn't been combined yet)
-                                debug_assert!(
-                                    branch_v2.key.is_empty(),
-                                    "Branch at {:?} already has extension key {:?}",
-                                    last.path,
-                                    branch_v2.key
-                                );
-
-                                // Update the branch's key with the extension key
-                                branch_v2.key = ext.key.clone();
-
-                                // Update the path to the extension's path (parent path)
-                                last.path = current.path.clone();
-
-                                // Keep the masks from the branch (already set)
-                                continue;
-                            }
-                        }
-                    }
-
-                    // If we reach here, the extension's child is not a branch in the result.
-                    // This happens when the child branch is hashed (not revealed in the proof).
-                    // In V2 format, extension nodes are always combined with their child branch,
-                    // so we skip extension nodes whose child isn't revealed.
-                    // This is expected behavior - the V2 proof calculator also wouldn't include
-                    // such nodes.
-                }
-            }
-        }
-
-        result
+        ProofTrieNodeV2::from_sorted_trie_nodes(legacy_proofs.iter().map(|p| {
+            (p.path.clone(), p.node.clone(), p.masks)
+        }))
     }
 
     /// A test harness for comparing `ProofCalculator` and legacy `Proof` implementations.
