@@ -215,8 +215,7 @@ pub enum RuntimeBuildError {
 
 struct RuntimeInner {
     /// Owned tokio runtime, if we built one. Kept alive via the `Arc<RuntimeInner>`.
-    #[allow(dead_code)]
-    owned_tokio_runtime: Option<TokioRuntime>,
+    _tokio_runtime: Option<TokioRuntime>,
     /// Handle to the tokio runtime.
     handle: Handle,
     /// Receiver of the shutdown signal.
@@ -862,7 +861,7 @@ impl RuntimeBuilder {
         });
 
         let inner = RuntimeInner {
-            owned_tokio_runtime: owned_runtime,
+            _tokio_runtime: owned_runtime,
             handle,
             on_shutdown,
             task_events_tx,
