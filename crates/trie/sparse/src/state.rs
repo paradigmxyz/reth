@@ -1,6 +1,6 @@
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    traits::{SparseTrie as SparseTrieTrait, SparseTrieExt},
+    traits::SparseTrie as SparseTrieTrait,
     ParallelSparseTrie, RevealableSparseTrie,
 };
 use alloc::{collections::VecDeque, vec::Vec};
@@ -1100,8 +1100,8 @@ where
 
 impl<A, S> SparseStateTrie<A, S>
 where
-    A: SparseTrieTrait + SparseTrieExt + Default,
-    S: SparseTrieTrait + SparseTrieExt + Default + Clone,
+    A: SparseTrieTrait + Default,
+    S: SparseTrieTrait + Default + Clone,
 {
     /// Clears all trie data while preserving allocations for reuse.
     ///
@@ -1197,7 +1197,7 @@ struct StorageTries<S = ParallelSparseTrie> {
 }
 
 #[cfg(feature = "std")]
-impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
+impl<S: SparseTrieTrait> StorageTries<S> {
     /// Prunes and evicts storage tries.
     ///
     /// Keeps the top `max_storage_tries` by a score combining size and heat.

@@ -2,7 +2,7 @@ use crate::{
     lower::LowerSparseSubtrie,
     provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrie,
-    SparseTrieExt, SparseTrieUpdates,
+    SparseTrieUpdates,
 };
 use alloc::{borrow::Cow, boxed::Box, vec, vec::Vec};
 use alloy_primitives::{
@@ -1146,9 +1146,7 @@ impl SparseTrie for ParallelSparseTrie {
             subtrie.shrink_values_to(size_per_subtrie);
         }
     }
-}
 
-impl SparseTrieExt for ParallelSparseTrie {
     /// O(1) size hint based on total node count (including hash stubs).
     fn size_hint(&self) -> usize {
         let upper_count = self.upper_subtrie.nodes.len();
@@ -3693,7 +3691,7 @@ mod tests {
     use crate::{
         parallel::ChangedSubtrie,
         provider::{DefaultTrieNodeProvider, RevealedNode, TrieNodeProvider},
-        LeafLookup, LeafLookupError, SparseNode, SparseTrie, SparseTrieExt, SparseTrieUpdates,
+        LeafLookup, LeafLookupError, SparseNode, SparseTrie, SparseTrieUpdates,
     };
     use alloy_primitives::{
         b256, hex,
