@@ -86,6 +86,10 @@ where
 
 /// Prune history indices according to the provided list of highest sharded keys.
 ///
+/// Instead of seeking from scratch for every key (O(log N) per seek in the B-tree),
+/// this uses a single forward cursor pass. Since `highest_sharded_keys` is sorted,
+/// the cursor only advances forward, reusing its position from the previous iteration.
+///
 /// Returns total number of deleted, updated and unchanged entities.
 pub(crate) fn prune_history_indices<Provider, T, SK>(
     provider: &Provider,
@@ -99,14 +103,17 @@ where
 {
     let mut outcomes = PrunedIndices::default();
     let mut cursor = provider.tx_ref().cursor_write::<RawTable<T>>()?;
+    let mut lookahead: Option<(T::Key, RawValue<T::Value>)> = None;
 
     for sharded_key in highest_sharded_keys {
-        // Seek to the shard that has the key >= the given sharded key
-        // TODO: optimize
-        let mut shard = cursor.seek(RawKey::new(sharded_key.clone()))?;
-
-        // Get the highest block number that needs to be deleted for this sharded key
         let to_block = sharded_key.as_ref().highest_block_number;
+
+        let mut shard = match lookahead.take() {
+            Some((la_key, la_val)) if key_matches(&la_key, &sharded_key) => {
+                Some((RawKey::new(la_key), la_val))
+            }
+            _ => cursor.seek(RawKey::new(sharded_key.clone()))?,
+        };
 
         'shard: loop {
             let Some((key, block_nums)) =
@@ -122,7 +129,7 @@ where
                     PruneShardOutcome::Unchanged => outcomes.unchanged += 1,
                 }
             } else {
-                // If such shard doesn't exist, skip to the next sharded key
+                lookahead = Some((key, block_nums));
                 break 'shard
             }
 
@@ -163,14 +170,15 @@ where
     // contain the target block number, as it's in this shard.
     else {
         let blocks = raw_blocks.value()?;
-        let higher_blocks =
-            blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
+        let pruned_count = blocks.rank(to_block);
 
-        // If there were blocks less than or equal to the target one
-        // (so the shard has changed), update the shard.
-        if blocks.len() as usize == higher_blocks.len() {
+        if pruned_count == 0 {
             return Ok(PruneShardOutcome::Unchanged);
         }
+
+        let mut it = blocks.iter();
+        it.advance_to(to_block + 1);
+        let higher_blocks = it.collect::<Vec<_>>();
 
         // If there will be no more blocks in the shard after pruning blocks below target
         // block, we need to remove it, as empty shards are not allowed.
