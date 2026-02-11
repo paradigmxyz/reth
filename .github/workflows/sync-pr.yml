@@ -1,0 +1,61 @@
+# Runs a short sync test on PRs to catch sync regressions early.
+
+name: sync test (PR)
+
+on:
+  pull_request:
+  merge_group:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: "sccache"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    if: github.repository == 'paradigmxyz/reth'
+    name: sync (${{ matrix.chain.bin }})
+    runs-on: depot-ubuntu-latest
+    env:
+      RUST_LOG: info,sync=error
+      RUST_BACKTRACE: 1
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        chain:
+          - build: install
+            bin: reth
+            chain: mainnet
+            tip: "0xdc2d938e4cd0a149681e9e04352953ef5ab399d59bcd5b0357f6c0797470a524"
+            block: 10000
+            unwind-target: "0xc9a85a28e88c546b0872870f7ffc2681dfccfbbd8dd7e38d354583e4dca60bdf"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: rui314/setup-mold@v1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Build ${{ matrix.chain.bin }}
+        run: make ${{ matrix.chain.build }}
+      - name: Run sync
+        run: |
+          ${{ matrix.chain.bin }} node \
+            --chain ${{ matrix.chain.chain }} \
+            --debug.tip ${{ matrix.chain.tip }} \
+            --debug.max-block ${{ matrix.chain.block }} \
+            --debug.terminate
+      - name: Verify the target block hash
+        run: |
+          ${{ matrix.chain.bin }} db --chain ${{ matrix.chain.chain }} get static-file headers ${{ matrix.chain.block }} \
+            | grep ${{ matrix.chain.tip }}
+      - name: Run stage unwind for 100 blocks
+        run: |
+          ${{ matrix.chain.bin }} stage unwind num-blocks 100 --chain ${{ matrix.chain.chain }}
+      - name: Run stage unwind to block hash
+        run: |
+          ${{ matrix.chain.bin }} stage unwind to-block ${{ matrix.chain.unwind-target }} --chain ${{ matrix.chain.chain }}
