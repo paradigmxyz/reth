@@ -236,7 +236,7 @@ where
     {
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.gas_used);
+            self.spawn_tx_iterator(transactions, env.transaction_count);
 
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
@@ -344,7 +344,7 @@ where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.gas_used);
+            self.spawn_tx_iterator(transactions, env.transaction_count);
         // This path doesn't use multiproof, so V2 proofs flag doesn't matter
         let prewarm_handle =
             self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal, false);
@@ -357,16 +357,23 @@ where
         }
     }
 
+    /// Transaction count threshold below which sequential signature recovery is used.
+    ///
+    /// For blocks with fewer than this many transactions, the rayon parallel iterator overhead
+    /// (work-stealing setup, channel-based reorder) exceeds the cost of sequential ECDSA
+    /// recovery. Inspired by Nethermind's `RecoverSignature` which uses sequential `foreach`
+    /// for small blocks.
+    const SMALL_BLOCK_TX_THRESHOLD: usize = 30;
+
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
-    /// For blocks with less than [`SMALL_BLOCK_GAS_THRESHOLD`] gas, uses sequential iteration
-    /// to avoid rayon overhead. Inspired by Nethermind's `RecoverSignature` which uses sequential
-    /// `foreach` for small blocks.
+    /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
+    /// sequential iteration to avoid rayon overhead.
     #[expect(clippy::type_complexity)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
-        gas_used: u64,
+        transaction_count: usize,
     ) -> (
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
@@ -375,12 +382,12 @@ where
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
 
-        if gas_used > 0 && gas_used < SMALL_BLOCK_GAS_THRESHOLD {
+        if transaction_count > 0 && transaction_count < Self::SMALL_BLOCK_TX_THRESHOLD {
             // Sequential path for small blocks — avoids rayon work-stealing setup and
             // channel-based reorder overhead when it costs more than the ECDSA recovery itself.
             debug!(
                 target: "engine::tree::payload_processor",
-                gas_used,
+                transaction_count,
                 "using sequential sig recovery for small block"
             );
             self.executor.spawn_blocking(move || {
