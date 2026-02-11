@@ -356,6 +356,11 @@ where
         }
     }
 
+    /// Below this transaction count, signature recovery runs sequentially in a single task
+    /// instead of using rayon parallelism + BTreeMap reordering. This avoids the fixed overhead
+    /// of thread pool scheduling and cross-task synchronization for small blocks.
+    const SMALL_BLOCK_TX_THRESHOLD: usize = 128;
+
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     #[expect(clippy::type_complexity)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
@@ -367,50 +372,71 @@ where
         usize,
     ) {
         let (transactions, convert) = transactions.into();
-        let transactions = transactions.into_par_iter();
-        let transaction_count_hint = transactions.len();
 
-        let (ooo_tx, ooo_rx) = mpsc::channel();
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
 
-        // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
-        self.executor.spawn_blocking(move || {
-            transactions.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
-                let tx = convert(tx);
-                let tx = tx.map(|tx| {
-                    let (tx_env, tx) = tx.into_parts();
-                    WithTxEnv { tx_env, tx: Arc::new(tx) }
-                });
-                // Only send Ok(_) variants to prewarming task.
-                if let Ok(tx) = &tx {
-                    let _ = prewarm_tx.send(tx.clone());
-                }
-                let _ = ooo_tx.send((idx, tx));
-            });
-        });
+        // Probe length via the parallel iterator to decide which path to use,
+        // then collect back to avoid consuming the data in the parallel form.
+        let par_iter = transactions.into_par_iter();
+        let transaction_count_hint = par_iter.len();
 
-        // Spawn a task that processes out-of-order transactions from the task above and sends them
-        // to the execution task in order.
-        self.executor.spawn_blocking(move || {
-            let mut next_for_execution = 0;
-            let mut queue = BTreeMap::new();
-            while let Ok((idx, tx)) = ooo_rx.recv() {
-                if next_for_execution == idx {
-                    let _ = execute_tx.send(tx);
-                    next_for_execution += 1;
-
-                    while let Some(entry) = queue.first_entry() &&
-                        *entry.key() == next_for_execution
-                    {
-                        let _ = execute_tx.send(entry.remove());
-                        next_for_execution += 1;
+        if transaction_count_hint > 0 && transaction_count_hint < Self::SMALL_BLOCK_TX_THRESHOLD {
+            // Fast path for small blocks: sequential recovery in a single task.
+            // Avoids rayon thread pool scheduling, the intermediate out-of-order channel,
+            // and BTreeMap-based reordering.
+            let transactions: Vec<_> = par_iter.collect();
+            self.executor.spawn_blocking(move || {
+                for raw_tx in transactions {
+                    let tx = convert(raw_tx);
+                    let tx = tx.map(|tx| {
+                        let (tx_env, tx) = tx.into_parts();
+                        WithTxEnv { tx_env, tx: Arc::new(tx) }
+                    });
+                    if let Ok(ref tx) = tx {
+                        let _ = prewarm_tx.send(tx.clone());
                     }
-                } else {
-                    queue.insert(idx, tx);
+                    let _ = execute_tx.send(tx);
                 }
-            }
-        });
+            });
+        } else {
+            // Parallel path for large blocks: rayon par_iter + BTreeMap reordering.
+            let (ooo_tx, ooo_rx) = mpsc::channel();
+
+            self.executor.spawn_blocking(move || {
+                par_iter.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
+                    let tx = convert(tx);
+                    let tx = tx.map(|tx| {
+                        let (tx_env, tx) = tx.into_parts();
+                        WithTxEnv { tx_env, tx: Arc::new(tx) }
+                    });
+                    if let Ok(ref tx) = tx {
+                        let _ = prewarm_tx.send(tx.clone());
+                    }
+                    let _ = ooo_tx.send((idx, tx));
+                });
+            });
+
+            self.executor.spawn_blocking(move || {
+                let mut next_for_execution = 0;
+                let mut queue = BTreeMap::new();
+                while let Ok((idx, tx)) = ooo_rx.recv() {
+                    if next_for_execution == idx {
+                        let _ = execute_tx.send(tx);
+                        next_for_execution += 1;
+
+                        while let Some(entry) = queue.first_entry() &&
+                            *entry.key() == next_for_execution
+                        {
+                            let _ = execute_tx.send(entry.remove());
+                            next_for_execution += 1;
+                        }
+                    } else {
+                        queue.insert(idx, tx);
+                    }
+                }
+            });
+        }
 
         (prewarm_rx, execute_rx, transaction_count_hint)
     }
