@@ -2,13 +2,15 @@
 
 mod fcu_finalized_blocks;
 
+use alloy_rpc_types_engine::PayloadStatusEnum;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
     actions::{
-        CaptureBlock, CompareNodeChainTips, CreateFork, ExpectFcuStatus, MakeCanonical,
-        ProduceBlocks, ProduceBlocksLocally, ProduceInvalidBlocks, ReorgTo, SelectActiveNode,
-        SendNewPayloads, UpdateBlockInfo, ValidateCanonicalTag, WaitForSync,
+        BlockReference, CaptureBlock, CompareNodeChainTips, CreateFork, ExpectFcuStatus,
+        MakeCanonical, ProduceBlocks, ProduceBlocksLocally, ProduceInvalidBlocks, ReorgTo,
+        SelectActiveNode, SendForkchoiceUpdate, SendNewPayloads, SetForkBase, UpdateBlockInfo,
+        ValidateCanonicalTag, WaitForSync,
     },
     setup::{NetworkSetup, Setup},
     TestBuilder,
@@ -400,5 +402,94 @@ async fn test_engine_tree_fcu_extends_canon_chain_v2_e2e() -> Result<()> {
 
     test.run::<EthereumNode>().await?;
 
+    Ok(())
+}
+
+/// Creates a 2-node setup for disk-level reorg testing.
+///
+/// Uses unconnected nodes so fork blocks can be produced independently on Node 1 and then
+/// sent to Node 0 via newPayload only (no FCU), keeping Node 0's persisted chain intact
+/// until the final ReorgTo triggers `find_disk_reorg`.
+fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
+    let mut setup = Setup::default()
+        .with_chain_spec(Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(
+                    serde_json::from_str(include_str!(
+                        "../../../../e2e-test-utils/src/testsuite/assets/genesis.json"
+                    ))
+                    .unwrap(),
+                )
+                .cancun_activated()
+                .build(),
+        ))
+        .with_network(NetworkSetup::multi_node_unconnected(2))
+        .with_tree_config(
+            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
+        );
+    if storage_v2 {
+        setup = setup.with_storage_v2();
+    }
+    setup
+}
+
+/// Builds a disk-level reorg test scenario.
+///
+/// 1. Both nodes receive 3 shared blocks
+/// 2. Node 0 extends to 10 blocks locally (persisted to disk)
+/// 3. Node 1 builds an 8-block fork from block 3 (its canonical head)
+/// 4. Fork blocks are sent to Node 0 via newPayload (no FCU, old chain stays on disk)
+/// 5. FCU to fork tip on Node 0 triggers `find_disk_reorg` → `RemoveBlocksAbove(3)`
+fn disk_reorg_test(storage_v2: bool) -> TestBuilder<EthEngineTypes> {
+    TestBuilder::new()
+        .with_setup(disk_reorg_setup(storage_v2))
+        .with_action(SelectActiveNode::new(0))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
+        .with_action(MakeCanonical::new())
+        .with_action(ProduceBlocksLocally::<EthEngineTypes>::new(7))
+        .with_action(MakeCanonical::with_active_node())
+        .with_action(SelectActiveNode::new(1))
+        .with_action(SetForkBase::new(3))
+        .with_action(ProduceBlocksLocally::<EthEngineTypes>::new(8))
+        .with_action(MakeCanonical::with_active_node())
+        .with_action(CaptureBlock::new("fork_tip"))
+        .with_action(
+            SendNewPayloads::<EthEngineTypes>::new()
+                .with_source_node(1)
+                .with_target_node(0)
+                .with_start_block(4)
+                .with_total_blocks(8),
+        )
+        .with_action(
+            SendForkchoiceUpdate::<EthEngineTypes>::new(
+                BlockReference::Tag("fork_tip".into()),
+                BlockReference::Tag("fork_tip".into()),
+                BlockReference::Tag("fork_tip".into()),
+            )
+            .with_expected_status(PayloadStatusEnum::Valid)
+            .with_node_idx(0),
+        )
+}
+
+/// Verifies disk-level reorg in v1 (plain key) storage mode.
+///
+/// Confirms `find_disk_reorg()` detects persisted blocks on the wrong fork and calls
+/// `RemoveBlocksAbove` to truncate, then re-persists the correct fork chain.
+#[tokio::test]
+async fn test_engine_tree_disk_reorg_v1_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+    disk_reorg_test(false).run::<EthereumNode>().await?;
+    Ok(())
+}
+
+/// v2 variant: Verifies disk-level reorg in v2 storage mode.
+///
+/// Same scenario as v1 but with hashed changeset keys in static files and rocksdb history.
+/// Exercises `find_disk_reorg()` → `RemoveBlocksAbove` with v2 hashed key format.
+#[tokio::test]
+async fn test_engine_tree_disk_reorg_v2_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+    disk_reorg_test(true).run::<EthereumNode>().await?;
     Ok(())
 }
