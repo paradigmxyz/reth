@@ -25,6 +25,7 @@ alloy-rlp.workspace = true
 
 # misc
 auto_impl.workspace = true
+inturn = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
 smallvec.workspace = true
 
@@ -53,6 +54,7 @@ rand_08.workspace = true
 [features]
 default = ["std", "metrics"]
 std = [
+    "dep:inturn",
     "dep:rayon",
     "alloy-primitives/std",
     "alloy-rlp/std",

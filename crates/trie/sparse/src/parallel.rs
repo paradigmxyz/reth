@@ -1,4 +1,5 @@
 use crate::{
+    interner::{shared_path_interner, SharedPathInterner},
     lower::LowerSparseSubtrie,
     provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrie,
@@ -19,6 +20,7 @@ use reth_trie_common::{
     ProofTrieNode, RlpNode, TrieNode,
 };
 use smallvec::SmallVec;
+use std::sync::Arc;
 use tracing::{debug, instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
@@ -101,8 +103,10 @@ pub struct ParallelismThresholds {
 /// - Each leaf entry in the `subtries` and `upper_trie` collection must have a corresponding entry
 ///   in `values` collection. If the root node is a leaf, it must also have an entry in `values`.
 /// - All keys in `values` collection are full leaf paths.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone)]
 pub struct ParallelSparseTrie {
+    /// Shared path interner used across upper and lower subtries.
+    path_interner: SharedPathInterner,
     /// This contains the trie nodes for the upper part of the trie.
     upper_subtrie: Box<SparseSubtrie>,
     /// An array containing the subtries at the second level of the trie.
@@ -133,11 +137,14 @@ pub struct ParallelSparseTrie {
 
 impl Default for ParallelSparseTrie {
     fn default() -> Self {
+        let path_interner = shared_path_interner();
         Self {
-            upper_subtrie: Box::new(SparseSubtrie {
-                nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
-                ..Default::default()
-            }),
+            upper_subtrie: {
+                let mut subtrie = SparseSubtrie::with_interner(Arc::clone(&path_interner));
+                subtrie.nodes.insert(Nibbles::default(), SparseNode::Empty);
+                Box::new(subtrie)
+            },
+            path_interner,
             lower_subtries: Box::new(
                 [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES],
             ),
@@ -150,6 +157,36 @@ impl Default for ParallelSparseTrie {
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
+    }
+}
+
+impl PartialEq for ParallelSparseTrie {
+    fn eq(&self, other: &Self) -> bool {
+        self.upper_subtrie == other.upper_subtrie &&
+            self.lower_subtries == other.lower_subtries &&
+            self.prefix_set == other.prefix_set &&
+            self.updates == other.updates &&
+            self.branch_node_masks == other.branch_node_masks &&
+            self.update_actions_buffers == other.update_actions_buffers &&
+            self.parallelism_thresholds == other.parallelism_thresholds &&
+            self.subtrie_heat == other.subtrie_heat
+    }
+}
+
+impl Eq for ParallelSparseTrie {}
+
+impl core::fmt::Debug for ParallelSparseTrie {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ParallelSparseTrie")
+            .field("upper_subtrie", &self.upper_subtrie)
+            .field("lower_subtries", &self.lower_subtries)
+            .field("prefix_set", &self.prefix_set)
+            .field("updates", &self.updates)
+            .field("branch_node_masks", &self.branch_node_masks)
+            .field("update_actions_buffers", &self.update_actions_buffers)
+            .field("parallelism_thresholds", &self.parallelism_thresholds)
+            .field("subtrie_heat", &self.subtrie_heat)
+            .finish()
     }
 }
 
@@ -242,7 +279,7 @@ impl SparseTrie for ParallelSparseTrie {
                     );
                     continue;
                 }
-                self.lower_subtries[idx].reveal(&node.path);
+                self.lower_subtries[idx].reveal(&node.path, &self.path_interner);
                 self.subtrie_heat.mark_modified(idx);
                 self.lower_subtries[idx]
                     .as_revealed_mut()
@@ -302,7 +339,7 @@ impl SparseTrie for ParallelSparseTrie {
                     // the first element of each group, the `path` here will necessarily be the
                     // shortest path being revealed for each subtrie. Therefore we can reveal the
                     // subtrie itself using this path and retain correct behavior.
-                    self.lower_subtries[idx].reveal(&node.path);
+                    self.lower_subtries[idx].reveal(&node.path, &self.path_interner);
                     Some((idx, self.lower_subtries[idx].take_revealed().expect("just revealed")))
                 })
                 .collect();
@@ -1530,7 +1567,7 @@ impl ParallelSparseTrie {
         match SparseSubtrieType::from_path(path) {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
-                self.lower_subtries[idx].reveal(path);
+                self.lower_subtries[idx].reveal(path, &self.path_interner);
                 self.subtrie_heat.mark_modified(idx);
                 Some(self.lower_subtries[idx].as_revealed_mut().expect("just revealed"))
             }
@@ -2298,7 +2335,7 @@ impl ParallelSparseTrie {
     /// This is used for leaves that sit at the upper/lower subtrie boundary, where the leaf is
     /// in a lower subtrie but its parent branch is in the upper subtrie.
     fn is_boundary_leaf_reachable(
-        upper_nodes: &HashMap<Nibbles, SparseNode>,
+        upper_nodes: &crate::interner::SparseNodeInterner,
         path: &Nibbles,
         node: &TrieNode,
     ) -> bool {
@@ -2440,7 +2477,7 @@ impl SubtrieModifications {
 
 /// This is a subtrie of the [`ParallelSparseTrie`] that contains a map from path to sparse trie
 /// nodes.
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct SparseSubtrie {
     /// The root path of this subtrie.
     ///
@@ -2450,8 +2487,8 @@ pub struct SparseSubtrie {
     ///
     /// There should be a node for this path in `nodes` map.
     pub(crate) path: Nibbles,
-    /// The map from paths to sparse trie nodes within this subtrie.
-    nodes: HashMap<Nibbles, SparseNode>,
+    /// Interned map from paths to sparse trie nodes within this subtrie.
+    nodes: crate::interner::SparseNodeInterner,
     /// Subset of fields for mutable access while `nodes` field is also being mutably borrowed.
     inner: SparseSubtrieInner,
 }
@@ -2473,8 +2510,17 @@ enum FindNextToLeafOutcome {
 
 impl SparseSubtrie {
     /// Creates a new empty subtrie with the specified root path.
-    pub(crate) fn new(path: Nibbles) -> Self {
-        Self { path, ..Default::default() }
+    pub(crate) fn new(path: Nibbles, interner: SharedPathInterner) -> Self {
+        Self {
+            path,
+            nodes: crate::interner::SparseNodeInterner::new(interner),
+            inner: SparseSubtrieInner::default(),
+        }
+    }
+
+    /// Creates a new empty subtrie with the default root path.
+    pub(crate) fn with_interner(interner: SharedPathInterner) -> Self {
+        Self::new(Nibbles::default(), interner)
     }
 
     /// Returns true if this subtrie has any nodes, false otherwise.
@@ -2840,7 +2886,7 @@ impl SparseSubtrie {
                 // Update the branch node entry in the nodes map, handling cases where a blinded
                 // node is now replaced with a revealed node.
                 match self.nodes.entry(path) {
-                    Entry::Occupied(mut entry) => match entry.get() {
+                    crate::interner::Entry::Occupied(mut entry) => match entry.get() {
                         // Replace a hash node with a fully revealed branch node.
                         SparseNode::Hash(hash) => {
                             entry.insert(SparseNode::Branch {
@@ -2855,7 +2901,7 @@ impl SparseSubtrie {
                         }
                         _ => unreachable!("checked that node is either a hash or non-existent"),
                     },
-                    Entry::Vacant(entry) => {
+                    crate::interner::Entry::Vacant(entry) => {
                         entry.insert(SparseNode::new_branch(branch.state_mask));
                     }
                 }
@@ -2875,7 +2921,7 @@ impl SparseSubtrie {
                 }
             }
             TrieNode::Extension(ext) => match self.nodes.entry(path) {
-                Entry::Occupied(mut entry) => match entry.get() {
+                crate::interner::Entry::Occupied(mut entry) => match entry.get() {
                     // Replace a hash node with a revealed extension node.
                     SparseNode::Hash(hash) => {
                         let mut child_path = *entry.key();
@@ -2893,7 +2939,7 @@ impl SparseSubtrie {
                     }
                     _ => unreachable!("checked that node is either a hash or non-existent"),
                 },
-                Entry::Vacant(entry) => {
+                crate::interner::Entry::Vacant(entry) => {
                     let mut child_path = *entry.key();
                     child_path.extend(&ext.key);
                     entry.insert(SparseNode::new_ext(ext.key));
@@ -2936,7 +2982,7 @@ impl SparseSubtrie {
                 }
 
                 match self.nodes.entry(path) {
-                    Entry::Occupied(mut entry) => match entry.get() {
+                    crate::interner::Entry::Occupied(mut entry) => match entry.get() {
                         // Replace a hash node with a revealed leaf node and store leaf node value.
                         SparseNode::Hash(hash) => {
                             entry.insert(SparseNode::Leaf {
@@ -2948,7 +2994,7 @@ impl SparseSubtrie {
                         }
                         _ => unreachable!("checked that node is either a hash or non-existent"),
                     },
-                    Entry::Vacant(entry) => {
+                    crate::interner::Entry::Vacant(entry) => {
                         entry.insert(SparseNode::new_leaf(leaf.key));
                     }
                 }
@@ -2980,7 +3026,7 @@ impl SparseSubtrie {
         if child.len() == B256::len_bytes() + 1 {
             let hash = B256::from_slice(&child[1..]);
             match self.nodes.entry(path) {
-                Entry::Occupied(entry) => match entry.get() {
+                crate::interner::Entry::Occupied(entry) => match entry.get() {
                     // Hash node with a different hash can't be handled.
                     SparseNode::Hash(previous_hash) if previous_hash != &hash => {
                         return Err(SparseTrieErrorKind::Reveal {
@@ -2991,7 +3037,7 @@ impl SparseSubtrie {
                     }
                     _ => {}
                 },
-                Entry::Vacant(entry) => {
+                crate::interner::Entry::Vacant(entry) => {
                     entry.insert(SparseNode::Hash(hash));
                 }
             }
@@ -3058,7 +3104,8 @@ impl SparseSubtrie {
     /// Removes all nodes and values from the subtrie, resetting it to a blank state
     /// with only an empty root node. This is used when a storage root is deleted.
     fn wipe(&mut self) {
-        self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
+        self.nodes.clear();
+        self.nodes.insert(Nibbles::default(), SparseNode::Empty);
         self.inner.clear();
     }
 
@@ -3082,12 +3129,8 @@ impl SparseSubtrie {
     pub(crate) fn memory_size(&self) -> usize {
         let mut size = core::mem::size_of::<Self>();
 
-        // Nodes map: key (Nibbles) + value (SparseNode)
-        for (path, node) in &self.nodes {
-            size += core::mem::size_of::<Nibbles>();
-            size += path.len(); // Nibbles heap allocation
-            size += node.memory_size();
-        }
+        // Nodes interner
+        size += self.nodes.memory_size();
 
         // Values map: key (Nibbles) + value (Vec<u8>)
         for (path, value) in &self.inner.values {
@@ -3689,6 +3732,7 @@ mod tests {
         SparseSubtrieType,
     };
     use crate::{
+        interner::shared_path_interner,
         parallel::ChangedSubtrie,
         provider::{DefaultTrieNodeProvider, RevealedNode, TrieNodeProvider},
         LeafLookup, LeafLookupError, SparseNode, SparseTrie, SparseTrieUpdates,
@@ -3722,7 +3766,10 @@ mod tests {
         ProofTrieNode, RlpNode, TrieMask, TrieNode, EMPTY_ROOT_HASH,
     };
     use reth_trie_db::DatabaseTrieCursorFactory;
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        sync::Arc,
+    };
 
     /// Pad nibbles to the length of a B256 hash with zeros on the right.
     fn pad_nibbles_right(mut nibbles: Nibbles) -> Nibbles {
@@ -4165,11 +4212,15 @@ mod tests {
     fn test_get_changed_subtries() {
         // Create a trie with three subtries
         let mut trie = ParallelSparseTrie::default();
-        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+        let interner = shared_path_interner();
+        let subtrie_1 =
+            Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0]), Arc::clone(&interner)));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
+        let subtrie_2 =
+            Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0]), Arc::clone(&interner)));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
+        let subtrie_3 =
+            Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0]), Arc::clone(&interner)));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
@@ -4219,11 +4270,15 @@ mod tests {
     fn test_get_changed_subtries_all() {
         // Create a trie with three subtries
         let mut trie = ParallelSparseTrie::default();
-        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+        let interner = shared_path_interner();
+        let subtrie_1 =
+            Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0]), Arc::clone(&interner)));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
+        let subtrie_2 =
+            Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0]), Arc::clone(&interner)));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
+        let subtrie_3 =
+            Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0]), Arc::clone(&interner)));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
@@ -4622,7 +4677,8 @@ mod tests {
 
     #[test]
     fn test_subtrie_update_hashes() {
-        let mut subtrie = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+        let mut subtrie =
+            Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0]), shared_path_interner()));
 
         // Create leaf nodes with paths 0x0...0, 0x00001...0, 0x0010...0
         let leaf_1_full_path = Nibbles::from_nibbles([0; 64]);

@@ -519,6 +519,7 @@ fdlimit = "0.3.0"
 fixed-map = { version = "0.9", default-features = false }
 humantime = "2.1"
 humantime-serde = "1.1"
+inturn = "0.1"
 itertools = { version = "0.14", default-features = false }
 linked_hash_set = "0.1"
 lz4 = "1.28.1"
@@ -757,3 +758,5 @@ ipnet = "2.11"
 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
 # alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
+
+inturn = { git = "https://github.com/DaniPopes/inturn", branch = "dani/copy-interner" }

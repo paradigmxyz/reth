@@ -19,6 +19,9 @@ pub use parallel::*;
 
 mod lower;
 
+#[cfg(feature = "std")]
+pub mod interner;
+
 pub mod provider;
 
 #[cfg(feature = "metrics")]

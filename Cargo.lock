@@ -1914,6 +1914,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "boxcar"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
+
+[[package]]
 name = "boyer-moore-magiclen"
 version = "0.2.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5107,6 +5113,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "189d0897e4cbe8c75efedf3502c18c887b05046e59d28404d4d8e46cbc4d1e86"
 dependencies = [
  "memoffset",
+]
+
+[[package]]
+name = "inturn"
+version = "0.1.2"
+source = "git+https://github.com/DaniPopes/inturn?branch=dani%2Fcopy-interner#dfbf54fe098a323d326af9a6ecc8fd052af84587"
+dependencies = [
+ "boxcar",
+ "bumpalo",
+ "dashmap",
+ "hashbrown 0.14.5",
+ "thread_local",
 ]
 
 [[package]]
@@ -10674,6 +10692,7 @@ dependencies = [
  "arbitrary",
  "assert_matches",
  "auto_impl",
+ "inturn",
  "itertools 0.14.0",
  "metrics",
  "pretty_assertions",
