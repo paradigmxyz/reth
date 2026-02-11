@@ -343,6 +343,9 @@ where
                 MultiProofMessage::EmptyProof { .. } | MultiProofMessage::BlockAccessList(_) => {
                     continue
                 }
+                MultiProofMessage::HashedStateUpdate(state) => {
+                    SparseTrieTaskMessage::HashedState(state)
+                }
             };
             if hashed_state_tx.send(msg).is_err() {
                 break;
@@ -1028,4 +1031,60 @@ where
     );
 
     Ok(elapsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{keccak256, Address, U256};
+    use reth_trie_sparse::ParallelSparseTrie;
+
+    #[test]
+    fn test_run_hashing_task_hashed_state_update_forwards() {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
+
+        let address = keccak256(Address::random());
+        let slot = keccak256(U256::from(42).to_be_bytes::<32>());
+        let value = U256::from(999);
+
+        let mut hashed_state = HashedPostState::default();
+        hashed_state.accounts.insert(
+            address,
+            Some(Account { balance: U256::from(100), nonce: 1, bytecode_hash: None }),
+        );
+        let mut storage = reth_trie::HashedStorage::new(false);
+        storage.storage.insert(slot, value);
+        hashed_state.storages.insert(address, storage);
+
+        let expected_state = hashed_state.clone();
+
+        let handle = std::thread::spawn(move || {
+            SparseTrieCacheTask::<ParallelSparseTrie, ParallelSparseTrie>::run_hashing_task(
+                updates_rx,
+                hashed_state_tx,
+            );
+        });
+
+        updates_tx.send(MultiProofMessage::HashedStateUpdate(hashed_state)).unwrap();
+        updates_tx.send(MultiProofMessage::FinishedStateUpdates).unwrap();
+        drop(updates_tx);
+
+        let SparseTrieTaskMessage::HashedState(received) = hashed_state_rx.recv().unwrap() else {
+            panic!("expected HashedState message");
+        };
+
+        let account = received.accounts.get(&address).unwrap().unwrap();
+        assert_eq!(account.balance, expected_state.accounts[&address].unwrap().balance);
+        assert_eq!(account.nonce, expected_state.accounts[&address].unwrap().nonce);
+
+        let storage = received.storages.get(&address).unwrap();
+        assert_eq!(*storage.storage.get(&slot).unwrap(), value);
+
+        let second = hashed_state_rx.recv().unwrap();
+        assert!(matches!(second, SparseTrieTaskMessage::FinishedStateUpdates));
+
+        assert!(hashed_state_rx.recv().is_err());
+        handle.join().unwrap();
+    }
 }

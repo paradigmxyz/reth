@@ -1563,7 +1563,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         }
     }
 
-    /// Returns the withdrawals if available.
+    /// Returns the withdrawals from the payload or block.
     pub fn withdrawals(&self) -> Option<&[Withdrawal]>
     where
         T::ExecutionData: ExecutionPayload,
