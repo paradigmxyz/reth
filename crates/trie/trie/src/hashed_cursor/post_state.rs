@@ -156,7 +156,11 @@ where
         post_state: &'a HashedPostStateSorted,
         hashed_address: B256,
     ) -> (ForwardInMemoryCursor<'a, B256, U256>, bool) {
-        let post_state_storage = post_state.storages.get(&hashed_address);
+        let post_state_storage = post_state
+            .storages
+            .binary_search_by_key(&hashed_address, |(addr, _)| *addr)
+            .ok()
+            .map(|idx| &post_state.storages[idx].1);
         let cursor_wiped = post_state_storage.is_some_and(|u| u.is_wiped());
         let storage_slots = post_state_storage.map(|u| u.storage_slots_ref()).unwrap_or(&[]);
 
@@ -492,8 +496,7 @@ mod tests {
                     storage_slots: post_state_nodes,
                     wiped: false,
                 };
-                let mut storages = alloy_primitives::map::B256Map::default();
-                storages.insert(hashed_address, storage_sorted);
+                let storages = vec![(hashed_address, storage_sorted)];
                 let post_state = HashedPostStateSorted::new(Vec::new(), storages);
 
                 let mut test_cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, hashed_address);

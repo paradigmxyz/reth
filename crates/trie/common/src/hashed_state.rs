@@ -357,11 +357,12 @@ impl HashedPostState {
         let mut accounts: Vec<_> = self.accounts.into_iter().collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
-        let storages = self
+        let mut storages: Vec<_> = self
             .storages
             .into_iter()
             .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
             .collect();
+        storages.sort_unstable_by_key(|(addr, _)| *addr);
 
         HashedPostStateSorted { accounts, storages }
     }
@@ -372,11 +373,12 @@ impl HashedPostState {
         let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
-        let storages = self
+        let mut storages: Vec<_> = self
             .storages
             .iter()
             .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted()))
             .collect();
+        storages.sort_unstable_by_key(|(addr, _)| *addr);
 
         HashedPostStateSorted { accounts, storages }
     }
@@ -546,15 +548,15 @@ impl HashedStorage {
 pub struct HashedPostStateSorted {
     /// Sorted collection of account updates. `None` indicates a destroyed account.
     pub accounts: Vec<(B256, Option<Account>)>,
-    /// Map of hashed addresses to their sorted storage updates.
-    pub storages: B256Map<HashedStorageSorted>,
+    /// Sorted collection of hashed addresses to their sorted storage updates.
+    pub storages: Vec<(B256, HashedStorageSorted)>,
 }
 
 impl HashedPostStateSorted {
     /// Create new instance of [`HashedPostStateSorted`]
     pub const fn new(
         accounts: Vec<(B256, Option<Account>)>,
-        storages: B256Map<HashedStorageSorted>,
+        storages: Vec<(B256, HashedStorageSorted)>,
     ) -> Self {
         Self { accounts, storages }
     }
@@ -565,7 +567,7 @@ impl HashedPostStateSorted {
     }
 
     /// Returns reference to hashed account storages.
-    pub const fn account_storages(&self) -> &B256Map<HashedStorageSorted> {
+    pub const fn account_storages(&self) -> &Vec<(B256, HashedStorageSorted)> {
         &self.storages
     }
 
@@ -576,7 +578,7 @@ impl HashedPostStateSorted {
 
     /// Returns the total number of updates including all accounts and storage updates.
     pub fn total_len(&self) -> usize {
-        self.accounts.len() + self.storages.values().map(|s| s.len()).sum::<usize>()
+        self.accounts.len() + self.storages.iter().map(|(_, s)| s.len()).sum::<usize>()
     }
 
     /// Construct [`TriePrefixSetsMut`] from hashed post state.
@@ -627,13 +629,40 @@ impl HashedPostStateSorted {
         // Extend accounts
         extend_sorted_vec(&mut self.accounts, &other.accounts);
 
-        // Extend storages
-        for (hashed_address, other_storage) in &other.storages {
-            self.storages
-                .entry(*hashed_address)
-                .and_modify(|existing| existing.extend_ref(other_storage))
-                .or_insert_with(|| other_storage.clone());
+        // Extend storages using sorted merge
+        let self_storages = core::mem::take(&mut self.storages);
+        let mut merged = Vec::with_capacity(self_storages.len() + other.storages.len());
+        let mut self_iter = self_storages.into_iter().peekable();
+        let mut other_iter = other.storages.iter().peekable();
+
+        loop {
+            match (self_iter.peek(), other_iter.peek()) {
+                (Some((a, _)), Some((b, _))) => match a.cmp(b) {
+                    core::cmp::Ordering::Less => {
+                        merged.push(self_iter.next().unwrap());
+                    }
+                    core::cmp::Ordering::Greater => {
+                        let (addr, storage) = other_iter.next().unwrap();
+                        merged.push((*addr, storage.clone()));
+                    }
+                    core::cmp::Ordering::Equal => {
+                        let (addr, mut existing) = self_iter.next().unwrap();
+                        let (_, other_storage) = other_iter.next().unwrap();
+                        existing.extend_ref(other_storage);
+                        merged.push((addr, existing));
+                    }
+                },
+                (Some(_), None) => {
+                    merged.push(self_iter.next().unwrap());
+                }
+                (None, Some(_)) => {
+                    let (addr, storage) = other_iter.next().unwrap();
+                    merged.push((*addr, storage.clone()));
+                }
+                (None, None) => break,
+            }
         }
+        self.storages = merged;
     }
 
     /// Batch-merge sorted hashed post states. Iterator yields **newest to oldest**.
@@ -694,13 +723,14 @@ impl HashedPostStateSorted {
             }
         }
 
-        let storages = acc
+        let mut storages: Vec<_> = acc
             .into_iter()
             .map(|(addr, entry)| {
                 let storage_slots = kway_merge_sorted(entry.slices);
                 (addr, HashedStorageSorted { wiped: entry.wiped, storage_slots })
             })
             .collect();
+        storages.sort_unstable_by_key(|(addr, _)| *addr);
 
         Self { accounts, storages }.into()
     }
@@ -800,17 +830,15 @@ impl From<HashedPostStateSorted> for HashedPostState {
         let mut accounts =
             B256Map::with_capacity_and_hasher(sorted.accounts.len(), Default::default());
 
-        // Add all accounts (Some for updated, None for destroyed)
         for (address, account) in sorted.accounts {
             accounts.insert(address, account);
         }
 
-        // Convert storages
-        let storages = sorted
-            .storages
-            .into_iter()
-            .map(|(address, storage)| (address, storage.into()))
-            .collect();
+        let mut storages =
+            B256Map::with_capacity_and_hasher(sorted.storages.len(), Default::default());
+        for (address, storage) in sorted.storages {
+            storages.insert(address, storage.into());
+        }
 
         Self { accounts, storages }
     }
@@ -1418,7 +1446,7 @@ mod tests {
                 (B256::from([3; 32]), Some(Account::default())),
                 (B256::from([5; 32]), None),
             ],
-            storages: B256Map::default(),
+            storages: Vec::new(),
         };
 
         let state2 = HashedPostStateSorted {
@@ -1428,7 +1456,7 @@ mod tests {
                 (B256::from([4; 32]), Some(Account::default())),
                 (B256::from([6; 32]), None),
             ],
-            storages: B256Map::default(),
+            storages: Vec::new(),
         };
 
         state1.extend_ref_and_sort(&state2);
@@ -1863,7 +1891,7 @@ pub mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct HashedPostStateSorted<'a> {
         accounts: Cow<'a, [(B256, Option<Account>)]>,
-        storages: B256Map<HashedStorageSorted<'a>>,
+        storages: Vec<(B256, HashedStorageSorted<'a>)>,
     }
 
     impl<'a> From<&'a super::HashedPostStateSorted> for HashedPostStateSorted<'a> {
@@ -2044,13 +2072,13 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.hashed_state.storages.insert(
+            data.hashed_state.storages.push((
                 B256::random(),
                 HashedStorageSorted {
                     storage_slots: vec![(B256::from([1; 32]), U256::from(10))],
                     wiped: false,
                 },
-            );
+            ));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);

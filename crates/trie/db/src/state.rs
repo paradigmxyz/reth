@@ -294,13 +294,14 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
         }
 
         // Sort storage slots and convert to HashedStorageSorted
-        let hashed_storages = storages
+        let mut hashed_storages: Vec<_> = storages
             .into_iter()
             .map(|(address, mut slots)| {
                 slots.sort_unstable_by_key(|(slot, _)| *slot);
                 (address, HashedStorageSorted { storage_slots: slots, wiped: false })
             })
             .collect();
+        hashed_storages.sort_unstable_by_key(|(addr, _)| *addr);
 
         Ok(Self::new(accounts, hashed_storages))
     }
@@ -451,7 +452,7 @@ mod tests {
         assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
 
         // Ordering guarantees - storage slots sorted by hashed slot
-        for storage in sorted.storages.values() {
+        for (_, storage) in &sorted.storages {
             assert!(storage.storage_slots.windows(2).all(|w| w[0].0 <= w[1].0));
         }
     }

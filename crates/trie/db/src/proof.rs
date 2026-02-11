@@ -117,7 +117,7 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
         let prefix_set = storage.construct_prefix_set();
         let state_sorted = HashedPostStateSorted::new(
             Default::default(),
-            HashMap::from_iter([(hashed_address, storage.into_sorted())]),
+            vec![(hashed_address, storage.into_sorted())],
         );
         StorageProof::new(
             DatabaseTrieCursorFactory::new(tx),
@@ -139,7 +139,7 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
         let prefix_set = storage.construct_prefix_set();
         let state_sorted = HashedPostStateSorted::new(
             Default::default(),
-            HashMap::from_iter([(hashed_address, storage.into_sorted())]),
+            vec![(hashed_address, storage.into_sorted())],
         );
         StorageProof::new(
             DatabaseTrieCursorFactory::new(tx),

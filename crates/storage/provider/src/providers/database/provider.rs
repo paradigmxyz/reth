@@ -2481,10 +2481,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         // Write hashed storage changes.
-        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
         let mut hashed_storage_cursor =
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, storage) in sorted_storages {
+        for (hashed_address, storage) in hashed_state.account_storages() {
             if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
