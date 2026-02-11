@@ -14,8 +14,7 @@
 use crate::tree::{
     cached_state::{CachedStateProvider, SavedCache},
     payload_processor::{
-        bal::{total_slots, BALSlotIter},
-        executor::WorkloadExecutor,
+        bal::{self, total_slots, BALSlotIter},
         multiproof::{MultiProofMessage, VersionedMultiProofTargets},
         PayloadExecutionCache,
     },
@@ -37,6 +36,7 @@ use reth_provider::{
     StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
+use reth_tasks::Runtime;
 use reth_trie::MultiProofTargets;
 use std::{
     ops::Range,
@@ -78,7 +78,7 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     /// The executor used to spawn execution tasks.
-    executor: WorkloadExecutor,
+    executor: Runtime,
     /// Shared execution cache.
     execution_cache: PayloadExecutionCache,
     /// Context provided to execution tasks
@@ -101,7 +101,7 @@ where
 {
     /// Initializes the task with the given transactions pending execution
     pub fn new(
-        executor: WorkloadExecutor,
+        executor: Runtime,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
@@ -287,6 +287,7 @@ where
                 target: "engine::tree::payload_processor::prewarm",
                 "Skipping BAL prewarm - no cache available"
             );
+            self.send_bal_hashed_state(&bal);
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
             return;
@@ -302,7 +303,7 @@ where
         );
 
         if total_slots == 0 {
-            // No slots to prefetch, signal completion immediately
+            self.send_bal_hashed_state(&bal);
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
             return;
@@ -347,8 +348,49 @@ where
             "All BAL prewarm workers completed"
         );
 
+        // Convert BAL to HashedPostState and send to multiproof task
+        self.send_bal_hashed_state(&bal);
+
         // Signal that execution has finished
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
+    }
+
+    /// Converts the BAL to [`HashedPostState`](reth_trie::HashedPostState) and sends it to the
+    /// multiproof task.
+    fn send_bal_hashed_state(&self, bal: &BlockAccessList) {
+        let Some(to_multi_proof) = &self.to_multi_proof else { return };
+
+        let provider = match self.ctx.provider.build() {
+            Ok(provider) => provider,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    ?err,
+                    "Failed to build provider for BAL hashed state conversion"
+                );
+                return;
+            }
+        };
+
+        match bal::bal_to_hashed_post_state(bal, &provider) {
+            Ok(hashed_state) => {
+                debug!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    accounts = hashed_state.accounts.len(),
+                    storages = hashed_state.storages.len(),
+                    "Converted BAL to hashed post state"
+                );
+                let _ = to_multi_proof.send(MultiProofMessage::HashedStateUpdate(hashed_state));
+                let _ = to_multi_proof.send(MultiProofMessage::FinishedStateUpdates);
+            }
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    ?err,
+                    "Failed to convert BAL to hashed state"
+                );
+            }
+        }
     }
 
     /// Executes the task.
@@ -548,11 +590,7 @@ where
             return
         };
 
-        while let Ok(IndexedTransaction { index, tx }) = {
-            let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", "recv tx")
-                .entered();
-            txs.recv()
-        } {
+        while let Ok(IndexedTransaction { index, tx }) = txs.recv() {
             let enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 "prewarm tx",
@@ -629,7 +667,7 @@ where
     fn spawn_workers<Tx>(
         self,
         workers_needed: usize,
-        task_executor: &WorkloadExecutor,
+        task_executor: &Runtime,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         done_tx: Sender<()>,
     ) -> CrossbeamSender<IndexedTransaction<Tx>>
@@ -666,7 +704,7 @@ where
     fn spawn_bal_worker(
         &self,
         idx: usize,
-        executor: &WorkloadExecutor,
+        executor: &Runtime,
         bal: Arc<BlockAccessList>,
         range: Range<usize>,
         done_tx: Sender<()>,

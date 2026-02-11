@@ -46,6 +46,7 @@ use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofErro
 use reth_primitives_traits::dashmap::{self, DashMap};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
+use reth_tasks::Runtime;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedCursorMetricsCache, InstrumentedHashedCursor},
     node_iter::{TrieElement, TrieNodeIter},
@@ -74,7 +75,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tokio::runtime::Handle;
 use tracing::{debug, debug_span, error, trace};
 
 #[cfg(feature = "metrics")]
@@ -132,13 +132,13 @@ impl ProofWorkerHandle {
     /// Workers run until the last handle is dropped.
     ///
     /// # Parameters
-    /// - `executor`: Tokio runtime handle for spawning blocking tasks
+    /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `storage_worker_count`: Number of storage workers to spawn
     /// - `account_worker_count`: Number of account workers to spawn
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
     pub fn new<Factory>(
-        executor: Handle,
+        runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         storage_worker_count: usize,
         account_worker_count: usize,
@@ -178,7 +178,8 @@ impl ProofWorkerHandle {
             v2_proofs_enabled,
         };
 
-        // Clone for the first spawn_blocking (storage workers)
+        let executor = runtime.handle().clone();
+
         let task_ctx_for_storage = task_ctx.clone();
         let executor_for_storage = executor.clone();
         let cached_storage_roots_for_storage = cached_storage_roots.clone();
@@ -2021,7 +2022,6 @@ enum AccountWorkerJob {
 mod tests {
     use super::*;
     use reth_provider::test_utils::create_test_provider_factory;
-    use tokio::{runtime::Builder, task};
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
@@ -2030,25 +2030,21 @@ mod tests {
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
     #[test]
     fn spawn_proof_workers_creates_handle() {
-        let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
-        runtime.block_on(async {
-            let handle = tokio::runtime::Handle::current();
-            let provider_factory = create_test_provider_factory();
-            let changeset_cache = reth_trie_db::ChangesetCache::new();
-            let factory = reth_provider::providers::OverlayStateProviderFactory::new(
-                provider_factory,
-                changeset_cache,
-            );
-            let ctx = test_ctx(factory);
+        let provider_factory = create_test_provider_factory();
+        let changeset_cache = reth_trie_db::ChangesetCache::new();
+        let factory = reth_provider::providers::OverlayStateProviderFactory::new(
+            provider_factory,
+            changeset_cache,
+        );
+        let ctx = test_ctx(factory);
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false);
+        let runtime = reth_tasks::Runtime::test();
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, 5, 3, false);
 
-            // Verify handle can be cloned
-            let _cloned_handle = proof_handle.clone();
+        // Verify handle can be cloned
+        let _cloned_handle = proof_handle.clone();
 
-            // Workers shut down automatically when handle is dropped
-            drop(proof_handle);
-            task::yield_now().await;
-        });
+        // Workers shut down automatically when handle is dropped
+        drop(proof_handle);
     }
 }

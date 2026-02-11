@@ -256,7 +256,7 @@ where
     let chain_events = ctx.provider().canonical_state_stream();
     let client = ctx.provider().clone();
 
-    ctx.task_executor().spawn_critical(
+    ctx.task_executor().spawn_critical_task(
         "txpool maintenance task",
         reth_transaction_pool::maintain::maintain_transaction_pool_future(
             client,

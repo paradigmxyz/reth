@@ -248,6 +248,7 @@ mod tests {
         },
         BackfillJobFactory,
     };
+    use alloy_consensus::BlockHeader;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
@@ -331,6 +332,119 @@ mod tests {
 
             assert_eq!(block, expected_block);
             assert_eq!(&execution_output, expected_output);
+        }
+
+        Ok(())
+    }
+
+    /// Verify that ExEx backfill (using `history_by_block_number`) produces identical execution
+    /// results to the pipeline path (using `LatestStateProvider`).
+    ///
+    /// This is a regression test for an issue reported on mainnet where backfill fails around
+    /// blocks 1.7M-3.8M with "transaction gas limit X is more than blocks available gas Y",
+    /// suggesting the state provider used during backfill may return different state than what the
+    /// pipeline used during initial sync.
+    #[test]
+    fn test_backfill_state_provider_parity() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        let key_pair = generators::generate_key(&mut generators::rng());
+        let address = public_key_to_address(key_pair.public_key());
+
+        let chain_spec = chain_spec(address);
+
+        let executor = EthEvmConfig::ethereum(chain_spec.clone());
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        init_genesis(&provider_factory)?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
+
+        // Execute blocks via LatestStateProvider (pipeline-style) and commit to DB.
+        // This mirrors what the pipeline's ExecutionStage does.
+        let pipeline_results =
+            blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
+
+        // Now re-execute via SingleBlockBackfillJob which uses history_by_block_number.
+        let factory = BackfillJobFactory::new(executor, blockchain_db);
+        let job = factory.backfill(1..=2);
+        let single_job = job.into_single_blocks();
+        let backfill_results: Vec<_> = single_job.into_iter().collect::<Result<Vec<_>, _>>()?;
+
+        assert_eq!(
+            pipeline_results.len(),
+            backfill_results.len(),
+            "should produce same number of block results"
+        );
+
+        for (i, ((pipeline_block, pipeline_output), (backfill_block, mut backfill_output))) in
+            pipeline_results.iter().zip(backfill_results.into_iter()).enumerate()
+        {
+            backfill_output.state.reverts.sort();
+
+            assert_eq!(
+                backfill_block, *pipeline_block,
+                "block {i} mismatch between pipeline and backfill"
+            );
+
+            assert_eq!(
+                backfill_output.receipts, pipeline_output.receipts,
+                "block {i}: receipts differ — gas accounting divergence between \
+                 LatestStateProvider and history_by_block_number"
+            );
+
+            assert_eq!(
+                backfill_output.gas_used, pipeline_output.gas_used,
+                "block {i}: gas_used differs"
+            );
+
+            assert_eq!(
+                &backfill_output, pipeline_output,
+                "block {i}: full execution output differs between pipeline and backfill"
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Same as above but for the batch `BackfillJob` path (`execute_range`), which also uses
+    /// `history_by_block_number`. Verifies the batch execution outcome matches what the pipeline
+    /// produced block-by-block.
+    #[test]
+    fn test_backfill_batch_state_provider_parity() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        let key_pair = generators::generate_key(&mut generators::rng());
+        let address = public_key_to_address(key_pair.public_key());
+
+        let chain_spec = chain_spec(address);
+
+        let executor = EthEvmConfig::ethereum(chain_spec.clone());
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        init_genesis(&provider_factory)?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
+
+        let pipeline_results =
+            blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
+
+        // Re-execute via batch BackfillJob (execute_range) using history_by_block_number
+        let factory = BackfillJobFactory::new(executor, blockchain_db);
+        let job = factory.backfill(1..=2);
+        let chains = job.collect::<Result<Vec<_>, _>>()?;
+
+        assert_eq!(chains.len(), 1, "two blocks without threshold should yield one chain");
+        let chain = chains.into_iter().next().unwrap();
+
+        // Compare each block's receipts from the chain against the pipeline outputs
+        for (i, (pipeline_block, pipeline_output)) in pipeline_results.iter().enumerate() {
+            let block_number = pipeline_block.number();
+            let chain_block = chain.blocks().get(&block_number).expect("block should be in chain");
+            assert_eq!(chain_block, pipeline_block, "block {i}: block mismatch in batch backfill");
+
+            let chain_receipts = &chain.execution_outcome().receipts[i];
+            assert_eq!(
+                chain_receipts, &pipeline_output.receipts,
+                "block {i}: receipts differ in batch backfill — potential gas accounting \
+                 divergence between LatestStateProvider and history_by_block_number"
+            );
         }
 
         Ok(())

@@ -191,10 +191,9 @@ pub(crate) struct Args {
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub reth_args: Vec<String>,
 
-    /// Comma-separated list of features to enable during reth compilation (applied to both builds)
-    ///
-    /// Example: `jemalloc,asm-keccak`
-    #[arg(long, value_name = "FEATURES", default_value = "jemalloc,asm-keccak")]
+    /// Comma-separated list of extra features to enable during reth compilation (applied to both
+    /// builds)
+    #[arg(long, value_name = "FEATURES", default_value = "")]
     pub features: String,
 
     /// Comma-separated list of features to enable only for baseline build (overrides --features)
@@ -205,7 +204,7 @@ pub(crate) struct Args {
 
     /// Comma-separated list of features to enable only for feature build (overrides --features)
     ///
-    /// Example: `--feature-features jemalloc,asm-keccak`
+    /// Example: `--feature-features jemalloc-prof`
     #[arg(long, value_name = "FEATURES")]
     pub feature_features: Option<String>,
 

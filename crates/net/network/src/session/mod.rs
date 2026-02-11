@@ -229,7 +229,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.executor.spawn(f.boxed());
+        self.executor.spawn_task(f.boxed());
     }
 
     /// Invoked on a received status update.
