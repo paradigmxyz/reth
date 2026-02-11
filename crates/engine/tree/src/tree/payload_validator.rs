@@ -17,7 +17,6 @@ use alloy_evm::Evm;
 use alloy_primitives::B256;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
-use rayon::prelude::*;
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -232,35 +231,20 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
-        match input {
+        Ok(match input {
             BlockOrPayload::Payload(payload) => {
-                let (iter, convert) = self
+                let iter = self
                     .evm_config
                     .tx_iterator_for_payload(payload)
-                    .map_err(NewPayloadError::other)?
-                    .into();
-
-                let iter = Either::Left(iter.into_par_iter().map(Either::Left));
-                let convert = move |tx| {
-                    let Either::Left(tx) = tx else { unreachable!() };
-                    convert(tx).map(Either::Left).map_err(Either::Left)
-                };
-
-                // Box the closure to satisfy the `Fn` bound both here and in the branch below
-                Ok((iter, Box::new(convert) as Box<dyn Fn(_) -> _ + Send + Sync + 'static>))
+                    .map_err(NewPayloadError::other)?;
+                Either::Left(iter)
             }
             BlockOrPayload::Block(block) => {
-                let iter = Either::Right(
-                    block.body().clone_transactions().into_par_iter().map(Either::Right),
-                );
-                let convert = move |tx: Either<_, N::SignedTx>| {
-                    let Either::Right(tx) = tx else { unreachable!() };
-                    tx.try_into_recovered().map(Either::Right).map_err(Either::Right)
-                };
-
-                Ok((iter, Box::new(convert)))
+                let txs = block.body().clone_transactions();
+                let convert = |tx: N::SignedTx| tx.try_into_recovered();
+                Either::Right((txs, convert))
             }
-        }
+        })
     }
 
     /// Returns a [`ExecutionCtxFor`] for the given payload or block.
