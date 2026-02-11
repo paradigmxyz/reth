@@ -67,10 +67,9 @@ const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
 /// dispatched as a single merged proof request at the end. This eliminates per-update overhead
 /// from partition, dispatch, Arc cloning, and channel operations.
 ///
-/// Set to 128 to cover all small blocks (< 50 txs often produce 50-100 state updates
-/// including system-level updates). Above this, the per-update pipeline activates to
-/// overlap proof computation with execution.
-const SMALL_BLOCK_STATE_UPDATE_BATCH_THRESHOLD: usize = 128;
+/// Set to 30 to cover small blocks (< 30 txs). Above this, the per-update pipeline
+/// activates to overlap proof computation with execution.
+const SMALL_BLOCK_STATE_UPDATE_BATCH_THRESHOLD: usize = 30;
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
