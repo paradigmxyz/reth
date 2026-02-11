@@ -94,6 +94,26 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 /// 144MB.
 pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
+/// Transaction count threshold below which a block is considered "small" for optimization.
+///
+/// Blocks with fewer transactions use reduced parallelism: fewer proof workers are spawned
+/// and transaction prewarming is skipped, avoiding fixed overhead that exceeds the benefit
+/// for blocks with few state changes.
+///
+/// 50 transactions roughly corresponds to ~20M gas for simple transfers. `PandaOps` data shows
+/// reth's win rate drops from 88% (40-50M gas) to 49% (0-10M gas), suggesting the parallel
+/// machinery's fixed cost dominates for small blocks.
+pub const SMALL_BLOCK_TX_THRESHOLD: usize = 50;
+
+/// Number of proof workers (storage and account) to use for small blocks.
+///
+/// Small blocks (< [`SMALL_BLOCK_TX_THRESHOLD`] txs) produce few state changes and proof
+/// targets. The default worker pool (~2× CPU cores each for storage and account workers)
+/// spawns many threads that each initialize a database provider but sit idle. Using fewer
+/// workers avoids this fixed overhead while still providing enough parallelism for the
+/// modest proof workload.
+pub const SMALL_BLOCK_PROOF_WORKERS: usize = 2;
+
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
@@ -244,8 +264,10 @@ where
         // Extract V2 proofs flag early so we can pass it to prewarm
         let v2_proofs_enabled = !config.disable_proof_v2();
 
-        // Capture parent_state_root before env is moved into spawn_caching_with
+        // Capture fields before env is moved into spawn_caching_with
         let parent_state_root = env.parent_state_root;
+        let is_small_block =
+            env.transaction_count > 0 && env.transaction_count < SMALL_BLOCK_TX_THRESHOLD;
 
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
@@ -274,10 +296,20 @@ where
             )
         };
 
-        // Create and spawn the storage proof task
+        // Create and spawn the storage proof task.
+        // For small blocks, reduce worker count to avoid spawning idle threads that each
+        // initialize a database provider. The default pool size (~2x CPU cores) is tuned for
+        // large blocks with many state changes; small blocks produce few proof targets and
+        // don't benefit from high parallelism.
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        let storage_worker_count = config.storage_worker_count();
-        let account_worker_count = config.account_worker_count();
+        let (storage_worker_count, account_worker_count) = if is_small_block {
+            (
+                config.storage_worker_count().min(SMALL_BLOCK_PROOF_WORKERS),
+                config.account_worker_count().min(SMALL_BLOCK_PROOF_WORKERS),
+            )
+        } else {
+            (config.storage_worker_count(), config.account_worker_count())
+        };
         let proof_handle = ProofWorkerHandle::new(
             &self.executor,
             task_ctx,
@@ -431,7 +463,17 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        if self.disable_transaction_prewarming {
+        let skip_prewarm = self.disable_transaction_prewarming ||
+            (env.transaction_count > 0 && env.transaction_count < SMALL_BLOCK_TX_THRESHOLD);
+
+        if skip_prewarm {
+            debug!(
+                target: "engine::tree",
+                transaction_count = env.transaction_count,
+                threshold = SMALL_BLOCK_TX_THRESHOLD,
+                disabled = self.disable_transaction_prewarming,
+                "Skipping transaction prewarming for small block"
+            );
             // if no transactions should be executed we clear them but still spawn the task for
             // caching updates
             transactions = mpsc::channel().1;
