@@ -1663,9 +1663,9 @@ mod tests {
     /// its child branch has already been processed and is in the result. We need to pop it and
     /// combine it with the extension.
     fn convert_legacy_proofs_to_v2(legacy_proofs: &[ProofTrieNode]) -> Vec<ProofTrieNodeV2> {
-        ProofTrieNodeV2::from_sorted_trie_nodes(legacy_proofs.iter().map(|p| {
-            (p.path.clone(), p.node.clone(), p.masks)
-        }))
+        ProofTrieNodeV2::from_sorted_trie_nodes(
+            legacy_proofs.iter().map(|p| (p.path.clone(), p.node.clone(), p.masks)),
+        )
     }
 
     /// A test harness for comparing `ProofCalculator` and legacy `Proof` implementations.
