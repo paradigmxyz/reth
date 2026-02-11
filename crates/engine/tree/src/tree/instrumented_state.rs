@@ -199,6 +199,17 @@ impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
         self.record_storage_fetch(start.elapsed());
         res
     }
+
+    fn storage_by_hashed_key(
+        &self,
+        address: Address,
+        hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        let start = Instant::now();
+        let res = self.state_provider.storage_by_hashed_key(address, hashed_storage_key);
+        self.record_storage_fetch(start.elapsed());
+        res
+    }
 }
 
 impl<S: BytecodeReader> BytecodeReader for InstrumentedStateProvider<S> {

@@ -1,6 +1,6 @@
 //! Test setup utilities for configuring the initial state.
 
-use crate::{setup_engine_with_connection, testsuite::Environment, NodeBuilderHelper};
+use crate::{testsuite::Environment, E2ETestSetupBuilder, NodeBuilderHelper};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
@@ -38,6 +38,8 @@ pub struct Setup<I> {
     shutdown_tx: Option<mpsc::Sender<()>>,
     /// Is this setup in dev mode
     pub is_dev: bool,
+    /// Whether to use v2 storage mode (hashed keys, static file changesets, rocksdb history)
+    pub storage_v2: bool,
     /// Tracks instance generic.
     _phantom: PhantomData<I>,
     /// Holds the import result to keep nodes alive when using imported chain
@@ -58,6 +60,7 @@ impl<I> Default for Setup<I> {
             tree_config: TreeConfig::default(),
             shutdown_tx: None,
             is_dev: true,
+            storage_v2: false,
             _phantom: Default::default(),
             import_result_holder: None,
             import_rlp_path: None,
@@ -123,6 +126,12 @@ where
     /// Set the engine tree configuration
     pub const fn with_tree_config(mut self, tree_config: TreeConfig) -> Self {
         self.tree_config = tree_config;
+        self
+    }
+
+    /// Enable v2 storage mode (hashed keys, static file changesets, rocksdb history)
+    pub const fn with_storage_v2(mut self) -> Self {
+        self.storage_v2 = true;
         self
     }
 
@@ -194,19 +203,28 @@ where
         self.shutdown_tx = Some(shutdown_tx);
 
         let is_dev = self.is_dev;
+        let storage_v2 = self.storage_v2;
         let node_count = self.network.node_count;
+        let tree_config = self.tree_config.clone();
 
         let attributes_generator = Self::create_static_attributes_generator::<N>();
 
-        let result = setup_engine_with_connection::<N>(
+        let mut builder = E2ETestSetupBuilder::<N, _>::new(
             node_count,
             Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
-            is_dev,
-            self.tree_config.clone(),
             attributes_generator,
-            self.network.connect_nodes,
         )
-        .await;
+        .with_tree_config_modifier(move |base| {
+            tree_config.clone().with_cross_block_cache_size(base.cross_block_cache_size())
+        })
+        .with_node_config_modifier(move |config| config.set_dev(is_dev))
+        .with_connect_nodes(self.network.connect_nodes);
+
+        if storage_v2 {
+            builder = builder.with_storage_v2();
+        }
+
+        let result = builder.build().await;
 
         let mut node_clients = Vec::new();
         match result {
