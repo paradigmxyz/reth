@@ -422,7 +422,6 @@ where
             PrewarmMode::Skipped => {
                 let _ = actions_tx
                     .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
-                drop(actions_tx);
             }
         }
 
