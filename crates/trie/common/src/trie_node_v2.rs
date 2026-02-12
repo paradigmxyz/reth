@@ -200,6 +200,7 @@ impl fmt::Debug for BranchNodeV2 {
             .field("key", &self.key)
             .field("stack", &self.stack.iter().map(hex::encode).collect::<Vec<_>>())
             .field("state_mask", &self.state_mask)
+            .field("hash", &self.hash)
             .finish()
     }
 }

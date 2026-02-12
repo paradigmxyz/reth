@@ -1240,8 +1240,8 @@ fn estimate_v2_proof_capacity(nodes: &[ProofTrieNodeV2]) -> usize {
 /// Filters V2 proof nodes that are already revealed, separates the root node if present, and
 /// returns additional information about the number of total, skipped, and new nodes.
 ///
-/// Unlike [`filter_map_revealed_nodes`], V2 proof nodes already have masks included in the
-/// `ProofTrieNode` structure, so no separate masks map is needed.
+/// V2 proof nodes already have masks included in the `ProofTrieNode` structure, so no separate
+/// masks map is needed.
 fn filter_revealed_v2_proof_nodes(
     proof_nodes: Vec<ProofTrieNodeV2>,
     revealed_nodes: &mut HashSet<Nibbles>,
