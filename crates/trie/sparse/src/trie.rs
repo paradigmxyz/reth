@@ -5,7 +5,7 @@ use crate::{
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{rlp_node, BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNode};
+use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNode};
 use std::borrow::Cow;
 use tracing::instrument;
 
@@ -408,7 +408,7 @@ impl SparseNode {
             Self::Hash(hash) => Some(Cow::Owned(RlpNode::word_rlp(hash))),
             Self::Leaf { state, .. } |
             Self::Extension { state, .. } |
-            Self::Branch { state, .. } => state.cached_rlp_node().map(|n| Cow::Borrowed(n)),
+            Self::Branch { state, .. } => state.cached_rlp_node().map(Cow::Borrowed),
         }
     }
 
@@ -454,7 +454,7 @@ impl SparseNode {
 /// Tracks the current state of a node in the trie, specifically regarding whether it's been updated
 /// or not.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SparseNodeState {
+pub enum SparseNodeState {
     /// The node has been updated and its new `RlpNode` has not yet been calculated.
     ///
     /// If a node is dirty and has children (branches or extensions) then at least once child must
@@ -476,10 +476,10 @@ pub(crate) enum SparseNodeState {
 
 impl SparseNodeState {
     /// Returns the cached [`RlpNode`] of the node, if it's available.
-    pub fn cached_rlp_node(&self) -> Option<&RlpNode> {
-        match &self {
-            SparseNodeState::Cached { rlp_node, .. } => Some(rlp_node),
-            SparseNodeState::Dirty => None,
+    pub const fn cached_rlp_node(&self) -> Option<&RlpNode> {
+        match self {
+            Self::Cached { rlp_node, .. } => Some(rlp_node),
+            Self::Dirty => None,
         }
     }
 
@@ -489,10 +489,10 @@ impl SparseNodeState {
     }
 
     /// Returns whether or not this node is stored in the db, or None if it's not known.
-    pub fn store_in_db_trie(&self) -> Option<bool> {
-        match &self {
-            SparseNodeState::Cached { store_in_db_trie, .. } => *store_in_db_trie,
-            SparseNodeState::Dirty => None,
+    pub const fn store_in_db_trie(&self) -> Option<bool> {
+        match self {
+            Self::Cached { store_in_db_trie, .. } => *store_in_db_trie,
+            Self::Dirty => None,
         }
     }
 }
