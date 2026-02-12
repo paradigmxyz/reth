@@ -889,6 +889,12 @@ impl MultiProofTask {
             state_updates += 1;
         }
 
+        // Fast path: if all targets were already fetched, skip the expensive
+        // MultiAddedRemovedKeys clone, dispatch_with_chunking, and proof target construction.
+        if not_fetched_state_update.is_empty() {
+            return state_updates;
+        }
+
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
         let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
             account: self.multi_added_removed_keys.account.clone(),
