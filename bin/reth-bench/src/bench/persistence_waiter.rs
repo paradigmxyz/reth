@@ -4,6 +4,8 @@
 //! - **Fixed duration waits**: Sleep for a fixed time between blocks
 //! - **Persistence-based waits**: Wait for blocks to be persisted using
 //!   `reth_subscribePersistedBlock` subscription
+//! - **Combined mode**: Wait at least the fixed duration, and also wait for persistence if the
+//!   block hasn't been persisted yet (whichever takes longer)
 
 use alloy_eips::BlockNumHash;
 use alloy_network::Ethereum;
@@ -15,10 +17,42 @@ use eyre::Context;
 use futures::StreamExt;
 use std::time::Duration;
 use tracing::{debug, info};
+
+/// Default `WebSocket` RPC port for reth.
+const DEFAULT_WS_RPC_PORT: u16 = 8546;
 use url::Url;
 
-/// Default timeout for waiting on persistence.
-pub(crate) const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(60);
+/// Returns the websocket RPC URL used for the persistence subscription.
+///
+/// Preference:
+/// - If `ws_rpc_url` is provided, use it directly.
+/// - Otherwise, derive a WS RPC URL from `engine_rpc_url`.
+///
+/// The persistence subscription endpoint (`reth_subscribePersistedBlock`) is exposed on
+/// the regular RPC server (WS port, usually 8546), not on the engine API port (usually 8551).
+/// Since we may only have the engine URL by default, we convert the scheme
+/// (http→ws, https→wss) and force the port to 8546.
+pub(crate) fn derive_ws_rpc_url(
+    ws_rpc_url: Option<&str>,
+    engine_rpc_url: &str,
+) -> eyre::Result<Url> {
+    if let Some(ws_url) = ws_rpc_url {
+        let parsed: Url = ws_url
+            .parse()
+            .wrap_err_with(|| format!("Failed to parse WebSocket RPC URL: {ws_url}"))?;
+        info!(target: "reth-bench", ws_url = %parsed, "Using provided WebSocket RPC URL");
+        Ok(parsed)
+    } else {
+        let derived = engine_url_to_ws_url(engine_rpc_url)?;
+        debug!(
+            target: "reth-bench",
+            engine_url = %engine_rpc_url,
+            %derived,
+            "Derived WebSocket RPC URL from engine RPC URL"
+        );
+        Ok(derived)
+    }
+}
 
 /// Converts an engine API URL to the default RPC websocket URL.
 ///
@@ -30,7 +64,7 @@ pub(crate) const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(
 ///
 /// This is used when we only know the engine API URL (typically `:8551`) but
 /// need to connect to the node's WS RPC endpoint for persistence events.
-pub(crate) fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
+fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
     let url: Url = engine_url
         .parse()
         .wrap_err_with(|| format!("Failed to parse engine RPC URL: {engine_url}"))?;
@@ -52,7 +86,9 @@ pub(crate) fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
         }
     }
 
-    ws_url.set_port(Some(8546)).map_err(|_| eyre::eyre!("Failed to set port for URL: {url}"))?;
+    ws_url
+        .set_port(Some(DEFAULT_WS_RPC_PORT))
+        .map_err(|_| eyre::eyre!("Failed to set port for URL: {url}"))?;
 
     Ok(ws_url)
 }
@@ -118,12 +154,18 @@ impl PersistenceSubscription {
 }
 
 /// Establishes a websocket connection and subscribes to `reth_subscribePersistedBlock`.
+///
+/// The `keepalive_interval` is set to match `persistence_timeout` so that the `WebSocket`
+/// connection is not dropped during long MDBX commits that block the server from responding
+/// to pings.
 pub(crate) async fn setup_persistence_subscription(
     ws_url: Url,
+    persistence_timeout: Duration,
 ) -> eyre::Result<PersistenceSubscription> {
-    info!("Connecting to WebSocket at {} for persistence subscription", ws_url);
+    info!(target: "reth-bench", "Connecting to WebSocket at {} for persistence subscription", ws_url);
 
-    let ws_connect = WsConnect::new(ws_url.to_string());
+    let ws_connect =
+        WsConnect::new(ws_url.to_string()).with_keepalive_interval(persistence_timeout);
     let client = RpcClient::connect_pubsub(ws_connect)
         .await
         .wrap_err("Failed to connect to WebSocket RPC endpoint")?;
@@ -134,7 +176,7 @@ pub(crate) async fn setup_persistence_subscription(
         .await
         .wrap_err("Failed to subscribe to persistence notifications")?;
 
-    info!("Subscribed to persistence notifications");
+    info!(target: "reth-bench", "Subscribed to persistence notifications");
 
     Ok(PersistenceSubscription::new(provider, subscription.into_stream()))
 }
@@ -182,14 +224,39 @@ impl PersistenceWaiter {
         }
     }
 
+    /// Creates a waiter that combines both duration and persistence waiting.
+    ///
+    /// Waits at least `wait_time` between blocks, and also waits for persistence
+    /// if the block hasn't been persisted yet (whichever takes longer).
+    pub(crate) const fn with_duration_and_subscription(
+        wait_time: Duration,
+        subscription: PersistenceSubscription,
+        threshold: u64,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            wait_time: Some(wait_time),
+            subscription: Some(subscription),
+            blocks_sent: 0,
+            last_persisted: 0,
+            threshold,
+            timeout,
+        }
+    }
+
     /// Called once per block. Waits based on the configured mode.
+    ///
+    /// When both `wait_time` and `subscription` are set (combined mode):
+    /// - Always waits at least `wait_time`
+    /// - Additionally waits for persistence if we're at a persistence checkpoint
     #[allow(clippy::manual_is_multiple_of)]
     pub(crate) async fn on_block(&mut self, block_number: u64) -> eyre::Result<()> {
+        // Always wait for the fixed duration if configured
         if let Some(wait_time) = self.wait_time {
             tokio::time::sleep(wait_time).await;
-            return Ok(());
         }
 
+        // Check persistence if subscription is configured
         let Some(ref mut subscription) = self.subscription else {
             return Ok(());
         };

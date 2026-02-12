@@ -12,12 +12,12 @@
 use crate::{
     bench::{
         context::BenchContext,
+        helpers::parse_duration,
         output::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
         persistence_waiter::{
-            engine_url_to_ws_url, setup_persistence_subscription, PersistenceWaiter,
-            PERSISTENCE_CHECKPOINT_TIMEOUT,
+            derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
         },
     },
     valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload},
@@ -26,13 +26,11 @@ use alloy_provider::Provider;
 use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use eyre::{Context, OptionExt};
-use humantime::parse_duration;
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_core::args::BenchmarkArgs;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
-use url::Url;
 
 /// `reth benchmark new-payload-fcu` command
 #[derive(Debug, Parser)]
@@ -42,6 +40,9 @@ pub struct Command {
     rpc_url: String,
 
     /// How long to wait after a forkchoice update before sending the next payload.
+    ///
+    /// Accepts a duration string (e.g. `100ms`, `2s`) or a bare integer treated as
+    /// milliseconds (e.g. `400`).
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
 
@@ -68,6 +69,19 @@ pub struct Command {
     )]
     persistence_threshold: u64,
 
+    /// Timeout for waiting on persistence at each checkpoint.
+    ///
+    /// Must be long enough to account for the persistence thread being blocked
+    /// by pruning after the previous save.
+    #[arg(
+        long = "persistence-timeout",
+        value_name = "PERSISTENCE_TIMEOUT",
+        value_parser = parse_duration,
+        default_value = "120s",
+        verbatim_doc_comment
+    )]
+    persistence_timeout: Duration,
+
     /// The size of the block buffer (channel capacity) for prefetching blocks from the RPC
     /// endpoint.
     #[arg(
@@ -87,26 +101,44 @@ impl Command {
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!("Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+            info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
         }
         if self.wait_for_persistence {
             info!(
+                target: "reth-bench",
                 "Persistence waiting enabled (waits after every {} blocks to match engine gap > {} behavior)",
                 self.persistence_threshold + 1,
                 self.persistence_threshold
             );
         }
 
-        // Set up waiter based on configured options (duration takes precedence)
+        // Set up waiter based on configured options
+        // When both are set: wait at least wait_time, and also wait for persistence if needed
         let mut waiter = match (self.wait_time, self.wait_for_persistence) {
-            (Some(duration), _) => Some(PersistenceWaiter::with_duration(duration)),
+            (Some(duration), true) => {
+                let ws_url = derive_ws_rpc_url(
+                    self.benchmark.ws_rpc_url.as_deref(),
+                    &self.benchmark.engine_rpc_url,
+                )?;
+                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
+                Some(PersistenceWaiter::with_duration_and_subscription(
+                    duration,
+                    sub,
+                    self.persistence_threshold,
+                    self.persistence_timeout,
+                ))
+            }
+            (Some(duration), false) => Some(PersistenceWaiter::with_duration(duration)),
             (None, true) => {
-                let ws_url = self.derive_ws_rpc_url()?;
-                let sub = setup_persistence_subscription(ws_url).await?;
+                let ws_url = derive_ws_rpc_url(
+                    self.benchmark.ws_rpc_url.as_deref(),
+                    &self.benchmark.engine_rpc_url,
+                )?;
+                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
                 Some(PersistenceWaiter::with_subscription(
                     sub,
                     self.persistence_threshold,
-                    PERSISTENCE_CHECKPOINT_TIMEOUT,
+                    self.persistence_timeout,
                 ))
             }
             (None, false) => None,
@@ -137,7 +169,7 @@ impl Command {
                 let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
                     Ok(block) => block,
                     Err(e) => {
-                        tracing::error!("Failed to fetch block {next_block}: {e}");
+                        tracing::error!(target: "reth-bench", "Failed to fetch block {next_block}: {e}");
                         let _ = error_sender.send(e);
                         break;
                     }
@@ -167,7 +199,7 @@ impl Command {
                     .send((block, head_block_hash, safe_block_hash, finalized_block_hash))
                     .await
                 {
-                    tracing::error!("Failed to send block data: {e}");
+                    tracing::error!(target: "reth-bench", "Failed to send block data: {e}");
                     break;
                 }
             }
@@ -218,7 +250,7 @@ impl Command {
             // Exclude time spent waiting on the block prefetch channel from the benchmark duration.
             // We want to measure engine throughput, not RPC fetch latency.
             let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
-            info!(%combined_result);
+            info!(target: "reth-bench", %combined_result);
 
             if let Some(w) = &mut waiter {
                 w.on_block(block_number).await?;
@@ -249,6 +281,7 @@ impl Command {
             TotalGasOutput::with_combined_results(gas_output_results, &combined_results)?;
 
         info!(
+            target: "reth-bench",
             total_gas_used = gas_output.total_gas_used,
             total_duration = ?gas_output.total_duration,
             execution_duration = ?gas_output.execution_duration,
@@ -259,34 +292,5 @@ impl Command {
         );
 
         Ok(())
-    }
-
-    /// Returns the websocket RPC URL used for the persistence subscription.
-    ///
-    /// Preference:
-    /// - If `--ws-rpc-url` is provided, use it directly.
-    /// - Otherwise, derive a WS RPC URL from `--engine-rpc-url`.
-    ///
-    /// The persistence subscription endpoint (`reth_subscribePersistedBlock`) is exposed on
-    /// the regular RPC server (WS port, usually 8546), not on the engine API port (usually 8551).
-    /// Since `BenchmarkArgs` only has the engine URL by default, we convert the scheme
-    /// (http→ws, https→wss) and force the port to 8546.
-    fn derive_ws_rpc_url(&self) -> eyre::Result<Url> {
-        if let Some(ref ws_url) = self.benchmark.ws_rpc_url {
-            let parsed: Url = ws_url
-                .parse()
-                .wrap_err_with(|| format!("Failed to parse WebSocket RPC URL: {ws_url}"))?;
-            info!(target: "reth-bench", ws_url = %parsed, "Using provided WebSocket RPC URL");
-            Ok(parsed)
-        } else {
-            let derived = engine_url_to_ws_url(&self.benchmark.engine_rpc_url)?;
-            debug!(
-                target: "reth-bench",
-                engine_url = %self.benchmark.engine_rpc_url,
-                %derived,
-                "Derived WebSocket RPC URL from engine RPC URL"
-            );
-            Ok(derived)
-        }
     }
 }

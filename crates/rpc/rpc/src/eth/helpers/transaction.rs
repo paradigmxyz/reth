@@ -38,15 +38,16 @@ where
 
     async fn send_transaction(
         &self,
+        origin: reth_transaction_pool::TransactionOrigin,
         tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
     ) -> Result<B256, Self::Error> {
         let (tx, recovered) = tx.split();
         let mut pool_transaction =
             <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
-        // TODO: remove this after Osaka transition
-        // Convert legacy blob sidecars to EIP-7594 format
-        if pool_transaction.is_eip4844() {
+        // Optionally convert legacy blob sidecars to EIP-7594 format when Osaka is active
+        // This is opt-in via --rpc.force-blob-sidecar-upcasting
+        if self.inner.force_blob_sidecar_upcasting() && pool_transaction.is_eip4844() {
             let EthBlobTransactionSidecar::Present(sidecar) = pool_transaction.take_blob() else {
                 return Err(EthApiError::PoolError(RpcPoolError::Eip4844(
                     Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
@@ -106,7 +107,7 @@ where
                 }).map_err(EthApiError::other)?;
 
             // Retain tx in local tx pool after forwarding, for local RPC usage.
-            let _ = self.inner.add_pool_transaction(pool_transaction).await;
+            let _ = self.inner.add_pool_transaction(origin, pool_transaction).await;
 
             return Ok(hash);
         }
@@ -114,9 +115,8 @@ where
         // broadcast raw transaction to subscribers if there is any.
         self.broadcast_raw_transaction(tx);
 
-        // submit the transaction to the pool with a `Local` origin
         let AddedTransactionOutcome { hash, .. } =
-            self.inner.add_pool_transaction(pool_transaction).await?;
+            self.inner.add_pool_transaction(origin, pool_transaction).await?;
 
         Ok(hash)
     }
@@ -137,7 +137,7 @@ mod tests {
     use alloy_consensus::{
         BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
     };
-    use alloy_primitives::{Address, U256};
+    use alloy_primitives::{map::AddressMap, Address, U256};
     use alloy_rpc_types_eth::request::TransactionRequest;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_evm_ethereum::EthEvmConfig;
@@ -149,10 +149,9 @@ mod tests {
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use revm_primitives::Bytes;
-    use std::collections::HashMap;
 
     fn mock_eth_api(
-        accounts: HashMap<Address, ExtendedAccount>,
+        accounts: AddressMap<ExtendedAccount>,
     ) -> EthApi<
         RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
         EthRpcConverter<ChainSpec>,
@@ -218,7 +217,7 @@ mod tests {
     #[tokio::test]
     async fn test_fill_transaction_fills_chain_id() {
         let address = Address::random();
-        let accounts = HashMap::from([(
+        let accounts = AddressMap::from_iter([(
             address,
             ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)), // 10 ETH
         )]);
@@ -244,7 +243,7 @@ mod tests {
         let address = Address::random();
         let nonce = 42u64;
 
-        let accounts = HashMap::from([(
+        let accounts = AddressMap::from_iter([(
             address,
             ExtendedAccount::new(nonce, U256::from(1_000_000_000_000_000_000u64)), // 1 ETH
         )]);
@@ -271,7 +270,7 @@ mod tests {
         let provided_nonce = 100u64;
         let provided_gas_limit = 50_000u64;
 
-        let accounts = HashMap::from([(
+        let accounts = AddressMap::from_iter([(
             address,
             ExtendedAccount::new(42, U256::from(10_000_000_000_000_000_000u64)),
         )]);
@@ -300,7 +299,7 @@ mod tests {
         let address = Address::random();
 
         let balance = U256::from(100u128) * U256::from(1_000_000_000_000_000_000u128);
-        let accounts = HashMap::from([(address, ExtendedAccount::new(5, balance))]);
+        let accounts = AddressMap::from_iter([(address, ExtendedAccount::new(5, balance))]);
 
         let eth_api = mock_eth_api(accounts);
 
@@ -320,7 +319,7 @@ mod tests {
     #[tokio::test]
     async fn test_fill_transaction_eip4844_blob_fee() {
         let address = Address::random();
-        let accounts = HashMap::from([(
+        let accounts = AddressMap::from_iter([(
             address,
             ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
         )]);
@@ -357,7 +356,7 @@ mod tests {
     #[tokio::test]
     async fn test_fill_transaction_eip4844_preserves_blob_fee() {
         let address = Address::random();
-        let accounts = HashMap::from([(
+        let accounts = AddressMap::from_iter([(
             address,
             ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
         )]);
@@ -395,7 +394,7 @@ mod tests {
     #[tokio::test]
     async fn test_fill_transaction_non_blob_tx_no_blob_fee() {
         let address = Address::random();
-        let accounts = HashMap::from([(
+        let accounts = AddressMap::from_iter([(
             address,
             ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
         )]);

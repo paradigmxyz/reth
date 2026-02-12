@@ -38,6 +38,7 @@ reth-storage-errors.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-static-file-types.workspace = true
+reth-tasks.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 
@@ -61,7 +62,7 @@ rayon.workspace = true
 num-traits.workspace = true
 tempfile = { workspace = true, optional = true }
 bincode.workspace = true
-reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots", "blocking"] }
+reqwest.workspace = true
 eyre.workspace = true
 
 [dev-dependencies]
@@ -73,7 +74,7 @@ reth-ethereum-consensus.workspace = true
 reth-evm-ethereum.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
-reth-downloaders.workspace = true
+reth-downloaders = { workspace = true, features = ["file-client"] }
 reth-static-file.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
 reth-storage-api.workspace = true
@@ -82,8 +83,11 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-network-peers.workspace = true
 
+alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
 alloy-rlp.workspace = true
+reth-db-common.workspace = true
+reth-tracing.workspace = true
 
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 assert_matches.workspace = true
@@ -117,8 +121,10 @@ test-utils = [
     "dep:reth-ethereum-primitives",
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
+    "reth-tasks/test-utils",
 ]
-rocksdb = ["reth-provider/rocksdb"]
+rocksdb = ["reth-provider/rocksdb", "reth-db-common/rocksdb"]
+edge = ["rocksdb"]
 
 [[bench]]
 name = "criterion"

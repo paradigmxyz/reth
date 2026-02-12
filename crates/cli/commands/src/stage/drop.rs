@@ -9,7 +9,10 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::{
-    init::{insert_genesis_header, insert_genesis_history, insert_genesis_state},
+    init::{
+        insert_genesis_account_history, insert_genesis_header, insert_genesis_state,
+        insert_genesis_storage_history,
+    },
     DbTool,
 };
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
@@ -171,7 +174,7 @@ impl<C: ChainSpecParser> Command<C> {
                     None,
                 )?;
             }
-            StageEnum::AccountHistory | StageEnum::StorageHistory => {
+            StageEnum::AccountHistory => {
                 let settings = provider_rw.cached_storage_settings();
                 let rocksdb = tool.provider_factory.rocksdb_provider();
 
@@ -181,16 +184,29 @@ impl<C: ChainSpecParser> Command<C> {
                     tx.clear::<tables::AccountsHistory>()?;
                 }
 
+                reset_stage_checkpoint(tx, StageId::IndexAccountHistory)?;
+
+                insert_genesis_account_history(
+                    &provider_rw,
+                    self.env.chain.genesis().alloc.iter(),
+                )?;
+            }
+            StageEnum::StorageHistory => {
+                let settings = provider_rw.cached_storage_settings();
+                let rocksdb = tool.provider_factory.rocksdb_provider();
+
                 if settings.storages_history_in_rocksdb {
                     rocksdb.clear::<tables::StoragesHistory>()?;
                 } else {
                     tx.clear::<tables::StoragesHistory>()?;
                 }
 
-                reset_stage_checkpoint(tx, StageId::IndexAccountHistory)?;
                 reset_stage_checkpoint(tx, StageId::IndexStorageHistory)?;
 
-                insert_genesis_history(&provider_rw, self.env.chain.genesis().alloc.iter())?;
+                insert_genesis_storage_history(
+                    &provider_rw,
+                    self.env.chain.genesis().alloc.iter(),
+                )?;
             }
             StageEnum::TxLookup => {
                 if provider_rw.cached_storage_settings().transaction_hash_numbers_in_rocksdb {

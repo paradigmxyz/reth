@@ -27,7 +27,7 @@ use alloy_consensus::{
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, HashMap, HashSet},
+    map::{hash_map, AddressSet, B256Map, HashMap},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
@@ -78,7 +78,6 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::Arc,
-    thread,
     time::Instant,
 };
 use tracing::{debug, instrument, trace};
@@ -200,6 +199,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     rocksdb_provider: RocksDBProvider,
     /// Changeset cache for trie unwinding
     changeset_cache: ChangesetCache,
+    /// Task runtime for spawning parallel I/O work.
+    runtime: reth_tasks::Runtime,
     /// Pending `RocksDB` batches to be committed at provider commit time.
     #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
     pending_rocksdb_batches: PendingRocksDBBatches,
@@ -222,6 +223,7 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("storage_settings", &self.storage_settings)
             .field("rocksdb_provider", &self.rocksdb_provider)
             .field("changeset_cache", &self.changeset_cache)
+            .field("runtime", &self.runtime)
             .field("pending_rocksdb_batches", &"<pending batches>")
             .field("commit_order", &self.commit_order)
             .field("minimum_pruning_distance", &self.minimum_pruning_distance)
@@ -355,6 +357,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
         changeset_cache: ChangesetCache,
+        runtime: reth_tasks::Runtime,
         commit_order: CommitOrder,
     ) -> Self {
         Self {
@@ -366,6 +369,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             changeset_cache,
+            runtime,
             pending_rocksdb_batches: Default::default(),
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -384,6 +388,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
         changeset_cache: ChangesetCache,
+        runtime: reth_tasks::Runtime,
     ) -> Self {
         Self::new_rw_inner(
             tx,
@@ -394,6 +399,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             changeset_cache,
+            runtime,
             CommitOrder::Normal,
         )
     }
@@ -409,6 +415,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
         changeset_cache: ChangesetCache,
+        runtime: reth_tasks::Runtime,
     ) -> Self {
         Self::new_rw_inner(
             tx,
@@ -419,6 +426,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             changeset_cache,
+            runtime,
             CommitOrder::Unwind,
         )
     }
@@ -549,24 +557,38 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let rocksdb_provider = self.rocksdb_provider.clone();
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb_enabled = rocksdb_ctx.storage_settings.any_in_rocksdb();
 
-        thread::scope(|s| {
+        let mut sf_result = None;
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let mut rocksdb_result = None;
+
+        // Write to all backends in parallel.
+        let runtime = &self.runtime;
+        runtime.storage_pool().in_place_scope(|s| {
             // SF writes
-            let sf_handle = s.spawn(|| {
+            s.spawn(|_| {
                 let start = Instant::now();
-                sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx)?;
-                Ok::<_, ProviderError>(start.elapsed())
+                sf_result = Some(
+                    sf_provider
+                        .write_blocks_data(&blocks, &tx_nums, sf_ctx, runtime)
+                        .map(|()| start.elapsed()),
+                );
             });
 
             // RocksDB writes
             #[cfg(all(unix, feature = "rocksdb"))]
-            let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
-                s.spawn(|| {
+            if rocksdb_enabled {
+                s.spawn(|_| {
                     let start = Instant::now();
-                    rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)?;
-                    Ok::<_, ProviderError>(start.elapsed())
-                })
-            });
+                    rocksdb_result = Some(
+                        rocksdb_provider
+                            .write_blocks_data(&blocks, &tx_nums, rocksdb_ctx, runtime)
+                            .map(|()| start.elapsed()),
+                    );
+                });
+            }
 
             // MDBX writes
             let mdbx_start = Instant::now();
@@ -671,24 +693,27 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             timings.mdbx = mdbx_start.elapsed();
 
-            // Wait for SF thread
-            timings.sf = sf_handle
-                .join()
-                .map_err(|_| StaticFileWriterError::ThreadPanic("static file"))??;
+            Ok::<_, ProviderError>(())
+        })?;
 
-            // Wait for RocksDB thread
-            #[cfg(all(unix, feature = "rocksdb"))]
-            if let Some(handle) = rocksdb_handle {
-                timings.rocksdb = handle.join().expect("RocksDB thread panicked")?;
-            }
+        // Collect results from spawned tasks
+        timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
 
-            timings.total = total_start.elapsed();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if rocksdb_enabled {
+            timings.rocksdb = rocksdb_result.ok_or_else(|| {
+                ProviderError::Database(reth_db_api::DatabaseError::Other(
+                    "RocksDB thread panicked".into(),
+                ))
+            })??;
+        }
 
-            self.metrics.record_save_blocks(&timings);
-            debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
+        timings.total = total_start.elapsed();
 
-            Ok(())
-        })
+        self.metrics.record_save_blocks(&timings);
+        debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
+
+        Ok(())
     }
 
     /// Writes MDBX-only data for a block (indices, lookups, and senders if configured for MDBX).
@@ -761,11 +786,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
     pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
-        let changed_accounts = self
-            .tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(from..)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let changed_accounts = self.account_changesets_range(from..)?;
 
         // Unwind account hashes.
         self.unwind_account_hashing(changed_accounts.iter())?;
@@ -773,12 +794,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Unwind account history indices.
         self.unwind_account_history_indices(changed_accounts.iter())?;
 
-        let storage_start = BlockNumberAddress((from, Address::ZERO));
-        let changed_storages = self
-            .tx
-            .cursor_read::<tables::StorageChangeSets>()?
-            .walk_range(storage_start..)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let changed_storages = self.storage_changesets_range(from..)?;
 
         // Unwind storage hashes.
         self.unwind_storage_hashing(changed_storages.iter().copied())?;
@@ -834,10 +850,19 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        // if the block number is the same as the currently best block number on disk we can use the
-        // latest state provider here
-        if block_number == self.best_block_number().unwrap_or_default() {
-            return Ok(Box::new(LatestStateProvider::new(self)))
+        let best_block = self.best_block_number().unwrap_or_default();
+
+        // Reject requests for blocks beyond the best block
+        if block_number > best_block {
+            return Err(ProviderError::BlockNotExecuted {
+                requested: block_number,
+                executed: best_block,
+            });
+        }
+
+        // If requesting state at the best block, use the latest state provider
+        if block_number == best_block {
+            return Ok(Box::new(LatestStateProvider::new(self)));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -946,6 +971,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
         changeset_cache: ChangesetCache,
+        runtime: reth_tasks::Runtime,
     ) -> Self {
         Self {
             tx,
@@ -956,6 +982,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             changeset_cache,
+            runtime,
             pending_rocksdb_batches: Default::default(),
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -1010,10 +1037,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 
         let tx_range = body.tx_num_range();
 
-        let (transactions, senders) = if tx_range.is_empty() {
-            (vec![], vec![])
+        let transactions = if tx_range.is_empty() {
+            vec![]
         } else {
-            (self.transactions_by_tx_range(tx_range.clone())?, self.senders_by_tx_range(tx_range)?)
+            self.transactions_by_tx_range(tx_range.clone())?
         };
 
         let body = self
@@ -1022,6 +1049,25 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             .read_block_bodies(self, vec![(header.as_ref(), transactions)])?
             .pop()
             .ok_or(ProviderError::InvalidStorageOutput)?;
+
+        let senders = if tx_range.is_empty() {
+            vec![]
+        } else {
+            let known_senders: HashMap<TxNumber, Address> =
+                EitherReader::new_senders(self)?.senders_by_tx_range(tx_range.clone())?;
+
+            let mut senders = Vec::with_capacity(body.transactions().len());
+            for (tx_num, tx) in tx_range.zip(body.transactions()) {
+                match known_senders.get(&tx_num) {
+                    None => {
+                        let sender = tx.recover_signer_unchecked()?;
+                        senders.push(sender);
+                    }
+                    Some(sender) => senders.push(*sender),
+                }
+            }
+            senders
+        };
 
         construct_block(header, body, senders)
     }
@@ -1314,7 +1360,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
             self.cached_storage_settings().account_changesets_in_static_files
         {
             let start = *range.start();
-            let static_end = (*range.end()).min(highest + 1);
+            let static_end = (*range.end()).min(highest);
 
             let mut changed_accounts_and_blocks: BTreeMap<_, Vec<u64>> = BTreeMap::default();
             if start <= static_end {
@@ -2237,7 +2283,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
 
         // Prepare set of addresses which logs should not be pruned.
-        let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
+        let mut allowed_addresses: AddressSet = AddressSet::default();
         for (_, addresses) in contract_log_pruner.range(..first_block) {
             allowed_addresses.extend(addresses.iter().copied());
         }
@@ -2498,10 +2544,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             block_bodies.first().expect("already checked if there are blocks").first_tx_num();
 
         let storage_range = BlockNumberAddress::range(range.clone());
-        let storage_changeset = if let Some(_highest_block) = self
-            .static_file_provider
-            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets) &&
-            self.cached_storage_settings().storage_changesets_in_static_files
+        let storage_changeset = if self.cached_storage_settings().storage_changesets_in_static_files
         {
             let changesets = self.storage_changesets_range(range.clone())?;
             let mut changeset_writer =
@@ -2511,7 +2554,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         } else {
             self.take::<tables::StorageChangeSets>(storage_range)?
         };
-        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
+        let account_changeset = if self.cached_storage_settings().account_changesets_in_static_files
+        {
+            let changesets = self.account_changesets_range(range)?;
+            let mut changeset_writer =
+                self.static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
+            changeset_writer.prune_account_changesets(block)?;
+            changesets
+        } else {
+            self.take::<tables::AccountChangeSets>(range)?
+        };
 
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
@@ -2859,7 +2911,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
     fn unwind_storage_hashing(
         &self,
         changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
-    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
+    ) -> ProviderResult<B256Map<BTreeSet<B256>>> {
         // Aggregate all block changesets and make list of accounts that have been changed.
         let mut hashed_storages = changesets
             .into_iter()
@@ -2870,8 +2922,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
 
         // Apply values to HashedState, and remove the account if it's None.
-        let mut hashed_storage_keys: HashMap<B256, BTreeSet<B256>> =
-            HashMap::with_capacity_and_hasher(hashed_storages.len(), Default::default());
+        let mut hashed_storage_keys: B256Map<BTreeSet<B256>> =
+            B256Map::with_capacity_and_hasher(hashed_storages.len(), Default::default());
         let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, key, value) in hashed_storages.into_iter().rev() {
             hashed_storage_keys.entry(hashed_address).or_default().insert(key);
@@ -2894,7 +2946,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
     fn unwind_storage_hashing_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
+    ) -> ProviderResult<B256Map<BTreeSet<B256>>> {
         let changesets = self.storage_changesets_range(range)?;
         self.unwind_storage_hashing(changesets.into_iter())
     }
@@ -2902,7 +2954,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
     fn insert_storage_for_hashing(
         &self,
         storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageEntry>)>,
-    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
+    ) -> ProviderResult<B256Map<BTreeSet<B256>>> {
         // hash values
         let hashed_storages =
             storages.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
@@ -3506,6 +3558,12 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
     }
 
     /// Commit database transaction, static files, and pending `RocksDB` batches.
+    #[instrument(
+        name = "DatabaseProvider::commit",
+        level = "debug",
+        target = "providers::db",
+        skip_all
+    )]
     fn commit(self) -> ProviderResult<()> {
         // For unwinding it makes more sense to commit the database first, since if
         // it is interrupted before the static files commit, we can just
@@ -3614,7 +3672,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3647,7 +3705,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3684,7 +3742,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3722,7 +3780,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3792,7 +3850,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -4083,7 +4141,7 @@ mod tests {
         // Legacy mode (receipts in DB) - should be prunable
         {
             let factory = create_test_provider_factory();
-            let storage_settings = StorageSettings::legacy();
+            let storage_settings = StorageSettings::v1();
             factory.set_storage_settings_cache(storage_settings);
             let factory = factory.with_prune_modes(PruneModes {
                 receipts: Some(PruneMode::Before(100)),
@@ -4120,7 +4178,7 @@ mod tests {
         // Static files mode
         {
             let factory = create_test_provider_factory();
-            let storage_settings = StorageSettings::legacy().with_receipts_in_static_files(true);
+            let storage_settings = StorageSettings::v1().with_receipts_in_static_files(true);
             factory.set_storage_settings_cache(storage_settings);
             let factory = factory.with_prune_modes(PruneModes {
                 receipts: Some(PruneMode::Before(2)),
@@ -4185,6 +4243,44 @@ mod tests {
                     assert!(receipt.is_none());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_try_into_history_rejects_unexecuted_blocks() {
+        use reth_storage_api::TryIntoHistoricalStateProvider;
+
+        let factory = create_test_provider_factory();
+
+        // Insert genesis block to have some data
+        let data = BlockchainTestData::default();
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                crate::OriginalValuesKnown::No,
+                StateWriteConfig::default(),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        // Get a fresh provider - Execution checkpoint is 0, no receipts written beyond genesis
+        let provider = factory.provider().unwrap();
+
+        // Requesting historical state for block 0 (executed) should succeed
+        let result = provider.try_into_history_at_block(0);
+        assert!(result.is_ok(), "Block 0 should be available");
+
+        // Get another provider and request state for block 100 (not executed)
+        let provider = factory.provider().unwrap();
+        let result = provider.try_into_history_at_block(100);
+
+        // Should fail with BlockNotExecuted error
+        match result {
+            Err(ProviderError::BlockNotExecuted { requested: 100, .. }) => {}
+            Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
+            Ok(_) => panic!("Expected error, got Ok"),
         }
     }
 }

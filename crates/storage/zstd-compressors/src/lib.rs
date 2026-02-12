@@ -60,7 +60,8 @@ mod locals {
 
 /// Fn creates tx [`Compressor`]
 pub fn create_tx_compressor() -> Compressor<'static> {
-    Compressor::with_dictionary(0, RECEIPT_DICTIONARY).expect("Failed to instantiate tx compressor")
+    Compressor::with_dictionary(0, TRANSACTION_DICTIONARY)
+        .expect("Failed to instantiate tx compressor")
 }
 
 /// Fn creates tx [`Decompressor`]
@@ -83,6 +84,59 @@ pub fn create_receipt_decompressor() -> ReusableDecompressor {
         Decompressor::with_dictionary(RECEIPT_DICTIONARY)
             .expect("Failed to instantiate receipt decompressor"),
     )
+}
+
+/// Executes `f` with the thread-local transaction compressor on `std`, otherwise creates a new one.
+#[inline]
+pub fn with_tx_compressor<R>(f: impl FnOnce(&mut Compressor<'_>) -> R) -> R {
+    #[cfg(feature = "std")]
+    {
+        TRANSACTION_COMPRESSOR.with_borrow_mut(f)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        f(&mut create_tx_compressor())
+    }
+}
+
+/// Executes `f` with the thread-local transaction decompressor on `std`, otherwise creates a new
+/// one.
+#[inline]
+pub fn with_tx_decompressor<R>(f: impl FnOnce(&mut ReusableDecompressor) -> R) -> R {
+    #[cfg(feature = "std")]
+    {
+        TRANSACTION_DECOMPRESSOR.with_borrow_mut(f)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        f(&mut create_tx_decompressor())
+    }
+}
+
+/// Executes `f` with the thread-local receipt compressor on `std`, otherwise creates a new one.
+#[inline]
+pub fn with_receipt_compressor<R>(f: impl FnOnce(&mut Compressor<'_>) -> R) -> R {
+    #[cfg(feature = "std")]
+    {
+        RECEIPT_COMPRESSOR.with_borrow_mut(f)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        f(&mut create_receipt_compressor())
+    }
+}
+
+/// Executes `f` with the thread-local receipt decompressor on `std`, otherwise creates a new one.
+#[inline]
+pub fn with_receipt_decompressor<R>(f: impl FnOnce(&mut ReusableDecompressor) -> R) -> R {
+    #[cfg(feature = "std")]
+    {
+        RECEIPT_DECOMPRESSOR.with_borrow_mut(f)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        f(&mut create_receipt_decompressor())
+    }
 }
 
 /// Reusable decompressor that uses its own internal buffer.
@@ -146,5 +200,36 @@ impl ReusableDecompressor {
                 existing = self.buf.capacity(),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tx_roundtrip_compression() {
+        let data: Vec<u8> = (0u8..=255).collect();
+
+        let mut compressor = create_tx_compressor();
+        let compressed = compressor.compress(&data).expect("compress tx");
+
+        let mut decompressor = create_tx_decompressor();
+        let decompressed = decompressor.decompress(&compressed);
+
+        assert_eq!(decompressed, &*data);
+    }
+
+    #[test]
+    fn receipt_roundtrip_compression() {
+        let data: Vec<u8> = (0u8..=255).rev().collect();
+
+        let mut compressor = create_receipt_compressor();
+        let compressed = compressor.compress(&data).expect("compress receipt");
+
+        let mut decompressor = create_receipt_decompressor();
+        let decompressed = decompressor.decompress(&compressed);
+
+        assert_eq!(decompressed, &*data);
     }
 }

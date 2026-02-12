@@ -17,12 +17,11 @@ use reth_provider::{providers::ProviderNodeTypes, DBProvider, StaticFileProvider
 use reth_static_file_types::StaticFileSegment;
 use std::{
     hash::{BuildHasher, Hasher},
-    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
 
-#[cfg(all(unix, feature = "edge"))]
+#[cfg(all(unix, feature = "rocksdb"))]
 mod rocksdb;
 
 /// Interval for logging progress during checksum computation.
@@ -74,7 +73,7 @@ enum Subcommand {
         limit: Option<usize>,
     },
     /// Calculates the checksum of a RocksDB table
-    #[cfg(all(unix, feature = "edge"))]
+    #[cfg(all(unix, feature = "rocksdb"))]
     Rocksdb {
         /// The RocksDB table
         #[arg(value_enum)]
@@ -90,7 +89,7 @@ impl Command {
     /// Execute `db checksum` command
     pub fn execute<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         self,
-        tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+        tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     ) -> eyre::Result<()> {
         warn!("This command should be run without the node running!");
 
@@ -101,7 +100,7 @@ impl Command {
             Subcommand::StaticFile { segment, start_block, end_block, limit } => {
                 checksum_static_file(tool, segment, start_block, end_block, limit)?;
             }
-            #[cfg(all(unix, feature = "edge"))]
+            #[cfg(all(unix, feature = "rocksdb"))]
             Subcommand::Rocksdb { table, limit } => {
                 rocksdb::checksum_rocksdb(tool, table, limit)?;
             }
@@ -117,7 +116,7 @@ fn checksum_hasher() -> impl Hasher {
 }
 
 fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
-    tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+    tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     segment: StaticFileSegment,
     start_block: Option<u64>,
     end_block: Option<u64>,

@@ -5,12 +5,6 @@
 
 extern crate alloc;
 
-/// Default depth to prune sparse tries to for cross-payload caching.
-pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
-
-/// Default number of storage tries to preserve across payload validations.
-pub const DEFAULT_MAX_PRESERVED_STORAGE_TRIES: usize = 100;
-
 mod state;
 pub use state::*;
 
@@ -19,6 +13,11 @@ pub use trie::*;
 
 mod traits;
 pub use traits::*;
+
+mod parallel;
+pub use parallel::*;
+
+mod lower;
 
 pub mod provider;
 
