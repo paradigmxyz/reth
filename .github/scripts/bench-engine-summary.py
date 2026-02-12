@@ -115,6 +115,14 @@ def compute_summary(combined: list[dict], gas: list[dict]) -> dict:
     }
 
 
+def format_duration(seconds: float) -> str:
+    """Format duration as human-readable string."""
+    if seconds >= 60:
+        minutes = seconds / 60
+        return f"{minutes:.1f}min"
+    return f"{seconds}s"
+
+
 def format_gas(gas: int) -> str:
     """Format gas as human-readable string (e.g. 60.4G, 123.5M)."""
     if gas >= GIGAGAS:
@@ -184,7 +192,7 @@ def generate_markdown(summary: dict, baseline: dict | None) -> str:
         lines.append("")
         lines.append(f"Blocks: {summary['blocks']} | "
                       f"Total gas: {format_gas(summary['total_gas'])} | "
-                      f"Total time: {summary['wall_clock_s']}s")
+                      f"Total time: {format_duration(summary['wall_clock_s'])}")
     else:
         lines.append("| Metric | Value |")
         lines.append("|--------|-------|")
@@ -200,7 +208,7 @@ def generate_markdown(summary: dict, baseline: dict | None) -> str:
         lines.append("")
         lines.append(f"Blocks: {summary['blocks']} | "
                       f"Total gas: {format_gas(summary['total_gas'])} | "
-                      f"Total time: {summary['wall_clock_s']}s")
+                      f"Total time: {format_duration(summary['wall_clock_s'])}")
         lines.append("")
         lines.append("*No baseline found — first run on main will establish it.*")
 
