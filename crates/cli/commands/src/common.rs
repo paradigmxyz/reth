@@ -8,7 +8,7 @@ use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::noop::NoopConsensus;
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis_with_settings;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_eth_wire::NetPrimitivesFor;
@@ -74,6 +74,13 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     /// Storage mode configuration (v2 vs v1/legacy)
     #[command(flatten)]
     pub storage: StorageArgs,
+
+    /// Open the database in read-only mode.
+    ///
+    /// This allows inspecting the database while the node is running, but prevents
+    /// automatic healing of storage inconsistencies.
+    #[arg(long, default_value_t = false, global = true)]
+    pub read_only: bool,
 }
 
 impl<C: ChainSpecParser> EnvironmentArgs<C> {
@@ -139,9 +146,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let sf_path = data_dir.static_files();
         let rocksdb_path = data_dir.rocksdb();
 
-        reth_fs_util::create_dir_all(&db_path)?;
-        reth_fs_util::create_dir_all(&sf_path)?;
-        reth_fs_util::create_dir_all(&rocksdb_path)?;
+        if !self.read_only {
+            reth_fs_util::create_dir_all(&db_path)?;
+            reth_fs_util::create_dir_all(&sf_path)?;
+            reth_fs_util::create_dir_all(&rocksdb_path)?;
+        }
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
@@ -159,37 +168,59 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             config.stages.era = config.stages.era.with_datadir(data_dir.data_dir());
         }
 
-        info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
+        info!(target: "reth::cli", ?db_path, ?sf_path, read_only = self.read_only, "Opening storage");
         let genesis_block_number = self.chain.genesis().number.unwrap_or_default();
-        let (db, sfp) = (
-            init_db(db_path, self.db.database_args())?,
-            StaticFileProviderBuilder::read_write(sf_path)
-                .with_metrics()
-                .with_genesis_block_number(genesis_block_number)
-                .build()?,
-        );
+        let (db, sfp) = if self.read_only {
+            (open_db_read_only(&db_path, self.db.database_args())?, {
+                let provider = StaticFileProviderBuilder::read_only(sf_path)
+                    .with_metrics()
+                    .with_genesis_block_number(genesis_block_number)
+                    .build()?;
+                provider.watch_directory();
+                provider
+            })
+        } else {
+            (
+                init_db(db_path, self.db.database_args())?,
+                StaticFileProviderBuilder::read_write(sf_path)
+                    .with_metrics()
+                    .with_genesis_block_number(genesis_block_number)
+                    .build()?,
+            )
+        };
         let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
             .with_default_tables()
             .with_database_log_level(self.db.log_level)
+            .with_read_only(self.read_only)
             .build()?;
 
-        let provider_factory =
-            self.create_provider_factory(&config, db, sfp, rocksdb_provider, runtime)?;
-        debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
-        init_genesis_with_settings(&provider_factory, self.storage_settings())?;
+        let provider_factory = self.create_provider_factory(
+            &config,
+            db,
+            sfp,
+            rocksdb_provider,
+            self.read_only,
+            runtime,
+        )?;
+        if !self.read_only {
+            debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
+            init_genesis_with_settings(&provider_factory, self.storage_settings())?;
+        }
 
         Ok(Environment { config, provider_factory, data_dir })
     }
 
     /// Returns a [`ProviderFactory`] after executing consistency checks.
     ///
-    /// If an issue is found, it will attempt to heal (including a pipeline unwind).
+    /// If an issue is found and `read_only` is false, it will attempt to heal (including a
+    /// pipeline unwind). In read-only mode, it will only warn about inconsistencies.
     fn create_provider_factory<N: CliNodeTypes>(
         &self,
         config: &Config,
         db: DatabaseEnv,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        read_only: bool,
         runtime: reth_tasks::Runtime,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>>
     where
@@ -209,6 +240,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         if let Some(unwind_target) =
             factory.static_file_provider().check_consistency(&factory.provider()?)?
         {
+            if read_only {
+                warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart without --read-only to heal.");
+                return Ok(factory)
+            }
+
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
             assert_ne!(
