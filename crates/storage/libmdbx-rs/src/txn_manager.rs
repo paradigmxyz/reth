@@ -287,10 +287,15 @@ mod read_transactions {
                         let was_in_active = self.remove_active(ptr);
                         if let Err(err) = err {
                             if was_in_active {
+                                // If the transaction was in the list of active transactions,
+                                // then user didn't abort it and we failed to do so.
                                 error!(target: "libmdbx", %err, ?open_duration, ?backtrace, "Failed to time out the long-lived read transaction");
                             }
                         } else {
+                            // Happy path, the transaction has been timed out by us with no errors.
                             warn!(target: "libmdbx", ?open_duration, ?backtrace, "Long-lived read transaction has been timed out");
+                            // Add transaction to the list of timed out transactions that were not
+                            // aborted by the user yet.
                             self.timed_out_not_aborted.insert(ptr as usize);
                         }
                     }

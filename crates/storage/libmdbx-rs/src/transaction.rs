@@ -281,8 +281,6 @@ where
 
 // SAFETY: `TransactionPtr` is `Send` and the raw pointer is not aliased.
 unsafe impl<K: TransactionKind> Send for Transaction<K> {}
-// SAFETY: The raw pointer is not aliased.
-unsafe impl<K: TransactionKind> Sync for Transaction<K> {}
 
 impl<K> fmt::Debug for Transaction<K>
 where
@@ -689,11 +687,11 @@ unsafe impl Send for TransactionPtr {}
 mod tests {
     use super::*;
 
-    const fn assert_send_sync<T: Send + Sync>() {}
+    const fn assert_send<T: Send>() {}
 
     #[expect(dead_code)]
-    const fn test_txn_send_sync() {
-        assert_send_sync::<Transaction<RO>>();
-        assert_send_sync::<Transaction<RW>>();
+    const fn test_txn_send() {
+        assert_send::<Transaction<RO>>();
+        assert_send::<Transaction<RW>>();
     }
 }
