@@ -9373,7 +9373,7 @@ mod tests {
 
         // Create the branch node with children at indices 1 and 2, using the RLP-encoded leaves
         let branch_node = TrieNode::Branch(BranchNode::new(
-            vec![leaf1_rlp.clone(), leaf2_rlp.clone()],
+            vec![leaf1_rlp, leaf2_rlp],
             TrieMask::new(0b0000_0110), // bits 1 and 2 set
         ));
 

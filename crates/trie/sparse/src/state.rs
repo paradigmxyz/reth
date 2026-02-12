@@ -1722,7 +1722,7 @@ mod tests {
 
         // Full 64-nibble paths
         let full_path_0 = leaf_key([0x0], 64);
-        let full_path_1 = leaf_key([0x1], 64);
+        let _full_path_1 = leaf_key([0x1], 64);
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
         // Leaf key is 63 nibbles (suffix after 1-nibble node path)
