@@ -492,11 +492,11 @@ alloy-transport-ws = { version = "1.6.3", default-features = false }
 # op
 alloy-op-evm = { version = "0.27.2", default-features = false }
 alloy-op-hardforks = "0.4.4"
-op-alloy-rpc-types = { version = "0.23.1", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.23.1", default-features = false }
-op-alloy-network = { version = "0.23.1", default-features = false }
-op-alloy-consensus = { version = "0.23.1", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.23.1", default-features = false }
+op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", branch = "mattsse/add-in-memory-size", default-features = false }
+op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", branch = "mattsse/add-in-memory-size", default-features = false }
+op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", branch = "mattsse/add-in-memory-size", default-features = false }
+op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", branch = "mattsse/add-in-memory-size", default-features = false }
+op-alloy-rpc-jsonrpsee = { git = "https://github.com/alloy-rs/op-alloy", branch = "mattsse/add-in-memory-size", default-features = false }
 op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc

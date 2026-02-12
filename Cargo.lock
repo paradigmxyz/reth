@@ -6322,11 +6322,11 @@ version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9b8fee21003dd4f076563de9b9d26f8c97840157ef78593cd7f262c5ca99848"
 dependencies = [
- "op-alloy-consensus",
- "op-alloy-network",
+ "op-alloy-consensus 0.23.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "op-alloy-network 0.23.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-alloy-provider",
- "op-alloy-rpc-types",
- "op-alloy-rpc-types-engine",
+ "op-alloy-rpc-types 0.23.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "op-alloy-rpc-types-engine 0.23.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -6334,6 +6334,23 @@ name = "op-alloy-consensus"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "736381a95471d23e267263cfcee9e1d96d30b9754a94a2819148f83379de8a86"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-eth",
+ "alloy-serde",
+ "derive_more",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "op-alloy-consensus"
+version = "0.23.1"
+source = "git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size#21416bfaf75d566e89c05bf0960a5e0712a20a97"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6361,8 +6378,23 @@ dependencies = [
  "alloy-provider",
  "alloy-rpc-types-eth",
  "alloy-signer",
- "op-alloy-consensus",
- "op-alloy-rpc-types",
+ "op-alloy-consensus 0.23.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "op-alloy-rpc-types 0.23.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "op-alloy-network"
+version = "0.23.1"
+source = "git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size#21416bfaf75d566e89c05bf0960a5e0712a20a97"
+dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types-eth",
+ "alloy-signer",
+ "op-alloy-consensus 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
+ "op-alloy-rpc-types 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
 ]
 
 [[package]]
@@ -6377,7 +6409,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-transport",
  "async-trait",
- "op-alloy-rpc-types-engine",
+ "op-alloy-rpc-types-engine 0.23.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -6393,7 +6425,25 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-serde",
  "derive_more",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.23.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "op-alloy-rpc-types"
+version = "0.23.1"
+source = "git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size#21416bfaf75d566e89c05bf0960a5e0712a20a97"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-network-primitives",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "alloy-serde",
+ "derive_more",
+ "op-alloy-consensus 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -6414,7 +6464,28 @@ dependencies = [
  "derive_more",
  "ethereum_ssz 0.9.1",
  "ethereum_ssz_derive 0.9.1",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.23.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde",
+ "sha2",
+ "snap",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "op-alloy-rpc-types-engine"
+version = "0.23.1"
+source = "git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size#21416bfaf75d566e89c05bf0960a5e0712a20a97"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-engine",
+ "alloy-serde",
+ "derive_more",
+ "ethereum_ssz 0.9.1",
+ "ethereum_ssz_derive 0.9.1",
+ "op-alloy-consensus 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
  "serde",
  "sha2",
  "snap",
@@ -7624,8 +7695,8 @@ dependencies = [
  "eyre",
  "futures",
  "humantime",
- "op-alloy-consensus",
- "op-alloy-rpc-types-engine",
+ "op-alloy-consensus 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
+ "op-alloy-rpc-types-engine 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
  "reqwest",
  "reth-chainspec",
  "reth-cli-runner",
@@ -7870,7 +7941,7 @@ dependencies = [
  "arbitrary",
  "bytes",
  "modular-bitfield",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-codecs-derive",
@@ -8009,7 +8080,7 @@ dependencies = [
  "derive_more",
  "metrics",
  "modular-bitfield",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
  "parity-scale-codec",
  "proptest",
  "proptest-arbitrary-interop",
@@ -8284,7 +8355,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "eyre",
  "futures-util",
- "op-alloy-rpc-types-engine",
+ "op-alloy-rpc-types-engine 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
@@ -9557,7 +9628,7 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "either",
- "op-alloy-rpc-types-engine",
+ "op-alloy-rpc-types-engine 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
  "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
@@ -9629,7 +9700,7 @@ dependencies = [
  "derive_more",
  "modular-bitfield",
  "once_cell",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
@@ -9967,9 +10038,9 @@ dependencies = [
  "auto_impl",
  "dyn-clone",
  "jsonrpsee-types",
- "op-alloy-consensus",
- "op-alloy-network",
- "op-alloy-rpc-types",
+ "op-alloy-consensus 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
+ "op-alloy-network 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
+ "op-alloy-rpc-types 0.23.1 (git+https://github.com/alloy-rs/op-alloy?branch=mattsse%2Fadd-in-memory-size)",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-primitives-traits",
