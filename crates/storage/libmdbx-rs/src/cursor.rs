@@ -503,7 +503,6 @@ const unsafe fn slice_to_val(slice: Option<&[u8]>) -> ffi::MDBX_val {
 }
 
 unsafe impl<K> Send for Cursor<K> where K: TransactionKind {}
-unsafe impl<K> Sync for Cursor<K> where K: TransactionKind {}
 
 /// An iterator over the key/value pairs in an MDBX database.
 #[derive(Debug)]

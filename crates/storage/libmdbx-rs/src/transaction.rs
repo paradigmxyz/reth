@@ -87,7 +87,7 @@ where
 
         #[cfg(feature = "read-tx-timeouts")]
         if K::IS_READ_ONLY {
-            env.txn_manager().add_active_read_transaction(txn_ptr, txn.clone())
+            env.txn_manager().add_active_read_transaction(txn_ptr, txn.timed_out.clone())
         }
 
         let inner = TransactionInner {
@@ -278,6 +278,11 @@ where
         Self { inner: Arc::clone(&self.inner) }
     }
 }
+
+// SAFETY: `TransactionPtr` is `Send` and the raw pointer is not aliased.
+unsafe impl<K: TransactionKind> Send for Transaction<K> {}
+// SAFETY: The raw pointer is not aliased.
+unsafe impl<K: TransactionKind> Sync for Transaction<K> {}
 
 impl<K> fmt::Debug for Transaction<K>
 where
@@ -565,11 +570,6 @@ impl TransactionPtr {
         self.timed_out.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    #[cfg(feature = "read-tx-timeouts")]
-    pub(crate) fn set_timed_out(&self) {
-        self.timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
     /// Executes the given closure with the transaction pointer.
     ///
     /// Returns the result of the closure or an error if the transaction is timed out.
@@ -684,9 +684,6 @@ impl CommitLatency {
 
 // SAFETY: The raw pointer is not aliased.
 unsafe impl Send for TransactionPtr {}
-
-// SAFETY: The raw pointer is not aliased.
-unsafe impl Sync for TransactionPtr {}
 
 #[cfg(test)]
 mod tests {
