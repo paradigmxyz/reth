@@ -10,8 +10,8 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::ParallelIterator;
-use reth_primitives_traits::{Account, ParallelBridgeBuffered};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use reth_primitives_traits::Account;
 use reth_tasks::Runtime;
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, Nibbles,
@@ -37,6 +37,11 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, error, instrument, trace};
+
+/// Maximum number of storage tries to process sequentially before switching to rayon
+/// parallelism. Below this threshold, the fixed overhead of rayon scheduling (~9-15µs per
+/// `into_par_iter()` call) exceeds the benefit of parallel execution.
+const SEQUENTIAL_STORAGE_TRIE_THRESHOLD: usize = 4;
 
 #[expect(clippy::large_enum_variant)]
 pub(super) enum SpawnedSparseTrieTask<BPF, A, S>
@@ -625,9 +630,8 @@ where
         let storage_updates =
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
-        // Process all storage updates in parallel, skipping tries with no pending updates.
-        let span = tracing::Span::current();
-        let storage_results = storage_updates
+        // Collect non-empty storage tries for processing.
+        let items: Vec<_> = storage_updates
             .iter_mut()
             .filter(|(_, updates)| !updates.is_empty())
             .map(|(address, updates)| {
@@ -636,29 +640,61 @@ where
 
                 (address, updates, fetched, trie)
             })
-            .par_bridge_buffered()
-            .map(|(address, updates, mut fetched, mut trie)| {
-                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie leaf updates", ?address).entered();
-                let mut targets = Vec::new();
+            .collect();
 
-                trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                    Entry::Occupied(mut entry) => {
-                        if min_len < *entry.get() {
+        // Skip rayon parallelism for small numbers of storage tries where the fixed
+        // scheduling overhead (~9-15µs per par_bridge_buffered call) exceeds the benefit.
+        let storage_results = if items.len() <= SEQUENTIAL_STORAGE_TRIE_THRESHOLD {
+            // Sequential fast-path: process each storage trie inline.
+            items
+                .into_iter()
+                .map(|(address, updates, mut fetched, mut trie)| {
+                    let mut targets = Vec::new();
+
+                    trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+                        Entry::Occupied(mut entry) => {
+                            if min_len < *entry.get() {
+                                entry.insert(min_len);
+                                targets.push(Target::new(path).with_min_len(min_len));
+                            }
+                        }
+                        Entry::Vacant(entry) => {
                             entry.insert(min_len);
                             targets.push(Target::new(path).with_min_len(min_len));
                         }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(min_len);
-                        targets.push(Target::new(path).with_min_len(min_len));
-                    }
-                })?;
+                    })?;
 
-                SparseTrieResult::Ok((address, targets, fetched, trie))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                    SparseTrieResult::Ok((address, targets, fetched, trie))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            // Parallel path for larger batches where rayon overhead is amortized.
+            let span = tracing::Span::current();
+            let results = items
+                .into_par_iter()
+                .map(|(address, updates, mut fetched, mut trie)| {
+                    let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie leaf updates", ?address).entered();
+                    let mut targets = Vec::new();
 
-        drop(span);
+                    trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+                        Entry::Occupied(mut entry) => {
+                            if min_len < *entry.get() {
+                                entry.insert(min_len);
+                                targets.push(Target::new(path).with_min_len(min_len));
+                            }
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(min_len);
+                            targets.push(Target::new(path).with_min_len(min_len));
+                        }
+                    })?;
+
+                    SparseTrieResult::Ok((address, targets, fetched, trie))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(span);
+            results
+        };
 
         for (address, targets, fetched, trie) in storage_results {
             self.fetched_storage_targets.insert(*address, fetched);
@@ -726,8 +762,9 @@ where
             return Ok(());
         }
 
-        let span = debug_span!("compute_storage_roots").entered();
-        self
+        // Compute storage roots, using sequential iteration for small batches to avoid
+        // rayon scheduling overhead (~9-15µs per par_bridge_buffered call).
+        let candidates: Vec<_> = self
             .trie
             .storage_tries_mut()
             .iter_mut()
@@ -735,12 +772,22 @@ where
                 self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty()) &&
                     !trie.is_root_cached()
             })
-            .par_bridge_buffered()
-            .for_each(|(address, trie)| {
-                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage root", ?address).entered();
+            .collect();
+
+        if candidates.len() <= SEQUENTIAL_STORAGE_TRIE_THRESHOLD {
+            for (_address, trie) in candidates {
                 trie.root().expect("updates are drained, trie should be revealed by now");
-            });
-        drop(span);
+            }
+        } else {
+            let span = debug_span!("compute_storage_roots").entered();
+            candidates
+                .into_par_iter()
+                .for_each(|(address, trie)| {
+                    let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage root", ?address).entered();
+                    trie.root().expect("updates are drained, trie should be revealed by now");
+                });
+            drop(span);
+        }
 
         loop {
             let span = debug_span!("promote_updates", promoted = tracing::field::Empty).entered();
@@ -913,58 +960,65 @@ where
     );
 
     // Update storage slots with new values and calculate storage roots.
-    let span = tracing::Span::current();
-    let results: Vec<_> = state
+    // Collect storage entries first, then choose sequential or parallel based on count.
+    let storage_items: Vec<_> = state
         .storages
         .into_iter()
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
-        .par_bridge_buffered()
-        .map(|(address, storage, storage_trie)| {
-            let _enter =
-                debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie", ?address)
-                    .entered();
-
-            trace!(target: "engine::tree::payload_processor::sparse_trie", "Updating storage");
-            let storage_provider = blinded_provider_factory.storage_node_provider(address);
-            let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
-
-            if storage.wiped {
-                trace!(target: "engine::tree::payload_processor::sparse_trie", "Wiping storage");
-                storage_trie.wipe()?;
-            }
-
-            // Defer leaf removals until after updates/additions, so that we don't delete an
-            // intermediate branch node during a removal and then re-add that branch back during a
-            // later leaf addition. This is an optimization, but also a requirement inherited from
-            // multiproof generating, which can't know the order that leaf operations happen in.
-            let mut removed_slots = SmallVec::<[Nibbles; 8]>::new();
-
-            for (slot, value) in storage.storage {
-                let slot_nibbles = Nibbles::unpack(slot);
-
-                if value.is_zero() {
-                    removed_slots.push(slot_nibbles);
-                    continue;
-                }
-
-                trace!(target: "engine::tree::payload_processor::sparse_trie", ?slot_nibbles, "Updating storage slot");
-                storage_trie.update_leaf(
-                    slot_nibbles,
-                    alloy_rlp::encode_fixed_size(&value).to_vec(),
-                    &storage_provider,
-                )?;
-            }
-
-            for slot_nibbles in removed_slots {
-                trace!(target: "engine::root::sparse", ?slot_nibbles, "Removing storage slot");
-                storage_trie.remove_leaf(&slot_nibbles, &storage_provider)?;
-            }
-
-            storage_trie.root();
-
-            SparseStateTrieResult::Ok((address, storage_trie))
-        })
         .collect();
+
+    let process_storage = |address: B256,
+                           storage: reth_trie::HashedStorage,
+                           storage_trie: Option<reth_trie_sparse::RevealableSparseTrie<S>>,
+                           blinded_provider_factory: &BPF| {
+        let storage_provider = blinded_provider_factory.storage_node_provider(address);
+        let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
+
+        if storage.wiped {
+            storage_trie.wipe()?;
+        }
+
+        let mut removed_slots = SmallVec::<[Nibbles; 8]>::new();
+        for (slot, value) in storage.storage {
+            let slot_nibbles = Nibbles::unpack(slot);
+            if value.is_zero() {
+                removed_slots.push(slot_nibbles);
+                continue;
+            }
+            storage_trie.update_leaf(
+                slot_nibbles,
+                alloy_rlp::encode_fixed_size(&value).to_vec(),
+                &storage_provider,
+            )?;
+        }
+        for slot_nibbles in removed_slots {
+            storage_trie.remove_leaf(&slot_nibbles, &storage_provider)?;
+        }
+        storage_trie.root();
+        SparseStateTrieResult::Ok((address, storage_trie))
+    };
+
+    let results: Vec<_> = if storage_items.len() <= SEQUENTIAL_STORAGE_TRIE_THRESHOLD {
+        // Sequential fast-path: avoid rayon scheduling overhead for small blocks.
+        storage_items
+            .into_iter()
+            .map(|(address, storage, storage_trie)| {
+                process_storage(address, storage, storage_trie, blinded_provider_factory)
+            })
+            .collect()
+    } else {
+        // Parallel path for larger batches where rayon overhead is amortized.
+        let span = tracing::Span::current();
+        storage_items
+            .into_par_iter()
+            .map(|(address, storage, storage_trie)| {
+                let _enter =
+                    debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie", ?address)
+                        .entered();
+                process_storage(address, storage, storage_trie, blinded_provider_factory)
+            })
+            .collect()
+    };
 
     // Defer leaf removals until after updates/additions, so that we don't delete an intermediate
     // branch node during a removal and then re-add that branch back during a later leaf addition.
