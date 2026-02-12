@@ -212,12 +212,6 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     metrics: metrics::DatabaseProviderMetrics,
 }
 
-// SAFETY: The database transaction `TX` is `Send` but not necessarily `Sync`.
-// However, `DatabaseProvider` only accesses `TX` through `&self` methods, and the provider
-// itself is never accessed concurrently from multiple threads (shared ownership via `Arc`
-// does not imply concurrent mutable access to the transaction).
-unsafe impl<TX: Send, N: NodeTypes> Sync for DatabaseProvider<TX, N> {}
-
 impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = f.debug_struct("DatabaseProvider");

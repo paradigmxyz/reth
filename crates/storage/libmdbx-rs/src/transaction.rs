@@ -680,7 +680,8 @@ impl CommitLatency {
     }
 }
 
-// SAFETY: The raw pointer is not aliased.
+// SAFETY: Transactions can be sent to other threads.
+// TODO: document the config that allows this
 unsafe impl Send for TransactionPtr {}
 
 #[cfg(test)]
