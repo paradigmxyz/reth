@@ -176,9 +176,7 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// The execution payload received by Engine API.
         payload: Payload::ExecutionData,
         /// The sender for returning payload status result and timing breakdown.
-        tx: oneshot::Sender<
-            Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError>,
-        >,
+        tx: oneshot::Sender<Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError>>,
     },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {

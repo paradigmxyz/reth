@@ -335,13 +335,20 @@ impl Command {
             )
             .await?;
 
-            let np_latency = server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
+            let np_latency =
+                server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
             let new_payload_result = NewPayloadResult {
                 gas_used,
                 latency: np_latency,
                 persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
-                execution_cache_wait: server_timings.as_ref().map(|t| t.execution_cache_wait).unwrap_or_default(),
-                sparse_trie_wait: server_timings.as_ref().map(|t| t.sparse_trie_wait).unwrap_or_default(),
+                execution_cache_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.execution_cache_wait)
+                    .unwrap_or_default(),
+                sparse_trie_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.sparse_trie_wait)
+                    .unwrap_or_default(),
             };
 
             let fcu_state = ForkchoiceState {
@@ -356,11 +363,8 @@ impl Command {
             let fcu_result = auth_provider.fork_choice_updated_v3(fcu_state, None).await?;
             let fcu_latency = fcu_start.elapsed();
 
-            let total_latency = if server_timings.is_some() {
-                np_latency + fcu_latency
-            } else {
-                start.elapsed()
-            };
+            let total_latency =
+                if server_timings.is_some() { np_latency + fcu_latency } else { start.elapsed() };
 
             let combined_result = CombinedResult {
                 block_number,

@@ -1559,17 +1559,23 @@ where
                                             })
                                         });
 
-                                        let cache_handle = s.spawn(|| {
-                                            validator.wait_for_caches()
-                                        });
+                                        let cache_handle = s.spawn(|| validator.wait_for_caches());
 
-                                        let persistence_result = persistence_handle.join().expect("persistence wait thread panicked");
-                                        let cache_wait = cache_handle.join().expect("cache wait thread panicked");
+                                        let persistence_result = persistence_handle
+                                            .join()
+                                            .expect("persistence wait thread panicked");
+                                        let cache_wait = cache_handle
+                                            .join()
+                                            .expect("cache wait thread panicked");
 
-                                        let persistence_wait = persistence_result.as_ref().map(|(_, _, elapsed)| *elapsed);
-                                        let persistence_complete = persistence_result.and_then(|(result, start_time, _)| {
-                                            result.map(|r| (r, start_time))
-                                        });
+                                        let persistence_wait = persistence_result
+                                            .as_ref()
+                                            .map(|(_, _, elapsed)| *elapsed);
+                                        let persistence_complete = persistence_result.and_then(
+                                            |(result, start_time, _)| {
+                                                result.map(|r| (r, start_time))
+                                            },
+                                        );
 
                                         (persistence_complete, persistence_wait, cache_wait)
                                     });

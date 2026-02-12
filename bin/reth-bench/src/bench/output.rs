@@ -145,9 +145,18 @@ impl Serialize for CombinedResult {
         state.serialize_field("new_payload_latency", &new_payload_latency)?;
         state.serialize_field("fcu_latency", &fcu_latency)?;
         state.serialize_field("total_latency", &total_latency)?;
-        state.serialize_field("persistence_wait", &self.new_payload_result.persistence_wait.map(|d| d.as_micros()))?;
-        state.serialize_field("execution_cache_wait", &self.new_payload_result.execution_cache_wait.as_micros())?;
-        state.serialize_field("sparse_trie_wait", &self.new_payload_result.sparse_trie_wait.as_micros())?;
+        state.serialize_field(
+            "persistence_wait",
+            &self.new_payload_result.persistence_wait.map(|d| d.as_micros()),
+        )?;
+        state.serialize_field(
+            "execution_cache_wait",
+            &self.new_payload_result.execution_cache_wait.as_micros(),
+        )?;
+        state.serialize_field(
+            "sparse_trie_wait",
+            &self.new_payload_result.sparse_trie_wait.as_micros(),
+        )?;
         state.end()
     }
 }
