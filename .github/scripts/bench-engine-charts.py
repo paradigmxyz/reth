@@ -36,7 +36,7 @@ def parse_combined_csv(path: str) -> list[dict]:
                 "block_number": int(row["block_number"]),
                 "gas_used": int(row["gas_used"]),
                 "new_payload_latency_us": int(row["new_payload_latency"]),
-                "persistence_wait_us": int(row.get("persistence_wait", 0)),
+                "persistence_wait_us": int(row["persistence_wait"]) if row.get("persistence_wait") else None,
                 "execution_cache_wait_us": int(row.get("execution_cache_wait", 0)),
                 "sparse_trie_wait_us": int(row.get("sparse_trie_wait", 0)),
             })
@@ -79,8 +79,8 @@ def plot_wait_breakdown(rows: list[dict], out: Path):
 
     fig, axes = plt.subplots(len(series), 1, figsize=(12, 3 * len(series)), sharex=True)
     for ax, (label, key, color) in zip(axes, series):
-        xs = [r["block_number"] for r in rows if r[key] > 0]
-        ys = [r[key] / 1_000 for r in rows if r[key] > 0]
+        xs = [r["block_number"] for r in rows if r[key] is not None]
+        ys = [r[key] / 1_000 for r in rows if r[key] is not None]
         ax.plot(xs, ys, linewidth=0.8, color=color)
         ax.set_ylabel("ms")
         ax.set_title(label)
