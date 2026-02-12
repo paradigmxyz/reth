@@ -20,7 +20,6 @@ import sys
 from pathlib import Path
 
 GIGAGAS = 1_000_000_000
-BASELINE_PATH = Path("/reth-bench/baseline.json")
 NOISE_THRESHOLD = 1.0  # minimum threshold floor (%)
 Z_K = 2.0  # z-score multiplier for 95% confidence interval
 
@@ -246,7 +245,7 @@ def generate_comparison_table(run1: dict, run2: dict) -> str:
     return "\n".join(lines)
 
 
-def generate_markdown(summary: dict, baseline: dict | None, comparison_table: str | None) -> str:
+def generate_markdown(summary: dict, comparison_table: str | None) -> str:
     """Generate a markdown comment body."""
     lines = ["## ⚡ Engine Benchmark Results", ""]
 
@@ -254,24 +253,6 @@ def generate_markdown(summary: dict, baseline: dict | None, comparison_table: st
         lines.append(comparison_table)
         lines.append("")
 
-    metrics = [
-        ("Mean Ggas/s", "mean_ggas_s", True),
-        ("Median block Ggas/s", "median_block_ggas_s", True),
-        ("Avg newPayload (ms)", "avg_new_payload_ms", False),
-        ("P90 newPayload (ms)", "p90_new_payload_ms", False),
-        ("P95 newPayload (ms)", "p95_new_payload_ms", False),
-        ("Avg persistence wait (ms)", "avg_persistence_wait_ms", False),
-        ("Avg state cache wait (ms)", "avg_execution_cache_wait_ms", False),
-        ("Avg trie cache wait (ms)", "avg_sparse_trie_wait_ms", False),
-    ]
-
-    lines.append("### Run 2 Summary")
-    lines.append("")
-    lines.append("| Metric | Value |")
-    lines.append("|--------|-------|")
-    for label, key, _ in metrics:
-        lines.append(f"| {label} | {summary[key]} |")
-    lines.append("")
     lines.append(f"Blocks: {summary['blocks']} | "
                   f"Total gas: {format_gas(summary['total_gas'])} | "
                   f"Total time: {format_duration(summary['wall_clock_s'])}")
@@ -285,7 +266,6 @@ def main():
     parser.add_argument("gas_csv", help="Path to total_gas.csv (run 2)")
     parser.add_argument("--output-summary", required=True, help="Output JSON summary path")
     parser.add_argument("--output-markdown", required=True, help="Output markdown path")
-    parser.add_argument("--baseline", default=None, help="Baseline JSON path (for main comparison)")
     parser.add_argument("--baseline-csv", default=None, help="Run 1 combined_latency.csv for comparison")
     args = parser.parse_args()
 
@@ -311,14 +291,7 @@ def main():
             comparison_table = generate_comparison_table(run1_stats, run2_stats)
             print("Generated statistical comparison table")
 
-    baseline = None
-    baseline_path = Path(args.baseline) if args.baseline else BASELINE_PATH
-    if baseline_path.exists():
-        with open(baseline_path) as f:
-            baseline = json.load(f)
-        print(f"Loaded baseline from {baseline_path}")
-
-    markdown = generate_markdown(summary, baseline, comparison_table)
+    markdown = generate_markdown(summary, comparison_table)
 
     with open(args.output_markdown, "w") as f:
         f.write(markdown)
