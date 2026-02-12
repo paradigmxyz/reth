@@ -215,25 +215,30 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.add_ons.exexs.push((exex_id.into(), false, Box::new(exex)));
+        self.add_ons.exexs.push((exex_id.into(), reth_exex::ExExConfig::default(), Box::new(exex)));
         self
     }
 
-    /// Installs a stateful `ExEx` (Execution Extension) in the node.
+    /// Installs an `ExEx` (Execution Extension) in the node with custom configuration.
     ///
-    /// Stateful ExExes depend on state existing in the database and therefore do not receive
-    /// pipeline notifications.
+    /// This allows configuring ExEx behavior such as whether to skip pipeline notifications
+    /// and the maximum backfill distance.
     ///
     /// # Note
     ///
     /// The `ExEx` ID must be unique.
-    pub fn install_stateful_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
+    pub fn install_exex_with_config<F, R, E>(
+        mut self,
+        exex_id: impl Into<String>,
+        config: reth_exex::ExExConfig,
+        exex: F,
+    ) -> Self
     where
         F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.add_ons.exexs.push((exex_id.into(), true, Box::new(exex)));
+        self.add_ons.exexs.push((exex_id.into(), config, Box::new(exex)));
         self
     }
 

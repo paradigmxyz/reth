@@ -1,3 +1,4 @@
+use super::ExExConfig;
 use crate::{
     wal::Wal, ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight, WalHandle,
 };
@@ -32,6 +33,8 @@ use tokio::sync::{
 };
 use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 
+type NotificationPayload<N> = (ExExNotificationSource, ExExNotification<N>);
+
 /// Default max size of the internal state notifications buffer.
 ///
 /// 1024 notifications in the buffer is 3.5 hours of mainnet blocks,
@@ -61,7 +64,7 @@ pub enum ExExNotificationSource {
 
 impl ExExNotificationSource {
     /// Returns true if the notification source is `Pipeline`.
-    const fn is_pipeline(&self) -> bool {
+    pub const fn is_pipeline(&self) -> bool {
         matches!(self, Self::Pipeline)
     }
 }
@@ -85,15 +88,10 @@ struct ExExMetrics {
 pub struct ExExHandle<N: NodePrimitives = EthPrimitives> {
     /// The execution extension's ID.
     id: String,
-    /// Specifies if the exex is stateful.
-    ///
-    /// If this is true we do not send Pipeline notifications to the exex as the state has not
-    /// been persisted and as such the stateful exex can not operate on it.
-    is_stateful: bool,
     /// Metrics for an `ExEx`.
     metrics: ExExMetrics,
     /// Channel to send [`ExExNotification`]s to the `ExEx`.
-    sender: PollSender<ExExNotification<N>>,
+    sender: PollSender<(ExExNotificationSource, ExExNotification<N>)>,
     /// Channel to receive [`ExExEvent`]s from the `ExEx`.
     receiver: UnboundedReceiver<ExExEvent>,
     /// The ID of the next notification to send to this `ExEx`.
@@ -111,7 +109,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
     /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
     pub fn new<P, E: ConfigureEvm<Primitives = N>>(
         id: String,
-        is_stateful: bool,
+        config: ExExConfig,
         node_head: BlockNumHash,
         provider: P,
         evm_config: E,
@@ -125,13 +123,12 @@ impl<N: NodePrimitives> ExExHandle<N> {
             evm_config,
             notification_rx,
             wal_handle,
-            is_stateful,
+            config,
         );
 
         (
             Self {
                 id: id.clone(),
-                is_stateful,
                 metrics: ExExMetrics::new_with_labels(&[("exex", id)]),
                 sender: PollSender::new(notification_tx),
                 receiver: event_rx,
@@ -155,18 +152,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
             ExExNotificationSource,
             ExExNotification<N>,
         ),
-    ) -> Poll<Result<(), PollSendError<ExExNotification<N>>>> {
-        if self.is_stateful && source.is_pipeline() {
-            debug!(
-                target: "exex::manager",
-                exex_id = %self.id,
-                %notification_id,
-                "Skipping pipeline notification for stateful ExEx"
-            );
-            self.next_notification_id = notification_id + 1;
-            return Poll::Ready(Ok(()));
-        }
-
+    ) -> Poll<Result<(), PollSendError<NotificationPayload<N>>>> {
         if let Some(finished_height) = self.finished_height {
             match notification {
                 ExExNotification::ChainCommitted { new } => {
@@ -212,7 +198,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
             %notification_id,
             "Sending notification"
         );
-        match self.sender.send_item(notification.clone()) {
+        match self.sender.send_item((*source, notification.clone())) {
             Ok(()) => {
                 self.next_notification_id = notification_id + 1;
                 self.metrics.notifications_sent_total.increment(1);
@@ -748,7 +734,7 @@ mod tests {
 
         let (mut exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
             "test_exex".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -769,7 +755,7 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -792,7 +778,7 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -821,7 +807,7 @@ mod tests {
 
         let (exex_handle, _, _) = ExExHandle::new(
             "test_exex".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -882,7 +868,7 @@ mod tests {
 
         let (exex_handle, _, _) = ExExHandle::new(
             "test_exex".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -935,7 +921,7 @@ mod tests {
 
         let (exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
             "test_exex".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -991,7 +977,7 @@ mod tests {
         // Create two `ExExHandle` instances
         let (exex_handle1, event_tx1, _) = ExExHandle::new(
             "test_exex1".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -999,7 +985,7 @@ mod tests {
         );
         let (exex_handle2, event_tx2, _) = ExExHandle::new(
             "test_exex2".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -1050,7 +1036,7 @@ mod tests {
         // Create two `ExExHandle` instances
         let (exex_handle1, event_tx1, _) = ExExHandle::new(
             "test_exex1".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -1058,7 +1044,7 @@ mod tests {
         );
         let (exex_handle2, event_tx2, _) = ExExHandle::new(
             "test_exex2".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -1115,7 +1101,7 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -1185,7 +1171,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1243,7 +1229,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1295,7 +1281,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1341,7 +1327,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1404,7 +1390,7 @@ mod tests {
 
         let (exex_handle, events_tx, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             provider.clone(),
             EthEvmConfig::mainnet(),
@@ -1504,7 +1490,7 @@ mod tests {
         // 1. Setup Manager with Capacity = 1
         let (exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            false,
+            ExExConfig::default(),
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1581,7 +1567,7 @@ mod tests {
         // STATELESS ExEx - should receive ALL notifications
         let (stateless_handle, _stateless_events_tx, mut stateless_notifications) = ExExHandle::new(
             "stateless_exex".to_string(),
-            false, // is_stateful = false
+            ExExConfig { skip_pipeline_notifications: false, max_backfill_distance: None },
             Default::default(),
             provider.clone(),
             EthEvmConfig::mainnet(),
@@ -1591,7 +1577,7 @@ mod tests {
         // STATEFUL ExEx - should SKIP pipeline notifications
         let (stateful_handle, _stateful_events_tx, mut stateful_notifications) = ExExHandle::new(
             "stateful_exex".to_string(),
-            true, // is_stateful = true
+            ExExConfig { skip_pipeline_notifications: true, max_backfill_distance: None },
             Default::default(),
             provider.clone(),
             EthEvmConfig::mainnet(),
