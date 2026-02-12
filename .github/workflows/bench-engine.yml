@@ -117,6 +117,16 @@ jobs:
             sleep 1
           done
 
+      # Warmup: run 50 blocks to prime caches without collecting results
+      - name: Warmup
+        run: |
+          reth-bench new-payload-fcu \
+            --rpc-url "$BENCH_RPC_URL" \
+            --engine-rpc-url http://127.0.0.1:8551 \
+            --jwt-secret "$JWT_SECRET" \
+            --advance 50 \
+            --reth-new-payload
+
       # Run the benchmark
       - name: Run benchmark
         run: |
