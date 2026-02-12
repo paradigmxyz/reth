@@ -771,6 +771,11 @@ impl MultiProofTask {
     fn on_prefetch_proof(&mut self, mut targets: VersionedMultiProofTargets) -> u64 {
         // Remove already fetched proof targets to avoid redundant work.
         targets.retain_difference(&self.fetched_proof_targets);
+
+        if targets.is_empty() {
+            return 0;
+        }
+
         extend_multiproof_targets(&mut self.fetched_proof_targets, &targets);
 
         // For Legacy multiproofs, make sure all target accounts have an `AddedRemovedKeySet` in the
@@ -887,6 +892,10 @@ impl MultiProofTask {
                 state: fetched_state_update,
             });
             state_updates += 1;
+        }
+
+        if not_fetched_state_update.is_empty() {
+            return state_updates;
         }
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
