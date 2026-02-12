@@ -201,25 +201,25 @@ impl<S: TransactionSource> TransactionCollector<S> {
 pub struct Command {
     /// The RPC URL to use for fetching blocks (can be an external archive node).
     #[arg(long, value_name = "RPC_URL")]
-    rpc_url: String,
+    pub(crate) rpc_url: String,
 
     /// The engine RPC URL (with JWT authentication).
     #[arg(long, value_name = "ENGINE_RPC_URL", default_value = "http://localhost:8551")]
-    engine_rpc_url: String,
+    pub(crate) engine_rpc_url: String,
 
     /// The RPC URL for `testing_buildBlockV1` calls (same node as engine, regular RPC port).
     #[arg(long, value_name = "TESTING_RPC_URL", default_value = "http://localhost:8545")]
-    testing_rpc_url: String,
+    pub(crate) testing_rpc_url: String,
 
     /// Path to the JWT secret file for engine API authentication.
     #[arg(long, value_name = "JWT_SECRET")]
-    jwt_secret: std::path::PathBuf,
+    pub(crate) jwt_secret: std::path::PathBuf,
 
     /// Target gas to pack into the block.
     /// Accepts short notation: K for thousand, M for million, G for billion (e.g., 1G = 1
     /// billion).
     #[arg(long, value_name = "TARGET_GAS", default_value = "30000000", value_parser = parse_gas_limit)]
-    target_gas: u64,
+    pub(crate) target_gas: u64,
 
     /// Block number to start fetching transactions from (required).
     ///
@@ -235,27 +235,27 @@ pub struct Command {
     /// Using a block after ramping started will cause transaction collection to fail
     /// because those blocks contain synthetic transactions that cannot be replayed.
     #[arg(long, value_name = "FROM_BLOCK")]
-    from_block: u64,
+    pub(crate) from_block: u64,
 
     /// Execute the payload (call newPayload + forkchoiceUpdated).
     /// If false, only builds the payload and prints it.
     #[arg(long, default_value = "false")]
-    execute: bool,
+    pub(crate) execute: bool,
 
     /// Number of payloads to generate. Each payload uses the previous as parent.
     /// When count == 1, the payload is only generated and saved, not executed.
     /// When count > 1, each payload is executed before building the next.
     #[arg(long, default_value = "1")]
-    count: u64,
+    pub(crate) count: u64,
 
     /// Number of transaction batches to prefetch in background when count > 1.
     /// Higher values reduce latency but use more memory.
     #[arg(long, default_value = "4")]
-    prefetch_buffer: usize,
+    pub(crate) prefetch_buffer: usize,
 
     /// Output directory for generated payloads. Each payload is saved as `payload_block_N.json`.
     #[arg(long, value_name = "OUTPUT_DIR")]
-    output_dir: std::path::PathBuf,
+    pub(crate) output_dir: std::path::PathBuf,
 }
 
 /// A built payload ready for execution.

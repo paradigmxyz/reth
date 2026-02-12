@@ -8,6 +8,7 @@ use reth_tracing::FileWorkerGuard;
 mod context;
 mod gas_limit_ramp;
 mod generate_big_block;
+mod generate_small_block;
 pub(crate) mod helpers;
 pub use generate_big_block::{
     RawTransaction, RpcTransactionSource, TransactionCollector, TransactionSource,
@@ -66,6 +67,18 @@ pub enum Subcommands {
     /// 30000000`
     GenerateBigBlock(generate_big_block::Command),
 
+    /// Generate a small block (under 20M gas) for benchmarking small block performance.
+    ///
+    /// Same as `generate-big-block` but defaults to 15M gas target. Does not require a
+    /// prior gas limit ramp phase since the target is below the standard block gas limit.
+    ///
+    /// Example:
+    ///
+    /// `reth-bench generate-small-block --rpc-url http://localhost:8545 --engine-rpc-url
+    /// http://localhost:8551 --jwt-secret ~/.local/share/reth/mainnet/jwt.hex --from-block
+    /// 21000000`
+    GenerateSmallBlock(generate_small_block::Command),
+
     /// Replay pre-generated payloads from a directory.
     ///
     /// This command reads payload files from a previous `generate-big-block` run and replays
@@ -102,6 +115,7 @@ impl BenchmarkCommand {
             Subcommands::NewPayloadOnly(command) => command.execute(ctx).await,
             Subcommands::SendPayload(command) => command.execute(ctx).await,
             Subcommands::GenerateBigBlock(command) => command.execute(ctx).await,
+            Subcommands::GenerateSmallBlock(command) => command.execute(ctx).await,
             Subcommands::ReplayPayloads(command) => command.execute(ctx).await,
             Subcommands::SendInvalidPayload(command) => (*command).execute(ctx).await,
         }
