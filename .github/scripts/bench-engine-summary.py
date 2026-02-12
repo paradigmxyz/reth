@@ -115,6 +115,15 @@ def compute_summary(combined: list[dict], gas: list[dict]) -> dict:
     }
 
 
+def format_gas(gas: int) -> str:
+    """Format gas as human-readable string (e.g. 60.4G, 123.5M)."""
+    if gas >= GIGAGAS:
+        return f"{gas / GIGAGAS:.1f}G"
+    if gas >= 1_000_000:
+        return f"{gas / 1_000_000:.1f}M"
+    return f"{gas:,}"
+
+
 def format_change(current: float, baseline: float) -> str:
     """Format a % change with arrow indicator."""
     if baseline == 0:
@@ -174,8 +183,8 @@ def generate_markdown(summary: dict, baseline: dict | None) -> str:
 
         lines.append("")
         lines.append(f"Blocks: {summary['blocks']} | "
-                      f"Total gas: {summary['total_gas']:,} | "
-                      f"Execution time: {summary['execution_s']}s")
+                      f"Total gas: {format_gas(summary['total_gas'])} | "
+                      f"Total time: {summary['wall_clock_s']}s")
     else:
         lines.append("| Metric | Value |")
         lines.append("|--------|-------|")
@@ -190,8 +199,8 @@ def generate_markdown(summary: dict, baseline: dict | None) -> str:
         lines.append(f"| Avg sparse trie wait (ms) | {summary['avg_sparse_trie_wait_ms']} |")
         lines.append("")
         lines.append(f"Blocks: {summary['blocks']} | "
-                      f"Total gas: {summary['total_gas']:,} | "
-                      f"Execution time: {summary['execution_s']}s")
+                      f"Total gas: {format_gas(summary['total_gas'])} | "
+                      f"Total time: {summary['wall_clock_s']}s")
         lines.append("")
         lines.append("*No baseline found — first run on main will establish it.*")
 
