@@ -163,8 +163,8 @@ def generate_markdown(summary: dict, baseline: dict | None) -> str:
         ("P90 newPayload (ms)", "p90_new_payload_ms", False),
         ("P95 newPayload (ms)", "p95_new_payload_ms", False),
         ("Avg persistence wait (ms)", "avg_persistence_wait_ms", False),
-        ("Avg exec cache wait (ms)", "avg_execution_cache_wait_ms", False),
-        ("Avg sparse trie wait (ms)", "avg_sparse_trie_wait_ms", False),
+        ("Avg state cache wait (ms)", "avg_execution_cache_wait_ms", False),
+        ("Avg trie cache wait (ms)", "avg_sparse_trie_wait_ms", False),
     ]
 
     if baseline:
