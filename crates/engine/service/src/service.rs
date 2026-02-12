@@ -18,6 +18,7 @@ use reth_evm::ConfigureEvm;
 use reth_network_p2p::BlockClient;
 use reth_node_types::{BlockTy, NodeTypes};
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives_traits::{NodePrimitives, Recovered};
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     ProviderFactory,
@@ -85,6 +86,9 @@ where
         sync_metrics_tx: MetricEventsSender,
         evm_config: C,
         changeset_cache: ChangesetCache,
+        txpool_pending_transactions: Option<
+            Box<dyn Fn() -> Vec<Recovered<<N::Primitives as NodePrimitives>::SignedTx>> + Send>,
+        >,
     ) -> Self
     where
         V: EngineValidator<N::Payload>,
@@ -111,6 +115,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
+            txpool_pending_transactions,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
@@ -222,6 +227,7 @@ mod tests {
             sync_metrics_tx,
             evm_config,
             changeset_cache,
+            None,
         );
     }
 }

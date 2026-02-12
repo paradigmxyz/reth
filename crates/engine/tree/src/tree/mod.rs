@@ -27,7 +27,9 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{
+    NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
+};
 use reth_provider::{
     BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
@@ -40,7 +42,12 @@ use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{fmt::Debug, ops, sync::Arc, time::Instant};
+use std::{
+    fmt::Debug,
+    ops,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -271,6 +278,12 @@ where
     evm_config: C,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Timer for delayed txpool prewarming. Fires ~4s after a block is canonicalized.
+    txpool_prewarm_timer: Option<crossbeam_channel::Receiver<Instant>>,
+    /// The canonical head hash the prewarm timer was scheduled for.
+    txpool_prewarm_target: Option<B256>,
+    /// Callback to snapshot pending transactions from the txpool.
+    txpool_pending_transactions: Option<Box<dyn Fn() -> Vec<Recovered<N::SignedTx>> + Send>>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -296,6 +309,7 @@ where
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
+            .field("txpool_prewarm_target", &self.txpool_prewarm_target)
             .finish()
     }
 }
@@ -334,6 +348,7 @@ where
         engine_kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
+        txpool_pending_transactions: Option<Box<dyn Fn() -> Vec<Recovered<N::SignedTx>> + Send>>,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -355,6 +370,9 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
+            txpool_prewarm_timer: None,
+            txpool_prewarm_target: None,
+            txpool_pending_transactions,
         }
     }
 
@@ -375,6 +393,7 @@ where
         kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
+        txpool_pending_transactions: Option<Box<dyn Fn() -> Vec<Recovered<N::SignedTx>> + Send>>,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -407,6 +426,7 @@ where
             kind,
             evm_config,
             changeset_cache,
+            txpool_pending_transactions,
         );
         let incoming = task.incoming_tx.clone();
         spawn_os_thread("engine", || task.run());
@@ -441,6 +461,9 @@ where
                         return
                     }
                 }
+                LoopEvent::TxpoolPrewarmTimer => {
+                    self.on_txpool_prewarm_timer();
+                }
                 LoopEvent::Disconnected => {
                     error!(target: "engine::tree", "Channel disconnected");
                     return
@@ -467,35 +490,68 @@ where
         // Take ownership of persistence rx if present
         let maybe_persistence = self.persistence_state.rx.take();
 
-        if let Some((persistence_rx, start_time, action)) = maybe_persistence {
-            // Biased select prioritizes persistence completion to update in memory state and
-            // unblock further writes
-            crossbeam_channel::select_biased! {
-                recv(persistence_rx) -> result => {
-                    // Don't put it back - consumed (oneshot-like behavior)
-                    match result {
-                        Ok(value) => LoopEvent::PersistenceComplete {
-                            result: value,
-                            start_time,
-                        },
-                        Err(_) => LoopEvent::Disconnected,
-                    }
-                },
-                recv(self.incoming) -> msg => {
-                    // Put the persistence rx back - we didn't consume it
-                    self.persistence_state.rx = Some((persistence_rx, start_time, action));
-                    match msg {
-                        Ok(m) => LoopEvent::EngineMessage(m),
-                        Err(_) => LoopEvent::Disconnected,
-                    }
-                },
+        match (maybe_persistence, self.txpool_prewarm_timer.as_ref()) {
+            (Some((persistence_rx, start_time, action)), Some(timer)) => {
+                crossbeam_channel::select_biased! {
+                    recv(persistence_rx) -> result => {
+                        match result {
+                            Ok(value) => LoopEvent::PersistenceComplete {
+                                result: value,
+                                start_time,
+                            },
+                            Err(_) => LoopEvent::Disconnected,
+                        }
+                    },
+                    recv(self.incoming) -> msg => {
+                        self.persistence_state.rx = Some((persistence_rx, start_time, action));
+                        match msg {
+                            Ok(m) => LoopEvent::EngineMessage(m),
+                            Err(_) => LoopEvent::Disconnected,
+                        }
+                    },
+                    recv(timer) -> _ => {
+                        self.persistence_state.rx = Some((persistence_rx, start_time, action));
+                        LoopEvent::TxpoolPrewarmTimer
+                    },
+                }
             }
-        } else {
-            // No persistence in progress - just wait on incoming
-            match self.incoming.recv() {
+            (Some((persistence_rx, start_time, action)), None) => {
+                crossbeam_channel::select_biased! {
+                    recv(persistence_rx) -> result => {
+                        match result {
+                            Ok(value) => LoopEvent::PersistenceComplete {
+                                result: value,
+                                start_time,
+                            },
+                            Err(_) => LoopEvent::Disconnected,
+                        }
+                    },
+                    recv(self.incoming) -> msg => {
+                        self.persistence_state.rx = Some((persistence_rx, start_time, action));
+                        match msg {
+                            Ok(m) => LoopEvent::EngineMessage(m),
+                            Err(_) => LoopEvent::Disconnected,
+                        }
+                    },
+                }
+            }
+            (None, Some(timer)) => {
+                crossbeam_channel::select_biased! {
+                    recv(self.incoming) -> msg => {
+                        match msg {
+                            Ok(m) => LoopEvent::EngineMessage(m),
+                            Err(_) => LoopEvent::Disconnected,
+                        }
+                    },
+                    recv(timer) -> _ => {
+                        LoopEvent::TxpoolPrewarmTimer
+                    },
+                }
+            }
+            (None, None) => match self.incoming.recv() {
                 Ok(m) => LoopEvent::EngineMessage(m),
                 Err(_) => LoopEvent::Disconnected,
-            }
+            },
         }
     }
 
@@ -558,6 +614,8 @@ where
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
+        self.cancel_txpool_prewarm();
+
         trace!(target: "engine::tree", "invoked new payload");
 
         // start timing for the new payload process
@@ -1722,9 +1780,77 @@ where
     fn make_canonical(&mut self, target: B256) -> ProviderResult<()> {
         if let Some(chain_update) = self.on_new_head(target)? {
             self.on_canonical_chain_update(chain_update);
+            self.schedule_txpool_prewarm();
         }
 
         Ok(())
+    }
+
+    /// Cancels any scheduled or running txpool prewarming.
+    fn cancel_txpool_prewarm(&mut self) {
+        self.txpool_prewarm_timer = None;
+        self.txpool_prewarm_target = None;
+        self.payload_validator.cancel_txpool_prewarm();
+    }
+
+    /// Schedules txpool prewarming to start after a 4-second delay.
+    fn schedule_txpool_prewarm(&mut self) {
+        if self.txpool_pending_transactions.is_none() ||
+            !self.backfill_sync_state.is_idle() ||
+            self.config.disable_txpool_prewarming()
+        {
+            return;
+        }
+
+        self.cancel_txpool_prewarm();
+
+        let head_hash = self.state.tree_state.current_canonical_head.hash;
+        self.txpool_prewarm_target = Some(head_hash);
+        self.txpool_prewarm_timer = Some(crossbeam_channel::after(Duration::from_secs(4)));
+
+        debug!(
+            target: "engine::tree",
+            %head_hash,
+            "Scheduled txpool prewarming in 4s"
+        );
+    }
+
+    /// Called when the txpool prewarm timer fires.
+    fn on_txpool_prewarm_timer(&mut self) {
+        self.txpool_prewarm_timer = None;
+
+        let Some(target) = self.txpool_prewarm_target.take() else {
+            return;
+        };
+
+        if target != self.state.tree_state.current_canonical_head.hash {
+            debug!(
+                target: "engine::tree",
+                expected = %target,
+                actual = %self.state.tree_state.current_canonical_head.hash,
+                "Txpool prewarm target changed, skipping"
+            );
+            return;
+        }
+
+        let Some(get_pending) = &self.txpool_pending_transactions else {
+            return;
+        };
+
+        let transactions = get_pending();
+
+        if transactions.is_empty() {
+            return;
+        }
+
+        debug!(
+            target: "engine::tree",
+            %target,
+            tx_count = transactions.len(),
+            "Starting txpool prewarming"
+        );
+
+        self.payload_validator.start_txpool_prewarm(target, &self.state, transactions);
     }
 
     /// Convenience function to handle an optional tree event.
@@ -2990,6 +3116,8 @@ where
         /// When the persistence operation started.
         start_time: Instant,
     },
+    /// The txpool prewarm timer fired.
+    TxpoolPrewarmTimer,
     /// A channel was disconnected.
     Disconnected,
 }

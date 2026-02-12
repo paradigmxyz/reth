@@ -221,6 +221,7 @@ impl TestHarness {
             EngineApiKind::Ethereum,
             evm_config,
             changeset_cache,
+            None,
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());

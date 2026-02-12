@@ -142,6 +142,8 @@ where
     disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
+    /// Handle to the currently running txpool prewarming task, if any.
+    txpool_prewarm_handle: Option<TxpoolPrewarmHandle>,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -177,6 +179,7 @@ where
             sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             disable_cache_metrics: config.disable_cache_metrics(),
+            txpool_prewarm_handle: None,
         }
     }
 }
@@ -675,6 +678,85 @@ where
         });
     }
 
+    /// Cancels any running txpool prewarming task.
+    pub fn cancel_txpool_prewarm(&mut self) {
+        if let Some(handle) = self.txpool_prewarm_handle.take() {
+            handle.cancel();
+        }
+    }
+
+    /// Spawns a txpool prewarming task that warms the execution cache using pending transactions.
+    ///
+    /// This runs between `newPayload` requests to speculatively load state accessed by pending
+    /// transactions, so that subsequent payload execution can avoid database reads for hot state.
+    ///
+    /// Only warms the execution cache (no multiproof/sparse trie pipeline).
+    pub fn spawn_txpool_prewarm<P>(
+        &mut self,
+        env: ExecutionEnv<Evm>,
+        transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        provider_builder: StateProviderBuilder<N, P>,
+    ) where
+        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    {
+        self.cancel_txpool_prewarm();
+
+        if self.disable_state_cache {
+            return;
+        }
+
+        let parent_hash = env.parent_hash;
+
+        let saved_cache = if let Some(existing) = self.execution_cache.get_cache_for(parent_hash) {
+            let cache = existing.cache().clone();
+            let metrics = existing.metrics().clone();
+            drop(existing);
+            SavedCache::new(parent_hash, cache, metrics)
+                .with_disable_cache_metrics(self.disable_cache_metrics)
+        } else {
+            let cache = ExecutionCache::new(self.cross_block_cache_size);
+            let metrics = CachedStateMetrics::zeroed();
+            SavedCache::new(parent_hash, cache, metrics)
+                .with_disable_cache_metrics(self.disable_cache_metrics)
+        };
+
+        let terminate = Arc::new(AtomicBool::new(false));
+
+        let prewarm_ctx = PrewarmContext {
+            env,
+            evm_config: self.evm_config.clone(),
+            saved_cache: Some(saved_cache),
+            provider: provider_builder,
+            metrics: PrewarmMetrics::default(),
+            terminate_execution: terminate.clone(),
+            precompile_cache_disabled: self.precompile_cache_disabled,
+            precompile_cache_map: self.precompile_cache_map.clone(),
+            v2_proofs_enabled: false,
+        };
+
+        let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
+            self.executor.clone(),
+            self.execution_cache.clone(),
+            prewarm_ctx,
+            None,
+            self.prewarm_max_concurrency,
+        );
+
+        let to_prewarm_task_clone = to_prewarm_task.clone();
+        self.executor.spawn_blocking(move || {
+            prewarm_task.run(PrewarmMode::Transactions(transactions), to_prewarm_task_clone);
+        });
+
+        self.txpool_prewarm_handle =
+            Some(TxpoolPrewarmHandle { terminate, _prewarm_task_guard: Box::new(to_prewarm_task) });
+
+        debug!(
+            target: "engine::tree::payload_processor",
+            %parent_hash,
+            "Started txpool prewarming"
+        );
+    }
+
     /// Updates the execution cache with the post-execution state from an inserted block.
     ///
     /// This is used when blocks are inserted directly (e.g., locally built blocks by sequencers)
@@ -881,6 +963,44 @@ impl<R> Drop for CacheTaskHandle<R> {
                 valid_block_rx: mpsc::channel().1,
             });
         }
+    }
+}
+
+/// Handle to a running txpool prewarming task.
+///
+/// This handle allows cancelling the background txpool prewarming that runs
+/// between newPayload requests to speculatively warm the execution cache and
+/// sparse trie with state accessed by pending transactions.
+pub struct TxpoolPrewarmHandle {
+    /// Cancel flag shared with all prewarm workers.
+    terminate: Arc<AtomicBool>,
+    /// Dropping this signals the prewarm task to exit after workers finish.
+    ///
+    /// Holds a type-erased `Sender<PrewarmTaskEvent<R>>` so the handle does not
+    /// need to be generic over the receipt type. When the handle is dropped or
+    /// cancelled, the sender is dropped, which causes `actions_rx.recv()` in
+    /// [`PrewarmCacheTask::run`] to return `Err` once all other senders are also
+    /// dropped, allowing the task to exit cleanly.
+    _prewarm_task_guard: Box<dyn Send + Sync>,
+}
+
+impl std::fmt::Debug for TxpoolPrewarmHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TxpoolPrewarmHandle")
+            .field("terminate", &self.terminate)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TxpoolPrewarmHandle {
+    /// Cancels the txpool prewarming by setting the terminate flag.
+    ///
+    /// This is non-blocking — workers will exit on their next check of the flag.
+    /// The prewarm task itself exits once the workers finish and all senders are
+    /// dropped (including the one held by this handle).
+    pub fn cancel(self) {
+        self.terminate.store(true, std::sync::atomic::Ordering::Relaxed);
+        // `self._prewarm_task_guard` is dropped here, releasing the sender.
     }
 }
 

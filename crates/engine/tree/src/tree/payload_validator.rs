@@ -24,15 +24,16 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    SpecFor,
+    block::BlockExecutor,
+    execute::{ExecutableTxFor, WithTxEnv},
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, SpecFor,
 };
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
-    SealedHeader, SignerRecoverable,
+    AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, Recovered, RecoveredBlock,
+    SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
@@ -1516,6 +1517,25 @@ pub trait EngineValidator<
     /// This is invoked when blocks are inserted via `InsertExecutedBlock` (e.g., locally built
     /// blocks by sequencers) to allow implementations to update internal state such as caches.
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>);
+
+    /// Starts txpool prewarming using the given canonical head state.
+    ///
+    /// This is called ~4s after a block is canonicalized to speculatively warm the execution
+    /// cache with state accessed by pending transactions, so the next `newPayload` is faster.
+    ///
+    /// Default implementation is a no-op.
+    fn start_txpool_prewarm(
+        &mut self,
+        _head_hash: B256,
+        _state: &EngineApiTreeState<N>,
+        _transactions: Vec<Recovered<N::SignedTx>>,
+    ) {
+    }
+
+    /// Cancels any running txpool prewarming task.
+    ///
+    /// Default implementation is a no-op.
+    fn cancel_txpool_prewarm(&mut self) {}
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1577,6 +1597,74 @@ where
             block.recovered_block.block_with_parent(),
             &block.execution_output.state,
         );
+    }
+
+    fn start_txpool_prewarm(
+        &mut self,
+        head_hash: B256,
+        state: &EngineApiTreeState<N>,
+        transactions: Vec<Recovered<N::SignedTx>>,
+    ) {
+        if self.config.disable_txpool_prewarming() || transactions.is_empty() {
+            return;
+        }
+
+        let Some(provider_builder) = self
+            .state_provider_builder(head_hash, state)
+            .inspect_err(|err| {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %head_hash, %err,
+                    "Failed to create state provider builder for txpool prewarming"
+                );
+            })
+            .ok()
+            .flatten()
+        else {
+            return;
+        };
+
+        let evm_env = match self.evm_config.evm_env(
+            &self.sealed_header_by_hash(head_hash, state).unwrap_or_default().unwrap_or_default(),
+        ) {
+            Ok(env) => env,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %head_hash, %err,
+                    "Failed to create EVM env for txpool prewarming"
+                );
+                return;
+            }
+        };
+
+        let env = ExecutionEnv {
+            evm_env,
+            hash: B256::ZERO,
+            parent_hash: head_hash,
+            parent_state_root: B256::ZERO,
+            transaction_count: transactions.len(),
+            withdrawals: None,
+        };
+
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let evm_config = self.evm_config.clone();
+        self.runtime.spawn_blocking(move || {
+            for recovered_tx in transactions {
+                let tx_env = evm_config.tx_env(&recovered_tx);
+                let with_env = WithTxEnv { tx_env, tx: Arc::new(recovered_tx) };
+                if tx.send(with_env).is_err() {
+                    break;
+                }
+            }
+        });
+
+        self.payload_processor.spawn_txpool_prewarm(env, rx, provider_builder);
+    }
+
+    fn cancel_txpool_prewarm(&mut self) {
+        self.payload_processor.cancel_txpool_prewarm();
     }
 }
 

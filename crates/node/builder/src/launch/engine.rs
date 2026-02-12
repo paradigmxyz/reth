@@ -219,6 +219,21 @@ impl EngineNodeLauncher {
             // during this run.
             .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
+        let txpool_pending_transactions = {
+            let pool = ctx.components().pool().clone();
+            let callback: Box<
+                dyn Fn() -> Vec<reth_primitives_traits::Recovered<<<T::Types as NodeTypes>::Primitives as reth_primitives_traits::NodePrimitives>::SignedTx>>
+                    + Send,
+            > = Box::new(move || {
+                use reth_transaction_pool::{PoolTransaction, TransactionPool};
+                pool.pending_transactions()
+                    .into_iter()
+                    .map(|tx| tx.transaction.clone_into_consensus())
+                    .collect()
+            });
+            Some(callback)
+        };
+
         let mut engine_service = EngineService::new(
             consensus.clone(),
             ctx.chain_spec(),
@@ -235,6 +250,7 @@ impl EngineNodeLauncher {
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
             changeset_cache,
+            txpool_pending_transactions,
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");
