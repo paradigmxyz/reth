@@ -80,14 +80,16 @@ def plot_gas_per_second(rows: list[dict], out: Path):
 def plot_wait_breakdown(rows: list[dict], out: Path):
     blocks = [r["block_number"] for r in rows]
     series = [
-        ("Persistence Wait", [r["persistence_wait_us"] / 1_000 for r in rows], "#d62728"),
-        ("State Cache Wait", [r["execution_cache_wait_us"] / 1_000 for r in rows], "#ff7f0e"),
-        ("Trie Cache Wait", [r["sparse_trie_wait_us"] / 1_000 for r in rows], "#9467bd"),
+        ("Persistence Wait", "persistence_wait_us", "#d62728"),
+        ("State Cache Wait", "execution_cache_wait_us", "#ff7f0e"),
+        ("Trie Cache Wait", "sparse_trie_wait_us", "#9467bd"),
     ]
 
     fig, axes = plt.subplots(len(series), 1, figsize=(12, 3 * len(series)), sharex=True)
-    for ax, (label, data, color) in zip(axes, series):
-        ax.plot(blocks, data, linewidth=0.8, color=color)
+    for ax, (label, key, color) in zip(axes, series):
+        xs = [r["block_number"] for r in rows if r[key] > 0]
+        ys = [r[key] / 1_000 for r in rows if r[key] > 0]
+        ax.plot(xs, ys, linewidth=0.8, color=color)
         ax.set_ylabel("ms")
         ax.set_title(label)
         ax.grid(True, alpha=0.3)
