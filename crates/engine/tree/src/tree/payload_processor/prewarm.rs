@@ -49,11 +49,12 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
-/// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
+/// Determines the prewarming mode: BAL-based or skipped.
+///
+/// Transaction prewarming is handled directly in the tx iterator via
+/// [`PrewarmContext::spawn_tx`] and does not go through the task.
 #[derive(Debug)]
-pub enum PrewarmMode<Tx> {
-    /// Prewarm by executing transactions from a stream.
-    Transactions(Receiver<Tx>),
+pub enum PrewarmMode {
     /// Prewarm by prefetching slots from a Block Access List.
     BlockAccessList(Arc<BlockAccessList>),
     /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
@@ -117,59 +118,6 @@ where
             },
             actions_tx,
         )
-    }
-
-    /// Collects pending transactions and executes them in parallel on the prewarm pool.
-    ///
-    /// This blocks the calling thread until all transactions have been collected and executed.
-    /// Cancellation is handled via the shared `terminate_execution` [`AtomicBool`] which is
-    /// checked during both collection and execution.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn spawn_all<Tx>(
-        &self,
-        pending: mpsc::Receiver<Tx>,
-        actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
-        to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-    ) where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
-    {
-        let ctx = &self.ctx;
-
-        let mut transactions = Vec::new();
-        while let Ok(tx) = pending.recv() {
-            if ctx.terminate_execution.load(Ordering::Relaxed) {
-                trace!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    "Termination requested, stopping transaction collection"
-                );
-                break;
-            }
-            transactions.push(tx);
-        }
-
-        let tx_count = transactions.len();
-
-        self.executor.prewarm_pool().install(|| {
-            transactions.into_par_iter().enumerate().for_each_init(
-                || ctx.clone().evm_for_ctx(),
-                |evm_ctx, (index, tx)| {
-                    ctx.transact_one(evm_ctx, index, tx, to_multi_proof.as_ref());
-                },
-            );
-        });
-
-        // Send withdrawal prefetch targets after all transactions have been processed
-        if let Some(to_multi_proof) = &to_multi_proof
-            && let Some(withdrawals) = &ctx.env.withdrawals
-            && !withdrawals.is_empty()
-        {
-            let targets =
-                multiproof_targets_from_withdrawals(withdrawals, ctx.v2_proofs_enabled);
-            let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
-        }
-
-        let _ = actions_tx
-            .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
     }
 
     /// This method calls `ExecutionCache::update_with_guard` which requires exclusive access.
@@ -334,15 +282,9 @@ where
         name = "prewarm and caching",
         skip_all
     )]
-    pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
-    where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
-    {
+    pub fn run(self, mode: PrewarmMode, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>) {
         // Spawn execution tasks based on mode
         match mode {
-            PrewarmMode::Transactions(pending) => {
-                self.spawn_all(pending, actions_tx, self.to_multi_proof.clone());
-            }
             PrewarmMode::BlockAccessList(bal) => {
                 self.run_bal_prewarm(bal, actions_tx);
             }
@@ -428,6 +370,27 @@ where
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
+    /// Spawns a single transaction for prewarming on the given rayon pool.
+    ///
+    /// The transaction is executed asynchronously (fire-and-forget) on the prewarm pool.
+    /// Each spawned task builds its own EVM instance from a clone of this context.
+    pub fn spawn_tx<Tx>(
+        &self,
+        pool: &rayon::ThreadPool,
+        index: usize,
+        tx: Tx,
+        to_multi_proof: Option<&CrossbeamSender<MultiProofMessage>>,
+    ) where
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+    {
+        let ctx = self.clone();
+        let to_multi_proof = to_multi_proof.cloned();
+        pool.spawn(move || {
+            let mut evm_ctx = ctx.clone().evm_for_ctx();
+            ctx.transact_one(&mut evm_ctx, index, tx, to_multi_proof.as_ref());
+        });
+    }
+
     /// Splits this context into an evm, an evm config, metrics, the atomic bool for terminating
     /// execution, and whether V2 proofs are enabled.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
@@ -717,7 +680,7 @@ fn multiproof_targets_v2_from_state(state: EvmState) -> (VersionedMultiProofTarg
 ///
 /// Withdrawals only modify account balances (no storage), so the targets contain
 /// only account-level entries with empty storage sets.
-fn multiproof_targets_from_withdrawals(
+pub fn multiproof_targets_from_withdrawals(
     withdrawals: &[Withdrawal],
     v2_enabled: bool,
 ) -> VersionedMultiProofTargets {

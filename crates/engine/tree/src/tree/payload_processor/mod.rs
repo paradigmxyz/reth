@@ -4,7 +4,10 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache, SavedCache},
     payload_processor::{
-        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
+        prewarm::{
+            multiproof_targets_from_withdrawals, PrewarmCacheTask, PrewarmContext, PrewarmMode,
+            PrewarmTaskEvent,
+        },
         sparse_trie::StateRootComputeOutcome,
     },
     sparse_trie::{SparseTrieCacheTask, SparseTrieTask, SpawnedSparseTrieTask},
@@ -21,10 +24,8 @@ use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
-    block::ExecutableTxParts,
-    execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook,
-    SpecFor, TxEnvFor,
+    block::ExecutableTxParts, execute::WithTxEnv, ConfigureEvm, ConvertTx, EvmEnvFor,
+    ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor, TxEnvFor,
 };
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
@@ -231,9 +232,6 @@ where
             + Send
             + 'static,
     {
-        // start preparing transactions immediately
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
-
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
         let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
@@ -244,32 +242,22 @@ where
         // Capture parent_state_root before env is moved into spawn_caching_with
         let parent_state_root = env.parent_state_root;
 
-        // Handle BAL-based optimization if available
-        let prewarm_handle = if let Some(bal) = bal {
-            // When BAL is present, use BAL prewarming and send BAL to multiproof
+        if bal.is_some() {
             debug!(target: "engine::tree::payload_processor", "BAL present, using BAL prewarming");
+        }
 
-            // The prewarm task converts the BAL to HashedPostState and sends it on
-            // to_multi_proof after slot prefetching completes.
-            self.spawn_caching_with(
-                env,
-                prewarm_rx,
-                provider_builder.clone(),
-                Some(to_multi_proof.clone()),
-                Some(bal),
-                v2_proofs_enabled,
-            )
-        } else {
-            // Normal path: spawn with transaction prewarming
-            self.spawn_caching_with(
-                env,
-                prewarm_rx,
-                provider_builder.clone(),
-                Some(to_multi_proof.clone()),
-                None,
-                v2_proofs_enabled,
-            )
-        };
+        // Spawn cache/BAL prewarming task and get optional tx prewarm context
+        let (prewarm_handle, tx_prewarm_ctx) = self.spawn_caching_with(
+            env,
+            provider_builder.clone(),
+            Some(to_multi_proof.clone()),
+            bal,
+            v2_proofs_enabled,
+        );
+
+        // Spawn the tx iterator, wiring tx prewarming if available
+        let prewarm = tx_prewarm_ctx.map(|(ctx, _)| (ctx, Some(to_multi_proof.clone())));
+        let execution_rx = self.spawn_tx_iterator(transactions, prewarm);
 
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
@@ -339,10 +327,13 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
         // This path doesn't use multiproof, so V2 proofs flag doesn't matter
-        let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal, false);
+        let (prewarm_handle, tx_prewarm_ctx) =
+            self.spawn_caching_with(env, provider_builder, None, bal, false);
+
+        let prewarm = tx_prewarm_ctx.map(|(ctx, _)| (ctx, None));
+        let execution_rx = self.spawn_tx_iterator(transactions, prewarm);
+
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
@@ -354,32 +345,64 @@ where
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     #[expect(clippy::type_complexity)]
-    fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
+    fn spawn_tx_iterator<P, I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
-    ) -> (
-        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
-        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
-    ) {
+        prewarm: Option<(PrewarmContext<N, P, Evm>, Option<CrossbeamSender<MultiProofMessage>>)>,
+    ) -> mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>
+    where
+        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        I::Recovered: 'static,
+    {
         let (ooo_tx, ooo_rx) = mpsc::channel();
-        let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
 
+        let executor = self.executor.clone();
+
         // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
+        // When prewarm context is provided, each successfully converted transaction is also
+        // spawned on the prewarm pool for speculative execution.
         rayon::spawn(move || {
-            let (transactions, convert) = transactions.into_parts();
-            transactions.into_par_iter().enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
-                let tx = convert.convert(tx);
-                let tx = tx.map(|tx| {
-                    let (tx_env, tx) = tx.into_parts();
-                    WithTxEnv { tx_env, tx: Arc::new(tx) }
-                });
-                // Only send Ok(_) variants to prewarming task.
-                if let Ok(tx) = &tx {
-                    let _ = prewarm_tx.send(tx.clone());
+            let prewarm_pool = prewarm.as_ref().map(|_| executor.prewarm_pool());
+
+            // Extract withdrawal prefetch info before par_iter consumes prewarm
+            let withdrawal_prefetch = prewarm.as_ref().and_then(|(ctx, to_multi_proof)| {
+                let withdrawals = ctx.env.withdrawals.as_ref()?;
+                if withdrawals.is_empty() {
+                    return None;
                 }
-                let _ = ooo_tx.send((idx, tx));
+                let to_multi_proof = to_multi_proof.as_ref()?;
+                Some((withdrawals.clone(), ctx.v2_proofs_enabled, to_multi_proof.clone()))
             });
+
+            let (transactions, convert) = transactions.into_parts();
+            transactions.into_par_iter().enumerate().for_each_with(
+                (ooo_tx, prewarm),
+                |(ooo_tx, prewarm), (idx, tx)| {
+                    let tx = convert.convert(tx);
+                    let tx = tx.map(|tx| {
+                        let (tx_env, tx) = tx.into_parts();
+                        WithTxEnv { tx_env, tx: Arc::new(tx) }
+                    });
+                    if let Ok(tx) = &tx {
+                        if let Some((ctx, to_multi_proof)) = prewarm.as_ref() {
+                            ctx.spawn_tx(
+                                prewarm_pool.expect("prewarm pool set when ctx is Some"),
+                                idx,
+                                tx.clone(),
+                                to_multi_proof.as_ref(),
+                            );
+                        }
+                    }
+                    let _ = ooo_tx.send((idx, tx));
+                },
+            );
+
+            // Send withdrawal prefetch targets after all transactions have been processed
+            if let Some((withdrawals, v2_proofs_enabled, to_multi_proof)) = withdrawal_prefetch {
+                let targets = multiproof_targets_from_withdrawals(&withdrawals, v2_proofs_enabled);
+                let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
+            }
         });
 
         // Spawn a task that processes out-of-order transactions from the task above and sends them
@@ -404,19 +427,25 @@ where
             }
         });
 
-        (prewarm_rx, execute_rx)
+        execute_rx
     }
 
-    /// Spawn prewarming optionally wired to the multiproof task for target updates.
+    /// Spawns the cache/BAL prewarming task and returns the prewarm context for tx prewarming.
+    ///
+    /// Transaction prewarming is not handled by this task — it is done directly in the tx
+    /// iterator via [`PrewarmContext::spawn_tx`]. This task only handles BAL prewarming and
+    /// cache saving.
+    ///
+    /// Returns `(CacheTaskHandle, Option<(PrewarmContext, terminate_execution)>)` where the
+    /// prewarm context is `Some` when tx prewarming is enabled (no BAL and not disabled).
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
         v2_proofs_enabled: bool,
-    ) -> CacheTaskHandle<N::Receipt>
+    ) -> (CacheTaskHandle<N::Receipt>, Option<(PrewarmContext<N, P, Evm>, Arc<AtomicBool>)>)
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
@@ -439,6 +468,12 @@ where
             v2_proofs_enabled,
         };
 
+        // Determine if tx prewarming should happen in the iterator.
+        // Tx prewarming only applies when there's no BAL (BAL replaces tx prewarming)
+        // and prewarming is not disabled.
+        let tx_prewarm_ctx = (!skip_prewarm && bal.is_none())
+            .then(|| (prewarm_ctx.clone(), terminate_execution.clone()));
+
         let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
             self.executor.clone(),
             self.execution_cache.clone(),
@@ -455,17 +490,19 @@ where
                 } else if let Some(bal) = bal {
                     PrewarmMode::BlockAccessList(bal)
                 } else {
-                    PrewarmMode::Transactions(transactions)
+                    PrewarmMode::Skipped
                 };
                 prewarm_task.run(mode, to_prewarm_task);
             });
         }
 
-        CacheTaskHandle {
+        let handle = CacheTaskHandle {
             saved_cache,
             to_prewarm_task: Some(to_prewarm_task),
             terminate_execution,
-        }
+        };
+
+        (handle, tx_prewarm_ctx)
     }
 
     /// Returns the cache for the given parent hash.
