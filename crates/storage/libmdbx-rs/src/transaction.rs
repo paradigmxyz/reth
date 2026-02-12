@@ -7,7 +7,6 @@ use crate::{
     Cursor, Error, Stat, TableObject,
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
-use parking_lot::{Mutex, MutexGuard};
 use std::{
     ffi::{c_uint, c_void},
     fmt::{self, Debug},
@@ -101,7 +100,7 @@ where
         Self { inner: Arc::new(inner) }
     }
 
-    /// Executes the given closure once the lock on the transaction is acquired.
+    /// Executes the given closure with the transaction pointer.
     ///
     /// The caller **must** ensure that the pointer is not used after the
     /// lifetime of the transaction.
@@ -113,8 +112,8 @@ where
         self.inner.txn_execute(f)
     }
 
-    /// Executes the given closure once the lock on the transaction is acquired. If the transaction
-    /// is timed out, it will be renewed first.
+    /// Executes the given closure with the transaction pointer. If the transaction is timed out,
+    /// it will be renewed first.
     ///
     /// Returns the result of the closure or an error if the transaction renewal fails.
     #[inline]
@@ -542,7 +541,6 @@ pub(crate) struct TransactionPtr {
     txn: *mut ffi::MDBX_txn,
     #[cfg(feature = "read-tx-timeouts")]
     timed_out: Arc<AtomicBool>,
-    lock: Arc<Mutex<()>>,
 }
 
 impl TransactionPtr {
@@ -551,7 +549,6 @@ impl TransactionPtr {
             txn,
             #[cfg(feature = "read-tx-timeouts")]
             timed_out: Arc::new(AtomicBool::new(false)),
-            lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -573,24 +570,7 @@ impl TransactionPtr {
         self.timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    /// Acquires the inner transaction lock to guarantee exclusive access to the transaction
-    /// pointer.
-    fn lock(&self) -> MutexGuard<'_, ()> {
-        if let Some(lock) = self.lock.try_lock() {
-            lock
-        } else {
-            tracing::trace!(
-                target: "libmdbx",
-                txn = %self.txn as usize,
-                backtrace = %std::backtrace::Backtrace::capture(),
-                "Transaction lock is already acquired, blocking...
-                To display the full backtrace, run with `RUST_BACKTRACE=full` env variable."
-            );
-            self.lock.lock()
-        }
-    }
-
-    /// Executes the given closure once the lock on the transaction is acquired.
+    /// Executes the given closure with the transaction pointer.
     ///
     /// Returns the result of the closure or an error if the transaction is timed out.
     #[inline]
@@ -598,11 +578,6 @@ impl TransactionPtr {
     where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
-        let _lck = self.lock();
-
-        // No race condition with the `TxnManager` timing out the transaction is possible here,
-        // because we're taking a lock for any actions on the transaction pointer, including a call
-        // to the `mdbx_txn_reset`.
         #[cfg(feature = "read-tx-timeouts")]
         if self.is_timed_out() {
             return Err(Error::ReadTransactionTimeout)
@@ -611,8 +586,8 @@ impl TransactionPtr {
         Ok((f)(self.txn))
     }
 
-    /// Executes the given closure once the lock on the transaction is acquired. If the transaction
-    /// is timed out, it will be renewed first.
+    /// Executes the given closure with the transaction pointer. If the transaction is timed out,
+    /// it will be renewed first.
     ///
     /// Returns the result of the closure or an error if the transaction renewal fails.
     #[inline]
@@ -620,9 +595,6 @@ impl TransactionPtr {
     where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
-        let _lck = self.lock();
-
-        // To be able to do any operations on the transaction, we need to renew it first.
         #[cfg(feature = "read-tx-timeouts")]
         if self.is_timed_out() {
             mdbx_result(unsafe { mdbx_txn_renew(self.txn) })?;
@@ -710,10 +682,10 @@ impl CommitLatency {
     }
 }
 
-// SAFETY: Access to the transaction is synchronized by the lock.
+// SAFETY: The raw pointer is not aliased.
 unsafe impl Send for TransactionPtr {}
 
-// SAFETY: Access to the transaction is synchronized by the lock.
+// SAFETY: The raw pointer is not aliased.
 unsafe impl Sync for TransactionPtr {}
 
 #[cfg(test)]
