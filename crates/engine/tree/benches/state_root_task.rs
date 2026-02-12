@@ -247,6 +247,7 @@ fn bench_state_root(c: &mut Criterion) {
                                 ),
                                 &TreeConfig::default(),
                                 None,
+                                None,
                             );
 
                             let mut state_hook = handle.state_hook();

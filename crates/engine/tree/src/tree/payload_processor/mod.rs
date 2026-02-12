@@ -229,6 +229,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
+        storage_filter: Option<Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -280,7 +281,8 @@ where
 
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, v2_proofs_enabled);
+        let proof_handle =
+            ProofWorkerHandle::new(&self.executor, task_ctx, v2_proofs_enabled, storage_filter);
 
         if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(
@@ -1334,6 +1336,7 @@ mod tests {
             OverlayStateProviderFactory::new(provider_factory, ChangesetCache::new()),
             &TreeConfig::default(),
             None, // No BAL for test
+            None,
         );
 
         let mut state_hook = handle.state_hook();

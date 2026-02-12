@@ -201,6 +201,7 @@ mod tests {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
+            None, // storage_filter
             reth_tasks::Runtime::test(),
         );
 
