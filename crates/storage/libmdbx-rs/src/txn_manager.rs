@@ -121,19 +121,34 @@ impl TxnManager {
 
 #[cfg(feature = "read-tx-timeouts")]
 mod read_transactions {
-    use crate::{
-        environment::EnvPtr, error::mdbx_result, transaction::TransactionPtr,
-        txn_manager::TxnManager,
-    };
+    use crate::{environment::EnvPtr, error::mdbx_result, txn_manager::TxnManager};
     use dashmap::{DashMap, DashSet};
     use std::{
         backtrace::Backtrace,
-        sync::{mpsc::sync_channel, Arc},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc::sync_channel,
+            Arc,
+        },
         time::{Duration, Instant},
     };
     use tracing::{error, trace, warn};
 
     const READ_TRANSACTIONS_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+
+    /// Handle stored by the timeout monitor to track and time out read transactions.
+    ///
+    /// Holds just the raw pointer (for `mdbx_txn_reset`) and a shared timed-out flag
+    /// (to signal the owning `TransactionPtr`).
+    #[derive(Debug)]
+    struct ReadTransactionHandle {
+        txn: *mut ffi::MDBX_txn,
+        timed_out: Arc<AtomicBool>,
+    }
+
+    // SAFETY: The raw pointer is only dereferenced on the monitor thread for `mdbx_txn_reset`.
+    unsafe impl Send for ReadTransactionHandle {}
+    unsafe impl Sync for ReadTransactionHandle {}
 
     impl TxnManager {
         /// Returns a new instance for which the maximum duration that a read transaction can be
@@ -158,10 +173,10 @@ mod read_transactions {
         pub(crate) fn add_active_read_transaction(
             &self,
             ptr: *mut ffi::MDBX_txn,
-            tx: TransactionPtr,
+            timed_out: Arc<AtomicBool>,
         ) {
             if let Some(read_transactions) = &self.read_transactions {
-                read_transactions.add_active(ptr, tx);
+                read_transactions.add_active(ptr, timed_out);
             }
         }
 
@@ -192,7 +207,7 @@ mod read_transactions {
         ///
         /// The backtrace of the transaction opening is recorded only when debug assertions are
         /// enabled.
-        active: DashMap<usize, (TransactionPtr, Instant, Option<Arc<Backtrace>>)>,
+        active: DashMap<usize, (ReadTransactionHandle, Instant, Option<Arc<Backtrace>>)>,
         /// List of timed out transactions that were not aborted by the user yet, hence have a
         /// dangling read transaction pointer.
         timed_out_not_aborted: DashSet<usize>,
@@ -204,11 +219,11 @@ mod read_transactions {
         }
 
         /// Adds a new transaction to the list of active read transactions.
-        pub(super) fn add_active(&self, ptr: *mut ffi::MDBX_txn, tx: TransactionPtr) {
+        pub(super) fn add_active(&self, ptr: *mut ffi::MDBX_txn, timed_out: Arc<AtomicBool>) {
             let _ = self.active.insert(
                 ptr as usize,
                 (
-                    tx,
+                    ReadTransactionHandle { txn: ptr, timed_out },
                     Instant::now(),
                     cfg!(debug_assertions).then(|| Arc::new(Backtrace::force_capture())),
                 ),
@@ -239,43 +254,25 @@ mod read_transactions {
                     // Iterate through active read transactions and time out those that's open for
                     // longer than `self.max_duration`.
                     for entry in &self.active {
-                        let (tx, start, backtrace) = entry.value();
+                        let (handle, start, backtrace) = entry.value();
                         let duration = now - *start;
 
                         if duration > self.max_duration {
-                            let result = tx.txn_execute_fail_on_timeout(|txn_ptr| {
-                                // Time out the transaction.
-                                //
-                                // We use `mdbx_txn_reset` instead of `mdbx_txn_abort` here to
-                                // prevent MDBX from reusing the pointer of the aborted
-                                // transaction for new read-only transactions. This is
-                                // important because we store the pointer in the `active` list
-                                // and assume that it is unique.
-                                //
-                                // See https://libmdbx.dqdkfa.ru/group__c__transactions.html#gae9f34737fe60b0ba538d5a09b6a25c8d for more info.
-                                let result = mdbx_result(unsafe { ffi::mdbx_txn_reset(txn_ptr) });
-                                if result.is_ok() {
-                                    tx.set_timed_out();
-                                }
-                                (txn_ptr, duration, result)
-                            });
-
-                            match result {
-                                Ok((txn_ptr, duration, error)) => {
-                                    // Add the transaction to `timed_out_active`. We can't remove it
-                                    // instantly from the list of active transactions, because we
-                                    // iterate through it.
-                                    timed_out_active.push((
-                                        txn_ptr,
-                                        duration,
-                                        backtrace.clone(),
-                                        error,
-                                    ));
-                                }
-                                Err(err) => {
-                                    error!(target: "libmdbx", %err, ?backtrace, "Failed to abort the long-lived read transaction")
-                                }
+                            // Time out the transaction using `mdbx_txn_reset` instead of
+                            // `mdbx_txn_abort` to prevent MDBX from reusing the pointer.
+                            // We store the pointer in the `active` list and assume it is unique.
+                            //
+                            // See https://libmdbx.dqdkfa.ru/group__c__transactions.html#gae9f34737fe60b0ba538d5a09b6a25c8d for more info.
+                            let result = mdbx_result(unsafe { ffi::mdbx_txn_reset(handle.txn) });
+                            if result.is_ok() {
+                                handle.timed_out.store(true, Ordering::SeqCst);
                             }
+                            timed_out_active.push((
+                                handle.txn,
+                                duration,
+                                backtrace.clone(),
+                                result,
+                            ));
                         } else {
                             max_active_transaction_duration = Some(
                                 duration.max(max_active_transaction_duration.unwrap_or_default()),
@@ -312,8 +309,8 @@ mod read_transactions {
                             target: "libmdbx",
                             elapsed = ?now.elapsed(),
                             active = ?self.active.iter().map(|entry| {
-                                let (tx, start, _) = entry.value();
-                                (tx.clone(), start.elapsed())
+                                let (_, start, _) = entry.value();
+                                start.elapsed()
                             }).collect::<Vec<_>>(),
                             "Read transactions"
                         );
