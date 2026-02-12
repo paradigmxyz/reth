@@ -469,10 +469,10 @@ impl SparseTrie for ParallelSparseTrie {
                     // Clear modified_original since we haven't actually modified anything yet
                     modified_original = None;
                 }
-                LeafUpdateStep::Complete { inserted_nodes, extention_to_reveal } => {
+                LeafUpdateStep::Complete { inserted_nodes, extension_to_reveal } => {
                     new_nodes.extend(inserted_nodes);
 
-                    if let Some((reveal_path, child_path)) = extention_to_reveal {
+                    if let Some((reveal_path, child_path)) = extension_to_reveal {
                         let subtrie = self.subtrie_for_path_mut(&child_path);
                         let reveal_masks = if subtrie
                             .nodes
@@ -2703,10 +2703,10 @@ impl SparseSubtrie {
                     // Clear modified_original since we haven't actually modified anything yet
                     modified_original = None;
                 }
-                LeafUpdateStep::Complete { inserted_nodes: new_inserted, extention_to_reveal } => {
+                LeafUpdateStep::Complete { inserted_nodes: new_inserted, extension_to_reveal } => {
                     inserted_nodes.extend(new_inserted);
 
-                    if let Some((reveal_path, child_path)) = extention_to_reveal &&
+                    if let Some((reveal_path, child_path)) = extension_to_reveal &&
                         self.nodes.get(&child_path).expect("node must exist").is_hash()
                     {
                         debug!(
@@ -3708,7 +3708,7 @@ pub enum LeafUpdateStep {
         /// Tuple of the extension node path to reveal and its child path. Before requesting
         /// reveal, it should be verified that the child node (second element of the tuple) is not
         /// revealed yet.
-        extention_to_reveal: Option<(Nibbles, Nibbles)>,
+        extension_to_reveal: Option<(Nibbles, Nibbles)>,
     },
     /// The node was not found
     #[default]
@@ -3724,9 +3724,9 @@ impl LeafUpdateStep {
     /// Creates a step indicating completion with inserted nodes
     pub const fn complete_with_insertions(
         inserted_nodes: Vec<Nibbles>,
-        extention_to_reveal: Option<(Nibbles, Nibbles)>,
+        extension_to_reveal: Option<(Nibbles, Nibbles)>,
     ) -> Self {
-        Self::Complete { inserted_nodes, extention_to_reveal }
+        Self::Complete { inserted_nodes, extension_to_reveal }
     }
 }
 
