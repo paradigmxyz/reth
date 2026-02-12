@@ -10273,6 +10273,7 @@ version = "1.10.2"
 dependencies = [
  "alloy-primitives",
  "assert_matches",
+ "metrics",
  "parking_lot",
  "rayon",
  "reth-codecs",
