@@ -624,10 +624,6 @@ where
 
     /// Installs an `ExEx` (Execution Extension) in the node.
     ///
-    /// By default, the ExEx is stateless and receives all notifications including
-    /// pipeline notifications. Use `install_stateful_exex` if the ExEx maintains
-    /// state and should skip pipeline notifications.
-    ///
     /// # Note
     ///
     /// The `ExEx` ID must be unique.
@@ -645,14 +641,8 @@ where
 
     /// Installs a stateful `ExEx` (Execution Extension) in the node.
     ///
-    /// Stateful ExExes maintain their own state and will skip pipeline notifications
-    /// because those contain finalized blocks with already-persisted state hashes.
-    /// They will only receive notifications from the blockchain tree.
-    ///
-    /// Use this for ExExes that:
-    /// - Maintain their own database or state
-    /// - Cannot operate on finalized/committed state
-    /// - Only need to process live blockchain tree updates
+    /// Stateful ExExes depend on state existing in the database and therefore do not receive
+    /// pipeline notifications.
     ///
     /// # Note
     ///
