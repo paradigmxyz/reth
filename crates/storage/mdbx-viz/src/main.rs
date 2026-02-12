@@ -84,6 +84,7 @@ async fn main() {
         dbi_names: vec![],
         tree_info: vec![],
         owner_map,
+        db_path: std::path::PathBuf::new(),
     };
 
     if let Err(e) = reth_mdbx_viz::start_viz_server(config, rx).await {

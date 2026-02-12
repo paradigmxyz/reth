@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     mpsc, Arc, RwLock,
@@ -18,15 +19,6 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 pub mod walker;
-
-unsafe extern "C" {
-    fn mdbx_pageviz_get_mapping(
-        out_base: *mut *mut std::ffi::c_void,
-        out_len: *mut usize,
-        out_mdbx_ps: *mut u32,
-        out_sys_ps: *mut u32,
-    ) -> i32;
-}
 
 #[derive(Clone, Default, Serialize)]
 struct ResidencyStats {
@@ -72,6 +64,7 @@ pub struct VizConfig {
     pub dbi_names: Vec<String>,
     pub owner_map: Vec<u8>,
     pub tree_info: Vec<walker::TreeInfo>,
+    pub db_path: PathBuf,
 }
 
 const WIRE_EVENT_SIZE: usize = 8;
@@ -86,6 +79,80 @@ fn encode_events(events: &[PageEvent]) -> Vec<u8> {
     }
     buf
 }
+
+struct ReadOnlyMapping {
+    base: *mut libc::c_void,
+    len: usize,
+}
+
+impl ReadOnlyMapping {
+    fn new(path: &std::path::Path) -> Option<Self> {
+        use std::os::unix::io::AsRawFd;
+        let file = std::fs::File::open(path).ok()?;
+        let len = file.metadata().ok()?.len() as usize;
+        if len == 0 {
+            return None;
+        }
+        let base = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                libc::PROT_READ,
+                libc::MAP_SHARED,
+                file.as_raw_fd(),
+                0,
+            )
+        };
+        if base == libc::MAP_FAILED {
+            return None;
+        }
+        Some(Self { base, len })
+    }
+
+    fn remap(&mut self, path: &std::path::Path) -> bool {
+        use std::os::unix::io::AsRawFd;
+        let file = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(_) => return false,
+        };
+        let new_len = match file.metadata() {
+            Ok(m) => m.len() as usize,
+            Err(_) => return false,
+        };
+        if new_len == 0 {
+            return false;
+        }
+        unsafe {
+            libc::munmap(self.base, self.len);
+        }
+        let base = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                new_len,
+                libc::PROT_READ,
+                libc::MAP_SHARED,
+                file.as_raw_fd(),
+                0,
+            )
+        };
+        if base == libc::MAP_FAILED {
+            return false;
+        }
+        self.base = base;
+        self.len = new_len;
+        true
+    }
+}
+
+impl Drop for ReadOnlyMapping {
+    fn drop(&mut self) {
+        unsafe {
+            libc::munmap(self.base, self.len);
+        }
+    }
+}
+
+unsafe impl Send for ReadOnlyMapping {}
 
 pub async fn start_viz_server(
     config: VizConfig,
@@ -147,11 +214,21 @@ pub async fn start_viz_server(
     let res_subs = state.residency_subscribers.clone();
     let own_map = state.owner_map.clone();
     let info_clone = state.info.clone();
+    let db_path = config.db_path;
+    let mdbx_ps = config.page_size;
+    let sys_ps = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u32;
 
     std::thread::Builder::new()
         .name("residency-poller".into())
         .spawn(move || {
+            let mut mapping: Option<ReadOnlyMapping> = None;
             let mut prev: Vec<u8> = Vec::new();
+
+            if db_path.as_os_str().is_empty() {
+                tracing::warn!("residency-poller: no db_path configured, residency polling disabled");
+                return;
+            }
+
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(3));
 
@@ -159,14 +236,51 @@ pub async fn start_viz_server(
                     continue;
                 }
 
-                let mut base: *mut std::ffi::c_void = std::ptr::null_mut();
-                let mut len: usize = 0;
-                let mut mdbx_ps: u32 = 0;
-                let mut sys_ps: u32 = 0;
-                let ok = unsafe {
-                    mdbx_pageviz_get_mapping(&mut base, &mut len, &mut mdbx_ps, &mut sys_ps)
+                if mapping.is_none() {
+                    match ReadOnlyMapping::new(&db_path) {
+                        Some(m) => {
+                            tracing::info!(
+                                "residency-poller: mapped {} ({} bytes, mdbx_ps={}, sys_ps={})",
+                                db_path.display(),
+                                m.len,
+                                mdbx_ps,
+                                sys_ps,
+                            );
+                            mapping = Some(m);
+                        }
+                        None => {
+                            tracing::warn!(
+                                "residency-poller: failed to mmap {}",
+                                db_path.display()
+                            );
+                            continue;
+                        }
+                    }
+                }
+
+                let file_len = match std::fs::metadata(&db_path) {
+                    Ok(m) => m.len() as usize,
+                    Err(_) => continue,
                 };
-                if ok == 0 || base.is_null() || len == 0 || mdbx_ps == 0 || sys_ps == 0 {
+                let m = mapping.as_mut().unwrap();
+                if file_len > m.len {
+                    tracing::info!(
+                        "residency-poller: file grew {} -> {}, remapping",
+                        m.len,
+                        file_len,
+                    );
+                    if !m.remap(&db_path) {
+                        tracing::warn!("residency-poller: remap failed");
+                        mapping = None;
+                        continue;
+                    }
+                }
+
+                let m = mapping.as_ref().unwrap();
+                let base = m.base;
+                let len = m.len;
+
+                if mdbx_ps == 0 || sys_ps == 0 || len == 0 {
                     continue;
                 }
 
@@ -181,12 +295,10 @@ pub async fn start_viz_server(
 
                 let mut cur = vec![0u8; mdbx_page_count];
                 if mdbx_ps == sys_ps {
-                    // 1:1 mapping
                     for i in 0..mdbx_page_count.min(sys_pages) {
                         cur[i] = mincore_vec[i] & 1;
                     }
                 } else if mdbx_ps > sys_ps {
-                    // Multiple sys pages per MDBX page — ALL must be resident
                     let ratio = mdbx_ps as usize / sys_ps as usize;
                     for i in 0..mdbx_page_count {
                         let base_idx = i * ratio;
@@ -202,7 +314,6 @@ pub async fn start_viz_server(
                         cur[i] = if all_resident { 1 } else { 0 };
                     }
                 } else {
-                    // Multiple MDBX pages per sys page — share residency
                     let ratio = sys_ps as usize / mdbx_ps as usize;
                     for i in 0..mdbx_page_count {
                         let sys_idx = i / ratio;

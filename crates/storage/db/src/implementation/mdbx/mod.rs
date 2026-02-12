@@ -573,6 +573,7 @@ impl DatabaseEnv {
             dbi_names,
             owner_map: walk.owner_map,
             tree_info: walk.tree_info,
+            db_path: mdbx_dat,
         };
 
         // Spawn the viz server on a background tokio runtime

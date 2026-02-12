@@ -71,6 +71,7 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
     <span class="stat-label">Events/s: <span class="stat-value" id="evt-rate">0</span></span>
     <span class="stat-label">Total: <span class="stat-value" id="evt-total">0</span></span>
     <span class="stat-label">Active: <span class="stat-value" id="active-count">0</span></span>
+    <span class="stat-label">FPS: <span class="stat-value" id="fps-counter">-</span></span>
   </div>
   <div class="status-bar">
     <span class="stat-label" style="color:#3c82f6">R: <span class="stat-value" id="cnt-read">0</span></span>
@@ -131,18 +132,24 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
 <script>
 (function(){
 "use strict";
-const PHEX=["#e6194B","#3cb44b","#ffe119","#4363d8","#f58231","#911eb4","#42d4f4","#f032e6","#bfef45","#fabed4","#469990","#dcbeff","#9A6324","#fffac8","#800000","#aaffc3","#808000","#ffd8b1","#000075","#a9a9a9"];
-function h2r(h){const v=parseInt(h.slice(1),16);return[(v>>16)&0xFF,(v>>8)&0xFF,v&0xFF]}
 function hsl2r(h,s,l){h/=360;s/=100;l/=100;let r,g,b;if(!s){r=g=b=l}else{const q=l<.5?l*(1+s):l+s-l*s,p=2*l-q;const f=(p,q,t)=>{if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<.5)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p};r=f(p,q,h+1/3);g=f(p,q,h);b=f(p,q,h-1/3)}return[Math.round(r*255),Math.round(g*255),Math.round(b*255)]}
-function cDbi(i){if(i===0)return[255,255,255];if(i===1)return[0,0,0];if(i===0xFE)return[10,10,10];if(i===0xFF)return[17,17,17];const x=i-2;if(x<PHEX.length)return h2r(PHEX[x]);return hsl2r((x*137)%360,70,55)}
-const PAL=new Array(256);for(let i=0;i<256;i++)PAL[i]=cDbi(i);
-const DGA=[40,40,40],DGB=[55,55,55],DWA=[220,220,220],DWB=[240,240,240];
-const HL={1:[60,130,246],2:[255,80,80],3:[234,179,8]};
+const DBI_HUES=new Float32Array(256);
+for(let i=2;i<254;i++)DBI_HUES[i]=((i-2)*137.508)%360;
+const PAL=new Array(256),PAL_DESAT=new Array(256),PAL_DARK=new Array(256),PAL_DD=new Array(256);
+PAL[0]=hsl2r(220,15,82);PAL_DESAT[0]=hsl2r(220,5,72);PAL_DARK[0]=hsl2r(220,15,28);PAL_DD[0]=hsl2r(220,5,22);
+PAL[1]=hsl2r(220,30,24);PAL_DESAT[1]=hsl2r(220,8,22);PAL_DARK[1]=hsl2r(220,30,12);PAL_DD[1]=hsl2r(220,8,12);
+for(let i=2;i<254;i++){const h=DBI_HUES[i];PAL[i]=hsl2r(h,70,55);PAL_DESAT[i]=hsl2r(h,15,50);PAL_DARK[i]=hsl2r(h,70,22);PAL_DD[i]=hsl2r(h,15,20)}
+PAL[0xFE]=[20,20,23];PAL_DESAT[0xFE]=[20,20,23];PAL_DARK[0xFE]=[12,12,14];PAL_DD[0xFE]=[12,12,14];
+PAL[0xFF]=[28,28,32];PAL_DESAT[0xFF]=[28,28,32];PAL_DARK[0xFF]=[16,16,18];PAL_DD[0xFF]=[16,16,18];
+const FLASH_TINT={1:[255,255,255],2:[255,220,200],3:[200,220,255]};
 let NP=0,PS=4096,GC=0,GR=0,DBIS=[],DBI_IDX={},oMap=null,lOp=null,lTs=null,FADE=2000;
 let cntR=0,cntW=0,cntF=0;
 let sR=true,sW=true,sF=true,fW=false,showTrails=false,trailW=1.5;
-const TRAIL_CAP=4096;let trails=[];
+const TRAIL_CAP=4096;let trailBuf=new Array(TRAIL_CAP);let trailStart=0,trailN=0;
 const TRC={1:"60,130,246",2:"255,80,80",3:"234,179,8"};
+let activePgs=0;
+let outR=0,outG=0,outB=0;
+let cacheTotalCached=0,cacheCachedPer=null,cacheStale=true;
 let hmMode=false,hmCounts=null;
 let cacheMode=false,resMap=null,faultCounts={};
 let showFlame=false;const FLAME_SECS=120;let flameData={},flameHead=0;
@@ -170,45 +177,79 @@ function oY(){return Math.max(0,(H-GR*sc)/2)}
 function cP(){const vw=W/sc,vh=H/sc;pX=cl(pX,0,Math.max(0,GC-vw));pY=cl(pY,0,Math.max(0,GR-vh))}
 function s2w(sx,sy){return{wx:pX+(sx-oX())/sc,wy:pY+(sy-oY())/sc}}
 function w2p(wx,wy){const px=Math.floor(wx),py=Math.floor(wy);if(px<0||py<0||px>=GC||py>=GR)return-1;const i=py*GC+px;return i<NP?i:-1}
-const HM_STOPS=[[60,130,246],[0,200,200],[80,200,80],[234,179,8],[255,80,80]];
-function hmColor(cnt){
-  if(cnt<=0)return null;
-  const t=Math.min(1,Math.log2(cnt+1)/16),s=t*(HM_STOPS.length-1),i=Math.min(Math.floor(s),HM_STOPS.length-2),f=s-i;
-  const a=HM_STOPS[i],b=HM_STOPS[i+1];
-  return[Math.round(a[0]+(b[0]-a[0])*f),Math.round(a[1]+(b[1]-a[1])*f),Math.round(a[2]+(b[2]-a[2])*f)];
+
+function trailPush(from,to,op,ts){
+  const idx=(trailStart+trailN)%TRAIL_CAP;
+  if(!trailBuf[idx])trailBuf[idx]={from,to,op,ts};
+  else{trailBuf[idx].from=from;trailBuf[idx].to=to;trailBuf[idx].op=op;trailBuf[idx].ts=ts}
+  if(trailN<TRAIL_CAP)trailN++;
+  else trailStart=(trailStart+1)%TRAIL_CAP;
+}
+function trailExpire(now){
+  while(trailN>0){
+    const t=trailBuf[trailStart];
+    if(now-t.ts>=FADE){trailStart=(trailStart+1)%TRAIL_CAP;trailN--}
+    else break;
+  }
 }
 function pC(pg,gy,flt,dA,dB,now){
-  const c=pCInner(pg,gy,flt,dA,dB,now);
-  if(!c)return null;
-  if(cacheMode&&resMap&&pg<resMap.length&&!resMap[pg])return[Math.round(c[0]*0.25),Math.round(c[1]*0.25),Math.round(c[2]*0.25)];
-  return c;
-}
-function pCInner(pg,gy,flt,dA,dB,now){
-  if(pg<0||pg>=NP)return null;const ow=oMap[pg];
-  let c;if(flt&&!sel.has(ow))c=(gy&1)?dA:dB;else c=PAL[ow]||PAL[255];
-  if(hmMode&&hmCounts){if(flt&&!sel.has(ow))return c;const hc=hmColor(hmCounts[pg]);if(hc)return hc;return c}
-  const op=lOp[pg];if(!op)return c;
-  if((op===1&&!sR)||(op===2&&!sW)||(op===3&&!sF))return c;
-  const age=now-lTs[pg];if(age>=FADE){lOp[pg]=0;return c}
-  const t=1-Math.pow(age/FADE,2);const h=HL[op];if(!h)return c;
-  return[Math.round(c[0]+(h[0]-c[0])*t),Math.round(c[1]+(h[1]-c[1])*t),Math.round(c[2]+(h[2]-c[2])*t)];
+  if(pg<0||pg>=NP)return false;
+  const ow=oMap[pg];
+  if(flt&&!sel.has(ow)){outR=25;outG=25;outB=28;return true}
+  let ht=1.0;
+  if(hmMode&&hmCounts){const cnt=hmCounts[pg];ht=cnt>0?Math.min(1,Math.log2(cnt+1)/16):0}
+  let cached=true;
+  if(cacheMode&&resMap&&pg<resMap.length)cached=!!resMap[pg];
+  let cf,cd;
+  if(cached){cf=PAL[ow];cd=PAL_DESAT[ow]}else{cf=PAL_DARK[ow];cd=PAL_DD[ow]}
+  if(!cf)cf=PAL[255];if(!cd)cd=PAL_DESAT[255];
+  outR=Math.round(cd[0]+(cf[0]-cd[0])*ht);
+  outG=Math.round(cd[1]+(cf[1]-cd[1])*ht);
+  outB=Math.round(cd[2]+(cf[2]-cd[2])*ht);
+  const op=lOp[pg];
+  if(op&&((op===1&&sR)||(op===2&&sW)||(op===3&&sF))){
+    const age=now-lTs[pg];
+    if(age>=FADE){lOp[pg]=0;activePgs=Math.max(0,activePgs-1)}
+    else{const t=1-(age/FADE)*(age/FADE);const fl=FLASH_TINT[op];const fi=t*0.7;
+      outR=Math.min(255,Math.round(outR+(fl[0]-outR)*fi));
+      outG=Math.min(255,Math.round(outG+(fl[1]-outG)*fi));
+      outB=Math.min(255,Math.round(outB+(fl[2]-outB)*fi))}
+  }
+  return true;
 }
 function pg2s(pg){const col=pg%GC,row=Math.floor(pg/GC);return{sx:oX()+(col-pX+.5)*sc,sy:oY()+(row-pY+.5)*sc}}
 function drawTrails(now){
-  if(!showTrails||trails.length===0)return;
+  if(!showTrails||trailN===0)return;
   cx.lineCap="round";cx.lineWidth=trailW;
-  for(let i=0;i<trails.length;i++){
-    const t=trails[i],age=now-t.ts;if(age>=FADE)continue;
+  const paths={1:[],2:[],3:[]};
+  for(let j=0;j<trailN;j++){
+    const idx=(trailStart+j)%TRAIL_CAP;
+    const t=trailBuf[idx];
+    const age=now-t.ts;if(age>=FADE)continue;
     const a=1-Math.pow(age/FADE,2);
-    const c=TRC[t.op]||TRC[1];
     const f=pg2s(t.from),e=pg2s(t.to);
-    cx.strokeStyle=`rgba(${c},${(a*0.6).toFixed(2)})`;
-    cx.beginPath();cx.moveTo(f.sx,f.sy);cx.lineTo(e.sx,e.sy);cx.stroke();
+    (paths[t.op]||(paths[t.op]=[])).push({fx:f.sx,fy:f.sy,ex:e.sx,ey:e.sy,a});
+  }
+  for(const op of [1,2,3]){
+    const segs=paths[op];if(!segs||!segs.length)continue;
+    const groups={};
+    for(const s of segs){
+      const ak=Math.round(s.a*10);
+      if(!groups[ak])groups[ak]=[];
+      groups[ak].push(s);
+    }
+    const c=TRC[op]||TRC[1];
+    for(const [ak,gs] of Object.entries(groups)){
+      cx.strokeStyle=`rgba(${c},${(ak/10*0.6).toFixed(2)})`;
+      cx.beginPath();
+      for(const s of gs){cx.moveTo(s.fx,s.fy);cx.lineTo(s.ex,s.ey)}
+      cx.stroke();
+    }
   }
 }
 function render(){
   if(!oMap||W<1||H<1)return;
-  const flt=sel.size>0,uw=sel.has(1),dA=uw?DWA:DGA,dB=uw?DWB:DGB,now=performance.now();
+  const flt=sel.size>0,now=performance.now();
   if(sc>=1){
     const vw=W/sc,vh=H/sc,x0=Math.floor(pX),y0=Math.floor(pY);
     const x1=Math.min(GC,Math.ceil(pX+vw)+1),y1=Math.min(GR,Math.ceil(pY+vh)+1);
@@ -218,8 +259,8 @@ function render(){
     const od=oCx.createImageData(vW,vH),d=od.data;
     for(let y=0;y<vH;y++){const gy=y0+y;for(let x=0;x<vW;x++){
       const i=gy*GC+(x0+x),o=(y*vW+x)<<2;
-      const c=(i>=0&&i<NP)?pC(i,gy,flt,dA,dB,now):null;
-      if(c){d[o]=c[0];d[o+1]=c[1];d[o+2]=c[2]}else{d[o]=0;d[o+1]=0;d[o+2]=0}d[o+3]=255;
+      const ok=(i>=0&&i<NP)?pC(i,gy,flt,null,null,now):false;
+      if(ok){d[o]=outR;d[o+1]=outG;d[o+2]=outB}else{d[o]=0;d[o+1]=0;d[o+2]=0}d[o+3]=255;
     }}
     oCx.putImageData(od,0,0);cx.imageSmoothingEnabled=false;cx.clearRect(0,0,W,H);
     cx.drawImage(oC,oX()-(pX-x0)*sc,oY()-(pY-y0)*sc,vW*sc,vH*sc);
@@ -243,22 +284,30 @@ function render(){
           if(op>bOp||(op===bOp&&age<bAge)){bOp=op;bAge=age;bPg=i}
         }}
         const cpx=Math.floor(wxC),cpy=Math.floor(wyC),ci=cpy*GC+cpx;
-        const c=bPg>=0?pC(bPg,cpy,flt,dA,dB,now):(ci>=0&&ci<NP)?pC(ci,cpy,flt,dA,dB,now):null;
-        if(c){d[o]=c[0];d[o+1]=c[1];d[o+2]=c[2]}else{d[o]=0;d[o+1]=0;d[o+2]=0}d[o+3]=255;
+        const ok=bPg>=0?pC(bPg,cpy,flt,null,null,now):(ci>=0&&ci<NP)?pC(ci,cpy,flt,null,null,now):false;
+        if(ok){d[o]=outR;d[o+1]=outG;d[o+2]=outB}else{d[o]=0;d[o+1]=0;d[o+2]=0}d[o+3]=255;
     }}
     cx.putImageData(iD,0,0);drawTrails(now);const pp=1/sc;zmEl.textContent="1 px = "+pp.toFixed(pp>=10?0:1)+" pages";
   }
 }
 let anim=false;
+let fpsFrames=0,fpsLast=performance.now();
 function rLoop(){
   render();let act=0;const now=performance.now();
-  if(lOp)for(let i=0;i<NP;i++)if(lOp[i]&&(now-lTs[i])<FADE)act++;
-  if(showTrails){while(trails.length>0&&(now-trails[0].ts)>=FADE)trails.shift();act+=trails.length}
+  act+=activePgs;
+  if(showTrails){trailExpire(now);act+=trailN}
   document.getElementById("active-count").textContent=act.toLocaleString();
-  if(act>0)requestAnimationFrame(rLoop);else anim=false;
+  fpsFrames++;
+  const fpsNow=performance.now();
+  if(fpsNow-fpsLast>=500){
+    document.getElementById("fps-counter").textContent=Math.round(fpsFrames/((fpsNow-fpsLast)/1000));
+    fpsFrames=0;fpsLast=fpsNow;
+  }
+  if(act>0)requestAnimationFrame(rLoop);else{anim=false;document.getElementById("fps-counter").textContent="-"}
 }
 function kick(){if(!anim){anim=true;requestAnimationFrame(rLoop)}}
-function sched(){requestAnimationFrame(render)}
+let schedPending=false;
+function sched(){if(!schedPending){schedPending=true;requestAnimationFrame(()=>{schedPending=false;render()})}}
 function szCv(){const w=wr.clientWidth,h=wr.clientHeight;if(w<1||h<1)return;W=w;H=h;cv.width=W;cv.height=H;iD=null}
 function fmtSz(mb){if(mb>=1024)return(mb/1024).toFixed(1)+" GB";if(mb>=1)return mb.toFixed(1)+" MB";return(mb*1024).toFixed(0)+" KB"}
 function bldTbl(){
@@ -277,7 +326,7 @@ function zA(ns,sx,sy){ns=cl(ns,mS,xS);if(Math.abs(ns-sc)<1e-6)return;const b=s2w
 document.getElementById("btn-zin").addEventListener("click",()=>zA(sc*1.3,W>>1,H>>1));
 document.getElementById("btn-zout").addEventListener("click",()=>zA(sc/1.3,W>>1,H>>1));
 document.getElementById("btn-reset").addEventListener("click",()=>{sc=mS;pX=0;pY=0;sel.clear();uAR();render()});
-document.getElementById("btn-clear").addEventListener("click",()=>{if(lOp)lOp.fill(0);if(hmCounts)hmCounts.fill(0);sched()});
+document.getElementById("btn-clear").addEventListener("click",()=>{if(lOp)lOp.fill(0);if(hmCounts)hmCounts.fill(0);activePgs=0;sched()});
 wr.addEventListener("wheel",e=>{e.preventDefault();const r=cv.getBoundingClientRect();zA(sc*Math.exp(-(e.deltaMode===1?e.deltaY*16:e.deltaY)*.002),(e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H)},{passive:false});
 let drag=false,lCX=0,lCY=0;
 cv.addEventListener("pointerdown",e=>{drag=true;lCX=e.clientX;lCY=e.clientY;cv.setPointerCapture(e.pointerId);cv.style.cursor="grabbing"});
@@ -290,9 +339,12 @@ cv.addEventListener("pointermove",e=>{
   let ex="";const op=lOp[pg];if(op===1)ex=" [READ]";else if(op===2)ex=" [WRITE]";else if(op===3)ex=" [FREE]";
   ttNm.textContent=`Page ${pg.toLocaleString()} \u2014 ${inf?inf.name:"idx "+ow}${ex}`;
   let dtxt=inf?`${inf.pages.toLocaleString()} pages, ${inf.pct}%`:"";
-  if(hmMode&&hmCounts&&pg<hmCounts.length)dtxt+=(dtxt?" \u00b7 ":"")+hmCounts[pg].toLocaleString()+" hits";
-  if(cacheMode&&resMap&&pg<resMap.length)dtxt+=(dtxt?" \u00b7 ":"")+(resMap[pg]?"cached":"NOT CACHED");
-  ttDt.textContent=dtxt;
+  if(hmCounts&&pg<hmCounts.length&&hmCounts[pg]>0)dtxt+=(dtxt?" \u00b7 ":"")+hmCounts[pg].toLocaleString()+" hits";
+  if(resMap&&pg<resMap.length){
+    const cached=resMap[pg];
+    dtxt+=(dtxt?" \u00b7 ":"")+(cached?'<span style="color:#28c840;font-weight:600">CACHED</span>':'<span style="color:#f04040;font-weight:600">NOT CACHED</span>');
+  }
+  ttDt.innerHTML=dtxt;
   tt.style.display="block";tt.style.left=(e.clientX+14)+"px";tt.style.top=(e.clientY+14)+"px";
 });
 cv.addEventListener("pointerup",()=>{drag=false;cv.style.cursor="crosshair"});
@@ -302,7 +354,7 @@ document.getElementById("chk-read").addEventListener("change",e=>{sR=e.target.ch
 document.getElementById("chk-write").addEventListener("change",e=>{sW=e.target.checked;sched()});
 document.getElementById("chk-free").addEventListener("change",e=>{sF=e.target.checked;sched()});
 document.getElementById("fade-slider").addEventListener("input",e=>{FADE=parseInt(e.target.value);document.getElementById("fade-val").textContent=(FADE/1000).toFixed(1)+"s"});
-document.getElementById("chk-trails").addEventListener("change",e=>{showTrails=e.target.checked;if(!showTrails)trails=[];sched()});
+document.getElementById("chk-trails").addEventListener("change",e=>{showTrails=e.target.checked;if(!showTrails){trailStart=0;trailN=0}sched()});
 document.getElementById("trail-width").addEventListener("input",e=>{trailW=parseFloat(e.target.value);document.getElementById("trail-w-val").textContent=trailW.toFixed(1);sched()});
 document.getElementById("chk-heatmap").addEventListener("change",e=>{hmMode=e.target.checked;sched()});
 document.getElementById("chk-cache").addEventListener("change",e=>{cacheMode=e.target.checked;sched()});
@@ -335,9 +387,12 @@ function connectWS(){
              if(hmCounts)hmCounts[pg]++;
       if(sparkAccum[dbi]!==undefined)sparkAccum[dbi]++;
       const prev=lOp[pg],prevLive=prev&&(now-lTs[pg])<FADE;
-      if(!prevLive||op>=prev){lOp[pg]=op;lTs[pg]=now}
+      if(!prevLive||op>=prev){
+        if(prev===0)activePgs++;
+        lOp[pg]=op;lTs[pg]=now;
+      }
       if(op===2&&dbi>0&&dbi<0xFE)oMap[pg]=dbi;
-      if(showTrails&&prevPg>=0&&prevPg!==pg){trails.push({from:prevPg,to:pg,op:op,ts:now});if(trails.length>TRAIL_CAP)trails.shift()}
+      if(showTrails&&prevPg>=0&&prevPg!==pg)trailPush(prevPg,pg,op,now);
       prevPg=pg;
       if(op>=2){lastPg=pg;lastDbi=dbi;lastOp=op}else if(lastPg<0){lastPg=pg;lastDbi=dbi;lastOp=op}
     }
@@ -451,6 +506,12 @@ function connectResidencyWS(){
       if(!resMap||resMap.length!==msg.data.byteLength-1)resMap=new Uint8Array(msg.data.byteLength-1);
       const src=new Uint8Array(msg.data,1);
       resMap.set(src);
+      cacheTotalCached=0;
+      if(cacheCachedPer)cacheCachedPer.fill(0);
+      for(let i=0;i<Math.min(resMap.length,NP,oMap?oMap.length:0);i++){
+        if(resMap[i]){cacheTotalCached++;if(cacheCachedPer){const dbi=oMap[i];if(dbi<cacheCachedPer.length)cacheCachedPer[dbi]++}}
+      }
+      cacheStale=true;
       updateCacheStats();
       if(cacheMode)sched();
     }else if(msgType===1){
@@ -461,29 +522,34 @@ function connectResidencyWS(){
         const start=v.getUint32(off,true);off+=4;
         const len=v.getUint32(off,true);off+=4;
         const state=v.getUint8(off);off+=1;
-        for(let p=start;p<start+len&&p<resMap.length;p++)resMap[p]=state;
+        for(let p=start;p<start+len&&p<resMap.length;p++){
+          const oldState=resMap[p];
+          if(oldState!==state){
+            const dbi=oMap?oMap[p]:0;
+            if(state&&!oldState){cacheTotalCached++;if(cacheCachedPer&&dbi<cacheCachedPer.length)cacheCachedPer[dbi]++}
+            else if(!state&&oldState){cacheTotalCached--;if(cacheCachedPer&&dbi<cacheCachedPer.length)cacheCachedPer[dbi]--}
+          }
+          resMap[p]=state;
+        }
       }
+      cacheStale=true;
       updateCacheStats();
       if(cacheMode)sched();
     }
   };
 }
 function updateCacheStats(){
-  if(!resMap||!oMap)return;
+  if(!cacheStale||!cacheCachedPer)return;
+  cacheStale=false;
   const el=document.getElementById("cache-stats");if(!el)return;
-  const max_dbi=DBIS.length;
-  const total_per=new Array(max_dbi).fill(0),cached_per=new Array(max_dbi).fill(0);
-  let totalCached=0;const limit=Math.min(resMap.length,NP,oMap.length);
-  for(let i=0;i<limit;i++){
-    const dbi=oMap[i];if(dbi<max_dbi){total_per[dbi]++;if(resMap[i])cached_per[dbi]++}
-    if(resMap[i])totalCached++;
-  }
-  const totalPct=limit>0?(totalCached/limit*100).toFixed(1):"0";
-  document.getElementById("cache-total").textContent=`${totalCached.toLocaleString()}/${limit.toLocaleString()} (${totalPct}%)`;
+  const limit=Math.min(resMap?resMap.length:0,NP);
+  const totalPct=limit>0?(cacheTotalCached/limit*100).toFixed(1):"0";
+  document.getElementById("cache-total").textContent=`${cacheTotalCached.toLocaleString()}/${limit.toLocaleString()} (${totalPct}%)`;
   el.innerHTML="";
   DBIS.forEach(d=>{
-    if(total_per[d.dbi_index]<=0)return;
-    const pct=total_per[d.dbi_index]>0?(cached_per[d.dbi_index]/total_per[d.dbi_index]*100):0;
+    const total=d.pages;if(total<=0)return;
+    const cached=cacheCachedPer[d.dbi_index]||0;
+    const pct=total>0?(cached/total*100):0;
     const c=PAL[d.dbi_index]||PAL[255];
     const fc=faultCounts[d.dbi_index]||0;
     const row=document.createElement("div");row.className="cache-stat";
@@ -508,6 +574,7 @@ async function init(){
   const gb=(NP*PS/(1024**3)).toFixed(2);
   document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${ref.toLocaleString()} ref \u00b7 ${unref.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
   lOp=new Uint8Array(NP);lTs=new Float64Array(NP);hmCounts=new Uint32Array(NP);
+  cacheCachedPer=new Array(DBIS.length).fill(0);
   DBIS.forEach(d=>{sparkData[d.dbi_index]={ring:new Array(SPARK_SECS).fill(0),head:0};sparkAccum[d.dbi_index]=0;flameData[d.dbi_index]=new Array(FLAME_SECS).fill(0)});
   bldTbl();buildSparklines();
   let treeInfo=[];
