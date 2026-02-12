@@ -731,9 +731,10 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         // convert the channel into a `StateHookSender` that emits an event on drop
         let to_multi_proof = self.to_multi_proof.clone().map(StateHookSender::new);
 
-        move |source: StateChangeSource, state: &EvmState| {
+        move |_source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
+                let hashed = evm_state_to_hashed_post_state_ref(state);
+                let _ = sender.send(MultiProofMessage::HashedStateUpdate(hashed));
             }
         }
     }
