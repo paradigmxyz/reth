@@ -429,6 +429,40 @@ where
     insert_history(provider, alloc, genesis_block_number)
 }
 
+/// Inserts account history indices for genesis accounts.
+pub fn insert_genesis_account_history<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
+{
+    let genesis_block_number = provider.chain_spec().genesis_header().number();
+    insert_account_history(provider, alloc, genesis_block_number)
+}
+
+/// Inserts storage history indices for genesis accounts.
+pub fn insert_genesis_storage_history<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
+{
+    let genesis_block_number = provider.chain_spec().genesis_header().number();
+    insert_storage_history(provider, alloc, genesis_block_number)
+}
+
 /// Inserts history indices for genesis accounts and storage.
 ///
 /// Writes to either MDBX or `RocksDB` based on storage settings configuration,
@@ -445,16 +479,50 @@ where
         + RocksDBProviderFactory
         + NodePrimitivesProvider,
 {
+    insert_account_history(provider, alloc.clone(), block)?;
+    insert_storage_history(provider, alloc, block)?;
+    Ok(())
+}
+
+/// Inserts account history indices at the given block.
+pub fn insert_account_history<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+    block: u64,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
+{
     provider.with_rocksdb_batch(|batch| {
         let mut writer = EitherWriter::new_accounts_history(provider, batch)?;
         let list = BlockNumberList::new([block]).expect("single block always fits");
-        for (addr, _) in alloc.clone() {
+        for (addr, _) in alloc {
             writer.upsert_account_history(ShardedKey::last(*addr), &list)?;
         }
         trace!(target: "reth::cli", "Inserted account history");
         Ok(((), writer.into_raw_rocksdb_batch()))
     })?;
 
+    Ok(())
+}
+
+/// Inserts storage history indices at the given block.
+pub fn insert_storage_history<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+    block: u64,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
+{
     provider.with_rocksdb_batch(|batch| {
         let mut writer = EitherWriter::new_storages_history(provider, batch)?;
         let list = BlockNumberList::new([block]).expect("single block always fits");

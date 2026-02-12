@@ -1541,6 +1541,7 @@ mod tests {
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
         PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StorageChangeSetReader,
+        StorageSettingsCache,
     };
     use reth_trie::MultiProof;
     use reth_trie_db::ChangesetCache;
@@ -1562,6 +1563,7 @@ mod tests {
                               + PruneCheckpointReader
                               + ChangeSetReader
                               + StorageChangeSetReader
+                              + StorageSettingsCache
                               + BlockNumReader,
             > + Clone
             + Send
@@ -1571,7 +1573,7 @@ mod tests {
         let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(runtime, task_ctx, 1, 1, false);
+        let proof_handle = ProofWorkerHandle::new(runtime, task_ctx, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -1581,7 +1583,10 @@ mod tests {
     fn create_cached_provider<F>(factory: F) -> CachedStateProvider<StateProviderBox>
     where
         F: DatabaseProviderFactory<
-                Provider: BlockReader + StageCheckpointReader + PruneCheckpointReader,
+                Provider: BlockReader
+                              + StageCheckpointReader
+                              + PruneCheckpointReader
+                              + reth_provider::StorageSettingsCache,
             > + Clone
             + Send
             + 'static,

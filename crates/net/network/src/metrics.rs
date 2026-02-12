@@ -2,7 +2,7 @@ use metrics::Histogram;
 use reth_eth_wire::DisconnectReason;
 use reth_ethereum_primitives::TxType;
 use reth_metrics::{
-    metrics::{self, Counter, Gauge},
+    metrics::{Counter, Gauge},
     Metrics,
 };
 
@@ -106,6 +106,29 @@ impl Default for PendingSessionFailureMetrics {
         Self {
             inbound: metrics::counter!("network_pending_session_failures", "direction" => "inbound"),
             outbound: metrics::counter!("network_pending_session_failures", "direction" => "outbound"),
+        }
+    }
+}
+
+/// Metrics for backed off peers, split by reason.
+#[derive(Metrics)]
+#[metrics(scope = "network.backed_off_peers")]
+pub struct BackedOffPeersMetrics {
+    /// Peers backed off because they reported too many peers.
+    pub too_many_peers: Counter,
+    /// Peers backed off after a graceful session close.
+    pub graceful_close: Counter,
+    /// Peers backed off due to connection or protocol errors.
+    pub connection_error: Counter,
+}
+
+impl BackedOffPeersMetrics {
+    /// Increments the counter for the given backoff reason.
+    pub fn increment_for_reason(&self, reason: crate::peers::BackoffReason) {
+        match reason {
+            crate::peers::BackoffReason::TooManyPeers => self.too_many_peers.increment(1),
+            crate::peers::BackoffReason::GracefulClose => self.graceful_close.increment(1),
+            crate::peers::BackoffReason::ConnectionError => self.connection_error.increment(1),
         }
     }
 }

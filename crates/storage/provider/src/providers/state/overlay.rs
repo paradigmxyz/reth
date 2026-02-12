@@ -10,17 +10,15 @@ use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
     DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
-    StorageChangeSetReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
-    HashedPostStateSorted, KeccakKeyHasher,
+    HashedPostStateSorted,
 };
-use reth_trie_db::{
-    ChangesetCache, DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
-};
+use reth_trie_db::{ChangesetCache, DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -198,7 +196,8 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + DBProvider
-        + BlockNumReader,
+        + BlockNumReader
+        + StorageSettingsCache,
 {
     /// Resolves the effective overlay (trie updates, hashed state).
     ///
@@ -336,10 +335,7 @@ where
                 let _guard = debug_span!(target: "providers::state::overlay", "Retrieving hashed state reverts").entered();
 
                 let start = Instant::now();
-                let res = HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
-                    provider,
-                    from_block + 1..,
-                )?;
+                let res = reth_trie_db::from_reverts_auto(provider, from_block + 1..)?;
                 retrieve_hashed_state_reverts_duration = start.elapsed();
                 res
             };
@@ -450,7 +446,8 @@ where
         + PruneCheckpointReader
         + BlockNumReader
         + ChangeSetReader
-        + StorageChangeSetReader,
+        + StorageChangeSetReader
+        + StorageSettingsCache,
 {
     type Provider = OverlayStateProvider<F::Provider>;
 
