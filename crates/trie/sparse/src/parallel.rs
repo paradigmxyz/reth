@@ -248,6 +248,18 @@ impl SparseTrie for ParallelSparseTrie {
                     .as_revealed_mut()
                     .expect("just revealed")
                     .reveal_node(node.path, &node.node, node.masks)?;
+
+                // For boundary leaves, update the parent branch's leaf_mask in upper subtrie
+                if node.path.len() == UPPER_TRIE_MAX_DEPTH && matches!(node.node, TrieNode::Leaf(_))
+                {
+                    let parent_path = node.path.slice(..node.path.len() - 1);
+                    let leaf_nibble = node.path.get_unchecked(node.path.len() - 1);
+                    if let Some(SparseNode::Branch { leaf_mask, .. }) =
+                        self.upper_subtrie.nodes.get_mut(&parent_path)
+                    {
+                        leaf_mask.set_bit(leaf_nibble);
+                    }
+                }
             }
             return Ok(())
         }
@@ -321,6 +333,7 @@ impl SparseTrie for ParallelSparseTrie {
                     // can cause multiple re-allocations as the hashmap grows.
                     subtrie.nodes.reserve(nodes.len());
 
+                    let mut boundary_leaves: Vec<(Nibbles, u8)> = Vec::new();
                     for node in nodes {
                         // For boundary leaves, check reachability from upper subtrie's parent
                         // branch
@@ -341,20 +354,36 @@ impl SparseTrie for ParallelSparseTrie {
                         // Reveal each node in the subtrie, returning early on any errors
                         let res = subtrie.reveal_node(node.path, &node.node, node.masks);
                         if res.is_err() {
-                            return (subtrie_idx, subtrie, res.map(|_| ()))
+                            return (subtrie_idx, subtrie, boundary_leaves, res.map(|_| ()))
+                        }
+                        // Track boundary leaves to update parent's leaf_mask after parallel work
+                        if node.path.len() == UPPER_TRIE_MAX_DEPTH &&
+                            matches!(node.node, TrieNode::Leaf(_))
+                        {
+                            let parent_path = node.path.slice(..node.path.len() - 1);
+                            let leaf_nibble = node.path.get_unchecked(node.path.len() - 1);
+                            boundary_leaves.push((parent_path, leaf_nibble));
                         }
                     }
-                    (subtrie_idx, subtrie, Ok(()))
+                    (subtrie_idx, subtrie, boundary_leaves, Ok(()))
                 })
                 .collect();
 
             // Put subtries back which were processed in the rayon pool, collecting the last
             // seen error in the process and returning that.
             let mut any_err = Ok(());
-            for (subtrie_idx, subtrie, res) in results {
+            for (subtrie_idx, subtrie, boundary_leaves, res) in results {
                 self.lower_subtries[subtrie_idx] = LowerSparseSubtrie::Revealed(subtrie);
                 if res.is_err() {
                     any_err = res;
+                }
+                // Update leaf_mask for boundary leaves' parent branches in upper subtrie
+                for (parent_path, leaf_nibble) in boundary_leaves {
+                    if let Some(SparseNode::Branch { leaf_mask, .. }) =
+                        self.upper_subtrie.nodes.get_mut(&parent_path)
+                    {
+                        leaf_mask.set_bit(leaf_nibble);
+                    }
                 }
             }
 
@@ -452,8 +481,22 @@ impl SparseTrie for ParallelSparseTrie {
                     // Clear modified_original since we haven't actually modified anything yet
                     modified_original = None;
                 }
-                LeafUpdateStep::Complete { inserted_nodes, reveal_path } => {
+                LeafUpdateStep::Complete { inserted_nodes, reveal_path, converted_leaf_path } => {
                     new_nodes.extend(inserted_nodes);
+
+                    // If a leaf was converted to a non-leaf, update the parent branch's leaf_mask
+                    if let Some(leaf_path) = converted_leaf_path {
+                        if !leaf_path.is_empty() {
+                            let parent_path = leaf_path.slice(..leaf_path.len() - 1);
+                            let child_nibble = leaf_path.get_unchecked(leaf_path.len() - 1);
+                            let subtrie = self.subtrie_for_path_mut(&parent_path);
+                            if let Some(SparseNode::Branch { leaf_mask, .. }) =
+                                subtrie.nodes.get_mut(&parent_path)
+                            {
+                                leaf_mask.unset_bit(child_nibble);
+                            }
+                        }
+                    }
 
                     if let Some(reveal_path) = reveal_path {
                         let subtrie = self.subtrie_for_path_mut(&reveal_path);
@@ -2606,8 +2649,26 @@ impl SparseSubtrie {
                     // Clear modified_original since we haven't actually modified anything yet
                     modified_original = None;
                 }
-                LeafUpdateStep::Complete { inserted_nodes: new_inserted, reveal_path } => {
+                LeafUpdateStep::Complete {
+                    inserted_nodes: new_inserted,
+                    reveal_path,
+                    converted_leaf_path,
+                } => {
                     inserted_nodes.extend(new_inserted);
+
+                    // If a leaf was converted to a non-leaf, update the parent branch's leaf_mask
+                    // within this subtrie (cross-subtrie updates are handled by the caller)
+                    if let Some(leaf_path) = converted_leaf_path {
+                        if !leaf_path.is_empty() {
+                            let parent_path = leaf_path.slice(..leaf_path.len() - 1);
+                            let child_nibble = leaf_path.get_unchecked(leaf_path.len() - 1);
+                            if let Some(SparseNode::Branch { leaf_mask, .. }) =
+                                self.nodes.get_mut(&parent_path)
+                            {
+                                leaf_mask.unset_bit(child_nibble);
+                            }
+                        }
+                    }
 
                     if let Some(reveal_path) = reveal_path &&
                         self.nodes.get(&reveal_path).expect("node must exist").is_hash()
@@ -2745,6 +2806,8 @@ impl SparseSubtrie {
                 Err(SparseTrieErrorKind::BlindedNode { path: current, hash: *hash }.into())
             }
             SparseNode::Leaf { key: current_key, .. } => {
+                // Save the original leaf node path before extending
+                let original_leaf_path = current;
                 current.extend(current_key);
 
                 // this leaf is being updated
@@ -2777,9 +2840,12 @@ impl SparseSubtrie {
                 self.nodes
                     .insert(existing_leaf_path, SparseNode::new_leaf(current.slice(common + 1..)));
 
-                Ok(LeafUpdateStep::complete_with_insertions(
+                // The original leaf is being converted to an extension. Signal this to the caller
+                // so the parent branch's leaf_mask can be updated (the parent may be in a
+                // different subtrie).
+                Ok(LeafUpdateStep::complete_with_converted_leaf(
                     vec![branch_path, new_leaf_path, existing_leaf_path],
-                    None,
+                    original_leaf_path,
                 ))
             }
             SparseNode::Extension { key, .. } => {
@@ -3012,6 +3078,17 @@ impl SparseSubtrie {
                     },
                     Entry::Vacant(entry) => {
                         entry.insert(SparseNode::new_leaf(leaf.key));
+                    }
+                }
+
+                // Update parent branch's leaf_mask if there's a parent branch in this subtrie
+                if !path.is_empty() {
+                    let parent_path = path.slice(..path.len() - 1);
+                    let leaf_nibble = path.get_unchecked(path.len() - 1);
+                    if let Some(SparseNode::Branch { leaf_mask, .. }) =
+                        self.nodes.get_mut(&parent_path)
+                    {
+                        leaf_mask.set_bit(leaf_nibble);
                     }
                 }
             }
@@ -3543,6 +3620,9 @@ pub enum LeafUpdateStep {
         inserted_nodes: Vec<Nibbles>,
         /// Path to a node which may need to be revealed
         reveal_path: Option<Nibbles>,
+        /// Path to a leaf that was converted to a non-leaf (extension/branch).
+        /// The parent branch's leaf_mask should be updated to unset the bit for this child.
+        converted_leaf_path: Option<Nibbles>,
     },
     /// The node was not found
     #[default]
@@ -3560,7 +3640,19 @@ impl LeafUpdateStep {
         inserted_nodes: Vec<Nibbles>,
         reveal_path: Option<Nibbles>,
     ) -> Self {
-        Self::Complete { inserted_nodes, reveal_path }
+        Self::Complete { inserted_nodes, reveal_path, converted_leaf_path: None }
+    }
+
+    /// Creates a step indicating completion with a converted leaf
+    pub const fn complete_with_converted_leaf(
+        inserted_nodes: Vec<Nibbles>,
+        converted_leaf_path: Nibbles,
+    ) -> Self {
+        Self::Complete {
+            inserted_nodes,
+            reveal_path: None,
+            converted_leaf_path: Some(converted_leaf_path),
+        }
     }
 }
 
