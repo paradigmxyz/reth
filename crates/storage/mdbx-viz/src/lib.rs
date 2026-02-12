@@ -23,6 +23,7 @@ pub mod walker;
 struct AppState {
     info: VizInfo,
     owner_map: Arc<RwLock<Vec<u8>>>,
+    tree_info: Arc<Vec<walker::TreeInfo>>,
     subscribers: Arc<AtomicUsize>,
     event_tx: broadcast::Sender<Vec<u8>>,
 }
@@ -40,6 +41,7 @@ pub struct VizConfig {
     pub page_size: u32,
     pub dbi_names: Vec<String>,
     pub owner_map: Vec<u8>,
+    pub tree_info: Vec<walker::TreeInfo>,
 }
 
 const WIRE_EVENT_SIZE: usize = 8;
@@ -71,6 +73,7 @@ pub async fn start_viz_server(
             dbi_names: config.dbi_names,
         },
         owner_map: owner_map.clone(),
+        tree_info: Arc::new(config.tree_info),
         subscribers: subscribers.clone(),
         event_tx: event_tx.clone(),
     };
@@ -108,6 +111,7 @@ pub async fn start_viz_server(
         .route("/ws", get(ws_handler))
         .route("/api/info", get(info_handler))
         .route("/api/owner_map", get(owner_map_handler))
+        .route("/api/tree_info", get(tree_info_handler))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", config.port);
@@ -134,6 +138,10 @@ async fn owner_map_handler(State(state): State<AppState>) -> impl IntoResponse {
         map.clone(),
     )
         .into_response()
+}
+
+async fn tree_info_handler(State(state): State<AppState>) -> impl IntoResponse {
+    axum::Json(state.tree_info.as_ref().clone())
 }
 
 async fn ws_handler(

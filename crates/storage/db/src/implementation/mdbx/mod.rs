@@ -572,6 +572,7 @@ impl DatabaseEnv {
             page_size: page_size as u32,
             dbi_names,
             owner_map: walk.owner_map,
+            tree_info: walk.tree_info,
         };
 
         // Spawn the viz server on a background tokio runtime

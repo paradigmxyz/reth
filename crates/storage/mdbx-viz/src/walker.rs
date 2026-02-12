@@ -1,4 +1,5 @@
 use rayon::prelude::*;
+use serde::Serialize;
 use std::{collections::HashMap, fs::File, io, os::unix::fs::FileExt, path::Path, time::Instant};
 
 const PAGEHDRSZ: usize = 20;
@@ -33,10 +34,23 @@ const TREE_ITEMS: usize = 0x20;
 
 const MDBX_MAGIC: u64 = 0x59659DBDEF4C11;
 
+#[derive(Debug, Clone, Serialize)]
+pub struct TreeInfo {
+    pub name: String,
+    pub dbi_index: u8,
+    pub height: u16,
+    pub branch_pages: u32,
+    pub leaf_pages: u32,
+    pub large_pages: u32,
+    pub items: u64,
+    pub root_pgno: u32,
+}
+
 pub struct WalkResult {
     pub owner_map: Vec<u8>,
     pub page_count: usize,
     pub page_size: usize,
+    pub tree_info: Vec<TreeInfo>,
 }
 
 #[allow(dead_code)]
@@ -505,5 +519,42 @@ pub fn walk_mdbx(path: &Path, name_to_dbi: &HashMap<&str, u8>) -> eyre::Result<W
         "walk complete"
     );
 
-    Ok(WalkResult { owner_map, page_count, page_size: ps })
+    let mut tree_info = Vec::new();
+
+    tree_info.push(TreeInfo {
+        name: "FreeDB".to_string(),
+        dbi_index: dbi_free,
+        height: free_tree.height,
+        branch_pages: free_tree.branch_pages,
+        leaf_pages: free_tree.leaf_pages,
+        large_pages: free_tree.large_pages,
+        items: free_tree.items,
+        root_pgno: free_tree.root,
+    });
+
+    tree_info.push(TreeInfo {
+        name: "MainDB".to_string(),
+        dbi_index: dbi_main,
+        height: main_tree.height,
+        branch_pages: main_tree.branch_pages,
+        leaf_pages: main_tree.leaf_pages,
+        large_pages: main_tree.large_pages,
+        items: main_tree.items,
+        root_pgno: main_tree.root,
+    });
+
+    for dbi in &named_dbis {
+        tree_info.push(TreeInfo {
+            name: dbi.name.clone(),
+            dbi_index: dbi.dbi_index,
+            height: dbi.tree.height,
+            branch_pages: dbi.tree.branch_pages,
+            leaf_pages: dbi.tree.leaf_pages,
+            large_pages: dbi.tree.large_pages,
+            items: dbi.tree.items,
+            root_pgno: dbi.tree.root,
+        });
+    }
+
+    Ok(WalkResult { owner_map, page_count, page_size: ps, tree_info })
 }

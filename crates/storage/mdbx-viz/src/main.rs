@@ -82,6 +82,7 @@ async fn main() {
         page_count,
         page_size: args.page_size,
         dbi_names: vec![],
+        tree_info: vec![],
         owner_map,
     };
 

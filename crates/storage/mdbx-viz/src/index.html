@@ -42,6 +42,18 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
 .pct-bar{display:inline-block;height:6px;border-radius:3px;margin-right:6px;vertical-align:middle}
 .swatch-cell{width:12px;height:12px;border-radius:2px;flex-shrink:0}
 #loading{display:flex;align-items:center;justify-content:center;height:100%;color:#8b949e;font-size:14px}
+#flame-wrap{border:1px solid #30363d;border-radius:0 0 6px 6px;margin-top:-1px;background:#0d1117}
+#flame-wrap canvas{display:block}
+.spark-row{display:flex;align-items:center;gap:6px;margin-bottom:3px;font-size:10px}
+.spark-label{width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8b949e}
+.spark-cv{border:1px solid #21262d;border-radius:2px;background:#0d1117}
+.spark-val{color:#c9d1d9;min-width:30px;text-align:right}
+.tree-card{background:#1c2128;border:1px solid #30363d;border-radius:4px;padding:6px 8px;margin-bottom:4px;font-size:10px;cursor:pointer}
+.tree-card:hover{border-color:#58a6ff}
+.tree-card .tree-name{color:#f0f6fc;font-weight:600;font-size:11px}
+.tree-card .tree-stat{color:#8b949e;margin-top:2px}
+.tree-card .tree-bar{display:flex;gap:1px;margin-top:3px;height:6px;border-radius:2px;overflow:hidden}
+.tree-card .tree-seg{height:100%}
 </style>
 </head>
 <body>
@@ -72,6 +84,9 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
     <div id="loading">Loading page map&hellip;</div>
     <canvas id="map" style="display:none"></canvas>
   </div>
+  <div id="flame-wrap" style="height:0;overflow:hidden;transition:height 0.2s">
+    <canvas id="flame"></canvas>
+  </div>
 </div>
 <div id="side-panel">
   <div class="viz-controls">
@@ -81,6 +96,8 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
       <label><input type="checkbox" id="chk-free" checked> <span style="color:#eab308">&#9632;</span> Frees</label>
       <label><input type="checkbox" id="chk-fixw"> Fixed Width</label>
       <label><input type="checkbox" id="chk-trails"> Trails</label>
+      <label><input type="checkbox" id="chk-heatmap"> Heatmap</label>
+      <label><input type="checkbox" id="chk-flame"> Timeline</label>
     </div>
     <div>
       <label>Fade: <input type="range" id="fade-slider" min="200" max="8000" value="2000" step="100">
@@ -93,6 +110,10 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
   </div>
   <h2>Table Details</h2>
   <table><thead><tr><th></th><th>Table</th><th>Pages</th><th>Size</th><th>%</th></tr></thead><tbody id="tbl-body"></tbody></table>
+  <h2 style="margin-top:12px">Activity</h2>
+  <div id="sparklines"></div>
+  <h2 style="margin-top:12px">B-Tree Structure</h2>
+  <div id="tree-info"></div>
 </div>
 <div id="tooltip">
   <div class="tt-row"><div class="tt-swatch" id="tt-swatch"></div><div class="tt-name" id="tt-name"></div></div>
@@ -113,6 +134,9 @@ let cntR=0,cntW=0,cntF=0;
 let sR=true,sW=true,sF=true,fW=false,showTrails=false,trailW=1.5;
 const TRAIL_CAP=4096;let trails=[];
 const TRC={1:"60,130,246",2:"255,80,80",3:"234,179,8"};
+let hmMode=false,hmCounts=null;
+let showFlame=false;const FLAME_SECS=120;let flameData={},flameHead=0;
+const SPARK_SECS=60;let sparkData={},sparkAccum={};
 const cv=document.getElementById("map"),cx=cv.getContext("2d"),wr=document.getElementById("canvas-wrap");
 const ldEl=document.getElementById("loading"),zmEl=document.getElementById("zoom-info");
 const tt=document.getElementById("tooltip"),ttSw=document.getElementById("tt-swatch");
@@ -126,6 +150,7 @@ function growTo(newNP){
   const nOm=new Uint8Array(newNP);nOm.set(oMap);nOm.fill(0xFF,NP);oMap=nOm;
   const nOp=new Uint8Array(newNP);nOp.set(lOp);lOp=nOp;
   const nTs=new Float64Array(newNP);nTs.set(lTs);lTs=nTs;
+  if(hmCounts){const nHm=new Uint32Array(newNP);nHm.set(hmCounts);hmCounts=nHm}
   NP=newNP;GR=Math.ceil(NP/GC);
   iD=null;oC=null;
 }
@@ -134,9 +159,17 @@ function oY(){return Math.max(0,(H-GR*sc)/2)}
 function cP(){const vw=W/sc,vh=H/sc;pX=cl(pX,0,Math.max(0,GC-vw));pY=cl(pY,0,Math.max(0,GR-vh))}
 function s2w(sx,sy){return{wx:pX+(sx-oX())/sc,wy:pY+(sy-oY())/sc}}
 function w2p(wx,wy){const px=Math.floor(wx),py=Math.floor(wy);if(px<0||py<0||px>=GC||py>=GR)return-1;const i=py*GC+px;return i<NP?i:-1}
+const HM_STOPS=[[60,130,246],[0,200,200],[80,200,80],[234,179,8],[255,80,80]];
+function hmColor(cnt){
+  if(cnt<=0)return null;
+  const t=Math.min(1,Math.log2(cnt+1)/16),s=t*(HM_STOPS.length-1),i=Math.min(Math.floor(s),HM_STOPS.length-2),f=s-i;
+  const a=HM_STOPS[i],b=HM_STOPS[i+1];
+  return[Math.round(a[0]+(b[0]-a[0])*f),Math.round(a[1]+(b[1]-a[1])*f),Math.round(a[2]+(b[2]-a[2])*f)];
+}
 function pC(pg,gy,flt,dA,dB,now){
   if(pg<0||pg>=NP)return null;const ow=oMap[pg];
   let c;if(flt&&!sel.has(ow))c=(gy&1)?dA:dB;else c=PAL[ow]||PAL[255];
+  if(hmMode&&hmCounts){const hc=hmColor(hmCounts[pg]);if(hc)return hc;return c}
   const op=lOp[pg];if(!op)return c;
   if((op===1&&!sR)||(op===2&&!sW)||(op===3&&!sF))return c;
   const age=now-lTs[pg];if(age>=FADE){lOp[pg]=0;return c}
@@ -227,7 +260,7 @@ function zA(ns,sx,sy){ns=cl(ns,mS,xS);if(Math.abs(ns-sc)<1e-6)return;const b=s2w
 document.getElementById("btn-zin").addEventListener("click",()=>zA(sc*1.3,W>>1,H>>1));
 document.getElementById("btn-zout").addEventListener("click",()=>zA(sc/1.3,W>>1,H>>1));
 document.getElementById("btn-reset").addEventListener("click",()=>{sc=mS;pX=0;pY=0;sel.clear();uAR();render()});
-document.getElementById("btn-clear").addEventListener("click",()=>{if(lOp)lOp.fill(0);sched()});
+document.getElementById("btn-clear").addEventListener("click",()=>{if(lOp)lOp.fill(0);if(hmCounts)hmCounts.fill(0);sched()});
 wr.addEventListener("wheel",e=>{e.preventDefault();const r=cv.getBoundingClientRect();zA(sc*Math.exp(-(e.deltaMode===1?e.deltaY*16:e.deltaY)*.002),(e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H)},{passive:false});
 let drag=false,lCX=0,lCY=0;
 cv.addEventListener("pointerdown",e=>{drag=true;lCX=e.clientX;lCY=e.clientY;cv.setPointerCapture(e.pointerId);cv.style.cursor="grabbing"});
@@ -239,7 +272,9 @@ cv.addEventListener("pointermove",e=>{
   ttSw.style.background=`rgb(${c[0]},${c[1]},${c[2]})`;
   let ex="";const op=lOp[pg];if(op===1)ex=" [READ]";else if(op===2)ex=" [WRITE]";else if(op===3)ex=" [FREE]";
   ttNm.textContent=`Page ${pg.toLocaleString()} \u2014 ${inf?inf.name:"idx "+ow}${ex}`;
-  ttDt.textContent=inf?`${inf.pages.toLocaleString()} pages, ${inf.pct}%`:"";
+  let dtxt=inf?`${inf.pages.toLocaleString()} pages, ${inf.pct}%`:"";
+  if(hmMode&&hmCounts&&pg<hmCounts.length)dtxt+=(dtxt?" \u00b7 ":"")+hmCounts[pg].toLocaleString()+" hits";
+  ttDt.textContent=dtxt;
   tt.style.display="block";tt.style.left=(e.clientX+14)+"px";tt.style.top=(e.clientY+14)+"px";
 });
 cv.addEventListener("pointerup",()=>{drag=false;cv.style.cursor="crosshair"});
@@ -251,8 +286,14 @@ document.getElementById("chk-free").addEventListener("change",e=>{sF=e.target.ch
 document.getElementById("fade-slider").addEventListener("input",e=>{FADE=parseInt(e.target.value);document.getElementById("fade-val").textContent=(FADE/1000).toFixed(1)+"s"});
 document.getElementById("chk-trails").addEventListener("change",e=>{showTrails=e.target.checked;if(!showTrails)trails=[];sched()});
 document.getElementById("trail-width").addEventListener("input",e=>{trailW=parseFloat(e.target.value);document.getElementById("trail-w-val").textContent=trailW.toFixed(1);sched()});
+document.getElementById("chk-heatmap").addEventListener("change",e=>{hmMode=e.target.checked;sched()});
+document.getElementById("chk-flame").addEventListener("change",e=>{
+  showFlame=e.target.checked;const fw=document.getElementById("flame-wrap");
+  const at=DBIS.filter(d=>d.pages>0);fw.style.height=showFlame?Math.min(at.length*8+24,200)+"px":"0";
+  if(showFlame){szFlame();drawFlame()}
+});
 document.getElementById("chk-fixw").addEventListener("change",e=>{fW=e.target.checked;if(fW){reflow()}else{GC=Math.ceil(Math.sqrt(NP));GR=Math.ceil(NP/GC);mS=Math.min(W/GC,H/GR,1);pX=0;cP()}sched()});
-window.addEventListener("resize",()=>{if(!oMap)return;szCv();reflow();mS=Math.min(W/GC,H/GR,1);if(sc<mS)sc=mS;cP();render()});
+window.addEventListener("resize",()=>{if(!oMap)return;szCv();reflow();mS=Math.min(W/GC,H/GR,1);if(sc<mS)sc=mS;cP();render();if(showFlame){szFlame();drawFlame()}});
 const wD=document.getElementById("ws-dot"),wS=document.getElementById("ws-status");
 function connectWS(){
   const ws=new WebSocket(`${location.protocol==="https:"?"wss:":"ws:"}//${location.host}/ws`);
@@ -270,6 +311,8 @@ function connectWS(){
       if(pg>=maxPg)maxPg=pg+1;
       if(pg>=NP){if(maxPg>NP)growTo(maxPg);if(pg>=NP)continue}cnt++;
       if(op===1)cntR++;else if(op===2)cntW++;else if(op===3)cntF++;
+      if(hmCounts)hmCounts[pg]++;
+      if(sparkAccum[dbi]!==undefined)sparkAccum[dbi]++;
       const prev=lOp[pg],prevLive=prev&&(now-lTs[pg])<FADE;
       if(!prevLive||op>=prev){lOp[pg]=op;lTs[pg]=now}
       if(op===2&&dbi>0&&dbi<0xFE)oMap[pg]=dbi;
@@ -285,6 +328,94 @@ function connectWS(){
     const el=now-lRT;if(el>=1000){document.getElementById("evt-rate").textContent=Math.round(rEv/(el/1000)).toLocaleString();rEv=0;lRT=now}
     if(cnt>0)kick();
   };
+}
+function szFlame(){
+  const fw=document.getElementById("flame-wrap"),fc=document.getElementById("flame");
+  if(!fw||!fc)return;fc.width=fw.clientWidth||300;fc.height=fw.clientHeight||100;
+}
+function drawFlame(){
+  const fc=document.getElementById("flame");if(!fc)return;
+  const ctx=fc.getContext("2d"),cw=fc.width,ch=fc.height;ctx.clearRect(0,0,cw,ch);
+  const at=DBIS.filter(d=>d.pages>0);if(!at.length)return;
+  const lw=42,rw=cw-lw,rowH=Math.max(4,Math.floor((ch-14)/Math.max(1,at.length)));
+  ctx.font="7px monospace";
+  for(let r=0;r<at.length;r++){
+    const d=at[r],fd=flameData[d.dbi_index];if(!fd)continue;
+    const c=PAL[d.dbi_index]||PAL[255],y=r*rowH;
+    let mx=1;for(let s=0;s<FLAME_SECS;s++){const v=fd[s];if(v>mx)mx=v}
+    for(let s=0;s<FLAME_SECS;s++){
+      const idx=((flameHead-FLAME_SECS+s)%FLAME_SECS+FLAME_SECS)%FLAME_SECS;
+      const ops=fd[idx];if(ops<=0)continue;
+      const x=lw+(s/FLAME_SECS)*rw,w=Math.ceil(rw/FLAME_SECS);
+      const a=Math.min(1,Math.log2(ops+1)/Math.log2(mx+1));
+      ctx.fillStyle=`rgba(${c[0]},${c[1]},${c[2]},${a.toFixed(2)})`;
+      ctx.fillRect(x,y,w,rowH-1);
+    }
+    ctx.fillStyle="#8b949e";ctx.fillText(d.name.slice(0,6),2,y+rowH-2);
+  }
+  const ay=at.length*rowH+2;ctx.fillStyle="#30363d";ctx.fillRect(lw,ay,rw,1);
+  ctx.fillStyle="#8b949e";ctx.font="7px monospace";
+  for(let s=30;s<FLAME_SECS;s+=30){
+    const x=lw+((FLAME_SECS-s)/FLAME_SECS)*rw;
+    ctx.fillText("-"+s+"s",x,ay+10);
+  }
+}
+function buildSparklines(){
+  const el=document.getElementById("sparklines");if(!el)return;el.innerHTML="";
+  DBIS.forEach(d=>{
+    if(d.pages<=0&&d.dbi_index>2)return;
+    const row=document.createElement("div");row.className="spark-row";
+    const c=PAL[d.dbi_index]||PAL[255];
+    const sw=document.createElement("div");sw.style.cssText=`width:10px;height:10px;border-radius:2px;background:rgb(${c[0]},${c[1]},${c[2]})`;
+    const lb=document.createElement("span");lb.className="spark-label";lb.textContent=d.name;
+    const cv=document.createElement("canvas");cv.className="spark-cv";cv.width=120;cv.height=20;cv.style.width="120px";cv.style.height="20px";
+    const vl=document.createElement("span");vl.className="spark-val";vl.textContent="0";
+    row.append(sw,lb,cv,vl);el.appendChild(row);
+    d._sparkCv=cv;d._sparkCtx=cv.getContext("2d");d._sparkVal=vl;
+  });
+}
+function drawSparkline(d){
+  const cv=d._sparkCv,ctx=d._sparkCtx;if(!cv||!ctx)return;
+  const sd=sparkData[d.dbi_index];if(!sd)return;
+  const w=cv.width,h=cv.height,c=PAL[d.dbi_index]||PAL[255];
+  ctx.clearRect(0,0,w,h);
+  let mx=1;for(let i=0;i<SPARK_SECS;i++){const v=sd.ring[i];if(v>mx)mx=v}
+  const latest=sd.ring[((sd.head-1)%SPARK_SECS+SPARK_SECS)%SPARK_SECS];
+  ctx.beginPath();ctx.moveTo(0,h);
+  for(let i=0;i<SPARK_SECS;i++){
+    const idx=((sd.head-SPARK_SECS+i)%SPARK_SECS+SPARK_SECS)%SPARK_SECS;
+    const x=(i/(SPARK_SECS-1))*w,y=h-(sd.ring[idx]/mx)*h;
+    if(i===0)ctx.lineTo(x,y);else ctx.lineTo(x,y);
+  }
+  ctx.lineTo(w,h);ctx.closePath();
+  ctx.fillStyle=`rgba(${c[0]},${c[1]},${c[2]},0.3)`;ctx.fill();
+  ctx.beginPath();
+  for(let i=0;i<SPARK_SECS;i++){
+    const idx=((sd.head-SPARK_SECS+i)%SPARK_SECS+SPARK_SECS)%SPARK_SECS;
+    const x=(i/(SPARK_SECS-1))*w,y=h-(sd.ring[idx]/mx)*h;
+    if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+  }
+  ctx.strokeStyle=`rgba(${c[0]},${c[1]},${c[2]},0.8)`;ctx.lineWidth=1;ctx.stroke();
+  if(d._sparkVal)d._sparkVal.textContent=latest.toLocaleString();
+}
+function buildTreeInfo(info){
+  const el=document.getElementById("tree-info");if(!el)return;el.innerHTML="";
+  info.forEach(ti=>{
+    if(ti.height===0&&ti.branch_pages===0&&ti.leaf_pages===0&&ti.large_pages===0)return;
+    const card=document.createElement("div");card.className="tree-card";
+    const total=ti.branch_pages+ti.leaf_pages+ti.large_pages;
+    const ipl=ti.leaf_pages>0?Math.round(ti.items/ti.leaf_pages):0;
+    let html=`<div class="tree-name">${ti.name} <span style="color:#8b949e;font-weight:400">depth ${ti.height}</span></div>`;
+    html+=`<div class="tree-stat">B:${ti.branch_pages.toLocaleString()} L:${ti.leaf_pages.toLocaleString()} O:${ti.large_pages.toLocaleString()} items:${ti.items.toLocaleString()}</div>`;
+    if(total>0){
+      const bp=Math.max(1,Math.round(ti.branch_pages/total*100)),lp=Math.max(1,Math.round(ti.leaf_pages/total*100)),op=Math.max(1,100-bp-lp);
+      html+=`<div class="tree-bar"><div class="tree-seg" style="width:${bp}%;background:#3c82f6"></div><div class="tree-seg" style="width:${lp}%;background:#4ade80"></div><div class="tree-seg" style="width:${op}%;background:#f58231"></div></div>`;
+    }
+    if(ipl>0)html+=`<div class="tree-stat">~${ipl.toLocaleString()} items/leaf</div>`;
+    card.innerHTML=html;
+    card.addEventListener("click",()=>{const i=ti.dbi_index;if(sel.has(i))sel.delete(i);else sel.add(i);uAR();sched()});
+    el.appendChild(card);
+  });
 }
 async function init(){
   try{
@@ -302,8 +433,24 @@ async function init(){
   const unref=oMap.reduce((n,b)=>n+(b===0xFF?1:0),0),ref=NP-unref;
   const gb=(NP*PS/(1024**3)).toFixed(2);
   document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${ref.toLocaleString()} ref \u00b7 ${unref.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
-  lOp=new Uint8Array(NP);lTs=new Float64Array(NP);
-  bldTbl();ldEl.style.display="none";cv.style.display="block";boot();connectWS();
+  lOp=new Uint8Array(NP);lTs=new Float64Array(NP);hmCounts=new Uint32Array(NP);
+  DBIS.forEach(d=>{sparkData[d.dbi_index]={ring:new Array(SPARK_SECS).fill(0),head:0};sparkAccum[d.dbi_index]=0;flameData[d.dbi_index]=new Array(FLAME_SECS).fill(0)});
+  bldTbl();buildSparklines();
+  let treeInfo=[];
+  try{const r=await fetch("/api/tree_info");if(r.ok)treeInfo=await r.json()}catch(e){}
+  if(treeInfo.length>0)buildTreeInfo(treeInfo);
+  ldEl.style.display="none";cv.style.display="block";boot();connectWS();
+  setInterval(()=>{
+    DBIS.forEach(d=>{
+      const v=sparkAccum[d.dbi_index]||0;
+      const sd=sparkData[d.dbi_index];if(sd){sd.ring[sd.head%SPARK_SECS]=v;sd.head++}
+      const fd=flameData[d.dbi_index];if(fd)fd[flameHead%FLAME_SECS]=v;
+      sparkAccum[d.dbi_index]=0;
+    });
+    flameHead++;
+    DBIS.forEach(d=>drawSparkline(d));
+    if(showFlame)drawFlame();
+  },1000);
   setInterval(()=>{if(!oMap)return;const ct={};let ur=0;for(let i=0;i<NP;i++){const o=oMap[i];ct[o]=(ct[o]||0)+1;if(o===0xFF)ur++}DBIS.forEach(d=>{d.pages=ct[d.dbi_index]||0;d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});bldTbl();uAR();const rf=NP-ur,gb=(NP*PS/(1024**3)).toFixed(2);document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${rf.toLocaleString()} ref \u00b7 ${ur.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`},2000);
 }
 init();
