@@ -130,6 +130,14 @@ impl TrieNodeV2 {
     }
 }
 
+impl Encodable for TrieNodeV2 {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        let mut buf = Vec::new();
+        self.encode_rlp(&mut buf);
+        out.put_slice(&buf);
+    }
+}
+
 impl Decodable for TrieNodeV2 {
     fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
         match TrieNode::decode(buf)? {

@@ -1317,8 +1317,8 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
-        TrieMask,
+        BranchNode, BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode,
+        StorageMultiProof, TrieMask, TrieNode,
     };
 
     #[test]
@@ -1344,6 +1344,7 @@ mod tests {
                         key: Nibbles::default(),
                         stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
                         state_mask: TrieMask::new(0b11),
+                        hash: None,
                     }))
                     .into(),
                 ),
@@ -1418,6 +1419,7 @@ mod tests {
                                 key: Nibbles::default(),
                                 stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
                                 state_mask: TrieMask::new(0b11),
+                                hash: None,
                             }))
                             .into(),
                         ),
@@ -1498,6 +1500,7 @@ mod tests {
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
             ],
             state_mask: TrieMask::new(0b11),
+            hash: None,
         });
 
         // Create V2 proof nodes with masks already included
@@ -1562,6 +1565,7 @@ mod tests {
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
             ],
             state_mask: TrieMask::new(0b11),
+            hash: None,
         });
 
         let v2_proof_nodes = vec![

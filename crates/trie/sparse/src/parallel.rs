@@ -3958,8 +3958,8 @@ mod tests {
         prefix_set::PrefixSetMut,
         proof::{ProofNodes, ProofRetainer},
         updates::TrieUpdates,
-        BranchNode, BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, ExtensionNode, HashBuilder,
-        LeafNode, ProofTrieNodeV2, RlpNode, TrieMask, TrieNode, TrieNodeV2, EMPTY_ROOT_HASH,
+        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, ExtensionNode, HashBuilder, LeafNode,
+        ProofTrieNodeV2, RlpNode, TrieMask, TrieNodeV2, EMPTY_ROOT_HASH,
     };
     use reth_trie_db::DatabaseTrieCursorFactory;
     use std::collections::{BTreeMap, BTreeSet};
@@ -4237,7 +4237,7 @@ mod tests {
             stack.push(hash);
         }
 
-        TrieNodeV2::Branch(BranchNodeV2::new(Nibbles::default(), stack, state_mask))
+        TrieNodeV2::Branch(BranchNodeV2::new(Nibbles::default(), stack, state_mask, None))
     }
 
     /// Calculate the state root by feeding the provided state to the hash builder and retaining the
@@ -5578,6 +5578,7 @@ mod tests {
                             ))),
                         ],
                         TrieMask::new(0b1111111111111111),
+                        None,
                     ))
                 },
                 masks: Some(BranchNodeMasks {
@@ -5601,6 +5602,7 @@ mod tests {
                         Nibbles::default(),
                         stack,
                         TrieMask::new(0b0001000000000100),
+                        None,
                     );
                     TrieNodeV2::Branch(branch_node)
                 },
@@ -5619,7 +5621,7 @@ mod tests {
                             "56fab2b106a97eae9c7197f86d03bca292da6e0ac725b783082f7d950cc4e0fc"
                         ))),
                     );
-                    TrieNode::Extension(extension_node)
+                    TrieNodeV2::Extension(extension_node)
                 },
                 masks: None,
             },
@@ -6264,6 +6266,7 @@ mod tests {
                 RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(),
             ],
             TrieMask::new(0b11),
+            None,
         ));
 
         let provider = DefaultTrieNodeProvider;
@@ -6320,6 +6323,7 @@ mod tests {
                 RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(),
             ],
             TrieMask::new(0b11),
+            None,
         ));
 
         let provider = DefaultTrieNodeProvider;
@@ -7763,9 +7767,11 @@ mod tests {
             .map(|hex_str| RlpNode::from_raw_rlp(&hex_str[..]).unwrap())
             .collect();
 
-        let root_branch_node = BranchNode::new(
+        let root_branch_node = BranchNodeV2::new(
+            Default::default(),
             root_branch_rlp_stack,
             TrieMask::new(0b1111111111111111), // state_mask: all 16 children present
+            None,
         );
 
         let root_branch_masks = Some(BranchNodeMasks {
@@ -7774,7 +7780,7 @@ mod tests {
         });
 
         let mut trie = ParallelSparseTrie::from_root(
-            TrieNodeV2::Branch(BranchNodeV2::new(Nibbles::default(), root_branch_node)),
+            TrieNodeV2::Branch(root_branch_node),
             root_branch_masks,
             true,
         )
@@ -7805,9 +7811,11 @@ mod tests {
             .map(|hex_str| RlpNode::from_raw_rlp(&hex_str[..]).unwrap())
             .collect();
 
-        let branch_0x3_node = BranchNode::new(
+        let branch_0x3_node = BranchNodeV2::new(
+            Default::default(),
             branch_0x3_rlp_stack,
             TrieMask::new(0b1111111111111111), // state_mask: all 16 children present
+            None,
         );
 
         let branch_0x3_masks = Some(BranchNodeMasks {
@@ -7828,7 +7836,7 @@ mod tests {
         trie.reveal_nodes(&mut [
             ProofTrieNodeV2 {
                 path: Nibbles::from_nibbles([0x3]),
-                node: TrieNodeV2::Branch(BranchNodeV2::new(Nibbles::default(), branch_0x3_node)),
+                node: TrieNodeV2::Branch(branch_0x3_node),
                 masks: branch_0x3_masks,
             },
             ProofTrieNodeV2 {
@@ -8771,6 +8779,7 @@ mod tests {
                 RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
             ],
             TrieMask::new(0b11),
+            None,
         ));
 
         let mut trie = ParallelSparseTrie::from_root(
@@ -8881,6 +8890,7 @@ mod tests {
                 RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
             ],
             TrieMask::new(0b11),
+            None,
         ));
 
         let mut trie = ParallelSparseTrie::from_root(
@@ -8964,6 +8974,7 @@ mod tests {
                 RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), /* leaf at nibble 1 */
             ],
             TrieMask::new(0b11),
+            None,
         ));
 
         let mut trie = ParallelSparseTrie::from_root(
@@ -9162,6 +9173,7 @@ mod tests {
                 RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
             ],
             TrieMask::new(0b11),
+            None,
         ));
 
         let mut trie = ParallelSparseTrie::from_root(
@@ -9232,6 +9244,7 @@ mod tests {
                 RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
             ],
             TrieMask::new(0b11),
+            None,
         ));
 
         let mut trie = ParallelSparseTrie::from_root(
