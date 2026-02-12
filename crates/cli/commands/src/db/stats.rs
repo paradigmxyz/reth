@@ -25,7 +25,7 @@ pub struct Command {
     #[arg(long, default_value_t = false)]
     pub(crate) skip_consistency_checks: bool,
 
-    /// Show only the total size for static files.
+    /// Show detailed size breakdown (data, index, offsets, config) for static files.
     #[arg(long, default_value_t = false)]
     detailed_sizes: bool,
 
