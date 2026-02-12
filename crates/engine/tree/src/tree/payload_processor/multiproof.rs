@@ -115,8 +115,11 @@ pub enum MultiProofMessage {
         /// The state update that was used to calculate the proof
         state: HashedPostState,
     },
-    /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
-    HashedStateUpdate(HashedPostState),
+    /// Pre-hashed state update that can be applied directly without proofs.
+    ///
+    /// Used when the caller has already converted `EvmState` to `HashedPostState` (e.g., in the
+    /// state hook to avoid cloning the full `EvmState`), or from BAL conversion.
+    HashedStateUpdate(Source, HashedPostState),
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
     ///
     /// When received, the task generates a single state update from the BAL and processes it.
@@ -218,6 +221,41 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
                 .into_iter()
                 .filter(|(_slot, value)| value.is_changed())
                 .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                .peekable();
+
+            if destroyed {
+                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
+            } else if changed_storage_iter.peek().is_some() {
+                hashed_state
+                    .storages
+                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+            }
+        }
+    }
+
+    hashed_state
+}
+
+/// Converts an `&EvmState` to [`HashedPostState`] without cloning the entire state.
+///
+/// Only processes touched accounts and changed storage slots, avoiding the cost of
+/// deep-cloning the full `EvmState` (which includes unchanged storage, `original_info`, etc.).
+pub(crate) fn evm_state_to_hashed_post_state_ref(update: &EvmState) -> HashedPostState {
+    let mut hashed_state = HashedPostState::with_capacity(update.len());
+
+    for (address, account) in update {
+        if account.is_touched() {
+            let hashed_address = keccak256(address);
+
+            let destroyed = account.is_selfdestructed();
+            let info = if destroyed { None } else { Some(account.info.clone().into()) };
+            hashed_state.accounts.insert(hashed_address, info);
+
+            let mut changed_storage_iter = account
+                .storage
+                .iter()
+                .filter(|(_slot, value)| value.is_changed())
+                .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value))
                 .peekable();
 
             if destroyed {
@@ -889,6 +927,13 @@ impl MultiProofTask {
             state_updates += 1;
         }
 
+        // Fast path: if all targets were already fetched, skip the expensive
+        // MultiAddedRemovedKeys clone, Arc allocation, dispatch_with_chunking,
+        // get_proof_targets on empty state, and fetched_proof_targets.extend on empty targets.
+        if not_fetched_state_update.is_empty() {
+            return state_updates;
+        }
+
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
         let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
             account: self.multi_added_removed_keys.account.clone(),
@@ -1191,9 +1236,17 @@ impl MultiProofTask {
                 }
                 false
             }
-            MultiProofMessage::HashedStateUpdate(hashed_state) => {
+            MultiProofMessage::HashedStateUpdate(source, hashed_state) => {
+                if ctx.first_update_time.is_none() {
+                    self.metrics
+                        .first_update_wait_time_histogram
+                        .record(ctx.start.elapsed().as_secs_f64());
+                    ctx.first_update_time = Some(Instant::now());
+                    debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation from pre-hashed state");
+                }
+
                 batch_metrics.state_update_proofs_requested +=
-                    self.on_hashed_state_update(Source::BlockAccessList, hashed_state);
+                    self.on_hashed_state_update(source, hashed_state);
                 false
             }
         }

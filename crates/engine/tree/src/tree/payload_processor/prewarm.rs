@@ -383,7 +383,10 @@ where
                     storages = hashed_state.storages.len(),
                     "Converted BAL to hashed post state"
                 );
-                let _ = to_multi_proof.send(MultiProofMessage::HashedStateUpdate(hashed_state));
+                let _ = to_multi_proof.send(MultiProofMessage::HashedStateUpdate(
+                    super::multiproof::Source::BlockAccessList,
+                    hashed_state,
+                ));
                 let _ = to_multi_proof.send(MultiProofMessage::FinishedStateUpdates);
             }
             Err(err) => {

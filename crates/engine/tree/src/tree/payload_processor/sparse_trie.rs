@@ -343,7 +343,7 @@ where
                 MultiProofMessage::EmptyProof { .. } | MultiProofMessage::BlockAccessList(_) => {
                     continue
                 }
-                MultiProofMessage::HashedStateUpdate(state) => {
+                MultiProofMessage::HashedStateUpdate(_source, state) => {
                     SparseTrieTaskMessage::HashedState(state)
                 }
             };
@@ -1066,7 +1066,12 @@ mod tests {
             );
         });
 
-        updates_tx.send(MultiProofMessage::HashedStateUpdate(hashed_state)).unwrap();
+        updates_tx
+            .send(MultiProofMessage::HashedStateUpdate(
+                crate::tree::multiproof::Source::BlockAccessList,
+                hashed_state,
+            ))
+            .unwrap();
         updates_tx.send(MultiProofMessage::FinishedStateUpdates).unwrap();
         drop(updates_tx);
 

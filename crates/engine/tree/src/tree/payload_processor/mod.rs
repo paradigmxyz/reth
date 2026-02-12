@@ -727,13 +727,19 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Returns a state hook to be used to send state updates to this task.
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
+    ///
+    /// Pre-hashes the `EvmState` by reference to produce a `HashedPostState`, avoiding the cost
+    /// of deep-cloning the entire `EvmState` (which includes unchanged storage slots,
+    /// `original_info`, etc.). The `HashedPostState` is typically much smaller since it only
+    /// contains touched accounts and changed storage.
     pub fn state_hook(&self) -> impl OnStateHook {
         // convert the channel into a `StateHookSender` that emits an event on drop
         let to_multi_proof = self.to_multi_proof.clone().map(StateHookSender::new);
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
+                let hashed = multiproof::evm_state_to_hashed_post_state_ref(state);
+                let _ = sender.send(MultiProofMessage::HashedStateUpdate(source.into(), hashed));
             }
         }
     }
