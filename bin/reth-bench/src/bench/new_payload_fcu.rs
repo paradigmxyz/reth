@@ -248,7 +248,14 @@ impl Command {
             call_forkchoice_updated(&auth_provider, version, forkchoice_state, None).await?;
             let fcu_latency = fcu_start.elapsed();
 
-            let total_latency = start.elapsed();
+            let total_latency = if server_latency.is_some() {
+                // When using server-side latency for newPayload, derive total from the
+                // independently measured components to avoid mixing server-side and
+                // client-side (network-inclusive) timings.
+                np_latency + fcu_latency
+            } else {
+                start.elapsed()
+            };
             let combined_result = CombinedResult {
                 block_number,
                 gas_limit,

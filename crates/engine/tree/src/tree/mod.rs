@@ -19,7 +19,7 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
-    ForkchoiceStateTracker, OnForkChoiceUpdated,
+    ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
@@ -1544,15 +1544,40 @@ where
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
-                            BeaconEngineMessage::NewPayloadWaitForCaches { payload, tx } => {
-                                // Wait for execution cache and sparse trie locks before processing
-                                debug!(target: "engine::tree", "Waiting for caches before processing reth_newPayload");
-                                let cache_wait = self.payload_validator.wait_for_caches();
+                            BeaconEngineMessage::RethNewPayload { payload, tx } => {
+                                let pending_persistence = self.persistence_state.rx.take();
+                                let validator = &self.payload_validator;
+
+                                debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
+                                let (persistence_result, persistence_wait, cache_wait) =
+                                    std::thread::scope(|s| {
+                                        let persistence_handle = s.spawn(|| {
+                                            let start = Instant::now();
+                                            let result = pending_persistence.map(|(rx, start_time, _action)| {
+                                                (rx.recv().ok(), start_time)
+                                            });
+                                            (result, start.elapsed())
+                                        });
+
+                                        let cache_handle = s.spawn(|| {
+                                            validator.wait_for_caches()
+                                        });
+
+                                        let (persistence_result, persistence_wait) = persistence_handle.join().expect("persistence wait thread panicked");
+                                        let cache_wait = cache_handle.join().expect("cache wait thread panicked");
+                                        (persistence_result, persistence_wait, cache_wait)
+                                    });
+
+                                if let Some((Some(result), start_time)) = persistence_result {
+                                    let _ = self.on_persistence_complete(result, start_time);
+                                }
+
                                 debug!(
                                     target: "engine::tree",
+                                    persistence_wait = ?persistence_wait,
                                     execution_cache_wait = ?cache_wait.execution_cache,
                                     sparse_trie_wait = ?cache_wait.sparse_trie,
-                                    "Cache locks acquired for reth_newPayload"
+                                    "Locks acquired for reth_newPayload"
                                 );
 
                                 let start = Instant::now();
@@ -1570,9 +1595,14 @@ where
                                 let maybe_event =
                                     output.as_mut().ok().and_then(|out| out.event.take());
 
-                                // emit response with execution latency
+                                let timings = NewPayloadTimings {
+                                    latency,
+                                    persistence_wait,
+                                    execution_cache_wait: cache_wait.execution_cache,
+                                    sparse_trie_wait: cache_wait.sparse_trie,
+                                };
                                 if let Err(err) =
-                                    tx.send(output.map(|o| (o.outcome, latency)).map_err(|e| {
+                                    tx.send(output.map(|o| (o.outcome, timings)).map_err(|e| {
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {
@@ -1583,7 +1613,6 @@ where
                                         .increment(1);
                                 }
 
-                                // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
                         }

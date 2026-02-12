@@ -10,7 +10,6 @@ use alloy_rpc_types_engine::{
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 /// Reth-specific payload status that includes server-measured execution latency.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,13 +19,12 @@ pub struct RethPayloadStatus {
     pub status: PayloadStatus,
     /// Server-side execution latency in microseconds.
     pub latency_us: u64,
-}
-
-impl RethPayloadStatus {
-    /// Creates a new [`RethPayloadStatus`] from a [`PayloadStatus`] and execution [`Duration`].
-    pub const fn new(status: PayloadStatus, latency: Duration) -> Self {
-        Self { status, latency_us: latency.as_micros() as u64 }
-    }
+    /// Time spent waiting for persistence to complete, in microseconds.
+    pub persistence_wait_us: u64,
+    /// Time spent waiting for the execution cache lock, in microseconds.
+    pub execution_cache_wait_us: u64,
+    /// Time spent waiting for the sparse trie lock, in microseconds.
+    pub sparse_trie_wait_us: u64,
 }
 
 /// Reth-specific engine API extensions.

@@ -143,6 +143,19 @@ impl Future for PendingPayloadId {
     }
 }
 
+/// Timing breakdown for `reth_newPayload*` responses.
+#[derive(Debug, Clone, Copy)]
+pub struct NewPayloadTimings {
+    /// Server-side execution latency.
+    pub latency: Duration,
+    /// Time spent waiting for persistence to complete.
+    pub persistence_wait: Duration,
+    /// Time spent waiting for the execution cache lock.
+    pub execution_cache_wait: Duration,
+    /// Time spent waiting for the sparse trie lock.
+    pub sparse_trie_wait: Duration,
+}
+
 /// A message for the beacon engine from other components of the node (engine RPC API invoked by the
 /// consensus layer).
 #[derive(Debug)]
@@ -154,19 +167,17 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
-    /// Message with new payload that waits for execution cache and sparse trie locks.
+    /// Message with new payload used by `reth_newPayload*` endpoints.
     ///
-    /// This variant is used by `reth_newPayload*` endpoints to ensure that the payload
-    /// processing waits for execution cache and preserved sparse trie locks to become
-    /// available before starting execution.
-    ///
-    /// Returns `(PayloadStatus, Duration)` where the duration is the server-side
-    /// execution latency measured inside the engine tree handler.
-    NewPayloadWaitForCaches {
+    /// Waits for persistence, execution cache, and sparse trie locks before processing,
+    /// and returns detailed timing breakdown alongside the payload status.
+    RethNewPayload {
         /// The execution payload received by Engine API.
         payload: Payload::ExecutionData,
-        /// The sender for returning payload status result and execution latency.
-        tx: oneshot::Sender<Result<(PayloadStatus, Duration), BeaconOnNewPayloadError>>,
+        /// The sender for returning payload status result and timing breakdown.
+        tx: oneshot::Sender<
+            Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError>,
+        >,
     },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {
@@ -193,10 +204,10 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                     payload.block_hash()
                 )
             }
-            Self::NewPayloadWaitForCaches { payload, .. } => {
+            Self::RethNewPayload { payload, .. } => {
                 write!(
                     f,
-                    "NewPayloadWaitForCaches(parent: {}, number: {}, hash: {})",
+                    "RethNewPayload(parent: {}, number: {}, hash: {})",
                     payload.parent_hash(),
                     payload.block_number(),
                     payload.block_hash()
@@ -247,19 +258,16 @@ where
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
-    /// Sends a new payload message to the beacon consensus engine that waits for execution cache
-    /// and preserved sparse trie locks to become available before processing.
+    /// Sends a new payload message used by `reth_newPayload*` endpoints.
     ///
-    /// This is used by the `reth_newPayload*` endpoints to ensure sequential processing with
-    /// proper cache synchronization.
-    ///
-    /// Returns the payload status and the server-side execution latency.
-    pub async fn new_payload_wait_for_caches(
+    /// Waits for persistence, execution cache, and sparse trie locks before processing,
+    /// and returns detailed timing breakdown alongside the payload status.
+    pub async fn reth_new_payload(
         &self,
         payload: Payload::ExecutionData,
-    ) -> Result<(PayloadStatus, Duration), BeaconOnNewPayloadError> {
+    ) -> Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayloadWaitForCaches { payload, tx });
+        let _ = self.to_engine.send(BeaconEngineMessage::RethNewPayload { payload, tx });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
