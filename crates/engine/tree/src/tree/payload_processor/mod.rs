@@ -251,8 +251,9 @@ where
         // Extract V2 proofs flag early so we can pass it to prewarm
         let v2_proofs_enabled = !config.disable_proof_v2();
 
-        // Capture parent_state_root before env is moved into spawn_caching_with
+        // Capture fields before env is moved into spawn_caching_with
         let parent_state_root = env.parent_state_root;
+        let transaction_count = env.transaction_count;
 
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
@@ -281,9 +282,21 @@ where
             )
         };
 
-        // Create and spawn the storage proof task
+        // Create and spawn the storage proof task.
+        // For small blocks (≤30 txns), cap proof workers at 32 each — fewer transactions
+        // produce fewer state changes, making most workers idle overhead.
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, v2_proofs_enabled);
+        let proof_handle = if transaction_count > 0 && transaction_count <= 30 {
+            debug!(
+                target: "engine::tree::payload_processor",
+                transaction_count,
+                max_workers = 32,
+                "reducing proof workers for small block"
+            );
+            ProofWorkerHandle::with_max_workers(&self.executor, task_ctx, v2_proofs_enabled, 32)
+        } else {
+            ProofWorkerHandle::new(&self.executor, task_ctx, v2_proofs_enabled)
+        };
 
         if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(

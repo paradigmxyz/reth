@@ -126,19 +126,47 @@ pub struct ProofWorkerHandle {
 }
 
 impl ProofWorkerHandle {
+    /// Spawns storage and account worker pools, capping each at `max_workers` threads.
+    ///
+    /// Useful for small blocks where fewer state changes make the full pool unnecessary.
+    pub fn with_max_workers<Factory>(
+        runtime: &Runtime,
+        task_ctx: ProofTaskCtx<Factory>,
+        v2_proofs_enabled: bool,
+        max_workers: usize,
+    ) -> Self
+    where
+        Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + 'static,
+    {
+        Self::new_inner(runtime, task_ctx, v2_proofs_enabled, Some(max_workers))
+    }
+
     /// Spawns storage and account worker pools with dedicated database transactions.
     ///
     /// Returns a handle for submitting proof tasks to the worker pools.
     /// Workers run until the last handle is dropped.
-    ///
-    /// # Parameters
-    /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
-    /// - `task_ctx`: Shared context with database view and prefix sets
-    /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
     pub fn new<Factory>(
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         v2_proofs_enabled: bool,
+    ) -> Self
+    where
+        Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + 'static,
+    {
+        Self::new_inner(runtime, task_ctx, v2_proofs_enabled, None)
+    }
+
+    fn new_inner<Factory>(
+        runtime: &Runtime,
+        task_ctx: ProofTaskCtx<Factory>,
+        v2_proofs_enabled: bool,
+        max_workers: Option<usize>,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -154,8 +182,16 @@ impl ProofWorkerHandle {
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
-        let storage_worker_count = runtime.proof_storage_worker_pool().current_num_threads();
-        let account_worker_count = runtime.proof_account_worker_pool().current_num_threads();
+        let storage_worker_count = if let Some(max) = max_workers {
+            runtime.proof_storage_worker_pool().current_num_threads().min(max)
+        } else {
+            runtime.proof_storage_worker_pool().current_num_threads()
+        };
+        let account_worker_count = if let Some(max) = max_workers {
+            runtime.proof_account_worker_pool().current_num_threads().min(max)
+        } else {
+            runtime.proof_account_worker_pool().current_num_threads()
+        };
 
         debug!(
             target: "trie::proof_task",
