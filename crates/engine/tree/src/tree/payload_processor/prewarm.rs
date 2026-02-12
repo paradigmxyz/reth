@@ -15,7 +15,7 @@ use crate::tree::{
     cached_state::{CachedStateProvider, SavedCache},
     payload_processor::{
         bal::{self, total_slots, BALSlotIter},
-        multiproof::{MultiProofMessage, VersionedMultiProofTargets},
+        multiproof::{MultiProofMessage, Source, VersionedMultiProofTargets},
         PayloadExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
@@ -383,7 +383,10 @@ where
                     storages = hashed_state.storages.len(),
                     "Converted BAL to hashed post state"
                 );
-                let _ = to_multi_proof.send(MultiProofMessage::HashedStateUpdate(hashed_state));
+                let _ = to_multi_proof.send(MultiProofMessage::HashedStateUpdate(
+                    Source::BlockAccessList,
+                    hashed_state,
+                ));
                 let _ = to_multi_proof.send(MultiProofMessage::FinishedStateUpdates);
             }
             Err(err) => {

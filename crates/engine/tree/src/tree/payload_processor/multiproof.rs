@@ -115,8 +115,11 @@ pub enum MultiProofMessage {
         /// The state update that was used to calculate the proof
         state: HashedPostState,
     },
-    /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
-    HashedStateUpdate(HashedPostState),
+    /// Pre-hashed state update that can be applied directly without needing to clone and hash
+    /// the full [`EvmState`].
+    ///
+    /// Used by the state hook (which hashes by reference inline) and by BAL conversion.
+    HashedStateUpdate(Source, HashedPostState),
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
     ///
     /// When received, the task generates a single state update from the BAL and processes it.
@@ -218,6 +221,42 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
                 .into_iter()
                 .filter(|(_slot, value)| value.is_changed())
                 .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                .peekable();
+
+            if destroyed {
+                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
+            } else if changed_storage_iter.peek().is_some() {
+                hashed_state
+                    .storages
+                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+            }
+        }
+    }
+
+    hashed_state
+}
+
+/// Converts an [`EvmState`] reference to [`HashedPostState`] without cloning.
+///
+/// Only copies the minimal data needed (nonce, balance, code_hash are `Copy`;
+/// changed storage values are `Copy`). Skips bytecode (`Arc<Bytecode>`),
+/// `original_info` (`Box<AccountInfo>`), and unchanged storage slots entirely.
+pub(crate) fn evm_state_to_hashed_post_state_ref(update: &EvmState) -> HashedPostState {
+    let mut hashed_state = HashedPostState::with_capacity(update.len());
+
+    for (address, account) in update {
+        if account.is_touched() {
+            let hashed_address = keccak256(address);
+
+            let destroyed = account.is_selfdestructed();
+            let info = if destroyed { None } else { Some((&account.info).into()) };
+            hashed_state.accounts.insert(hashed_address, info);
+
+            let mut changed_storage_iter = account
+                .storage
+                .iter()
+                .filter(|(_slot, value)| value.is_changed())
+                .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value))
                 .peekable();
 
             if destroyed {
@@ -1191,9 +1230,28 @@ impl MultiProofTask {
                 }
                 false
             }
-            MultiProofMessage::HashedStateUpdate(hashed_state) => {
+            MultiProofMessage::HashedStateUpdate(source, hashed_state) => {
+                trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::HashedStateUpdate");
+
+                if ctx.first_update_time.is_none() {
+                    self.metrics
+                        .first_update_wait_time_histogram
+                        .record(ctx.start.elapsed().as_secs_f64());
+                    ctx.first_update_time = Some(Instant::now());
+                    debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
+                }
+
+                let update_len = hashed_state.accounts.len();
                 batch_metrics.state_update_proofs_requested +=
-                    self.on_hashed_state_update(Source::BlockAccessList, hashed_state);
+                    self.on_hashed_state_update(source, hashed_state);
+                trace!(
+                    target: "engine::tree::payload_processor::multiproof",
+                    ?source,
+                    len = update_len,
+                    state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
+                    "Dispatched hashed state update"
+                );
+
                 false
             }
         }
@@ -2315,5 +2373,84 @@ mod tests {
 
         // Should need to wait for the results of those proofs to arrive
         assert!(!should_finish, "Should continue waiting for proofs");
+    }
+
+    /// Verifies that [`evm_state_to_hashed_post_state_ref`] produces identical output
+    /// to [`evm_state_to_hashed_post_state`] for touched, untouched, and selfdestructed accounts.
+    #[test]
+    fn test_hashed_post_state_ref_matches_owned() {
+        use revm_state::{Account, AccountStatus, EvmStorageSlot};
+
+        let mut state = EvmState::default();
+        let default_info = revm_state::AccountInfo::default();
+
+        // 1. Touched account with changed and unchanged storage
+        let addr1 = alloy_primitives::Address::random();
+        let info1 = revm_state::AccountInfo {
+            balance: U256::from(42),
+            nonce: 7,
+            code_hash: B256::random(),
+            code: None,
+            account_id: None,
+        };
+        let mut account1 = Account {
+            info: info1.clone(),
+            original_info: Box::new(info1),
+            storage: Default::default(),
+            status: AccountStatus::Touched,
+            transaction_id: 0,
+        };
+        // Changed slot
+        account1
+            .storage
+            .insert(U256::from(1), EvmStorageSlot::new_changed(U256::from(10), U256::from(20), 0));
+        // Unchanged slot
+        account1.storage.insert(U256::from(2), EvmStorageSlot::new(U256::from(30), 0));
+        state.insert(addr1, account1);
+
+        // 2. Untouched account (should be skipped)
+        let addr2 = alloy_primitives::Address::random();
+        state.insert(
+            addr2,
+            Account {
+                info: revm_state::AccountInfo {
+                    balance: U256::from(999),
+                    nonce: 0,
+                    code_hash: Default::default(),
+                    code: None,
+                    account_id: None,
+                },
+                original_info: Box::new(default_info.clone()),
+                storage: Default::default(),
+                status: AccountStatus::default(),
+                transaction_id: 0,
+            },
+        );
+
+        // 3. Self-destructed account
+        let addr3 = alloy_primitives::Address::random();
+        state.insert(
+            addr3,
+            Account {
+                info: Default::default(),
+                original_info: Box::new(default_info),
+                storage: Default::default(),
+                status: AccountStatus::SelfDestructed | AccountStatus::Touched,
+                transaction_id: 0,
+            },
+        );
+
+        // by-ref result
+        let ref_result = evm_state_to_hashed_post_state_ref(&state);
+        // by-value result (consumes a clone)
+        let owned_result = evm_state_to_hashed_post_state(state);
+
+        assert_eq!(ref_result.accounts, owned_result.accounts);
+        assert_eq!(ref_result.storages.len(), owned_result.storages.len());
+        for (key, ref_storage) in &ref_result.storages {
+            let owned_storage = owned_result.storages.get(key).expect("missing storage key");
+            assert_eq!(ref_storage.wiped, owned_storage.wiped);
+            assert_eq!(ref_storage.storage, owned_storage.storage);
+        }
     }
 }
