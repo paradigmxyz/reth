@@ -19,7 +19,7 @@ use metrics::{Counter, Histogram};
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use rayon::prelude::*;
+use rayon::{iter::plumbing::ProducerCallback, prelude::*};
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
@@ -234,8 +234,11 @@ where
             + Send
             + 'static,
     {
+        // Capture transaction_count before env is moved
+        let transaction_count = env.transaction_count;
+
         // start preparing transactions immediately
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions, transaction_count);
 
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
@@ -342,7 +345,8 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
+        let transaction_count = env.transaction_count;
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions, transaction_count);
         // This path doesn't use multiproof, so V2 proofs flag doesn't matter
         let prewarm_handle =
             self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal, false);
@@ -355,9 +359,70 @@ where
         }
     }
 
+    /// Maximum transaction count for which we skip rayon parallelism and process sequentially.
+    /// Below this threshold, the fixed overhead of rayon scheduling (~10-15µs) plus `BTreeMap`
+    /// reordering (~5-10µs) exceeds the benefit of parallel signature recovery.
+    const SEQUENTIAL_TX_ITER_THRESHOLD: usize = 64;
+
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
+    ///
+    /// For small blocks (≤64 known transactions), uses a sequential fast path that avoids
+    /// rayon scheduling overhead and `BTreeMap` reordering. For larger or unknown-size blocks,
+    /// uses rayon parallel iteration with out-of-order reordering.
     #[expect(clippy::type_complexity)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
+        &self,
+        transactions: I,
+        transaction_count: usize,
+    ) -> (
+        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
+        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
+    ) {
+        if transaction_count > 0 && transaction_count <= Self::SEQUENTIAL_TX_ITER_THRESHOLD {
+            self.spawn_tx_iterator_sequential(transactions)
+        } else {
+            self.spawn_tx_iterator_parallel(transactions)
+        }
+    }
+
+    /// Sequential tx iterator for small blocks: iterates in-order without rayon or `BTreeMap`.
+    ///
+    /// Uses [`rayon::iter::plumbing::Producer`] to extract a sequential iterator from the
+    /// `IndexedParallelIterator`, avoiding rayon thread pool scheduling while remaining
+    /// compatible with the `ExecutableTxTuple` trait (which only guarantees
+    /// `IntoParallelIterator`, not `IntoIterator`).
+    #[expect(clippy::type_complexity)]
+    fn spawn_tx_iterator_sequential<I: ExecutableTxIterator<Evm>>(
+        &self,
+        transactions: I,
+    ) -> (
+        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
+        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
+    ) {
+        let (prewarm_tx, prewarm_rx) = mpsc::channel();
+        let (execute_tx, execute_rx) = mpsc::channel();
+
+        self.executor.spawn_blocking(move || {
+            let (transactions, convert) = transactions.into_parts();
+            let par_iter = transactions.into_par_iter();
+
+            par_iter.with_producer(SequentialConvertCallback {
+                convert_fn: |raw| {
+                    let tx = convert.convert(raw)?;
+                    let (tx_env, tx) = tx.into_parts();
+                    Ok(WithTxEnv { tx_env, tx: Arc::new(tx) })
+                },
+                prewarm_tx,
+                execute_tx,
+            });
+        });
+
+        (prewarm_rx, execute_rx)
+    }
+
+    /// Parallel tx iterator for large blocks: uses rayon + `BTreeMap` reordering.
+    #[expect(clippy::type_complexity)]
+    fn spawn_tx_iterator_parallel<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
     ) -> (
@@ -993,6 +1058,40 @@ where
             parent_state_root: Default::default(),
             transaction_count: 0,
             withdrawals: None,
+        }
+    }
+}
+
+/// Callback that extracts a sequential [`Producer`](rayon::iter::plumbing::Producer) from an
+/// [`IndexedParallelIterator`] and iterates it in-order, converting each raw transaction and
+/// sending results to the prewarm and execution channels.
+///
+/// This avoids rayon thread pool scheduling and `BTreeMap` reordering for small blocks where
+/// sequential processing is faster than the parallel machinery overhead.
+struct SequentialConvertCallback<F, OutTx, Err> {
+    convert_fn: F,
+    prewarm_tx: mpsc::Sender<OutTx>,
+    execute_tx: mpsc::Sender<Result<OutTx, Err>>,
+}
+
+impl<RawTx, F, OutTx, Err> ProducerCallback<RawTx> for SequentialConvertCallback<F, OutTx, Err>
+where
+    RawTx: Send,
+    F: FnMut(RawTx) -> Result<OutTx, Err>,
+    OutTx: Clone + Send,
+    Err: Send,
+{
+    type Output = ();
+    fn callback<P>(mut self, producer: P) -> Self::Output
+    where
+        P: rayon::iter::plumbing::Producer<Item = RawTx>,
+    {
+        for raw in producer.into_iter() {
+            let tx = (self.convert_fn)(raw);
+            if let Ok(tx) = &tx {
+                let _ = self.prewarm_tx.send(tx.clone());
+            }
+            let _ = self.execute_tx.send(tx);
         }
     }
 }
