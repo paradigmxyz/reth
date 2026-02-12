@@ -51,6 +51,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+// Used in feature flags only (`asm-keccak`, `keccak-cache-global`)
+use alloy_primitives as _;
+
 pub mod cli;
 
 /// Re-exported utils.

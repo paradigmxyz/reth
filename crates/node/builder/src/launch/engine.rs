@@ -303,8 +303,6 @@ impl EngineNodeLauncher {
             // the CL
             loop {
                 tokio::select! {
-                    biased;
-
                     event = engine_service.next() => {
                         let Some(event) = event else { break };
                         debug!(target: "reth::cli", "Event: {event}");

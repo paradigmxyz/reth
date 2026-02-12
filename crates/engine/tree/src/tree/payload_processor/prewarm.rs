@@ -535,11 +535,8 @@ where
         if let Some(saved_cache) = saved_cache {
             let caches = saved_cache.cache().clone();
             let cache_metrics = saved_cache.metrics().clone();
-            state_provider = Box::new(
-                CachedStateProvider::new(state_provider, caches, cache_metrics)
-                    // ensure we pre-warm the cache
-                    .prewarm(),
-            );
+            state_provider =
+                Box::new(CachedStateProvider::new_prewarm(state_provider, caches, cache_metrics));
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);

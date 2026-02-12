@@ -52,6 +52,7 @@ impl Command {
             ..
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
+        let total_blocks = benchmark_mode.total_blocks();
         let buffer_size = self.rpc_block_buffer_size;
 
         // Use a oneshot channel to propagate errors from the spawned task
@@ -82,8 +83,8 @@ impl Command {
             }
         });
 
-        // put results in a summary vec so they can be printed at the end
         let mut results = Vec::new();
+        let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
@@ -105,7 +106,12 @@ impl Command {
             call_new_payload(&auth_provider, version, params).await?;
 
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
-            info!(target: "reth-bench", %new_payload_result);
+            blocks_processed += 1;
+            let progress = match total_blocks {
+                Some(total) => format!("{blocks_processed}/{total}"),
+                None => format!("{blocks_processed}"),
+            };
+            info!(target: "reth-bench", progress, %new_payload_result);
 
             // current duration since the start of the benchmark minus the time
             // waiting for blocks

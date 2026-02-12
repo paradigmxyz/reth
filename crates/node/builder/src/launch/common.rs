@@ -232,7 +232,7 @@ impl LaunchContext {
             .map_or(0, |num| num.get().saturating_sub(reserved_cpu_cores).max(1));
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
-            .thread_name(|i| format!("rayon-{i}"))
+            .thread_name(|i| format!("rayon-{i:02}"))
             .build_global()
         {
             warn!(%err, "Failed to build global thread pool")

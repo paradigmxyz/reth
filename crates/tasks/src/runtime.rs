@@ -830,12 +830,12 @@ impl RuntimeBuilder {
 
             let cpu_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(default_threads)
-                .thread_name(|i| format!("cpu-{i}"))
+                .thread_name(|i| format!("cpu-{i:02}"))
                 .build()?;
 
             let rpc_raw = rayon::ThreadPoolBuilder::new()
                 .num_threads(rpc_threads)
-                .thread_name(|i| format!("rpc-{i}"))
+                .thread_name(|i| format!("rpc-{i:02}"))
                 .build()?;
             let rpc_pool = BlockingTaskPool::new(rpc_raw);
 
@@ -843,7 +843,7 @@ impl RuntimeBuilder {
                 config.rayon.storage_threads.unwrap_or(DEFAULT_STORAGE_POOL_THREADS);
             let storage_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(storage_threads)
-                .thread_name(|i| format!("storage-{i}"))
+                .thread_name(|i| format!("storage-{i:02}"))
                 .build()?;
 
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
@@ -852,14 +852,14 @@ impl RuntimeBuilder {
                 config.rayon.proof_storage_worker_threads.unwrap_or(default_threads);
             let proof_storage_worker_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(proof_storage_worker_threads)
-                .thread_name(|i| format!("proof-strg-{i}"))
+                .thread_name(|i| format!("proof-strg-{i:02}"))
                 .build()?;
 
             let proof_account_worker_threads =
                 config.rayon.proof_account_worker_threads.unwrap_or(default_threads);
             let proof_account_worker_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(proof_account_worker_threads)
-                .thread_name(|i| format!("proof-acct-{i}"))
+                .thread_name(|i| format!("proof-acct-{i:02}"))
                 .build()?;
 
             debug!(
