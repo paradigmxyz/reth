@@ -10,7 +10,7 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::ParallelIterator;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{Account, ParallelBridgeBuffered};
 use reth_tasks::Runtime;
 use reth_trie::{
@@ -210,6 +210,12 @@ where
 
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
+
+/// Below this threshold of storage tries, leaf updates and root computations are processed
+/// sequentially instead of using rayon parallelism. For small blocks (< 20M gas) with
+/// typically 1-5 unique storage tries, rayon's work-stealing coordination overhead exceeds
+/// the benefit of parallel processing.
+const STORAGE_TRIE_PAR_THRESHOLD: usize = 8;
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparseTrie> {
@@ -614,6 +620,39 @@ where
         Ok(())
     }
 
+    /// Processes leaf updates for a single storage trie, collecting new proof targets.
+    #[expect(clippy::type_complexity)]
+    fn process_storage_trie<'a>(
+        parent_span: &tracing::Span,
+        address: &'a B256,
+        updates: &'a mut B256Map<LeafUpdate>,
+        mut fetched: B256Map<u8>,
+        mut trie: reth_trie_sparse::RevealableSparseTrie<S>,
+    ) -> SparseTrieResult<(
+        &'a B256,
+        Vec<Target>,
+        B256Map<u8>,
+        reth_trie_sparse::RevealableSparseTrie<S>,
+    )> {
+        let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: parent_span, "storage trie leaf updates", ?address).entered();
+        let mut targets = Vec::new();
+
+        trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+            Entry::Occupied(mut entry) => {
+                if min_len < *entry.get() {
+                    entry.insert(min_len);
+                    targets.push(Target::new(path).with_min_len(min_len));
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(min_len);
+                targets.push(Target::new(path).with_min_len(min_len));
+            }
+        })?;
+
+        Ok((address, targets, fetched, trie))
+    }
+
     /// Applies all account and storage leaf updates to corresponding tries and collects any new
     /// multiproof targets.
     #[instrument(
@@ -625,9 +664,9 @@ where
         let storage_updates =
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
-        // Process all storage updates in parallel, skipping tries with no pending updates.
+        // Collect storage tries with pending updates.
         let span = tracing::Span::current();
-        let storage_results = storage_updates
+        let tasks: Vec<_> = storage_updates
             .iter_mut()
             .filter(|(_, updates)| !updates.is_empty())
             .map(|(address, updates)| {
@@ -636,27 +675,24 @@ where
 
                 (address, updates, fetched, trie)
             })
-            .par_bridge_buffered()
-            .map(|(address, updates, mut fetched, mut trie)| {
-                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie leaf updates", ?address).entered();
-                let mut targets = Vec::new();
+            .collect();
 
-                trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                    Entry::Occupied(mut entry) => {
-                        if min_len < *entry.get() {
-                            entry.insert(min_len);
-                            targets.push(Target::new(path).with_min_len(min_len));
-                        }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(min_len);
-                        targets.push(Target::new(path).with_min_len(min_len));
-                    }
-                })?;
-
-                SparseTrieResult::Ok((address, targets, fetched, trie))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        // Use sequential processing for small batches to avoid rayon overhead.
+        let storage_results = if tasks.len() <= STORAGE_TRIE_PAR_THRESHOLD {
+            tasks
+                .into_iter()
+                .map(|(address, updates, fetched, trie)| {
+                    Self::process_storage_trie(&span, address, updates, fetched, trie)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            tasks
+                .into_par_iter()
+                .map(|(address, updates, fetched, trie)| {
+                    Self::process_storage_trie(&span, address, updates, fetched, trie)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
 
         drop(span);
 
@@ -727,7 +763,7 @@ where
         }
 
         let span = debug_span!("compute_storage_roots").entered();
-        self
+        let tries: Vec<_> = self
             .trie
             .storage_tries_mut()
             .iter_mut()
@@ -735,11 +771,20 @@ where
                 self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty()) &&
                     !trie.is_root_cached()
             })
-            .par_bridge_buffered()
-            .for_each(|(address, trie)| {
+            .collect();
+
+        // Use sequential processing for small batches to avoid rayon overhead.
+        if tries.len() <= STORAGE_TRIE_PAR_THRESHOLD {
+            for (address, trie) in tries {
+                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage root", ?address).entered();
+                trie.root().expect("updates are drained, trie should be revealed by now");
+            }
+        } else {
+            tries.into_par_iter().for_each(|(address, trie)| {
                 let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage root", ?address).entered();
                 trie.root().expect("updates are drained, trie should be revealed by now");
             });
+        }
         drop(span);
 
         loop {
