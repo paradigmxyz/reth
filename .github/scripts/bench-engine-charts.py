@@ -62,8 +62,8 @@ def plot_latency_and_throughput(feature: list[dict], baseline: list[dict] | None
         for r in baseline:
             lat_s = r["new_payload_latency_us"] / 1_000_000
             base_ggas.append(r["gas_used"] / lat_s / GIGAGAS if lat_s > 0 else 0)
-        ax1.plot(base_x, base_lat, linewidth=0.8, color="#aaaaaa", label="run 1", alpha=0.7)
-        ax2.plot(base_x, base_ggas, linewidth=0.8, color="#aaaaaa", label="run 1", alpha=0.7)
+        ax1.plot(base_x, base_lat, linewidth=0.8, color="#ff7f0e", label="run 1", alpha=0.7)
+        ax2.plot(base_x, base_ggas, linewidth=0.8, color="#ff7f0e", label="run 1", alpha=0.7)
 
     ax1.plot(feat_x, feat_lat, linewidth=0.8, color="#1f77b4", label="run 2")
     ax1.set_ylabel("Latency (ms)")
@@ -98,7 +98,7 @@ def plot_wait_breakdown(feature: list[dict], baseline: list[dict] | None, out: P
             bx = [r["block_number"] for r in baseline if r[key] is not None]
             by = [r[key] / 1_000 for r in baseline if r[key] is not None]
             if bx:
-                ax.plot(bx, by, linewidth=0.8, color="#aaaaaa", label="run 1", alpha=0.7)
+                ax.plot(bx, by, linewidth=0.8, color="#ff7f0e", label="run 1", alpha=0.7)
 
         fx = [r["block_number"] for r in feature if r[key] is not None]
         fy = [r[key] / 1_000 for r in feature if r[key] is not None]
@@ -124,7 +124,7 @@ def plot_gas_vs_latency(feature: list[dict], baseline: list[dict] | None, out: P
     if baseline:
         bgas = [r["gas_used"] / 1_000_000 for r in baseline]
         blat = [r["new_payload_latency_us"] / 1_000 for r in baseline]
-        ax.scatter(bgas, blat, s=8, alpha=0.4, color="#aaaaaa", label="run 1")
+        ax.scatter(bgas, blat, s=8, alpha=0.5, color="#ff7f0e", label="run 1")
 
     fgas = [r["gas_used"] / 1_000_000 for r in feature]
     flat = [r["new_payload_latency_us"] / 1_000 for r in feature]
