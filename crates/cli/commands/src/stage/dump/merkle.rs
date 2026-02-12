@@ -34,7 +34,7 @@ pub(crate) async fn dump_merkle_stage<N>(
     consensus: impl FullConsensus<N::Primitives> + 'static,
 ) -> Result<()>
 where
-    N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
+    N: ProviderNodeTypes<DB = DatabaseEnv>,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
@@ -57,12 +57,14 @@ where
     unwind_and_copy(db_tool, (from, to), tip_block_number, &output_db, evm_config, consensus)?;
 
     if should_run {
+        let runtime = reth_tasks::Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
         dry_run(
             ProviderFactory::<N>::new(
-                Arc::new(output_db),
+                output_db,
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                runtime,
             )?,
             to,
             from,

@@ -58,6 +58,10 @@ export const rethCliSidebar: SidebarItem = {
                         {
                             text: "reth db checksum static-file",
                             link: "/cli/reth/db/checksum/static-file"
+                        },
+                        {
+                            text: "reth db checksum rocksdb",
+                            link: "/cli/reth/db/checksum/rocksdb"
                         }
                     ]
                 },
@@ -167,6 +171,10 @@ export const rethCliSidebar: SidebarItem = {
                                 {
                                     text: "reth db settings set storage_changesets",
                                     link: "/cli/reth/db/settings/set/storage_changesets"
+                                },
+                                {
+                                    text: "reth db settings set use_hashed_state",
+                                    link: "/cli/reth/db/settings/set/use_hashed_state"
                                 }
                             ]
                         }
@@ -175,6 +183,10 @@ export const rethCliSidebar: SidebarItem = {
                 {
                     text: "reth db account-storage",
                     link: "/cli/reth/db/account-storage"
+                },
+                {
+                    text: "reth db state",
+                    link: "/cli/reth/db/state"
                 }
             ]
         },

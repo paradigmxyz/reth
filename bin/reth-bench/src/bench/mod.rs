@@ -15,6 +15,7 @@ pub use generate_big_block::{
 mod new_payload_fcu;
 mod new_payload_only;
 mod output;
+mod persistence_waiter;
 mod replay_payloads;
 mod send_invalid_payload;
 mod send_payload;
@@ -110,7 +111,18 @@ impl BenchmarkCommand {
     ///
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
+    ///
+    /// Always enables log target display (`RUST_LOG_TARGET=1`) so that the `reth-bench` target
+    /// is visible in output, making it easy to distinguish reth-bench logs from reth logs when
+    /// both are streamed to the same console or file.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+        // Always show the log target so "reth-bench" is visible in the output.
+        if std::env::var_os("RUST_LOG_TARGET").is_none() {
+            // SAFETY: This is called early during single-threaded initialization, before any
+            // threads are spawned and before the tracing subscriber is set up.
+            unsafe { std::env::set_var("RUST_LOG_TARGET", "1") };
+        }
+
         let guard = self.logs.init_tracing()?;
         Ok(guard)
     }

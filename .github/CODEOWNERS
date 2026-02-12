@@ -19,7 +19,6 @@ crates/metrics/             @mattsse @Rjected
 crates/net/                 @mattsse @Rjected
 crates/net/downloaders/     @Rjected
 crates/node/                @mattsse @Rjected @klkvr
-crates/optimism/            @mattsse @Rjected
 crates/payload/             @mattsse @Rjected
 crates/primitives-traits/   @Rjected @mattsse @klkvr
 crates/primitives/          @Rjected @mattsse @klkvr
@@ -39,7 +38,7 @@ crates/storage/libmdbx-rs/  @shekhirin
 crates/storage/nippy-jar/   @joshieDo @shekhirin
 crates/storage/provider/    @joshieDo @shekhirin @yongkangc
 crates/storage/storage-api/ @joshieDo
-crates/tasks/               @mattsse
+crates/tasks/               @mattsse @DaniPopes
 crates/tokio-util/          @mattsse 
 crates/tracing/             @mattsse @shekhirin
 crates/tracing-otlp/        @mattsse @Rjected 

@@ -56,7 +56,7 @@ ctrlc.workspace = true
 shlex.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["signal", "process"] }
+nix = { version = "0.31", features = ["signal", "process"] }
 
 [features]
 default = ["jemalloc"]
@@ -98,5 +98,5 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
-# no-op feature flag for switching between the `optimism` and default functionality in CI matrices
+# no-op feature flag for CI matrices
 ethereum = []

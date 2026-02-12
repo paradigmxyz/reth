@@ -11,7 +11,7 @@ use reth_provider::{
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig, SegmentOutput,
-    MINIMUM_PRUNING_DISTANCE,
+    MINIMUM_UNWIND_SAFE_DISTANCE,
 };
 use tracing::{instrument, trace};
 #[derive(Debug)]
@@ -45,12 +45,17 @@ where
         PrunePurpose::User
     }
 
-    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
+    #[instrument(
+        name = "ReceiptsByLogs::prune",
+        target = "pruner",
+        skip(self, provider),
+        ret(level = "trace")
+    )]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         // Contract log filtering removes every receipt possible except the ones in the list. So,
         // for the other receipts it's as if they had a `PruneMode::Distance()` of
-        // `MINIMUM_PRUNING_DISTANCE`.
-        let to_block = PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
+        // `MINIMUM_UNWIND_SAFE_DISTANCE`.
+        let to_block = PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)
             .prune_target_block(input.to_block, PruneSegment::ContractLogs, PrunePurpose::User)?
             .map(|(bn, _)| bn)
             .unwrap_or_default();

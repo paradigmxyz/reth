@@ -1,6 +1,36 @@
 //! Common helpers for reth-bench commands.
 
 use crate::valid_payload::call_forkchoice_updated;
+use eyre::Result;
+use std::{
+    io::{BufReader, Read},
+    time::Duration,
+};
+
+/// Read input from either a file path or stdin.
+pub(crate) fn read_input(path: Option<&str>) -> Result<String> {
+    Ok(match path {
+        Some(path) => reth_fs_util::read_to_string(path)?,
+        None => String::from_utf8(
+            BufReader::new(std::io::stdin()).bytes().collect::<Result<Vec<_>, _>>()?,
+        )?,
+    })
+}
+
+/// Load JWT secret from either a file or use the provided string directly.
+pub(crate) fn load_jwt_secret(jwt_secret: Option<&str>) -> Result<Option<String>> {
+    match jwt_secret {
+        Some(secret) => {
+            // Try to read as file first
+            match std::fs::read_to_string(secret) {
+                Ok(contents) => Ok(Some(contents.trim().to_string())),
+                // If file read fails, use the string directly
+                Err(_) => Ok(Some(secret.to_string())),
+            }
+        }
+        None => Ok(None),
+    }
+}
 
 /// Parses a gas limit value with optional suffix: K for thousand, M for million, G for billion.
 ///
@@ -24,6 +54,22 @@ pub(crate) fn parse_gas_limit(s: &str) -> eyre::Result<u64> {
     let base: u64 = num_str.trim().parse()?;
     base.checked_mul(multiplier).ok_or_else(|| eyre::eyre!("value overflow"))
 }
+
+/// Parses a duration string, treating bare integers as milliseconds.
+///
+/// Accepts either a `humantime` duration string (e.g. `"100ms"`, `"2s"`) or a plain
+/// integer which is interpreted as milliseconds (e.g. `"400"` → 400ms).
+pub(crate) fn parse_duration(s: &str) -> eyre::Result<Duration> {
+    match humantime::parse_duration(s) {
+        Ok(d) => Ok(d),
+        Err(_) => {
+            let millis: u64 =
+                s.trim().parse().map_err(|_| eyre::eyre!("invalid duration: {s:?}"))?;
+            Ok(Duration::from_millis(millis))
+        }
+    }
+}
+
 use alloy_consensus::Header;
 use alloy_eips::eip4844::kzg_to_versioned_hash;
 use alloy_primitives::{Address, B256};
@@ -154,7 +200,7 @@ pub(crate) async fn get_payload_with_sidecar(
     payload_id: PayloadId,
     parent_beacon_block_root: Option<B256>,
 ) -> eyre::Result<(ExecutionPayload, ExecutionPayloadSidecar)> {
-    debug!(get_payload_version = ?version, ?payload_id, "Sending getPayload");
+    debug!(target: "reth-bench", get_payload_version = ?version, ?payload_id, "Sending getPayload");
 
     match version {
         1 => {
@@ -200,7 +246,6 @@ pub(crate) async fn get_payload_with_sidecar(
             ))
         }
         5 => {
-            // V5 (Osaka) - use raw request since alloy doesn't have get_payload_v5 yet
             let envelope = provider.get_payload_v5(payload_id).await?;
             let versioned_hashes =
                 versioned_hashes_from_commitments(&envelope.blobs_bundle.commitments);
@@ -263,5 +308,25 @@ mod tests {
         assert!(parse_gas_limit("abc").is_err());
         assert!(parse_gas_limit("G").is_err());
         assert!(parse_gas_limit("-1G").is_err());
+    }
+
+    #[test]
+    fn test_parse_duration_with_unit() {
+        assert_eq!(parse_duration("100ms").unwrap(), Duration::from_millis(100));
+        assert_eq!(parse_duration("2s").unwrap(), Duration::from_secs(2));
+        assert_eq!(parse_duration("1m").unwrap(), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn test_parse_duration_bare_millis() {
+        assert_eq!(parse_duration("400").unwrap(), Duration::from_millis(400));
+        assert_eq!(parse_duration("0").unwrap(), Duration::from_millis(0));
+        assert_eq!(parse_duration("1000").unwrap(), Duration::from_millis(1000));
+    }
+
+    #[test]
+    fn test_parse_duration_errors() {
+        assert!(parse_duration("abc").is_err());
+        assert!(parse_duration("").is_err());
     }
 }

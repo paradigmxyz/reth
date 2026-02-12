@@ -5,6 +5,7 @@ import { basePath } from './redirects.config'
 
 export default defineConfig({
   title: 'Reth',
+  description: 'Reth is a secure, performant, and modular Ethereum execution client built in Rust.',
   logoUrl: '/logo.png',
   iconUrl: '/logo.png',
   ogImageUrl: '/reth-prod.png',

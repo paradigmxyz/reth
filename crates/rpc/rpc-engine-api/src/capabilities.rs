@@ -31,7 +31,9 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_newPayloadV4",
     "engine_newPayloadV5",
     "engine_getPayloadBodiesByHashV1",
+    "engine_getPayloadBodiesByHashV2",
     "engine_getPayloadBodiesByRangeV1",
+    "engine_getPayloadBodiesByRangeV2",
     "engine_getBlobsV1",
     "engine_getBlobsV2",
     "engine_getBlobsV3",
@@ -72,12 +74,12 @@ impl EngineCapabilities {
             .filter(|cap| !self.inner.contains(cap.as_str()))
             .cloned()
             .collect();
-        missing_in_el.sort();
+        missing_in_el.sort_unstable();
 
         // EL has methods CL doesn't support
         let mut missing_in_cl: Vec<_> =
             self.inner.iter().filter(|cap| !cl_set.contains(cap.as_str())).cloned().collect();
-        missing_in_cl.sort();
+        missing_in_cl.sort_unstable();
 
         CapabilityMismatches { missing_in_el, missing_in_cl }
     }

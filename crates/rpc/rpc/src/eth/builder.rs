@@ -47,6 +47,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     raw_tx_forwarder: ForwardConfig,
     send_raw_transaction_sync_timeout: Duration,
     evm_memory_limit: u64,
+    force_blob_sidecar_upcasting: bool,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -99,6 +100,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             raw_tx_forwarder,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            force_blob_sidecar_upcasting,
         } = self;
         EthApiBuilder {
             components,
@@ -121,6 +123,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             raw_tx_forwarder,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            force_blob_sidecar_upcasting,
         }
     }
 }
@@ -154,6 +157,7 @@ where
             raw_tx_forwarder: ForwardConfig::default(),
             send_raw_transaction_sync_timeout: Duration::from_secs(30),
             evm_memory_limit: (1 << 32) - 1,
+            force_blob_sidecar_upcasting: false,
         }
     }
 }
@@ -194,6 +198,7 @@ where
             raw_tx_forwarder,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            force_blob_sidecar_upcasting,
         } = self;
         EthApiBuilder {
             components,
@@ -216,6 +221,7 @@ where
             raw_tx_forwarder,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            force_blob_sidecar_upcasting,
         }
     }
 
@@ -245,6 +251,7 @@ where
             raw_tx_forwarder,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            force_blob_sidecar_upcasting,
         } = self;
         EthApiBuilder {
             components,
@@ -267,6 +274,7 @@ where
             raw_tx_forwarder,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            force_blob_sidecar_upcasting,
         }
     }
 
@@ -502,6 +510,7 @@ where
             raw_tx_forwarder,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            force_blob_sidecar_upcasting,
         } = self;
 
         let provider = components.provider().clone();
@@ -516,7 +525,7 @@ where
         let new_canonical_blocks = provider.canonical_state_stream();
         let fhc = fee_history_cache.clone();
         let cache = eth_cache.clone();
-        task_spawner.spawn_critical(
+        task_spawner.spawn_critical_task(
             "cache canonical blocks for fee history task",
             Box::pin(async move {
                 fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider, cache).await;
@@ -531,7 +540,11 @@ where
             max_simulate_blocks,
             eth_proof_window,
             blocking_task_pool.unwrap_or_else(|| {
-                BlockingTaskPool::build().expect("failed to build blocking task pool")
+                BlockingTaskPool::builder()
+                    .thread_name(|i| format!("blocking-{i:02}"))
+                    .build()
+                    .map(BlockingTaskPool::new)
+                    .expect("failed to build blocking task pool")
             }),
             fee_history_cache,
             task_spawner,
@@ -544,6 +557,7 @@ where
             raw_tx_forwarder.forwarder_client(),
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            force_blob_sidecar_upcasting,
         )
     }
 
@@ -572,6 +586,12 @@ where
     /// Sets the maximum memory the EVM can allocate per RPC request.
     pub const fn evm_memory_limit(mut self, memory_limit: u64) -> Self {
         self.evm_memory_limit = memory_limit;
+        self
+    }
+
+    /// Sets whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format.
+    pub const fn force_blob_sidecar_upcasting(mut self, force: bool) -> Self {
+        self.force_blob_sidecar_upcasting = force;
         self
     }
 }

@@ -319,9 +319,6 @@ where
     F: FnOnce(&mut File) -> std::result::Result<(), E>,
     E: Into<Box<dyn core::error::Error + Send + Sync>>,
 {
-    #[cfg(windows)]
-    use std::os::windows::fs::OpenOptionsExt;
-
     let mut tmp_path = file_path.to_path_buf();
     tmp_path.set_extension("tmp");
 
@@ -350,17 +347,6 @@ where
 
     // fsync() directory
     if let Some(parent) = file_path.parent() {
-        #[cfg(windows)]
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(0x02000000) // FILE_FLAG_BACKUP_SEMANTICS
-            .open(parent)
-            .map_err(|err| FsPathError::open(err, parent))?
-            .sync_all()
-            .map_err(|err| FsPathError::fsync(err, parent))?;
-
-        #[cfg(not(windows))]
         OpenOptions::new()
             .read(true)
             .open(parent)

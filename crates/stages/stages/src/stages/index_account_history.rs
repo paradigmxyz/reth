@@ -678,7 +678,7 @@ mod tests {
 
             // Enable RocksDB for account history
             db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_account_history_in_rocksdb(true),
+                StorageSettings::v1().with_account_history_in_rocksdb(true),
             );
 
             db.commit(|tx| {
@@ -723,7 +723,7 @@ mod tests {
             let db = TestStageDB::default();
 
             db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_account_history_in_rocksdb(true),
+                StorageSettings::v1().with_account_history_in_rocksdb(true),
             );
 
             db.commit(|tx| {
@@ -774,7 +774,7 @@ mod tests {
             let db = TestStageDB::default();
 
             db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_account_history_in_rocksdb(true),
+                StorageSettings::v1().with_account_history_in_rocksdb(true),
             );
 
             db.commit(|tx| {

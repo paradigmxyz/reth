@@ -52,6 +52,7 @@ impl Command {
             ..
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
+        let total_blocks = benchmark_mode.total_blocks();
         let buffer_size = self.rpc_block_buffer_size;
 
         // Use a oneshot channel to propagate errors from the spawned task
@@ -68,7 +69,7 @@ impl Command {
                 let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
                     Ok(block) => block,
                     Err(e) => {
-                        tracing::error!("Failed to fetch block {next_block}: {e}");
+                        tracing::error!(target: "reth-bench", "Failed to fetch block {next_block}: {e}");
                         let _ = error_sender.send(e);
                         break;
                     }
@@ -76,14 +77,14 @@ impl Command {
 
                 next_block += 1;
                 if let Err(e) = sender.send(block).await {
-                    tracing::error!("Failed to send block data: {e}");
+                    tracing::error!(target: "reth-bench", "Failed to send block data: {e}");
                     break;
                 }
             }
         });
 
-        // put results in a summary vec so they can be printed at the end
         let mut results = Vec::new();
+        let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
@@ -97,7 +98,7 @@ impl Command {
             let transaction_count = block.transactions.len() as u64;
             let gas_used = block.header.gas_used;
 
-            debug!(number=?block.header.number, "Sending payload to engine");
+            debug!(target: "reth-bench", number=?block.header.number, "Sending payload to engine");
 
             let (version, params) = block_to_new_payload(block, is_optimism)?;
 
@@ -105,7 +106,12 @@ impl Command {
             call_new_payload(&auth_provider, version, params).await?;
 
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
-            info!(%new_payload_result);
+            blocks_processed += 1;
+            let progress = match total_blocks {
+                Some(total) => format!("{blocks_processed}/{total}"),
+                None => format!("{blocks_processed}"),
+            };
+            info!(target: "reth-bench", progress, %new_payload_result);
 
             // current duration since the start of the benchmark minus the time
             // waiting for blocks
@@ -129,7 +135,7 @@ impl Command {
         if let Some(path) = self.benchmark.output {
             // first write the new payload results to a file
             let output_path = path.join(NEW_PAYLOAD_OUTPUT_SUFFIX);
-            info!("Writing newPayload call latency output to file: {:?}", output_path);
+            info!(target: "reth-bench", "Writing newPayload call latency output to file: {:?}", output_path);
             let mut writer = Writer::from_path(output_path)?;
             for result in new_payload_results {
                 writer.serialize(result)?;
@@ -138,19 +144,20 @@ impl Command {
 
             // now write the gas output to a file
             let output_path = path.join(GAS_OUTPUT_SUFFIX);
-            info!("Writing total gas output to file: {:?}", output_path);
+            info!(target: "reth-bench", "Writing total gas output to file: {:?}", output_path);
             let mut writer = Writer::from_path(output_path)?;
             for row in &gas_output_results {
                 writer.serialize(row)?;
             }
             writer.flush()?;
 
-            info!("Finished writing benchmark output files to {:?}.", path);
+            info!(target: "reth-bench", "Finished writing benchmark output files to {:?}.", path);
         }
 
         // accumulate the results and calculate the overall Ggas/s
         let gas_output = TotalGasOutput::new(gas_output_results)?;
         info!(
+            target: "reth-bench",
             total_duration=?gas_output.total_duration,
             total_gas_used=?gas_output.total_gas_used,
             blocks_processed=?gas_output.blocks_processed,

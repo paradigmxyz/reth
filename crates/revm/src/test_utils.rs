@@ -1,6 +1,8 @@
 use alloc::vec::Vec;
 use alloy_primitives::{
-    keccak256, map::HashMap, Address, BlockNumber, Bytes, StorageKey, B256, U256,
+    keccak256,
+    map::{AddressMap, B256Map, HashMap},
+    Address, BlockNumber, Bytes, StorageKey, B256, U256,
 };
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
@@ -16,8 +18,8 @@ use reth_trie::{
 /// Mock state for testing
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct StateProviderTest {
-    accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
-    contracts: HashMap<B256, Bytecode>,
+    accounts: AddressMap<(HashMap<StorageKey, U256>, Account)>,
+    contracts: B256Map<Bytecode>,
     block_hash: HashMap<u64, B256>,
 }
 
@@ -157,6 +159,14 @@ impl StateProvider for StateProviderTest {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).copied()))
+    }
+
+    fn storage_by_hashed_key(
+        &self,
+        _address: Address,
+        _hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
+        Ok(None)
     }
 }
 

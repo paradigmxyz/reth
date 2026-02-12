@@ -2,19 +2,14 @@
 
 use clap::{ArgAction, Args};
 
-/// Default value for `RocksDB` routing flags.
-///
-/// When the `edge` feature is enabled, defaults to `true` to enable edge storage features.
-/// Otherwise defaults to `false` for legacy behavior.
-const fn default_rocksdb_flag() -> bool {
-    cfg!(feature = "edge")
-}
-
 /// Parameters for `RocksDB` table routing configuration.
 ///
 /// These flags control which database tables are stored in `RocksDB` instead of MDBX.
 /// All flags are genesis-initialization-only: changing them after genesis requires a re-sync.
-#[derive(Debug, Args, PartialEq, Eq, Clone, Copy)]
+///
+/// When `--storage.v2` is used, the defaults for these flags change to enable `RocksDB` routing.
+/// Individual flags can still override those defaults when explicitly set.
+#[derive(Debug, Args, PartialEq, Eq, Clone, Copy, Default)]
 #[command(next_help_heading = "RocksDB")]
 pub struct RocksDbArgs {
     /// Route all supported tables to `RocksDB` instead of MDBX.
@@ -27,49 +22,39 @@ pub struct RocksDbArgs {
     /// Route tx hash -> number table to `RocksDB` instead of MDBX.
     ///
     /// This is a genesis-initialization-only flag: changing it after genesis requires a re-sync.
-    /// Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
-    #[arg(long = "rocksdb.tx-hash", default_value_t = default_rocksdb_flag(), action = ArgAction::Set)]
-    pub tx_hash: bool,
+    /// Defaults to the base storage mode (v1: false, v2: true).
+    #[arg(long = "rocksdb.tx-hash", action = ArgAction::Set)]
+    pub tx_hash: Option<bool>,
 
     /// Route storages history tables to `RocksDB` instead of MDBX.
     ///
     /// This is a genesis-initialization-only flag: changing it after genesis requires a re-sync.
-    /// Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
-    #[arg(long = "rocksdb.storages-history", default_value_t = default_rocksdb_flag(), action = ArgAction::Set)]
-    pub storages_history: bool,
+    /// Defaults to the base storage mode (v1: false, v2: true).
+    #[arg(long = "rocksdb.storages-history", action = ArgAction::Set)]
+    pub storages_history: Option<bool>,
 
     /// Route account history tables to `RocksDB` instead of MDBX.
     ///
     /// This is a genesis-initialization-only flag: changing it after genesis requires a re-sync.
-    /// Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
-    #[arg(long = "rocksdb.account-history", default_value_t = default_rocksdb_flag(), action = ArgAction::Set)]
-    pub account_history: bool,
-}
-
-impl Default for RocksDbArgs {
-    fn default() -> Self {
-        Self {
-            all: false,
-            tx_hash: default_rocksdb_flag(),
-            storages_history: default_rocksdb_flag(),
-            account_history: default_rocksdb_flag(),
-        }
-    }
+    /// Defaults to the base storage mode (v1: false, v2: true).
+    #[arg(long = "rocksdb.account-history", action = ArgAction::Set)]
+    pub account_history: Option<bool>,
 }
 
 impl RocksDbArgs {
     /// Validates the `RocksDB` arguments.
     ///
-    /// Returns an error if `--rocksdb.all` is used with any individual flag set to `false`.
+    /// Returns an error if `--rocksdb.all` is used with any individual flag explicitly set to
+    /// `false`.
     pub const fn validate(&self) -> Result<(), RocksDbArgsError> {
         if self.all {
-            if !self.tx_hash {
+            if matches!(self.tx_hash, Some(false)) {
                 return Err(RocksDbArgsError::ConflictingFlags("tx-hash"));
             }
-            if !self.storages_history {
+            if matches!(self.storages_history, Some(false)) {
                 return Err(RocksDbArgsError::ConflictingFlags("storages-history"));
             }
-            if !self.account_history {
+            if matches!(self.account_history, Some(false)) {
                 return Err(RocksDbArgsError::ConflictingFlags("account-history"));
             }
         }
@@ -100,13 +85,17 @@ mod tests {
     fn test_default_rocksdb_args() {
         let args = CommandParser::<RocksDbArgs>::parse_from(["reth"]).args;
         assert_eq!(args, RocksDbArgs::default());
+        assert!(!args.all);
+        assert!(args.tx_hash.is_none());
+        assert!(args.storages_history.is_none());
+        assert!(args.account_history.is_none());
     }
 
     #[test]
     fn test_parse_all_flag() {
         let args = CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.all"]).args;
         assert!(args.all);
-        assert_eq!(args.tx_hash, default_rocksdb_flag());
+        assert!(args.tx_hash.is_none());
     }
 
     #[test]
@@ -119,15 +108,26 @@ mod tests {
         ])
         .args;
         assert!(!args.all);
-        assert!(args.tx_hash);
-        assert!(!args.storages_history);
-        assert!(args.account_history);
+        assert_eq!(args.tx_hash, Some(true));
+        assert_eq!(args.storages_history, Some(false));
+        assert_eq!(args.account_history, Some(true));
+    }
+
+    #[test]
+    fn test_validate_all_with_none_ok() {
+        let args =
+            RocksDbArgs { all: true, tx_hash: None, storages_history: None, account_history: None };
+        assert!(args.validate().is_ok());
     }
 
     #[test]
     fn test_validate_all_with_true_ok() {
-        let args =
-            RocksDbArgs { all: true, tx_hash: true, storages_history: true, account_history: true };
+        let args = RocksDbArgs {
+            all: true,
+            tx_hash: Some(true),
+            storages_history: Some(true),
+            account_history: Some(true),
+        };
         assert!(args.validate().is_ok());
     }
 
@@ -135,25 +135,25 @@ mod tests {
     fn test_validate_all_with_false_errors() {
         let args = RocksDbArgs {
             all: true,
-            tx_hash: false,
-            storages_history: true,
-            account_history: true,
+            tx_hash: Some(false),
+            storages_history: None,
+            account_history: None,
         };
         assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("tx-hash")));
 
         let args = RocksDbArgs {
             all: true,
-            tx_hash: true,
-            storages_history: false,
-            account_history: true,
+            tx_hash: None,
+            storages_history: Some(false),
+            account_history: None,
         };
         assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("storages-history")));
 
         let args = RocksDbArgs {
             all: true,
-            tx_hash: true,
-            storages_history: true,
-            account_history: false,
+            tx_hash: None,
+            storages_history: None,
+            account_history: Some(false),
         };
         assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("account-history")));
     }

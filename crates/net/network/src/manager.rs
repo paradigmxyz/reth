@@ -24,9 +24,12 @@ use crate::{
     import::{BlockImport, BlockImportEvent, BlockImportOutcome, BlockValidation, NewBlockEvent},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage},
-    metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
+    metrics::{
+        BackedOffPeersMetrics, ClosedSessionsMetrics, DisconnectMetrics, NetworkMetrics,
+        PendingSessionFailureMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE,
+    },
     network::{NetworkHandle, NetworkHandleMessage},
-    peers::PeersManager,
+    peers::{BackoffReason, PeersManager},
     poll_nested_stream_with_budget,
     protocol::IntoRlpxSubProtocol,
     required_block_filter::RequiredBlockFilter,
@@ -139,6 +142,12 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     metrics: NetworkMetrics,
     /// Disconnect metrics for the Network
     disconnect_metrics: DisconnectMetrics,
+    /// Closed sessions metrics, split by direction.
+    closed_sessions_metrics: ClosedSessionsMetrics,
+    /// Pending session failure metrics, split by direction.
+    pending_session_failure_metrics: PendingSessionFailureMetrics,
+    /// Backed off peers metrics, split by reason.
+    backed_off_peers_metrics: BackedOffPeersMetrics,
 }
 
 impl NetworkManager {
@@ -354,6 +363,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             num_active_peers,
             metrics: Default::default(),
             disconnect_metrics: Default::default(),
+            closed_sessions_metrics: Default::default(),
+            pending_session_failure_metrics: Default::default(),
+            backed_off_peers_metrics: Default::default(),
         })
     }
 
@@ -860,26 +872,26 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         &peer_id,
                         err,
                     );
+                    self.backed_off_peers_metrics.increment_for_reason(
+                        BackoffReason::from_disconnect(err.as_disconnected()),
+                    );
                     err.as_disconnected()
                 } else {
                     // Gracefully disconnected
                     self.swarm.state_mut().peers_mut().on_active_session_gracefully_closed(peer_id);
+                    self.backed_off_peers_metrics
+                        .increment_for_reason(BackoffReason::GracefulClose);
                     None
                 };
-                self.metrics.closed_sessions.increment(1);
+                self.closed_sessions_metrics.active.increment(1);
                 self.update_active_connection_metrics();
 
                 if let Some(reason) = reason {
                     self.disconnect_metrics.increment(reason);
                 }
-                self.metrics.backed_off_peers.set(
-                        self.swarm
-                            .state()
-                            .peers()
-                            .num_backed_off_peers()
-                            .saturating_sub(1)
-                            as f64,
-                    );
+                self.metrics
+                    .backed_off_peers
+                    .set(self.swarm.state().peers().num_backed_off_peers() as f64);
                 self.event_sender
                     .notify(NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }));
             }
@@ -896,7 +908,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         .state_mut()
                         .peers_mut()
                         .on_incoming_pending_session_dropped(remote_addr, err);
-                    self.metrics.pending_session_failures.increment(1);
+                    self.pending_session_failure_metrics.inbound.increment(1);
                     if let Some(reason) = err.as_disconnected() {
                         self.disconnect_metrics.increment(reason);
                     }
@@ -906,18 +918,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         .peers_mut()
                         .on_incoming_pending_session_gracefully_closed();
                 }
-                self.metrics.closed_sessions.increment(1);
+                self.closed_sessions_metrics.incoming_pending.increment(1);
                 self.metrics
                     .incoming_connections
                     .set(self.swarm.state().peers().num_inbound_connections() as f64);
-                self.metrics.backed_off_peers.set(
-                        self.swarm
-                            .state()
-                            .peers()
-                            .num_backed_off_peers()
-                            .saturating_sub(1)
-                            as f64,
-                    );
             }
             SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
                 trace!(
@@ -934,7 +938,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         &peer_id,
                         err,
                     );
-                    self.metrics.pending_session_failures.increment(1);
+                    self.pending_session_failure_metrics.outbound.increment(1);
+                    self.backed_off_peers_metrics.increment_for_reason(
+                        BackoffReason::from_disconnect(err.as_disconnected()),
+                    );
                     if let Some(reason) = err.as_disconnected() {
                         self.disconnect_metrics.increment(reason);
                     }
@@ -944,17 +951,11 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         .peers_mut()
                         .on_outgoing_pending_session_gracefully_closed(&peer_id);
                 }
-                self.metrics.closed_sessions.increment(1);
+                self.closed_sessions_metrics.outgoing_pending.increment(1);
                 self.update_pending_connection_metrics();
-
-                self.metrics.backed_off_peers.set(
-                        self.swarm
-                            .state()
-                            .peers()
-                            .num_backed_off_peers()
-                            .saturating_sub(1)
-                            as f64,
-                    );
+                self.metrics
+                    .backed_off_peers
+                    .set(self.swarm.state().peers().num_backed_off_peers() as f64);
             }
             SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                 trace!(
@@ -971,14 +972,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     &error,
                 );
 
-                self.metrics.backed_off_peers.set(
-                        self.swarm
-                            .state()
-                            .peers()
-                            .num_backed_off_peers()
-                            .saturating_sub(1)
-                            as f64,
-                    );
+                self.backed_off_peers_metrics.increment_for_reason(BackoffReason::ConnectionError);
+                self.metrics
+                    .backed_off_peers
+                    .set(self.swarm.state().peers().num_backed_off_peers() as f64);
                 self.update_pending_connection_metrics();
             }
             SwarmEvent::BadMessage { peer_id } => {

@@ -15,7 +15,7 @@ use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 /// Result of [`Pruner::run`] execution.
 pub type PrunerResult = Result<PrunerOutput, PrunerError>;
@@ -114,6 +114,12 @@ where
     ///
     /// Returns a [`PruneProgress`], indicating whether pruning is finished, or there is more data
     /// to prune.
+    #[instrument(
+        name = "Pruner::run_with_provider",
+        level = "debug",
+        target = "pruner",
+        skip(self, provider)
+    )]
     pub fn run_with_provider(
         &mut self,
         provider: &Provider,
@@ -149,21 +155,7 @@ where
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        let message = match output.progress {
-            PruneProgress::HasMoreData(_) => "Pruner interrupted and has more data to prune",
-            PruneProgress::Finished => "Pruner finished",
-        };
-
-        debug!(
-            target: "pruner",
-            %tip_block_number,
-            ?elapsed,
-            ?deleted_entries,
-            ?limiter,
-            ?output,
-            ?stats,
-            "{message}",
-        );
+        output.debug_log(tip_block_number, deleted_entries, elapsed);
 
         self.event_sender.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
 
@@ -176,6 +168,7 @@ where
     ///
     /// Returns a list of stats per pruned segment, total number of entries pruned, and
     /// [`PruneProgress`].
+    #[instrument(level = "debug", target = "pruner", skip_all, fields(segments = self.segments.len()))]
     fn prune_segments(
         &mut self,
         provider: &Provider,
@@ -191,6 +184,8 @@ where
 
         for segment in &self.segments {
             if limiter.is_limit_reached() {
+                output.progress =
+                    output.progress.combine(PruneProgress::HasMoreData(limiter.interrupt_reason()));
                 break
             }
 
@@ -247,7 +242,7 @@ where
                         .set(highest_pruned_block as f64);
                 }
 
-                output.progress = segment_output.progress;
+                output.progress = output.progress.combine(segment_output.progress);
                 output.segments.push((segment.segment(), segment_output));
 
                 debug!(
@@ -342,6 +337,7 @@ where
     ///
     /// Returns a [`PruneProgress`], indicating whether pruning is finished, or there is more data
     /// to prune.
+    #[instrument(name = "Pruner::run", level = "debug", target = "pruner", skip(self))]
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
         let provider = self.provider_factory.database_provider_rw()?;
         let result = self.run_with_provider(&provider, tip_block_number);

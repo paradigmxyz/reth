@@ -1,11 +1,10 @@
-# syntax=docker.io/docker/dockerfile:1.7-labs
+# syntax=docker/dockerfile:1
 
-# Unified Dockerfile for reth and op-reth, optimized for Depot builds
+# Dockerfile for reth, optimized for Depot builds
 # Usage:
-#   reth:    --build-arg BINARY=reth
-#   op-reth: --build-arg BINARY=op-reth --build-arg MANIFEST_PATH=crates/optimism/bin
+#   reth: --build-arg BINARY=reth
 
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+FROM rust:1 AS builder
 WORKDIR /app
 
 LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
@@ -17,16 +16,9 @@ RUN apt-get update && apt-get install -y libclang-dev pkg-config
 RUN cargo install sccache --locked
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_DIR=/sccache
+ENV SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev
 
-# Builds a cargo-chef plan
-FROM chef AS planner
-COPY --exclude=.git . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-FROM chef AS builder
-COPY --from=planner /app/recipe.json recipe.json
-
-# Binary to build (reth or op-reth)
+# Binary to build
 ARG BINARY=reth
 
 # Manifest path for the binary
@@ -36,9 +28,8 @@ ARG MANIFEST_PATH=bin/reth
 ARG BUILD_PROFILE=release
 ENV BUILD_PROFILE=$BUILD_PROFILE
 
-# Extra Cargo flags
+# Extra Cargo flags (can be overridden, otherwise set per-platform below)
 ARG RUSTFLAGS=""
-ENV RUSTFLAGS="$RUSTFLAGS"
 
 # Extra Cargo features
 ARG FEATURES=""
@@ -52,18 +43,23 @@ ENV VERGEN_GIT_SHA=$VERGEN_GIT_SHA
 ENV VERGEN_GIT_DESCRIBE=$VERGEN_GIT_DESCRIBE
 ENV VERGEN_GIT_DIRTY=$VERGEN_GIT_DIRTY
 
-# Build dependencies with cache mounts
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --locked --recipe-path recipe.json --manifest-path $MANIFEST_PATH/Cargo.toml
-
-# Build application with cache mounts
+# Build application
+# Platform-specific RUSTFLAGS: amd64 uses x86-64-v3 (Haswell+) with pclmulqdq for rocksdb
+ARG TARGETPLATFORM
 COPY --exclude=.git . .
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml
+RUN --mount=type=secret,id=DEPOT_TOKEN,env=SCCACHE_WEBDAV_TOKEN \
+    --mount=type=cache,target=/usr/local/cargo/registry,sharing=shared \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=shared \
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=shared \
+    export RUSTC_WRAPPER=sccache SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev SCCACHE_DIR=/sccache && \
+    sccache --start-server && \
+    if [ -n "$RUSTFLAGS" ]; then \
+        export RUSTFLAGS="$RUSTFLAGS"; \
+    elif [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+        export RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq"; \
+    fi && \
+    cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml && \
+    sccache --show-stats
 
 # Copy binary to a known location (ARG not resolved in COPY)
 # Note: Custom profiles like maxperf/profiling output to target/<profile>/, not target/release/

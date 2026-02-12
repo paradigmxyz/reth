@@ -87,7 +87,7 @@ impl Command {
         }
         if !self.output.exists() {
             std::fs::create_dir_all(&self.output)?;
-            info!("Created output directory: {:?}", self.output);
+            info!(target: "reth-bench", "Created output directory: {:?}", self.output);
         }
 
         // Set up authenticated provider (used for both Engine API and eth_ methods)
@@ -95,7 +95,7 @@ impl Command {
         let jwt = JwtSecret::from_hex(jwt)?;
         let auth_url = Url::parse(&self.engine_rpc_url)?;
 
-        info!("Connecting to Engine RPC at {}", auth_url);
+        info!(target: "reth-bench", "Connecting to Engine RPC at {}", auth_url);
         let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
         let client = ClientBuilder::default().connect_with(auth_transport).await?;
         let provider = RootProvider::<AnyNetwork>::new(client);
@@ -120,6 +120,7 @@ impl Command {
         match mode {
             RampMode::Blocks(blocks) => {
                 info!(
+                    target: "reth-bench",
                     canonical_parent,
                     start_block,
                     end_block = start_block + blocks - 1,
@@ -128,6 +129,7 @@ impl Command {
             }
             RampMode::TargetGasLimit(target) => {
                 info!(
+                    target: "reth-bench",
                     canonical_parent,
                     start_block,
                     current_gas_limit = parent_header.gas_limit,
@@ -176,7 +178,7 @@ impl Command {
                 GasRampPayloadFile { version: version as u8, block_hash, params: params.clone() };
             let payload_json = serde_json::to_string_pretty(&file)?;
             std::fs::write(&payload_path, &payload_json)?;
-            info!(block_number = block.header.number, path = %payload_path.display(), "Saved payload");
+            info!(target: "reth-bench", block_number = block.header.number, path = %payload_path.display(), "Saved payload");
 
             call_new_payload(&provider, version, params).await?;
 
@@ -190,10 +192,20 @@ impl Command {
             parent_header = block.header;
             parent_hash = block_hash;
             blocks_processed += 1;
+
+            let progress = match mode {
+                RampMode::Blocks(total) => format!("{blocks_processed}/{total}"),
+                RampMode::TargetGasLimit(target) => {
+                    let pct = (parent_header.gas_limit as f64 / target as f64 * 100.0).min(100.0);
+                    format!("{pct:.1}%")
+                }
+            };
+            info!(target: "reth-bench", progress, block_number = parent_header.number, gas_limit = parent_header.gas_limit, "Block processed");
         }
 
         let final_gas_limit = parent_header.gas_limit;
         info!(
+            target: "reth-bench",
             total_duration=?total_benchmark_duration.elapsed(),
             blocks_processed,
             final_gas_limit,
