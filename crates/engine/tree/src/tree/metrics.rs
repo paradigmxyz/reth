@@ -479,6 +479,20 @@ impl BlockValidationMetrics {
     }
 }
 
+/// Metrics for txpool prewarming between blocks.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "engine.txpool_prewarm")]
+pub(crate) struct TxpoolPrewarmMetrics {
+    /// Total number of txpool prewarm sessions started.
+    pub(crate) started_total: Counter,
+    /// Total number of txpool prewarm sessions cancelled by an incoming newPayload.
+    pub(crate) cancelled_total: Counter,
+    /// Number of transactions in the last prewarm snapshot.
+    pub(crate) transactions: Gauge,
+    /// Duration of the last prewarm session in seconds.
+    pub(crate) duration_seconds: Histogram,
+}
+
 /// Metrics for the blockchain tree block buffer
 #[derive(Metrics)]
 #[metrics(scope = "blockchain_tree.block_buffer")]

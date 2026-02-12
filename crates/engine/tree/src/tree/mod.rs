@@ -284,6 +284,10 @@ where
     txpool_prewarm_target: Option<B256>,
     /// Callback to snapshot pending transactions from the txpool.
     txpool_pending_transactions: Option<Box<dyn Fn() -> Vec<Recovered<N::SignedTx>> + Send>>,
+    /// Metrics for txpool prewarming.
+    txpool_prewarm_metrics: metrics::TxpoolPrewarmMetrics,
+    /// Instant when the current txpool prewarm session started (for duration tracking).
+    txpool_prewarm_started_at: Option<Instant>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -373,6 +377,8 @@ where
             txpool_prewarm_timer: None,
             txpool_prewarm_target: None,
             txpool_pending_transactions,
+            txpool_prewarm_metrics: Default::default(),
+            txpool_prewarm_started_at: None,
         }
     }
 
@@ -1788,6 +1794,14 @@ where
 
     /// Cancels any scheduled or running txpool prewarming.
     fn cancel_txpool_prewarm(&mut self) {
+        if self.txpool_prewarm_timer.is_some() || self.txpool_prewarm_started_at.is_some() {
+            self.txpool_prewarm_metrics.cancelled_total.increment(1);
+            if let Some(started_at) = self.txpool_prewarm_started_at.take() {
+                self.txpool_prewarm_metrics
+                    .duration_seconds
+                    .record(started_at.elapsed().as_secs_f64());
+            }
+        }
         self.txpool_prewarm_timer = None;
         self.txpool_prewarm_target = None;
         self.payload_validator.cancel_txpool_prewarm();
@@ -1843,12 +1857,18 @@ where
             return;
         }
 
+        let tx_count = transactions.len();
+
         debug!(
             target: "engine::tree",
             %target,
-            tx_count = transactions.len(),
+            tx_count,
             "Starting txpool prewarming"
         );
+
+        self.txpool_prewarm_metrics.started_total.increment(1);
+        self.txpool_prewarm_metrics.transactions.set(tx_count as f64);
+        self.txpool_prewarm_started_at = Some(Instant::now());
 
         self.payload_validator.start_txpool_prewarm(target, &self.state, transactions);
     }
