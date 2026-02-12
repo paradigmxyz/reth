@@ -275,7 +275,7 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
         // check that `end_key` and `end_subkey` weren't previously given, as that wouldn't be
         // valid.
         if self.end_key.is_some() || self.end_subkey.is_some() {
-            return Err(eyre::eyre!("Only END_KEY can be given for non-DUPSORT tables"));
+            return Err(eyre::eyre!("END_KEY and END_SUBKEY cannot be provided for non-DUPSORT tables. Use SUBKEY as the end key for range queries."));
         }
 
         let end_key = self.subkey.clone();
