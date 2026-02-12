@@ -108,8 +108,7 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
             result: ResultAndState::new(
                 ExecutionResult::Success {
                     reason: SuccessReason::Return,
-                    gas_used: 0,
-                    gas_refunded: 0,
+                    gas: Default::default(),
                     logs: vec![],
                     output: Output::Call(Bytes::from(vec![])),
                 },
