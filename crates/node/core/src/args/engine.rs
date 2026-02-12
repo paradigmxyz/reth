@@ -44,6 +44,7 @@ pub struct DefaultEngineValues {
     sparse_trie_prune_depth: usize,
     sparse_trie_max_storage_tries: usize,
     disable_sparse_trie_cache_pruning: bool,
+    txpool_prewarming_disabled: bool,
     state_root_task_timeout: Option<String>,
 }
 
@@ -205,6 +206,12 @@ impl DefaultEngineValues {
         self
     }
 
+    /// Set whether to disable txpool prewarming by default
+    pub const fn with_txpool_prewarming_disabled(mut self, v: bool) -> Self {
+        self.txpool_prewarming_disabled = v;
+        self
+    }
+
     /// Set the default state root task timeout
     pub fn with_state_root_task_timeout(mut self, v: Option<String>) -> Self {
         self.state_root_task_timeout = v;
@@ -239,6 +246,7 @@ impl Default for DefaultEngineValues {
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
             disable_sparse_trie_cache_pruning: false,
+            txpool_prewarming_disabled: true,
             state_root_task_timeout: Some("1s".to_string()),
         }
     }
@@ -386,6 +394,12 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-sparse-trie-cache-pruning", default_value_t = DefaultEngineValues::get_global().disable_sparse_trie_cache_pruning)]
     pub disable_sparse_trie_cache_pruning: bool,
 
+    /// Enable txpool prewarming between blocks. After a block is canonicalized, waits 4 seconds
+    /// then speculatively executes pending txpool transactions to warm the execution and trie
+    /// caches for the next block.
+    #[arg(long = "engine.txpool-prewarming", default_value_t = !DefaultEngineValues::get_global().txpool_prewarming_disabled)]
+    pub txpool_prewarming: bool,
+
     /// Configure the timeout for the state root task before spawning a sequential fallback.
     /// If the state root task takes longer than this, a sequential computation starts in
     /// parallel and whichever finishes first is used.
@@ -430,6 +444,7 @@ impl Default for EngineArgs {
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
             disable_sparse_trie_cache_pruning,
+            txpool_prewarming_disabled,
             state_root_task_timeout,
         } = DefaultEngineValues::get_global().clone();
         Self {
@@ -461,6 +476,7 @@ impl Default for EngineArgs {
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
             disable_sparse_trie_cache_pruning,
+            txpool_prewarming: !txpool_prewarming_disabled,
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
@@ -497,6 +513,7 @@ impl EngineArgs {
             .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
             .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
+            .without_txpool_prewarming(!self.txpool_prewarming)
             .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
     }
 }
