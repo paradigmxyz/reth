@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* ── Tunables ─────────────────────────────────────────────────────────── */
 
@@ -76,10 +77,18 @@ typedef struct mdbx_pageviz_ring {
   uint32_t _pad[10];               /* pad to separate cache lines */
 } mdbx_pageviz_ring_t;
 
+typedef struct mdbx_pageviz_mapping {
+  volatile void *base;
+  volatile size_t len;
+  volatile uint32_t mdbx_page_size;
+  volatile uint32_t sys_page_size;
+} mdbx_pageviz_mapping_t;
+
 typedef struct mdbx_pageviz_state {
   mdbx_pageviz_ring_t rings[MDBX_PAGEVIZ_MAX_RINGS];
   _Atomic uint32_t ring_count; /* how many rings registered */
   _Atomic uint32_t enabled;    /* runtime enable/disable */
+  mdbx_pageviz_mapping_t mapping;
 } mdbx_pageviz_state_t;
 
 /* ── Global state (defined in .c) ─────────────────────────────────────── */
@@ -173,6 +182,9 @@ uint32_t mdbx_pageviz_drain(mdbx_pageviz_state_t *state, uint32_t ring_idx,
                              uint64_t *out_buf, uint32_t max_count);
 uint32_t mdbx_pageviz_ring_count(mdbx_pageviz_state_t *state);
 uint64_t mdbx_pageviz_dropped(mdbx_pageviz_state_t *state, uint32_t ring_idx);
+void mdbx_pageviz_set_mapping(void *base, size_t len, uint32_t mdbx_page_size);
+int mdbx_pageviz_get_mapping(void **out_base, size_t *out_len,
+                              uint32_t *out_mdbx_ps, uint32_t *out_sys_ps);
 
 #endif /* MDBX_PAGEVIZ */
 #endif /* MDBX_PAGEVIZ_H */

@@ -19,6 +19,32 @@ use tokio::sync::broadcast;
 
 pub mod walker;
 
+unsafe extern "C" {
+    fn mdbx_pageviz_get_mapping(
+        out_base: *mut *mut std::ffi::c_void,
+        out_len: *mut usize,
+        out_mdbx_ps: *mut u32,
+        out_sys_ps: *mut u32,
+    ) -> i32;
+}
+
+#[derive(Clone, Default, Serialize)]
+struct ResidencyStats {
+    total_pages: u64,
+    cached_pages: u64,
+    pct: f64,
+    per_table: Vec<TableResidency>,
+}
+
+#[derive(Clone, Default, Serialize)]
+struct TableResidency {
+    dbi: usize,
+    name: String,
+    total: u64,
+    cached: u64,
+    pct: f64,
+}
+
 #[derive(Clone)]
 struct AppState {
     info: VizInfo,
@@ -26,6 +52,10 @@ struct AppState {
     tree_info: Arc<Vec<walker::TreeInfo>>,
     subscribers: Arc<AtomicUsize>,
     event_tx: broadcast::Sender<Vec<u8>>,
+    residency: Arc<RwLock<Vec<u8>>>,
+    residency_stats: Arc<RwLock<ResidencyStats>>,
+    residency_tx: broadcast::Sender<Vec<u8>>,
+    residency_subscribers: Arc<AtomicUsize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,6 +92,7 @@ pub async fn start_viz_server(
     rx: mpsc::Receiver<Vec<PageEvent>>,
 ) -> std::io::Result<()> {
     let (event_tx, _) = broadcast::channel::<Vec<u8>>(256);
+    let (residency_tx, _) = broadcast::channel::<Vec<u8>>(64);
 
     let owner_map = Arc::new(RwLock::new(config.owner_map));
     let subscribers = Arc::new(AtomicUsize::new(0));
@@ -76,6 +107,10 @@ pub async fn start_viz_server(
         tree_info: Arc::new(config.tree_info),
         subscribers: subscribers.clone(),
         event_tx: event_tx.clone(),
+        residency: Arc::new(RwLock::new(Vec::new())),
+        residency_stats: Arc::new(RwLock::new(ResidencyStats::default())),
+        residency_tx: residency_tx.clone(),
+        residency_subscribers: Arc::new(AtomicUsize::new(0)),
     };
 
     let bridge_tx = event_tx.clone();
@@ -106,12 +141,178 @@ pub async fn start_viz_server(
         })
         .expect("failed to spawn viz-bridge thread");
 
+    let res_map = state.residency.clone();
+    let res_stats = state.residency_stats.clone();
+    let res_tx = state.residency_tx.clone();
+    let res_subs = state.residency_subscribers.clone();
+    let own_map = state.owner_map.clone();
+    let info_clone = state.info.clone();
+
+    std::thread::Builder::new()
+        .name("residency-poller".into())
+        .spawn(move || {
+            let mut prev: Vec<u8> = Vec::new();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+
+                if res_subs.load(Ordering::Relaxed) == 0 {
+                    continue;
+                }
+
+                let mut base: *mut std::ffi::c_void = std::ptr::null_mut();
+                let mut len: usize = 0;
+                let mut mdbx_ps: u32 = 0;
+                let mut sys_ps: u32 = 0;
+                let ok = unsafe {
+                    mdbx_pageviz_get_mapping(&mut base, &mut len, &mut mdbx_ps, &mut sys_ps)
+                };
+                if ok == 0 || base.is_null() || len == 0 || mdbx_ps == 0 || sys_ps == 0 {
+                    continue;
+                }
+
+                let sys_pages = (len + sys_ps as usize - 1) / sys_ps as usize;
+                let mdbx_page_count = len / mdbx_ps as usize;
+
+                let mut mincore_vec = vec![0u8; sys_pages];
+                let ret = unsafe { libc::mincore(base, len, mincore_vec.as_mut_ptr()) };
+                if ret != 0 {
+                    continue;
+                }
+
+                let mut cur = vec![0u8; mdbx_page_count];
+                if mdbx_ps == sys_ps {
+                    // 1:1 mapping
+                    for i in 0..mdbx_page_count.min(sys_pages) {
+                        cur[i] = mincore_vec[i] & 1;
+                    }
+                } else if mdbx_ps > sys_ps {
+                    // Multiple sys pages per MDBX page — ALL must be resident
+                    let ratio = mdbx_ps as usize / sys_ps as usize;
+                    for i in 0..mdbx_page_count {
+                        let base_idx = i * ratio;
+                        let mut all_resident = true;
+                        for j in 0..ratio {
+                            if base_idx + j >= sys_pages
+                                || (mincore_vec[base_idx + j] & 1) == 0
+                            {
+                                all_resident = false;
+                                break;
+                            }
+                        }
+                        cur[i] = if all_resident { 1 } else { 0 };
+                    }
+                } else {
+                    // Multiple MDBX pages per sys page — share residency
+                    let ratio = sys_ps as usize / mdbx_ps as usize;
+                    for i in 0..mdbx_page_count {
+                        let sys_idx = i / ratio;
+                        cur[i] = if sys_idx < sys_pages {
+                            mincore_vec[sys_idx] & 1
+                        } else {
+                            0
+                        };
+                    }
+                }
+
+                {
+                    let mut rm = res_map.write().unwrap();
+                    rm.clear();
+                    rm.extend_from_slice(&cur);
+                }
+
+                {
+                    let omap = own_map.read().unwrap();
+                    let max_dbi = info_clone.dbi_names.len();
+                    let mut total_per = vec![0u64; max_dbi];
+                    let mut cached_per = vec![0u64; max_dbi];
+                    let mut total_cached = 0u64;
+                    let limit = mdbx_page_count.min(omap.len());
+
+                    for i in 0..limit {
+                        let dbi = omap[i] as usize;
+                        if dbi < max_dbi {
+                            total_per[dbi] += 1;
+                            if cur[i] == 1 {
+                                cached_per[dbi] += 1;
+                                total_cached += 1;
+                            }
+                        }
+                    }
+
+                    let mut stats = res_stats.write().unwrap();
+                    stats.total_pages = mdbx_page_count as u64;
+                    stats.cached_pages = total_cached;
+                    stats.pct = if mdbx_page_count > 0 {
+                        (total_cached as f64 / mdbx_page_count as f64) * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    stats.per_table = (0..max_dbi)
+                        .filter(|&d| total_per[d] > 0)
+                        .map(|d| TableResidency {
+                            dbi: d,
+                            name: info_clone.dbi_names.get(d).cloned().unwrap_or_default(),
+                            total: total_per[d],
+                            cached: cached_per[d],
+                            pct: if total_per[d] > 0 {
+                                (cached_per[d] as f64 / total_per[d] as f64) * 100.0
+                            } else {
+                                0.0
+                            },
+                        })
+                        .collect();
+                }
+
+                if prev.len() == cur.len() {
+                    let mut spans: Vec<u8> = Vec::new();
+                    let mut span_count: u32 = 0;
+                    spans.extend_from_slice(&[1u8]);
+                    spans.extend_from_slice(&[0u8; 4]);
+
+                    let mut i = 0;
+                    while i < cur.len() {
+                        if cur[i] != prev[i] {
+                            let state_val = cur[i];
+                            let start = i as u32;
+                            let mut end = i + 1;
+                            while end < cur.len()
+                                && cur[end] != prev[end]
+                                && cur[end] == state_val
+                            {
+                                end += 1;
+                            }
+                            let run_len = (end - i) as u32;
+                            spans.extend_from_slice(&start.to_le_bytes());
+                            spans.extend_from_slice(&run_len.to_le_bytes());
+                            spans.push(state_val);
+                            span_count += 1;
+                            i = end;
+                        } else {
+                            i += 1;
+                        }
+                    }
+
+                    if span_count > 0 {
+                        spans[1..5].copy_from_slice(&span_count.to_le_bytes());
+                        let _ = res_tx.send(spans);
+                    }
+                }
+
+                prev = cur;
+            }
+        })
+        .expect("failed to spawn residency-poller thread");
+
     let app = Router::new()
         .route("/", get(index_handler))
         .route("/ws", get(ws_handler))
         .route("/api/info", get(info_handler))
         .route("/api/owner_map", get(owner_map_handler))
         .route("/api/tree_info", get(tree_info_handler))
+        .route("/api/residency", get(residency_handler))
+        .route("/api/residency_stats", get(residency_stats_handler))
+        .route("/ws_residency", get(ws_residency_handler))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", config.port);
@@ -174,4 +375,62 @@ async fn handle_ws(mut socket: WebSocket, state: AppState) {
     }
 
     state.subscribers.fetch_sub(1, Ordering::Relaxed);
+}
+
+async fn residency_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let map = state.residency.read().unwrap();
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/octet-stream")],
+        map.clone(),
+    )
+        .into_response()
+}
+
+async fn residency_stats_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let stats = state.residency_stats.read().unwrap();
+    axum::Json(stats.clone())
+}
+
+async fn ws_residency_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_ws_residency(socket, state))
+}
+
+async fn handle_ws_residency(mut socket: WebSocket, state: AppState) {
+    state.residency_subscribers.fetch_add(1, Ordering::Relaxed);
+
+    {
+        let msg = {
+            let map = state.residency.read().unwrap();
+            if !map.is_empty() {
+                let mut buf = Vec::with_capacity(1 + map.len());
+                buf.push(0u8);
+                buf.extend_from_slice(&map);
+                Some(buf)
+            } else {
+                None
+            }
+        };
+        if let Some(msg) = msg {
+            let _ = socket.send(Message::Binary(msg.into())).await;
+        }
+    }
+
+    let mut rx = state.residency_tx.subscribe();
+    loop {
+        match rx.recv().await {
+            Ok(data) => {
+                if socket.send(Message::Binary(data.into())).await.is_err() {
+                    break;
+                }
+            }
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
+    }
+
+    state.residency_subscribers.fetch_sub(1, Ordering::Relaxed);
 }

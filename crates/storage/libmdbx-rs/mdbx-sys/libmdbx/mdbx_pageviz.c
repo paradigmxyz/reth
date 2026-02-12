@@ -73,7 +73,35 @@ uint32_t mdbx_pageviz_ring_count(mdbx_pageviz_state_t *state) {
 
 uint64_t mdbx_pageviz_dropped(mdbx_pageviz_state_t *state, uint32_t ring_idx) {
   return atomic_load_explicit(&state->rings[ring_idx].dropped,
-                              memory_order_relaxed);
+                               memory_order_relaxed);
+}
+
+/* ── Mapping info ────────────────────────────────────────────────────── */
+
+void mdbx_pageviz_set_mapping(void *base, size_t len, uint32_t mdbx_page_size) {
+  mdbx_pageviz_state_t *state = mdbx_pageviz_global;
+  if (!state)
+    return;
+  state->mapping.mdbx_page_size = mdbx_page_size;
+  state->mapping.sys_page_size = (uint32_t)sysconf(_SC_PAGESIZE);
+  state->mapping.len = len;
+  /* base written last so consumers see consistent len+page_size first */
+  __atomic_store_n((void *volatile *)&state->mapping.base, base, __ATOMIC_RELEASE);
+}
+
+int mdbx_pageviz_get_mapping(void **out_base, size_t *out_len,
+                              uint32_t *out_mdbx_ps, uint32_t *out_sys_ps) {
+  mdbx_pageviz_state_t *state = mdbx_pageviz_global;
+  if (!state)
+    return 0;
+  void *b = __atomic_load_n((void *volatile *)&state->mapping.base, __ATOMIC_ACQUIRE);
+  if (!b)
+    return 0;
+  *out_base = b;
+  *out_len = state->mapping.len;
+  *out_mdbx_ps = state->mapping.mdbx_page_size;
+  *out_sys_ps = state->mapping.sys_page_size;
+  return 1;
 }
 
 #else /* !MDBX_PAGEVIZ */

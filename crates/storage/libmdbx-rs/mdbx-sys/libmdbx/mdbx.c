@@ -19929,6 +19929,9 @@ __cold int dxb_resize(MDBX_env *const env, const pgno_t used_pgno, const pgno_t 
   eASSERT(env, env->dxb_mmap.limit >= env->dxb_mmap.current);
 
   if (rc == MDBX_SUCCESS) {
+#if defined(MDBX_PAGEVIZ) && MDBX_PAGEVIZ
+    mdbx_pageviz_set_mapping(env->dxb_mmap.base, env->dxb_mmap.current, env->ps);
+#endif
     eASSERT(env, limit_bytes == env->dxb_mmap.limit);
     eASSERT(env, size_bytes <= env->dxb_mmap.filesize);
     if (mode == explicit_resize)
@@ -20341,6 +20344,10 @@ __cold int dxb_setup(MDBX_env *env, const int lck_rc, const mdbx_mode_t mode_bit
                   (lck_rc && env->stuck_meta < 0) ? MMAP_OPTION_TRUNCATE : 0, env->pathname.dxb);
   if (unlikely(err != MDBX_SUCCESS))
     return err;
+
+#if defined(MDBX_PAGEVIZ) && MDBX_PAGEVIZ
+  mdbx_pageviz_set_mapping(env->dxb_mmap.base, env->dxb_mmap.current, env->ps);
+#endif
 
 #if defined(MADV_DONTDUMP)
   err =
