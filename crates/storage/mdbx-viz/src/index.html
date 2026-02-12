@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MDBX Live Viz</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:#0d1117;color:#c9d1d9;font-family:'SF Mono','Fira Code','Cascadia Code',monospace;height:100%;overflow:hidden}
+body{display:flex;flex-direction:row;height:100%}
+#main-panel{flex:1;display:flex;flex-direction:column;padding:16px;overflow:hidden;min-width:0}
+#side-panel{width:340px;flex-shrink:0;border-left:1px solid #30363d;overflow-y:auto;padding:16px;background:#161b22}
+h1{color:#f0f6fc;font-size:18px;margin-bottom:2px}
+.subtitle{color:#8b949e;font-size:12px;margin-bottom:10px}
+.controls{margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.controls button{background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:3px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px}
+.controls button:hover{background:#30363d}
+.zoom-info{font-size:11px;color:#8b949e}
+.status-bar{display:flex;gap:12px;align-items:center;margin-bottom:6px;font-size:11px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.dot.connected{background:#4ade80}.dot.disconnected{background:#f87171}.dot.connecting{background:#facc15}
+.stat-label{color:#8b949e}.stat-value{color:#c9d1d9;font-weight:600}
+#canvas-wrap{border:1px solid #30363d;border-radius:6px;overflow:hidden;background:#000;position:relative;cursor:crosshair;flex:1;min-height:0}
+canvas{display:block;image-rendering:pixelated;width:100%;height:100%}
+#tooltip{position:fixed;background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:8px 12px;font-size:12px;pointer-events:none;display:none;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,.4);max-width:360px}
+#tooltip .tt-row{display:flex;align-items:center;gap:6px}
+#tooltip .tt-swatch{width:10px;height:10px;border-radius:2px;flex-shrink:0;border:1px solid rgba(255,255,255,0.2)}
+#tooltip .tt-name{color:#f0f6fc;font-weight:600}
+#tooltip .tt-detail{color:#8b949e;margin-top:2px}
+#side-panel h2{color:#f0f6fc;font-size:14px;margin-bottom:8px}
+.viz-controls{margin-bottom:12px;font-size:11px}
+.viz-controls label{display:inline-flex;align-items:center;gap:4px;margin-right:10px;cursor:pointer;color:#8b949e}
+.viz-controls label:hover{color:#c9d1d9}
+.viz-controls input[type=checkbox]{accent-color:#58a6ff}
+.viz-controls input[type=range]{width:100px;accent-color:#58a6ff}
+.fade-val{color:#c9d1d9;min-width:35px;display:inline-block}
+table{width:100%;border-collapse:collapse;font-size:11px;background:#0d1117;border:1px solid #30363d;border-radius:6px;overflow:hidden}
+th{text-align:left;padding:6px 8px;background:#1c2128;color:#8b949e;font-weight:500;border-bottom:1px solid #30363d;font-size:10px;text-transform:uppercase;position:sticky;top:0}
+td{padding:5px 8px;border-bottom:1px solid #21262d}
+tr.tbl-row{cursor:pointer;transition:background 0.1s}
+tr.tbl-row:hover td{background:#1c2128}
+tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
+.pct-bar{display:inline-block;height:6px;border-radius:3px;margin-right:6px;vertical-align:middle}
+.swatch-cell{width:12px;height:12px;border-radius:2px;flex-shrink:0}
+#loading{display:flex;align-items:center;justify-content:center;height:100%;color:#8b949e;font-size:14px}
+</style>
+</head>
+<body>
+<div id="main-panel">
+  <h1>MDBX Live Viz</h1>
+  <div class="subtitle" id="subtitle">Loading...</div>
+  <div class="status-bar">
+    <span><span class="dot connecting" id="ws-dot"></span><span id="ws-status">Connecting</span></span>
+    <span class="stat-label">Events/s: <span class="stat-value" id="evt-rate">0</span></span>
+    <span class="stat-label">Total: <span class="stat-value" id="evt-total">0</span></span>
+    <span class="stat-label">Active: <span class="stat-value" id="active-count">0</span></span>
+  </div>
+  <div class="status-bar">
+    <span class="stat-label" style="color:#3c82f6">R: <span class="stat-value" id="cnt-read">0</span></span>
+    <span class="stat-label" style="color:#ef4444">W: <span class="stat-value" id="cnt-write">0</span></span>
+    <span class="stat-label" style="color:#eab308">F: <span class="stat-value" id="cnt-free">0</span></span>
+    <span class="stat-label">Latest: <span class="stat-value" id="evt-latest">-</span></span>
+  </div>
+  <div class="controls">
+    <button id="btn-zin">Zoom +</button>
+    <button id="btn-zout">Zoom &minus;</button>
+    <button id="btn-reset">Reset</button>
+    <button id="btn-clear">Clear Highlights</button>
+    <span class="zoom-info" id="zoom-info"></span>
+  </div>
+  <div id="canvas-wrap">
+    <div id="loading">Loading page map&hellip;</div>
+    <canvas id="map" style="display:none"></canvas>
+  </div>
+</div>
+<div id="side-panel">
+  <div class="viz-controls">
+    <div style="margin-bottom:6px">
+      <label><input type="checkbox" id="chk-read" checked> <span style="color:#3c82f6">&#9632;</span> Reads</label>
+      <label><input type="checkbox" id="chk-write" checked> <span style="color:#ef4444">&#9632;</span> Writes</label>
+      <label><input type="checkbox" id="chk-free" checked> <span style="color:#eab308">&#9632;</span> Frees</label>
+    </div>
+    <div>
+      <label>Fade: <input type="range" id="fade-slider" min="200" max="8000" value="2000" step="100">
+      <span class="fade-val" id="fade-val">2.0s</span></label>
+    </div>
+  </div>
+  <h2>Table Details</h2>
+  <table><thead><tr><th></th><th>Table</th><th>Pages</th><th>Size</th><th>%</th></tr></thead><tbody id="tbl-body"></tbody></table>
+</div>
+<div id="tooltip">
+  <div class="tt-row"><div class="tt-swatch" id="tt-swatch"></div><div class="tt-name" id="tt-name"></div></div>
+  <div class="tt-detail" id="tt-detail"></div>
+</div>
+<script>
+(function(){
+"use strict";
+const PHEX=["#e6194B","#3cb44b","#ffe119","#4363d8","#f58231","#911eb4","#42d4f4","#f032e6","#bfef45","#fabed4","#469990","#dcbeff","#9A6324","#fffac8","#800000","#aaffc3","#808000","#ffd8b1","#000075","#a9a9a9"];
+function h2r(h){const v=parseInt(h.slice(1),16);return[(v>>16)&0xFF,(v>>8)&0xFF,v&0xFF]}
+function hsl2r(h,s,l){h/=360;s/=100;l/=100;let r,g,b;if(!s){r=g=b=l}else{const q=l<.5?l*(1+s):l+s-l*s,p=2*l-q;const f=(p,q,t)=>{if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<.5)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p};r=f(p,q,h+1/3);g=f(p,q,h);b=f(p,q,h-1/3)}return[Math.round(r*255),Math.round(g*255),Math.round(b*255)]}
+function cDbi(i){if(i===0)return[255,255,255];if(i===1)return[0,0,0];if(i===0xFE)return[10,10,10];if(i===0xFF)return[17,17,17];const x=i-2;if(x<PHEX.length)return h2r(PHEX[x]);return hsl2r((x*137)%360,70,55)}
+const PAL=new Array(256);for(let i=0;i<256;i++)PAL[i]=cDbi(i);
+const DGA=[40,40,40],DGB=[55,55,55],DWA=[220,220,220],DWB=[240,240,240];
+const HL={1:[60,130,246],2:[255,80,80],3:[234,179,8]};
+let NP=0,PS=4096,GC=0,GR=0,DBIS=[],DBI_IDX={},oMap=null,lOp=null,lTs=null,FADE=2000;
+let cntR=0,cntW=0,cntF=0;
+let sR=true,sW=true,sF=true;
+const cv=document.getElementById("map"),cx=cv.getContext("2d"),wr=document.getElementById("canvas-wrap");
+const ldEl=document.getElementById("loading"),zmEl=document.getElementById("zoom-info");
+const tt=document.getElementById("tooltip"),ttSw=document.getElementById("tt-swatch");
+const ttNm=document.getElementById("tt-name"),ttDt=document.getElementById("tt-detail");
+const tb=document.getElementById("tbl-body");
+let W=0,H=0,iD=null,oC=null,oCx=null,pX=0,pY=0,sc=1,mS=.01;const xS=128;
+const sel=new Set();let tEv=0,rEv=0,lRT=performance.now();
+function cl(v,a,b){return Math.max(a,Math.min(b,v))}
+function oX(){return Math.max(0,(W-GC*sc)/2)}
+function oY(){return Math.max(0,(H-GR*sc)/2)}
+function cP(){const vw=W/sc,vh=H/sc;pX=cl(pX,0,Math.max(0,GC-vw));pY=cl(pY,0,Math.max(0,GR-vh))}
+function s2w(sx,sy){return{wx:pX+(sx-oX())/sc,wy:pY+(sy-oY())/sc}}
+function w2p(wx,wy){const px=Math.floor(wx),py=Math.floor(wy);if(px<0||py<0||px>=GC||py>=GR)return-1;const i=py*GC+px;return i<NP?i:-1}
+function pC(pg,gy,flt,dA,dB,now){
+  if(pg<0||pg>=NP)return null;const ow=oMap[pg];
+  let c;if(flt&&!sel.has(ow))c=(gy&1)?dA:dB;else c=PAL[ow]||PAL[255];
+  const op=lOp[pg];if(!op)return c;
+  if((op===1&&!sR)||(op===2&&!sW)||(op===3&&!sF))return c;
+  const age=now-lTs[pg];if(age>=FADE){lOp[pg]=0;return c}
+  const t=1-Math.pow(age/FADE,.5);const h=HL[op];if(!h)return c;
+  return[Math.round(c[0]+(h[0]-c[0])*t),Math.round(c[1]+(h[1]-c[1])*t),Math.round(c[2]+(h[2]-c[2])*t)];
+}
+function render(){
+  if(!oMap||W<1||H<1)return;
+  const flt=sel.size>0,uw=sel.has(1),dA=uw?DWA:DGA,dB=uw?DWB:DGB,now=performance.now();
+  if(sc>=1){
+    const vw=W/sc,vh=H/sc,x0=Math.floor(pX),y0=Math.floor(pY);
+    const x1=Math.min(GC,Math.ceil(pX+vw)+1),y1=Math.min(GR,Math.ceil(pY+vh)+1);
+    const vW=Math.max(1,x1-x0),vH=Math.max(1,y1-y0);
+    if(!oC){oC=document.createElement("canvas");oCx=oC.getContext("2d")}
+    if(oC.width!==vW||oC.height!==vH){oC.width=vW;oC.height=vH}
+    const od=oCx.createImageData(vW,vH),d=od.data;
+    for(let y=0;y<vH;y++){const gy=y0+y;for(let x=0;x<vW;x++){
+      const i=gy*GC+(x0+x),o=(y*vW+x)<<2;
+      const c=(i>=0&&i<NP)?pC(i,gy,flt,dA,dB,now):null;
+      if(c){d[o]=c[0];d[o+1]=c[1];d[o+2]=c[2]}else{d[o]=0;d[o+1]=0;d[o+2]=0}d[o+3]=255;
+    }}
+    oCx.putImageData(od,0,0);cx.imageSmoothingEnabled=false;cx.clearRect(0,0,W,H);
+    cx.drawImage(oC,oX()-(pX-x0)*sc,oY()-(pY-y0)*sc,vW*sc,vH*sc);
+    zmEl.textContent=sc.toFixed(sc>=10?0:1)+" px/page";
+  }else{
+    if(!iD||iD.width!==W||iD.height!==H)iD=cx.createImageData(W,H);
+    const d=iD.data,ox=oX(),oy=oY();
+    for(let sy=0;sy<H;sy++){const wy=pY+(sy-oy+.5)/sc,py=Math.floor(wy);
+      for(let sx=0;sx<W;sx++){const wx=pX+(sx-ox+.5)/sc,px=Math.floor(wx),o=(sy*W+sx)<<2;
+        if(px<0||py<0||px>=GC||py>=GR){d[o]=0;d[o+1]=0;d[o+2]=0;d[o+3]=255;continue}
+        const i=py*GC+px,c=(i<NP)?pC(i,py,flt,dA,dB,now):null;
+        if(c){d[o]=c[0];d[o+1]=c[1];d[o+2]=c[2]}else{d[o]=0;d[o+1]=0;d[o+2]=0}d[o+3]=255;
+    }}
+    cx.putImageData(iD,0,0);const pp=1/sc;zmEl.textContent="1 px = "+pp.toFixed(pp>=10?0:1)+" pages";
+  }
+}
+let anim=false;
+function rLoop(){
+  render();let act=0;const now=performance.now();
+  if(lOp)for(let i=0;i<NP;i++)if(lOp[i]&&(now-lTs[i])<FADE)act++;
+  document.getElementById("active-count").textContent=act.toLocaleString();
+  if(act>0)requestAnimationFrame(rLoop);else anim=false;
+}
+function kick(){if(!anim){anim=true;requestAnimationFrame(rLoop)}}
+function sched(){requestAnimationFrame(render)}
+function szCv(){const w=wr.clientWidth,h=wr.clientHeight;if(w<1||h<1)return;W=w;H=h;cv.width=W;cv.height=H;iD=null}
+function fmtSz(mb){if(mb>=1024)return(mb/1024).toFixed(1)+" GB";if(mb>=1)return mb.toFixed(1)+" MB";return(mb*1024).toFixed(0)+" KB"}
+function bldTbl(){
+  tb.innerHTML="";const mx=Math.max(...DBIS.map(d=>d.pct),.1);
+  DBIS.forEach(d=>{const tr=document.createElement("tr");tr.className="tbl-row";tr.dataset.dbiIndex=d.dbi_index;
+    const c=PAL[d.dbi_index]||PAL[255];
+    tr.innerHTML=`<td><div class="swatch-cell" style="background:rgb(${c[0]},${c[1]},${c[2]})"></div></td><td>${d.name}</td><td>${d.pages.toLocaleString()}</td><td>${fmtSz(d.size_mb)}</td><td><span class="pct-bar" style="width:${d.pct/mx*60}px;background:rgb(${c[0]},${c[1]},${c[2]})"></span>${d.pct}%</td>`;
+    tr.addEventListener("click",()=>{const i=d.dbi_index;if(sel.has(i))sel.delete(i);else sel.add(i);uAR();sched()});
+    tb.appendChild(tr);
+  });
+}
+function uAR(){document.querySelectorAll(".tbl-row").forEach(r=>{parseInt(r.dataset.dbiIndex,10);sel.has(parseInt(r.dataset.dbiIndex,10))?r.classList.add("active"):r.classList.remove("active")})}
+function boot(){szCv();GC=Math.ceil(Math.sqrt(NP));GR=Math.ceil(NP/GC);mS=Math.min(W/GC,H/GR,1);sc=mS;pX=0;pY=0;render()}
+function zA(ns,sx,sy){ns=cl(ns,mS,xS);if(Math.abs(ns-sc)<1e-6)return;const b=s2w(sx,sy);sc=ns;pX=b.wx-(sx-oX())/sc;pY=b.wy-(sy-oY())/sc;cP();sched()}
+document.getElementById("btn-zin").addEventListener("click",()=>zA(sc*1.3,W>>1,H>>1));
+document.getElementById("btn-zout").addEventListener("click",()=>zA(sc/1.3,W>>1,H>>1));
+document.getElementById("btn-reset").addEventListener("click",()=>{sc=mS;pX=0;pY=0;sel.clear();uAR();render()});
+document.getElementById("btn-clear").addEventListener("click",()=>{if(lOp)lOp.fill(0);sched()});
+wr.addEventListener("wheel",e=>{e.preventDefault();const r=cv.getBoundingClientRect();zA(sc*Math.exp(-(e.deltaMode===1?e.deltaY*16:e.deltaY)*.002),(e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H)},{passive:false});
+let drag=false,lCX=0,lCY=0;
+cv.addEventListener("pointerdown",e=>{drag=true;lCX=e.clientX;lCY=e.clientY;cv.setPointerCapture(e.pointerId);cv.style.cursor="grabbing"});
+cv.addEventListener("pointermove",e=>{
+  if(drag){pX-=(e.clientX-lCX)/sc;pY-=(e.clientY-lCY)/sc;lCX=e.clientX;lCY=e.clientY;cP();sched();tt.style.display="none";return}
+  const r=cv.getBoundingClientRect(),sx=(e.clientX-r.left)/r.width*W,sy=(e.clientY-r.top)/r.height*H;
+  const w=s2w(sx,sy),pg=w2p(w.wx,w.wy);if(pg<0){tt.style.display="none";return}
+  const ow=oMap[pg],inf=DBI_IDX[ow],c=PAL[ow]||PAL[255];
+  ttSw.style.background=`rgb(${c[0]},${c[1]},${c[2]})`;
+  let ex="";const op=lOp[pg];if(op===1)ex=" [READ]";else if(op===2)ex=" [WRITE]";else if(op===3)ex=" [FREE]";
+  ttNm.textContent=`Page ${pg.toLocaleString()} \u2014 ${inf?inf.name:"idx "+ow}${ex}`;
+  ttDt.textContent=inf?`${inf.pages.toLocaleString()} pages, ${inf.pct}%`:"";
+  tt.style.display="block";tt.style.left=(e.clientX+14)+"px";tt.style.top=(e.clientY+14)+"px";
+});
+cv.addEventListener("pointerup",()=>{drag=false;cv.style.cursor="crosshair"});
+cv.addEventListener("pointercancel",()=>{drag=false;cv.style.cursor="crosshair"});
+cv.addEventListener("mouseleave",()=>{tt.style.display="none"});
+document.getElementById("chk-read").addEventListener("change",e=>{sR=e.target.checked;sched()});
+document.getElementById("chk-write").addEventListener("change",e=>{sW=e.target.checked;sched()});
+document.getElementById("chk-free").addEventListener("change",e=>{sF=e.target.checked;sched()});
+document.getElementById("fade-slider").addEventListener("input",e=>{FADE=parseInt(e.target.value);document.getElementById("fade-val").textContent=(FADE/1000).toFixed(1)+"s"});
+window.addEventListener("resize",()=>{if(!oMap)return;szCv();mS=Math.min(W/GC,H/GR,1);if(sc<mS)sc=mS;cP();render()});
+const wD=document.getElementById("ws-dot"),wS=document.getElementById("ws-status");
+function connectWS(){
+  const ws=new WebSocket(`${location.protocol==="https:"?"wss:":"ws:"}//${location.host}/ws`);
+  ws.binaryType="arraybuffer";
+  ws.onopen=()=>{wD.className="dot connected";wS.textContent="Connected"};
+  ws.onclose=()=>{wD.className="dot disconnected";wS.textContent="Reconnecting...";setTimeout(connectWS,1000)};
+  ws.onerror=()=>ws.close();
+  ws.onmessage=msg=>{
+    if(!oMap)return;const v=new DataView(msg.data);let off=0;const now=performance.now();let cnt=0;
+    let lastPg=-1,lastDbi=0,lastOp=0;
+    while(off+8<=msg.data.byteLength){
+      const pg=v.getUint32(off,true),dbi=v.getUint16(off+4,true),op=v.getUint8(off+6);off+=8;
+      if(pg>=NP)continue;cnt++;
+      if(op===1)cntR++;else if(op===2)cntW++;else if(op===3)cntF++;
+      const prev=lOp[pg],prevLive=prev&&(now-lTs[pg])<FADE;
+      if(!prevLive||op>=prev){lOp[pg]=op;lTs[pg]=now}
+      if(op===2&&dbi>0&&dbi<0xFE)oMap[pg]=dbi;
+      if(op>=2){lastPg=pg;lastDbi=dbi;lastOp=op}else if(lastPg<0){lastPg=pg;lastDbi=dbi;lastOp=op}
+    }
+    tEv+=cnt;rEv+=cnt;document.getElementById("evt-total").textContent=tEv.toLocaleString();
+    document.getElementById("cnt-read").textContent=cntR.toLocaleString();
+    document.getElementById("cnt-write").textContent=cntW.toLocaleString();
+    document.getElementById("cnt-free").textContent=cntF.toLocaleString();
+    if(lastPg>=0){const inf=DBI_IDX[lastDbi];const nm=inf?inf.name:"dbi"+lastDbi;const opN=lastOp===1?"R":lastOp===2?"W":"F";document.getElementById("evt-latest").textContent=opN+" pg"+lastPg.toLocaleString()+" "+nm}
+    const el=now-lRT;if(el>=1000){document.getElementById("evt-rate").textContent=Math.round(rEv/(el/1000)).toLocaleString();rEv=0;lRT=now}
+    if(cnt>0)kick();
+  };
+}
+async function init(){
+  try{
+    const r=await fetch("/api/info"),info=await r.json();NP=info.page_count;PS=info.page_size;
+    DBIS=info.dbi_names.map((n,i)=>({name:n,dbi_index:i,pages:0,pct:0,size_mb:0}));
+    DBI_IDX={};DBIS.forEach(d=>{DBI_IDX[d.dbi_index]=d});
+    const gb=(NP*PS/(1024**3)).toFixed(2);
+    document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
+  }catch(e){document.getElementById("subtitle").textContent="Failed: "+e.message}
+  try{
+    const r=await fetch("/api/owner_map");
+    if(r.ok){oMap=new Uint8Array(await r.arrayBuffer());const ct={};for(let i=0;i<NP;i++){const o=oMap[i];ct[o]=(ct[o]||0)+1}
+      DBIS.forEach(d=>{d.pages=ct[d.dbi_index]||0;d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});
+    }else oMap=new Uint8Array(NP);
+  }catch(e){oMap=new Uint8Array(NP)}
+  lOp=new Uint8Array(NP);lTs=new Float64Array(NP);
+  bldTbl();ldEl.style.display="none";cv.style.display="block";boot();connectWS();
+  setInterval(()=>{if(!oMap)return;const ct={};for(let i=0;i<NP;i++){const o=oMap[i];ct[o]=(ct[o]||0)+1}DBIS.forEach(d=>{d.pages=ct[d.dbi_index]||0;d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});bldTbl()},2000);
+}
+init();
+})();
+</script>
+</body>
+</html>

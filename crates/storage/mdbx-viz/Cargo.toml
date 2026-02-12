@@ -1,0 +1,22 @@
+[package]
+name = "reth-mdbx-viz"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "Apache-2.0"
+homepage.workspace = true
+repository.workspace = true
+description = "Real-time MDBX page access visualization server"
+
+[dependencies]
+reth-libmdbx = { workspace = true, features = ["pageviz"] }
+reth-mdbx-sys = { workspace = true, features = ["pageviz"] }
+axum = { version = "0.7", features = ["ws"] }
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+clap = { version = "4", features = ["derive"] }
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rayon.workspace = true
+eyre.workspace = true

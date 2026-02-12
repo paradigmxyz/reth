@@ -11,3 +11,7 @@ repository.workspace = true
 [build-dependencies]
 cc.workspace = true
 bindgen = { workspace = true, features = ["runtime"] }
+
+[features]
+default = []
+pageviz = []

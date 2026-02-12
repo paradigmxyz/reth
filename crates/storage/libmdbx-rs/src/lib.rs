@@ -36,6 +36,9 @@ mod flags;
 mod transaction;
 mod txn_manager;
 
+#[cfg(feature = "pageviz")]
+pub mod pageviz;
+
 #[cfg(test)]
 mod test_utils {
     use super::*;

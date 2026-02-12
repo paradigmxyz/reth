@@ -190,6 +190,7 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
+pageviz = ["reth-db/pageviz"]
 rocksdb = ["reth-ethereum-cli/rocksdb", "reth-node-core/rocksdb"]
 edge = ["rocksdb"]
 

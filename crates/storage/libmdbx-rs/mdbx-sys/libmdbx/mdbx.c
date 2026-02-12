@@ -13,6 +13,7 @@
 #include MDBX_CONFIG_H
 #endif
 
+
 /* Undefine the NDEBUG if debugging is enforced by MDBX_DEBUG */
 #if (defined(MDBX_DEBUG) && MDBX_DEBUG > 0) || (defined(MDBX_FORCE_ASSERTIONS) && MDBX_FORCE_ASSERTIONS)
 #undef NDEBUG
@@ -437,6 +438,7 @@ __extern_C key_t ftok(const char *, int);
 #include <sys/uio.h>
 
 #endif /*---------------------------------------------------------------------*/
+#include "mdbx_pageviz.h"
 
 #if defined(__ANDROID_API__) || defined(ANDROID)
 #include <android/log.h>
@@ -6193,6 +6195,7 @@ MDBX_INTERNAL int page_touch_unmodifable(MDBX_txn *txn, MDBX_cursor *mc, const p
 static inline int page_touch(MDBX_cursor *mc) {
   page_t *const mp = mc->pg[mc->top];
   MDBX_txn *txn = mc->txn;
+  MDBX_PAGEVIZ_WRITE(mc, mp->pgno);
 
   tASSERT(txn, mc->txn->flags & MDBX_TXN_DIRTY);
   tASSERT(txn, F_ISSET(*cursor_dbi_state(mc), DBI_LINDO | DBI_VALID | DBI_DIRTY));
@@ -31626,6 +31629,7 @@ static __always_inline pgr_t page_get_inline(const uint16_t ILL, const MDBX_curs
   if (unlikely(r.err != MDBX_SUCCESS))
     goto bailout;
 #endif /* MDBX_DISABLE_VALIDATION */
+  MDBX_PAGEVIZ_READ(mc, pgno);
   return r;
 }
 
@@ -31842,6 +31846,7 @@ pgr_t page_new(MDBX_cursor *mc, const unsigned flags) {
     return ret;
 
   DEBUG("db %zu allocated new page %" PRIaPGNO, cursor_dbi(mc), ret.page->pgno);
+  MDBX_PAGEVIZ_WRITE(mc, ret.page->pgno);
   ret.page->flags = (uint16_t)flags;
   cASSERT(mc, *cursor_dbi_state(mc) & DBI_DIRTY);
   cASSERT(mc, mc->txn->flags & MDBX_TXN_DIRTY);
@@ -31870,6 +31875,7 @@ pgr_t page_new_large(MDBX_cursor *mc, const size_t npages) {
     return ret;
 
   DEBUG("dbi %zu allocated new large-page %" PRIaPGNO ", num %zu", cursor_dbi(mc), ret.page->pgno, npages);
+  MDBX_PAGEVIZ_WRITE(mc, ret.page->pgno);
   ret.page->flags = P_LARGE;
   cASSERT(mc, *cursor_dbi_state(mc) & DBI_DIRTY);
   cASSERT(mc, mc->txn->flags & MDBX_TXN_DIRTY);
@@ -32211,6 +32217,7 @@ int page_retire_ex(MDBX_cursor *mc, const pgno_t pgno, page_t *mp /* maybe null 
                    unsigned pageflags /* maybe unknown/zero */) {
   int rc;
   MDBX_txn *const txn = mc->txn;
+  MDBX_PAGEVIZ_FREE(mc, pgno);
   tASSERT(txn, !mp || (mp->pgno == pgno && mp->flags == pageflags));
 
   /* During deleting entire subtrees, it is reasonable and possible to avoid

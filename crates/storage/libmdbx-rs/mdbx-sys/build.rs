@@ -30,6 +30,11 @@ fn main() {
     #[cfg(not(debug_assertions))]
     cc.define("MDBX_DEBUG", "0").define("NDEBUG", None);
 
+    // Enable page visualization instrumentation
+    if std::env::var("CARGO_FEATURE_PAGEVIZ").is_ok() {
+        cc.define("MDBX_PAGEVIZ", "1");
+    }
+
     // Propagate `-C target-cpu=native`
     let rustflags = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap();
     if rustflags.contains("target-cpu=native") &&
@@ -38,7 +43,11 @@ fn main() {
         cc.flag("-march=native");
     }
 
-    cc.file(mdbx.join("mdbx.c")).compile("libmdbx.a");
+    cc.file(mdbx.join("mdbx.c"));
+    if std::env::var("CARGO_FEATURE_PAGEVIZ").is_ok() {
+        cc.file(mdbx.join("mdbx_pageviz.c"));
+    }
+    cc.compile("libmdbx.a");
 }
 
 fn generate_bindings(mdbx: &Path, out_file: &Path) {

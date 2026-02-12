@@ -522,6 +522,79 @@ impl DatabaseEnv {
         self
     }
 
+    /// Starts the real-time page access visualization server.
+    ///
+    /// This enables the C-level page access instrumentation hooks,
+    /// starts a background drainer thread that coalesces events,
+    /// and launches an HTTP+WebSocket server on the given port.
+    ///
+    /// The server serves an interactive HTML visualization at `http://localhost:{port}/`
+    /// showing page accesses in real-time with fading highlights:
+    /// - Blue = read, Red = write, Yellow = free
+    #[cfg(feature = "pageviz")]
+    pub fn start_pageviz(&self, port: u16, db_path: std::path::PathBuf) {
+        use reth_libmdbx::pageviz::PageVizDrainer;
+
+        let max_dbi = self.dbis.values().copied().max().unwrap_or(0) as usize;
+        let mut dbi_names = vec![String::new(); max_dbi + 1];
+        dbi_names[0] = "FREE_DBI".to_string();
+        if dbi_names.len() > 1 {
+            dbi_names[1] = "MAIN_DBI".to_string();
+        }
+        for (name, &dbi) in self.dbis.iter() {
+            dbi_names[dbi as usize] = name.to_string();
+        }
+
+        let mut name_to_dbi = std::collections::HashMap::new();
+        for (&name, &dbi) in self.dbis.iter() {
+            name_to_dbi.insert(name, dbi as u8);
+        }
+
+        let mdbx_dat = db_path.join("mdbx.dat");
+        let walk = match reth_mdbx_viz::walker::walk_mdbx(&mdbx_dat, &name_to_dbi) {
+            Ok(w) => w,
+            Err(e) => {
+                reth_tracing::tracing::error!("pageviz: failed to walk B-tree: {e}");
+                return;
+            }
+        };
+
+        let page_count = walk.page_count;
+        let page_size = walk.page_size;
+
+        let mut drainer = PageVizDrainer::new();
+        drainer.enable();
+        let rx = drainer.start(60);
+
+        let config = reth_mdbx_viz::VizConfig {
+            port,
+            page_count: page_count as u64,
+            page_size: page_size as u32,
+            dbi_names,
+            owner_map: walk.owner_map,
+        };
+
+        // Spawn the viz server on a background tokio runtime
+        std::thread::Builder::new()
+            .name("mdbx-viz-server".into())
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("failed to build tokio runtime for pageviz");
+                rt.block_on(async {
+                    if let Err(e) = reth_mdbx_viz::start_viz_server(config, rx).await {
+                        reth_tracing::tracing::error!("pageviz server error: {e}");
+                    }
+                });
+                // Keep drainer alive while server runs
+                drop(drainer);
+            })
+            .expect("failed to spawn pageviz server thread");
+
+        reth_tracing::tracing::info!("pageviz server started on port {port}");
+    }
+
     /// Creates all the tables defined in [`Tables`], if necessary.
     ///
     /// This keeps tracks of the created table handles and stores them for better efficiency.

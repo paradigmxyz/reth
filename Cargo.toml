@@ -111,6 +111,7 @@ members = [
     "crates/storage/errors/",
     "crates/storage/libmdbx-rs/",
     "crates/storage/libmdbx-rs/mdbx-sys/",
+    "crates/storage/mdbx-viz/",
     "crates/storage/nippy-jar/",
     "crates/storage/provider/",
     "crates/storage/storage-api/",
@@ -378,6 +379,7 @@ reth-invalid-block-hooks = { path = "crates/engine/invalid-block-hooks" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
 reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }
+reth-mdbx-viz = { path = "crates/storage/mdbx-viz" }
 reth-metrics = { path = "crates/metrics" }
 reth-net-banlist = { path = "crates/net/banlist" }
 reth-net-nat = { path = "crates/net/nat" }

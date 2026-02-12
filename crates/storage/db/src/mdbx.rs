@@ -45,11 +45,22 @@ pub fn init_db_for<P: AsRef<Path>, TS: TableSet>(
     path: P,
     args: DatabaseArguments,
 ) -> eyre::Result<DatabaseEnv> {
+    let db_path = path.as_ref().to_path_buf();
     let client_version = args.client_version().clone();
     let mut db = create_db(path, args)?;
     db.create_and_track_tables_for::<TS>()?;
     db.record_client_version(client_version)?;
     drop_orphan_tables(&db);
+
+    #[cfg(feature = "pageviz")]
+    {
+        let port = std::env::var("RETH_PAGEVIZ_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3141u16);
+        db.start_pageviz(port, db_path);
+    }
+
     Ok(db)
 }
 

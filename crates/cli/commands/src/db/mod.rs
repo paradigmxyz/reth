@@ -20,6 +20,7 @@ mod settings;
 mod state;
 mod static_file_header;
 mod stats;
+pub mod gen_ownermap;
 /// DB List TUI
 mod tui;
 
@@ -68,6 +69,8 @@ pub enum Subcommands {
     AccountStorage(account_storage::Command),
     /// Gets account state and storage at a specific block
     State(state::Command),
+    /// Generate a page owner map for MDBX page visualization
+    GenOwnermap(gen_ownermap::Command),
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
@@ -204,6 +207,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             Subcommands::State(command) => {
                 db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
+                });
+            }
+            Subcommands::GenOwnermap(command) => {
+                db_exec!(self.env, tool, N, AccessRights::RO, {
+                    command.execute(data_dir, &tool)?;
                 });
             }
         }

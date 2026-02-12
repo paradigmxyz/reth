@@ -27,6 +27,8 @@ alloy-primitives.workspace = true
 # mdbx
 reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed", "read-tx-timeouts"] }
 eyre = { workspace = true, optional = true }
+reth-mdbx-viz = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["full"] }
 
 # metrics
 reth-metrics = { workspace = true, optional = true }
@@ -97,6 +99,7 @@ op = [
     "reth-db-api/op",
     "reth-primitives-traits/op",
 ]
+pageviz = ["reth-libmdbx/pageviz", "dep:reth-mdbx-viz", "dep:tokio", "mdbx"]
 disable-lock = []
 
 [[bench]]

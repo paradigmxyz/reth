@@ -28,6 +28,7 @@ dashmap = { workspace = true, features = ["inline"], optional = true }
 default = []
 return-borrowed = []
 read-tx-timeouts = ["dep:dashmap"]
+pageviz = ["reth-mdbx-sys/pageviz"]
 
 [dev-dependencies]
 criterion.workspace = true
