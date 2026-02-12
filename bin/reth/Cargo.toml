@@ -33,7 +33,6 @@ reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider.workspace = true
-reth-evm.workspace = true
 reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-cli-runner.workspace = true
@@ -53,35 +52,44 @@ reth-payload-primitives.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-ethereum-payload-builder.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-node-ethereum.workspace = true
 reth-node-builder.workspace = true
 reth-node-metrics.workspace = true
 reth-consensus.workspace = true
-reth-tokio-util.workspace = true
-reth-ress-protocol.workspace = true
-reth-ress-provider.workspace = true
 
 # alloy
+alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 
 # tracing
 tracing.workspace = true
 
-# async
-tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
-
 # misc
 aquamarine.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
-eyre.workspace = true
 
 [dev-dependencies]
+alloy-node-bindings = "1.6.3"
+alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-rpc-types-eth.workspace = true
 backon.workspace = true
+serde_json.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+toml.workspace = true
 
 [features]
-default = ["jemalloc", "otlp", "otlp-logs", "reth-revm/portable", "js-tracer", "keccak-cache-global", "asm-keccak"]
+default = [
+    "jemalloc",
+    "otlp",
+    "otlp-logs",
+    "reth-revm/portable",
+    "js-tracer",
+    "keccak-cache-global",
+    "asm-keccak",
+    "min-debug-logs",
+    "rocksdb",
+]
 
 otlp = [
     "reth-ethereum-cli/otlp",
@@ -105,10 +113,12 @@ asm-keccak = [
     "reth-primitives/asm-keccak",
     "reth-ethereum-cli/asm-keccak",
     "reth-node-ethereum/asm-keccak",
+    "alloy-primitives/asm-keccak",
 ]
 keccak-cache-global = [
     "reth-node-core/keccak-cache-global",
     "reth-node-ethereum/keccak-cache-global",
+    "alloy-primitives/keccak-cache-global",
 ]
 jemalloc = [
     "reth-cli-util/jemalloc",
@@ -180,7 +190,8 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
-edge = ["reth-ethereum-cli/edge", "reth-node-core/edge"]
+rocksdb = ["reth-ethereum-cli/rocksdb", "reth-node-core/rocksdb"]
+edge = ["rocksdb"]
 
 [[bin]]
 name = "reth"

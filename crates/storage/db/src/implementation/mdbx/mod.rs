@@ -146,6 +146,24 @@ impl DatabaseArguments {
         }
     }
 
+    /// Create database arguments suitable for testing.
+    ///
+    /// Uses a small geometry (64MB max, 4MB growth) to avoid exhausting the system's
+    /// virtual memory map limit (`vm.max_map_count`) when many test databases are open
+    /// concurrently.
+    pub fn test() -> Self {
+        Self {
+            geometry: Geometry {
+                size: Some(0..(64 * MEGABYTE)),
+                growth_step: Some(4 * MEGABYTE as isize),
+                shrink_threshold: Some(0),
+                page_size: Some(PageSize::Set(default_page_size())),
+            },
+            max_read_transaction_duration: Some(MaxReadTransactionDuration::Unbounded),
+            ..Self::new(ClientVersion::default())
+        }
+    }
+
     /// Sets the upper size limit of the db environment, the maximum database size in bytes.
     pub const fn with_geometry_max_size(mut self, max_size: Option<usize>) -> Self {
         if let Some(max_size) = max_size {

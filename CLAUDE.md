@@ -24,7 +24,7 @@ Reth is a high-performance Ethereum execution client written in Rust, focusing o
 
 - **Modularity**: Each crate can be used as a standalone library
 - **Performance**: Extensive use of parallelism, memory-mapped I/O, and optimized data structures
-- **Extensibility**: Traits and generic types allow for different implementations (Ethereum, Optimism, etc.)
+- **Extensibility**: Traits and generic types allow for different chain implementations
 - **Type Safety**: Strong typing throughout with minimal use of dynamic dispatch
 
 ## Development Workflow
@@ -179,7 +179,6 @@ Before submitting changes, ensure:
 Label PRs appropriately, first check the available labels and then apply the relevant ones:
 * when changes are RPC related, add A-rpc label
 * when changes are docs related, add C-docs label
-* when changes are optimism related (e.g. new feature or exclusive changes to crates/optimism), add A-op-reth label
 * ... and so on, check the available labels for more options.
 * if being tasked to open a pr, ensure that all changes are properly formatted: `cargo +nightly fmt --all`
 
@@ -233,7 +232,7 @@ Tests often need expansion for:
 Common refactoring pattern:
 - Replace concrete types with generics
 - Add trait bounds for flexibility
-- Enable reuse across different chain types (Ethereum, Optimism)
+- Enable reuse across different chain types
 
 #### When to Comment
 
@@ -382,7 +381,7 @@ cargo nextest run --workspace
 cargo bench --bench bench_name
 
 # Build optimized binary
-cargo build --release --features "jemalloc asm-keccak"
+cargo build --release
 
 # Check compilation for all features
 cargo check --workspace --all-features

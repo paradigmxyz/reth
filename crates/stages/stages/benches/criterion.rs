@@ -72,7 +72,7 @@ fn senders(c: &mut Criterion, runtime: &Runtime) {
 
     let db = setup::txs_testdata(DEFAULT_NUM_BLOCKS);
 
-    let stage = SenderRecoveryStage { commit_threshold: DEFAULT_NUM_BLOCKS };
+    let stage = SenderRecoveryStage { commit_threshold: DEFAULT_NUM_BLOCKS, prune_mode: None };
 
     measure_stage(
         runtime,

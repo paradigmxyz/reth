@@ -248,7 +248,7 @@ impl EngineNodeLauncher {
             static_file_producer_events.map(Into::into),
         );
 
-        ctx.task_executor().spawn_critical(
+        ctx.task_executor().spawn_critical_task(
             "events task",
             Box::pin(node::handle_events(
                 Some(Box::new(ctx.components().network().clone())),
@@ -303,8 +303,6 @@ impl EngineNodeLauncher {
             // the CL
             loop {
                 tokio::select! {
-                    biased;
-
                     event = engine_service.next() => {
                         let Some(event) = event else { break };
                         debug!(target: "reth::cli", "Event: {event}");
@@ -371,7 +369,7 @@ impl EngineNodeLauncher {
 
             let _ = exit.send(res);
         };
-        ctx.task_executor().spawn_critical("consensus engine", Box::pin(consensus_engine));
+        ctx.task_executor().spawn_critical_task("consensus engine", Box::pin(consensus_engine));
 
         let engine_events_for_ethstats = engine_events.new_listener();
 

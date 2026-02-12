@@ -1162,7 +1162,7 @@ mod tests {
 
         for transaction_senders_in_static_files in [false, true] {
             factory.set_storage_settings_cache(
-                StorageSettings::legacy()
+                StorageSettings::v1()
                     .with_transaction_senders_in_static_files(transaction_senders_in_static_files),
             );
 
@@ -1235,7 +1235,7 @@ mod rocksdb_tests {
 
         // Enable RocksDB for transaction hash numbers
         factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+            StorageSettings::v1().with_transaction_hash_numbers_in_rocksdb(true),
         );
 
         let hash1 = B256::from([1u8; 32]);
@@ -1279,7 +1279,7 @@ mod rocksdb_tests {
 
         // Enable RocksDB for transaction hash numbers
         factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+            StorageSettings::v1().with_transaction_hash_numbers_in_rocksdb(true),
         );
 
         let hash = B256::from([1u8; 32]);
@@ -1833,7 +1833,7 @@ mod rocksdb_tests {
 
         // Enable RocksDB for transaction hash numbers
         factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+            StorageSettings::v1().with_transaction_hash_numbers_in_rocksdb(true),
         );
 
         let hash1 = B256::from([1u8; 32]);
@@ -1893,7 +1893,7 @@ mod rocksdb_tests {
         let factory = create_test_provider_factory();
 
         factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+            StorageSettings::v1().with_account_history_in_rocksdb(true),
         );
 
         let provider = factory.database_provider_ro().unwrap();

@@ -32,7 +32,7 @@ Otherwise, running `make maxperf` at the root of the repo should be sufficient f
 The `reth-bench new-payload-fcu` command is the most representative of ethereum mainnet live sync, alternating between sending `engine_newPayload` calls and `engine_forkchoiceUpdated` calls.
 
 The `new-payload-fcu` command supports two optional waiting modes that can be used together or independently:
-- `--wait-time <duration>`: Fixed sleep interval between blocks (e.g., `--wait-time 100ms`)
+- `--wait-time <duration>`: Fixed sleep interval between blocks (e.g., `--wait-time 100ms` or `--wait-time 400` for 400ms)
 - `--wait-for-persistence`: Waits for blocks to be persisted using the `reth_subscribePersistedBlock` subscription
 
 When using `--wait-for-persistence`, the benchmark waits after every `(threshold + 1)` blocks, where the threshold defaults to the engine's persistence threshold (2). This can be customized with `--persistence-threshold <N>`.
@@ -73,7 +73,7 @@ make profiling
 
 If the purpose of the benchmark is to obtain `jemalloc` memory profiles that can then be analyzed by `jeprof`, it should be compiled with the `profiling` profile and the `jemalloc-prof` feature:
 ```bash
-RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features "jemalloc-prof,asm-keccak"
+RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features "jemalloc-prof"
 ```
 
 > [!NOTE]
@@ -82,7 +82,7 @@ RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features "jem
 Finally, if the purpose of the benchmark is to profile the node when `snmalloc` is configured as the default allocator, it would be built with the following
 command:
 ```bash
-RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --no-default-features --features "snmalloc-native,asm-keccak"
+RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --no-default-features --features "snmalloc-native,asm-keccak,min-debug-logs"
 ```
 
 ### Run the Benchmark:

@@ -349,7 +349,7 @@ where
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
-        self.executor.spawn_blocking(Box::pin(async move {
+        self.executor.spawn_blocking_task(Box::pin(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
             let args =
@@ -495,7 +495,7 @@ where
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
                     let builder = self.builder.clone();
-                    self.executor.spawn_blocking(Box::pin(async move {
+                    self.executor.spawn_blocking_task(Box::pin(async move {
                         let res = builder.build_empty_payload(config);
                         let _ = tx.send(res);
                     }));
@@ -506,7 +506,7 @@ where
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
-                    self.executor.spawn_blocking(Box::pin(async move {
+                    self.executor.spawn_blocking_task(Box::pin(async move {
                         let _ = tx.send(job());
                     }));
                     empty_payload = Some(rx);
