@@ -12,10 +12,11 @@ use crate::{
     trie_cursor::{depth_first, TrieCursor, TrieStorageCursor},
 };
 use alloy_primitives::{keccak256, B256, U256};
+use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    BranchNodeMasks, BranchNodeV2, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2,
+    BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2,
 };
 use std::cmp::Ordering;
 use tracing::{error, instrument, trace};
@@ -541,9 +542,21 @@ where
             self.branch_path.len() - branch.ext_len as usize,
         );
 
+        // Compute hash for the branch node if it has a parent extension.
+        let hash = if short_key.is_empty() {
+            None
+        } else {
+            let branch = BranchNodeRef::new(&rlp_nodes_buf, branch.state_mask);
+            (branch.length() > 32).then(|| {
+                self.rlp_encode_buf.clear();
+                branch.encode(&mut self.rlp_encode_buf);
+                keccak256(&self.rlp_encode_buf)
+            })
+        };
+
         // Wrap the `BranchNodeV2` so it can be pushed onto the child stack.
         let branch_as_child = ProofTrieBranchChild::Branch {
-            node: BranchNodeV2::new(short_key, rlp_nodes_buf, branch.state_mask),
+            node: BranchNodeV2::new(short_key, rlp_nodes_buf, branch.state_mask, hash),
             masks: branch.masks,
         };
 

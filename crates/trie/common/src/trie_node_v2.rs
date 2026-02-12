@@ -2,7 +2,7 @@
 
 use crate::BranchNodeMasks;
 use alloc::vec::Vec;
-use alloy_primitives::hex;
+use alloy_primitives::{hex, B256};
 use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
 use alloy_trie::{
     nodes::{BranchNodeRef, ExtensionNode, ExtensionNodeRef, LeafNode, RlpNode, TrieNode},
@@ -47,6 +47,7 @@ impl ProofTrieNodeV2 {
                         path,
                         node: TrieNodeV2::Branch(BranchNodeV2 {
                             key: Nibbles::new(),
+                            hash: None,
                             stack: branch.stack,
                             state_mask: branch.state_mask,
                         }),
@@ -71,6 +72,7 @@ impl ProofTrieNodeV2 {
                             branch_v2.key
                         );
                         branch_v2.key = ext.key;
+                        branch_v2.hash = ext.child.as_hash();
                         last.path = path;
                     }
 
@@ -137,6 +139,7 @@ impl Decodable for TrieNodeV2 {
                 Default::default(),
                 branch.stack,
                 branch.state_mask,
+                None,
             ))),
             TrieNode::Extension(ext) => {
                 if ext.child.is_hash() {
@@ -174,6 +177,13 @@ pub struct BranchNodeV2 {
     pub stack: Vec<RlpNode>,
     /// The bitmask indicating the presence of children at the respective nibble positions
     pub state_mask: TrieMask,
+    /// The hash of the branch node.
+    ///
+    /// This is [`None`] in 2 cases:
+    ///   - When the `key` is empty, i.e this branch is not coupled with a child extension node.
+    ///   - When the branch encoding is short enough that it can be stored in the database without
+    ///     hashing.
+    pub hash: Option<B256>,
 }
 
 impl fmt::Debug for BranchNodeV2 {
@@ -188,8 +198,13 @@ impl fmt::Debug for BranchNodeV2 {
 
 impl BranchNodeV2 {
     /// Creates a new branch node with the given short key, stack, and state mask.
-    pub const fn new(key: Nibbles, stack: Vec<RlpNode>, state_mask: TrieMask) -> Self {
-        Self { key, stack, state_mask }
+    pub const fn new(
+        key: Nibbles,
+        stack: Vec<RlpNode>,
+        state_mask: TrieMask,
+        hash: Option<B256>,
+    ) -> Self {
+        Self { key, stack, state_mask, hash }
     }
 
     /// Converts this node into its RLP node representation, encoding into the provided buffer.
