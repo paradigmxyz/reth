@@ -382,7 +382,9 @@ where
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
 
-        if transaction_count > 0 && transaction_count < Self::SMALL_BLOCK_TX_THRESHOLD {
+        if transaction_count == 0 {
+            // Empty block — nothing to do.
+        } else if transaction_count < Self::SMALL_BLOCK_TX_THRESHOLD {
             // Sequential path for small blocks — avoids rayon work-stealing setup and
             // channel-based reorder overhead when it costs more than the ECDSA recovery itself.
             debug!(

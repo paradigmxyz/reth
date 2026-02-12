@@ -134,24 +134,70 @@ where
     type Recovered = <T::Tx as ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>>>::Recovered;
 }
 
+/// Wraps `Either<L, R>` to implement both [`IntoParallelIterator`] and [`IntoIterator`],
+/// mapping items through [`Either::Left`] / [`Either::Right`] on demand without collecting.
+#[derive(Debug)]
+pub struct EitherIter<L, R>(Either<L, R>);
+
+impl<L, R> IntoParallelIterator for EitherIter<L, R>
+where
+    L: IntoParallelIterator,
+    R: IntoParallelIterator,
+    L::Iter: IndexedParallelIterator,
+    R::Iter: IndexedParallelIterator,
+{
+    type Item = Either<L::Item, R::Item>;
+    type Iter = Either<
+        rayon::iter::Map<L::Iter, fn(L::Item) -> Either<L::Item, R::Item>>,
+        rayon::iter::Map<R::Iter, fn(R::Item) -> Either<L::Item, R::Item>>,
+    >;
+
+    fn into_par_iter(self) -> Self::Iter {
+        match self.0 {
+            Either::Left(l) => Either::Left(l.into_par_iter().map(Either::Left)),
+            Either::Right(r) => Either::Right(r.into_par_iter().map(Either::Right)),
+        }
+    }
+}
+
+impl<L, R> IntoIterator for EitherIter<L, R>
+where
+    L: IntoIterator,
+    R: IntoIterator,
+{
+    type Item = Either<L::Item, R::Item>;
+    type IntoIter = Either<
+        core::iter::Map<L::IntoIter, fn(L::Item) -> Either<L::Item, R::Item>>,
+        core::iter::Map<R::IntoIter, fn(R::Item) -> Either<L::Item, R::Item>>,
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self.0 {
+            Either::Left(l) => Either::Left(l.into_iter().map(Either::Left)),
+            Either::Right(r) => Either::Right(r.into_iter().map(Either::Right)),
+        }
+    }
+}
+
+// SAFETY: `EitherIter` is just a newtype over `Either<L, R>`.
+unsafe impl<L: Send, R: Send> Send for EitherIter<L, R> {}
+
 impl<A: ExecutableTxTuple, B: ExecutableTxTuple> ExecutableTxTuple for Either<A, B> {
     type RawTx = Either<A::RawTx, B::RawTx>;
     type Tx = Either<A::Tx, B::Tx>;
     type Error = Either<A::Error, B::Error>;
-    type IntoIter = Vec<Either<A::RawTx, B::RawTx>>;
+    type IntoIter = EitherIter<A::IntoIter, B::IntoIter>;
     type Convert = Either<A::Convert, B::Convert>;
 
     fn into_parts(self) -> (Self::IntoIter, Self::Convert) {
         match self {
             Self::Left(a) => {
                 let (iter, convert) = a.into_parts();
-                let items: Vec<_> = iter.into_iter().map(Either::Left).collect();
-                (items, Either::Left(convert))
+                (EitherIter(Either::Left(iter)), Either::Left(convert))
             }
             Self::Right(b) => {
                 let (iter, convert) = b.into_parts();
-                let items: Vec<_> = iter.into_iter().map(Either::Right).collect();
-                (items, Either::Right(convert))
+                (EitherIter(Either::Right(iter)), Either::Right(convert))
             }
         }
     }
