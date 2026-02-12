@@ -5,21 +5,24 @@ Usage:
     bench-engine-summary.py <combined_csv> <gas_csv> \
         --output-summary <summary.json> \
         --output-markdown <comment.md> \
+        [--baseline-csv <run1_combined.csv>]
         [--baseline <baseline.json>]
 
-The baseline file defaults to /reth-bench/baseline.json if it exists.
+When --baseline-csv is provided, generates a statistical comparison table
+between run 1 (baseline-csv) and run 2 (combined_csv) with z-score thresholds.
 """
 
 import argparse
 import csv
 import json
-import os
+import math
 import sys
 from pathlib import Path
 
 GIGAGAS = 1_000_000_000
 BASELINE_PATH = Path("/reth-bench/baseline.json")
-REGRESSION_THRESHOLD = 0.05  # 5%
+NOISE_THRESHOLD = 1.0  # minimum threshold floor (%)
+Z_K = 2.0  # z-score multiplier for 95% confidence interval
 
 
 def parse_combined_csv(path: str) -> list[dict]:
@@ -57,20 +60,60 @@ def parse_gas_csv(path: str) -> list[dict]:
     return rows
 
 
+def stddev(values: list[float], mean: float) -> float:
+    if len(values) < 2:
+        return 0.0
+    return math.sqrt(sum((v - mean) ** 2 for v in values) / (len(values) - 1))
+
+
+def percentile(sorted_vals: list[float], pct: int) -> float:
+    if not sorted_vals:
+        return 0.0
+    idx = int(len(sorted_vals) * pct / 100)
+    idx = min(idx, len(sorted_vals) - 1)
+    return sorted_vals[idx]
+
+
+def compute_stats(combined: list[dict]) -> dict:
+    """Compute per-run statistics from parsed CSV data."""
+    n = len(combined)
+    if n == 0:
+        return {}
+
+    latencies_ms = [r["new_payload_latency_us"] / 1_000 for r in combined]
+    sorted_lat = sorted(latencies_ms)
+    mean_lat = sum(latencies_ms) / n
+    std_lat = stddev(latencies_ms, mean_lat)
+
+    mgas_s_values = []
+    for r in combined:
+        lat_s = r["new_payload_latency_us"] / 1_000_000
+        if lat_s > 0:
+            mgas_s_values.append(r["gas_used"] / lat_s / 1_000_000)
+    mean_mgas_s = sum(mgas_s_values) / len(mgas_s_values) if mgas_s_values else 0
+
+    return {
+        "n": n,
+        "mean_ms": mean_lat,
+        "stddev_ms": std_lat,
+        "p50_ms": percentile(sorted_lat, 50),
+        "p90_ms": percentile(sorted_lat, 90),
+        "p99_ms": percentile(sorted_lat, 99),
+        "mean_mgas_s": mean_mgas_s,
+    }
+
+
 def compute_summary(combined: list[dict], gas: list[dict]) -> dict:
     """Compute aggregate metrics from parsed CSV data."""
     total_gas = sum(r["gas_used"] for r in combined)
     blocks = len(combined)
 
-    # Execution-only duration: sum of per-block total_latency
     exec_duration_us = sum(r["total_latency_us"] for r in combined)
     exec_duration_s = exec_duration_us / 1_000_000
 
-    # Wall-clock duration from gas CSV (last timestamp)
     wall_duration_us = gas[-1]["time_us"] if gas else exec_duration_us
     wall_duration_s = wall_duration_us / 1_000_000
 
-    # Per-block Ggas/s
     per_block_ggas = []
     for r in combined:
         lat_s = r["total_latency_us"] / 1_000_000
@@ -80,11 +123,6 @@ def compute_summary(combined: list[dict], gas: list[dict]) -> dict:
     np_latencies_ms = sorted(r["new_payload_latency_us"] / 1_000 for r in combined)
 
     avg_new_payload_ms = sum(np_latencies_ms) / blocks if blocks else 0
-
-    def percentile(sorted_vals: list[float], pct: int) -> float:
-        idx = int(len(sorted_vals) * pct / 100)
-        idx = min(idx, len(sorted_vals) - 1)
-        return sorted_vals[idx] if sorted_vals else 0
 
     persistence_values = [r["persistence_wait_us"] for r in combined if r["persistence_wait_us"] is not None]
     avg_persistence_wait_ms = (
@@ -119,15 +157,12 @@ def compute_summary(combined: list[dict], gas: list[dict]) -> dict:
 
 
 def format_duration(seconds: float) -> str:
-    """Format duration as human-readable string."""
     if seconds >= 60:
-        minutes = seconds / 60
-        return f"{minutes:.1f}min"
+        return f"{seconds / 60:.1f}min"
     return f"{seconds}s"
 
 
 def format_gas(gas: int) -> str:
-    """Format gas as human-readable string (e.g. 60.4G, 123.5M)."""
     if gas >= GIGAGAS:
         return f"{gas / GIGAGAS:.1f}G"
     if gas >= 1_000_000:
@@ -135,27 +170,89 @@ def format_gas(gas: int) -> str:
     return f"{gas:,}"
 
 
-def format_change(current: float, baseline: float) -> str:
-    """Format a % change with arrow indicator."""
-    if baseline == 0:
-        return "N/A"
-    pct = (current - baseline) / baseline * 100
-    if abs(pct) < 0.5:
-        return f"~0%"
-    arrow = "🔺" if pct > 0 else "🔻"
-    return f"{arrow} {pct:+.1f}%"
+def z_threshold(std_b: float, std_f: float, n: int, ref_mean: float) -> float:
+    """Calculate z-score threshold percentage.
+    
+    threshold% = k * sqrt(stddev_b² + stddev_f²) / (mean * sqrt(n)) * 100
+    """
+    if n <= 0 or ref_mean <= 0:
+        return 0.0
+    combined_std = math.sqrt(std_b ** 2 + std_f ** 2)
+    se = combined_std / math.sqrt(n)
+    return max(Z_K * se / ref_mean * 100.0, NOISE_THRESHOLD)
 
 
-def is_regression(current: float, baseline: float) -> bool:
-    """Check if a metric regressed beyond threshold (lower is worse for Ggas/s)."""
-    if baseline == 0:
-        return False
-    return (baseline - current) / baseline > REGRESSION_THRESHOLD
+def z_threshold_p50(std_b: float, std_f: float, n: int, ref_p50: float) -> float:
+    """Z-score threshold for medians (1.253x correction for median SE)."""
+    if n <= 0 or ref_p50 <= 0:
+        return 0.0
+    combined_std = math.sqrt(std_b ** 2 + std_f ** 2)
+    se = 1.253 * combined_std / math.sqrt(n)
+    return max(Z_K * se / ref_p50 * 100.0, NOISE_THRESHOLD)
 
 
-def generate_markdown(summary: dict, baseline: dict | None) -> str:
-    """Generate a markdown comment body comparing current vs baseline."""
+def fmt_ms(v: float) -> str:
+    return f"{v:.2f}ms"
+
+
+def fmt_mgas(v: float) -> str:
+    return f"{v:.2f}"
+
+
+def change_str(pct: float, threshold: float, lower_is_better: bool) -> str:
+    """Format change% with significance indicator and threshold."""
+    if abs(pct) <= threshold:
+        emoji = "≈"
+    elif (pct < 0) == lower_is_better:
+        emoji = "✅"
+    else:
+        emoji = "❌"
+
+    thresh_str = f" ±{threshold:.2f}%" if threshold > NOISE_THRESHOLD else ""
+    return f"{pct:+.2f}% {emoji}{thresh_str}"
+
+
+def generate_comparison_table(run1: dict, run2: dict) -> str:
+    """Generate a markdown comparison table between two runs using z-score thresholds."""
+    n = min(run1["n"], run2["n"])
+
+    thresh_mean = z_threshold(run1["stddev_ms"], run2["stddev_ms"], n, run1["mean_ms"])
+    thresh_p50 = z_threshold_p50(run1["stddev_ms"], run2["stddev_ms"], n, run1["p50_ms"])
+    thresh_gas = z_threshold(run1["stddev_ms"], run2["stddev_ms"], n, run1["mean_ms"])
+
+    def pct(base: float, feat: float) -> float:
+        return (feat - base) / base * 100.0 if base > 0 else 0.0
+
+    mean_pct = pct(run1["mean_ms"], run2["mean_ms"])
+    p50_pct = pct(run1["p50_ms"], run2["p50_ms"])
+    p90_pct = pct(run1["p90_ms"], run2["p90_ms"])
+    p99_pct = pct(run1["p99_ms"], run2["p99_ms"])
+    gas_pct = pct(run1["mean_mgas_s"], run2["mean_mgas_s"])
+
+    lines = [
+        "### Statistical Comparison (run 1 vs run 2)",
+        "",
+        "| Metric | Run 1 | Run 2 | Change |",
+        "|--------|-------|-------|--------|",
+        f"| Mean | {fmt_ms(run1['mean_ms'])} | {fmt_ms(run2['mean_ms'])} | {change_str(mean_pct, thresh_mean, lower_is_better=True)} |",
+        f"| StdDev | {fmt_ms(run1['stddev_ms'])} | {fmt_ms(run2['stddev_ms'])} | |",
+        f"| P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, thresh_p50, lower_is_better=True)} |",
+        f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, thresh_mean, lower_is_better=True)} |",
+        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, thresh_mean, lower_is_better=True)} |",
+        f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, thresh_gas, lower_is_better=False)} |",
+        "",
+        f"*{n} blocks, z-score k={Z_K} (95% CI), noise floor {NOISE_THRESHOLD}%*",
+    ]
+    return "\n".join(lines)
+
+
+def generate_markdown(summary: dict, baseline: dict | None, comparison_table: str | None) -> str:
+    """Generate a markdown comment body."""
     lines = ["## ⚡ Engine Benchmark Results", ""]
+
+    if comparison_table:
+        lines.append(comparison_table)
+        lines.append("")
 
     metrics = [
         ("Mean Ggas/s", "mean_ggas_s", True),
@@ -168,55 +265,28 @@ def generate_markdown(summary: dict, baseline: dict | None) -> str:
         ("Avg trie cache wait (ms)", "avg_sparse_trie_wait_ms", False),
     ]
 
-    if baseline:
-        has_regression = (
-            is_regression(summary["mean_ggas_s"], baseline.get("mean_ggas_s", baseline.get("execution_ggas_s", 0)))
-            or is_regression(summary["median_block_ggas_s"], baseline.get("median_block_ggas_s", 0))
-        )
-
-        if has_regression:
-            lines.append("> [!CAUTION]")
-            lines.append(f"> Performance regression detected (>{REGRESSION_THRESHOLD*100:.0f}% drop in Ggas/s)")
-            lines.append("")
-
-        lines.append("| Metric | This PR | main | Change |")
-        lines.append("|--------|---------|------|--------|")
-
-        for label, key, higher_is_better in metrics:
-            cur = summary[key]
-            base = baseline.get(key, 0)
-            if higher_is_better:
-                change = format_change(cur, base)
-            else:
-                change = format_change(base, cur) if base != 0 else "N/A"
-            lines.append(f"| {label} | {cur} | {base} | {change} |")
-
-        lines.append("")
-        lines.append(f"Blocks: {summary['blocks']} | "
-                      f"Total gas: {format_gas(summary['total_gas'])} | "
-                      f"Total time: {format_duration(summary['wall_clock_s'])}")
-    else:
-        lines.append("| Metric | Value |")
-        lines.append("|--------|-------|")
-        for label, key, _ in metrics:
-            lines.append(f"| {label} | {summary[key]} |")
-        lines.append("")
-        lines.append(f"Blocks: {summary['blocks']} | "
-                      f"Total gas: {format_gas(summary['total_gas'])} | "
-                      f"Total time: {format_duration(summary['wall_clock_s'])}")
-        lines.append("")
-        lines.append("*No baseline found — first run on main will establish it.*")
+    lines.append("### Run 2 Summary")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
+    for label, key, _ in metrics:
+        lines.append(f"| {label} | {summary[key]} |")
+    lines.append("")
+    lines.append(f"Blocks: {summary['blocks']} | "
+                  f"Total gas: {format_gas(summary['total_gas'])} | "
+                  f"Total time: {format_duration(summary['wall_clock_s'])}")
 
     return "\n".join(lines)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Parse reth-bench results")
-    parser.add_argument("combined_csv", help="Path to combined_latency.csv")
-    parser.add_argument("gas_csv", help="Path to total_gas.csv")
+    parser.add_argument("combined_csv", help="Path to combined_latency.csv (run 2)")
+    parser.add_argument("gas_csv", help="Path to total_gas.csv (run 2)")
     parser.add_argument("--output-summary", required=True, help="Output JSON summary path")
     parser.add_argument("--output-markdown", required=True, help="Output markdown path")
-    parser.add_argument("--baseline", default=None, help="Baseline JSON path")
+    parser.add_argument("--baseline", default=None, help="Baseline JSON path (for main comparison)")
+    parser.add_argument("--baseline-csv", default=None, help="Run 1 combined_latency.csv for comparison")
     args = parser.parse_args()
 
     combined = parse_combined_csv(args.combined_csv)
@@ -232,17 +302,23 @@ def main():
         json.dump(summary, f, indent=2)
     print(f"Summary written to {args.output_summary}")
 
-    # Load baseline
+    comparison_table = None
+    if args.baseline_csv and Path(args.baseline_csv).exists():
+        run1_data = parse_combined_csv(args.baseline_csv)
+        if run1_data:
+            run1_stats = compute_stats(run1_data)
+            run2_stats = compute_stats(combined)
+            comparison_table = generate_comparison_table(run1_stats, run2_stats)
+            print("Generated statistical comparison table")
+
     baseline = None
     baseline_path = Path(args.baseline) if args.baseline else BASELINE_PATH
     if baseline_path.exists():
         with open(baseline_path) as f:
             baseline = json.load(f)
         print(f"Loaded baseline from {baseline_path}")
-    else:
-        print(f"No baseline found at {baseline_path}")
 
-    markdown = generate_markdown(summary, baseline)
+    markdown = generate_markdown(summary, baseline, comparison_table)
 
     with open(args.output_markdown, "w") as f:
         f.write(markdown)

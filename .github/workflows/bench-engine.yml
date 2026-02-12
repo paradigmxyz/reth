@@ -232,11 +232,13 @@ jobs:
         id: results
         if: success()
         run: |
-          python3 .github/scripts/bench-engine-summary.py \
-            /tmp/bench-results/combined_latency.csv \
-            /tmp/bench-results/total_gas.csv \
-            --output-summary /tmp/bench-summary.json \
-            --output-markdown /tmp/bench-comment.md
+          SUMMARY_ARGS="/tmp/bench-results/combined_latency.csv /tmp/bench-results/total_gas.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --output-summary /tmp/bench-summary.json"
+          SUMMARY_ARGS="$SUMMARY_ARGS --output-markdown /tmp/bench-comment.md"
+          if [ -f /tmp/bench-results-run1/combined_latency.csv ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv /tmp/bench-results-run1/combined_latency.csv"
+          fi
+          python3 .github/scripts/bench-engine-summary.py $SUMMARY_ARGS
 
       - name: Generate charts
         if: success()
