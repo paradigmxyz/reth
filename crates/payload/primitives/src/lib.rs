@@ -444,8 +444,8 @@ impl EngineApiMessageVersion {
     /// Returns the reth-specific method name for the given version.
     ///
     /// These endpoints (`reth_newPayload*`) mirror the standard `engine_newPayload*`
-    /// endpoints but wait for execution cache and preserved sparse trie locks
-    /// to become available before processing.
+    /// endpoints but wait for persistence and cache updates to complete
+    /// before processing.
     pub const fn reth_method_name(&self) -> &'static str {
         match self {
             Self::V1 => "reth_newPayloadV1",

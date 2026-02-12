@@ -294,7 +294,7 @@ pub(crate) struct NewPayloadTimingBreakdown {
 /// flag.
 ///
 /// When `use_reth_namespace` is true, uses the `reth_newPayload*` endpoints which wait for
-/// execution cache and preserved sparse trie locks to become available before processing.
+/// persistence and cache updates to complete before processing.
 ///
 /// Returns the server-reported execution latency when using the reth namespace, or `None` for
 /// the standard engine namespace.

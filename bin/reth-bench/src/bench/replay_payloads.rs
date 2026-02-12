@@ -128,8 +128,8 @@ pub struct Command {
     /// Use `reth_newPayload*` endpoints instead of `engine_newPayload*`.
     ///
     /// The `reth_newPayload*` endpoints are reth-specific extensions that wait for
-    /// execution cache and preserved sparse trie locks to become available before
-    /// processing, ensuring optimal cache utilization during benchmarking.
+    /// persistence and cache updates to complete before processing the next payload,
+    /// and return server-side timing breakdowns (latency, persistence wait, cache wait).
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     reth_new_payload: bool,
 }
@@ -172,7 +172,7 @@ impl Command {
             );
         }
         if self.reth_new_payload {
-            info!("Using reth_newPayload* endpoints (waits for execution cache locks)");
+            info!("Using reth_newPayload* endpoints");
         }
 
         // Set up waiter based on configured options

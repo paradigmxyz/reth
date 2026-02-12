@@ -62,8 +62,8 @@ pub struct BenchmarkArgs {
     /// Use `reth_newPayload*` endpoints instead of `engine_newPayload*`.
     ///
     /// The `reth_newPayload*` endpoints are reth-specific extensions that wait for
-    /// execution cache and preserved sparse trie locks to become available before
-    /// processing, ensuring optimal cache utilization during benchmarking.
+    /// persistence and cache updates to complete before processing the next payload,
+    /// and return server-side timing breakdowns (latency, persistence wait, cache wait).
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     pub reth_new_payload: bool,
 }

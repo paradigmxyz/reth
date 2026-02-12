@@ -77,7 +77,7 @@ pub struct CacheWaitDurations {
 /// This is used by `reth_newPayload*` endpoints to ensure that payload processing
 /// waits for any ongoing operations to complete before starting.
 pub trait WaitForCaches {
-    /// Waits for both the execution cache and preserved sparse trie locks to become available.
+    /// Waits for persistence and cache updates to complete.
     ///
     /// Returns the time spent waiting for each cache separately.
     fn wait_for_caches(&self) -> CacheWaitDurations;

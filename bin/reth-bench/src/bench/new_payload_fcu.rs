@@ -156,7 +156,7 @@ impl Command {
         let total_blocks = benchmark_mode.total_blocks();
 
         if use_reth_namespace {
-            info!("Using reth_newPayload* endpoints (waits for execution cache locks)");
+            info!("Using reth_newPayload* endpoints");
         }
 
         let buffer_size = self.rpc_block_buffer_size;
