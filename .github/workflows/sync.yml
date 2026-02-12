@@ -1,8 +1,13 @@
 # Runs sync tests.
+#
+# - On PRs and merge groups: lightweight 3k block sync with hivetests profile.
+# - On schedule (every 6h) and manual dispatch: full 100k block sync, with and without ERA.
 
 name: sync test
 
 on:
+  pull_request:
+  merge_group:
   workflow_dispatch:
   schedule:
     - cron: "0 */6 * * *"
@@ -18,7 +23,7 @@ concurrency:
 jobs:
   sync:
     if: github.repository == 'paradigmxyz/reth'
-    name: sync (${{ matrix.chain.bin }})
+    name: ${{ matrix.name }}
     runs-on: depot-ubuntu-latest
     env:
       RUST_LOG: info,sync=error
@@ -26,37 +31,75 @@ jobs:
     timeout-minutes: 60
     strategy:
       matrix:
-        chain:
-          - build: install
+        include:
+          # PR / merge group: lightweight 3k block sync with debug assertions
+          - name: sync (reth, 3k)
+            build: install
+            bin: reth
+            chain: mainnet
+            tip: "0x6b51cf0d0c2e298ef9039c03c3aa2f219aac2ee5f4e446a3097a7834307b9777"
+            block: 3000
+            unwind-target: "0x4976c27e6aca290c2c45d20aa36f81c2df2ada1e7226e4fe0debfb95f6a49ae3"
+            profile: hivetests
+            extra-args: ""
+            scheduled: false
+          # Scheduled: full 100k block sync
+          - name: sync (reth, 100k)
+            build: install
             bin: reth
             chain: mainnet
             tip: "0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4"
             block: 100000
             unwind-target: "0x52e0509d33a988ef807058e2980099ee3070187f7333aae12b64d4d675f34c5a"
+            profile: release
+            extra-args: ""
+            scheduled: true
+          # Scheduled: full 100k block sync with ERA
+          - name: sync-era (reth, 100k)
+            build: install
+            bin: reth
+            chain: mainnet
+            tip: "0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4"
+            block: 100000
+            unwind-target: "0x52e0509d33a988ef807058e2980099ee3070187f7333aae12b64d4d675f34c5a"
+            profile: release
+            extra-args: "--era.enable"
+            scheduled: true
     steps:
-      - uses: actions/checkout@v6
-      - uses: rui314/setup-mold@v1
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
+      - if: ${{ matrix.scheduled == false || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        uses: actions/checkout@v6
+      - if: ${{ matrix.scheduled == false || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        uses: rui314/setup-mold@v1
+      - if: ${{ matrix.scheduled == false || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        uses: dtolnay/rust-toolchain@stable
+      - if: ${{ matrix.scheduled == false || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - if: ${{ matrix.scheduled == false || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Build ${{ matrix.chain.bin }}
-        run: make ${{ matrix.chain.build }}
+      - name: Build ${{ matrix.bin }}
+        if: ${{ matrix.scheduled == false || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        run: make PROFILE=${{ matrix.profile }} ${{ matrix.build }}
       - name: Run sync
+        if: ${{ matrix.scheduled == false || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
-          ${{ matrix.chain.bin }} node \
-            --chain ${{ matrix.chain.chain }} \
-            --debug.tip ${{ matrix.chain.tip }} \
-            --debug.max-block ${{ matrix.chain.block }} \
-            --debug.terminate
+          ${{ matrix.bin }} node \
+            --chain ${{ matrix.chain }} \
+            --debug.tip ${{ matrix.tip }} \
+            --debug.max-block ${{ matrix.block }} \
+            --debug.terminate \
+            ${{ matrix.extra-args }}
       - name: Verify the target block hash
+        if: ${{ matrix.scheduled == false || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
-          ${{ matrix.chain.bin }} db --chain ${{ matrix.chain.chain }} get static-file headers ${{ matrix.chain.block }} \
-            | grep ${{ matrix.chain.tip }}
+          ${{ matrix.bin }} db --chain ${{ matrix.chain }} get static-file headers ${{ matrix.block }} \
+            | grep ${{ matrix.tip }}
       - name: Run stage unwind for 100 blocks
+        if: ${{ matrix.scheduled == false || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
-          ${{ matrix.chain.bin }} stage unwind num-blocks 100 --chain ${{ matrix.chain.chain }}
+          ${{ matrix.bin }} stage unwind num-blocks 100 --chain ${{ matrix.chain }}
       - name: Run stage unwind to block hash
+        if: ${{ matrix.scheduled == false || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
-          ${{ matrix.chain.bin }} stage unwind to-block ${{ matrix.chain.unwind-target }} --chain ${{ matrix.chain.chain }}
+          ${{ matrix.bin }} stage unwind to-block ${{ matrix.unwind-target }} --chain ${{ matrix.chain }}
