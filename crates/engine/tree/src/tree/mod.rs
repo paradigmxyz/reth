@@ -1510,7 +1510,7 @@ where
                                         .engine
                                         .failed_forkchoice_updated_response_deliveries
                                         .increment(1);
-                                    error!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}");
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
@@ -1534,7 +1534,7 @@ where
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {
-                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    warn!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to deliver newPayload response, receiver dropped (request cancelled): {err:?}");
                                     self.metrics
                                         .engine
                                         .failed_new_payload_response_deliveries
