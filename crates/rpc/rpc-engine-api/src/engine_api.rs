@@ -281,7 +281,7 @@ where
         Ok(RethPayloadStatus {
             status,
             latency_us: timings.latency.as_micros() as u64,
-            persistence_wait_us: timings.persistence_wait.as_micros() as u64,
+            persistence_wait_us: timings.persistence_wait.map(|d| d.as_micros() as u64),
             execution_cache_wait_us: timings.execution_cache_wait.as_micros() as u64,
             sparse_trie_wait_us: timings.sparse_trie_wait.as_micros() as u64,
         })
@@ -318,7 +318,7 @@ where
         Ok(RethPayloadStatus {
             status,
             latency_us: timings.latency.as_micros() as u64,
-            persistence_wait_us: timings.persistence_wait.as_micros() as u64,
+            persistence_wait_us: timings.persistence_wait.map(|d| d.as_micros() as u64),
             execution_cache_wait_us: timings.execution_cache_wait.as_micros() as u64,
             sparse_trie_wait_us: timings.sparse_trie_wait.as_micros() as u64,
         })
@@ -355,7 +355,7 @@ where
         Ok(RethPayloadStatus {
             status,
             latency_us: timings.latency.as_micros() as u64,
-            persistence_wait_us: timings.persistence_wait.as_micros() as u64,
+            persistence_wait_us: timings.persistence_wait.map(|d| d.as_micros() as u64),
             execution_cache_wait_us: timings.execution_cache_wait.as_micros() as u64,
             sparse_trie_wait_us: timings.sparse_trie_wait.as_micros() as u64,
         })
@@ -392,7 +392,7 @@ where
         Ok(RethPayloadStatus {
             status,
             latency_us: timings.latency.as_micros() as u64,
-            persistence_wait_us: timings.persistence_wait.as_micros() as u64,
+            persistence_wait_us: timings.persistence_wait.map(|d| d.as_micros() as u64),
             execution_cache_wait_us: timings.execution_cache_wait.as_micros() as u64,
             sparse_trie_wait_us: timings.sparse_trie_wait.as_micros() as u64,
         })

@@ -1552,23 +1552,29 @@ where
                                 let (persistence_result, persistence_wait, cache_wait) =
                                     std::thread::scope(|s| {
                                         let persistence_handle = s.spawn(|| {
-                                            let start = Instant::now();
-                                            let result = pending_persistence.map(|(rx, start_time, _action)| {
-                                                (rx.recv().ok(), start_time)
-                                            });
-                                            (result, start.elapsed())
+                                            pending_persistence.map(|(rx, start_time, _action)| {
+                                                let start = Instant::now();
+                                                let result = rx.recv().ok();
+                                                (result, start_time, start.elapsed())
+                                            })
                                         });
 
                                         let cache_handle = s.spawn(|| {
                                             validator.wait_for_caches()
                                         });
 
-                                        let (persistence_result, persistence_wait) = persistence_handle.join().expect("persistence wait thread panicked");
+                                        let persistence_result = persistence_handle.join().expect("persistence wait thread panicked");
                                         let cache_wait = cache_handle.join().expect("cache wait thread panicked");
-                                        (persistence_result, persistence_wait, cache_wait)
+
+                                        let persistence_wait = persistence_result.as_ref().map(|(_, _, elapsed)| *elapsed);
+                                        let persistence_complete = persistence_result.and_then(|(result, start_time, _)| {
+                                            result.map(|r| (r, start_time))
+                                        });
+
+                                        (persistence_complete, persistence_wait, cache_wait)
                                     });
 
-                                if let Some((Some(result), start_time)) = persistence_result {
+                                if let Some((result, start_time)) = persistence_result {
                                     let _ = self.on_persistence_complete(result, start_time);
                                 }
 

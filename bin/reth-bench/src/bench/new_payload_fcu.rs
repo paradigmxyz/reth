@@ -237,18 +237,24 @@ impl Command {
 
             let (version, params) = block_to_new_payload(block, is_optimism)?;
             let start = Instant::now();
-            let server_latency =
+            let server_timings =
                 call_new_payload_with_reth(&auth_provider, version, params, use_reth_namespace)
                     .await?;
 
-            let np_latency = server_latency.unwrap_or_else(|| start.elapsed());
-            let new_payload_result = NewPayloadResult { gas_used, latency: np_latency };
+            let np_latency = server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
+            let new_payload_result = NewPayloadResult {
+                gas_used,
+                latency: np_latency,
+                persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
+                execution_cache_wait: server_timings.as_ref().map(|t| t.execution_cache_wait).unwrap_or_default(),
+                sparse_trie_wait: server_timings.as_ref().map(|t| t.sparse_trie_wait).unwrap_or_default(),
+            };
 
             let fcu_start = Instant::now();
             call_forkchoice_updated(&auth_provider, version, forkchoice_state, None).await?;
             let fcu_latency = fcu_start.elapsed();
 
-            let total_latency = if server_latency.is_some() {
+            let total_latency = if server_timings.is_some() {
                 // When using server-side latency for newPayload, derive total from the
                 // independently measured components to avoid mixing server-side and
                 // client-side (network-inclusive) timings.

@@ -259,7 +259,7 @@ pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
     provider: P,
     version: EngineApiMessageVersion,
     params: serde_json::Value,
-) -> TransportResult<Option<Duration>> {
+) -> TransportResult<Option<NewPayloadTimingBreakdown>> {
     call_new_payload_with_reth(provider, version, params, false).await
 }
 
@@ -269,6 +269,25 @@ struct RethPayloadStatus {
     #[serde(flatten)]
     status: PayloadStatus,
     latency_us: u64,
+    #[serde(default)]
+    persistence_wait_us: Option<u64>,
+    #[serde(default)]
+    execution_cache_wait_us: u64,
+    #[serde(default)]
+    sparse_trie_wait_us: u64,
+}
+
+/// Server-side timing breakdown from `reth_newPayload*` endpoints.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct NewPayloadTimingBreakdown {
+    /// Server-side execution latency.
+    pub(crate) latency: Duration,
+    /// Time spent waiting for persistence. `None` when no persistence was in-flight.
+    pub(crate) persistence_wait: Option<Duration>,
+    /// Time spent waiting for execution cache lock.
+    pub(crate) execution_cache_wait: Duration,
+    /// Time spent waiting for sparse trie lock.
+    pub(crate) sparse_trie_wait: Duration,
 }
 
 /// Calls either `engine_newPayload*` or `reth_newPayload*` depending on the `use_reth_namespace`
@@ -284,7 +303,7 @@ pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
     version: EngineApiMessageVersion,
     params: serde_json::Value,
     use_reth_namespace: bool,
-) -> TransportResult<Option<Duration>> {
+) -> TransportResult<Option<NewPayloadTimingBreakdown>> {
     let method =
         if use_reth_namespace { version.reth_method_name() } else { version.method_name() };
 
@@ -308,7 +327,12 @@ pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
             resp = provider.client().request(method, &params).await?;
         }
 
-        Ok(Some(Duration::from_micros(resp.latency_us)))
+        Ok(Some(NewPayloadTimingBreakdown {
+            latency: Duration::from_micros(resp.latency_us),
+            persistence_wait: resp.persistence_wait_us.map(Duration::from_micros),
+            execution_cache_wait: Duration::from_micros(resp.execution_cache_wait_us),
+            sparse_trie_wait: Duration::from_micros(resp.sparse_trie_wait_us),
+        }))
     } else {
         let mut status: PayloadStatus = provider.client().request(method, &params).await?;
 

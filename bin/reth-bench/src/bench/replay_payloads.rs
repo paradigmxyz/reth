@@ -327,7 +327,7 @@ impl Command {
                 envelope.execution_requests.to_vec(),
             ))?;
 
-            let server_latency = call_new_payload_with_reth(
+            let server_timings = call_new_payload_with_reth(
                 &auth_provider,
                 EngineApiMessageVersion::V4,
                 params,
@@ -335,8 +335,14 @@ impl Command {
             )
             .await?;
 
-            let np_latency = server_latency.unwrap_or_else(|| start.elapsed());
-            let new_payload_result = NewPayloadResult { gas_used, latency: np_latency };
+            let np_latency = server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
+            let new_payload_result = NewPayloadResult {
+                gas_used,
+                latency: np_latency,
+                persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
+                execution_cache_wait: server_timings.as_ref().map(|t| t.execution_cache_wait).unwrap_or_default(),
+                sparse_trie_wait: server_timings.as_ref().map(|t| t.sparse_trie_wait).unwrap_or_default(),
+            };
 
             let fcu_state = ForkchoiceState {
                 head_block_hash: block_hash,
@@ -350,7 +356,7 @@ impl Command {
             let fcu_result = auth_provider.fork_choice_updated_v3(fcu_state, None).await?;
             let fcu_latency = fcu_start.elapsed();
 
-            let total_latency = if server_latency.is_some() {
+            let total_latency = if server_timings.is_some() {
                 np_latency + fcu_latency
             } else {
                 start.elapsed()
