@@ -11,7 +11,6 @@ use reth_node_builder::{
     PayloadTypes,
 };
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
-use reth_tasks::TaskManager;
 use std::sync::Arc;
 use wallet::Wallet;
 
@@ -50,7 +49,7 @@ pub async fn setup<N>(
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
     attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
-) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
+) -> eyre::Result<(Vec<NodeHelperType<N>>, Wallet)>
 where
     N: NodeBuilderHelper,
 {
@@ -69,7 +68,6 @@ pub async fn setup_engine<N>(
     attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-    TaskManager,
     Wallet,
 )>
 where
@@ -96,7 +94,6 @@ pub async fn setup_engine_with_connection<N>(
     connect_nodes: bool,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-    TaskManager,
     Wallet,
 )>
 where

@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # async
-tokio = { workspace = true, features = ["sync", "rt"] }
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 tracing-futures.workspace = true
 futures-util = { workspace = true, features = ["std"] }
 
@@ -36,3 +36,4 @@ tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time",
 
 [features]
 rayon = ["dep:rayon", "pin-project"]
+test-utils = []

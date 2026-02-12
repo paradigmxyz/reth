@@ -12,6 +12,7 @@
 use crate::{
     bench::{
         context::BenchContext,
+        helpers::parse_duration,
         output::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
@@ -25,7 +26,6 @@ use alloy_provider::Provider;
 use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use eyre::{Context, OptionExt};
-use humantime::parse_duration;
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_core::args::BenchmarkArgs;
@@ -40,6 +40,9 @@ pub struct Command {
     rpc_url: String,
 
     /// How long to wait after a forkchoice update before sending the next payload.
+    ///
+    /// Accepts a duration string (e.g. `100ms`, `2s`) or a bare integer treated as
+    /// milliseconds (e.g. `400`).
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
 
@@ -117,7 +120,7 @@ impl Command {
                     self.benchmark.ws_rpc_url.as_deref(),
                     &self.benchmark.engine_rpc_url,
                 )?;
-                let sub = setup_persistence_subscription(ws_url).await?;
+                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
                 Some(PersistenceWaiter::with_duration_and_subscription(
                     duration,
                     sub,
@@ -131,7 +134,7 @@ impl Command {
                     self.benchmark.ws_rpc_url.as_deref(),
                     &self.benchmark.engine_rpc_url,
                 )?;
-                let sub = setup_persistence_subscription(ws_url).await?;
+                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
                 Some(PersistenceWaiter::with_subscription(
                     sub,
                     self.persistence_threshold,
