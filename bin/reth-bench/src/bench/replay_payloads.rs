@@ -346,10 +346,15 @@ impl Command {
 
             debug!(target: "reth-bench", method = "engine_forkchoiceUpdatedV3", ?fcu_state, "Sending forkchoiceUpdated");
 
+            let fcu_start = Instant::now();
             let fcu_result = auth_provider.fork_choice_updated_v3(fcu_state, None).await?;
+            let fcu_latency = fcu_start.elapsed();
 
-            let total_latency = start.elapsed();
-            let fcu_latency = total_latency - new_payload_result.latency;
+            let total_latency = if server_latency.is_some() {
+                np_latency + fcu_latency
+            } else {
+                start.elapsed()
+            };
 
             let combined_result = CombinedResult {
                 block_number,
