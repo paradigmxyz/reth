@@ -344,6 +344,15 @@ pub enum SparseNode {
         /// Tracker for the node's state, e.g. cached `RlpNode` tracking.
         state: SparseNodeState,
     },
+    /// A leaf node that is at the root of the trie (path is empty).
+    /// This variant is used when the entire trie contains only a single key-value pair.
+    RootLeaf {
+        /// The full key for this leaf (since it's at the root, the key suffix equals the full
+        /// key).
+        key: Nibbles,
+        /// Tracker for the node's state, e.g. cached `RlpNode` tracking.
+        state: SparseNodeState,
+    },
     /// Sparse extension node with key.
     Extension {
         /// The key slice stored by this extension node.
@@ -422,6 +431,12 @@ impl SparseNode {
         Self::Leaf { key, state: SparseNodeState::Dirty }
     }
 
+    /// Create new [`SparseNode::RootLeaf`] from leaf key.
+    /// This should be used when the leaf is at the root of the trie (path is empty).
+    pub const fn new_root_leaf(key: Nibbles) -> Self {
+        Self::RootLeaf { key, state: SparseNodeState::Dirty }
+    }
+
     /// Returns `true` if the node is a hash node.
     pub const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash(_))
@@ -433,6 +448,7 @@ impl SparseNode {
             Self::Empty => None,
             Self::Hash(hash) => Some(Cow::Owned(RlpNode::word_rlp(hash))),
             Self::Leaf { state, .. } |
+            Self::RootLeaf { state, .. } |
             Self::Extension { state, .. } |
             Self::Branch { state, .. } => state.cached_rlp_node().map(Cow::Borrowed),
         }
@@ -444,6 +460,7 @@ impl SparseNode {
             Self::Empty => None,
             Self::Hash(hash) => Some(*hash),
             Self::Leaf { state, .. } |
+            Self::RootLeaf { state, .. } |
             Self::Extension { state, .. } |
             Self::Branch { state, .. } => state.cached_hash(),
         }
@@ -459,6 +476,7 @@ impl SparseNode {
                 panic!("Cannot set hash for Empty or Hash nodes")
             }
             Self::Leaf { state, .. } |
+            Self::RootLeaf { state, .. } |
             Self::Extension { state, .. } |
             Self::Branch { state, .. } => {
                 *state = new_state;
@@ -470,7 +488,7 @@ impl SparseNode {
     pub const fn memory_size(&self) -> usize {
         match self {
             Self::Empty | Self::Hash(_) | Self::Branch { .. } => core::mem::size_of::<Self>(),
-            Self::Leaf { key, .. } | Self::Extension { key, .. } => {
+            Self::Leaf { key, .. } | Self::RootLeaf { key, .. } | Self::Extension { key, .. } => {
                 core::mem::size_of::<Self>() + key.len()
             }
         }
