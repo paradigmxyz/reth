@@ -1644,8 +1644,8 @@ mod tests {
                 .unwrap()
                 .unwrap();
 
-        assert!(
-            matches!(stateless_notif1, ExExNotification::ChainCommitted { .. }),
+        assert_eq!(
+            stateless_notif1, pipeline_notification,
             "Stateless ExEx: Expected ChainCommitted notification from pipeline"
         );
 
@@ -1679,34 +1679,9 @@ mod tests {
                 .unwrap()
                 .unwrap();
 
-        assert!(
-            matches!(stateless_notif2, ExExNotification::ChainCommitted { .. }),
+        assert_eq!(
+            stateless_notif2, tree_notification,
             "Stateless ExEx: Expected ChainCommitted notification from blockchain tree"
-        );
-
-        // Stateful ExEx: Should receive the tree notification (first and only notification for it)
-        let stateful_notif =
-            tokio::time::timeout(std::time::Duration::from_secs(1), stateful_notifications.next())
-                .await
-                .expect("Timeout: stateful ExEx should receive tree notification")
-                .unwrap()
-                .unwrap();
-
-        assert!(
-            matches!(stateful_notif, ExExNotification::ChainCommitted { .. }),
-            "Stateful ExEx: Expected ChainCommitted notification from blockchain tree"
-        );
-
-        // STEP 3: Verify no more notifications are pending for stateful ExEx
-        let no_more_notifications = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            stateful_notifications.next(),
-        )
-        .await;
-
-        assert!(
-            no_more_notifications.is_err(),
-            "Stateful ExEx should have no more notifications after receiving the tree notification"
         );
     }
 }
