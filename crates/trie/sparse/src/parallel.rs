@@ -486,7 +486,7 @@ impl SparseTrie for ParallelSparseTrie {
                                 leaf_full_path = ?full_path,
                                 "Extension node child not revealed in update_leaf, falling back to db",
                             );
-                            let revealed_node = match provider.trie_node(&reveal_path) {
+                            let revealed_node = match provider.trie_node(&child_path) {
                                 Ok(node) => node,
                                 Err(e) => {
                                     self.rollback_insert(
@@ -521,7 +521,7 @@ impl SparseTrie for ParallelSparseTrie {
                                     "Revealing child (from upper)",
                                 );
                                 let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
-                                if let Err(e) = subtrie.reveal_node(reveal_path, &decoded, masks) {
+                                if let Err(e) = subtrie.reveal_node(child_path, &decoded, masks) {
                                     self.rollback_insert(
                                         &full_path,
                                         &new_nodes,
@@ -2715,7 +2715,7 @@ impl SparseSubtrie {
                             leaf_full_path = ?full_path,
                             "Extension node child not revealed in update_leaf, falling back to db",
                         );
-                        let revealed_node = match provider.trie_node(&reveal_path) {
+                        let revealed_node = match provider.trie_node(&child_path) {
                             Ok(node) => node,
                             Err(e) => {
                                 self.rollback_leaf_insert(
@@ -2747,7 +2747,7 @@ impl SparseSubtrie {
                                 "Revealing child (from lower)",
                             );
                             let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
-                            if let Err(e) = self.reveal_node(reveal_path, &decoded, masks) {
+                            if let Err(e) = self.reveal_node(child_path, &decoded, masks) {
                                 self.rollback_leaf_insert(
                                     &full_path,
                                     &inserted_nodes,
@@ -6622,7 +6622,11 @@ mod tests {
         // Check that the branch node exists with only two nibbles set
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b101.into()))
+            Some(&SparseNode::Branch {
+                state_mask: 0b101.into(),
+                hash: None,
+                store_in_db_trie: Some(false)
+            })
         );
 
         // Insert the leaf for the second key
@@ -6631,7 +6635,11 @@ mod tests {
         // Check that the branch node was updated and another nibble was set
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b111.into()))
+            Some(&SparseNode::Branch {
+                state_mask: 0b111.into(),
+                hash: None,
+                store_in_db_trie: Some(false)
+            })
         );
 
         // Generate the proof for the third key and reveal it in the sparse trie
@@ -6657,7 +6665,11 @@ mod tests {
         // Check that nothing changed in the branch node
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b111.into()))
+            Some(&SparseNode::Branch {
+                state_mask: 0b111.into(),
+                hash: None,
+                store_in_db_trie: Some(false)
+            })
         );
 
         // Generate the nodes for the full trie with all three key using the hash builder, and
@@ -6743,7 +6755,11 @@ mod tests {
         // Check that the branch node exists
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b11.into()))
+            Some(&SparseNode::Branch {
+                state_mask: 0b11.into(),
+                hash: None,
+                store_in_db_trie: Some(true)
+            })
         );
 
         // Remove the leaf for the first key
