@@ -2865,7 +2865,7 @@ impl SparseSubtrie {
                         SparseNode::Hash(hash) => {
                             entry.insert(SparseNode::Branch {
                                 state_mask: branch.state_mask,
-                                state: SparseNodeState::Revealed {
+                                state: SparseNodeState::Cached {
                                     // Memoize the hash of a previously blinded node in the new
                                     // branch node.
                                     rlp_node: RlpNode::word_rlp(hash),
@@ -2904,7 +2904,7 @@ impl SparseSubtrie {
                         child_path.extend(&ext.key);
                         entry.insert(SparseNode::Extension {
                             key: ext.key,
-                            state: SparseNodeState::Revealed {
+                            state: SparseNodeState::Cached {
                                 // Memoize the hash of a previously blinded node in the new
                                 // extension node.
                                 rlp_node: RlpNode::word_rlp(hash),
@@ -2965,7 +2965,7 @@ impl SparseSubtrie {
                         SparseNode::Hash(hash) => {
                             entry.insert(SparseNode::Leaf {
                                 key: leaf.key,
-                                state: SparseNodeState::Revealed {
+                                state: SparseNodeState::Cached {
                                     // Memoize the hash of a previously blinded node in the new leaf
                                     // node.
                                     rlp_node: RlpNode::word_rlp(hash),
@@ -3221,7 +3221,7 @@ impl SparseSubtrieInner {
                     let value = value.expect("leaf value must exist in subtrie");
                     self.buffers.rlp_buf.clear();
                     let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.buffers.rlp_buf);
-                    *state = SparseNodeState::Updated {
+                    *state = SparseNodeState::Cached {
                         rlp_node: rlp_node.clone(),
                         store_in_db_trie: Some(false),
                     };
@@ -3269,7 +3269,7 @@ impl SparseSubtrieInner {
                         "Extension node"
                     );
 
-                    *state = SparseNodeState::Updated {
+                    *state = SparseNodeState::Cached {
                         rlp_node: rlp_node.clone(),
                         store_in_db_trie: store_in_db_trie_value,
                     };
@@ -3465,7 +3465,7 @@ impl SparseSubtrieInner {
                     false
                 };
 
-                *state = SparseNodeState::Updated {
+                *state = SparseNodeState::Cached {
                     rlp_node: rlp_node.clone(),
                     store_in_db_trie: Some(store_in_db_trie_value),
                 };
@@ -4374,7 +4374,7 @@ mod tests {
 
             assert_matches!(
                 trie.upper_subtrie.nodes.get(&path),
-                Some(SparseNode::Leaf { key, state: SparseNodeState::Revealed { .. } })
+                Some(SparseNode::Leaf { key, state: SparseNodeState::Cached { .. } })
                 if key == &Nibbles::from_nibbles([0x2, 0x3])
             );
 
@@ -4418,7 +4418,7 @@ mod tests {
 
             assert_matches!(
                 lower_subtrie.nodes.get(&path),
-                Some(SparseNode::Leaf { key, state: SparseNodeState::Revealed { .. } })
+                Some(SparseNode::Leaf { key, state: SparseNodeState::Cached { .. } })
                 if key == &Nibbles::from_nibbles([0x3, 0x4])
             );
         }
@@ -4500,7 +4500,7 @@ mod tests {
         // Extension node should be in upper trie, hash is memoized from the previous Hash node
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
-            Some(SparseNode::Extension { key, state: SparseNodeState::Revealed { .. }, .. })
+            Some(SparseNode::Extension { key, state: SparseNodeState::Cached { .. }, .. })
             if key == &Nibbles::from_nibbles([0x2])
         );
 
@@ -4566,7 +4566,7 @@ mod tests {
         // Branch node should be in upper trie, hash is memoized from the previous Hash node
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
-            Some(SparseNode::Branch { state_mask, state: SparseNodeState::Revealed { .. }, .. })
+            Some(SparseNode::Branch { state_mask, state: SparseNodeState::Cached { .. }, .. })
             if *state_mask == 0b1000000010000001.into()
         );
 
@@ -5198,7 +5198,7 @@ mod tests {
         // extension at 0x0, branch at 0x01) should have their hash field unset
         //
 
-        let make_revealed = |hash: B256| SparseNodeState::Revealed {
+        let make_revealed = |hash: B256| SparseNodeState::Cached {
             rlp_node: RlpNode::word_rlp(&hash),
             store_in_db_trie: None,
         };
@@ -5293,15 +5293,15 @@ mod tests {
         // Verify that nodes not on the path still have their hashes
         assert_matches!(
             upper_subtrie.nodes.get(&Nibbles::from_nibbles([0x1])),
-            Some(SparseNode::Leaf { state: SparseNodeState::Revealed { .. }, .. })
+            Some(SparseNode::Leaf { state: SparseNodeState::Cached { .. }, .. })
         );
         assert_matches!(
             lower_subtrie_10.nodes.get(&Nibbles::from_nibbles([0x0, 0x1, 0x3])),
-            Some(SparseNode::Leaf { state: SparseNodeState::Revealed { .. }, .. })
+            Some(SparseNode::Leaf { state: SparseNodeState::Cached { .. }, .. })
         );
         assert_matches!(
             lower_subtrie_10.nodes.get(&Nibbles::from_nibbles([0x0, 0x1, 0x4])),
-            Some(SparseNode::Leaf { state: SparseNodeState::Revealed { .. }, .. })
+            Some(SparseNode::Leaf { state: SparseNodeState::Cached { .. }, .. })
         );
     }
 

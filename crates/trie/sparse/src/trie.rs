@@ -455,27 +455,13 @@ impl SparseNode {
 /// or not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SparseNodeState {
-    /// The node is in the state it was revealed in, ie no changes have been made to it by updates
-    /// to the sparse trie.
-    Revealed {
-        /// The RLP node which is used to represent this node in its parent. Usually this is the
-        /// RLP encoding of the node's hash, except for when the node RLP encodes to <32
-        /// bytes.
-        rlp_node: RlpNode,
-        /// Flag indicating if this node is cached in the database.
-        ///
-        /// NOTE for extension nodes this actually indicates the node's child branch is in the
-        /// database, not the extension itself.
-        store_in_db_trie: Option<bool>,
-    },
     /// The node has been updated and its new `RlpNode` has not yet been calculated.
     ///
     /// If a node is dirty and has children (branches or extensions) then at least once child must
     /// also be dirty.
     Dirty,
-    /// The node was previously updated, but since then its `RlpNode` was recalculated and no new
-    /// updates have been made to it since.
-    Updated {
+    /// The node has a cached `RlpNode`, either from being revealed or computed after an update.
+    Cached {
         /// The RLP node which is used to represent this node in its parent. Usually this is the
         /// RLP encoding of the node's hash, except for when the node RLP encodes to <32
         /// bytes.
@@ -492,8 +478,7 @@ impl SparseNodeState {
     /// Returns the cached [`RlpNode`] of the node, if it's available.
     pub fn cached_rlp_node(&self) -> Option<&RlpNode> {
         match &self {
-            SparseNodeState::Revealed { rlp_node, .. } |
-            SparseNodeState::Updated { rlp_node, .. } => Some(rlp_node),
+            SparseNodeState::Cached { rlp_node, .. } => Some(rlp_node),
             SparseNodeState::Dirty => None,
         }
     }
@@ -506,8 +491,7 @@ impl SparseNodeState {
     /// Returns whether or not this node is stored in the db, or None if it's not known.
     pub fn store_in_db_trie(&self) -> Option<bool> {
         match &self {
-            SparseNodeState::Revealed { store_in_db_trie, .. } => *store_in_db_trie,
-            SparseNodeState::Updated { store_in_db_trie, .. } => *store_in_db_trie,
+            SparseNodeState::Cached { store_in_db_trie, .. } => *store_in_db_trie,
             SparseNodeState::Dirty => None,
         }
     }
