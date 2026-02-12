@@ -192,6 +192,13 @@ Storage:
 
           Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
 
+      --storage.use-hashed-state
+          Use hashed state tables (`HashedAccounts`/`HashedStorages`) as canonical state representation instead of plain state tables.
+
+          When enabled, execution writes directly to hashed tables, eliminating the need for separate hashing stages. This should only be enabled for new databases.
+
+          WARNING: Changing this setting on an existing database requires a full resync.
+
       --metrics <SOCKET>
           Enable Prometheus metrics.
 
@@ -452,6 +459,11 @@ Networking:
           Comma separated list of CIDR network specifications. Only peers with IP addresses within these ranges will be allowed to connect.
 
           Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
+
+      --enforce-enr-fork-id
+          Enforce EIP-868 ENR fork ID validation for discovered peers.
+
+          When enabled, peers discovered without a confirmed fork ID are not added to the peer set until their fork ID is verified via EIP-868 ENR request. This filters out peers from other networks that pollute the discovery table.
 
 Logging:
       --log.stdout.format <FORMAT>

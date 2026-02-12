@@ -14,6 +14,11 @@ pub use trie::*;
 mod traits;
 pub use traits::*;
 
+mod parallel;
+pub use parallel::*;
+
+mod lower;
+
 pub mod provider;
 
 #[cfg(feature = "metrics")]

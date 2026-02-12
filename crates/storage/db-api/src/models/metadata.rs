@@ -34,6 +34,10 @@ pub struct StorageSettings {
     /// Whether this node should read and write storage changesets from static files.
     #[serde(default)]
     pub storage_changesets_in_static_files: bool,
+    /// Whether to use hashed state tables (`HashedAccounts`/`HashedStorages`) as the canonical
+    /// state representation instead of plain state tables.
+    #[serde(default)]
+    pub use_hashed_state: bool,
 }
 
 impl StorageSettings {
@@ -61,6 +65,7 @@ impl StorageSettings {
             storages_history_in_rocksdb: true,
             transaction_hash_numbers_in_rocksdb: true,
             account_history_in_rocksdb: true,
+            use_hashed_state: false,
         }
     }
 
@@ -78,6 +83,7 @@ impl StorageSettings {
             account_history_in_rocksdb: false,
             account_changesets_in_static_files: false,
             storage_changesets_in_static_files: false,
+            use_hashed_state: false,
         }
     }
 
@@ -120,6 +126,80 @@ impl StorageSettings {
     /// Sets the `storage_changesets_in_static_files` flag to the provided value.
     pub const fn with_storage_changesets_in_static_files(mut self, value: bool) -> Self {
         self.storage_changesets_in_static_files = value;
+        self
+    }
+
+    /// Sets the `use_hashed_state` flag to the provided value.
+    pub const fn with_use_hashed_state(mut self, value: bool) -> Self {
+        self.use_hashed_state = value;
+        self
+    }
+
+    /// Sets `receipts_in_static_files` if `value` is `Some`.
+    pub const fn with_receipts_in_static_files_opt(mut self, value: Option<bool>) -> Self {
+        if let Some(v) = value {
+            self.receipts_in_static_files = v;
+        }
+        self
+    }
+
+    /// Sets `transaction_senders_in_static_files` if `value` is `Some`.
+    pub const fn with_transaction_senders_in_static_files_opt(
+        mut self,
+        value: Option<bool>,
+    ) -> Self {
+        if let Some(v) = value {
+            self.transaction_senders_in_static_files = v;
+        }
+        self
+    }
+
+    /// Sets `account_changesets_in_static_files` if `value` is `Some`.
+    pub const fn with_account_changesets_in_static_files_opt(
+        mut self,
+        value: Option<bool>,
+    ) -> Self {
+        if let Some(v) = value {
+            self.account_changesets_in_static_files = v;
+        }
+        self
+    }
+
+    /// Sets `storage_changesets_in_static_files` if `value` is `Some`.
+    pub const fn with_storage_changesets_in_static_files_opt(
+        mut self,
+        value: Option<bool>,
+    ) -> Self {
+        if let Some(v) = value {
+            self.storage_changesets_in_static_files = v;
+        }
+        self
+    }
+
+    /// Sets `transaction_hash_numbers_in_rocksdb` if `value` is `Some`.
+    pub const fn with_transaction_hash_numbers_in_rocksdb_opt(
+        mut self,
+        value: Option<bool>,
+    ) -> Self {
+        if let Some(v) = value {
+            self.transaction_hash_numbers_in_rocksdb = v;
+        }
+        self
+    }
+
+    /// Sets `storages_history_in_rocksdb` if `value` is `Some`.
+    pub const fn with_storages_history_in_rocksdb_opt(mut self, value: Option<bool>) -> Self {
+        if let Some(v) = value {
+            self.storages_history_in_rocksdb = v;
+        }
+        self
+    }
+
+    /// Sets `account_history_in_rocksdb` if `value` is `Some`.
+    pub const fn with_account_history_in_rocksdb_opt(mut self, value: Option<bool>) -> Self {
+        if let Some(v) = value {
+            self.account_history_in_rocksdb = v;
+        }
         self
     }
 

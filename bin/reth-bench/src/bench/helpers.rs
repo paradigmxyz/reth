@@ -2,7 +2,10 @@
 
 use crate::valid_payload::call_forkchoice_updated;
 use eyre::Result;
-use std::io::{BufReader, Read};
+use std::{
+    io::{BufReader, Read},
+    time::Duration,
+};
 
 /// Read input from either a file path or stdin.
 pub(crate) fn read_input(path: Option<&str>) -> Result<String> {
@@ -51,6 +54,22 @@ pub(crate) fn parse_gas_limit(s: &str) -> eyre::Result<u64> {
     let base: u64 = num_str.trim().parse()?;
     base.checked_mul(multiplier).ok_or_else(|| eyre::eyre!("value overflow"))
 }
+
+/// Parses a duration string, treating bare integers as milliseconds.
+///
+/// Accepts either a `humantime` duration string (e.g. `"100ms"`, `"2s"`) or a plain
+/// integer which is interpreted as milliseconds (e.g. `"400"` → 400ms).
+pub(crate) fn parse_duration(s: &str) -> eyre::Result<Duration> {
+    match humantime::parse_duration(s) {
+        Ok(d) => Ok(d),
+        Err(_) => {
+            let millis: u64 =
+                s.trim().parse().map_err(|_| eyre::eyre!("invalid duration: {s:?}"))?;
+            Ok(Duration::from_millis(millis))
+        }
+    }
+}
+
 use alloy_consensus::Header;
 use alloy_eips::eip4844::kzg_to_versioned_hash;
 use alloy_primitives::{Address, B256};
@@ -269,5 +288,25 @@ mod tests {
         assert!(parse_gas_limit("abc").is_err());
         assert!(parse_gas_limit("G").is_err());
         assert!(parse_gas_limit("-1G").is_err());
+    }
+
+    #[test]
+    fn test_parse_duration_with_unit() {
+        assert_eq!(parse_duration("100ms").unwrap(), Duration::from_millis(100));
+        assert_eq!(parse_duration("2s").unwrap(), Duration::from_secs(2));
+        assert_eq!(parse_duration("1m").unwrap(), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn test_parse_duration_bare_millis() {
+        assert_eq!(parse_duration("400").unwrap(), Duration::from_millis(400));
+        assert_eq!(parse_duration("0").unwrap(), Duration::from_millis(0));
+        assert_eq!(parse_duration("1000").unwrap(), Duration::from_millis(1000));
+    }
+
+    #[test]
+    fn test_parse_duration_errors() {
+        assert!(parse_duration("abc").is_err());
+        assert!(parse_duration("").is_err());
     }
 }
