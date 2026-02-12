@@ -162,6 +162,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         let lookup_key = if self.provider.cached_storage_settings().use_hashed_state {
             storage_key.to_hashed()
         } else {
+            debug_assert!(storage_key.is_plain(), "expected plain storage key when use_hashed_state is false");
             storage_key.as_b256()
         };
 
@@ -192,6 +193,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         let lookup_key = if self.provider.cached_storage_settings().use_hashed_state {
             storage_key.to_hashed()
         } else {
+            debug_assert!(storage_key.is_plain(), "expected plain storage key when use_hashed_state is false");
             storage_key.as_b256()
         };
 
