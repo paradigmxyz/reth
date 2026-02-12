@@ -161,8 +161,7 @@ jobs:
       - name: Generate charts
         if: success()
         run: |
-          pip install --quiet matplotlib
-          python3 .github/scripts/bench-engine-charts.py \
+          uv run --with matplotlib python3 .github/scripts/bench-engine-charts.py \
             /tmp/bench-results/combined_latency.csv \
             --output-dir /tmp/bench-charts
 
