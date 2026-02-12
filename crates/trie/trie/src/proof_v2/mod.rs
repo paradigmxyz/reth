@@ -1575,7 +1575,7 @@ impl TrieCursorState {
     fn before(&self, path: &Nibbles) -> bool {
         match self {
             Self::Unseeked => true,
-            Self::Available(seeked_to, _) | Self::Taken(seeked_to) => path < seeked_to,
+            Self::Available(seeked_to, _) | Self::Taken(seeked_to) => seeked_to < path,
             Self::Exhausted => false,
         }
     }
@@ -2354,5 +2354,38 @@ mod tests {
 
         // Test proof generation
         harness.assert_proof(targets).expect("Proof generation failed");
+    }
+
+    #[test]
+    fn test_trie_cursor_state_before() {
+        let nibbles = |hex: &str| {
+            Nibbles::from_nibbles_unchecked(
+                hex.chars().map(|c| c.to_digit(16).unwrap() as u8).collect::<Vec<_>>(),
+            )
+        };
+
+        let branch = BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None);
+
+        // Unseeked is always "before" any path
+        let state = TrieCursorState::unseeked();
+        assert!(state.before(&nibbles("00")));
+        assert!(state.before(&nibbles("ff")));
+
+        // Available: cursor at 0x3, should be before 0x5 but not before 0x1
+        let state = TrieCursorState::Available(nibbles("3"), branch.clone());
+        assert!(state.before(&nibbles("5")), "cursor at 0x3 should be before 0x5");
+        assert!(!state.before(&nibbles("1")), "cursor at 0x3 should NOT be before 0x1");
+        assert!(!state.before(&nibbles("3")), "cursor at 0x3 should NOT be before 0x3 (equal)");
+
+        // Taken: same semantics as Available for `before`
+        let state = TrieCursorState::Taken(nibbles("3"));
+        assert!(state.before(&nibbles("5")), "taken at 0x3 should be before 0x5");
+        assert!(!state.before(&nibbles("1")), "taken at 0x3 should NOT be before 0x1");
+        assert!(!state.before(&nibbles("3")), "taken at 0x3 should NOT be before 0x3 (equal)");
+
+        // Exhausted is never "before" anything
+        let state = TrieCursorState::Exhausted;
+        assert!(!state.before(&nibbles("00")));
+        assert!(!state.before(&nibbles("ff")));
     }
 }
