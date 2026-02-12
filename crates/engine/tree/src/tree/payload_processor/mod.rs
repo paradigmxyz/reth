@@ -16,7 +16,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use metrics::{Counter, Histogram};
-use multiproof::{SparseTrieUpdate, *};
+use multiproof::{evm_state_to_hashed_post_state_ref, SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
@@ -727,13 +727,18 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Returns a state hook to be used to send state updates to this task.
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
+    ///
+    /// Pre-hashes the `EvmState` by reference into a compact `HashedPostState`, avoiding a
+    /// deep clone of the full EVM state (which includes bytecode, `original_info`, and
+    /// unchanged storage slots that are immediately discarded downstream).
     pub fn state_hook(&self) -> impl OnStateHook {
         // convert the channel into a `StateHookSender` that emits an event on drop
         let to_multi_proof = self.to_multi_proof.clone().map(StateHookSender::new);
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
+                let hashed = evm_state_to_hashed_post_state_ref(state);
+                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), hashed));
             }
         }
     }
