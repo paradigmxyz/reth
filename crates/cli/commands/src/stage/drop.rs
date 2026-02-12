@@ -133,7 +133,7 @@ impl<C: ChainSpecParser> Command<C> {
                 reset_stage_checkpoint(tx, StageId::SenderRecovery)?;
             }
             StageEnum::Execution => {
-                if provider_rw.cached_storage_settings().use_hashed_state {
+                if provider_rw.cached_storage_settings().use_hashed_state() {
                     tx.clear::<tables::HashedAccounts>()?;
                     tx.clear::<tables::HashedStorages>()?;
                     reset_stage_checkpoint(tx, StageId::AccountHashing)?;
@@ -187,7 +187,7 @@ impl<C: ChainSpecParser> Command<C> {
                 let settings = provider_rw.cached_storage_settings();
                 let rocksdb = tool.provider_factory.rocksdb_provider();
 
-                if settings.account_history_in_rocksdb {
+                if settings.storage_v2 {
                     rocksdb.clear::<tables::AccountsHistory>()?;
                 } else {
                     tx.clear::<tables::AccountsHistory>()?;
@@ -204,7 +204,7 @@ impl<C: ChainSpecParser> Command<C> {
                 let settings = provider_rw.cached_storage_settings();
                 let rocksdb = tool.provider_factory.rocksdb_provider();
 
-                if settings.storages_history_in_rocksdb {
+                if settings.storage_v2 {
                     rocksdb.clear::<tables::StoragesHistory>()?;
                 } else {
                     tx.clear::<tables::StoragesHistory>()?;
@@ -218,7 +218,7 @@ impl<C: ChainSpecParser> Command<C> {
                 )?;
             }
             StageEnum::TxLookup => {
-                if provider_rw.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+                if provider_rw.cached_storage_settings().storage_v2 {
                     tool.provider_factory
                         .rocksdb_provider()
                         .clear::<tables::TransactionHashNumbers>()?;

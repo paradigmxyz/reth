@@ -79,7 +79,7 @@ fn assert_changesets_queryable(
     let settings = provider.cached_storage_settings();
 
     // Verify storage changesets
-    if settings.storage_changesets_in_static_files {
+    if settings.storage_v2 {
         let static_file_provider = provider_factory.static_file_provider();
         static_file_provider.initialize_index()?;
         let storage_changesets =
@@ -118,7 +118,7 @@ fn assert_changesets_queryable(
     }
 
     // Verify account changesets
-    if settings.account_changesets_in_static_files {
+    if settings.storage_v2 {
         let static_file_provider = provider_factory.static_file_provider();
         static_file_provider.initialize_index()?;
         let account_changesets =
@@ -604,7 +604,7 @@ async fn test_pipeline() -> eyre::Result<()> {
 }
 
 /// Same as [`test_pipeline`] but runs with v2 storage settings (`use_hashed_state=true`,
-/// `storage_changesets_in_static_files=true`, etc.).
+/// `is_v2()=true`, etc.).
 ///
 /// In v2 mode:
 /// - The execution stage writes directly to `HashedAccounts`/`HashedStorages`

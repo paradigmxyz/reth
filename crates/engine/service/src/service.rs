@@ -94,7 +94,7 @@ where
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
 
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
-        let use_hashed_state = provider.cached_storage_settings().use_hashed_state;
+        let use_hashed_state = provider.cached_storage_settings().use_hashed_state();
 
         let persistence_handle =
             PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
