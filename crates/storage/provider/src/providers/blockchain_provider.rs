@@ -22,7 +22,7 @@ use reth_chain_state::{
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
+use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -32,11 +32,70 @@ use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{HashedPostState, KeccakKeyHasher};
 use revm_database::BundleState;
 use std::{
+    cell::RefCell,
     ops::{RangeBounds, RangeInclusive},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::Instant,
 };
+use thread_local::ThreadLocal;
 use tracing::trace;
+
+/// Maximum age of a cached [`ConsistentProvider`] before it is refreshed.
+///
+/// Keeps the underlying read transaction short-lived to avoid database timeouts.
+const MAX_CACHED_PROVIDER_AGE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Per-thread cached [`ConsistentProvider`] together with staleness tracking.
+struct CachedConsistentProvider<N: ProviderNodeTypes> {
+    /// Canonical revision at the time this provider was created.
+    rev: u64,
+    /// When this provider was created.
+    created_at: Instant,
+    /// The cached provider.
+    provider: ConsistentProvider<N>,
+}
+
+/// Per-thread state for the [`ConsistentProvider`] cache.
+struct ConsistentProviderTlsState<N: ProviderNodeTypes> {
+    /// Scoped depth counter. Caching is only active when `depth > 0`.
+    depth: usize,
+    /// The cached provider, if any.
+    cached: Option<CachedConsistentProvider<N>>,
+}
+
+impl<N: ProviderNodeTypes> Default for ConsistentProviderTlsState<N> {
+    fn default() -> Self {
+        Self { depth: 0, cached: None }
+    }
+}
+
+/// Shared, thread-local cache for [`ConsistentProvider`] instances.
+///
+/// Uses the [`thread_local`] crate's [`ThreadLocal`] to maintain one cached provider per OS thread,
+/// gated behind a scoped depth counter so caching only occurs inside explicit validation contexts.
+struct ConsistentProviderCache<N: ProviderNodeTypes>(
+    ThreadLocal<RefCell<ConsistentProviderTlsState<N>>>,
+);
+
+impl<N: ProviderNodeTypes> ConsistentProviderCache<N> {
+    const fn new() -> Self {
+        Self(ThreadLocal::new())
+    }
+
+    /// Returns the per-thread state cell, lazily initialized.
+    fn state(&self) -> &RefCell<ConsistentProviderTlsState<N>> {
+        self.0.get_or(|| RefCell::new(ConsistentProviderTlsState::default()))
+    }
+}
+
+impl<N: ProviderNodeTypes> std::fmt::Debug for ConsistentProviderCache<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConsistentProviderCache").finish_non_exhaustive()
+    }
+}
 
 /// The main type for interacting with the blockchain.
 ///
@@ -44,19 +103,26 @@ use tracing::trace;
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
 #[derive(Debug)]
-pub struct BlockchainProvider<N: NodeTypesWithDB> {
+pub struct BlockchainProvider<N: ProviderNodeTypes> {
     /// Provider factory used to access the database.
     pub(crate) database: ProviderFactory<N>,
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
     pub(crate) canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
+    /// Monotonically increasing revision counter bumped on canonical state changes.
+    /// Used to invalidate per-thread cached providers.
+    canonical_rev: Arc<AtomicU64>,
+    /// Per-thread cache for [`ConsistentProvider`] instances.
+    consistent_provider_cache: Arc<ConsistentProviderCache<N>>,
 }
 
-impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
+impl<N: ProviderNodeTypes> Clone for BlockchainProvider<N> {
     fn clone(&self) -> Self {
         Self {
             database: self.database.clone(),
             canonical_in_memory_state: self.canonical_in_memory_state.clone(),
+            canonical_rev: self.canonical_rev.clone(),
+            consistent_provider_cache: self.consistent_provider_cache.clone(),
         }
     }
 }
@@ -108,6 +174,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 finalized_header,
                 safe_header,
             ),
+            canonical_rev: Arc::new(AtomicU64::new(0)),
+            consistent_provider_cache: Arc::new(ConsistentProviderCache::new()),
         })
     }
 
@@ -122,6 +190,76 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     #[track_caller]
     pub fn consistent_provider(&self) -> ProviderResult<ConsistentProvider<N>> {
         ConsistentProvider::new(self.database.clone(), self.canonical_in_memory_state())
+    }
+
+    /// Executes `f` with a [`ConsistentProvider`], reusing a per-thread cached instance when
+    /// inside a [`ConsistentProviderCacheScope`].
+    ///
+    /// Outside of a cache scope, this simply creates a fresh provider for each call (the default
+    /// behavior). Inside a scope, the provider is cached per-thread and reused across calls,
+    /// automatically refreshing when the canonical revision changes or the cache exceeds
+    /// [`MAX_CACHED_PROVIDER_AGE`].
+    #[inline]
+    fn with_consistent_provider<R>(
+        &self,
+        f: impl FnOnce(&ConsistentProvider<N>) -> ProviderResult<R>,
+    ) -> ProviderResult<R> {
+        let cell = self.consistent_provider_cache.state();
+
+        // Fast path: caching disabled (outside scope).
+        if cell.borrow().depth == 0 {
+            return f(&self.consistent_provider()?);
+        }
+
+        let now = Instant::now();
+        let rev = self.canonical_rev.load(Ordering::Relaxed);
+
+        {
+            let mut st = cell.borrow_mut();
+            let needs_refresh = match &st.cached {
+                Some(c) => {
+                    c.rev != rev || now.duration_since(c.created_at) > MAX_CACHED_PROVIDER_AGE
+                }
+                None => true,
+            };
+
+            if needs_refresh {
+                st.cached = Some(CachedConsistentProvider {
+                    rev,
+                    created_at: now,
+                    provider: self.consistent_provider()?,
+                });
+            }
+        }
+
+        let st = cell.borrow();
+        f(&st.cached.as_ref().expect("set above").provider)
+    }
+
+    /// Enters a scope where per-thread [`ConsistentProvider`] caching is active.
+    ///
+    /// While the returned guard is alive, all calls to provider trait methods on this
+    /// [`BlockchainProvider`] (on the current thread) will reuse a single cached
+    /// [`ConsistentProvider`] instead of opening a new database read transaction each time.
+    ///
+    /// The cached provider is dropped when the guard is dropped, keeping the underlying
+    /// database transaction short-lived.
+    pub fn consistent_provider_cache_scope(&self) -> ConsistentProviderCacheScope<'_, N> {
+        let cell = self.consistent_provider_cache.state();
+        {
+            let mut st = cell.borrow_mut();
+            st.depth += 1;
+            // Clear stale cache on first entry.
+            if st.depth == 1 {
+                st.cached = None;
+            }
+        }
+        ConsistentProviderCacheScope { provider: self }
+    }
+
+    /// Bumps the canonical revision, invalidating any cached providers.
+    fn bump_canonical_rev(&self) {
+        self.canonical_rev.fetch_add(1, Ordering::Relaxed);
     }
 
     /// This uses a given [`BlockState`] to initialize a state provider for that block.
@@ -141,11 +279,31 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Option<ExecutionOutcome<ReceiptTy<N>>>> {
-        self.consistent_provider()?.get_state(range)
+        self.with_consistent_provider(|p| p.get_state(range))
     }
 }
 
-impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
+/// RAII guard that enables per-thread [`ConsistentProvider`] caching.
+///
+/// Created via [`BlockchainProvider::consistent_provider_cache_scope`]. When dropped, the
+/// cached provider is released and the scope depth is decremented.
+#[derive(Debug)]
+pub struct ConsistentProviderCacheScope<'a, N: ProviderNodeTypes> {
+    provider: &'a BlockchainProvider<N>,
+}
+
+impl<N: ProviderNodeTypes> Drop for ConsistentProviderCacheScope<'_, N> {
+    fn drop(&mut self) {
+        let cell = self.provider.consistent_provider_cache.state();
+        let mut st = cell.borrow_mut();
+        st.depth = st.depth.saturating_sub(1);
+        if st.depth == 0 {
+            st.cached = None;
+        }
+    }
+}
+
+impl<N: ProviderNodeTypes> NodePrimitivesProvider for BlockchainProvider<N> {
     type Primitives = N::Primitives;
 }
 
@@ -197,32 +355,32 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
     type Header = HeaderTy<N>;
 
     fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
-        self.consistent_provider()?.header(block_hash)
+        self.with_consistent_provider(|p| p.header(block_hash))
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
-        self.consistent_provider()?.header_by_number(num)
+        self.with_consistent_provider(|p| p.header_by_number(num))
     }
 
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Self::Header>> {
-        self.consistent_provider()?.headers_range(range)
+        self.with_consistent_provider(|p| p.headers_range(range))
     }
 
     fn sealed_header(
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.consistent_provider()?.sealed_header(number)
+        self.with_consistent_provider(|p| p.sealed_header(number))
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
-        self.consistent_provider()?.sealed_headers_range(range)
+        self.with_consistent_provider(|p| p.sealed_headers_range(range))
     }
 
     fn sealed_headers_while(
@@ -230,13 +388,13 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
     ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
-        self.consistent_provider()?.sealed_headers_while(range, predicate)
+        self.with_consistent_provider(|p| p.sealed_headers_while(range, predicate))
     }
 }
 
 impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.consistent_provider()?.block_hash(number)
+        self.with_consistent_provider(|p| p.block_hash(number))
     }
 
     fn canonical_hashes_range(
@@ -244,7 +402,7 @@ impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider<N> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.consistent_provider()?.canonical_hashes_range(start, end)
+        self.with_consistent_provider(|p| p.canonical_hashes_range(start, end))
     }
 }
 
@@ -266,7 +424,7 @@ impl<N: ProviderNodeTypes> BlockNumReader for BlockchainProvider<N> {
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
-        self.consistent_provider()?.block_number(hash)
+        self.with_consistent_provider(|p| p.block_number(hash))
     }
 }
 
@@ -292,11 +450,11 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         hash: B256,
         source: BlockSource,
     ) -> ProviderResult<Option<Self::Block>> {
-        self.consistent_provider()?.find_block_by_hash(hash, source)
+        self.with_consistent_provider(|p| p.find_block_by_hash(hash, source))
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        self.consistent_provider()?.block(id)
+        self.with_consistent_provider(|p| p.block(id))
     }
 
     fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
@@ -320,7 +478,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.consistent_provider()?.recovered_block(id, transaction_kind)
+        self.with_consistent_provider(|p| p.recovered_block(id, transaction_kind))
     }
 
     fn sealed_block_with_senders(
@@ -328,29 +486,29 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.consistent_provider()?.sealed_block_with_senders(id, transaction_kind)
+        self.with_consistent_provider(|p| p.sealed_block_with_senders(id, transaction_kind))
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
-        self.consistent_provider()?.block_range(range)
+        self.with_consistent_provider(|p| p.block_range(range))
     }
 
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        self.consistent_provider()?.block_with_senders_range(range)
+        self.with_consistent_provider(|p| p.block_with_senders_range(range))
     }
 
     fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        self.consistent_provider()?.recovered_block_range(range)
+        self.with_consistent_provider(|p| p.recovered_block_range(range))
     }
 
     fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        self.consistent_provider()?.block_by_transaction_id(id)
+        self.with_consistent_provider(|p| p.block_by_transaction_id(id))
     }
 }
 
@@ -358,61 +516,61 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
     type Transaction = TxTy<N>;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        self.consistent_provider()?.transaction_id(tx_hash)
+        self.with_consistent_provider(|p| p.transaction_id(tx_hash))
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
-        self.consistent_provider()?.transaction_by_id(id)
+        self.with_consistent_provider(|p| p.transaction_by_id(id))
     }
 
     fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<Self::Transaction>> {
-        self.consistent_provider()?.transaction_by_id_unhashed(id)
+        self.with_consistent_provider(|p| p.transaction_by_id_unhashed(id))
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
-        self.consistent_provider()?.transaction_by_hash(hash)
+        self.with_consistent_provider(|p| p.transaction_by_hash(hash))
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
-        self.consistent_provider()?.transaction_by_hash_with_meta(tx_hash)
+        self.with_consistent_provider(|p| p.transaction_by_hash_with_meta(tx_hash))
     }
 
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
-        self.consistent_provider()?.transactions_by_block(id)
+        self.with_consistent_provider(|p| p.transactions_by_block(id))
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
-        self.consistent_provider()?.transactions_by_block_range(range)
+        self.with_consistent_provider(|p| p.transactions_by_block_range(range))
     }
 
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Transaction>> {
-        self.consistent_provider()?.transactions_by_tx_range(range)
+        self.with_consistent_provider(|p| p.transactions_by_tx_range(range))
     }
 
     fn senders_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.consistent_provider()?.senders_by_tx_range(range)
+        self.with_consistent_provider(|p| p.senders_by_tx_range(range))
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        self.consistent_provider()?.transaction_sender(id)
+        self.with_consistent_provider(|p| p.transaction_sender(id))
     }
 }
 
@@ -420,38 +578,38 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider<N> {
     type Receipt = ReceiptTy<N>;
 
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
-        self.consistent_provider()?.receipt(id)
+        self.with_consistent_provider(|p| p.receipt(id))
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
-        self.consistent_provider()?.receipt_by_hash(hash)
+        self.with_consistent_provider(|p| p.receipt_by_hash(hash))
     }
 
     fn receipts_by_block(
         &self,
         block: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-        self.consistent_provider()?.receipts_by_block(block)
+        self.with_consistent_provider(|p| p.receipts_by_block(block))
     }
 
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Receipt>> {
-        self.consistent_provider()?.receipts_by_tx_range(range)
+        self.with_consistent_provider(|p| p.receipts_by_tx_range(range))
     }
 
     fn receipts_by_block_range(
         &self,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
-        self.consistent_provider()?.receipts_by_block_range(block_range)
+        self.with_consistent_provider(|p| p.receipts_by_block_range(block_range))
     }
 }
 
 impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-        self.consistent_provider()?.receipts_by_block_id(block)
+        self.with_consistent_provider(|p| p.receipts_by_block_id(block))
     }
 }
 
@@ -460,28 +618,28 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider<N> {
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.consistent_provider()?.block_body_indices(number)
+        self.with_consistent_provider(|p| p.block_body_indices(number))
     }
 
     fn block_body_indices_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
-        self.consistent_provider()?.block_body_indices_range(range)
+        self.with_consistent_provider(|p| p.block_body_indices_range(range))
     }
 }
 
 impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
-        self.consistent_provider()?.get_stage_checkpoint(id)
+        self.with_consistent_provider(|p| p.get_stage_checkpoint(id))
     }
 
     fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
-        self.consistent_provider()?.get_stage_checkpoint_progress(id)
+        self.with_consistent_provider(|p| p.get_stage_checkpoint_progress(id))
     }
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
-        self.consistent_provider()?.get_all_checkpoints()
+        self.with_consistent_provider(|p| p.get_all_checkpoints())
     }
 }
 
@@ -490,15 +648,15 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for BlockchainProvider<N> {
         &self,
         segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>> {
-        self.consistent_provider()?.get_prune_checkpoint(segment)
+        self.with_consistent_provider(|p| p.get_prune_checkpoint(segment))
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        self.consistent_provider()?.get_prune_checkpoints()
+        self.with_consistent_provider(|p| p.get_prune_checkpoints())
     }
 }
 
-impl<N: NodeTypesWithDB> ChainSpecProvider for BlockchainProvider<N> {
+impl<N: ProviderNodeTypes> ChainSpecProvider for BlockchainProvider<N> {
     type ChainSpec = N::ChainSpec;
 
     fn chain_spec(&self) -> Arc<N::ChainSpec> {
@@ -617,7 +775,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider<N> {
+impl<N: ProviderNodeTypes> HashedPostStateProvider for BlockchainProvider<N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
@@ -627,7 +785,7 @@ impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N> {
     type Header = HeaderTy<N>;
 
     fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
-        // update timestamp
+        self.bump_canonical_rev();
         self.canonical_in_memory_state.on_forkchoice_update_received();
     }
 
@@ -636,14 +794,17 @@ impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N> {
     }
 
     fn set_canonical_head(&self, header: SealedHeader<Self::Header>) {
+        self.bump_canonical_rev();
         self.canonical_in_memory_state.set_canonical_head(header);
     }
 
     fn set_safe(&self, header: SealedHeader<Self::Header>) {
+        self.bump_canonical_rev();
         self.canonical_in_memory_state.set_safe(header);
     }
 
     fn set_finalized(&self, header: SealedHeader<Self::Header>) {
+        self.bump_canonical_rev();
         self.canonical_in_memory_state.set_finalized(header);
     }
 }
@@ -653,32 +814,32 @@ where
     Self: ReceiptProviderIdExt,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
-        self.consistent_provider()?.block_by_id(id)
+        self.with_consistent_provider(|p| p.block_by_id(id))
     }
 
     fn header_by_number_or_tag(
         &self,
         id: BlockNumberOrTag,
     ) -> ProviderResult<Option<Self::Header>> {
-        self.consistent_provider()?.header_by_number_or_tag(id)
+        self.with_consistent_provider(|p| p.header_by_number_or_tag(id))
     }
 
     fn sealed_header_by_number_or_tag(
         &self,
         id: BlockNumberOrTag,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.consistent_provider()?.sealed_header_by_number_or_tag(id)
+        self.with_consistent_provider(|p| p.sealed_header_by_number_or_tag(id))
     }
 
     fn sealed_header_by_id(
         &self,
         id: BlockId,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.consistent_provider()?.sealed_header_by_id(id)
+        self.with_consistent_provider(|p| p.sealed_header_by_id(id))
     }
 
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Header>> {
-        self.consistent_provider()?.header_by_id(id)
+        self.with_consistent_provider(|p| p.header_by_id(id))
     }
 }
 
@@ -714,7 +875,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
-        self.consistent_provider()?.storage_changeset(block_number)
+        self.with_consistent_provider(|p| p.storage_changeset(block_number))
     }
 
     fn get_storage_before_block(
@@ -723,18 +884,20 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
         address: Address,
         storage_key: B256,
     ) -> ProviderResult<Option<StorageEntry>> {
-        self.consistent_provider()?.get_storage_before_block(block_number, address, storage_key)
+        self.with_consistent_provider(|p| {
+            p.get_storage_before_block(block_number, address, storage_key)
+        })
     }
 
     fn storage_changesets_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
-        self.consistent_provider()?.storage_changesets_range(range)
+        self.with_consistent_provider(|p| p.storage_changesets_range(range))
     }
 
     fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        self.consistent_provider()?.storage_changeset_count()
+        self.with_consistent_provider(|p| p.storage_changeset_count())
     }
 }
 
@@ -743,7 +906,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
-        self.consistent_provider()?.account_block_changeset(block_number)
+        self.with_consistent_provider(|p| p.account_block_changeset(block_number))
     }
 
     fn get_account_before_block(
@@ -751,25 +914,25 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
         block_number: BlockNumber,
         address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
-        self.consistent_provider()?.get_account_before_block(block_number, address)
+        self.with_consistent_provider(|p| p.get_account_before_block(block_number, address))
     }
 
     fn account_changesets_range(
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
-        self.consistent_provider()?.account_changesets_range(range)
+        self.with_consistent_provider(|p| p.account_changesets_range(range))
     }
 
     fn account_changeset_count(&self) -> ProviderResult<usize> {
-        self.consistent_provider()?.account_changeset_count()
+        self.with_consistent_provider(|p| p.account_changeset_count())
     }
 }
 
 impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        self.consistent_provider()?.basic_account(address)
+        self.with_consistent_provider(|p| p.basic_account(address))
     }
 }
 
@@ -789,7 +952,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         &self,
         block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
-        StateReader::get_state(&self.consistent_provider()?, block)
+        self.with_consistent_provider(|p| StateReader::get_state(p, block))
     }
 }
 

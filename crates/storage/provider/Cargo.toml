@@ -54,6 +54,7 @@ itertools.workspace = true
 notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
 parking_lot.workspace = true
 strum.workspace = true
+thread_local.workspace = true
 eyre.workspace = true
 
 # test-utils
