@@ -36,7 +36,7 @@ def parse_combined_csv(path: str) -> list[dict]:
                 "new_payload_latency_us": int(row["new_payload_latency"]),
                 "fcu_latency_us": int(row["fcu_latency"]),
                 "total_latency_us": int(row["total_latency"]),
-                "persistence_wait_us": int(row.get("persistence_wait", 0)),
+                "persistence_wait_us": int(row["persistence_wait"]) if row.get("persistence_wait") else None,
                 "execution_cache_wait_us": int(row.get("execution_cache_wait", 0)),
                 "sparse_trie_wait_us": int(row.get("sparse_trie_wait", 0)),
             })
@@ -86,9 +86,10 @@ def compute_summary(combined: list[dict], gas: list[dict]) -> dict:
         idx = min(idx, len(sorted_vals) - 1)
         return sorted_vals[idx] if sorted_vals else 0
 
+    persistence_values = [r["persistence_wait_us"] for r in combined if r["persistence_wait_us"] is not None]
     avg_persistence_wait_ms = (
-        sum(r["persistence_wait_us"] for r in combined) / blocks / 1_000
-        if blocks else 0
+        sum(persistence_values) / len(persistence_values) / 1_000
+        if persistence_values else 0
     )
     avg_execution_cache_wait_ms = (
         sum(r["execution_cache_wait_us"] for r in combined) / blocks / 1_000
