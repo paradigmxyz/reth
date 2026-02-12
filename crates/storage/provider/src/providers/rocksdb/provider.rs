@@ -24,7 +24,6 @@ use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
     provider::{ProviderError, ProviderResult},
 };
-use reth_tasks::spawn_scoped_os_thread;
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
@@ -36,7 +35,6 @@ use std::{
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
-    thread,
     time::Instant,
 };
 use tracing::instrument;
@@ -109,6 +107,15 @@ const DEFAULT_BLOCK_SIZE: usize = 16 * 1024;
 
 /// Default max background jobs for `RocksDB` compaction and flushing.
 const DEFAULT_MAX_BACKGROUND_JOBS: i32 = 6;
+
+/// Default max open file descriptors for `RocksDB`.
+///
+/// Caps the number of SST file handles `RocksDB` keeps open simultaneously.
+/// Set to 512 to stay within the common default OS `ulimit -n` of 1024,
+/// leaving headroom for MDBX, static files, and other I/O.
+/// `RocksDB` uses an internal table cache and re-opens files on demand,
+/// so this has negligible performance impact on read-heavy workloads.
+const DEFAULT_MAX_OPEN_FILES: i32 = 512;
 
 /// Default bytes per sync for `RocksDB` WAL writes (1 MB).
 const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
@@ -201,6 +208,8 @@ impl RocksDBBuilder {
         options.set_compaction_pri(CompactionPri::MinOverlappingRatio);
 
         options.set_log_level(log_level);
+
+        options.set_max_open_files(DEFAULT_MAX_OPEN_FILES);
 
         // Delete obsolete WAL files immediately after all column families have flushed.
         // Both set to 0 means "delete ASAP, no archival".
@@ -1192,46 +1201,64 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
         ctx: RocksDBWriteCtx,
+        runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
         if !ctx.storage_settings.any_in_rocksdb() {
             return Ok(());
         }
 
-        thread::scope(|s| {
-            let handles: Vec<_> = [
-                (ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
-                    ctx.prune_tx_lookup.is_none_or(|m| !m.is_full()))
-                .then(|| {
-                    spawn_scoped_os_thread(s, "rocksdb-tx-hash", || {
-                        self.write_tx_hash_numbers(blocks, tx_nums, &ctx)
-                    })
-                }),
-                ctx.storage_settings.account_history_in_rocksdb.then(|| {
-                    spawn_scoped_os_thread(s, "rocksdb-account-history", || {
-                        self.write_account_history(blocks, &ctx)
-                    })
-                }),
-                ctx.storage_settings.storages_history_in_rocksdb.then(|| {
-                    spawn_scoped_os_thread(s, "rocksdb-storage-history", || {
-                        self.write_storage_history(blocks, &ctx)
-                    })
-                }),
-            ]
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, h)| h.map(|h| (i, h)))
-            .collect();
+        let mut r_tx_hash = None;
+        let mut r_account_history = None;
+        let mut r_storage_history = None;
 
-            for (i, handle) in handles {
-                handle.join().map_err(|_| {
-                    ProviderError::Database(DatabaseError::Other(format!(
-                        "rocksdb write thread {i} panicked"
-                    )))
-                })??;
+        let write_tx_hash = ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
+            ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
+        let write_account_history = ctx.storage_settings.account_history_in_rocksdb;
+        let write_storage_history = ctx.storage_settings.storages_history_in_rocksdb;
+
+        runtime.storage_pool().in_place_scope(|s| {
+            if write_tx_hash {
+                s.spawn(|_| {
+                    r_tx_hash = Some(self.write_tx_hash_numbers(blocks, tx_nums, &ctx));
+                });
             }
 
-            Ok(())
-        })
+            if write_account_history {
+                s.spawn(|_| {
+                    r_account_history = Some(self.write_account_history(blocks, &ctx));
+                });
+            }
+
+            if write_storage_history {
+                s.spawn(|_| {
+                    r_storage_history = Some(self.write_storage_history(blocks, &ctx));
+                });
+            }
+        });
+
+        if write_tx_hash {
+            r_tx_hash.ok_or_else(|| {
+                ProviderError::Database(DatabaseError::Other(
+                    "rocksdb tx-hash write thread panicked".into(),
+                ))
+            })??;
+        }
+        if write_account_history {
+            r_account_history.ok_or_else(|| {
+                ProviderError::Database(DatabaseError::Other(
+                    "rocksdb account-history write thread panicked".into(),
+                ))
+            })??;
+        }
+        if write_storage_history {
+            r_storage_history.ok_or_else(|| {
+                ProviderError::Database(DatabaseError::Other(
+                    "rocksdb storage-history write thread panicked".into(),
+                ))
+            })??;
+        }
+
+        Ok(())
     }
 
     /// Writes transaction hash to number mappings for the given blocks.

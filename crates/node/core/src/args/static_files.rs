@@ -2,23 +2,17 @@
 
 use clap::Args;
 use reth_config::config::{BlocksPerFileConfig, StaticFilesConfig};
-use reth_storage_api::StorageSettings;
 
 /// Blocks per static file when running in `--minimal` node.
 ///
 /// 10000 blocks per static file allows us to prune all history every 10k blocks.
 pub const MINIMAL_BLOCKS_PER_FILE: u64 = 10000;
 
-/// Default value for static file storage flags.
-///
-/// When the `edge` feature is enabled, defaults to `true` to enable edge storage features.
-/// Otherwise defaults to `false` for legacy behavior.
-const fn default_static_file_flag() -> bool {
-    cfg!(feature = "edge")
-}
-
 /// Parameters for static files configuration
-#[derive(Debug, Args, PartialEq, Eq, Clone, Copy)]
+///
+/// When `--storage.v2` is used, the defaults for the storage flags change to enable static file
+/// storage. Individual flags can still override those defaults when explicitly set.
+#[derive(Debug, Args, PartialEq, Eq, Clone, Copy, Default)]
 #[command(next_help_heading = "Static Files")]
 pub struct StaticFilesArgs {
     /// Number of blocks per file for the headers segment.
@@ -51,8 +45,10 @@ pub struct StaticFilesArgs {
     ///
     /// Note: This setting can only be configured at genesis initialization. Once
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
-    #[arg(long = "static-files.receipts", default_value_t = default_static_file_flag(), action = clap::ArgAction::Set)]
-    pub receipts: bool,
+    ///
+    /// Defaults to the base storage mode (v1: false, v2: true).
+    #[arg(long = "static-files.receipts", action = clap::ArgAction::Set)]
+    pub receipts: Option<bool>,
 
     /// Store transaction senders in static files instead of the database.
     ///
@@ -61,8 +57,10 @@ pub struct StaticFilesArgs {
     ///
     /// Note: This setting can only be configured at genesis initialization. Once
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
-    #[arg(long = "static-files.transaction-senders", default_value_t = default_static_file_flag(), action = clap::ArgAction::Set)]
-    pub transaction_senders: bool,
+    ///
+    /// Defaults to the base storage mode (v1: false, v2: true).
+    #[arg(long = "static-files.transaction-senders", action = clap::ArgAction::Set)]
+    pub transaction_senders: Option<bool>,
 
     /// Store account changesets in static files.
     ///
@@ -71,8 +69,10 @@ pub struct StaticFilesArgs {
     ///
     /// Note: This setting can only be configured at genesis initialization. Once
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
-    #[arg(long = "static-files.account-change-sets", default_value_t = default_static_file_flag(), action = clap::ArgAction::Set)]
-    pub account_changesets: bool,
+    ///
+    /// Defaults to the base storage mode (v1: false, v2: true).
+    #[arg(long = "static-files.account-change-sets", action = clap::ArgAction::Set)]
+    pub account_changesets: Option<bool>,
 
     /// Store storage changesets in static files.
     ///
@@ -81,8 +81,10 @@ pub struct StaticFilesArgs {
     ///
     /// Note: This setting can only be configured at genesis initialization. Once
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
-    #[arg(long = "static-files.storage-change-sets", default_value_t = default_static_file_flag(), action = clap::ArgAction::Set)]
-    pub storage_changesets: bool,
+    ///
+    /// Defaults to the base storage mode (v1: false, v2: true).
+    #[arg(long = "static-files.storage-change-sets", action = clap::ArgAction::Set)]
+    pub storage_changesets: Option<bool>,
 }
 
 impl StaticFilesArgs {
@@ -120,36 +122,6 @@ impl StaticFilesArgs {
                     .or(minimal_blocks_per_file)
                     .or(config.blocks_per_file.storage_change_sets),
             },
-        }
-    }
-
-    /// Converts the static files arguments into [`StorageSettings`].
-    pub const fn to_settings(&self) -> StorageSettings {
-        #[cfg(feature = "edge")]
-        let base = StorageSettings::edge();
-        #[cfg(not(feature = "edge"))]
-        let base = StorageSettings::legacy();
-
-        base.with_receipts_in_static_files(self.receipts)
-            .with_transaction_senders_in_static_files(self.transaction_senders)
-            .with_account_changesets_in_static_files(self.account_changesets)
-            .with_storage_changesets_in_static_files(self.storage_changesets)
-    }
-}
-
-impl Default for StaticFilesArgs {
-    fn default() -> Self {
-        Self {
-            blocks_per_file_headers: None,
-            blocks_per_file_transactions: None,
-            blocks_per_file_receipts: None,
-            blocks_per_file_transaction_senders: None,
-            blocks_per_file_account_change_sets: None,
-            blocks_per_file_storage_change_sets: None,
-            receipts: default_static_file_flag(),
-            transaction_senders: default_static_file_flag(),
-            account_changesets: default_static_file_flag(),
-            storage_changesets: default_static_file_flag(),
         }
     }
 }

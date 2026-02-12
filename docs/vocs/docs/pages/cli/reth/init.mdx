@@ -118,7 +118,8 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-          [default: false]
+          Defaults to the base storage mode (v1: false, v2: true).
+
           [possible values: true, false]
 
       --static-files.transaction-senders <TRANSACTION_SENDERS>
@@ -128,7 +129,8 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-          [default: false]
+          Defaults to the base storage mode (v1: false, v2: true).
+
           [possible values: true, false]
 
       --static-files.account-change-sets <ACCOUNT_CHANGESETS>
@@ -138,7 +140,8 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-          [default: false]
+          Defaults to the base storage mode (v1: false, v2: true).
+
           [possible values: true, false]
 
       --static-files.storage-change-sets <STORAGE_CHANGESETS>
@@ -148,7 +151,8 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-          [default: false]
+          Defaults to the base storage mode (v1: false, v2: true).
+
           [possible values: true, false]
 
 RocksDB:
@@ -160,26 +164,40 @@ RocksDB:
       --rocksdb.tx-hash <TX_HASH>
           Route tx hash -> number table to `RocksDB` instead of MDBX.
 
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to the base storage mode (v1: false, v2: true).
 
-          [default: false]
           [possible values: true, false]
 
       --rocksdb.storages-history <STORAGES_HISTORY>
           Route storages history tables to `RocksDB` instead of MDBX.
 
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to the base storage mode (v1: false, v2: true).
 
-          [default: false]
           [possible values: true, false]
 
       --rocksdb.account-history <ACCOUNT_HISTORY>
           Route account history tables to `RocksDB` instead of MDBX.
 
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to the base storage mode (v1: false, v2: true).
 
-          [default: false]
           [possible values: true, false]
+
+Storage:
+      --storage.v2
+          Enable v2 storage defaults (static files + `RocksDB` routing).
+
+          When enabled, the node uses optimized storage settings: - Receipts and transaction senders in static files - History indices in `RocksDB` (accounts, storages, transaction hashes) - Account and storage changesets in static files
+
+          This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
+
+          Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
+
+      --storage.use-hashed-state
+          Use hashed state tables (`HashedAccounts`/`HashedStorages`) as canonical state representation instead of plain state tables.
+
+          When enabled, execution writes directly to hashed tables, eliminating the need for separate hashing stages. This should only be enabled for new databases.
+
+          WARNING: Changing this setting on an existing database requires a full resync.
 
 Logging:
       --log.stdout.format <FORMAT>

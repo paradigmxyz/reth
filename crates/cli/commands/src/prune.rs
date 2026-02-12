@@ -12,7 +12,7 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
-#[cfg(all(unix, feature = "edge"))]
+#[cfg(all(unix, feature = "rocksdb"))]
 use reth_provider::RocksDBProviderFactory;
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -76,7 +76,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
             // Set up cancellation token for graceful shutdown on Ctrl+C
             let cancellation = CancellationToken::new();
             let cancellation_clone = cancellation.clone();
-            ctx.task_executor.spawn_critical("prune-ctrl-c", async move {
+            ctx.task_executor.spawn_critical_task("prune-ctrl-c", async move {
                 tokio::signal::ctrl_c().await.expect("failed to listen for ctrl-c");
                 cancellation_clone.cancel();
             });
@@ -122,7 +122,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         }
 
         // Flush and compact RocksDB to reclaim disk space after pruning
-        #[cfg(all(unix, feature = "edge"))]
+        #[cfg(all(unix, feature = "rocksdb"))]
         {
             info!(target: "reth::cli", "Flushing and compacting RocksDB...");
             provider_factory.rocksdb_provider().flush_and_compact()?;

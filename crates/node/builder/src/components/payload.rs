@@ -107,7 +107,8 @@ where
         let (payload_service, payload_service_handle) =
             PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
 
-        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
+        ctx.task_executor()
+            .spawn_critical_task("payload builder service", Box::pin(payload_service));
 
         Ok(payload_service_handle)
     }
@@ -133,7 +134,7 @@ where
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
-        ctx.task_executor().spawn_critical("payload builder", async move {
+        ctx.task_executor().spawn_critical_task("payload builder", async move {
             #[allow(clippy::collection_is_never_read)]
             let mut subscriptions = Vec::new();
 

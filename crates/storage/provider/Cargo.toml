@@ -24,14 +24,16 @@ reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-chain-state.workspace = true
 reth-node-types.workspace = true
-reth-static-file-types.workspace = true
-reth-tasks.workspace = true
+reth-static-file-types = { workspace = true, features = ["std"] }
+reth-fs-util.workspace = true
+
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
@@ -85,8 +87,8 @@ rand.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
-edge = ["reth-storage-api/edge", "rocksdb"]
-rocksdb = ["dep:rocksdb"]
+rocksdb = ["reth-storage-api/rocksdb", "dep:rocksdb"]
+edge = ["rocksdb"]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
@@ -103,4 +105,5 @@ test-utils = [
     "reth-stages-types/test-utils",
     "revm-state",
     "tokio",
+    "reth-tasks/test-utils",
 ]

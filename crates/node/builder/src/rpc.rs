@@ -992,7 +992,7 @@ where
 
         let new_canonical_blocks = node.provider().canonical_state_stream();
         let c = cache.clone();
-        node.task_executor().spawn_critical(
+        node.task_executor().spawn_critical_task(
             "cache canonical blocks task",
             Box::pin(async move {
                 cache_new_blocks_task(c, new_canonical_blocks).await;
@@ -1352,6 +1352,7 @@ where
             tree_config,
             invalid_block_hook,
             changeset_cache,
+            ctx.node.task_executor().clone(),
         ))
     }
 }

@@ -619,7 +619,7 @@ mod tests {
 
             // Enable RocksDB for transaction hash numbers
             runner.db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+                StorageSettings::v1().with_transaction_hash_numbers_in_rocksdb(true),
             );
 
             let input = ExecInput {
@@ -687,7 +687,7 @@ mod tests {
 
             // Enable RocksDB for transaction hash numbers
             runner.db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+                StorageSettings::v1().with_transaction_hash_numbers_in_rocksdb(true),
             );
 
             // Insert blocks with transactions

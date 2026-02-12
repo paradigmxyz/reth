@@ -31,6 +31,7 @@ on:
 
 jobs:
   build:
+    if: github.repository == 'paradigmxyz/reth'
     name: Build Docker images
     runs-on: ubuntu-24.04
     permissions:
@@ -64,27 +65,23 @@ jobs:
 
           if [[ "${{ github.event_name }}" == "push" ]]; then
             VERSION="${GITHUB_REF#refs/tags/}"
-            echo "targets=ethereum optimism" >> "$GITHUB_OUTPUT"
+            echo "targets=ethereum" >> "$GITHUB_OUTPUT"
 
             # Add 'latest' tag for non-RC releases
             if [[ ! "$VERSION" =~ -rc ]]; then
               echo "ethereum_tags=${REGISTRY}/reth:${VERSION},${REGISTRY}/reth:latest" >> "$GITHUB_OUTPUT"
-              echo "optimism_tags=${REGISTRY}/op-reth:${VERSION},${REGISTRY}/op-reth:latest" >> "$GITHUB_OUTPUT"
             else
               echo "ethereum_tags=${REGISTRY}/reth:${VERSION}" >> "$GITHUB_OUTPUT"
-              echo "optimism_tags=${REGISTRY}/op-reth:${VERSION}" >> "$GITHUB_OUTPUT"
             fi
 
           elif [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_type }}" == "nightly" ]]; then
             echo "targets=nightly" >> "$GITHUB_OUTPUT"
             echo "ethereum_tags=${REGISTRY}/reth:nightly" >> "$GITHUB_OUTPUT"
-            echo "optimism_tags=${REGISTRY}/op-reth:nightly" >> "$GITHUB_OUTPUT"
 
           else
             # git-sha build
-            echo "targets=ethereum optimism" >> "$GITHUB_OUTPUT"
+            echo "targets=ethereum" >> "$GITHUB_OUTPUT"
             echo "ethereum_tags=${REGISTRY}/reth:${{ github.sha }}" >> "$GITHUB_OUTPUT"
-            echo "optimism_tags=${REGISTRY}/op-reth:${{ github.sha }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build and push images
@@ -101,7 +98,6 @@ jobs:
           push: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
           set: |
             ethereum.tags=${{ steps.params.outputs.ethereum_tags }}
-            optimism.tags=${{ steps.params.outputs.optimism_tags }}
 
       - name: Verify image architectures
         env:
@@ -110,8 +106,7 @@ jobs:
           ./.github/scripts/verify_image_arch.sh \
             "${{ steps.params.outputs.targets }}" \
             "ghcr.io/${{ github.repository_owner }}" \
-            "${{ steps.params.outputs.ethereum_tags }}" \
-            "${{ steps.params.outputs.optimism_tags }}"
+            "${{ steps.params.outputs.ethereum_tags }}"
 
   notify:
     name: Notify on failure

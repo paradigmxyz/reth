@@ -370,15 +370,14 @@ async fn test_setup_builder_with_custom_tree_config() -> Result<()> {
             .build(),
     );
 
-    let (nodes, _tasks, _wallet) =
-        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, |_| {
-            EthPayloadBuilderAttributes::default()
-        })
-        .with_tree_config_modifier(|config| {
-            config.with_persistence_threshold(0).with_memory_block_buffer_target(5)
-        })
-        .build()
-        .await?;
+    let (nodes, _wallet) = E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, |_| {
+        EthPayloadBuilderAttributes::default()
+    })
+    .with_tree_config_modifier(|config| {
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(5)
+    })
+    .build()
+    .await?;
 
     assert_eq!(nodes.len(), 1);
 

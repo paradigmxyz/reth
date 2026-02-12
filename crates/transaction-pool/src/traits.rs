@@ -175,6 +175,20 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send {
+        self.add_transactions_with_origins(transactions.into_iter().map(move |tx| (origin, tx)))
+    }
+
+    /// Adds the given _unvalidated_ transactions into the pool.
+    ///
+    /// Each transaction is paired with its own [`TransactionOrigin`].
+    ///
+    /// Returns a list of results.
+    ///
+    /// Consumer: RPC
+    fn add_transactions_with_origins(
+        &self,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
     ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
 
     /// Submit a consensus transaction directly to the pool
@@ -494,6 +508,44 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn remove_transactions_by_sender(
         &self,
         sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Prunes a single transaction from the pool.
+    ///
+    /// This is similar to [`Self::remove_transaction`] but treats the transaction as _mined_
+    /// rather than discarded. The key difference is that pruning does **not** park descendant
+    /// transactions: their nonce requirements are considered satisfied, so they remain in whatever
+    /// sub-pool they currently occupy and can be included in the next block.
+    ///
+    /// In contrast, [`Self::remove_transaction`] treats the removal as a discard, which
+    /// introduces a nonce gap and moves all descendant transactions to the queued (parked)
+    /// sub-pool.
+    ///
+    /// Returns the pruned transaction if it existed in the pool.
+    ///
+    /// Consumer: Utility
+    fn prune_transaction(
+        &self,
+        hash: TxHash,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.prune_transactions(vec![hash]).pop()
+    }
+
+    /// Prunes all transactions corresponding to the given hashes from the pool.
+    ///
+    /// This behaves like [`Self::prune_transaction`] but for multiple transactions at once.
+    /// Each transaction is removed as if it was mined: descendant transactions are **not** parked
+    /// and their nonce requirements are considered satisfied.
+    ///
+    /// This is useful for scenarios like Flashblocks where transactions are committed across
+    /// multiple partial blocks without a canonical state update: previously committed transactions
+    /// can be pruned so that the best-transactions iterator yields their descendants in the
+    /// correct priority order.
+    ///
+    /// Consumer: Utility
+    fn prune_transactions(
+        &self,
+        hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Retains only those hashes that are unknown to the pool.
