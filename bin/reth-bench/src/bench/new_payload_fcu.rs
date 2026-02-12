@@ -244,10 +244,11 @@ impl Command {
             let np_latency = server_latency.unwrap_or_else(|| start.elapsed());
             let new_payload_result = NewPayloadResult { gas_used, latency: np_latency };
 
+            let fcu_start = Instant::now();
             call_forkchoice_updated(&auth_provider, version, forkchoice_state, None).await?;
+            let fcu_latency = fcu_start.elapsed();
 
             let total_latency = start.elapsed();
-            let fcu_latency = total_latency - new_payload_result.latency;
             let combined_result = CombinedResult {
                 block_number,
                 gas_limit,
