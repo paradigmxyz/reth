@@ -161,6 +161,7 @@ jobs:
       - name: Generate charts
         if: success()
         run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
           uv run --with matplotlib python3 .github/scripts/bench-engine-charts.py \
             /tmp/bench-results/combined_latency.csv \
             --output-dir /tmp/bench-charts
@@ -190,8 +191,13 @@ jobs:
           RUN_ID=${{ github.run_id }}
           CHART_DIR="pr/${PR_NUMBER}/${RUN_ID}"
 
-          git fetch origin bench-charts:bench-charts 2>/dev/null || git checkout --orphan bench-charts
-          git checkout bench-charts
+          if git fetch origin bench-charts 2>/dev/null; then
+            git checkout bench-charts
+          else
+            git checkout --orphan bench-charts
+            git rm -rf . 2>/dev/null || true
+          fi
+
           mkdir -p "${CHART_DIR}"
           cp /tmp/bench-charts/*.png "${CHART_DIR}/"
           git add "${CHART_DIR}"
