@@ -351,6 +351,14 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
             self.state_provider.storage(account, storage_key)
         }
     }
+
+    fn storage_by_hashed_key(
+        &self,
+        address: Address,
+        hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        self.state_provider.storage_by_hashed_key(address, hashed_storage_key)
+    }
 }
 
 impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvider<S, PREWARM> {
