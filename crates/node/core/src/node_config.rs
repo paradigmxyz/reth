@@ -375,7 +375,11 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     /// - When `--storage.v2` is set: uses [`StorageSettings::v2()`] defaults
     /// - Otherwise: uses [`StorageSettings::base()`] defaults
     pub const fn storage_settings(&self) -> StorageSettings {
-        if self.storage.v2 { StorageSettings::v2() } else { StorageSettings::base() }
+        if self.storage.v2 {
+            StorageSettings::v2()
+        } else {
+            StorageSettings::base()
+        }
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if

@@ -83,7 +83,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     /// - When `--storage.v2` is set: uses [`StorageSettings::v2()`] defaults
     /// - Otherwise: uses [`StorageSettings::base()`] defaults
     pub fn storage_settings(&self) -> StorageSettings {
-        if self.storage.v2 { StorageSettings::v2() } else { StorageSettings::base() }
+        if self.storage.v2 {
+            StorageSettings::v2()
+        } else {
+            StorageSettings::base()
+        }
     }
 
     /// Initializes environment according to [`AccessRights`] and returns an instance of
