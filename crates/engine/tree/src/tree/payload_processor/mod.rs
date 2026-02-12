@@ -425,6 +425,7 @@ where
                             let (tx_env, tx) = tx.into_parts();
                             WithTxEnv { tx_env, tx: Arc::new(tx) }
                         });
+                        // Only send Ok(_) variants to the prewarming task.
                         if let Ok(tx) = &tx {
                             let _ = prewarm_tx.send(tx.clone());
                         }
