@@ -292,7 +292,7 @@ where
 
         // Halve proof workers for small blocks — fewer txs means fewer state changes,
         // so most workers would be idle overhead.
-        if transaction_count <= Self::SMALL_BLOCK_TX_THRESHOLD {
+        if transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD {
             storage_worker_count /= 2;
             account_worker_count /= 2;
         }
@@ -382,6 +382,10 @@ where
             _span: Span::current(),
         }
     }
+
+    /// Transaction count threshold below which proof workers are halved, since fewer transactions
+    /// produce fewer state changes and most workers would be idle overhead.
+    const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
 
     /// Transaction count threshold below which sequential signature recovery is used.
     ///
