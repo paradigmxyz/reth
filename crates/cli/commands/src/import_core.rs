@@ -139,7 +139,7 @@ where
         total_decoded_blocks += file_client.headers_len();
         total_decoded_txns += file_client.total_transactions();
 
-        let (mut pipeline, events) = build_import_pipeline_impl(
+        let (mut pipeline, events, _runtime) = build_import_pipeline_impl(
             config,
             provider_factory.clone(),
             &consensus,
@@ -265,7 +265,11 @@ pub fn build_import_pipeline_impl<N, C, E>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
     evm_config: E,
-) -> eyre::Result<(Pipeline<N>, impl futures::Stream<Item = NodeEvent<N::Primitives>> + use<N, C, E>)>
+) -> eyre::Result<(
+    Pipeline<N>,
+    impl futures::Stream<Item = NodeEvent<N::Primitives>> + use<N, C, E>,
+    reth_tasks::Runtime,
+)>
 where
     N: ProviderNodeTypes,
     C: FullConsensus<N::Primitives> + 'static,
@@ -329,5 +333,5 @@ where
 
     let events = pipeline.events().map(Into::into);
 
-    Ok((pipeline, events))
+    Ok((pipeline, events, runtime))
 }
