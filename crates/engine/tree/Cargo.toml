@@ -49,6 +49,7 @@ revm.workspace = true
 revm-primitives.workspace = true
 
 # common
+arrayvec.workspace = true
 futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }

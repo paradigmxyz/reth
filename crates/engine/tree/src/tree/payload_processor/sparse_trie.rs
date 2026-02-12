@@ -9,6 +9,7 @@ use crate::tree::{
 };
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
+use arrayvec::ArrayVec;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, ParallelBridgeBuffered};
@@ -525,11 +526,10 @@ where
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (address, storage) in hashed_state_update.storages {
             for (slot, value) in storage.storage {
-                let encoded = if value.is_zero() {
-                    Vec::new()
-                } else {
-                    alloy_rlp::encode_fixed_size(&value).to_vec()
-                };
+                let mut encoded = ArrayVec::new();
+                if !value.is_zero() {
+                    encoded.extend(alloy_rlp::encode_fixed_size(&value));
+                }
                 self.new_storage_updates
                     .entry(address)
                     .or_default()
@@ -757,14 +757,15 @@ where
                         let encoded = if account.is_none_or(|account| account.is_empty()) &&
                             storage_root == EMPTY_ROOT_HASH
                         {
-                            Vec::new()
+                            ArrayVec::new()
                         } else {
                             account_rlp_buf.clear();
                             account
                                 .unwrap_or_default()
                                 .into_trie_account(storage_root)
                                 .encode(account_rlp_buf);
-                            account_rlp_buf.clone()
+                            ArrayVec::try_from(account_rlp_buf.as_slice())
+                                .expect("account RLP fits in ArrayVec")
                         };
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
@@ -773,10 +774,10 @@ where
                 }
 
                 // Get the current account state either from the trie or from latest account update.
-                let trie_account = if let Some(LeafUpdate::Changed(encoded)) = self.account_updates.get(addr) {
-                    Some(encoded).filter(|encoded| !encoded.is_empty())
+                let trie_account: Option<&[u8]> = if let Some(LeafUpdate::Changed(encoded)) = self.account_updates.get(addr) {
+                    Some(encoded.as_slice()).filter(|encoded| !encoded.is_empty())
                 } else if !self.account_updates.contains_key(addr) {
-                    self.trie.get_account_value(addr)
+                    self.trie.get_account_value(addr).map(|v| v.as_slice())
                 } else {
                     // Needs to be revealed first
                     return true;
@@ -797,11 +798,12 @@ where
                 };
 
                 let encoded = if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
-                    Vec::new()
+                    ArrayVec::new()
                 } else {
                     account_rlp_buf.clear();
                     account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
-                    account_rlp_buf.clone()
+                    ArrayVec::try_from(account_rlp_buf.as_slice())
+                        .expect("account RLP fits in ArrayVec")
                 };
                 self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                 num_promoted += 1;

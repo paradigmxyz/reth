@@ -8,8 +8,11 @@ use alloy_primitives::{
     B256,
 };
 use alloy_trie::BranchNodeCompact;
+use arrayvec::ArrayVec;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
+use reth_trie_common::{
+    BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode, TRIE_ACCOUNT_RLP_MAX_SIZE,
+};
 
 use crate::provider::TrieNodeProvider;
 
@@ -17,8 +20,8 @@ use crate::provider::TrieNodeProvider;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafUpdate {
     /// The leaf value has been changed to the given RLP-encoded value.
-    /// Empty Vec indicates the leaf has been removed.
-    Changed(Vec<u8>),
+    /// Empty array indicates the leaf has been removed.
+    Changed(ArrayVec<u8, TRIE_ACCOUNT_RLP_MAX_SIZE>),
     /// The leaf value may have changed, but the new value is not yet known.
     /// Used for optimistic prewarming when the actual value is unavailable.
     Touched,

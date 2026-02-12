@@ -1349,7 +1349,8 @@ impl SparseTrie for ParallelSparseTrie {
                         }
                     } else {
                         // Update/insert: update_leaf is atomic - cleans up on error.
-                        if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider)
+                        if let Err(e) =
+                            self.update_leaf(full_path, value.to_vec(), NoRevealProvider)
                         {
                             if let Some(path) = Self::get_retriable_path(&e) {
                                 let (target_key, min_len) =
@@ -3782,6 +3783,13 @@ mod tests {
         let mut buf = Vec::new();
         trie_account.encode(&mut buf);
         buf
+    }
+
+    fn encode_account_value_arrayvec(
+        nonce: u64,
+    ) -> arrayvec::ArrayVec<u8, { reth_trie_common::TRIE_ACCOUNT_RLP_MAX_SIZE }> {
+        arrayvec::ArrayVec::try_from(encode_account_value(nonce).as_slice())
+            .expect("account RLP fits in ArrayVec")
     }
 
     /// Test context that provides helper methods for trie testing
@@ -8441,7 +8449,7 @@ mod tests {
         trie.update_leaf(key, value, &provider).unwrap();
 
         // Create update map with a new value for the same key
-        let new_value = encode_account_value(2);
+        let new_value = encode_account_value_arrayvec(2);
 
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
         updates.insert(b256_key, LeafUpdate::Changed(new_value));
@@ -8470,7 +8478,7 @@ mod tests {
 
         // Insert a NEW leaf (key doesn't exist yet) via update_leaves
         let b256_key = B256::with_last_byte(99);
-        let new_value = encode_account_value(42);
+        let new_value = encode_account_value_arrayvec(42);
 
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
         updates.insert(b256_key, LeafUpdate::Changed(new_value.clone()));
@@ -8492,7 +8500,7 @@ mod tests {
         let full_path = Nibbles::unpack(b256_key);
         assert_eq!(
             trie.get_leaf_value(&full_path),
-            Some(&new_value),
+            Some(&new_value.to_vec()),
             "New leaf value should be retrievable"
         );
     }
@@ -8544,7 +8552,7 @@ mod tests {
         // Create an update targeting the blinded path using a full B256 key
         let b256_key = B256::ZERO; // starts with 0x0...
 
-        let new_value = encode_account_value(42);
+        let new_value = encode_account_value_arrayvec(42);
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
         updates.insert(b256_key, LeafUpdate::Changed(new_value));
 
@@ -8594,7 +8602,7 @@ mod tests {
 
         // Create an update to remove key1 (empty value = removal)
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
-        updates.insert(b256_key1, LeafUpdate::Changed(vec![])); // empty = removal
+        updates.insert(b256_key1, LeafUpdate::Changed(arrayvec::ArrayVec::new())); // empty = removal
 
         let proof_targets = RefCell::new(Vec::new());
         trie.update_leaves(&mut updates, |path, min_len| {
@@ -8657,7 +8665,7 @@ mod tests {
         trie.upper_subtrie.inner.values.insert(full_path, old_value.clone());
 
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
-        updates.insert(b256_key, LeafUpdate::Changed(vec![])); // empty = removal
+        updates.insert(b256_key, LeafUpdate::Changed(arrayvec::ArrayVec::new())); // empty = removal
 
         let proof_targets = RefCell::new(Vec::new());
         let prefix_set_len_before = trie.prefix_set.len();
@@ -8748,7 +8756,7 @@ mod tests {
                 .sum::<usize>();
 
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
-        updates.insert(b256_key, LeafUpdate::Changed(vec![])); // removal
+        updates.insert(b256_key, LeafUpdate::Changed(arrayvec::ArrayVec::new())); // removal
 
         let proof_targets = RefCell::new(Vec::new());
         trie.update_leaves(&mut updates, |path, min_len| {
@@ -9003,7 +9011,7 @@ mod tests {
         let b256_key3 = B256::with_last_byte(2); // still starts with 0x0
 
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
-        let value = encode_account_value(42);
+        let value = encode_account_value_arrayvec(42);
 
         updates.insert(b256_key1, LeafUpdate::Changed(value.clone()));
         updates.insert(b256_key2, LeafUpdate::Changed(value.clone()));
@@ -9073,7 +9081,7 @@ mod tests {
             k
         };
 
-        let new_value = encode_account_value(42);
+        let new_value = encode_account_value_arrayvec(42);
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
         updates.insert(b256_key, LeafUpdate::Changed(new_value));
 

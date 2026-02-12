@@ -24,6 +24,7 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # misc
+arrayvec.workspace = true
 auto_impl.workspace = true
 rayon = { workspace = true, optional = true }
 smallvec.workspace = true
