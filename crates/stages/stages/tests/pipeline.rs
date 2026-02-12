@@ -604,7 +604,7 @@ async fn test_pipeline() -> eyre::Result<()> {
 }
 
 /// Same as [`test_pipeline`] but runs with v2 storage settings (`use_hashed_state=true`,
-/// `storage_changesets_in_static_files=true`, etc.).
+/// `is_v2()=true`, etc.).
 ///
 /// In v2 mode:
 /// - The execution stage writes directly to `HashedAccounts`/`HashedStorages`

@@ -183,8 +183,7 @@ mod tests {
 
     #[test]
     fn test_rocksdb_settings_create_tx() {
-        let settings =
-            StorageSettings { account_history_in_rocksdb: true, ..StorageSettings::v1() };
+        let settings = StorageSettings::v2();
         let provider = TestProvider::new(settings);
 
         let result = provider.with_rocksdb_tx(|tx| {

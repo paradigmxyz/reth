@@ -147,10 +147,6 @@ export const rethCliSidebar: SidebarItem = {
                                 {
                                     text: "reth db settings set v2",
                                     link: "/cli/reth/db/settings/set/v2"
-                                },
-                                {
-                                    text: "reth db settings set use_hashed_state",
-                                    link: "/cli/reth/db/settings/set/use_hashed_state"
                                 }
                             ]
                         }

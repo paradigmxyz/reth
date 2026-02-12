@@ -19,7 +19,7 @@ use reth_node_builder::{
     Node, NodeComponents, NodeComponentsBuilder, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
-    args::{DatabaseArgs, DatadirArgs, RocksDbArgs, StaticFilesArgs, StorageArgs},
+    args::{DatabaseArgs, DatadirArgs, StaticFilesArgs, StorageArgs},
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
@@ -66,10 +66,6 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     /// All static files related arguments
     #[command(flatten)]
     pub static_files: StaticFilesArgs,
-
-    /// All `RocksDB` related arguments
-    #[command(flatten)]
-    pub rocksdb: RocksDbArgs,
 
     /// Storage mode configuration (v2 vs v1/legacy)
     #[command(flatten)]

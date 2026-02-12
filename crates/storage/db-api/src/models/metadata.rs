@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// Storage configuration settings for this node.
 ///
-/// Controls whether this node uses v2 storage layout (static files + RocksDB routing)
+/// Controls whether this node uses v2 storage layout (static files + `RocksDB` routing)
 /// or v1/legacy layout (everything in MDBX).
 ///
 /// These should be set during `init_genesis` or `init_db` depending on whether we want dictate
@@ -18,7 +18,7 @@ pub struct StorageSettings {
     ///
     /// When `true`, enables all v2 storage features:
     /// - Receipts and transaction senders in static files
-    /// - History indices in RocksDB (accounts, storages, transaction hashes)
+    /// - History indices in `RocksDB` (accounts, storages, transaction hashes)
     /// - Account and storage changesets in static files
     /// - Hashed state tables as canonical state representation
     ///
@@ -77,27 +77,17 @@ impl StorageSettings {
         self.storage_v2
     }
 
-    /// Whether account changesets are stored in static files.
-    pub const fn account_changesets_in_static_files(&self) -> bool {
-        self.storage_v2
-    }
-
-    /// Whether storage changesets are stored in static files.
-    pub const fn storage_changesets_in_static_files(&self) -> bool {
-        self.storage_v2
-    }
-
-    /// Whether storages history is stored in RocksDB.
+    /// Whether storages history is stored in `RocksDB`.
     pub const fn storages_history_in_rocksdb(&self) -> bool {
         self.storage_v2
     }
 
-    /// Whether transaction hash numbers are stored in RocksDB.
+    /// Whether transaction hash numbers are stored in `RocksDB`.
     pub const fn transaction_hash_numbers_in_rocksdb(&self) -> bool {
         self.storage_v2
     }
 
-    /// Whether account history is stored in RocksDB.
+    /// Whether account history is stored in `RocksDB`.
     pub const fn account_history_in_rocksdb(&self) -> bool {
         self.storage_v2
     }
