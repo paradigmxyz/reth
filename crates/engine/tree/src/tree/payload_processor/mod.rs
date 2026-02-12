@@ -685,19 +685,25 @@ where
         }
     }
 
-    /// Spawns a txpool prewarming task that warms the execution cache using pending transactions.
+    /// Spawns a txpool prewarming task that warms both the execution cache and the sparse trie
+    /// cache using pending transactions.
     ///
     /// This runs between `newPayload` requests to speculatively load state accessed by pending
-    /// transactions, so that subsequent payload execution can avoid database reads for hot state.
-    ///
-    /// Only warms the execution cache (no multiproof/sparse trie pipeline).
-    pub fn spawn_txpool_prewarm<P>(
+    /// transactions, so that subsequent payload execution can avoid database reads for hot state
+    /// and the sparse trie already has nodes revealed.
+    pub fn spawn_txpool_prewarm<P, F>(
         &mut self,
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         provider_builder: StateProviderBuilder<N, P>,
+        multiproof_provider_factory: F,
+        config: &TreeConfig,
     ) where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + 'static,
     {
         self.cancel_txpool_prewarm();
 
@@ -706,6 +712,7 @@ where
         }
 
         let parent_hash = env.parent_hash;
+        let parent_state_root = env.parent_state_root;
 
         let saved_cache = if let Some(existing) = self.execution_cache.get_cache_for(parent_hash) {
             let cache = existing.cache().clone();
@@ -722,23 +729,25 @@ where
 
         let terminate = Arc::new(AtomicBool::new(false));
 
+        let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
+
         let prewarm_ctx = PrewarmContext {
             env,
             evm_config: self.evm_config.clone(),
             saved_cache: Some(saved_cache),
-            provider: provider_builder,
+            provider: provider_builder.clone(),
             metrics: PrewarmMetrics::default(),
             terminate_execution: terminate.clone(),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
-            v2_proofs_enabled: false,
+            v2_proofs_enabled: !config.disable_proof_v2(),
         };
 
         let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
             self.executor.clone(),
             self.execution_cache.clone(),
             prewarm_ctx,
-            None,
+            Some(to_multi_proof.clone()),
             self.prewarm_max_concurrency,
         );
 
@@ -747,13 +756,97 @@ where
             prewarm_task.run(PrewarmMode::Transactions(transactions), to_prewarm_task_clone);
         });
 
-        self.txpool_prewarm_handle =
-            Some(TxpoolPrewarmHandle { terminate, _prewarm_task_guard: Box::new(to_prewarm_task) });
+        if !config.disable_trie_cache() {
+            let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
+            let proof_handle =
+                ProofWorkerHandle::new(&self.executor, task_ctx, !config.disable_proof_v2());
+
+            let chunk_size =
+                config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
+
+            let sparse_trie_cache_task = SparseTrieCacheTask::new_with_trie(
+                &self.executor,
+                from_multi_proof,
+                proof_handle,
+                self.trie_metrics.clone(),
+                {
+                    let start = Instant::now();
+                    let preserved = self.sparse_state_trie.take();
+                    self.trie_metrics
+                        .sparse_trie_cache_wait_duration_histogram
+                        .record(start.elapsed().as_secs_f64());
+
+                    preserved
+                        .map(|p| p.into_trie_for(parent_state_root))
+                        .unwrap_or_else(|| {
+                            let default_trie = RevealableSparseTrie::blind_from(
+                                ParallelSparseTrie::default().with_parallelism_thresholds(
+                                    PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS,
+                                ),
+                            );
+                            SparseStateTrie::new()
+                                .with_accounts_trie(default_trie.clone())
+                                .with_default_storage_trie(default_trie)
+                                .with_updates(true)
+                        })
+                        .with_skip_proof_node_filtering(true)
+                },
+                chunk_size,
+            );
+
+            let preserved_sparse_trie = self.sparse_state_trie.clone();
+            let trie_metrics = self.trie_metrics.clone();
+            let prune_depth = self.sparse_trie_prune_depth;
+            let max_storage_tries = self.sparse_trie_max_storage_tries;
+            let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
+
+            self.executor.spawn_blocking(move || {
+                let mut task = sparse_trie_cache_task;
+                let result = task.run_warm_only();
+
+                let mut guard = preserved_sparse_trie.lock();
+
+                let deferred = if result.is_ok() {
+                    let start = Instant::now();
+                    let (trie, deferred) = task.into_trie_for_reuse(
+                        prune_depth,
+                        max_storage_tries,
+                        SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                        SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                        disable_cache_pruning,
+                    );
+                    trie_metrics
+                        .into_trie_for_reuse_duration_histogram
+                        .record(start.elapsed().as_secs_f64());
+                    guard.store(PreservedSparseTrie::anchored(trie, parent_state_root));
+                    deferred
+                } else {
+                    debug!(
+                        target: "engine::tree::payload_processor",
+                        "Txpool trie warm failed, clearing trie"
+                    );
+                    let (trie, deferred) = task.into_cleared_trie(
+                        SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                        SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                    );
+                    guard.store(PreservedSparseTrie::cleared(trie));
+                    deferred
+                };
+                drop(guard);
+                drop(deferred);
+            });
+        }
+
+        self.txpool_prewarm_handle = Some(TxpoolPrewarmHandle {
+            terminate,
+            _prewarm_task_guard: Box::new(to_prewarm_task),
+            _multiproof_guard: Some(to_multi_proof),
+        });
 
         debug!(
             target: "engine::tree::payload_processor",
             %parent_hash,
-            "Started txpool prewarming"
+            "Started txpool prewarming with multiproof pipeline"
         );
     }
 
@@ -982,6 +1075,9 @@ pub struct TxpoolPrewarmHandle {
     /// [`PrewarmCacheTask::run`] to return `Err` once all other senders are also
     /// dropped, allowing the task to exit cleanly.
     _prewarm_task_guard: Box<dyn Send + Sync>,
+    /// Dropping this closes the multiproof channel, causing the MultiProofTask and
+    /// SparseTrieCacheTask to exit. None if multiproof pipeline is not wired.
+    _multiproof_guard: Option<CrossbeamSender<MultiProofMessage>>,
 }
 
 impl std::fmt::Debug for TxpoolPrewarmHandle {
@@ -1000,7 +1096,8 @@ impl TxpoolPrewarmHandle {
     /// dropped (including the one held by this handle).
     pub fn cancel(self) {
         self.terminate.store(true, std::sync::atomic::Ordering::Relaxed);
-        // `self._prewarm_task_guard` is dropped here, releasing the sender.
+        // `self._prewarm_task_guard` and `self._multiproof_guard` are dropped here,
+        // closing the channels and causing all pipeline tasks to exit.
     }
 }
 

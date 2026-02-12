@@ -483,6 +483,75 @@ where
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
 
+    /// Runs the sparse trie task in warm-only mode for txpool prewarming.
+    ///
+    /// Similar to [`run`](Self::run), but does NOT compute a state root at the end.
+    /// Instead, it only reveals nodes from proofs and applies updates to populate the trie cache.
+    /// Exits when channels close (cancelled) or all messages are processed.
+    #[instrument(
+        name = "SparseTrieCacheTask::run_warm_only",
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
+    pub(super) fn run_warm_only(&mut self) -> Result<(), ParallelStateRootError> {
+        loop {
+            crossbeam_channel::select_biased! {
+                recv(self.updates) -> message => {
+                    let update = match message {
+                        Ok(m) => m,
+                        Err(_) => {
+                            break
+                        }
+                    };
+
+                    self.on_message(update);
+                    self.pending_updates += 1;
+                }
+                recv(self.proof_result_rx) -> message => {
+                    let Ok(result) = message else {
+                        unreachable!("we own the sender half")
+                    };
+                    let ProofResult::V2(mut result) = result.result? else {
+                        unreachable!("sparse trie as cache must only be used with multiproof v2");
+                    };
+
+                    while let Ok(next) = self.proof_result_rx.try_recv() {
+                        let ProofResult::V2(res) = next.result? else {
+                            unreachable!("sparse trie as cache must only be used with multiproof v2");
+                        };
+                        result.extend(res);
+                    }
+
+                    self.on_proof_result(result)?;
+                },
+            }
+
+            if self.updates.is_empty() && self.proof_result_rx.is_empty() {
+                self.dispatch_pending_targets();
+                self.process_new_updates()?;
+                self.promote_pending_account_updates()?;
+
+                if self.finished_state_updates &&
+                    self.account_updates.is_empty() &&
+                    self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
+                {
+                    break;
+                }
+
+                self.dispatch_pending_targets();
+            } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
+                self.process_new_updates()?;
+                self.dispatch_pending_targets();
+            } else if self.pending_targets.chunking_length() > self.chunk_size.unwrap_or_default() {
+                self.dispatch_pending_targets();
+            }
+        }
+
+        debug!(target: "engine::root", "Txpool trie warm-only completed, skipping root computation");
+        Ok(())
+    }
+
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
     fn on_message(&mut self, message: SparseTrieTaskMessage) {
         match message {

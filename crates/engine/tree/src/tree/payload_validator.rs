@@ -1624,9 +1624,10 @@ where
             return;
         };
 
-        let evm_env = match self.evm_config.evm_env(
-            &self.sealed_header_by_hash(head_hash, state).unwrap_or_default().unwrap_or_default(),
-        ) {
+        let sealed_header =
+            self.sealed_header_by_hash(head_hash, state).unwrap_or_default().unwrap_or_default();
+
+        let evm_env = match self.evm_config.evm_env(&sealed_header) {
             Ok(env) => env,
             Err(err) => {
                 warn!(
@@ -1638,11 +1639,19 @@ where
             }
         };
 
+        let parent_state_root = sealed_header.state_root();
+
+        let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(head_hash, state);
+        let overlay_factory =
+            OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
+                .with_block_hash(Some(anchor_hash))
+                .with_lazy_overlay(lazy_overlay);
+
         let env = ExecutionEnv {
             evm_env,
             hash: B256::ZERO,
             parent_hash: head_hash,
-            parent_state_root: B256::ZERO,
+            parent_state_root,
             transaction_count: transactions.len(),
             withdrawals: None,
         };
@@ -1660,7 +1669,13 @@ where
             }
         });
 
-        self.payload_processor.spawn_txpool_prewarm(env, rx, provider_builder);
+        self.payload_processor.spawn_txpool_prewarm(
+            env,
+            rx,
+            provider_builder,
+            overlay_factory,
+            &self.config,
+        );
     }
 
     fn cancel_txpool_prewarm(&mut self) {
