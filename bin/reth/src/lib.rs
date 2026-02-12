@@ -205,12 +205,9 @@ pub mod rpc {
     }
 }
 
-/// Ress subprotocol installation.
-pub mod ress;
-
 // re-export for convenience
 #[doc(inline)]
-pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
+pub use reth_cli_runner::{CliContext, CliRunner};
 
 // for rendering diagrams
 use aquamarine as _;
@@ -218,3 +215,4 @@ use aquamarine as _;
 // used in main
 use clap as _;
 use reth_cli_util as _;
+use tracing as _;

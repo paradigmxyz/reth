@@ -21,7 +21,7 @@ use reth_node_core::{
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
 use reth_rpc_api::servers::AdminApiServer;
-use reth_tasks::TaskManager;
+use reth_tasks::Runtime;
 use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -57,7 +57,7 @@ async fn test_fee_history() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         1,
         chain_spec.clone(),
         false,
@@ -142,7 +142,7 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         1,
         chain_spec.clone(),
         false,
@@ -224,7 +224,7 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         1,
         chain_spec.clone(),
         false,
@@ -314,7 +314,7 @@ async fn test_eth_config() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         1,
         chain_spec.clone(),
         false,
@@ -344,8 +344,7 @@ async fn test_eth_config() -> eyre::Result<()> {
 async fn test_admin_external_ip() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let exec = TaskManager::current();
-    let exec = exec.executor();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     // Chain spec with test allocs
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
@@ -363,7 +362,7 @@ async fn test_admin_external_ip() -> eyre::Result<()> {
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(exec)
+        .testing_node(runtime)
         .node(EthereumNode::default())
         .launch()
         .await?;

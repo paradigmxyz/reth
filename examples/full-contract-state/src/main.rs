@@ -7,9 +7,10 @@
 //! 3. Get contract bytecode
 //! 4. Iterate through all storage slots for the contract
 
+use alloy_primitives::map::B256Map;
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
-    evm::revm::primitives::{Address, B256, U256},
+    evm::revm::primitives::{Address, U256},
     node::EthereumNode,
     primitives::{Account, Bytecode},
     provider::{
@@ -23,7 +24,7 @@ use reth_ethereum::{
     },
     storage::{DBProvider, StateProvider},
 };
-use std::{collections::HashMap, str::FromStr};
+use std::str::FromStr;
 
 /// Represents the complete state of a contract including account info, bytecode, and storage
 #[derive(Debug, Clone)]
@@ -35,7 +36,7 @@ pub struct ContractState {
     /// Contract bytecode (None if not a contract or doesn't exist)
     pub bytecode: Option<Bytecode>,
     /// All storage slots for the contract
-    pub storage: HashMap<B256, U256>,
+    pub storage: B256Map<U256>,
 }
 
 /// Extract the full state of a specific contract
@@ -52,7 +53,7 @@ pub fn extract_contract_state<P: DBProvider>(
     let bytecode = state_provider.account_code(&contract_address)?;
 
     let mut storage_cursor = provider.tx_ref().cursor_dup_read::<tables::PlainStorageState>()?;
-    let mut storage = HashMap::new();
+    let mut storage = B256Map::default();
 
     if let Some((_, first_entry)) = storage_cursor.seek_exact(contract_address)? {
         storage.insert(first_entry.key, first_entry.value);
@@ -71,8 +72,12 @@ fn main() -> eyre::Result<()> {
 
     let datadir = std::env::var("RETH_DATADIR")?;
     let spec = ChainSpecBuilder::mainnet().build();
-    let factory = EthereumNode::provider_factory_builder()
-        .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
+    let runtime = reth_ethereum::tasks::Runtime::test();
+    let factory = EthereumNode::provider_factory_builder().open_read_only(
+        spec.into(),
+        ReadOnlyConfig::from_datadir(datadir),
+        runtime,
+    )?;
 
     let provider = factory.provider()?;
     let state_provider = factory.latest()?;

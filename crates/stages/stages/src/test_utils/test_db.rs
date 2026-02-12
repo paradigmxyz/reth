@@ -54,6 +54,7 @@ impl Default for TestStageDB {
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
                 RocksDBProvider::builder(rocksdb_dir_path).with_default_tables().build().unwrap(),
+                reth_tasks::Runtime::test(),
             )
             .expect("failed to create test provider factory"),
         }
@@ -73,6 +74,7 @@ impl TestStageDB {
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
                 RocksDBProvider::builder(rocksdb_dir_path).with_default_tables().build().unwrap(),
+                reth_tasks::Runtime::test(),
             )
             .expect("failed to create test provider factory"),
         }

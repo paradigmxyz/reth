@@ -540,6 +540,11 @@ Gas Price Oracle:
 
           When enabled, transactions that fail execution will be skipped, and all subsequent transactions from the same sender will also be skipped.
 
+      --rpc.force-blob-sidecar-upcasting
+          Force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
+
+          When enabled, blob transactions submitted via `eth_sendRawTransaction` with EIP-4844 sidecars will be automatically converted to EIP-7594 format if the next block is Osaka. By default this is disabled, meaning transactions are submitted as-is.
+
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
           Max number of transaction in the pending sub-pool
@@ -832,7 +837,7 @@ Dev testnet:
 
 Pruning:
       --full
-          Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored
+          Run full node. Only the most recent [`MINIMUM_UNWIND_SAFE_DISTANCE`] block states are stored
 
       --minimal
           Run minimal storage mode with maximum pruning and smaller static files.
@@ -911,25 +916,22 @@ RocksDB:
       --rocksdb.tx-hash <TX_HASH>
           Route tx hash -> number table to `RocksDB` instead of MDBX.
 
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to the base storage mode (v1: false, v2: true).
 
-          [default: false]
           [possible values: true, false]
 
       --rocksdb.storages-history <STORAGES_HISTORY>
           Route storages history tables to `RocksDB` instead of MDBX.
 
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to the base storage mode (v1: false, v2: true).
 
-          [default: false]
           [possible values: true, false]
 
       --rocksdb.account-history <ACCOUNT_HISTORY>
           Route account history tables to `RocksDB` instead of MDBX.
 
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to the base storage mode (v1: false, v2: true).
 
-          [default: false]
           [possible values: true, false]
 
 Engine:
@@ -996,16 +998,38 @@ Engine:
           Allow unwinding canonical header to ancestor during forkchoice updates. See `TreeConfig::unwind_canonical_header` for more details
 
       --engine.storage-worker-count <STORAGE_WORKER_COUNT>
-          Configure the number of storage proof workers in the Tokio blocking pool. If not specified, defaults to 2x available parallelism, clamped between 2 and 64
+          Configure the number of storage proof workers in the Tokio blocking pool. If not specified, defaults to 2x available parallelism
 
       --engine.account-worker-count <ACCOUNT_WORKER_COUNT>
           Configure the number of account proof workers in the Tokio blocking pool. If not specified, defaults to the same count as storage workers
 
-      --engine.enable-proof-v2
-          Enable V2 storage proofs for state root calculations
+      --engine.disable-proof-v2
+          Disable V2 storage proofs for state root calculations
 
       --engine.disable-cache-metrics
           Disable cache metrics recording, which can take up to 50ms with large cached state
+
+      --engine.disable-trie-cache
+          Disable sparse trie cache
+
+      --engine.sparse-trie-prune-depth <SPARSE_TRIE_PRUNE_DEPTH>
+          Sparse trie prune depth
+
+          [default: 4]
+
+      --engine.sparse-trie-max-storage-tries <SPARSE_TRIE_MAX_STORAGE_TRIES>
+          Maximum number of storage tries to retain after sparse trie pruning
+
+          [default: 100]
+
+      --engine.state-root-task-timeout <STATE_ROOT_TASK_TIMEOUT>
+          Configure the timeout for the state root task before spawning a sequential fallback. If the state root task takes longer than this, a sequential computation starts in parallel and whichever finishes first is used.
+
+          --engine.state-root-task-timeout 1s --engine.state-root-task-timeout 400ms
+
+          Set to 0s to disable.
+
+          [default: 1s]
 
 ERA:
       --era.enable
@@ -1048,7 +1072,8 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-          [default: false]
+          Defaults to the base storage mode (v1: false, v2: true).
+
           [possible values: true, false]
 
       --static-files.transaction-senders <TRANSACTION_SENDERS>
@@ -1058,7 +1083,8 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-          [default: false]
+          Defaults to the base storage mode (v1: false, v2: true).
+
           [possible values: true, false]
 
       --static-files.account-change-sets <ACCOUNT_CHANGESETS>
@@ -1068,7 +1094,8 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-          [default: false]
+          Defaults to the base storage mode (v1: false, v2: true).
+
           [possible values: true, false]
 
       --static-files.storage-change-sets <STORAGE_CHANGESETS>
@@ -1078,32 +1105,26 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-          [default: false]
+          Defaults to the base storage mode (v1: false, v2: true).
+
           [possible values: true, false]
 
-Ress:
-      --ress.enable
-          Enable support for `ress` subprotocol
+Storage:
+      --storage.v2
+          Enable v2 storage defaults (static files + `RocksDB` routing).
 
-      --ress.max-active-connections <MAX_ACTIVE_CONNECTIONS>
-          The maximum number of active connections for `ress` subprotocol
+          When enabled, the node uses optimized storage settings: - Receipts and transaction senders in static files - History indices in `RocksDB` (accounts, storages, transaction hashes) - Account and storage changesets in static files
 
-          [default: 5]
+          This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
 
-      --ress.max-witness-window <MAX_WITNESS_WINDOW>
-          The maximum witness lookback window
+          Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
 
-          [default: 1024]
+      --storage.use-hashed-state
+          Use hashed state tables (`HashedAccounts`/`HashedStorages`) as canonical state representation instead of plain state tables.
 
-      --ress.witness-max-parallel <WITNESS_MAX_PARALLEL>
-          The maximum number of witnesses to generate in parallel
+          When enabled, execution writes directly to hashed tables, eliminating the need for separate hashing stages. This should only be enabled for new databases.
 
-          [default: 5]
-
-      --ress.witness-cache-size <WITNESS_CACHE_SIZE>
-          Witness cache size
-
-          [default: 10]
+          WARNING: Changing this setting on an existing database requires a full resync.
 
 Logging:
       --log.stdout.format <FORMAT>

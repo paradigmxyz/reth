@@ -1,10 +1,10 @@
 use alloy_primitives::{BlockNumber, B256};
 use metrics::{Counter, Histogram};
-use parking_lot::RwLock;
 use reth_chain_state::LazyOverlay;
 use reth_db_api::DatabaseError;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
+use reth_primitives_traits::dashmap::{self, DashMap};
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
@@ -22,7 +22,6 @@ use reth_trie_db::{
     ChangesetCache, DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
 };
 use std::{
-    collections::{hash_map::Entry, HashMap},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -102,7 +101,7 @@ pub struct OverlayStateProviderFactory<F> {
     metrics: OverlayStateProviderMetrics,
     /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
     /// then a new entry will get added to this, but in most cases only one entry is present.
-    overlay_cache: Arc<RwLock<HashMap<BlockNumber, Overlay>>>,
+    overlay_cache: Arc<DashMap<BlockNumber, Overlay>>,
 }
 
 impl<F> OverlayStateProviderFactory<F> {
@@ -419,17 +418,16 @@ where
         let db_tip_block = self.get_db_tip_block_number(provider)?;
 
         // If the overlay is present in the cache then return it directly.
-        if let Some(overlay) = self.overlay_cache.as_ref().read().get(&db_tip_block) {
-            return Ok(overlay.clone());
+        if let Some(entry) = self.overlay_cache.get(&db_tip_block) {
+            return Ok(entry.value().clone());
         }
 
-        // If the overlay is not present then we need to calculate a new one. We grab a write lock,
-        // and then check the cache again in case some other thread populated the cache since we
-        // checked with the read-lock. If still not present we calculate and populate.
+        // If the overlay is not present then we need to calculate a new one.
+        // DashMap's entry API handles the race condition internally.
         let mut cache_miss = false;
-        let overlay = match self.overlay_cache.as_ref().write().entry(db_tip_block) {
-            Entry::Occupied(entry) => entry.get().clone(),
-            Entry::Vacant(entry) => {
+        let overlay = match self.overlay_cache.entry(db_tip_block) {
+            dashmap::Entry::Occupied(entry) => entry.get().clone(),
+            dashmap::Entry::Vacant(entry) => {
                 cache_miss = true;
                 let overlay = self.calculate_overlay(provider, db_tip_block)?;
                 entry.insert(overlay.clone());

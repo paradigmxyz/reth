@@ -6,7 +6,7 @@ use csv::Writer;
 use eyre::OptionExt;
 use reth_primitives_traits::constants::GIGAGAS;
 use serde::{ser::SerializeStruct, Deserialize, Serialize};
-use std::{path::Path, time::Duration};
+use std::{fs, path::Path, time::Duration};
 use tracing::info;
 
 /// This is the suffix for gas output csv files.
@@ -158,29 +158,58 @@ pub(crate) struct TotalGasRow {
 pub(crate) struct TotalGasOutput {
     /// The total gas used in the benchmark.
     pub(crate) total_gas_used: u64,
-    /// The total duration of the benchmark.
+    /// The total wall-clock duration of the benchmark (includes wait times).
     pub(crate) total_duration: Duration,
-    /// The total gas used per second.
-    pub(crate) total_gas_per_second: f64,
+    /// The total execution-only duration (excludes wait times).
+    pub(crate) execution_duration: Duration,
     /// The number of blocks processed.
     pub(crate) blocks_processed: u64,
 }
 
 impl TotalGasOutput {
-    /// Create a new [`TotalGasOutput`] from a list of [`TotalGasRow`].
+    /// Create a new [`TotalGasOutput`] from gas rows only.
+    ///
+    /// Use this when execution-only timing is not available (e.g., `new_payload_only`).
+    /// `execution_duration` will equal `total_duration`.
     pub(crate) fn new(rows: Vec<TotalGasRow>) -> eyre::Result<Self> {
-        // the duration is obtained from the last row
         let total_duration = rows.last().map(|row| row.time).ok_or_eyre("empty results")?;
         let blocks_processed = rows.len() as u64;
         let total_gas_used: u64 = rows.into_iter().map(|row| row.gas_used).sum();
-        let total_gas_per_second = total_gas_used as f64 / total_duration.as_secs_f64();
 
-        Ok(Self { total_gas_used, total_duration, total_gas_per_second, blocks_processed })
+        Ok(Self {
+            total_gas_used,
+            total_duration,
+            execution_duration: total_duration,
+            blocks_processed,
+        })
     }
 
-    /// Return the total gigagas per second.
+    /// Create a new [`TotalGasOutput`] from gas rows and combined results.
+    ///
+    /// - `rows`: Used for total gas and wall-clock duration
+    /// - `combined_results`: Used for execution-only duration (sum of `total_latency`)
+    pub(crate) fn with_combined_results(
+        rows: Vec<TotalGasRow>,
+        combined_results: &[CombinedResult],
+    ) -> eyre::Result<Self> {
+        let total_duration = rows.last().map(|row| row.time).ok_or_eyre("empty results")?;
+        let blocks_processed = rows.len() as u64;
+        let total_gas_used: u64 = rows.into_iter().map(|row| row.gas_used).sum();
+
+        // Sum execution-only time from combined results
+        let execution_duration: Duration = combined_results.iter().map(|r| r.total_latency).sum();
+
+        Ok(Self { total_gas_used, total_duration, execution_duration, blocks_processed })
+    }
+
+    /// Return the total gigagas per second based on wall-clock time.
     pub(crate) fn total_gigagas_per_second(&self) -> f64 {
-        self.total_gas_per_second / GIGAGAS as f64
+        self.total_gas_used as f64 / self.total_duration.as_secs_f64() / GIGAGAS as f64
+    }
+
+    /// Return the execution-only gigagas per second (excludes wait times).
+    pub(crate) fn execution_gigagas_per_second(&self) -> f64 {
+        self.total_gas_used as f64 / self.execution_duration.as_secs_f64() / GIGAGAS as f64
     }
 }
 
@@ -192,10 +221,12 @@ impl TotalGasOutput {
 pub(crate) fn write_benchmark_results(
     output_dir: &Path,
     gas_results: &[TotalGasRow],
-    combined_results: Vec<CombinedResult>,
+    combined_results: &[CombinedResult],
 ) -> eyre::Result<()> {
+    fs::create_dir_all(output_dir)?;
+
     let output_path = output_dir.join(COMBINED_OUTPUT_SUFFIX);
-    info!("Writing engine api call latency output to file: {:?}", output_path);
+    info!(target: "reth-bench", "Writing engine api call latency output to file: {:?}", output_path);
     let mut writer = Writer::from_path(&output_path)?;
     for result in combined_results {
         writer.serialize(result)?;
@@ -203,14 +234,14 @@ pub(crate) fn write_benchmark_results(
     writer.flush()?;
 
     let output_path = output_dir.join(GAS_OUTPUT_SUFFIX);
-    info!("Writing total gas output to file: {:?}", output_path);
+    info!(target: "reth-bench", "Writing total gas output to file: {:?}", output_path);
     let mut writer = Writer::from_path(&output_path)?;
     for row in gas_results {
         writer.serialize(row)?;
     }
     writer.flush()?;
 
-    info!("Finished writing benchmark output files to {:?}.", output_dir);
+    info!(target: "reth-bench", "Finished writing benchmark output files to {:?}.", output_dir);
     Ok(())
 }
 

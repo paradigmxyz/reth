@@ -133,7 +133,7 @@ pub enum Error {
     #[error("permission denied to setup database")]
     Permission,
     /// Unknown error code.
-    #[error("unknown error code: {0}")]
+    #[error("{}", Error::fmt_other(*.0))]
     Other(i32),
 }
 
@@ -214,6 +214,13 @@ impl Error {
             Self::Permission => ffi::MDBX_EPERM,
             Self::Other(err_code) => *err_code,
         }
+    }
+
+    fn fmt_other(code: i32) -> String {
+        let mut s = String::with_capacity(1024);
+        let desc = unsafe { ffi::mdbx_strerror_r(code, s.as_mut_ptr().cast(), 1024) };
+        let desc = unsafe { std::ffi::CStr::from_ptr(desc) }.to_string_lossy();
+        desc.into_owned()
     }
 }
 

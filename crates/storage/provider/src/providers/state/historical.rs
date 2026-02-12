@@ -187,7 +187,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
 
         if self.check_distance_against_limit(EPOCH_SLOTS)? {
             tracing::warn!(
-                target: "provider::historical_sp",
+                target: "providers::historical_sp",
                 target = self.block_number,
                 "Attempt to calculate state root for an old block might result in OOM"
             );
@@ -204,7 +204,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
 
         if self.check_distance_against_limit(EPOCH_SLOTS * 10)? {
             tracing::warn!(
-                target: "provider::historical_sp",
+                target: "providers::historical_sp",
                 target = self.block_number,
                 "Attempt to calculate storage root for an old block might result in OOM"
             );

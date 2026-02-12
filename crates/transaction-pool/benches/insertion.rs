@@ -94,7 +94,8 @@ fn txpool_batch_insertion(c: &mut Criterion) {
                     let mut response_futures = Vec::with_capacity(tx_count);
                     for tx in txs {
                         let (response_tx, response_rx) = oneshot::channel();
-                        let request = BatchTxRequest::new(tx, response_tx);
+                        let request =
+                            BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx);
                         batch_requests.push(request);
                         response_futures.push(response_rx);
                     }

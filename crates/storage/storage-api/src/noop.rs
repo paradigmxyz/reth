@@ -430,7 +430,7 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
 
     fn storage_changesets_range(
         &self,
-        _range: RangeInclusive<BlockNumber>,
+        _range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<
         Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
     > {
