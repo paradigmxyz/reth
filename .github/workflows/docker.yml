@@ -117,6 +117,18 @@ jobs:
       - name: Slack Webhook Action
         uses: rtCamp/action-slack-notify@v2
         env:
-          SLACK_COLOR: ${{ job.status }}
-          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_COLOR: danger
+          SLACK_ICON_EMOJI: ":rotating_light:"
+          SLACK_USERNAME: "GitHub Actions"
+          SLACK_TITLE: ":rotating_light: Nightly Docker Build Failed"
+          SLACK_MESSAGE: |
+            The scheduled nightly Docker build failed.
+
+            *Commit:* `${{ github.sha }}`
+            *Branch:* `${{ github.ref_name }}`
+            *Run:* <https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}|View logs>
+
+            *Action required:* Re-run the workflow or investigate the build failure.
+          SLACK_FOOTER: "paradigmxyz/reth · docker.yml"
+          MSG_MINIMAL: true
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
