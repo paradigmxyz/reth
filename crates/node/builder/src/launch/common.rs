@@ -1011,6 +1011,7 @@ where
         &self,
         installed_exex: Vec<(
             String,
+            bool,
             Box<dyn crate::exex::BoxedLaunchExEx<NodeAdapter<T, CB::Components>>>,
         )>,
     ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<T::Types>>>> {
@@ -1033,6 +1034,7 @@ where
         &self,
         installed_exex: Vec<(
             String,
+            bool,
             Box<dyn crate::exex::BoxedLaunchExEx<NodeAdapter<T, CB::Components>>>,
         )>,
     ) -> ExExLauncher<NodeAdapter<T, CB::Components>> {

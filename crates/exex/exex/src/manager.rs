@@ -59,6 +59,13 @@ pub enum ExExNotificationSource {
     BlockchainTree,
 }
 
+impl ExExNotificationSource {
+    /// Returns true if the notification source is `Pipeline`.
+    const fn is_pipeline(&self) -> bool {
+        matches!(self, Self::Pipeline)
+    }
+}
+
 /// Metrics for an `ExEx`.
 #[derive(Metrics)]
 #[metrics(scope = "exex")]
@@ -78,6 +85,11 @@ struct ExExMetrics {
 pub struct ExExHandle<N: NodePrimitives = EthPrimitives> {
     /// The execution extension's ID.
     id: String,
+    /// Specifies if the exex is stateful.
+    ///
+    /// If this is true we do not send Pipeline notifications to the exex as the state has not
+    /// been persisted and as such the stateful exex can not operate on it.
+    is_stateful: bool,
     /// Metrics for an `ExEx`.
     metrics: ExExMetrics,
     /// Channel to send [`ExExNotification`]s to the `ExEx`.
@@ -99,6 +111,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
     /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
     pub fn new<P, E: ConfigureEvm<Primitives = N>>(
         id: String,
+        is_stateful: bool,
         node_head: BlockNumHash,
         provider: P,
         evm_config: E,
@@ -112,6 +125,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
         (
             Self {
                 id: id.clone(),
+                is_stateful,
                 metrics: ExExMetrics::new_with_labels(&[("exex", id)]),
                 sender: PollSender::new(notification_tx),
                 receiver: event_rx,
@@ -130,8 +144,23 @@ impl<N: NodePrimitives> ExExHandle<N> {
     fn send(
         &mut self,
         cx: &mut Context<'_>,
-        (notification_id, notification): &(usize, ExExNotification<N>),
+        (notification_id, source, notification): &(
+            usize,
+            ExExNotificationSource,
+            ExExNotification<N>,
+        ),
     ) -> Poll<Result<(), PollSendError<ExExNotification<N>>>> {
+        if self.is_stateful && source.is_pipeline() {
+            debug!(
+                target: "exex::manager",
+                exex_id = %self.id,
+                %notification_id,
+                "Skipping pipeline notification for stateful ExEx"
+            );
+            self.next_notification_id = notification_id + 1;
+            return Poll::Ready(Ok(()));
+        }
+
         if let Some(finished_height) = self.finished_height {
             match notification {
                 ExExNotification::ChainCommitted { new } => {
@@ -232,7 +261,7 @@ pub struct ExExManager<P, N: NodePrimitives> {
     ///
     /// The first element of the tuple is a monotonically increasing ID unique to the notification
     /// (the second element of the tuple).
-    buffer: VecDeque<(usize, ExExNotification<N>)>,
+    buffer: VecDeque<(usize, ExExNotificationSource, ExExNotification<N>)>,
     /// Max size of the internal state notifications buffer.
     max_capacity: usize,
     /// Current state notifications buffer capacity.
@@ -355,9 +384,13 @@ where
 
     /// Pushes a new notification into the managers internal buffer, assigning the notification a
     /// unique ID.
-    fn push_notification(&mut self, notification: ExExNotification<N>) {
+    fn push_notification(
+        &mut self,
+        source: ExExNotificationSource,
+        notification: ExExNotification<N>,
+    ) {
         let next_id = self.next_id;
-        self.buffer.push_back((next_id, notification));
+        self.buffer.push_back((next_id, source, notification));
         self.next_id += 1;
     }
 }
@@ -498,7 +531,7 @@ where
                     }
                 }
 
-                this.push_notification(notification);
+                this.push_notification(source, notification);
                 continue
             }
             break
@@ -531,7 +564,7 @@ where
 
         // Remove processed buffered notifications
         debug!(target: "exex::manager", %min_id, "Updating lowest notification id in buffer");
-        this.buffer.retain(|&(id, _)| id >= min_id);
+        this.buffer.retain(|&(id, _, _)| id >= min_id);
         this.min_id = min_id;
 
         // Update capacity
@@ -709,6 +742,7 @@ mod tests {
 
         let (mut exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
             "test_exex".to_string(),
+            false,
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -729,6 +763,7 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
+            false,
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -751,6 +786,7 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
+            false,
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -779,6 +815,7 @@ mod tests {
 
         let (exex_handle, _, _) = ExExHandle::new(
             "test_exex".to_string(),
+            false,
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -799,12 +836,14 @@ mod tests {
         };
 
         // Push the first notification
-        exex_manager.push_notification(notification1.clone());
+        exex_manager
+            .push_notification(ExExNotificationSource::BlockchainTree, notification1.clone());
 
         // Verify the buffer contains the notification with the correct ID
         assert_eq!(exex_manager.buffer.len(), 1);
         assert_eq!(exex_manager.buffer.front().unwrap().0, 0);
-        assert_eq!(exex_manager.buffer.front().unwrap().1, notification1);
+        assert_eq!(exex_manager.buffer.front().unwrap().1, ExExNotificationSource::BlockchainTree);
+        assert_eq!(exex_manager.buffer.front().unwrap().2, notification1);
         assert_eq!(exex_manager.next_id, 1);
 
         // Push another notification
@@ -816,14 +855,17 @@ mod tests {
             new: Arc::new(Chain::new(vec![block2.clone()], Default::default(), Default::default())),
         };
 
-        exex_manager.push_notification(notification2.clone());
+        exex_manager
+            .push_notification(ExExNotificationSource::BlockchainTree, notification2.clone());
 
         // Verify the buffer contains both notifications with correct IDs
         assert_eq!(exex_manager.buffer.len(), 2);
         assert_eq!(exex_manager.buffer.front().unwrap().0, 0);
-        assert_eq!(exex_manager.buffer.front().unwrap().1, notification1);
+        assert_eq!(exex_manager.buffer.front().unwrap().1, ExExNotificationSource::BlockchainTree);
+        assert_eq!(exex_manager.buffer.front().unwrap().2, notification1);
         assert_eq!(exex_manager.buffer.get(1).unwrap().0, 1);
-        assert_eq!(exex_manager.buffer.get(1).unwrap().1, notification2);
+        assert_eq!(exex_manager.buffer.get(1).unwrap().1, ExExNotificationSource::BlockchainTree);
+        assert_eq!(exex_manager.buffer.get(1).unwrap().2, notification2);
         assert_eq!(exex_manager.next_id, 2);
     }
 
@@ -834,6 +876,7 @@ mod tests {
 
         let (exex_handle, _, _) = ExExHandle::new(
             "test_exex".to_string(),
+            false,
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -859,8 +902,9 @@ mod tests {
             new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
         };
 
-        exex_manager.push_notification(notification1.clone());
-        exex_manager.push_notification(notification1);
+        exex_manager
+            .push_notification(ExExNotificationSource::BlockchainTree, notification1.clone());
+        exex_manager.push_notification(ExExNotificationSource::BlockchainTree, notification1);
 
         // Update capacity
         exex_manager.update_capacity();
@@ -885,6 +929,7 @@ mod tests {
 
         let (exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
             "test_exex".to_string(),
+            false,
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -940,6 +985,7 @@ mod tests {
         // Create two `ExExHandle` instances
         let (exex_handle1, event_tx1, _) = ExExHandle::new(
             "test_exex1".to_string(),
+            false,
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -947,6 +993,7 @@ mod tests {
         );
         let (exex_handle2, event_tx2, _) = ExExHandle::new(
             "test_exex2".to_string(),
+            false,
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -997,6 +1044,7 @@ mod tests {
         // Create two `ExExHandle` instances
         let (exex_handle1, event_tx1, _) = ExExHandle::new(
             "test_exex1".to_string(),
+            false,
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -1004,6 +1052,7 @@ mod tests {
         );
         let (exex_handle2, event_tx2, _) = ExExHandle::new(
             "test_exex2".to_string(),
+            false,
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -1060,6 +1109,7 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
+            false,
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -1129,6 +1179,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
+            false,
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1160,7 +1211,9 @@ mod tests {
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
         // Send a notification and ensure it's received correctly
-        match exex_handle.send(&mut cx, &(22, notification.clone())) {
+        match exex_handle
+            .send(&mut cx, &(22, ExExNotificationSource::BlockchainTree, notification.clone()))
+        {
             Poll::Ready(Ok(())) => {
                 let received_notification = notifications.next().await.unwrap().unwrap();
                 assert_eq!(received_notification, notification);
@@ -1184,6 +1237,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
+            false,
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1204,7 +1258,8 @@ mod tests {
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
         // Send the notification
-        match exex_handle.send(&mut cx, &(22, notification)) {
+        match exex_handle.send(&mut cx, &(22, ExExNotificationSource::BlockchainTree, notification))
+        {
             Poll::Ready(Ok(())) => {
                 poll_fn(|cx| {
                     // The notification should be skipped, so nothing should be sent.
@@ -1234,6 +1289,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
+            false,
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1252,7 +1308,9 @@ mod tests {
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
         // Send the notification
-        match exex_handle.send(&mut cx, &(22, notification.clone())) {
+        match exex_handle
+            .send(&mut cx, &(22, ExExNotificationSource::BlockchainTree, notification.clone()))
+        {
             Poll::Ready(Ok(())) => {
                 let received_notification = notifications.next().await.unwrap().unwrap();
                 assert_eq!(received_notification, notification);
@@ -1277,6 +1335,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
+            false,
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1292,7 +1351,9 @@ mod tests {
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
         // Send the notification
-        match exex_handle.send(&mut cx, &(22, notification.clone())) {
+        match exex_handle
+            .send(&mut cx, &(22, ExExNotificationSource::BlockchainTree, notification.clone()))
+        {
             Poll::Ready(Ok(())) => {
                 let received_notification = notifications.next().await.unwrap().unwrap();
                 assert_eq!(received_notification, notification);
@@ -1337,6 +1398,7 @@ mod tests {
 
         let (exex_handle, events_tx, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
+            false,
             Default::default(),
             provider.clone(),
             EthEvmConfig::mainnet(),
@@ -1436,6 +1498,7 @@ mod tests {
         // 1. Setup Manager with Capacity = 1
         let (exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
+            false,
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1493,6 +1556,157 @@ mod tests {
         assert!(
             result.is_ok(),
             "Deadlock detected! Manager failed to wake up and process Pending Item #100."
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stateful_exex_skips_pipeline_notifications() {
+        reth_tracing::init_test_tracing();
+
+        // Create test provider and initialize genesis
+        let provider_factory = create_test_provider_factory();
+        init_genesis(&provider_factory).unwrap();
+        let provider = BlockchainProvider::new(provider_factory.clone()).unwrap();
+
+        // Create WAL for ExEx manager
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+
+        // STATELESS ExEx - should receive ALL notifications
+        let (stateless_handle, _stateless_events_tx, mut stateless_notifications) = ExExHandle::new(
+            "stateless_exex".to_string(),
+            false, // is_stateful = false
+            Default::default(),
+            provider.clone(),
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+
+        // STATEFUL ExEx - should SKIP pipeline notifications
+        let (stateful_handle, _stateful_events_tx, mut stateful_notifications) = ExExHandle::new(
+            "stateful_exex".to_string(),
+            true, // is_stateful = true
+            Default::default(),
+            provider.clone(),
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+
+        // Create manager with both ExEx handles
+        let exex_manager = ExExManager::new(
+            provider_factory,
+            vec![stateless_handle, stateful_handle],
+            10, // buffer capacity
+            wal,
+            empty_finalized_header_stream(),
+        );
+
+        let manager_handle = exex_manager.handle();
+
+        // Spawn manager in background
+        tokio::spawn(async move {
+            exex_manager.await.ok();
+        });
+
+        // Helper to create test blocks
+        let mut rng = generators::rng();
+
+        // Block for pipeline notification (simulating backfill)
+        let pipeline_block =
+            random_block(&mut rng, 33, BlockParams::default()).try_recover().unwrap();
+
+        // Block for blockchain tree notification (live sync)
+        let tree_block = random_block(&mut rng, 34, BlockParams::default()).try_recover().unwrap();
+
+        // Create notifications
+        let pipeline_notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![pipeline_block], Default::default(), Default::default())),
+        };
+
+        let tree_notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![tree_block], Default::default(), Default::default())),
+        };
+
+        // STEP 1: Send PIPELINE notification
+        // Expected: stateless ExEx receives it, stateful ExEx skips it
+        manager_handle
+            .send(ExExNotificationSource::Pipeline, pipeline_notification.clone())
+            .unwrap();
+
+        // Give the manager time to process
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Stateless ExEx: Should receive the pipeline notification
+        let stateless_notif1 =
+            tokio::time::timeout(std::time::Duration::from_secs(1), stateless_notifications.next())
+                .await
+                .expect("Timeout: stateless ExEx should receive pipeline notification")
+                .unwrap()
+                .unwrap();
+
+        assert!(
+            matches!(stateless_notif1, ExExNotification::ChainCommitted { .. }),
+            "Stateless ExEx: Expected ChainCommitted notification from pipeline"
+        );
+
+        // Stateful ExEx: Should NOT receive the pipeline notification
+        // (the manager skipped it due to the filtering logic)
+        let no_pipeline_notif = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            stateful_notifications.next(),
+        )
+        .await;
+
+        assert!(
+            no_pipeline_notif.is_err(),
+            "Stateful ExEx should NOT receive pipeline notification - it should be filtered out"
+        );
+
+        // STEP 2: Send BLOCKCHAIN TREE notification
+        // Expected: BOTH ExExs receive it (no filtering for tree notifications)
+        manager_handle
+            .send(ExExNotificationSource::BlockchainTree, tree_notification.clone())
+            .unwrap();
+
+        // Give the manager time to process
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Stateless ExEx: Should receive the tree notification
+        let stateless_notif2 =
+            tokio::time::timeout(std::time::Duration::from_secs(1), stateless_notifications.next())
+                .await
+                .expect("Timeout: stateless ExEx should receive tree notification")
+                .unwrap()
+                .unwrap();
+
+        assert!(
+            matches!(stateless_notif2, ExExNotification::ChainCommitted { .. }),
+            "Stateless ExEx: Expected ChainCommitted notification from blockchain tree"
+        );
+
+        // Stateful ExEx: Should receive the tree notification (first and only notification for it)
+        let stateful_notif =
+            tokio::time::timeout(std::time::Duration::from_secs(1), stateful_notifications.next())
+                .await
+                .expect("Timeout: stateful ExEx should receive tree notification")
+                .unwrap()
+                .unwrap();
+
+        assert!(
+            matches!(stateful_notif, ExExNotification::ChainCommitted { .. }),
+            "Stateful ExEx: Expected ChainCommitted notification from blockchain tree"
+        );
+
+        // STEP 3: Verify no more notifications are pending for stateful ExEx
+        let no_more_notifications = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            stateful_notifications.next(),
+        )
+        .await;
+
+        assert!(
+            no_more_notifications.is_err(),
+            "Stateful ExEx should have no more notifications after receiving the tree notification"
         );
     }
 }

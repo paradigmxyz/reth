@@ -624,6 +624,10 @@ where
 
     /// Installs an `ExEx` (Execution Extension) in the node.
     ///
+    /// By default, the ExEx is stateless and receives all notifications including
+    /// pipeline notifications. Use `install_stateful_exex` if the ExEx maintains
+    /// state and should skip pipeline notifications.
+    ///
     /// # Note
     ///
     /// The `ExEx` ID must be unique.
@@ -635,6 +639,32 @@ where
     {
         Self {
             builder: self.builder.install_exex(exex_id, exex),
+            task_executor: self.task_executor,
+        }
+    }
+
+    /// Installs a stateful `ExEx` (Execution Extension) in the node.
+    ///
+    /// Stateful ExExes maintain their own state and will skip pipeline notifications
+    /// because those contain finalized blocks with already-persisted state hashes.
+    /// They will only receive notifications from the blockchain tree.
+    ///
+    /// Use this for ExExes that:
+    /// - Maintain their own database or state
+    /// - Cannot operate on finalized/committed state
+    /// - Only need to process live blockchain tree updates
+    ///
+    /// # Note
+    ///
+    /// The `ExEx` ID must be unique.
+    pub fn install_stateful_exex<F, R, E>(self, exex_id: impl Into<String>, exex: F) -> Self
+    where
+        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: Future<Output = eyre::Result<()>> + Send,
+    {
+        Self {
+            builder: self.builder.install_stateful_exex(exex_id, exex),
             task_executor: self.task_executor,
         }
     }
@@ -652,6 +682,29 @@ where
     {
         if cond {
             self.install_exex(exex_id, exex)
+        } else {
+            self
+        }
+    }
+
+    /// Installs a stateful `ExEx` (Execution Extension) in the node if the condition is true.
+    ///
+    /// # Note
+    ///
+    /// The `ExEx` ID must be unique.
+    pub fn install_stateful_exex_if<F, R, E>(
+        self,
+        cond: bool,
+        exex_id: impl Into<String>,
+        exex: F,
+    ) -> Self
+    where
+        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: Future<Output = eyre::Result<()>> + Send,
+    {
+        if cond {
+            self.install_stateful_exex(exex_id, exex)
         } else {
             self
         }
