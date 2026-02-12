@@ -131,6 +131,8 @@ pub struct TreeConfig {
     disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
+    /// Whether to disable txpool prewarming between newPayload requests.
+    disable_txpool_prewarming: bool,
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
@@ -200,6 +202,7 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
+            disable_txpool_prewarming: true,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
@@ -237,6 +240,7 @@ impl TreeConfig {
         always_compare_trie_updates: bool,
         disable_state_cache: bool,
         disable_prewarming: bool,
+        disable_txpool_prewarming: bool,
         state_provider_metrics: bool,
         cross_block_cache_size: usize,
         has_enough_parallelism: bool,
@@ -266,6 +270,7 @@ impl TreeConfig {
             always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
+            disable_txpool_prewarming,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
@@ -360,6 +365,11 @@ impl TreeConfig {
     /// Returns whether or not parallel prewarming is disabled.
     pub const fn disable_prewarming(&self) -> bool {
         self.disable_prewarming
+    }
+
+    /// Returns whether or not txpool prewarming is disabled.
+    pub const fn disable_txpool_prewarming(&self) -> bool {
+        self.disable_txpool_prewarming
     }
 
     /// Returns whether to always compare trie updates from the state root task to the trie updates
@@ -458,6 +468,12 @@ impl TreeConfig {
     /// Setter for whether to disable parallel prewarming.
     pub const fn without_prewarming(mut self, disable_prewarming: bool) -> Self {
         self.disable_prewarming = disable_prewarming;
+        self
+    }
+
+    /// Setter for whether to disable txpool prewarming.
+    pub const fn without_txpool_prewarming(mut self, disable_txpool_prewarming: bool) -> Self {
+        self.disable_txpool_prewarming = disable_txpool_prewarming;
         self
     }
 
