@@ -2,8 +2,8 @@
 
 use clap::{builder::Resettable, Args};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
-    DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SMALL_BLOCK_GAS_THRESHOLD,
+    DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES, DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -45,6 +45,7 @@ pub struct DefaultEngineValues {
     sparse_trie_max_storage_tries: usize,
     disable_sparse_trie_cache_pruning: bool,
     state_root_task_timeout: Option<String>,
+    small_block_gas_threshold: u64,
 }
 
 impl DefaultEngineValues {
@@ -210,6 +211,12 @@ impl DefaultEngineValues {
         self.state_root_task_timeout = v;
         self
     }
+
+    /// Set the default small block gas threshold.
+    pub const fn with_small_block_gas_threshold(mut self, v: u64) -> Self {
+        self.small_block_gas_threshold = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -240,6 +247,7 @@ impl Default for DefaultEngineValues {
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some("1s".to_string()),
+            small_block_gas_threshold: DEFAULT_SMALL_BLOCK_GAS_THRESHOLD,
         }
     }
 }
@@ -400,6 +408,12 @@ pub struct EngineArgs {
         default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("1s"),
     )]
     pub state_root_task_timeout: Option<Duration>,
+
+    /// Gas threshold below which blocks skip the `StateRootTask` in favor of parallel state root
+    /// computation. The sparse trie task has fixed coordination overhead (~5-6ms) that exceeds
+    /// the benefit for small blocks. Set to 0 to disable.
+    #[arg(long = "engine.small-block-gas-threshold", default_value_t = DefaultEngineValues::get_global().small_block_gas_threshold)]
+    pub small_block_gas_threshold: u64,
 }
 
 #[allow(deprecated)]
@@ -431,6 +445,7 @@ impl Default for EngineArgs {
             sparse_trie_max_storage_tries,
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout,
+            small_block_gas_threshold,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -464,6 +479,7 @@ impl Default for EngineArgs {
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
+            small_block_gas_threshold,
         }
     }
 }
@@ -498,6 +514,7 @@ impl EngineArgs {
             .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
             .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
+            .with_small_block_gas_threshold(self.small_block_gas_threshold)
     }
 }
 
@@ -553,6 +570,7 @@ mod tests {
             sparse_trie_max_storage_tries: 100,
             disable_sparse_trie_cache_pruning: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
+            small_block_gas_threshold: 15_000_000,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -591,6 +609,8 @@ mod tests {
             "--engine.disable-sparse-trie-cache-pruning",
             "--engine.state-root-task-timeout",
             "2s",
+            "--engine.small-block-gas-threshold",
+            "15000000",
         ])
         .args;
 

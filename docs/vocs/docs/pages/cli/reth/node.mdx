@@ -1039,6 +1039,11 @@ Engine:
 
           [default: 1s]
 
+      --engine.small-block-gas-threshold <SMALL_BLOCK_GAS_THRESHOLD>
+          Gas threshold below which blocks skip the `StateRootTask` in favor of parallel state root computation. The sparse trie task has fixed coordination overhead (~5-6ms) that exceeds the benefit for small blocks. Set to 0 to disable
+
+          [default: 20000000]
+
 ERA:
       --era.enable
           Enable import from ERA1 files

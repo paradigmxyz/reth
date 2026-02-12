@@ -400,7 +400,7 @@ where
         };
 
         // Plan the strategy used for state root computation.
-        let strategy = self.plan_state_root_computation();
+        let strategy = self.plan_state_root_computation(input.gas_used());
 
         debug!(
             target: "engine::tree::payload_validator",
@@ -1232,18 +1232,36 @@ where
         Ok(None)
     }
 
-    /// Determines the state root computation strategy based on configuration.
+    /// Determines the state root computation strategy based on configuration and block size.
+    ///
+    /// For small blocks (below the configured gas threshold), the sparse trie task's
+    /// coordination overhead can outweigh the benefit. These blocks fall back to parallel state
+    /// root computation.
     ///
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
-    const fn plan_state_root_computation(&self) -> StateRootStrategy {
+    fn plan_state_root_computation(&self, gas_used: u64) -> StateRootStrategy {
         if self.config.state_root_fallback() {
-            StateRootStrategy::Synchronous
-        } else if self.config.use_state_root_task() {
-            StateRootStrategy::StateRootTask
-        } else {
-            StateRootStrategy::Parallel
+            return StateRootStrategy::Synchronous;
         }
+
+        if self.config.use_state_root_task() {
+            let threshold = self.config.small_block_gas_threshold();
+            if threshold > 0 && gas_used <= threshold {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    gas_used,
+                    threshold,
+                    "Skipping StateRootTask for small block"
+                );
+                self.metrics.block_validation.state_root_task_small_block_skip_total.increment(1);
+                return StateRootStrategy::Parallel;
+            }
+
+            return StateRootStrategy::StateRootTask;
+        }
+
+        StateRootStrategy::Parallel
     }
 
     /// Called when an invalid block is encountered during validation.
@@ -1634,6 +1652,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub const fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
         // TODO decode and return `BlockAccessList`
         None
+    }
+
+    /// Returns the gas used by the payload or block.
+    pub fn gas_used(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.gas_used(),
+            Self::Block(block) => block.gas_used(),
+        }
     }
 
     /// Returns the number of transactions in the payload or block.

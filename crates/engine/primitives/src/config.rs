@@ -68,6 +68,13 @@ pub const DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES: usize = 100;
 /// Default timeout for the state root task before spawning a sequential fallback.
 pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
 
+/// Default gas threshold below which blocks skip the `StateRootTask` machinery.
+///
+/// For blocks using less gas than this threshold, the coordination overhead of the sparse trie
+/// task (~5-6ms for channel setup, proof workers, multiproof gathering) exceeds the benefit.
+/// These blocks fall back to parallel state root computation instead.
+pub const DEFAULT_SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
+
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
@@ -186,6 +193,9 @@ pub struct TreeConfig {
     /// computation is spawned in parallel and whichever finishes first is used.
     /// If `None`, the timeout fallback is disabled.
     state_root_task_timeout: Option<Duration>,
+    /// Gas threshold below which blocks skip the `StateRootTask` in favor of parallel state root
+    /// computation. Set to `0` to disable.
+    small_block_gas_threshold: u64,
 }
 
 impl Default for TreeConfig {
@@ -220,6 +230,7 @@ impl Default for TreeConfig {
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
+            small_block_gas_threshold: DEFAULT_SMALL_BLOCK_GAS_THRESHOLD,
         }
     }
 }
@@ -286,6 +297,7 @@ impl TreeConfig {
             sparse_trie_max_storage_tries,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
+            small_block_gas_threshold: DEFAULT_SMALL_BLOCK_GAS_THRESHOLD,
         }
     }
 
@@ -654,6 +666,17 @@ impl TreeConfig {
     /// Setter for state root task timeout.
     pub const fn with_state_root_task_timeout(mut self, timeout: Option<Duration>) -> Self {
         self.state_root_task_timeout = timeout;
+        self
+    }
+
+    /// Returns the gas threshold for small block optimization.
+    pub const fn small_block_gas_threshold(&self) -> u64 {
+        self.small_block_gas_threshold
+    }
+
+    /// Setter for gas threshold below which blocks skip `StateRootTask`.
+    pub const fn with_small_block_gas_threshold(mut self, threshold: u64) -> Self {
+        self.small_block_gas_threshold = threshold;
         self
     }
 }
