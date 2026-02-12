@@ -15,7 +15,7 @@ use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::RethApiServer;
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
@@ -35,7 +35,7 @@ impl<Provider> RethApi<Provider> {
     }
 
     /// Create a new instance of the [`RethApi`]
-    pub fn new(provider: Provider, task_spawner: Box<dyn TaskSpawner>) -> Self {
+    pub fn new(provider: Provider, task_spawner: Runtime) -> Self {
         let inner = Arc::new(RethApiInner { provider, task_spawner });
         Self { inner }
     }
@@ -55,10 +55,10 @@ where
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         let f = c(this);
-        self.inner.task_spawner.spawn_blocking_task(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking_task(async move {
             let res = f.await;
             let _ = tx.send(res);
-        }));
+        });
         rx.await.map_err(|_| EthApiError::InternalEthError)?
     }
 
@@ -116,7 +116,7 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().canonical_state_stream();
-        self.inner.task_spawner.spawn_task(Box::pin(pipe_from_stream(sink, stream)));
+        self.inner.task_spawner.spawn_task(pipe_from_stream(sink, stream));
 
         Ok(())
     }
@@ -128,7 +128,7 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().persisted_block_stream();
-        self.inner.task_spawner.spawn_task(Box::pin(pipe_from_stream(sink, stream)));
+        self.inner.task_spawner.spawn_task(pipe_from_stream(sink, stream));
 
         Ok(())
     }
@@ -141,11 +141,11 @@ where
         let sink = pending.accept().await?;
         let canon_stream = self.provider().canonical_state_stream();
         let finalized_stream = self.provider().finalized_block_stream();
-        self.inner.task_spawner.spawn_task(Box::pin(finalized_chain_notifications(
+        self.inner.task_spawner.spawn_task(finalized_chain_notifications(
             sink,
             canon_stream,
             finalized_stream,
-        )));
+        ));
 
         Ok(())
     }
@@ -262,5 +262,5 @@ struct RethApiInner<Provider> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// The type that can spawn tasks which would otherwise block.
-    task_spawner: Box<dyn TaskSpawner>,
+    task_spawner: Runtime,
 }

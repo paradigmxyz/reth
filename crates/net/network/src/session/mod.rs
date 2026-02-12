@@ -28,7 +28,7 @@ use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
 use reth_network_types::SessionsConfig;
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use rustc_hash::FxHashMap;
 use secp256k1::SecretKey;
 use std::{
@@ -87,7 +87,7 @@ pub struct SessionManager<N: NetworkPrimitives> {
     /// Size of the command buffer per session.
     session_command_buffer: usize,
     /// The executor for spawned tasks.
-    executor: Box<dyn TaskSpawner>,
+    executor: Runtime,
     /// All pending session that are currently handshaking, exchanging `Hello`s.
     ///
     /// Events produced during the authentication phase are reported to this manager. Once the
@@ -130,7 +130,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     pub fn new(
         secret_key: SecretKey,
         config: SessionsConfig,
-        executor: Box<dyn TaskSpawner>,
+        executor: Runtime,
         status: UnifiedStatus,
         hello_message: HelloMessageWithProtocols,
         fork_filter: ForkFilter,
@@ -229,7 +229,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.executor.spawn_task(f.boxed());
+        self.executor.spawn_task(f);
     }
 
     /// Invoked on a received status update.

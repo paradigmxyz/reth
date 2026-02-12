@@ -20,7 +20,7 @@ use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_storage_api::{noop::NoopProvider, BlockNumReader, BlockReader, HeaderProvider};
-use reth_tasks::{TaskSpawner, TokioTaskExecutor};
+use reth_tasks::Runtime;
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
@@ -76,7 +76,7 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The default mode of the network.
     pub network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
-    pub executor: Box<dyn TaskSpawner>,
+    pub executor: Runtime,
     /// The `Status` message to send to peers at the beginning.
     pub status: UnifiedStatus,
     /// Sets the hello message for the p2p handshake in `RLPx`
@@ -206,7 +206,7 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The default mode of the network.
     network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
-    executor: Option<Box<dyn TaskSpawner>>,
+    executor: Option<Runtime>,
     /// Sets the hello message for the p2p handshake in `RLPx`
     hello_message: Option<HelloMessageWithProtocols>,
     /// The executor to use for spawning tasks.
@@ -342,7 +342,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// Sets the executor to use for spawning tasks.
     ///
     /// If `None`, then [`tokio::spawn`] is used for spawning tasks.
-    pub fn with_task_executor(mut self, executor: Box<dyn TaskSpawner>) -> Self {
+    pub fn with_task_executor(mut self, executor: Runtime) -> Self {
         self.executor = Some(executor);
         self
     }
@@ -691,7 +691,11 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             chain_id,
             block_import: block_import.unwrap_or_else(|| Box::<ProofOfStakeBlockImport>::default()),
             network_mode,
-            executor: executor.unwrap_or_else(|| Box::<TokioTaskExecutor>::default()),
+            executor: executor.unwrap_or_else(|| match tokio::runtime::Handle::try_current() {
+                Ok(handle) => Runtime::with_existing_handle(handle)
+                    .expect("failed to create runtime with existing handle"),
+                Err(_) => Runtime::test(),
+            }),
             status,
             hello_message,
             extra_protocols,
