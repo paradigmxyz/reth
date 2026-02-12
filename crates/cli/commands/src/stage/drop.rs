@@ -1,5 +1,5 @@
 //! Database debugging tool
-use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
+use crate::common::{CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
@@ -41,7 +41,7 @@ impl<C: ChainSpecParser> Command<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>()?;
 
         let tool = DbTool::new(provider_factory)?;
 

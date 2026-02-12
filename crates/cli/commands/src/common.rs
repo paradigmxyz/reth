@@ -8,7 +8,7 @@ use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::noop::NoopConsensus;
-use reth_db::{init_db, open_db_read_only, DatabaseEnv};
+use reth_db::{init_db, DatabaseEnv};
 use reth_db_common::init::init_genesis_with_settings;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_eth_wire::NetPrimitivesFor;
@@ -125,12 +125,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         s
     }
 
-    /// Initializes environment according to [`AccessRights`] and returns an instance of
-    /// [`Environment`].
+    /// Initializes environment and returns an instance of [`Environment`].
     ///
     /// Internally builds a [`reth_tasks::Runtime`] attached to the current tokio handle for
     /// parallel storage I/O.
-    pub fn init<N: CliNodeTypes>(&self, access: AccessRights) -> eyre::Result<Environment<N>>
+    pub fn init<N: CliNodeTypes>(&self) -> eyre::Result<Environment<N>>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
@@ -140,11 +139,9 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let sf_path = data_dir.static_files();
         let rocksdb_path = data_dir.rocksdb();
 
-        if access.is_read_write() {
-            reth_fs_util::create_dir_all(&db_path)?;
-            reth_fs_util::create_dir_all(&sf_path)?;
-            reth_fs_util::create_dir_all(&rocksdb_path)?;
-        }
+        reth_fs_util::create_dir_all(&db_path)?;
+        reth_fs_util::create_dir_all(&sf_path)?;
+        reth_fs_util::create_dir_all(&rocksdb_path)?;
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
@@ -164,53 +161,35 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
         let genesis_block_number = self.chain.genesis().number.unwrap_or_default();
-        let (db, sfp) = match access {
-            AccessRights::RW => (
-                init_db(db_path, self.db.database_args())?,
-                StaticFileProviderBuilder::read_write(sf_path)
-                    .with_metrics()
-                    .with_genesis_block_number(genesis_block_number)
-                    .build()?,
-            ),
-            AccessRights::RO | AccessRights::RoInconsistent => {
-                (open_db_read_only(&db_path, self.db.database_args())?, {
-                    let provider = StaticFileProviderBuilder::read_only(sf_path)
-                        .with_metrics()
-                        .with_genesis_block_number(genesis_block_number)
-                        .build()?;
-                    provider.watch_directory();
-                    provider
-                })
-            }
-        };
+        let (db, sfp) = (
+            init_db(db_path, self.db.database_args())?,
+            StaticFileProviderBuilder::read_write(sf_path)
+                .with_metrics()
+                .with_genesis_block_number(genesis_block_number)
+                .build()?,
+        );
         let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
             .with_default_tables()
             .with_database_log_level(self.db.log_level)
-            .with_read_only(!access.is_read_write())
             .build()?;
 
         let provider_factory =
-            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access, runtime)?;
-        if access.is_read_write() {
-            debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
-            init_genesis_with_settings(&provider_factory, self.storage_settings())?;
-        }
+            self.create_provider_factory(&config, db, sfp, rocksdb_provider, runtime)?;
+        debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
+        init_genesis_with_settings(&provider_factory, self.storage_settings())?;
 
         Ok(Environment { config, provider_factory, data_dir })
     }
 
     /// Returns a [`ProviderFactory`] after executing consistency checks.
     ///
-    /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
-    /// pipeline unwind). Otherwise, it will print out a warning, advising the user to restart the
-    /// node to heal.
+    /// If an issue is found, it will attempt to heal (including a pipeline unwind).
     fn create_provider_factory<N: CliNodeTypes>(
         &self,
         config: &Config,
         db: DatabaseEnv,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
-        access: AccessRights,
         runtime: reth_tasks::Runtime,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>>
     where
@@ -227,15 +206,9 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         .with_prune_modes(prune_modes.clone());
 
         // Check for consistency between database and static files.
-        if !access.is_read_only_inconsistent() &&
-            let Some(unwind_target) =
-                factory.static_file_provider().check_consistency(&factory.provider()?)?
+        if let Some(unwind_target) =
+            factory.static_file_provider().check_consistency(&factory.provider()?)?
         {
-            if factory.db_ref().is_read_only()? {
-                warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
-                return Ok(factory)
-            }
-
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
             assert_ne!(
@@ -281,30 +254,6 @@ pub struct Environment<N: NodeTypes> {
     pub provider_factory: ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     /// Datadir path.
     pub data_dir: ChainPath<DataDirPath>,
-}
-
-/// Environment access rights.
-#[derive(Debug, Copy, Clone)]
-pub enum AccessRights {
-    /// Read-write access
-    RW,
-    /// Read-only access
-    RO,
-    /// Read-only access with possibly inconsistent data
-    RoInconsistent,
-}
-
-impl AccessRights {
-    /// Returns `true` if it requires read-write access to the environment.
-    pub const fn is_read_write(&self) -> bool {
-        matches!(self, Self::RW)
-    }
-
-    /// Returns `true` if it requires read-only access to the environment with possibly inconsistent
-    /// data.
-    pub const fn is_read_only_inconsistent(&self) -> bool {
-        matches!(self, Self::RoInconsistent)
-    }
 }
 
 /// Helper alias to satisfy `FullNodeTypes` bound on [`Node`] trait generic.
