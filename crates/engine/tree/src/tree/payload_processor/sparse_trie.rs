@@ -10,7 +10,6 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, ParallelBridgeBuffered};
 use reth_tasks::Runtime;
 use reth_trie::{
@@ -211,6 +210,11 @@ where
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
 
+/// Threshold for switching from rayon parallel iteration to sequential iteration for storage trie
+/// operations. Below this count, rayon scheduling overhead (~10-15µs per call) exceeds the benefit
+/// of parallelism.
+const PARALLEL_STORAGE_TRIE_THRESHOLD: usize = 8;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparseTrie> {
     /// Sender for proof results.
@@ -218,7 +222,7 @@ pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparse
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Receives updates from execution and prewarming.
-    updates: CrossbeamReceiver<SparseTrieTaskMessage>,
+    updates: CrossbeamReceiver<MultiProofMessage>,
     /// `SparseStateTrie` used for computing the state root.
     trie: SparseStateTrie<A, S>,
     /// Handle to the proof worker pools (storage and account).
@@ -282,7 +286,7 @@ where
 {
     /// Creates a new sparse trie, pre-populating with an existing [`SparseStateTrie`].
     pub(super) fn new_with_trie(
-        executor: &Runtime,
+        _executor: &Runtime,
         updates: CrossbeamReceiver<MultiProofMessage>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,
@@ -290,18 +294,11 @@ where
         chunk_size: Option<usize>,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
-        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
-
-        let parent_span = tracing::Span::current();
-        executor.spawn_blocking(move || {
-            let _span = debug_span!(parent: parent_span, "run_hashing_task").entered();
-            Self::run_hashing_task(updates, hashed_state_tx)
-        });
 
         Self {
             proof_result_tx,
             proof_result_rx,
-            updates: hashed_state_rx,
+            updates,
             proof_worker_handle,
             trie,
             chunk_size,
@@ -318,38 +315,6 @@ where
             pending_targets: Default::default(),
             pending_updates: Default::default(),
             metrics,
-        }
-    }
-
-    /// Runs the hashing task that drains updates from the channel and converts them to
-    /// `HashedPostState` in parallel.
-    fn run_hashing_task(
-        updates: CrossbeamReceiver<MultiProofMessage>,
-        hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
-    ) {
-        while let Ok(message) = updates.recv() {
-            let msg = match message {
-                MultiProofMessage::PrefetchProofs(targets) => {
-                    SparseTrieTaskMessage::PrefetchProofs(targets)
-                }
-                MultiProofMessage::StateUpdate(_, state) => {
-                    let _span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing state update", update_len = state.len()).entered();
-                    let hashed = evm_state_to_hashed_post_state(state);
-                    SparseTrieTaskMessage::HashedState(hashed)
-                }
-                MultiProofMessage::FinishedStateUpdates => {
-                    SparseTrieTaskMessage::FinishedStateUpdates
-                }
-                MultiProofMessage::EmptyProof { .. } | MultiProofMessage::BlockAccessList(_) => {
-                    continue
-                }
-                MultiProofMessage::HashedStateUpdate(state) => {
-                    SparseTrieTaskMessage::HashedState(state)
-                }
-            };
-            if hashed_state_tx.send(msg).is_err() {
-                break;
-            }
         }
     }
 
@@ -388,7 +353,7 @@ where
 
     /// Runs the sparse trie task to completion.
     ///
-    /// This waits for new incoming [`SparseTrieTaskMessage`]s, applies updates
+    /// This waits for new incoming [`MultiProofMessage`]s, applies updates
     /// to the trie and schedules proof fetching when needed.
     ///
     /// This concludes once the last state update has been received and processed.
@@ -474,14 +439,17 @@ where
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
 
-    /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) {
+    /// Processes a [`MultiProofMessage`] directly, hashing `EvmState` inline.
+    fn on_message(&mut self, message: MultiProofMessage) {
         match message {
-            SparseTrieTaskMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
-            SparseTrieTaskMessage::HashedState(hashed_state) => {
-                self.on_hashed_state_update(hashed_state)
+            MultiProofMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
+            MultiProofMessage::StateUpdate(_, state) => {
+                let hashed = evm_state_to_hashed_post_state(state);
+                self.on_hashed_state_update(hashed)
             }
-            SparseTrieTaskMessage::FinishedStateUpdates => self.finished_state_updates = true,
+            MultiProofMessage::HashedStateUpdate(state) => self.on_hashed_state_update(state),
+            MultiProofMessage::FinishedStateUpdates => self.finished_state_updates = true,
+            MultiProofMessage::EmptyProof { .. } | MultiProofMessage::BlockAccessList(_) => {}
         }
     }
 
@@ -636,8 +604,7 @@ where
 
                 (address, updates, fetched, trie)
             })
-            .par_bridge_buffered()
-            .map(|(address, updates, mut fetched, mut trie)| {
+            .maybe_par_map_collect(PARALLEL_STORAGE_TRIE_THRESHOLD, |(address, updates, mut fetched, mut trie)| {
                 let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie leaf updates", ?address).entered();
                 let mut targets = Vec::new();
 
@@ -656,6 +623,7 @@ where
 
                 SparseTrieResult::Ok((address, targets, fetched, trie))
             })
+            .into_iter()
             .collect::<Result<Vec<_>, _>>()?;
 
         drop(span);
@@ -735,8 +703,7 @@ where
                 self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty()) &&
                     !trie.is_root_cached()
             })
-            .par_bridge_buffered()
-            .for_each(|(address, trie)| {
+            .maybe_par_for_each(PARALLEL_STORAGE_TRIE_THRESHOLD, |(address, trie)| {
                 let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage root", ?address).entered();
                 trie.root().expect("updates are drained, trie should be revealed by now");
             });
@@ -859,16 +826,6 @@ where
     }
 }
 
-/// Message type for the sparse trie task.
-enum SparseTrieTaskMessage {
-    /// A hashed state update ready to be processed.
-    HashedState(HashedPostState),
-    /// Prefetch proof targets (passed through directly).
-    PrefetchProofs(VersionedMultiProofTargets),
-    /// Signals that all state updates have been received.
-    FinishedStateUpdates,
-}
-
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates.
 #[derive(Debug)]
@@ -918,8 +875,7 @@ where
         .storages
         .into_iter()
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
-        .par_bridge_buffered()
-        .map(|(address, storage, storage_trie)| {
+        .maybe_par_map_collect(PARALLEL_STORAGE_TRIE_THRESHOLD, |(address, storage, storage_trie)| {
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie", ?address)
                     .entered();
@@ -963,8 +919,7 @@ where
             storage_trie.root();
 
             SparseStateTrieResult::Ok((address, storage_trie))
-        })
-        .collect();
+        });
 
     // Defer leaf removals until after updates/additions, so that we don't delete an intermediate
     // branch node during a removal and then re-add that branch back during a later leaf addition.
@@ -1037,54 +992,49 @@ where
 mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, U256};
-    use reth_trie_sparse::ParallelSparseTrie;
 
+    /// Verifies that `evm_state_to_hashed_post_state` produces the expected
+    /// `HashedPostState`, validating the inline hashing path used by `on_message`.
     #[test]
-    fn test_run_hashing_task_hashed_state_update_forwards() {
-        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
-        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
+    fn test_evm_state_hashing_produces_correct_output() {
+        use reth_revm::state::EvmState;
+        use revm_state::{Account as RevmAccount, AccountInfo, AccountStatus, EvmStorageSlot};
 
-        let address = keccak256(Address::random());
-        let slot = keccak256(U256::from(42).to_be_bytes::<32>());
-        let value = U256::from(999);
+        let address = Address::random();
+        let hashed_address = keccak256(address);
+        let slot_key = U256::from(42);
+        let slot_value = U256::from(999);
+        let hashed_slot = keccak256(B256::new(slot_key.to_be_bytes()));
 
-        let mut hashed_state = HashedPostState::default();
-        hashed_state.accounts.insert(
+        let mut evm_state = EvmState::default();
+        let mut storage = revm_primitives::map::HashMap::default();
+        storage.insert(slot_key, EvmStorageSlot::new_changed(U256::ZERO, slot_value, 0));
+        evm_state.insert(
             address,
-            Some(Account { balance: U256::from(100), nonce: 1, bytecode_hash: None }),
+            RevmAccount {
+                info: AccountInfo {
+                    balance: U256::from(100),
+                    nonce: 1,
+                    code_hash: alloy_primitives::KECCAK256_EMPTY,
+                    code: None,
+                    account_id: None,
+                },
+                original_info: Default::default(),
+                storage,
+                status: AccountStatus::Touched,
+                transaction_id: 0,
+            },
         );
-        let mut storage = reth_trie::HashedStorage::new(false);
-        storage.storage.insert(slot, value);
-        hashed_state.storages.insert(address, storage);
 
-        let expected_state = hashed_state.clone();
+        let hashed = evm_state_to_hashed_post_state(evm_state);
 
-        let handle = std::thread::spawn(move || {
-            SparseTrieCacheTask::<ParallelSparseTrie, ParallelSparseTrie>::run_hashing_task(
-                updates_rx,
-                hashed_state_tx,
-            );
-        });
+        // Verify account was hashed correctly
+        let account = hashed.accounts.get(&hashed_address).unwrap().unwrap();
+        assert_eq!(account.balance, U256::from(100));
+        assert_eq!(account.nonce, 1);
 
-        updates_tx.send(MultiProofMessage::HashedStateUpdate(hashed_state)).unwrap();
-        updates_tx.send(MultiProofMessage::FinishedStateUpdates).unwrap();
-        drop(updates_tx);
-
-        let SparseTrieTaskMessage::HashedState(received) = hashed_state_rx.recv().unwrap() else {
-            panic!("expected HashedState message");
-        };
-
-        let account = received.accounts.get(&address).unwrap().unwrap();
-        assert_eq!(account.balance, expected_state.accounts[&address].unwrap().balance);
-        assert_eq!(account.nonce, expected_state.accounts[&address].unwrap().nonce);
-
-        let storage = received.storages.get(&address).unwrap();
-        assert_eq!(*storage.storage.get(&slot).unwrap(), value);
-
-        let second = hashed_state_rx.recv().unwrap();
-        assert!(matches!(second, SparseTrieTaskMessage::FinishedStateUpdates));
-
-        assert!(hashed_state_rx.recv().is_err());
-        handle.join().unwrap();
+        // Verify storage slot was hashed correctly
+        let storage = hashed.storages.get(&hashed_address).unwrap();
+        assert_eq!(*storage.storage.get(&hashed_slot).unwrap(), slot_value);
     }
 }
