@@ -310,7 +310,12 @@ where
         let ctx = self.ctx.clone();
         self.executor.prewarming_pool().install(|| {
             bal.par_iter().for_each_init(
-                || (ctx.clone(), None::<CachedStateProvider<reth_provider::StateProviderBox>>),
+                || {
+                    (
+                        ctx.clone(),
+                        None::<CachedStateProvider<reth_provider::StateProviderBox, false>>,
+                    )
+                },
                 |(ctx, provider), account| {
                     if ctx.terminate_execution.load(Ordering::Relaxed) {
                         return;
@@ -509,11 +514,11 @@ where
         if let Some(saved_cache) = saved_cache {
             let caches = saved_cache.cache().clone();
             let cache_metrics = saved_cache.metrics().clone();
-            state_provider = Box::new(
-                CachedStateProvider::new(state_provider, caches, cache_metrics)
-                    // ensure we pre-warm the cache
-                    .prewarm(),
-            );
+            state_provider = Box::new(CachedStateProvider::<_, true>::new(
+                state_provider,
+                caches,
+                cache_metrics,
+            ));
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
@@ -667,7 +672,7 @@ where
     /// thread.
     fn prefetch_bal_account(
         &self,
-        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox>>,
+        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox, false>>,
         account: &alloy_eip7928::AccountChanges,
     ) {
         let state_provider = match provider {

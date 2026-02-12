@@ -297,7 +297,7 @@ where
                 let provider = provider_builder.build().expect("failed to build provider");
                 let provider = if let Some(saved_cache) = saved_cache {
                     let (cache, metrics, _disable_metrics) = saved_cache.split();
-                    Box::new(CachedStateProvider::new(provider, cache, metrics))
+                    Box::new(CachedStateProvider::<_, false>::new(provider, cache, metrics))
                         as Box<dyn StateProvider>
                 } else {
                     Box::new(provider)

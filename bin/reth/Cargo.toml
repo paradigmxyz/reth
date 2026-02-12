@@ -58,6 +58,7 @@ reth-node-metrics.workspace = true
 reth-consensus.workspace = true
 
 # alloy
+alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 
 # tracing
@@ -69,7 +70,6 @@ clap = { workspace = true, features = ["derive", "env"] }
 
 [dev-dependencies]
 alloy-node-bindings = "1.6.3"
-alloy-primitives.workspace = true
 alloy-provider = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types-eth.workspace = true
 backon.workspace = true
