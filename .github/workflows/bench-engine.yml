@@ -237,8 +237,7 @@ jobs:
             const baseUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${sha}/pr/${prNumber}/${runId}`;
 
             const charts = [
-              { file: 'newpayload_latency.png', label: 'newPayload Latency' },
-              { file: 'gas_per_second.png', label: 'Execution Throughput (Ggas/s)' },
+              { file: 'latency_throughput.png', label: 'Latency & Throughput' },
               { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
               { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
             ];

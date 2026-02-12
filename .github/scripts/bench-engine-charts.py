@@ -4,11 +4,10 @@
 Usage:
     bench-engine-charts.py <combined_csv> --output-dir <dir>
 
-Generates four PNG charts:
-  1. newPayload latency per block
-  2. Gas/s per block
-  3. Wait breakdown (persistence, execution cache, sparse trie) per block
-  4. Scatter plot of gas used vs latency
+Generates three PNG charts:
+  1. newPayload latency + Ggas/s per block (two subplots)
+  2. Wait breakdown (persistence, execution cache, sparse trie) per block
+  3. Scatter plot of gas used vs latency
 """
 
 import argparse
@@ -44,34 +43,27 @@ def parse_combined_csv(path: str) -> list[dict]:
     return rows
 
 
-def plot_latency(rows: list[dict], out: Path):
+def plot_latency_and_throughput(rows: list[dict], out: Path):
     blocks = [r["block_number"] for r in rows]
     latency_ms = [r["new_payload_latency_us"] / 1_000 for r in rows]
-
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(blocks, latency_ms, linewidth=0.8, color="#1f77b4")
-    ax.set_xlabel("Block Number")
-    ax.set_ylabel("newPayload Latency (ms)")
-    ax.set_title("newPayload Latency per Block")
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-
-
-def plot_gas_per_second(rows: list[dict], out: Path):
-    blocks = [r["block_number"] for r in rows]
     ggas_s = []
     for r in rows:
         lat_s = r["new_payload_latency_us"] / 1_000_000
         ggas_s.append(r["gas_used"] / lat_s / GIGAGAS if lat_s > 0 else 0)
 
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(blocks, ggas_s, linewidth=0.8, color="#2ca02c")
-    ax.set_xlabel("Block Number")
-    ax.set_ylabel("Ggas/s")
-    ax.set_title("Execution Throughput per Block")
-    ax.grid(True, alpha=0.3)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+    ax1.plot(blocks, latency_ms, linewidth=0.8, color="#1f77b4")
+    ax1.set_ylabel("Latency (ms)")
+    ax1.set_title("newPayload Latency per Block")
+    ax1.grid(True, alpha=0.3)
+
+    ax2.plot(blocks, ggas_s, linewidth=0.8, color="#2ca02c")
+    ax2.set_xlabel("Block Number")
+    ax2.set_ylabel("Ggas/s")
+    ax2.set_title("Execution Throughput per Block")
+    ax2.grid(True, alpha=0.3)
+
     fig.tight_layout()
     fig.savefig(out, dpi=150)
     plt.close(fig)
@@ -129,8 +121,7 @@ def main():
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    plot_latency(rows, out_dir / "newpayload_latency.png")
-    plot_gas_per_second(rows, out_dir / "gas_per_second.png")
+    plot_latency_and_throughput(rows, out_dir / "latency_throughput.png")
     plot_wait_breakdown(rows, out_dir / "wait_breakdown.png")
     plot_gas_vs_latency(rows, out_dir / "gas_vs_latency.png")
 
