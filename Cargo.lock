@@ -3328,7 +3328,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
- "reth-stateless",
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",
@@ -10266,32 +10265,6 @@ dependencies = [
  "reth-codecs",
  "reth-trie-common",
  "serde",
-]
-
-[[package]]
-name = "reth-stateless"
-version = "1.10.2"
-dependencies = [
- "alloy-consensus",
- "alloy-genesis",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types-debug",
- "alloy-trie",
- "itertools 0.14.0",
- "reth-chainspec",
- "reth-consensus",
- "reth-errors",
- "reth-ethereum-consensus",
- "reth-ethereum-primitives",
- "reth-evm",
- "reth-primitives-traits",
- "reth-revm",
- "reth-trie-common",
- "reth-trie-sparse",
- "serde",
- "serde_with",
- "thiserror 2.0.18",
 ]
 
 [[package]]
