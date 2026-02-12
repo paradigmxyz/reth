@@ -1022,6 +1022,15 @@ Engine:
 
           [default: 100]
 
+      --engine.state-root-task-timeout <STATE_ROOT_TASK_TIMEOUT>
+          Configure the timeout for the state root task before spawning a sequential fallback. If the state root task takes longer than this, a sequential computation starts in parallel and whichever finishes first is used.
+
+          --engine.state-root-task-timeout 1s --engine.state-root-task-timeout 400ms
+
+          Set to 0s to disable.
+
+          [default: 1s]
+
 ERA:
       --era.enable
           Enable import from ERA1 files
@@ -1116,30 +1125,6 @@ Storage:
           When enabled, execution writes directly to hashed tables, eliminating the need for separate hashing stages. This should only be enabled for new databases.
 
           WARNING: Changing this setting on an existing database requires a full resync.
-
-Ress:
-      --ress.enable
-          Enable support for `ress` subprotocol
-
-      --ress.max-active-connections <MAX_ACTIVE_CONNECTIONS>
-          The maximum number of active connections for `ress` subprotocol
-
-          [default: 5]
-
-      --ress.max-witness-window <MAX_WITNESS_WINDOW>
-          The maximum witness lookback window
-
-          [default: 1024]
-
-      --ress.witness-max-parallel <WITNESS_MAX_PARALLEL>
-          The maximum number of witnesses to generate in parallel
-
-          [default: 5]
-
-      --ress.witness-cache-size <WITNESS_CACHE_SIZE>
-          Witness cache size
-
-          [default: 10]
 
 Logging:
       --log.stdout.format <FORMAT>

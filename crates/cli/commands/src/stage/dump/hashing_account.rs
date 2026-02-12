@@ -33,12 +33,14 @@ pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = Databas
     unwind_and_copy(db_tool, from, tip_block_number, &output_db)?;
 
     if should_run {
+        let runtime = reth_tasks::Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
         dry_run(
             ProviderFactory::<N>::new(
                 output_db,
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                runtime,
             )?,
             to,
             from,

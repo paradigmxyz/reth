@@ -525,7 +525,7 @@ where
         let new_canonical_blocks = provider.canonical_state_stream();
         let fhc = fee_history_cache.clone();
         let cache = eth_cache.clone();
-        task_spawner.spawn_critical(
+        task_spawner.spawn_critical_task(
             "cache canonical blocks for fee history task",
             Box::pin(async move {
                 fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider, cache).await;
@@ -541,7 +541,7 @@ where
             eth_proof_window,
             blocking_task_pool.unwrap_or_else(|| {
                 BlockingTaskPool::builder()
-                    .thread_name(|i| format!("blocking-{i}"))
+                    .thread_name(|i| format!("blocking-{i:02}"))
                     .build()
                     .map(BlockingTaskPool::new)
                     .expect("failed to build blocking task pool")

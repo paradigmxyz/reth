@@ -127,10 +127,14 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
+    ///
+    /// Internally builds a [`reth_tasks::Runtime`] attached to the current tokio handle for
+    /// parallel storage I/O.
     pub fn init<N: CliNodeTypes>(&self, access: AccessRights) -> eyre::Result<Environment<N>>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
+        let runtime = reth_tasks::Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
@@ -186,7 +190,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             .build()?;
 
         let provider_factory =
-            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
+            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access, runtime)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis_with_settings(&provider_factory, self.storage_settings())?;
@@ -207,6 +211,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
         access: AccessRights,
+        runtime: reth_tasks::Runtime,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
@@ -217,6 +222,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             self.chain.clone(),
             static_file_provider,
             rocksdb_provider,
+            runtime,
         )?
         .with_prune_modes(prune_modes.clone());
 
