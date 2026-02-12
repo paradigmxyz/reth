@@ -8,7 +8,7 @@ use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::noop::NoopConsensus;
-use reth_db::{init_db, open_db_read_only, DatabaseEnv};
+use reth_db::{init_db, lockfile::StorageLock, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis_with_settings;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_eth_wire::NetPrimitivesFor;
@@ -146,7 +146,15 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let sf_path = data_dir.static_files();
         let rocksdb_path = data_dir.rocksdb();
 
-        if !self.read_only {
+        // Auto-detect if another process holds the lock and fall back to read-only mode.
+        let read_only = if !self.read_only && StorageLock::is_locked(&db_path) {
+            warn!(target: "reth::cli", "Storage lock is taken by another process, falling back to read-only mode");
+            true
+        } else {
+            self.read_only
+        };
+
+        if !read_only {
             reth_fs_util::create_dir_all(&db_path)?;
             reth_fs_util::create_dir_all(&sf_path)?;
             reth_fs_util::create_dir_all(&rocksdb_path)?;
@@ -168,9 +176,9 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             config.stages.era = config.stages.era.with_datadir(data_dir.data_dir());
         }
 
-        info!(target: "reth::cli", ?db_path, ?sf_path, read_only = self.read_only, "Opening storage");
+        info!(target: "reth::cli", ?db_path, ?sf_path, read_only, "Opening storage");
         let genesis_block_number = self.chain.genesis().number.unwrap_or_default();
-        let (db, sfp) = if self.read_only {
+        let (db, sfp) = if read_only {
             (open_db_read_only(&db_path, self.db.database_args())?, {
                 let provider = StaticFileProviderBuilder::read_only(sf_path)
                     .with_metrics()
@@ -191,18 +199,12 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
             .with_default_tables()
             .with_database_log_level(self.db.log_level)
-            .with_read_only(self.read_only)
+            .with_read_only(read_only)
             .build()?;
 
-        let provider_factory = self.create_provider_factory(
-            &config,
-            db,
-            sfp,
-            rocksdb_provider,
-            self.read_only,
-            runtime,
-        )?;
-        if !self.read_only {
+        let provider_factory =
+            self.create_provider_factory(&config, db, sfp, rocksdb_provider, read_only, runtime)?;
+        if !read_only {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis_with_settings(&provider_factory, self.storage_settings())?;
         }
