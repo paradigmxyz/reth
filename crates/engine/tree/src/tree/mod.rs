@@ -1549,40 +1549,32 @@ where
                                 let validator = &self.payload_validator;
 
                                 debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
-                                let (persistence_result, persistence_wait, cache_wait) =
-                                    std::thread::scope(|s| {
-                                        let persistence_handle = s.spawn(|| {
-                                            pending_persistence.map(|(rx, start_time, _action)| {
-                                                let start = Instant::now();
-                                                let result = rx.recv().ok();
-                                                (result, start_time, start.elapsed())
-                                            })
-                                        });
-
-                                        let cache_handle = s.spawn(|| validator.wait_for_caches());
-
-                                        let persistence_result = persistence_handle
-                                            .join()
-                                            .expect("persistence wait thread panicked");
-                                        let cache_wait = cache_handle
-                                            .join()
-                                            .expect("cache wait thread panicked");
-
-                                        let persistence_wait = persistence_result
-                                            .as_ref()
-                                            .map(|(_, _, elapsed)| *elapsed);
-                                        let persistence_complete = persistence_result.and_then(
-                                            |(result, start_time, _)| {
-                                                result.map(|r| (r, start_time))
-                                            },
-                                        );
-
-                                        (persistence_complete, persistence_wait, cache_wait)
+                                let (persistence_tx, persistence_rx) = std::sync::mpsc::channel();
+                                if let Some((rx, start_time, _action)) = pending_persistence {
+                                    tokio::task::spawn_blocking(move || {
+                                        let start = Instant::now();
+                                        let result = rx.recv().ok();
+                                        let _ = persistence_tx.send((
+                                            result,
+                                            start_time,
+                                            start.elapsed(),
+                                        ));
                                     });
-
-                                if let Some((result, start_time)) = persistence_result {
-                                    let _ = self.on_persistence_complete(result, start_time);
                                 }
+
+                                let cache_wait = validator.wait_for_caches();
+                                let persistence_result = persistence_rx.try_recv().ok();
+
+                                let persistence_wait =
+                                    if let Some((result, start_time, wait_duration)) =
+                                        persistence_result
+                                    {
+                                        let _ = self
+                                            .on_persistence_complete(result.flatten(), start_time);
+                                        Some(wait_duration)
+                                    } else {
+                                        None
+                                    };
 
                                 debug!(
                                     target: "engine::tree",

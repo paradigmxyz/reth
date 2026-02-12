@@ -212,14 +212,21 @@ where
         let execution_cache = self.execution_cache.clone();
         let sparse_trie = self.sparse_state_trie.clone();
 
-        let execution_cache_handle =
-            std::thread::spawn(move || execution_cache.wait_for_availability());
-        let sparse_trie_handle = std::thread::spawn(move || sparse_trie.wait_for_availability());
+        // Use channels and spawn_blocking instead of std::thread::spawn
+        let (execution_tx, execution_rx) = std::sync::mpsc::channel();
+        let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
+
+        self.executor.spawn_blocking(move || {
+            let _ = execution_tx.send(execution_cache.wait_for_availability());
+        });
+        self.executor.spawn_blocking(move || {
+            let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
+        });
 
         let execution_cache_duration =
-            execution_cache_handle.join().expect("execution cache wait thread panicked");
+            execution_rx.recv().expect("execution cache wait task failed to send result");
         let sparse_trie_duration =
-            sparse_trie_handle.join().expect("sparse trie wait thread panicked");
+            sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
 
         debug!(
             target: "engine::tree::payload_processor",
