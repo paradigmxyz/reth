@@ -33,7 +33,7 @@ use reth_provider::{
     StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_tasks::Runtime;
+use reth_tasks::{ForEachOrdered, Runtime};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -43,7 +43,6 @@ use reth_trie_sparse::{
     ParallelSparseTrie, ParallelismThresholds, RevealableSparseTrie, SparseStateTrie,
 };
 use std::{
-    collections::BTreeMap,
     ops::Not,
     sync::{
         atomic::AtomicBool,
@@ -374,7 +373,9 @@ where
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
-    /// sequential iteration to avoid rayon overhead.
+    /// sequential iteration to avoid rayon overhead. For larger blocks, uses rayon parallel
+    /// iteration with [`ForEachOrdered`] to recover signatures in parallel while streaming
+    /// results to execution in the original transaction order.
     #[expect(clippy::type_complexity)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
@@ -384,7 +385,6 @@ where
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
     ) {
-        let (ooo_tx, ooo_rx) = mpsc::channel();
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
 
@@ -400,7 +400,7 @@ where
             );
             self.executor.spawn_blocking(move || {
                 let (transactions, convert) = transactions.into_parts();
-                for (idx, tx) in transactions.into_iter().enumerate() {
+                for tx in transactions {
                     let tx = convert.convert(tx);
                     let tx = tx.map(|tx| {
                         let (tx_env, tx) = tx.into_parts();
@@ -409,52 +409,31 @@ where
                     if let Ok(tx) = &tx {
                         let _ = prewarm_tx.send(tx.clone());
                     }
-                    let _ = ooo_tx.send((idx, tx));
+                    let _ = execute_tx.send(tx);
                 }
             });
         } else {
-            // Parallel path — spawn on rayon for parallel signature recovery.
+            // Parallel path — recover signatures in parallel on rayon, stream results
+            // to execution in order via `for_each_ordered` (lock-free atomic bitmap reorder).
             rayon::spawn(move || {
                 let (transactions, convert) = transactions.into_parts();
-                transactions.into_par_iter().enumerate().for_each_with(
-                    ooo_tx,
-                    |ooo_tx, (idx, tx)| {
+                transactions
+                    .into_par_iter()
+                    .map(|tx| {
                         let tx = convert.convert(tx);
-                        let tx = tx.map(|tx| {
+                        tx.map(|tx| {
                             let (tx_env, tx) = tx.into_parts();
-                            WithTxEnv { tx_env, tx: Arc::new(tx) }
-                        });
-                        // Only send Ok(_) variants to prewarming task.
-                        if let Ok(tx) = &tx {
+                            let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
+                            // Send to prewarming out of order — order doesn't matter there.
                             let _ = prewarm_tx.send(tx.clone());
-                        }
-                        let _ = ooo_tx.send((idx, tx));
-                    },
-                );
+                            tx
+                        })
+                    })
+                    .for_each_ordered(|tx| {
+                        let _ = execute_tx.send(tx);
+                    });
             });
         }
-
-        // Spawn a task that processes out-of-order transactions from the task above and sends them
-        // to the execution task in order.
-        self.executor.spawn_blocking(move || {
-            let mut next_for_execution = 0;
-            let mut queue = BTreeMap::new();
-            while let Ok((idx, tx)) = ooo_rx.recv() {
-                if next_for_execution == idx {
-                    let _ = execute_tx.send(tx);
-                    next_for_execution += 1;
-
-                    while let Some(entry) = queue.first_entry() &&
-                        *entry.key() == next_for_execution
-                    {
-                        let _ = execute_tx.send(entry.remove());
-                        next_for_execution += 1;
-                    }
-                } else {
-                    queue.insert(idx, tx);
-                }
-            }
-        });
 
         (prewarm_rx, execute_rx)
     }

@@ -41,6 +41,11 @@ pub mod shutdown;
 pub mod pool;
 
 #[cfg(feature = "rayon")]
+pub mod rayon_ordered;
+#[cfg(feature = "rayon")]
+pub use rayon_ordered::ForEachOrdered;
+
+#[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
 pub use runtime::{Runtime, RuntimeBuildError, RuntimeBuilder, RuntimeConfig, TokioConfig};
 
