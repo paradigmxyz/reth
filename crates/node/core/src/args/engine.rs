@@ -383,7 +383,7 @@ pub struct EngineArgs {
     /// Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved
     /// without any node pruning or storage trie eviction between blocks. Useful for benchmarking
     /// the effects of retaining the full trie cache.
-    #[arg(long = "engine.disable-sparse-trie-cache-pruning", default_value_t = DefaultEngineValues::get_global().disable_sparse_trie_cache_pruning, requires = "enable_sparse_trie_as_cache")]
+    #[arg(long = "engine.disable-sparse-trie-cache-pruning", default_value_t = DefaultEngineValues::get_global().disable_sparse_trie_cache_pruning)]
     pub disable_sparse_trie_cache_pruning: bool,
 
     /// Configure the timeout for the state root task before spawning a sequential fallback.
