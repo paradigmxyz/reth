@@ -233,6 +233,44 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
     hashed_state
 }
 
+/// Converts an `EvmState` reference to a `HashedPostState` without cloning.
+///
+/// This avoids the expensive `EvmState::clone()` that would otherwise be needed to send
+/// the state across threads. Only copies the small scalar fields (address, nonce, balance,
+/// `code_hash`, storage keys/values) — never clones bytecode or the full Account struct.
+pub(crate) fn evm_state_to_hashed_post_state_ref(update: &EvmState) -> HashedPostState {
+    let mut hashed_state = HashedPostState::with_capacity(update.len());
+
+    for (address, account) in update {
+        if account.is_touched() {
+            let hashed_address = keccak256(*address);
+
+            let destroyed = account.is_selfdestructed();
+            let info = if destroyed { None } else { Some((&account.info).into()) };
+            hashed_state.accounts.insert(hashed_address, info);
+
+            if destroyed {
+                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
+            } else {
+                let changed_slots: Vec<_> = account
+                    .storage
+                    .iter()
+                    .filter(|(_, value)| value.is_changed())
+                    .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value))
+                    .collect();
+
+                if !changed_slots.is_empty() {
+                    hashed_state
+                        .storages
+                        .insert(hashed_address, HashedStorage::from_iter(false, changed_slots));
+                }
+            }
+        }
+    }
+
+    hashed_state
+}
+
 /// Extends a `MultiProofTargets` with the contents of a `VersionedMultiProofTargets`,
 /// regardless of which variant the latter is.
 fn extend_multiproof_targets(dest: &mut MultiProofTargets, src: &VersionedMultiProofTargets) {

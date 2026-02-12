@@ -319,11 +319,16 @@ where
             parent_state_root,
         );
 
+        // Enable pre-hashing when the trie cache path is active (no MultiProofTask running).
+        // In this mode, we hash EvmState by reference on the engine thread instead of cloning.
+        let send_hashed_state_updates = !config.disable_trie_cache();
+
         PayloadHandle {
             to_multi_proof: Some(to_multi_proof),
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
+            send_hashed_state_updates,
             _span: span,
         }
     }
@@ -351,6 +356,7 @@ where
             prewarm_handle,
             state_root: None,
             transactions: execution_rx,
+            send_hashed_state_updates: false,
             _span: Span::current(),
         }
     }
@@ -688,6 +694,11 @@ pub struct PayloadHandle<Tx, Err, R> {
     transactions: mpsc::Receiver<Result<Tx, Err>>,
     /// Receiver for the state root
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    /// When true, state updates are pre-hashed by reference on the engine thread and sent
+    /// as `HashedStateUpdate` instead of cloning the full `EvmState`. This avoids the
+    /// expensive `EvmState::clone()` and is safe when the trie cache path is active (no
+    /// `MultiProofTask` consumes the messages).
+    send_hashed_state_updates: bool,
     /// Span for tracing
     _span: Span,
 }
@@ -727,13 +738,25 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Returns a state hook to be used to send state updates to this task.
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
+    ///
+    /// When the trie cache path is active (`send_hashed_state_updates` is true), the hook
+    /// hashes the `EvmState` by reference on the engine thread and sends a
+    /// `HashedStateUpdate` instead of cloning the full state. This eliminates the expensive
+    /// `EvmState::clone()` per transaction.
     pub fn state_hook(&self) -> impl OnStateHook {
         // convert the channel into a `StateHookSender` that emits an event on drop
         let to_multi_proof = self.to_multi_proof.clone().map(StateHookSender::new);
+        let send_hashed = self.send_hashed_state_updates;
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
+                if send_hashed {
+                    let hashed = multiproof::evm_state_to_hashed_post_state_ref(state);
+                    let _ = sender.send(MultiProofMessage::HashedStateUpdate(hashed));
+                } else {
+                    let _ =
+                        sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
+                }
             }
         }
     }
