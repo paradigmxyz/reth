@@ -541,6 +541,51 @@ impl SparseNodeState {
     }
 }
 
+/// A leaf node in the sparse trie, containing both metadata and value.
+///
+/// This struct combines the leaf's key suffix length, state tracking, and value
+/// in a single allocation, avoiding the indirection of storing leaf metadata
+/// separately from values.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SparseNodeLeaf {
+    /// Length of the key suffix for this leaf.
+    /// The actual key can be derived from the full path: `full_path[full_path.len() - key_len..]`
+    pub key_len: usize,
+    /// Tracker for the node's state, e.g. cached `RlpNode` tracking.
+    pub state: SparseNodeState,
+    /// The RLP-encoded value stored at this leaf.
+    pub value: Vec<u8>,
+}
+
+impl SparseNodeLeaf {
+    /// Creates a new leaf node with the given key length, value, and dirty state.
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn new(key_len: usize, value: Vec<u8>) -> Self {
+        Self { key_len, state: SparseNodeState::Dirty, value }
+    }
+
+    /// Returns the key suffix for this leaf given the full path.
+    pub fn key(&self, full_path: &Nibbles) -> Nibbles {
+        full_path.slice(full_path.len() - self.key_len..)
+    }
+
+    /// Returns the cached [`RlpNode`] of the leaf, if it's available.
+    pub const fn cached_rlp_node(&self) -> Option<&RlpNode> {
+        self.state.cached_rlp_node()
+    }
+
+    /// Returns the cached hash of the leaf, if it's available.
+    pub fn cached_hash(&self) -> Option<B256> {
+        self.state.cached_hash()
+    }
+
+    /// Returns the memory size of this leaf in bytes.
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn memory_size(&self) -> usize {
+        core::mem::size_of::<Self>() + self.value.len()
+    }
+}
+
 /// RLP node stack item.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RlpNodeStackItem {
