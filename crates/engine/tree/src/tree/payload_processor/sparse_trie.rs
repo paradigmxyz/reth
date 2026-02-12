@@ -416,7 +416,9 @@ where
                     let update = match message {
                         Ok(m) => m,
                         Err(_) => {
-                            break
+                            return Err(ParallelStateRootError::Other(
+                                "updates channel disconnected before state root calculation".to_string(),
+                            ))
                         }
                     };
 
