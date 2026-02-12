@@ -9351,16 +9351,16 @@ mod tests {
         let ext_key: [u8; 63] = [0; 63];
 
         // The branch is at the end of the extension (63 zeroes)
-        let branch_path = Nibbles::from_nibbles(&ext_key);
+        let branch_path = Nibbles::from_nibbles(ext_key);
 
         // Leaf paths: 63 zeroes + 1, 63 zeroes + 2
         let mut leaf1_path_bytes = [0u8; 64];
         leaf1_path_bytes[63] = 1;
-        let leaf1_path = Nibbles::from_nibbles(&leaf1_path_bytes);
+        let leaf1_path = Nibbles::from_nibbles(leaf1_path_bytes);
 
         let mut leaf2_path_bytes = [0u8; 64];
         leaf2_path_bytes[63] = 2;
-        let leaf2_path = Nibbles::from_nibbles(&leaf2_path_bytes);
+        let leaf2_path = Nibbles::from_nibbles(leaf2_path_bytes);
 
         // Create leaves with empty keys (full path consumed by extension + branch)
         // and simple values
@@ -9383,7 +9383,7 @@ mod tests {
         // Create the extension node pointing to the branch using its RLP encoding
         // Since branch is < 32 bytes, it will be embedded directly
         let ext_node =
-            TrieNode::Extension(ExtensionNode::new(Nibbles::from_nibbles(&ext_key), branch_rlp));
+            TrieNode::Extension(ExtensionNode::new(Nibbles::from_nibbles(ext_key), branch_rlp));
 
         // Initialize trie with the extension as root
         let mut trie = ParallelSparseTrie::from_root(ext_node, None, false).unwrap();
@@ -9417,11 +9417,11 @@ mod tests {
         // Create two paths that share 63 nibbles and differ only at the 64th
         let mut leaf1_path_bytes = [0u8; 64];
         leaf1_path_bytes[63] = 1;
-        let leaf1_path = Nibbles::from_nibbles(&leaf1_path_bytes);
+        let leaf1_path = Nibbles::from_nibbles(leaf1_path_bytes);
 
         let mut leaf2_path_bytes = [0u8; 64];
         leaf2_path_bytes[63] = 2;
-        let leaf2_path = Nibbles::from_nibbles(&leaf2_path_bytes);
+        let leaf2_path = Nibbles::from_nibbles(leaf2_path_bytes);
 
         // Create an empty trie and update with two leaves
         let mut trie = ParallelSparseTrie::default();
