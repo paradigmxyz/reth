@@ -375,7 +375,16 @@ pub async fn start_viz_server(
                         .collect();
                 }
 
-                if prev.len() == cur.len() {
+                if prev.len() != cur.len() {
+                    let mut buf = Vec::with_capacity(1 + cur.len());
+                    buf.push(0u8);
+                    buf.extend_from_slice(&cur);
+                    let _ = res_tx.send(buf);
+                    tracing::info!(
+                        "residency-poller: broadcast full snapshot ({} pages)",
+                        cur.len(),
+                    );
+                } else {
                     let mut spans: Vec<u8> = Vec::new();
                     let mut span_count: u32 = 0;
                     spans.extend_from_slice(&[1u8]);

@@ -141,7 +141,7 @@ PAL[1]=hsl2r(220,30,24);PAL_DESAT[1]=hsl2r(220,8,22);PAL_DARK[1]=hsl2r(220,30,12
 for(let i=2;i<254;i++){const h=DBI_HUES[i];PAL[i]=hsl2r(h,70,55);PAL_DESAT[i]=hsl2r(h,15,50);PAL_DARK[i]=hsl2r(h,70,22);PAL_DD[i]=hsl2r(h,15,20)}
 PAL[0xFE]=[20,20,23];PAL_DESAT[0xFE]=[20,20,23];PAL_DARK[0xFE]=[12,12,14];PAL_DD[0xFE]=[12,12,14];
 PAL[0xFF]=[28,28,32];PAL_DESAT[0xFF]=[28,28,32];PAL_DARK[0xFF]=[16,16,18];PAL_DD[0xFF]=[16,16,18];
-const FLASH_TINT={1:[255,255,255],2:[255,220,200],3:[200,220,255]};
+const FLASH_TINT={1:[140,180,255],2:[255,140,140],3:[255,220,100]};
 let NP=0,PS=4096,GC=0,GR=0,DBIS=[],DBI_IDX={},oMap=null,lOp=null,lTs=null,FADE=2000;
 let cntR=0,cntW=0,cntF=0;
 let sR=true,sW=true,sF=true,fW=false,showTrails=false,trailW=1.5;

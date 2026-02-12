@@ -1,6 +1,13 @@
 use rayon::prelude::*;
-use serde::Serialize;
-use std::{collections::HashMap, fs::File, io, os::unix::fs::FileExt, path::Path, time::Instant};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    io::{self, Read, Write},
+    os::unix::io::AsRawFd,
+    path::Path,
+    sync::atomic::{AtomicU8, AtomicU64, Ordering},
+    time::Instant,
+};
 
 const PAGEHDRSZ: usize = 20;
 const NODESIZE: usize = 8;
@@ -34,7 +41,10 @@ const TREE_ITEMS: usize = 0x20;
 
 const MDBX_MAGIC: u64 = 0x59659DBDEF4C11;
 
-#[derive(Debug, Clone, Serialize)]
+const CACHE_MAGIC: u64 = 0x5056495A_43414348; // "PVIZC ACH"
+const CACHE_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TreeInfo {
     pub name: String,
     pub dbi_index: u8,
@@ -73,35 +83,89 @@ struct DBIInfo {
     tree: TreeDescriptor,
 }
 
+struct MmapFile {
+    ptr: *mut u8,
+    len: usize,
+}
+
+impl MmapFile {
+    fn open(path: &Path) -> io::Result<Self> {
+        let file = std::fs::File::open(path)?;
+        let len = file.metadata()?.len() as usize;
+        if len == 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "empty file"));
+        }
+        let ptr = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                libc::PROT_READ,
+                libc::MAP_SHARED,
+                file.as_raw_fd(),
+                0,
+            )
+        };
+        if ptr == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self { ptr: ptr as *mut u8, len })
+    }
+
+    #[inline]
+    fn page(&self, pgno: usize, ps: usize) -> Option<&[u8]> {
+        let off = pgno.checked_mul(ps)?;
+        if off + ps > self.len {
+            return None;
+        }
+        Some(unsafe { std::slice::from_raw_parts(self.ptr.add(off), ps) })
+    }
+
+    fn evict(&self) {
+        unsafe {
+            libc::madvise(self.ptr as *mut libc::c_void, self.len, libc::MADV_DONTNEED);
+        }
+        tracing::info!(size_gb = self.len / (1024 * 1024 * 1024), "evicted walker mmap from page cache");
+    }
+}
+
+impl Drop for MmapFile {
+    fn drop(&mut self) {
+        unsafe { libc::munmap(self.ptr as *mut libc::c_void, self.len); }
+    }
+}
+
+unsafe impl Send for MmapFile {}
+unsafe impl Sync for MmapFile {}
+
+#[inline]
 fn u16_le(buf: &[u8], off: usize) -> u16 {
     u16::from_le_bytes([buf[off], buf[off + 1]])
 }
 
+#[inline]
 fn u32_le(buf: &[u8], off: usize) -> u32 {
     u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]])
 }
 
+#[inline]
 fn u64_le(buf: &[u8], off: usize) -> u64 {
     u64::from_le_bytes([
-        buf[off],
-        buf[off + 1],
-        buf[off + 2],
-        buf[off + 3],
-        buf[off + 4],
-        buf[off + 5],
-        buf[off + 6],
-        buf[off + 7],
+        buf[off], buf[off + 1], buf[off + 2], buf[off + 3],
+        buf[off + 4], buf[off + 5], buf[off + 6], buf[off + 7],
     ])
 }
 
+#[inline]
 fn page_flags(buf: &[u8]) -> u16 {
     u16_le(buf, 0x0A)
 }
 
+#[inline]
 fn page_nkeys(buf: &[u8]) -> usize {
     u16_le(buf, 0x0C) as usize / 2
 }
 
+#[inline]
 fn page_overflow_count(buf: &[u8]) -> u32 {
     u32_le(buf, 0x0C)
 }
@@ -121,120 +185,122 @@ fn parse_tree_descriptor(buf: &[u8], off: usize) -> TreeDescriptor {
     }
 }
 
-fn read_page(file: &File, pgno: usize, ps: usize) -> io::Result<Vec<u8>> {
-    let mut buf = vec![0u8; ps];
-    file.read_exact_at(&mut buf, (pgno * ps) as u64)?;
-    Ok(buf)
-}
-
-fn mark(owner_map: &mut [u8], pgno: usize, dbi_index: u8, conflicts: &mut u64) -> bool {
+#[inline]
+fn claim(owner_map: &[AtomicU8], pgno: usize, dbi_index: u8, conflicts: &AtomicU64) -> bool {
     if pgno >= owner_map.len() {
         return false;
     }
-    let prev = owner_map[pgno];
-    if prev == UNREFERENCED {
-        owner_map[pgno] = dbi_index;
-        return true;
+    match owner_map[pgno].compare_exchange(UNREFERENCED, dbi_index, Ordering::Relaxed, Ordering::Relaxed) {
+        Ok(_) => true,
+        Err(existing) => {
+            if existing != dbi_index {
+                conflicts.fetch_add(1, Ordering::Relaxed);
+            }
+            false
+        }
     }
-    if prev != dbi_index {
-        *conflicts += 1;
-    }
-    false
 }
 
-fn walk_tree_collect(
-    file: &File,
+fn walk_tree_claim(
+    mmap: &MmapFile,
     ps: usize,
     root_pgno: u32,
     page_count: usize,
     dbi_index: u8,
-) -> Vec<(usize, u8)> {
-    let mut result = Vec::new();
+    owner_map: &[AtomicU8],
+    conflicts: &AtomicU64,
+) {
     if root_pgno == P_INVALID || root_pgno as usize >= page_count {
-        return result;
+        return;
     }
 
-    let mut visited = vec![false; page_count];
     let mut stack: Vec<usize> = vec![root_pgno as usize];
 
     while let Some(pgno) = stack.pop() {
-        if pgno >= page_count || visited[pgno] {
+        if pgno >= page_count {
             continue;
         }
-        visited[pgno] = true;
-        result.push((pgno, dbi_index));
+        if !claim(owner_map, pgno, dbi_index, conflicts) {
+            continue;
+        }
 
-        let buf = match read_page(file, pgno, ps) {
-            Ok(b) => b,
-            Err(_) => continue,
+        let buf = match mmap.page(pgno, ps) {
+            Some(b) => b,
+            None => continue,
         };
 
-        let flags = page_flags(&buf);
+        let flags = page_flags(buf);
 
         if flags & P_BRANCH != 0 {
-            let nkeys = page_nkeys(&buf);
+            let nkeys = page_nkeys(buf);
             for i in 0..nkeys {
-                let node_rel = u16_le(&buf, PAGEHDRSZ + i * 2) as usize;
-                let child_pgno = u32_le(&buf, PAGEHDRSZ + node_rel) as usize;
+                let node_rel = u16_le(buf, PAGEHDRSZ + i * 2) as usize;
+                let child_pgno = u32_le(buf, PAGEHDRSZ + node_rel) as usize;
                 stack.push(child_pgno);
             }
         } else if flags & P_LEAF != 0 && flags & P_DUPFIX == 0 {
-            let nkeys = page_nkeys(&buf);
+            let nkeys = page_nkeys(buf);
             for i in 0..nkeys {
-                let node_rel = u16_le(&buf, PAGEHDRSZ + i * 2) as usize;
+                let node_rel = u16_le(buf, PAGEHDRSZ + i * 2) as usize;
                 let node_off = PAGEHDRSZ + node_rel;
+                if node_off + NODESIZE > ps {
+                    continue;
+                }
                 let mn_flags = buf[node_off + 4];
-                let ksize = u16_le(&buf, node_off + 6) as usize;
+                let ksize = u16_le(buf, node_off + 6) as usize;
                 let data_off = node_off + NODESIZE + ksize;
 
                 if mn_flags & N_BIG != 0 {
-                    let ov_pgno = u32_le(&buf, data_off) as usize;
+                    if data_off + 4 > ps {
+                        continue;
+                    }
+                    let ov_pgno = u32_le(buf, data_off) as usize;
                     if ov_pgno >= page_count {
                         continue;
                     }
-                    let ov_buf = match read_page(file, ov_pgno, ps) {
-                        Ok(b) => b,
-                        Err(_) => continue,
+                    let ov_buf = match mmap.page(ov_pgno, ps) {
+                        Some(b) => b,
+                        None => continue,
                     };
-                    let ov_count = page_overflow_count(&ov_buf) as usize;
+                    let ov_count = page_overflow_count(ov_buf) as usize;
                     for op in ov_pgno..ov_pgno + ov_count {
-                        if op < page_count && !visited[op] {
-                            visited[op] = true;
-                            result.push((op, dbi_index));
+                        if op < page_count {
+                            claim(owner_map, op, dbi_index, conflicts);
                         }
                     }
                 } else if (mn_flags & (N_DUP | N_TREE)) == (N_DUP | N_TREE) {
-                    let sub_root = u32_le(&buf, data_off + TREE_ROOT);
+                    if data_off + TREE_ROOT + 4 > ps {
+                        continue;
+                    }
+                    let sub_root = u32_le(buf, data_off + TREE_ROOT);
                     if sub_root != P_INVALID {
                         stack.push(sub_root as usize);
                     }
                 }
             }
         } else if flags & P_LARGE != 0 {
-            let ov_count = page_overflow_count(&buf) as usize;
+            let ov_count = page_overflow_count(buf) as usize;
             for op in (pgno + 1)..pgno + ov_count {
-                if op < page_count && !visited[op] {
-                    visited[op] = true;
-                    result.push((op, dbi_index));
+                if op < page_count {
+                    claim(owner_map, op, dbi_index, conflicts);
                 }
             }
         }
     }
-
-    result
 }
 
 fn discover_named_dbis(
-    file: &File,
+    mmap: &MmapFile,
     ps: usize,
     main_root: u32,
-    owner_map: &mut [u8],
-    conflicts: &mut u64,
+    page_count: usize,
+    owner_map: &[AtomicU8],
+    conflicts: &AtomicU64,
     dbi_main: u8,
     dbi_start: u8,
 ) -> Vec<DBIInfo> {
     let mut named = Vec::new();
-    if main_root == P_INVALID || main_root as usize >= owner_map.len() {
+    if main_root == P_INVALID || main_root as usize >= page_count {
         return named;
     }
 
@@ -242,59 +308,68 @@ fn discover_named_dbis(
     let mut stack: Vec<usize> = vec![main_root as usize];
 
     while let Some(pgno) = stack.pop() {
-        if pgno >= owner_map.len() {
+        if pgno >= page_count {
             continue;
         }
-        if !mark(owner_map, pgno, dbi_main, conflicts) {
+        if !claim(owner_map, pgno, dbi_main, conflicts) {
             continue;
         }
 
-        let buf = match read_page(file, pgno, ps) {
-            Ok(b) => b,
-            Err(_) => continue,
+        let buf = match mmap.page(pgno, ps) {
+            Some(b) => b,
+            None => continue,
         };
 
-        let flags = page_flags(&buf);
+        let flags = page_flags(buf);
 
         if flags & P_BRANCH != 0 {
-            let nkeys = page_nkeys(&buf);
+            let nkeys = page_nkeys(buf);
             for i in 0..nkeys {
-                let node_rel = u16_le(&buf, PAGEHDRSZ + i * 2) as usize;
-                let child_pgno = u32_le(&buf, PAGEHDRSZ + node_rel) as usize;
+                let node_rel = u16_le(buf, PAGEHDRSZ + i * 2) as usize;
+                let child_pgno = u32_le(buf, PAGEHDRSZ + node_rel) as usize;
                 stack.push(child_pgno);
             }
         } else if flags & P_LEAF != 0 && flags & P_DUPFIX == 0 {
-            let nkeys = page_nkeys(&buf);
+            let nkeys = page_nkeys(buf);
             for i in 0..nkeys {
-                let node_rel = u16_le(&buf, PAGEHDRSZ + i * 2) as usize;
+                let node_rel = u16_le(buf, PAGEHDRSZ + i * 2) as usize;
                 let node_off = PAGEHDRSZ + node_rel;
+                if node_off + NODESIZE > ps {
+                    continue;
+                }
                 let mn_flags = buf[node_off + 4];
-                let ksize = u16_le(&buf, node_off + 6) as usize;
+                let ksize = u16_le(buf, node_off + 6) as usize;
                 let data_off = node_off + NODESIZE + ksize;
 
                 if mn_flags & N_TREE != 0 {
                     let key_off = node_off + NODESIZE;
+                    if key_off + ksize > ps || data_off + 0x30 > ps {
+                        continue;
+                    }
                     let key_bytes = &buf[key_off..key_off + ksize];
                     let name = match key_bytes.iter().position(|&b| b == 0) {
                         Some(nul) => &key_bytes[..nul],
                         None => key_bytes,
                     };
                     let name = String::from_utf8_lossy(name).into_owned();
-                    let tree = parse_tree_descriptor(&buf, data_off);
+                    let tree = parse_tree_descriptor(buf, data_off);
                     named.push(DBIInfo { name, dbi_index: next_index, tree });
                     next_index = next_index.wrapping_add(1);
                 } else if mn_flags & N_BIG != 0 {
-                    let ov_pgno = u32_le(&buf, data_off) as usize;
-                    if ov_pgno >= owner_map.len() {
+                    if data_off + 4 > ps {
                         continue;
                     }
-                    let ov_buf = match read_page(file, ov_pgno, ps) {
-                        Ok(b) => b,
-                        Err(_) => continue,
+                    let ov_pgno = u32_le(buf, data_off) as usize;
+                    if ov_pgno >= page_count {
+                        continue;
+                    }
+                    let ov_buf = match mmap.page(ov_pgno, ps) {
+                        Some(b) => b,
+                        None => continue,
                     };
-                    let ov_count = page_overflow_count(&ov_buf) as usize;
+                    let ov_count = page_overflow_count(ov_buf) as usize;
                     for op in ov_pgno..ov_pgno + ov_count {
-                        mark(owner_map, op, dbi_main, conflicts);
+                        claim(owner_map, op, dbi_main, conflicts);
                     }
                 }
             }
@@ -305,87 +380,104 @@ fn discover_named_dbis(
 }
 
 fn mark_free_pages(
-    file: &File,
+    mmap: &MmapFile,
     ps: usize,
     free_root: u32,
-    owner_map: &mut [u8],
-    conflicts: &mut u64,
+    page_count: usize,
+    owner_map: &[AtomicU8],
+    conflicts: &AtomicU64,
     dbi_free: u8,
 ) -> u64 {
     let mut marked: u64 = 0;
-    if free_root == P_INVALID || free_root as usize >= owner_map.len() {
+    if free_root == P_INVALID || free_root as usize >= page_count {
         return marked;
     }
 
     let mut stack: Vec<usize> = vec![free_root as usize];
 
     while let Some(pgno) = stack.pop() {
-        if pgno >= owner_map.len() {
+        if pgno >= page_count {
             continue;
         }
-        if !mark(owner_map, pgno, dbi_free, conflicts) {
+        if !claim(owner_map, pgno, dbi_free, conflicts) {
             continue;
         }
         marked += 1;
 
-        let buf = match read_page(file, pgno, ps) {
-            Ok(b) => b,
-            Err(_) => continue,
+        let buf = match mmap.page(pgno, ps) {
+            Some(b) => b,
+            None => continue,
         };
 
-        let flags = page_flags(&buf);
+        let flags = page_flags(buf);
 
         if flags & P_BRANCH != 0 {
-            let nkeys = page_nkeys(&buf);
+            let nkeys = page_nkeys(buf);
             for i in 0..nkeys {
-                let node_rel = u16_le(&buf, PAGEHDRSZ + i * 2) as usize;
-                let child_pgno = u32_le(&buf, PAGEHDRSZ + node_rel) as usize;
+                let node_rel = u16_le(buf, PAGEHDRSZ + i * 2) as usize;
+                let child_pgno = u32_le(buf, PAGEHDRSZ + node_rel) as usize;
                 stack.push(child_pgno);
             }
         } else if flags & P_LEAF != 0 && flags & P_DUPFIX == 0 {
-            let nkeys = page_nkeys(&buf);
+            let nkeys = page_nkeys(buf);
             for i in 0..nkeys {
-                let node_rel = u16_le(&buf, PAGEHDRSZ + i * 2) as usize;
+                let node_rel = u16_le(buf, PAGEHDRSZ + i * 2) as usize;
                 let node_off = PAGEHDRSZ + node_rel;
+                if node_off + NODESIZE > ps {
+                    continue;
+                }
                 let mn_flags = buf[node_off + 4];
-                let ksize = u16_le(&buf, node_off + 6) as usize;
-                let dsize = u32_le(&buf, node_off) as usize;
+                let ksize = u16_le(buf, node_off + 6) as usize;
+                let dsize = u32_le(buf, node_off) as usize;
                 let data_off = node_off + NODESIZE + ksize;
 
                 if mn_flags & N_BIG != 0 {
-                    let ov_pgno = u32_le(&buf, data_off) as usize;
-                    if ov_pgno >= owner_map.len() {
+                    if data_off + 4 > ps {
                         continue;
                     }
-                    let ov_buf = match read_page(file, ov_pgno, ps) {
-                        Ok(b) => b,
-                        Err(_) => continue,
+                    let ov_pgno = u32_le(buf, data_off) as usize;
+                    if ov_pgno >= page_count {
+                        continue;
+                    }
+                    let ov_buf = match mmap.page(ov_pgno, ps) {
+                        Some(b) => b,
+                        None => continue,
                     };
-                    let ov_count = page_overflow_count(&ov_buf) as usize;
+                    let ov_count = page_overflow_count(ov_buf) as usize;
                     for op in ov_pgno..ov_pgno + ov_count {
-                        if mark(owner_map, op, dbi_free, conflicts) {
+                        if claim(owner_map, op, dbi_free, conflicts) {
                             marked += 1;
                         }
                     }
                     let ov_data_off = PAGEHDRSZ;
-                    if dsize >= 4 {
-                        let pnl_count = u32_le(&ov_buf, ov_data_off) as usize;
+                    if dsize >= 4 && ov_data_off + 4 <= ps {
+                        let pnl_count = u32_le(ov_buf, ov_data_off) as usize;
+                        let max_entries = (ps - ov_data_off - 4) / 4;
+                        let pnl_count = pnl_count.min(max_entries);
                         for j in 0..pnl_count {
-                            let fp = u32_le(&ov_buf, ov_data_off + 4 + j * 4) as usize;
-                            if fp < owner_map.len() && owner_map[fp] == UNREFERENCED {
-                                owner_map[fp] = dbi_free;
-                                marked += 1;
+                            let off = ov_data_off + 4 + j * 4;
+                            if off + 4 > ps { break; }
+                            let fp = u32_le(ov_buf, off) as usize;
+                            if fp < page_count {
+                                if claim(owner_map, fp, dbi_free, conflicts) {
+                                    marked += 1;
+                                }
                             }
                         }
                     }
                 } else {
-                    if dsize >= 4 {
-                        let pnl_count = u32_le(&buf, data_off) as usize;
+                    if dsize >= 4 && data_off + 4 <= ps {
+                        let pnl_count = u32_le(buf, data_off) as usize;
+                        let max_entries = (ps - data_off - 4) / 4;
+                        let pnl_count = pnl_count.min(max_entries);
                         for j in 0..pnl_count {
-                            let fp = u32_le(&buf, data_off + 4 + j * 4) as usize;
-                            if fp < owner_map.len() && owner_map[fp] == UNREFERENCED {
-                                owner_map[fp] = dbi_free;
-                                marked += 1;
+                            let off = data_off + 4 + j * 4;
+                            if off + 4 > ps { break; }
+                            let fp = u32_le(buf, off) as usize;
+                            if fp < page_count {
+                                if claim(owner_map, fp, dbi_free, conflicts) {
+                                    marked += 1;
+                                }
                             }
                         }
                     }
@@ -397,47 +489,142 @@ fn mark_free_pages(
     marked
 }
 
+fn cache_path(mdbx_path: &Path) -> std::path::PathBuf {
+    mdbx_path.with_file_name("mdbx_pageviz_cache.bin")
+}
+
+fn try_load_cache(
+    path: &Path,
+    file_size: u64,
+    txnid: u64,
+    page_size: usize,
+    page_count: usize,
+) -> Option<WalkResult> {
+    let cp = cache_path(path);
+    let mut f = std::fs::File::open(&cp).ok()?;
+    let mut hdr = [0u8; 40];
+    f.read_exact(&mut hdr).ok()?;
+
+    let magic = u64::from_le_bytes(hdr[0..8].try_into().unwrap());
+    let ver = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
+    let c_txnid = u64::from_le_bytes(hdr[12..20].try_into().unwrap());
+    let c_pc = u64::from_le_bytes(hdr[20..28].try_into().unwrap());
+    let c_ps = u32::from_le_bytes(hdr[28..32].try_into().unwrap());
+    let c_fsz = u64::from_le_bytes(hdr[32..40].try_into().unwrap());
+
+    if magic != CACHE_MAGIC || ver != CACHE_VERSION {
+        return None;
+    }
+    if c_txnid != txnid || c_pc as usize != page_count || c_ps as usize != page_size || c_fsz != file_size {
+        tracing::info!(
+            cache_txnid = c_txnid, current_txnid = txnid,
+            "cache stale, will re-walk"
+        );
+        return None;
+    }
+
+    let mut ti_len_buf = [0u8; 4];
+    f.read_exact(&mut ti_len_buf).ok()?;
+    let ti_len = u32::from_le_bytes(ti_len_buf) as usize;
+
+    let mut ti_buf = vec![0u8; ti_len];
+    f.read_exact(&mut ti_buf).ok()?;
+    let tree_info: Vec<TreeInfo> = serde_json::from_slice(&ti_buf).ok()?;
+
+    let mut owner_map = vec![0u8; page_count];
+    f.read_exact(&mut owner_map).ok()?;
+
+    tracing::info!(page_count, "loaded owner_map from cache");
+    Some(WalkResult { owner_map, page_count, page_size, tree_info })
+}
+
+fn save_cache(
+    path: &Path,
+    file_size: u64,
+    txnid: u64,
+    result: &WalkResult,
+) {
+    let cp = cache_path(path);
+    let tmp = cp.with_extension("tmp");
+
+    let write_inner = || -> io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&CACHE_MAGIC.to_le_bytes())?;
+        f.write_all(&CACHE_VERSION.to_le_bytes())?;
+        f.write_all(&txnid.to_le_bytes())?;
+        f.write_all(&(result.page_count as u64).to_le_bytes())?;
+        f.write_all(&(result.page_size as u32).to_le_bytes())?;
+        f.write_all(&file_size.to_le_bytes())?;
+
+        let ti_json = serde_json::to_vec(&result.tree_info).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        f.write_all(&(ti_json.len() as u32).to_le_bytes())?;
+        f.write_all(&ti_json)?;
+        f.write_all(&result.owner_map)?;
+        f.flush()?;
+        Ok(())
+    };
+
+    match write_inner() {
+        Ok(()) => {
+            if let Err(e) = std::fs::rename(&tmp, &cp) {
+                tracing::warn!("failed to rename cache file: {e}");
+                let _ = std::fs::remove_file(&tmp);
+            } else {
+                tracing::info!(
+                    path = %cp.display(),
+                    size_mb = result.owner_map.len() / (1024 * 1024),
+                    "saved owner_map cache"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!("failed to write cache: {e}");
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
+}
+
 pub fn walk_mdbx(path: &Path, name_to_dbi: &HashMap<&str, u8>) -> eyre::Result<WalkResult> {
     let t0 = Instant::now();
-    let file = File::open(path)?;
-    let file_size = file.metadata()?.len() as usize;
 
-    let meta0 = read_page(&file, 0, 4096)?;
-    let pflags = page_flags(&meta0);
+    let mmap = MmapFile::open(path)?;
+    let file_size = mmap.len as u64;
+
+    let meta0 = mmap.page(0, 4096).ok_or_else(|| eyre::eyre!("cannot read page 0"))?;
+    let pflags = page_flags(meta0);
     eyre::ensure!(pflags & P_META != 0, "page 0 missing P_META flag");
 
-    let magic = u64_le(&meta0, PAGEHDRSZ);
+    let magic = u64_le(meta0, PAGEHDRSZ);
     eyre::ensure!((magic >> 8) == MDBX_MAGIC, "MDBX magic mismatch");
 
     let candidates: &[usize] = &[4096, 8192, 16384, 32768, 65536, 1024, 2048];
-    let geo_now_raw = u32_le(&meta0, PAGEHDRSZ + META_GEO + GEO_NOW) as usize;
+    let geo_now_raw = u32_le(meta0, PAGEHDRSZ + META_GEO + GEO_NOW) as usize;
 
     let mut ps = 4096usize;
     for &candidate in candidates {
         let mapped = geo_now_raw * candidate;
-        if mapped >= file_size / 2 && mapped <= file_size * 4 {
+        if mapped >= mmap.len / 2 && mapped <= mmap.len * 4 {
             ps = candidate;
             break;
         }
     }
 
-    tracing::info!(page_size = ps, "detected page size");
+    tracing::info!(page_size = ps, file_size_gb = file_size / (1024 * 1024 * 1024), "detected page size");
 
-    let meta_pages: Vec<Vec<u8>> = (0..3)
-        .map(|i| read_page(&file, i, ps))
-        .collect::<io::Result<Vec<_>>>()?;
+    let meta_pages: Vec<&[u8]> = (0..3)
+        .map(|i| mmap.page(i, ps).ok_or_else(|| eyre::eyre!("cannot read meta page {i}")))
+        .collect::<eyre::Result<Vec<_>>>()?;
 
     let mut best_idx = 0usize;
     let mut best_txnid = 0u64;
 
     for (i, meta) in meta_pages.iter().enumerate() {
-        let meta_body = PAGEHDRSZ;
-        let m = u64_le(meta, meta_body);
+        let m = u64_le(meta, PAGEHDRSZ);
         if (m >> 8) != MDBX_MAGIC {
             continue;
         }
-        let txnid_a = u64_le(meta, meta_body + META_TXNID_A);
-        let txnid_b = u64_le(meta, meta_body + META_TXNID_B);
+        let txnid_a = u64_le(meta, PAGEHDRSZ + META_TXNID_A);
+        let txnid_b = u64_le(meta, PAGEHDRSZ + META_TXNID_B);
         if txnid_a == txnid_b && txnid_a > best_txnid {
             best_txnid = txnid_a;
             best_idx = i;
@@ -445,13 +632,19 @@ pub fn walk_mdbx(path: &Path, name_to_dbi: &HashMap<&str, u8>) -> eyre::Result<W
     }
 
     eyre::ensure!(best_txnid > 0, "no valid meta page found");
-    tracing::info!(best_meta = best_idx, txnid = best_txnid, "selected best meta");
 
-    let best = &meta_pages[best_idx];
+    let best = meta_pages[best_idx];
     let mb = PAGEHDRSZ;
-
     let geo_now = u32_le(best, mb + META_GEO + GEO_NOW) as usize;
     let page_count = geo_now;
+
+    tracing::info!(best_meta = best_idx, txnid = best_txnid, page_count, "selected best meta");
+
+    if let Some(cached) = try_load_cache(path, file_size, best_txnid, ps, page_count) {
+        let elapsed = t0.elapsed();
+        tracing::info!(elapsed_ms = elapsed.as_millis() as u64, "walk skipped (cache hit)");
+        return Ok(cached);
+    }
 
     let free_tree = parse_tree_descriptor(best, mb + META_FREE_DB);
     let main_tree = parse_tree_descriptor(best, mb + META_MAIN_DB);
@@ -460,14 +653,14 @@ pub fn walk_mdbx(path: &Path, name_to_dbi: &HashMap<&str, u8>) -> eyre::Result<W
         page_count,
         free_root = free_tree.root,
         main_root = main_tree.root,
-        "parsed meta"
+        "parsed meta, starting walk"
     );
 
-    let mut owner_map = vec![UNREFERENCED; page_count];
-    let mut conflicts = 0u64;
+    let owner_map: Vec<AtomicU8> = (0..page_count).map(|_| AtomicU8::new(UNREFERENCED)).collect();
+    let conflicts = AtomicU64::new(0);
 
     for pgno in 0..3.min(page_count) {
-        owner_map[pgno] = DBI_META;
+        owner_map[pgno].store(DBI_META, Ordering::Relaxed);
     }
 
     let dbi_free: u8 = 1;
@@ -476,7 +669,7 @@ pub fn walk_mdbx(path: &Path, name_to_dbi: &HashMap<&str, u8>) -> eyre::Result<W
 
     tracing::info!("discovering named DBIs via MainDB walk");
     let mut named_dbis =
-        discover_named_dbis(&file, ps, main_tree.root, &mut owner_map, &mut conflicts, dbi_main, dbi_start);
+        discover_named_dbis(&mmap, ps, main_tree.root, page_count, &owner_map, &conflicts, dbi_main, dbi_start);
     tracing::info!(count = named_dbis.len(), "found named DBIs");
 
     for dbi in &mut named_dbis {
@@ -487,7 +680,7 @@ pub fn walk_mdbx(path: &Path, name_to_dbi: &HashMap<&str, u8>) -> eyre::Result<W
 
     tracing::info!("walking FreeDB");
     let free_marked =
-        mark_free_pages(&file, ps, free_tree.root, &mut owner_map, &mut conflicts, dbi_free);
+        mark_free_pages(&mmap, ps, free_tree.root, page_count, &owner_map, &conflicts, dbi_free);
     tracing::info!(marked = free_marked, "FreeDB walk complete");
 
     let walk_tasks: Vec<(u32, u8)> = named_dbis
@@ -498,24 +691,22 @@ pub fn walk_mdbx(path: &Path, name_to_dbi: &HashMap<&str, u8>) -> eyre::Result<W
 
     tracing::info!(count = walk_tasks.len(), "walking named DBIs in parallel");
 
-    let parallel_results: Vec<Vec<(usize, u8)>> = walk_tasks
+    walk_tasks
         .par_iter()
-        .map(|&(root, dbi_idx)| walk_tree_collect(&file, ps, root, page_count, dbi_idx))
-        .collect();
+        .for_each(|&(root, dbi_idx)| {
+            walk_tree_claim(&mmap, ps, root, page_count, dbi_idx, &owner_map, &conflicts);
+        });
 
-    for batch in parallel_results {
-        for (pgno, dbi_idx) in batch {
-            mark(&mut owner_map, pgno, dbi_idx, &mut conflicts);
-        }
-    }
+    let final_conflicts = conflicts.load(Ordering::Relaxed);
+    let owner_map_vec: Vec<u8> = owner_map.iter().map(|a| a.load(Ordering::Relaxed)).collect();
+    let assigned = owner_map_vec.iter().filter(|&&b| b != UNREFERENCED).count();
 
     let elapsed = t0.elapsed();
-    let assigned = owner_map.iter().filter(|&&b| b != UNREFERENCED).count();
     tracing::info!(
         elapsed_ms = elapsed.as_millis() as u64,
         assigned,
         unreferenced = page_count - assigned,
-        conflicts,
+        conflicts = final_conflicts,
         "walk complete"
     );
 
@@ -556,5 +747,11 @@ pub fn walk_mdbx(path: &Path, name_to_dbi: &HashMap<&str, u8>) -> eyre::Result<W
         });
     }
 
-    Ok(WalkResult { owner_map, page_count, page_size: ps, tree_info })
+    let result = WalkResult { owner_map: owner_map_vec, page_count, page_size: ps, tree_info };
+
+    save_cache(path, file_size, best_txnid, &result);
+
+    mmap.evict();
+
+    Ok(result)
 }

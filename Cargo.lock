@@ -9104,6 +9104,7 @@ dependencies = [
  "axum",
  "clap",
  "eyre",
+ "libc",
  "rayon",
  "reth-libmdbx",
  "reth-mdbx-sys",
