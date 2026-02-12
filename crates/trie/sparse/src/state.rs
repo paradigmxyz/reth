@@ -906,23 +906,18 @@ where
     }
 
     /// Returns storage trie updates for tries that have been revealed.
-    ///
-    /// Panics if any of the storage tries are not revealed.
     pub fn storage_trie_updates(&mut self) -> B256Map<StorageTrieUpdates> {
-        self.storage
-            .tries
-            .iter_mut()
-            .map(|(address, trie)| {
-                let trie = trie.as_revealed_mut().unwrap();
+        self.storage.tries.iter_mut()
+            .filter_map(|(address, trie)| {
+                let trie = trie.as_revealed_mut()?;
                 let updates = trie.take_updates();
                 let updates = StorageTrieUpdates {
                     is_deleted: updates.wiped,
                     storage_nodes: updates.updated_nodes,
                     removed_nodes: updates.removed_nodes,
                 };
-                (*address, updates)
+                (!updates.is_empty()).then_some((*address, updates))
             })
-            .filter(|(_, updates)| !updates.is_empty())
             .collect()
     }
 
@@ -930,14 +925,15 @@ where
     ///
     /// Returns `None` if the accounts trie is not revealed.
     pub fn take_trie_updates(&mut self) -> Option<TrieUpdates> {
+        self.state.as_revealed_mut()?;
+
         let storage_tries = self.storage_trie_updates();
-        self.state.as_revealed_mut().map(|state| {
-            let updates = state.take_updates();
-            TrieUpdates {
-                account_nodes: updates.updated_nodes,
-                removed_nodes: updates.removed_nodes,
-                storage_tries,
-            }
+        let updates = self.state.as_revealed_mut()?.take_updates();
+
+        Some(TrieUpdates {
+            account_nodes: updates.updated_nodes,
+            removed_nodes: updates.removed_nodes,
+            storage_tries,
         })
     }
 
@@ -1210,6 +1206,28 @@ impl<S: SparseTrieTrait> StorageTries<S> {
         // Update heat for accessed tries
         self.modifications.update_and_reset();
 
+        // Blind tries cannot carry updates and can linger as placeholders if never revealed.
+        // Evict them eagerly to avoid stale accumulation in the active trie cache.
+        let blind_tries: Vec<B256> = self
+            .tries
+            .iter()
+            .filter_map(|(address, trie)| {
+                matches!(trie, RevealableSparseTrie::Blind(_)).then_some(*address)
+            })
+            .collect();
+        stats.blind_evicted = blind_tries.len();
+        for address in &blind_tries {
+            if let Some(mut trie) = self.tries.remove(address) {
+                trie.clear();
+                self.cleared_tries.push(trie);
+            }
+            if let Some(mut paths) = self.revealed_paths.remove(address) {
+                paths.clear();
+                self.cleared_revealed_paths.push(paths);
+            }
+            self.modifications.remove(address);
+        }
+
         // Collect (address, size, score) for all tries
         // Score = size * heat_multiplier
         // Hot tries (high heat) get boosted weight
@@ -1298,6 +1316,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
             after = stats.total_tries_after,
             kept = stats.tries_to_keep,
             evicted = stats.tries_to_evict,
+            blind_evicted = stats.blind_evicted,
             pruned = stats.pruned_count,
             skipped_small = stats.skipped_small,
             skipped_recent = stats.skipped_recently_pruned,
@@ -1411,6 +1430,7 @@ struct StorageTriesPruneStats {
     total_tries_after: usize,
     tries_to_keep: usize,
     tries_to_evict: usize,
+    blind_evicted: usize,
     pruned_count: usize,
     skipped_small: usize,
     skipped_recently_pruned: usize,
