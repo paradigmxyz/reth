@@ -2315,6 +2315,71 @@ mod tests {
         }
     }
 
+    /// Verifies that `evm_state_to_hashed_post_state_ref` produces identical output to
+    /// the owned-state version `evm_state_to_hashed_post_state`.
+    #[test]
+    fn test_hashed_post_state_ref_matches_owned() {
+        use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
+        let mut state = EvmState::default();
+
+        // Account 1: touched with changed and unchanged storage
+        let addr1 = Address::new([1u8; 20]);
+        let mut account1 = Account {
+            info: AccountInfo {
+                balance: U256::from(100),
+                nonce: 5,
+                code_hash: B256::from([0xaa; 32]),
+                code: Some(Default::default()),
+                account_id: None,
+            },
+            original_info: Box::default(),
+            storage: Default::default(),
+            status: AccountStatus::Touched,
+            transaction_id: 0,
+        };
+        // Changed storage slot
+        account1
+            .storage
+            .insert(U256::from(1u64), EvmStorageSlot::new_changed(U256::ZERO, U256::from(42), 0));
+        // Unchanged storage slot — should be filtered out
+        account1.storage.insert(U256::from(2u64), EvmStorageSlot::new(U256::from(99), 0));
+        state.insert(addr1, account1);
+
+        // Account 2: selfdestructed
+        let addr2 = Address::new([2u8; 20]);
+        let mut account2 = Account {
+            info: AccountInfo::default(),
+            original_info: Box::default(),
+            storage: Default::default(),
+            status: AccountStatus::SelfDestructed | AccountStatus::Touched,
+            transaction_id: 0,
+        };
+        account2
+            .storage
+            .insert(U256::from(3u64), EvmStorageSlot::new_changed(U256::from(1), U256::ZERO, 0));
+        state.insert(addr2, account2);
+
+        // Account 3: untouched — should be skipped
+        let addr3 = Address::new([3u8; 20]);
+        state.insert(
+            addr3,
+            Account {
+                info: AccountInfo::default(),
+                original_info: Box::default(),
+                storage: Default::default(),
+                status: AccountStatus::LoadedAsNotExisting,
+                transaction_id: 0,
+            },
+        );
+
+        let result_ref = evm_state_to_hashed_post_state_ref(&state);
+        let result_owned = evm_state_to_hashed_post_state(state);
+
+        assert_eq!(result_ref.accounts, result_owned.accounts, "account maps differ");
+        assert_eq!(result_ref.storages, result_owned.storages, "storage maps differ");
+    }
+
     /// Verifies that BAL messages are processed correctly and generate state updates.
     #[test]
     fn test_bal_message_processing() {
