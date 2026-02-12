@@ -1260,6 +1260,27 @@ impl Display for InboundConnectionError {
     }
 }
 
+/// The reason a peer was backed off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackoffReason {
+    /// The remote peer responded with `TooManyPeers` (0x04).
+    TooManyPeers,
+    /// The session was gracefully closed and we're backing off briefly.
+    GracefulClose,
+    /// A connection or protocol-level error occurred.
+    ConnectionError,
+}
+
+impl BackoffReason {
+    /// Derives the backoff reason from an optional [`DisconnectReason`].
+    pub const fn from_disconnect(reason: Option<DisconnectReason>) -> Self {
+        match reason {
+            Some(DisconnectReason::TooManyPeers) => Self::TooManyPeers,
+            _ => Self::ConnectionError,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloy_primitives::B512;
