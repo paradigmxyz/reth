@@ -11,7 +11,7 @@
 #
 # See docs/repo/ci.md for runner setup instructions.
 
-name: bench-engine
+name: bench-reth
 
 on:
   pull_request:
@@ -34,7 +34,7 @@ env:
   JWT_SECRET: /reth-bench/jwt.hex
 
 concurrency:
-  group: bench-engine
+  group: bench-reth
   cancel-in-progress: true
 
 permissions:
@@ -42,8 +42,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  engine-bench:
-    name: engine-bench
+  reth-bench:
+    name: reth-bench
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 120
     steps:
@@ -238,7 +238,7 @@ jobs:
           if [ -f /tmp/bench-results-run1/combined_latency.csv ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv /tmp/bench-results-run1/combined_latency.csv"
           fi
-          python3 .github/scripts/bench-engine-summary.py $SUMMARY_ARGS
+          python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
 
       - name: Generate charts
         if: success()
@@ -248,13 +248,13 @@ jobs:
           if [ -f /tmp/bench-results-run1/combined_latency.csv ]; then
             CHART_ARGS="$CHART_ARGS --baseline /tmp/bench-results-run1/combined_latency.csv"
           fi
-          uv run --with matplotlib python3 .github/scripts/bench-engine-charts.py $CHART_ARGS
+          uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
       - name: Upload results
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: bench-engine-results
+          name: bench-reth-results
           path: |
             /tmp/bench-results/
             /tmp/bench-results-run1/
@@ -328,7 +328,7 @@ jobs:
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
-            const marker = '<!-- bench-engine-results -->';
+            const marker = '<!-- bench-reth-results -->';
             const existing = comments.find(c => c.body.includes(marker));
 
             const body = `${marker}\n${comment}`;
