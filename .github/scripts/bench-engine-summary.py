@@ -77,14 +77,15 @@ def compute_summary(combined: list[dict], gas: list[dict]) -> dict:
         if lat_s > 0:
             per_block_ggas.append(r["gas_used"] / lat_s / GIGAGAS)
 
-    avg_new_payload_ms = (
-        sum(r["new_payload_latency_us"] for r in combined) / blocks / 1_000
-        if blocks else 0
-    )
-    avg_fcu_ms = (
-        sum(r["fcu_latency_us"] for r in combined) / blocks / 1_000
-        if blocks else 0
-    )
+    np_latencies_ms = sorted(r["new_payload_latency_us"] / 1_000 for r in combined)
+
+    avg_new_payload_ms = sum(np_latencies_ms) / blocks if blocks else 0
+
+    def percentile(sorted_vals: list[float], pct: int) -> float:
+        idx = int(len(sorted_vals) * pct / 100)
+        idx = min(idx, len(sorted_vals) - 1)
+        return sorted_vals[idx] if sorted_vals else 0
+
     avg_persistence_wait_ms = (
         sum(r["persistence_wait_us"] for r in combined) / blocks / 1_000
         if blocks else 0
@@ -98,20 +99,21 @@ def compute_summary(combined: list[dict], gas: list[dict]) -> dict:
         if blocks else 0
     )
 
+    sorted_ggas = sorted(per_block_ggas)
+
     return {
         "blocks": blocks,
         "total_gas": total_gas,
         "wall_clock_s": round(wall_duration_s, 3),
         "execution_s": round(exec_duration_s, 3),
-        "wall_clock_ggas_s": round(total_gas / wall_duration_s / GIGAGAS, 4) if wall_duration_s > 0 else 0,
-        "execution_ggas_s": round(total_gas / exec_duration_s / GIGAGAS, 4) if exec_duration_s > 0 else 0,
+        "mean_ggas_s": round(total_gas / exec_duration_s / GIGAGAS, 4) if exec_duration_s > 0 else 0,
+        "median_block_ggas_s": round(percentile(sorted_ggas, 50), 4),
         "avg_new_payload_ms": round(avg_new_payload_ms, 2),
-        "avg_fcu_ms": round(avg_fcu_ms, 2),
+        "p90_new_payload_ms": round(percentile(np_latencies_ms, 90), 2),
+        "p95_new_payload_ms": round(percentile(np_latencies_ms, 95), 2),
         "avg_persistence_wait_ms": round(avg_persistence_wait_ms, 2),
         "avg_execution_cache_wait_ms": round(avg_execution_cache_wait_ms, 2),
         "avg_sparse_trie_wait_ms": round(avg_sparse_trie_wait_ms, 2),
-        "median_block_ggas_s": round(sorted(per_block_ggas)[len(per_block_ggas) // 2], 4) if per_block_ggas else 0,
-        "p10_block_ggas_s": round(sorted(per_block_ggas)[len(per_block_ggas) // 10], 4) if len(per_block_ggas) >= 10 else 0,
     }
 
 
@@ -154,10 +156,21 @@ def generate_markdown(summary: dict, baseline: dict | None) -> str:
     """Generate a markdown comment body comparing current vs baseline."""
     lines = ["## ⚡ Engine Benchmark Results", ""]
 
+    metrics = [
+        ("Mean Ggas/s", "mean_ggas_s", True),
+        ("Median block Ggas/s", "median_block_ggas_s", True),
+        ("Avg newPayload (ms)", "avg_new_payload_ms", False),
+        ("P90 newPayload (ms)", "p90_new_payload_ms", False),
+        ("P95 newPayload (ms)", "p95_new_payload_ms", False),
+        ("Avg persistence wait (ms)", "avg_persistence_wait_ms", False),
+        ("Avg exec cache wait (ms)", "avg_execution_cache_wait_ms", False),
+        ("Avg sparse trie wait (ms)", "avg_sparse_trie_wait_ms", False),
+    ]
+
     if baseline:
         has_regression = (
-            is_regression(summary["execution_ggas_s"], baseline["execution_ggas_s"])
-            or is_regression(summary["median_block_ggas_s"], baseline["median_block_ggas_s"])
+            is_regression(summary["mean_ggas_s"], baseline.get("mean_ggas_s", baseline.get("execution_ggas_s", 0)))
+            or is_regression(summary["median_block_ggas_s"], baseline.get("median_block_ggas_s", 0))
         )
 
         if has_regression:
@@ -168,21 +181,9 @@ def generate_markdown(summary: dict, baseline: dict | None) -> str:
         lines.append("| Metric | This PR | main | Change |")
         lines.append("|--------|---------|------|--------|")
 
-        metrics = [
-            ("Execution Ggas/s", "execution_ggas_s", True),
-            ("Wall-clock Ggas/s", "wall_clock_ggas_s", True),
-            ("Median block Ggas/s", "median_block_ggas_s", True),
-            ("P10 block Ggas/s", "p10_block_ggas_s", True),
-            ("Avg newPayload (ms)", "avg_new_payload_ms", False),
-            ("Avg FCU (ms)", "avg_fcu_ms", False),
-            ("Avg persistence wait (ms)", "avg_persistence_wait_ms", False),
-            ("Avg exec cache wait (ms)", "avg_execution_cache_wait_ms", False),
-            ("Avg sparse trie wait (ms)", "avg_sparse_trie_wait_ms", False),
-        ]
-
         for label, key, higher_is_better in metrics:
             cur = summary[key]
-            base = baseline[key]
+            base = baseline.get(key, 0)
             if higher_is_better:
                 change = format_change(cur, base)
             else:
@@ -196,15 +197,8 @@ def generate_markdown(summary: dict, baseline: dict | None) -> str:
     else:
         lines.append("| Metric | Value |")
         lines.append("|--------|-------|")
-        lines.append(f"| Execution Ggas/s | {summary['execution_ggas_s']} |")
-        lines.append(f"| Wall-clock Ggas/s | {summary['wall_clock_ggas_s']} |")
-        lines.append(f"| Median block Ggas/s | {summary['median_block_ggas_s']} |")
-        lines.append(f"| P10 block Ggas/s | {summary['p10_block_ggas_s']} |")
-        lines.append(f"| Avg newPayload (ms) | {summary['avg_new_payload_ms']} |")
-        lines.append(f"| Avg FCU (ms) | {summary['avg_fcu_ms']} |")
-        lines.append(f"| Avg persistence wait (ms) | {summary['avg_persistence_wait_ms']} |")
-        lines.append(f"| Avg exec cache wait (ms) | {summary['avg_execution_cache_wait_ms']} |")
-        lines.append(f"| Avg sparse trie wait (ms) | {summary['avg_sparse_trie_wait_ms']} |")
+        for label, key, _ in metrics:
+            lines.append(f"| {label} | {summary[key]} |")
         lines.append("")
         lines.append(f"Blocks: {summary['blocks']} | "
                       f"Total gas: {format_gas(summary['total_gas'])} | "
