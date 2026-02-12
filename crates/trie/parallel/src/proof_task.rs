@@ -130,6 +130,12 @@ impl ProofWorkerHandle {
     ///
     /// Returns a handle for submitting proof tasks to the worker pools.
     /// Workers run until the last handle is dropped.
+    ///
+    /// # Parameters
+    /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
+    /// - `task_ctx`: Shared context with database view and prefix sets
+    /// - `halve_workers`: Whether to halve the worker pool size (for small blocks)
+    /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
     pub fn new<Factory>(
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
