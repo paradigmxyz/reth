@@ -535,11 +535,8 @@ where
         if let Some(saved_cache) = saved_cache {
             let caches = saved_cache.cache().clone();
             let cache_metrics = saved_cache.metrics().clone();
-            state_provider = Box::new(CachedStateProvider::<_, true>::new(
-                state_provider,
-                caches,
-                cache_metrics,
-            ));
+            state_provider =
+                Box::new(CachedStateProvider::new_prewarm(state_provider, caches, cache_metrics));
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
@@ -749,8 +746,7 @@ where
         let saved_cache = saved_cache.expect("BAL prewarm should only run with cache");
         let caches = saved_cache.cache().clone();
         let cache_metrics = saved_cache.metrics().clone();
-        let state_provider =
-            CachedStateProvider::<_, false>::new(state_provider, caches, cache_metrics);
+        let state_provider = CachedStateProvider::new(state_provider, caches, cache_metrics);
 
         let start = Instant::now();
 
