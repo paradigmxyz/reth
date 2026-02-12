@@ -37,7 +37,13 @@ pub struct DownloadDefaults {
     pub available_snapshots: Vec<Cow<'static, str>>,
     /// Default base URL for snapshots
     pub default_base_url: Cow<'static, str>,
-    /// Default base URL for chain-aware snapshots
+    /// Default base URL for chain-aware snapshots.
+    ///
+    /// When set, the chain ID is appended to form the full URL: `{base_url}/{chain_id}`.
+    /// For example, given a base URL of `https://snapshots.example.com` and chain ID `1`,
+    /// the resulting URL would be `https://snapshots.example.com/1`.
+    ///
+    /// Falls back to [`default_base_url`](Self::default_base_url) when `None`.
     pub default_chain_aware_base_url: Option<Cow<'static, str>>,
     /// Optional custom long help text that overrides the generated help
     pub long_help: Option<String>,
@@ -89,7 +95,9 @@ impl DownloadDefaults {
         help.push_str(
             "\nIf no URL is provided, the latest archive snapshot for the selected chain\nwill be proposed for download from ",
         );
-        help.push_str(self.default_chain_aware_base_url.as_deref().unwrap_or(&self.default_base_url));
+        help.push_str(
+            self.default_chain_aware_base_url.as_deref().unwrap_or(&self.default_base_url),
+        );
         help.push_str(
             ".\n\nLocal file:// URLs are also supported for extracting snapshots from disk.",
         );
