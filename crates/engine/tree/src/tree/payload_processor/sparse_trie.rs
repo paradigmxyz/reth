@@ -343,7 +343,7 @@ where
                 MultiProofMessage::EmptyProof { .. } | MultiProofMessage::BlockAccessList(_) => {
                     continue
                 }
-                MultiProofMessage::HashedStateUpdate(state) => {
+                MultiProofMessage::HashedStateUpdate(_, state) => {
                     SparseTrieTaskMessage::HashedState(state)
                 }
             };
@@ -1036,6 +1036,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::multiproof::Source;
     use alloy_primitives::{keccak256, Address, U256};
     use reth_trie_sparse::ParallelSparseTrie;
 
@@ -1066,7 +1067,9 @@ mod tests {
             );
         });
 
-        updates_tx.send(MultiProofMessage::HashedStateUpdate(hashed_state)).unwrap();
+        updates_tx
+            .send(MultiProofMessage::HashedStateUpdate(Source::BlockAccessList, hashed_state))
+            .unwrap();
         updates_tx.send(MultiProofMessage::FinishedStateUpdates).unwrap();
         drop(updates_tx);
 
