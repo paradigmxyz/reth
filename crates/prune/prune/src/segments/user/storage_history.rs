@@ -518,7 +518,11 @@ mod tests {
         test_prune(1200, 3, (PruneProgress::Finished, 202));
     }
 
+    /// Tests the `prune_static_files` code path. On unix with rocksdb feature, v2 storage
+    /// routes to `prune_rocksdb` instead, so this test only runs without rocksdb (the
+    /// `prune_rocksdb_path` test covers that configuration).
     #[test]
+    #[cfg(not(all(unix, feature = "rocksdb")))]
     fn prune_static_file() {
         let db = TestStageDB::default();
         let mut rng = generators::rng();

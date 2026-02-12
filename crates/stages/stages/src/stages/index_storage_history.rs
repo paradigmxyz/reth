@@ -694,31 +694,51 @@ mod tests {
     #[cfg(all(unix, feature = "rocksdb"))]
     mod rocksdb_tests {
         use super::*;
-        use reth_provider::RocksDBProviderFactory;
+        use reth_db_api::models::StorageBeforeTx;
+        use reth_provider::{providers::StaticFileWriter, RocksDBProviderFactory};
+        use reth_static_file_types::StaticFileSegment;
         use reth_storage_api::StorageSettings;
+
+        /// Sets up v2 storage test data: writes block body indices to MDBX and
+        /// storage changesets to static files (matching realistic v2 layout).
+        fn setup_v2_storage_data(db: &TestStageDB, block_range: std::ops::RangeInclusive<u64>) {
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
+
+            db.commit(|tx| {
+                for block in block_range.clone() {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+            let static_file_provider = db.factory.static_file_provider();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            for block in block_range {
+                writer
+                    .append_storage_changeset(
+                        vec![StorageBeforeTx {
+                            address: ADDRESS,
+                            key: STORAGE_KEY,
+                            value: U256::ZERO,
+                        }],
+                        block,
+                    )
+                    .unwrap();
+            }
+            writer.commit().unwrap();
+        }
 
         /// Test that when `storages_history_in_rocksdb` is enabled, the stage
         /// writes storage history indices to `RocksDB` instead of MDBX.
         #[tokio::test]
         async fn execute_writes_to_rocksdb_when_enabled() {
             let db = TestStageDB::default();
-
-            db.factory.set_storage_settings_cache(StorageSettings::v2());
-
-            db.commit(|tx| {
-                for block in 0..=10 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::StorageChangeSets>(
-                        block_number_address(block),
-                        storage(STORAGE_KEY),
-                    )?;
-                }
-                Ok(())
-            })
-            .unwrap();
+            setup_v2_storage_data(&db, 0..=10);
 
             let input = ExecInput { target: Some(10), ..Default::default() };
             let mut stage = IndexStorageHistoryStage::default();
@@ -746,23 +766,7 @@ mod tests {
         #[tokio::test]
         async fn unwind_works_when_rocksdb_enabled() {
             let db = TestStageDB::default();
-
-            db.factory.set_storage_settings_cache(StorageSettings::v2());
-
-            db.commit(|tx| {
-                for block in 0..=10 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::StorageChangeSets>(
-                        block_number_address(block),
-                        storage(STORAGE_KEY),
-                    )?;
-                }
-                Ok(())
-            })
-            .unwrap();
+            setup_v2_storage_data(&db, 0..=10);
 
             let input = ExecInput { target: Some(10), ..Default::default() };
             let mut stage = IndexStorageHistoryStage::default();
@@ -799,23 +803,7 @@ mod tests {
         #[tokio::test]
         async fn unwind_to_zero_keeps_block_zero() {
             let db = TestStageDB::default();
-
-            db.factory.set_storage_settings_cache(StorageSettings::v2());
-
-            db.commit(|tx| {
-                for block in 0..=5 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::StorageChangeSets>(
-                        block_number_address(block),
-                        storage(STORAGE_KEY),
-                    )?;
-                }
-                Ok(())
-            })
-            .unwrap();
+            setup_v2_storage_data(&db, 0..=5);
 
             let input = ExecInput { target: Some(5), ..Default::default() };
             let mut stage = IndexStorageHistoryStage::default();
@@ -846,23 +834,7 @@ mod tests {
         #[tokio::test]
         async fn execute_incremental_sync() {
             let db = TestStageDB::default();
-
-            db.factory.set_storage_settings_cache(StorageSettings::v2());
-
-            db.commit(|tx| {
-                for block in 0..=5 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::StorageChangeSets>(
-                        block_number_address(block),
-                        storage(STORAGE_KEY),
-                    )?;
-                }
-                Ok(())
-            })
-            .unwrap();
+            setup_v2_storage_data(&db, 0..=10);
 
             let input = ExecInput { target: Some(5), ..Default::default() };
             let mut stage = IndexStorageHistoryStage::default();
@@ -876,21 +848,6 @@ mod tests {
             assert!(result.is_some());
             let blocks: Vec<u64> = result.unwrap().iter().collect();
             assert_eq!(blocks, (0..=5).collect::<Vec<_>>());
-
-            db.commit(|tx| {
-                for block in 6..=10 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::StorageChangeSets>(
-                        block_number_address(block),
-                        storage(STORAGE_KEY),
-                    )?;
-                }
-                Ok(())
-            })
-            .unwrap();
 
             let input = ExecInput { target: Some(10), checkpoint: Some(StageCheckpoint::new(5)) };
             let provider = db.factory.database_provider_rw().unwrap();
@@ -911,25 +868,8 @@ mod tests {
             use reth_db_api::models::sharded_key::NUM_OF_INDICES_IN_SHARD;
 
             let db = TestStageDB::default();
-
-            db.factory.set_storage_settings_cache(StorageSettings::v2());
-
             let num_blocks = (NUM_OF_INDICES_IN_SHARD * 2 + 100) as u64;
-
-            db.commit(|tx| {
-                for block in 0..num_blocks {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::StorageChangeSets>(
-                        block_number_address(block),
-                        storage(STORAGE_KEY),
-                    )?;
-                }
-                Ok(())
-            })
-            .unwrap();
+            setup_v2_storage_data(&db, 0..=num_blocks - 1);
 
             let input = ExecInput { target: Some(num_blocks - 1), ..Default::default() };
             let mut stage = IndexStorageHistoryStage::default();

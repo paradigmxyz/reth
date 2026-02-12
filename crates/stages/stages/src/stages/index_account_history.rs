@@ -666,30 +666,43 @@ mod tests {
     #[cfg(all(unix, feature = "rocksdb"))]
     mod rocksdb_tests {
         use super::*;
-        use reth_provider::RocksDBProviderFactory;
+        use reth_provider::{
+            providers::StaticFileWriter, RocksDBProviderFactory, StaticFileProviderFactory,
+        };
+        use reth_static_file_types::StaticFileSegment;
         use reth_storage_api::StorageSettings;
+
+        /// Sets up v2 account test data: writes block body indices to MDBX and
+        /// account changesets to static files (matching realistic v2 layout).
+        fn setup_v2_account_data(db: &TestStageDB, block_range: std::ops::RangeInclusive<u64>) {
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
+
+            db.commit(|tx| {
+                for block in block_range.clone() {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+            let static_file_provider = db.factory.static_file_provider();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            for block in block_range {
+                writer.append_account_changeset(vec![acc()], block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
 
         /// Test that when `account_history_in_rocksdb` is enabled, the stage
         /// writes account history indices to `RocksDB` instead of MDBX.
         #[tokio::test]
         async fn execute_writes_to_rocksdb_when_enabled() {
-            // init
             let db = TestStageDB::default();
-
-            // Enable RocksDB for account history
-            db.factory.set_storage_settings_cache(StorageSettings::v2());
-
-            db.commit(|tx| {
-                for block in 0..=10 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::AccountChangeSets>(block, acc())?;
-                }
-                Ok(())
-            })
-            .unwrap();
+            setup_v2_account_data(&db, 0..=10);
 
             let input = ExecInput { target: Some(10), ..Default::default() };
             let mut stage = IndexAccountHistoryStage::default();
@@ -719,20 +732,7 @@ mod tests {
         #[tokio::test]
         async fn unwind_works_when_rocksdb_enabled() {
             let db = TestStageDB::default();
-
-            db.factory.set_storage_settings_cache(StorageSettings::v2());
-
-            db.commit(|tx| {
-                for block in 0..=10 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::AccountChangeSets>(block, acc())?;
-                }
-                Ok(())
-            })
-            .unwrap();
+            setup_v2_account_data(&db, 0..=10);
 
             let input = ExecInput { target: Some(10), ..Default::default() };
             let mut stage = IndexAccountHistoryStage::default();
@@ -768,20 +768,7 @@ mod tests {
         #[tokio::test]
         async fn execute_incremental_sync() {
             let db = TestStageDB::default();
-
-            db.factory.set_storage_settings_cache(StorageSettings::v2());
-
-            db.commit(|tx| {
-                for block in 0..=5 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::AccountChangeSets>(block, acc())?;
-                }
-                Ok(())
-            })
-            .unwrap();
+            setup_v2_account_data(&db, 0..=10);
 
             let input = ExecInput { target: Some(5), ..Default::default() };
             let mut stage = IndexAccountHistoryStage::default();
@@ -795,18 +782,6 @@ mod tests {
             assert!(result.is_some());
             let blocks: Vec<u64> = result.unwrap().iter().collect();
             assert_eq!(blocks, (0..=5).collect::<Vec<_>>());
-
-            db.commit(|tx| {
-                for block in 6..=10 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::AccountChangeSets>(block, acc())?;
-                }
-                Ok(())
-            })
-            .unwrap();
 
             let input = ExecInput { target: Some(10), checkpoint: Some(StageCheckpoint::new(5)) };
             let provider = db.factory.database_provider_rw().unwrap();
