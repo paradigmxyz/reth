@@ -46,7 +46,7 @@ use reth_db_api::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    BlockNumberList, PlainAccountState, PlainStorageState,
+    BlockNumberList, DatabaseError, DatabaseWriteOperation, PlainAccountState, PlainStorageState,
 };
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
@@ -2428,11 +2428,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         }
 
-        // Write bytecode
+        // Write bytecode using NO_OVERWRITE: bytecodes are content-addressed, so if the hash
+        // already exists the value is guaranteed identical. This avoids dirtying MDBX pages for
+        // already-known bytecodes.
         tracing::trace!(len = changes.contracts.len(), "Writing bytecodes");
         let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in changes.contracts {
-            bytecodes_cursor.upsert(hash, &Bytecode(bytecode))?;
+            if let Err(e) = bytecodes_cursor.insert(hash, &Bytecode(bytecode))
+                && !matches!(&e, DatabaseError::Write(err) if err.operation == DatabaseWriteOperation::CursorInsert)
+            {
+                return Err(e.into());
+            }
         }
 
         // Write new storage state and wipe storage if needed.
@@ -2456,6 +2462,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)? &&
                     db_entry.key == entry.key
                 {
+                    if db_entry.value == entry.value && !entry.value.is_zero() {
+                        continue;
+                    }
                     storages_cursor.delete_current()?;
                 }
 
@@ -2496,6 +2505,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
                     db_entry.key == entry.key
                 {
+                    if db_entry.value == entry.value && !entry.value.is_zero() {
+                        continue;
+                    }
                     hashed_storage_cursor.delete_current()?;
                 }
 
