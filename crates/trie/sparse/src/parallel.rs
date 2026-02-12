@@ -192,9 +192,19 @@ impl SparseTrie for ParallelSparseTrie {
 
         // Update the top-level branch node masks. This is simple and can't be done in parallel.
         self.branch_node_masks.reserve(nodes.len());
-        for ProofTrieNodeV2 { path, masks, .. } in nodes.iter() {
+        for ProofTrieNodeV2 { path, masks, node } in nodes.iter() {
             if let Some(branch_masks) = masks {
-                self.branch_node_masks.insert(*path, *branch_masks);
+                // Use proper path for branch nodes by combining path and extension key.
+                let path = if let TrieNodeV2::Branch(branch) = node &&
+                    !branch.key.is_empty()
+                {
+                    let mut path = *path;
+                    path.extend(&branch.key);
+                    path
+                } else {
+                    *path
+                };
+                self.branch_node_masks.insert(path, *branch_masks);
             }
         }
 
