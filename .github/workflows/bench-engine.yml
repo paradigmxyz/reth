@@ -35,7 +35,7 @@ env:
 
 concurrency:
   group: bench-engine
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: write
