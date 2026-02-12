@@ -84,7 +84,8 @@ impl HashedPostState {
                 .map(|(address, account)| Self::hash_bundle_account::<KH>(address, account))
                 .collect()
         } else {
-            Self::from_bundle_state::<KH>(state)
+            let entries: Vec<_> = state.iter().collect();
+            Self::from_bundle_state::<KH>(entries)
         }
     }
 
@@ -98,7 +99,7 @@ impl HashedPostState {
 
     /// Account count at or below which sequential hashing outperforms rayon parallel iteration.
     #[cfg(feature = "rayon")]
-    const ADAPTIVE_THRESHOLD: usize = 32;
+    pub const ADAPTIVE_THRESHOLD: usize = 32;
 
     /// Hashes a single bundle account entry into the tuple expected by [`FromIterator`].
     fn hash_bundle_account<KH: KeyHasher>(
