@@ -9694,6 +9694,7 @@ dependencies = [
  "rocksdb",
  "strum",
  "tempfile",
+ "thread_local",
  "tokio",
  "tracing",
 ]

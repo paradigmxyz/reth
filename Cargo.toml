@@ -700,6 +700,7 @@ sysinfo = { version = "0.38", default-features = false }
 tracing-journald = "0.3"
 tracing-logfmt = "=0.3.5"
 tracing-samply = "0.1"
+thread_local = "1.1"
 tracing-subscriber = { version = "0.3", default-features = false }
 tracing-tracy = "0.11"
 triehash = "0.8"
