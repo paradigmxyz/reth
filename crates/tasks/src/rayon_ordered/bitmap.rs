@@ -18,7 +18,7 @@ impl AtomicBitmap {
     }
 
     #[inline]
-    fn word_and_mask(index: usize) -> (usize, u64) {
+    const fn word_and_mask(index: usize) -> (usize, u64) {
         (index >> 6, 1u64 << (index & 63))
     }
 

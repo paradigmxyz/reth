@@ -40,6 +40,7 @@ pub mod shutdown;
 #[cfg(feature = "rayon")]
 pub mod pool;
 
+/// Lock-free ordered parallel iterator extension trait.
 #[cfg(feature = "rayon")]
 pub mod rayon_ordered;
 #[cfg(feature = "rayon")]

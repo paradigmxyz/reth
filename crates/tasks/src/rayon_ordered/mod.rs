@@ -54,7 +54,7 @@ impl<T> Drop for Shared<T> {
     }
 }
 
-/// Extension trait for [`IndexedParallelIterator`](rayon::iter::IndexedParallelIterator)
+/// Extension trait for [`IndexedParallelIterator`]
 /// that streams results to a sequential consumer in index order.
 pub trait ForEachOrdered: IndexedParallelIterator {
     /// Executes the parallel iterator, calling `f` on each result **sequentially in index
