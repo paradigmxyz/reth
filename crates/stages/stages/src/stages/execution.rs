@@ -462,7 +462,9 @@ where
             }
         }
 
-        // write output
+        // Write output. When `use_hashed_state` is enabled, `write_state` skips writing to
+        // plain account/storage tables and only writes bytecodes and changesets. The hashed
+        // state is then written separately below.
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state {
