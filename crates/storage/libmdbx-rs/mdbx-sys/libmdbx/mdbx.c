@@ -47,6 +47,7 @@
 #define _DARWIN_C_SOURCE
 #endif /* _DARWIN_C_SOURCE */
 
+#include "mdbx_pageviz.h"
 #if (defined(__MINGW__) || defined(__MINGW32__) || defined(__MINGW64__)) && !defined(__USE_MINGW_ANSI_STDIO)
 #define __USE_MINGW_ANSI_STDIO 1
 #endif /* MinGW */
@@ -438,7 +439,6 @@ __extern_C key_t ftok(const char *, int);
 #include <sys/uio.h>
 
 #endif /*---------------------------------------------------------------------*/
-#include "mdbx_pageviz.h"
 
 #if defined(__ANDROID_API__) || defined(ANDROID)
 #include <android/log.h>
@@ -23093,6 +23093,7 @@ static int gcu_loose(MDBX_txn *txn, gcu_t *ctx) {
       return err;
     for (page_t *lp = txn->tw.loose_pages; lp; lp = page_next(lp)) {
       pnl_append_prereserved(txn->tw.retired_pages, lp->pgno);
+      mdbx_pageviz_emit(MDBX_PAGEVIZ_OP_FREE, 0, lp->pgno);
       MDBX_ASAN_UNPOISON_MEMORY_REGION(&page_next(lp), sizeof(page_t *));
       VALGRIND_MAKE_MEM_DEFINED(&page_next(lp), sizeof(page_t *));
     }
@@ -23107,6 +23108,7 @@ static int gcu_loose(MDBX_txn *txn, gcu_t *ctx) {
     for (page_t *lp = txn->tw.loose_pages; lp; lp = page_next(lp)) {
       tASSERT(txn, lp->flags == P_LOOSE);
       loose[++count] = lp->pgno;
+      mdbx_pageviz_emit(MDBX_PAGEVIZ_OP_FREE, 0, lp->pgno);
       MDBX_ASAN_UNPOISON_MEMORY_REGION(&page_next(lp), sizeof(page_t *));
       VALGRIND_MAKE_MEM_DEFINED(&page_next(lp), sizeof(page_t *));
     }
@@ -31846,7 +31848,6 @@ pgr_t page_new(MDBX_cursor *mc, const unsigned flags) {
     return ret;
 
   DEBUG("db %zu allocated new page %" PRIaPGNO, cursor_dbi(mc), ret.page->pgno);
-  MDBX_PAGEVIZ_WRITE(mc, ret.page->pgno);
   ret.page->flags = (uint16_t)flags;
   cASSERT(mc, *cursor_dbi_state(mc) & DBI_DIRTY);
   cASSERT(mc, mc->txn->flags & MDBX_TXN_DIRTY);
@@ -31875,7 +31876,6 @@ pgr_t page_new_large(MDBX_cursor *mc, const size_t npages) {
     return ret;
 
   DEBUG("dbi %zu allocated new large-page %" PRIaPGNO ", num %zu", cursor_dbi(mc), ret.page->pgno, npages);
-  MDBX_PAGEVIZ_WRITE(mc, ret.page->pgno);
   ret.page->flags = P_LARGE;
   cASSERT(mc, *cursor_dbi_state(mc) & DBI_DIRTY);
   cASSERT(mc, mc->txn->flags & MDBX_TXN_DIRTY);
@@ -32021,6 +32021,7 @@ __hot int page_touch_unmodifable(MDBX_txn *txn, MDBX_cursor *mc, const page_t *c
     DEBUG("touched db %d page %" PRIaPGNO " -> %" PRIaPGNO, cursor_dbi_dbg(mc), mp->pgno, pgno);
     tASSERT(txn, mp->pgno != pgno);
     pnl_append_prereserved(txn->tw.retired_pages, mp->pgno);
+    MDBX_PAGEVIZ_FREE(mc, mp->pgno);
     /* Update the parent page, if any, to point to the new page */
     if (likely(mc->top)) {
       page_t *parent = mc->pg[mc->top - 1];

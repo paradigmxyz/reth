@@ -156,6 +156,10 @@ async fn handle_ws(mut socket: WebSocket, state: AppState) {
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 tracing::warn!("ws client lagged by {n} messages");
+                let msg = format!("{{\"lagged\":{n}}}");
+                if socket.send(Message::Text(msg)).await.is_err() {
+                    break;
+                }
             }
             Err(broadcast::error::RecvError::Closed) => break,
         }

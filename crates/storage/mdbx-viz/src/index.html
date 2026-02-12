@@ -59,6 +59,7 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
     <span class="stat-label" style="color:#ef4444">W: <span class="stat-value" id="cnt-write">0</span></span>
     <span class="stat-label" style="color:#eab308">F: <span class="stat-value" id="cnt-free">0</span></span>
     <span class="stat-label">Latest: <span class="stat-value" id="evt-latest">-</span></span>
+    <span id="lag-warn" style="display:none;color:#f87171;font-weight:600">&#9888; Lagged <span id="lag-count">0</span> msgs</span>
   </div>
   <div class="controls">
     <button id="btn-zin">Zoom +</button>
@@ -78,10 +79,16 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
       <label><input type="checkbox" id="chk-read" checked> <span style="color:#3c82f6">&#9632;</span> Reads</label>
       <label><input type="checkbox" id="chk-write" checked> <span style="color:#ef4444">&#9632;</span> Writes</label>
       <label><input type="checkbox" id="chk-free" checked> <span style="color:#eab308">&#9632;</span> Frees</label>
+      <label><input type="checkbox" id="chk-fixw"> Fixed Width</label>
+      <label><input type="checkbox" id="chk-trails"> Trails</label>
     </div>
     <div>
       <label>Fade: <input type="range" id="fade-slider" min="200" max="8000" value="2000" step="100">
       <span class="fade-val" id="fade-val">2.0s</span></label>
+    </div>
+    <div>
+      <label>Trail width: <input type="range" id="trail-width" min="0.5" max="6" value="1.5" step="0.5">
+      <span class="fade-val" id="trail-w-val">1.5</span></label>
     </div>
   </div>
   <h2>Table Details</h2>
@@ -103,7 +110,9 @@ const DGA=[40,40,40],DGB=[55,55,55],DWA=[220,220,220],DWB=[240,240,240];
 const HL={1:[60,130,246],2:[255,80,80],3:[234,179,8]};
 let NP=0,PS=4096,GC=0,GR=0,DBIS=[],DBI_IDX={},oMap=null,lOp=null,lTs=null,FADE=2000;
 let cntR=0,cntW=0,cntF=0;
-let sR=true,sW=true,sF=true;
+let sR=true,sW=true,sF=true,fW=false,showTrails=false,trailW=1.5;
+const TRAIL_CAP=4096;let trails=[];
+const TRC={1:"60,130,246",2:"255,80,80",3:"234,179,8"};
 const cv=document.getElementById("map"),cx=cv.getContext("2d"),wr=document.getElementById("canvas-wrap");
 const ldEl=document.getElementById("loading"),zmEl=document.getElementById("zoom-info");
 const tt=document.getElementById("tooltip"),ttSw=document.getElementById("tt-swatch");
@@ -112,7 +121,15 @@ const tb=document.getElementById("tbl-body");
 let W=0,H=0,iD=null,oC=null,oCx=null,pX=0,pY=0,sc=1,mS=.01;const xS=128;
 const sel=new Set();let tEv=0,rEv=0,lRT=performance.now();
 function cl(v,a,b){return Math.max(a,Math.min(b,v))}
-function oX(){return Math.max(0,(W-GC*sc)/2)}
+function growTo(newNP){
+  if(newNP<=NP)return;
+  const nOm=new Uint8Array(newNP);nOm.set(oMap);nOm.fill(0xFF,NP);oMap=nOm;
+  const nOp=new Uint8Array(newNP);nOp.set(lOp);lOp=nOp;
+  const nTs=new Float64Array(newNP);nTs.set(lTs);lTs=nTs;
+  NP=newNP;GR=Math.ceil(NP/GC);
+  iD=null;oC=null;
+}
+function oX(){return fW?0:Math.max(0,(W-GC*sc)/2)}
 function oY(){return Math.max(0,(H-GR*sc)/2)}
 function cP(){const vw=W/sc,vh=H/sc;pX=cl(pX,0,Math.max(0,GC-vw));pY=cl(pY,0,Math.max(0,GR-vh))}
 function s2w(sx,sy){return{wx:pX+(sx-oX())/sc,wy:pY+(sy-oY())/sc}}
@@ -123,8 +140,21 @@ function pC(pg,gy,flt,dA,dB,now){
   const op=lOp[pg];if(!op)return c;
   if((op===1&&!sR)||(op===2&&!sW)||(op===3&&!sF))return c;
   const age=now-lTs[pg];if(age>=FADE){lOp[pg]=0;return c}
-  const t=1-Math.pow(age/FADE,.5);const h=HL[op];if(!h)return c;
+  const t=1-Math.pow(age/FADE,2);const h=HL[op];if(!h)return c;
   return[Math.round(c[0]+(h[0]-c[0])*t),Math.round(c[1]+(h[1]-c[1])*t),Math.round(c[2]+(h[2]-c[2])*t)];
+}
+function pg2s(pg){const col=pg%GC,row=Math.floor(pg/GC);return{sx:oX()+(col-pX+.5)*sc,sy:oY()+(row-pY+.5)*sc}}
+function drawTrails(now){
+  if(!showTrails||trails.length===0)return;
+  cx.lineCap="round";cx.lineWidth=trailW;
+  for(let i=0;i<trails.length;i++){
+    const t=trails[i],age=now-t.ts;if(age>=FADE)continue;
+    const a=1-Math.pow(age/FADE,2);
+    const c=TRC[t.op]||TRC[1];
+    const f=pg2s(t.from),e=pg2s(t.to);
+    cx.strokeStyle=`rgba(${c},${(a*0.6).toFixed(2)})`;
+    cx.beginPath();cx.moveTo(f.sx,f.sy);cx.lineTo(e.sx,e.sy);cx.stroke();
+  }
 }
 function render(){
   if(!oMap||W<1||H<1)return;
@@ -143,23 +173,37 @@ function render(){
     }}
     oCx.putImageData(od,0,0);cx.imageSmoothingEnabled=false;cx.clearRect(0,0,W,H);
     cx.drawImage(oC,oX()-(pX-x0)*sc,oY()-(pY-y0)*sc,vW*sc,vH*sc);
+    drawTrails(now);
     zmEl.textContent=sc.toFixed(sc>=10?0:1)+" px/page";
   }else{
     if(!iD||iD.width!==W||iD.height!==H)iD=cx.createImageData(W,H);
-    const d=iD.data,ox=oX(),oy=oY();
-    for(let sy=0;sy<H;sy++){const wy=pY+(sy-oy+.5)/sc,py=Math.floor(wy);
-      for(let sx=0;sx<W;sx++){const wx=pX+(sx-ox+.5)/sc,px=Math.floor(wx),o=(sy*W+sx)<<2;
-        if(px<0||py<0||px>=GC||py>=GR){d[o]=0;d[o+1]=0;d[o+2]=0;d[o+3]=255;continue}
-        const i=py*GC+px,c=(i<NP)?pC(i,py,flt,dA,dB,now):null;
+    const d=iD.data,ox=oX(),oy=oY(),ips=1/sc;
+    for(let sy=0;sy<H;sy++){
+      const wyC=pY+(sy-oy+.5)*ips,wy0=Math.max(0,Math.floor(pY+(sy-oy)*ips)),wy1=Math.min(GR-1,Math.floor(pY+(sy-oy+1)*ips));
+      for(let sx=0;sx<W;sx++){
+        const wxC=pX+(sx-ox+.5)*ips,wx0=Math.max(0,Math.floor(pX+(sx-ox)*ips)),wx1=Math.min(GC-1,Math.floor(pX+(sx-ox+1)*ips));
+        const o=(sy*W+sx)<<2;
+        if(wx1<0||wy1<0||wx0>=GC||wy0>=GR){d[o]=0;d[o+1]=0;d[o+2]=0;d[o+3]=255;continue}
+        let bPg=-1,bOp=0,bAge=FADE;
+        for(let py=wy0;py<=wy1;py++){for(let px=wx0;px<=wx1;px++){
+          const i=py*GC+px;if(i>=NP)continue;
+          const op=lOp[i];if(!op)continue;
+          if((op===1&&!sR)||(op===2&&!sW)||(op===3&&!sF))continue;
+          const age=now-lTs[i];if(age>=FADE)continue;
+          if(op>bOp||(op===bOp&&age<bAge)){bOp=op;bAge=age;bPg=i}
+        }}
+        const cpx=Math.floor(wxC),cpy=Math.floor(wyC),ci=cpy*GC+cpx;
+        const c=bPg>=0?pC(bPg,cpy,flt,dA,dB,now):(ci>=0&&ci<NP)?pC(ci,cpy,flt,dA,dB,now):null;
         if(c){d[o]=c[0];d[o+1]=c[1];d[o+2]=c[2]}else{d[o]=0;d[o+1]=0;d[o+2]=0}d[o+3]=255;
     }}
-    cx.putImageData(iD,0,0);const pp=1/sc;zmEl.textContent="1 px = "+pp.toFixed(pp>=10?0:1)+" pages";
+    cx.putImageData(iD,0,0);drawTrails(now);const pp=1/sc;zmEl.textContent="1 px = "+pp.toFixed(pp>=10?0:1)+" pages";
   }
 }
 let anim=false;
 function rLoop(){
   render();let act=0;const now=performance.now();
   if(lOp)for(let i=0;i<NP;i++)if(lOp[i]&&(now-lTs[i])<FADE)act++;
+  if(showTrails){while(trails.length>0&&(now-trails[0].ts)>=FADE)trails.shift();act+=trails.length}
   document.getElementById("active-count").textContent=act.toLocaleString();
   if(act>0)requestAnimationFrame(rLoop);else anim=false;
 }
@@ -177,8 +221,9 @@ function bldTbl(){
   });
 }
 function uAR(){document.querySelectorAll(".tbl-row").forEach(r=>{parseInt(r.dataset.dbiIndex,10);sel.has(parseInt(r.dataset.dbiIndex,10))?r.classList.add("active"):r.classList.remove("active")})}
+function reflow(){if(!fW)return;GC=Math.max(1,Math.floor(W/sc));GR=Math.ceil(NP/GC);pX=0;cP()}
 function boot(){szCv();GC=Math.ceil(Math.sqrt(NP));GR=Math.ceil(NP/GC);mS=Math.min(W/GC,H/GR,1);sc=mS;pX=0;pY=0;render()}
-function zA(ns,sx,sy){ns=cl(ns,mS,xS);if(Math.abs(ns-sc)<1e-6)return;const b=s2w(sx,sy);sc=ns;pX=b.wx-(sx-oX())/sc;pY=b.wy-(sy-oY())/sc;cP();sched()}
+function zA(ns,sx,sy){ns=cl(ns,mS,xS);if(Math.abs(ns-sc)<1e-6)return;const b=s2w(sx,sy);sc=ns;if(fW){reflow();pY=b.wy-(sy-oY())/sc;cP()}else{pX=b.wx-(sx-oX())/sc;pY=b.wy-(sy-oY())/sc;cP()}sched()}
 document.getElementById("btn-zin").addEventListener("click",()=>zA(sc*1.3,W>>1,H>>1));
 document.getElementById("btn-zout").addEventListener("click",()=>zA(sc/1.3,W>>1,H>>1));
 document.getElementById("btn-reset").addEventListener("click",()=>{sc=mS;pX=0;pY=0;sel.clear();uAR();render()});
@@ -187,7 +232,7 @@ wr.addEventListener("wheel",e=>{e.preventDefault();const r=cv.getBoundingClientR
 let drag=false,lCX=0,lCY=0;
 cv.addEventListener("pointerdown",e=>{drag=true;lCX=e.clientX;lCY=e.clientY;cv.setPointerCapture(e.pointerId);cv.style.cursor="grabbing"});
 cv.addEventListener("pointermove",e=>{
-  if(drag){pX-=(e.clientX-lCX)/sc;pY-=(e.clientY-lCY)/sc;lCX=e.clientX;lCY=e.clientY;cP();sched();tt.style.display="none";return}
+  if(drag){if(!fW)pX-=(e.clientX-lCX)/sc;pY-=(e.clientY-lCY)/sc;lCX=e.clientX;lCY=e.clientY;cP();sched();tt.style.display="none";return}
   const r=cv.getBoundingClientRect(),sx=(e.clientX-r.left)/r.width*W,sy=(e.clientY-r.top)/r.height*H;
   const w=s2w(sx,sy),pg=w2p(w.wx,w.wy);if(pg<0){tt.style.display="none";return}
   const ow=oMap[pg],inf=DBI_IDX[ow],c=PAL[ow]||PAL[255];
@@ -204,7 +249,10 @@ document.getElementById("chk-read").addEventListener("change",e=>{sR=e.target.ch
 document.getElementById("chk-write").addEventListener("change",e=>{sW=e.target.checked;sched()});
 document.getElementById("chk-free").addEventListener("change",e=>{sF=e.target.checked;sched()});
 document.getElementById("fade-slider").addEventListener("input",e=>{FADE=parseInt(e.target.value);document.getElementById("fade-val").textContent=(FADE/1000).toFixed(1)+"s"});
-window.addEventListener("resize",()=>{if(!oMap)return;szCv();mS=Math.min(W/GC,H/GR,1);if(sc<mS)sc=mS;cP();render()});
+document.getElementById("chk-trails").addEventListener("change",e=>{showTrails=e.target.checked;if(!showTrails)trails=[];sched()});
+document.getElementById("trail-width").addEventListener("input",e=>{trailW=parseFloat(e.target.value);document.getElementById("trail-w-val").textContent=trailW.toFixed(1);sched()});
+document.getElementById("chk-fixw").addEventListener("change",e=>{fW=e.target.checked;if(fW){reflow()}else{GC=Math.ceil(Math.sqrt(NP));GR=Math.ceil(NP/GC);mS=Math.min(W/GC,H/GR,1);pX=0;cP()}sched()});
+window.addEventListener("resize",()=>{if(!oMap)return;szCv();reflow();mS=Math.min(W/GC,H/GR,1);if(sc<mS)sc=mS;cP();render()});
 const wD=document.getElementById("ws-dot"),wS=document.getElementById("ws-status");
 function connectWS(){
   const ws=new WebSocket(`${location.protocol==="https:"?"wss:":"ws:"}//${location.host}/ws`);
@@ -212,16 +260,21 @@ function connectWS(){
   ws.onopen=()=>{wD.className="dot connected";wS.textContent="Connected"};
   ws.onclose=()=>{wD.className="dot disconnected";wS.textContent="Reconnecting...";setTimeout(connectWS,1000)};
   ws.onerror=()=>ws.close();
+  let lagTimer=0;
   ws.onmessage=msg=>{
+    if(typeof msg.data==="string"){try{const j=JSON.parse(msg.data);if(j.lagged){const el=document.getElementById("lag-warn"),lc=document.getElementById("lag-count");lc.textContent=j.lagged.toLocaleString();el.style.display="inline";clearTimeout(lagTimer);lagTimer=setTimeout(()=>{el.style.display="none"},5000)}}catch(e){}return}
     if(!oMap)return;const v=new DataView(msg.data);let off=0;const now=performance.now();let cnt=0;
-    let lastPg=-1,lastDbi=0,lastOp=0;
+    let lastPg=-1,lastDbi=0,lastOp=0,prevPg=-1,maxPg=NP;
     while(off+8<=msg.data.byteLength){
       const pg=v.getUint32(off,true),dbi=v.getUint16(off+4,true),op=v.getUint8(off+6);off+=8;
-      if(pg>=NP)continue;cnt++;
+      if(pg>=maxPg)maxPg=pg+1;
+      if(pg>=NP){if(maxPg>NP)growTo(maxPg);if(pg>=NP)continue}cnt++;
       if(op===1)cntR++;else if(op===2)cntW++;else if(op===3)cntF++;
       const prev=lOp[pg],prevLive=prev&&(now-lTs[pg])<FADE;
       if(!prevLive||op>=prev){lOp[pg]=op;lTs[pg]=now}
       if(op===2&&dbi>0&&dbi<0xFE)oMap[pg]=dbi;
+      if(showTrails&&prevPg>=0&&prevPg!==pg){trails.push({from:prevPg,to:pg,op:op,ts:now});if(trails.length>TRAIL_CAP)trails.shift()}
+      prevPg=pg;
       if(op>=2){lastPg=pg;lastDbi=dbi;lastOp=op}else if(lastPg<0){lastPg=pg;lastDbi=dbi;lastOp=op}
     }
     tEv+=cnt;rEv+=cnt;document.getElementById("evt-total").textContent=tEv.toLocaleString();
@@ -238,8 +291,7 @@ async function init(){
     const r=await fetch("/api/info"),info=await r.json();NP=info.page_count;PS=info.page_size;
     DBIS=info.dbi_names.map((n,i)=>({name:n,dbi_index:i,pages:0,pct:0,size_mb:0}));
     DBI_IDX={};DBIS.forEach(d=>{DBI_IDX[d.dbi_index]=d});
-    const gb=(NP*PS/(1024**3)).toFixed(2);
-    document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
+    document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 loading owner map\u2026`;
   }catch(e){document.getElementById("subtitle").textContent="Failed: "+e.message}
   try{
     const r=await fetch("/api/owner_map");
@@ -247,9 +299,12 @@ async function init(){
       DBIS.forEach(d=>{d.pages=ct[d.dbi_index]||0;d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});
     }else oMap=new Uint8Array(NP);
   }catch(e){oMap=new Uint8Array(NP)}
+  const unref=oMap.reduce((n,b)=>n+(b===0xFF?1:0),0),ref=NP-unref;
+  const gb=(NP*PS/(1024**3)).toFixed(2);
+  document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${ref.toLocaleString()} ref \u00b7 ${unref.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
   lOp=new Uint8Array(NP);lTs=new Float64Array(NP);
   bldTbl();ldEl.style.display="none";cv.style.display="block";boot();connectWS();
-  setInterval(()=>{if(!oMap)return;const ct={};for(let i=0;i<NP;i++){const o=oMap[i];ct[o]=(ct[o]||0)+1}DBIS.forEach(d=>{d.pages=ct[d.dbi_index]||0;d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});bldTbl()},2000);
+  setInterval(()=>{if(!oMap)return;const ct={};let ur=0;for(let i=0;i<NP;i++){const o=oMap[i];ct[o]=(ct[o]||0)+1;if(o===0xFF)ur++}DBIS.forEach(d=>{d.pages=ct[d.dbi_index]||0;d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});bldTbl();uAR();const rf=NP-ur,gb=(NP*PS/(1024**3)).toFixed(2);document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${rf.toLocaleString()} ref \u00b7 ${ur.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`},2000);
 }
 init();
 })();
