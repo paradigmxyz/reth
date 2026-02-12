@@ -1573,7 +1573,15 @@ mod tests {
         let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(runtime, task_ctx, false);
+        let storage_worker_count = runtime.proof_storage_worker_pool().current_num_threads();
+        let account_worker_count = runtime.proof_account_worker_pool().current_num_threads();
+        let proof_handle = ProofWorkerHandle::new(
+            runtime,
+            task_ctx,
+            storage_worker_count,
+            account_worker_count,
+            false,
+        );
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 

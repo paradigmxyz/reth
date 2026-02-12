@@ -283,20 +283,26 @@ where
         };
 
         // Create and spawn the storage proof task.
-        // For small blocks (≤30 txns), cap proof workers at 32 each — fewer transactions
-        // produce fewer state changes, making most workers idle overhead.
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        let proof_handle = if transaction_count > 0 && transaction_count <= 30 {
-            debug!(
-                target: "engine::tree::payload_processor",
-                transaction_count,
-                max_workers = 32,
-                "reducing proof workers for small block"
-            );
-            ProofWorkerHandle::with_max_workers(&self.executor, task_ctx, v2_proofs_enabled, 32)
-        } else {
-            ProofWorkerHandle::new(&self.executor, task_ctx, v2_proofs_enabled)
-        };
+        let mut storage_worker_count =
+            self.executor.proof_storage_worker_pool().current_num_threads();
+        let mut account_worker_count =
+            self.executor.proof_account_worker_pool().current_num_threads();
+
+        // Cap proof workers for small blocks — fewer txs means fewer state changes,
+        // so most workers would be idle overhead.
+        if transaction_count > 0 && transaction_count <= 30 {
+            storage_worker_count = storage_worker_count.min(16);
+            account_worker_count = account_worker_count.min(16);
+        }
+
+        let proof_handle = ProofWorkerHandle::new(
+            &self.executor,
+            task_ctx,
+            storage_worker_count,
+            account_worker_count,
+            v2_proofs_enabled,
+        );
 
         if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(
