@@ -3,7 +3,7 @@
 use crate::BranchNodeMasks;
 use alloc::vec::Vec;
 use alloy_primitives::{hex, B256};
-use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
+use alloy_rlp::{bytes, Decodable, Encodable, EMPTY_STRING_CODE};
 use alloy_trie::{
     nodes::{BranchNodeRef, ExtensionNode, ExtensionNodeRef, LeafNode, RlpNode, TrieNode},
     Nibbles, TrieMask,
