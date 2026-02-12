@@ -42,7 +42,8 @@ pub enum SetCommand {
     /// Enable or disable v2 storage layout
     ///
     /// When enabled, uses static files for receipts/senders/changesets and RocksDB for
-    /// history indices. When disabled, uses v1/legacy layout (everything in MDBX).
+    /// history indices and transaction hashes. When disabled, uses v1/legacy layout (everything in
+    /// MDBX).
     V2 {
         #[clap(action(ArgAction::Set))]
         value: bool,
