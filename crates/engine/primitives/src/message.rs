@@ -149,7 +149,8 @@ pub struct NewPayloadTimings {
     /// Server-side execution latency.
     pub latency: Duration,
     /// Time spent waiting for persistence to complete.
-    pub persistence_wait: Duration,
+    /// `None` when no persistence was in-flight.
+    pub persistence_wait: Option<Duration>,
     /// Time spent waiting for the execution cache lock.
     pub execution_cache_wait: Duration,
     /// Time spent waiting for the sparse trie lock.

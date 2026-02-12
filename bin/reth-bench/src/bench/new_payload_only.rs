@@ -108,12 +108,18 @@ impl Command {
             let (version, params) = block_to_new_payload(block, is_optimism)?;
 
             let start = Instant::now();
-            let server_latency =
+            let server_timings =
                 call_new_payload_with_reth(&auth_provider, version, params, use_reth_namespace)
                     .await?;
 
-            let latency = server_latency.unwrap_or_else(|| start.elapsed());
-            let new_payload_result = NewPayloadResult { gas_used, latency };
+            let latency = server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
+            let new_payload_result = NewPayloadResult {
+                gas_used,
+                latency,
+                persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
+                execution_cache_wait: server_timings.as_ref().map(|t| t.execution_cache_wait).unwrap_or_default(),
+                sparse_trie_wait: server_timings.as_ref().map(|t| t.sparse_trie_wait).unwrap_or_default(),
+            };
             blocks_processed += 1;
             let progress = match total_blocks {
                 Some(total) => format!("{blocks_processed}/{total}"),
