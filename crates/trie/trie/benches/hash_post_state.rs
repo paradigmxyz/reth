@@ -29,10 +29,8 @@ pub fn hash_post_state(c: &mut Criterion) {
         });
 
         // adaptive
-        let state_map: std::collections::HashMap<Address, BundleAccount> =
-            state.iter().map(|(k, v)| (*k, v.clone())).collect();
         let state_map: alloy_primitives::map::HashMap<Address, BundleAccount> =
-            state_map.into_iter().collect();
+            state.iter().map(|(k, v)| (*k, v.clone())).collect();
         group.bench_function(BenchmarkId::new("adaptive hashing", size), |b| {
             b.iter(|| HashedPostState::from_bundle_state_adaptive::<KeccakKeyHasher>(&state_map))
         });

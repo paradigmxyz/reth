@@ -73,7 +73,7 @@ impl HashedPostState {
     /// hashing based on the number of accounts.
     ///
     /// For small account counts (≤ [`Self::ADAPTIVE_THRESHOLD`]), sequential iteration avoids
-    /// rayon's fixed scheduling overhead (~10-15µs), which exceeds the hashing work itself.
+    /// rayon's fixed scheduling overhead, which can exceed the hashing work itself.
     #[cfg(feature = "rayon")]
     pub fn from_bundle_state_adaptive<KH: KeyHasher>(
         state: &HashMap<Address, BundleAccount>,
@@ -88,10 +88,16 @@ impl HashedPostState {
         }
     }
 
+    /// Initialize [`HashedPostState`] from bundle state sequentially (non-rayon fallback).
+    #[cfg(not(feature = "rayon"))]
+    pub fn from_bundle_state_adaptive<KH: KeyHasher>(
+        state: &HashMap<Address, BundleAccount>,
+    ) -> Self {
+        Self::from_bundle_state::<KH>(state)
+    }
+
     /// Account count at or below which sequential hashing outperforms rayon parallel iteration.
-    ///
-    /// Determined via microbenchmark: rayon's fixed overhead (~10-15µs) exceeds sequential hashing
-    /// cost for ≤32 accounts.
+    #[cfg(feature = "rayon")]
     const ADAPTIVE_THRESHOLD: usize = 32;
 
     /// Hashes a single bundle account entry into the tuple expected by [`FromIterator`].
