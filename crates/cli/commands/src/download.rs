@@ -37,6 +37,14 @@ pub struct DownloadDefaults {
     pub available_snapshots: Vec<Cow<'static, str>>,
     /// Default base URL for snapshots
     pub default_base_url: Cow<'static, str>,
+    /// Default base URL for chain-aware snapshots.
+    ///
+    /// When set, the chain ID is appended to form the full URL: `{base_url}/{chain_id}`.
+    /// For example, given a base URL of `https://snapshots.example.com` and chain ID `1`,
+    /// the resulting URL would be `https://snapshots.example.com/1`.
+    ///
+    /// Falls back to [`default_base_url`](Self::default_base_url) when `None`.
+    pub default_chain_aware_base_url: Option<Cow<'static, str>>,
     /// Optional custom long help text that overrides the generated help
     pub long_help: Option<String>,
 }
@@ -60,6 +68,7 @@ impl DownloadDefaults {
                 Cow::Borrowed("https://publicnode.com/snapshots (full nodes & testnets)"),
             ],
             default_base_url: Cow::Borrowed(MERKLE_BASE_URL),
+            default_chain_aware_base_url: None,
             long_help: None,
         }
     }
@@ -84,9 +93,11 @@ impl DownloadDefaults {
         }
 
         help.push_str(
-            "\nIf no URL is provided, the latest mainnet archive snapshot\nwill be proposed for download from ",
+            "\nIf no URL is provided, the latest archive snapshot for the selected chain\nwill be proposed for download from ",
         );
-        help.push_str(self.default_base_url.as_ref());
+        help.push_str(
+            self.default_chain_aware_base_url.as_deref().unwrap_or(&self.default_base_url),
+        );
         help.push_str(
             ".\n\nLocal file:// URLs are also supported for extracting snapshots from disk.",
         );
@@ -108,6 +119,12 @@ impl DownloadDefaults {
     /// Set the default base URL, e.g. `https://downloads.merkle.io`.
     pub fn with_base_url(mut self, url: impl Into<Cow<'static, str>>) -> Self {
         self.default_base_url = url.into();
+        self
+    }
+
+    /// Set the default chain-aware base URL.
+    pub fn with_chain_aware_base_url(mut self, url: impl Into<Cow<'static, str>>) -> Self {
+        self.default_chain_aware_base_url = Some(url.into());
         self
     }
 
@@ -142,7 +159,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let url = match self.url {
             Some(url) => url,
             None => {
-                let url = get_latest_snapshot_url().await?;
+                let url = get_latest_snapshot_url(self.env.chain.chain().id()).await?;
                 info!(target: "reth::cli", "Using default snapshot URL: {}", url);
                 url
             }
@@ -509,8 +526,12 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
 }
 
 // Builds default URL for latest mainnet archive snapshot using configured defaults
-async fn get_latest_snapshot_url() -> Result<String> {
-    let base_url = &DownloadDefaults::get_global().default_base_url;
+async fn get_latest_snapshot_url(chain_id: u64) -> Result<String> {
+    let defaults = DownloadDefaults::get_global();
+    let base_url = match &defaults.default_chain_aware_base_url {
+        Some(url) => format!("{url}/{chain_id}"),
+        None => defaults.default_base_url.to_string(),
+    };
     let latest_url = format!("{base_url}/latest.txt");
     let filename = Client::new()
         .get(latest_url)
