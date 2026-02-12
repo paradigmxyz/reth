@@ -310,6 +310,31 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     #[instrument(name = "Tx::commit", level = "debug", target = "providers::db", skip_all)]
     fn commit(self) -> Result<(), DatabaseError> {
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
+            // If parallel writes is enabled (only for RW), commit subtxns first with metrics
+            if !K::IS_READ_ONLY && this.inner.is_parallel_writes_enabled() {
+                let stats_result = this.inner.commit_subtxns_with_stats();
+                match stats_result {
+                    Ok(stats) => {
+                        // Record edge arena metrics if metrics are enabled
+                        if let Some(handler) = &this.metrics_handler {
+                            let dbi_to_table: rustc_hash::FxHashMap<
+                                reth_libmdbx::ffi::MDBX_dbi,
+                                &'static str,
+                            > = this.dbis.iter().map(|(&name, &dbi)| (dbi, name)).collect();
+
+                            for (dbi, subtxn_stats) in &stats {
+                                if let Some(&table) = dbi_to_table.get(dbi) {
+                                    handler
+                                        .env_metrics
+                                        .record_edge_arena_stats(table, subtxn_stats);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => return (Err(DatabaseError::Commit(e.into())), None),
+                }
+            }
+
             match this.inner.commit().map_err(|e| DatabaseError::Commit(e.into())) {
                 Ok(latency) => (Ok(()), Some(latency)),
                 Err(e) => (Err(e), None),
@@ -387,17 +412,162 @@ impl Tx<RW> {
         let key = key.encode();
         let value = value.compress();
         let (operation, write_operation, flags) = kind.into_operation_and_flags();
-        self.execute_with_operation_metric::<T, _>(operation, Some(value.as_ref().len()), |tx| {
-            tx.put(self.get_dbi::<T>()?, key.as_ref(), value, flags).map_err(|e| {
-                DatabaseWriteError {
-                    info: e.into(),
-                    operation: write_operation,
-                    table_name: T::NAME,
-                    key: key.into_vec(),
+        let dbi = self.get_dbi::<T>()?;
+
+        if self.is_parallel_writes_enabled() {
+            self.execute_with_operation_metric::<T, _>(
+                operation,
+                Some(value.as_ref().len()),
+                |tx| {
+                    tx.put_parallel(dbi, key.as_ref(), value, flags).map_err(|e| {
+                        DatabaseWriteError {
+                            info: e.into(),
+                            operation: write_operation,
+                            table_name: T::NAME,
+                            key: key.into_vec(),
+                        }
+                        .into()
+                    })
+                },
+            )
+        } else {
+            self.execute_with_operation_metric::<T, _>(
+                operation,
+                Some(value.as_ref().len()),
+                |tx| {
+                    tx.put(dbi, key.as_ref(), value, flags).map_err(|e| {
+                        DatabaseWriteError {
+                            info: e.into(),
+                            operation: write_operation,
+                            table_name: T::NAME,
+                            key: key.into_vec(),
+                        }
+                        .into()
+                    })
+                },
+            )
+        }
+    }
+
+    /// Enables parallel writes mode by creating subtransactions for ALL known DBIs.
+    ///
+    /// After calling this, cursor operations on any table will automatically use
+    /// the corresponding subtransaction, enabling safe parallel writes from multiple threads.
+    ///
+    /// This requires WRITEMAP mode to be enabled on the environment.
+    ///
+    /// # Returns
+    /// Ok(()) on success, or an error if subtransaction creation fails.
+    pub fn enable_parallel_writes(&self) -> Result<(), DatabaseError> {
+        let dbis: Vec<MDBX_dbi> = self.dbis.values().copied().collect();
+        self.inner.enable_parallel_writes(&dbis).map_err(|e| DatabaseError::InitCursor(e.into()))
+    }
+
+    /// Returns whether parallel writes mode is enabled.
+    pub fn is_parallel_writes_enabled(&self) -> bool {
+        self.inner.is_parallel_writes_enabled()
+    }
+
+    /// Commits all subtransactions serially.
+    ///
+    /// This must be called before committing the parent transaction when parallel writes
+    /// mode is enabled.
+    pub fn commit_subtxns(&self) -> Result<(), DatabaseError> {
+        self.inner.commit_subtxns().map_err(|e| DatabaseError::Commit(e.into()))
+    }
+
+    /// Commits all subtransactions serially and records arena stats as Prometheus metrics.
+    ///
+    /// This is the preferred method when metrics are enabled, as it collects per-table
+    /// arena allocation statistics for observability.
+    pub fn commit_subtxns_with_metrics(&self) -> Result<(), DatabaseError> {
+        let stats =
+            self.inner.commit_subtxns_with_stats().map_err(|e| DatabaseError::Commit(e.into()))?;
+
+        if let Some(handler) = &self.metrics_handler {
+            let dbi_to_table: rustc_hash::FxHashMap<MDBX_dbi, &'static str> =
+                self.dbis.iter().map(|(&name, &dbi)| (dbi, name)).collect();
+
+            for (dbi, subtxn_stats) in &stats {
+                if let Some(&table) = dbi_to_table.get(dbi) {
+                    handler.env_metrics.record_edge_arena_stats(table, subtxn_stats);
                 }
-                .into()
-            })
-        })
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Creates a cursor for the given table, using the subtransaction if parallel writes is
+    /// enabled.
+    pub fn new_cursor_parallel<T: Table>(&self) -> Result<Cursor<RW, T>, DatabaseError> {
+        let dbi = self.get_dbi::<T>()?;
+        let inner = self
+            .inner
+            .cursor_with_dbi_parallel_owned(dbi)
+            .map_err(|e| DatabaseError::InitCursor(e.into()))?;
+
+        Ok(Cursor::new_with_metrics(
+            inner,
+            self.metrics_handler.as_ref().map(|h| h.env_metrics.clone()),
+        ))
+    }
+
+    /// Enables parallel writes mode only for the specified tables.
+    ///
+    /// Creates subtransactions only for the listed tables, allowing parallel
+    /// writes to those tables while other tables continue using the main transaction.
+    ///
+    /// # Arguments
+    /// * `tables` - Slice of table names to create subtransactions for.
+    ///
+    /// # Returns
+    /// Ok(()) on success, or an error if subtransaction creation fails.
+    pub fn enable_parallel_writes_for_tables(&self, tables: &[&str]) -> Result<(), DatabaseError> {
+        let hints: Vec<_> = tables.iter().map(|&t| (t, 0usize)).collect();
+        self.enable_parallel_writes_for_tables_with_hints(&hints)
+    }
+
+    /// Enables parallel writes mode with arena size hints for specified tables.
+    ///
+    /// Similar to [`enable_parallel_writes_for_tables`], but allows specifying an arena_hint
+    /// for each table to guide page pre-allocation. An arena_hint of 0 means use
+    /// equal distribution among all subtransactions.
+    ///
+    /// # Arguments
+    /// * `tables` - Slice of (table_name, arena_hint) tuples.
+    ///
+    /// # Returns
+    /// Ok(()) on success, or an error if subtransaction creation fails.
+    pub fn enable_parallel_writes_for_tables_with_hints(
+        &self,
+        tables: &[(&str, usize)],
+    ) -> Result<(), DatabaseError> {
+        let specs: Vec<(MDBX_dbi, usize)> = tables
+            .iter()
+            .filter_map(|(name, hint)| self.dbis.get(*name).map(|&dbi| (dbi, *hint)))
+            .collect();
+
+        if specs.is_empty() {
+            return Ok(());
+        }
+
+        self.inner
+            .enable_parallel_writes_with_hints(&specs)
+            .map_err(|e| DatabaseError::InitCursor(e.into()))
+    }
+
+    /// Records arena hint estimation stats for a table.
+    ///
+    /// This tracks whether the arena hint estimation is working or always hitting floor/cap.
+    pub fn record_arena_estimation(
+        &self,
+        table: &'static str,
+        stats: &crate::metrics::ArenaHintEstimationStats,
+    ) {
+        if let Some(handler) = &self.metrics_handler {
+            handler.env_metrics.record_arena_estimation(table, stats);
+        }
     }
 }
 
@@ -425,10 +595,18 @@ impl DbTxMut for Tx<RW> {
             data = Some(value.as_ref());
         };
 
-        self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
-            tx.del(self.get_dbi::<T>()?, key.encode(), data)
-                .map_err(|e| DatabaseError::Delete(e.into()))
-        })
+        let dbi = self.get_dbi::<T>()?;
+        let encoded_key = key.encode();
+
+        if self.is_parallel_writes_enabled() {
+            self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
+                tx.del_parallel(dbi, encoded_key, data).map_err(|e| DatabaseError::Delete(e.into()))
+            })
+        } else {
+            self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
+                tx.del(dbi, encoded_key, data).map_err(|e| DatabaseError::Delete(e.into()))
+            })
+        }
     }
 
     fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
@@ -438,11 +616,54 @@ impl DbTxMut for Tx<RW> {
     }
 
     fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError> {
-        self.new_cursor()
+        if self.is_parallel_writes_enabled() {
+            self.new_cursor_parallel()
+        } else {
+            self.new_cursor()
+        }
     }
 
     fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
-        self.new_cursor()
+        if self.is_parallel_writes_enabled() {
+            self.new_cursor_parallel()
+        } else {
+            self.new_cursor()
+        }
+    }
+
+    fn enable_parallel_writes(&self) -> Result<(), DatabaseError> {
+        Tx::enable_parallel_writes(self)
+    }
+
+    fn is_parallel_writes_enabled(&self) -> bool {
+        Tx::is_parallel_writes_enabled(self)
+    }
+
+    fn commit_subtxns(&self) -> Result<(), DatabaseError> {
+        Tx::commit_subtxns(self)
+    }
+
+    fn commit_subtxns_with_metrics(&self) -> Result<(), DatabaseError> {
+        Tx::commit_subtxns_with_metrics(self)
+    }
+
+    fn enable_parallel_writes_for_tables(&self, tables: &[&str]) -> Result<(), DatabaseError> {
+        Tx::enable_parallel_writes_for_tables(self, tables)
+    }
+
+    fn enable_parallel_writes_for_tables_with_hints(
+        &self,
+        tables: &[(&str, usize)],
+    ) -> Result<(), DatabaseError> {
+        Tx::enable_parallel_writes_for_tables_with_hints(self, tables)
+    }
+
+    fn record_arena_estimation(
+        &self,
+        table: &'static str,
+        stats: &reth_db_api::transaction::ArenaHintEstimationStats,
+    ) {
+        Tx::record_arena_estimation(self, table, stats)
     }
 }
 
@@ -502,5 +723,62 @@ mod tests {
             DatabaseError::Open(err) if err == reth_libmdbx::Error::ReadTransactionTimeout.into()));
         // Backtrace is recorded.
         assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_parallel_writes_high_level_api() {
+        use reth_db_api::{
+            cursor::DbCursorRW,
+            transaction::{DbTx, DbTxMut},
+        };
+        use std::{sync::Barrier, thread};
+
+        let dir = tempdir().unwrap();
+        let args = DatabaseArguments::new(ClientVersion::default());
+        let mut db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap();
+        db.create_tables().unwrap();
+
+        let tx = db.tx_mut().unwrap();
+        tx.enable_parallel_writes().unwrap();
+        assert!(tx.is_parallel_writes_enabled());
+
+        let barrier = std::sync::Arc::new(Barrier::new(2));
+        let tx_clone = &tx;
+        let barrier1 = barrier.clone();
+        let barrier2 = barrier.clone();
+
+        thread::scope(|s| {
+            let handle1 = s.spawn(move || {
+                barrier1.wait();
+                let mut cursor = tx_clone.cursor_write::<tables::CanonicalHeaders>().unwrap();
+                for i in 0..10u64 {
+                    cursor.append(i, &alloy_primitives::B256::repeat_byte(i as u8)).unwrap();
+                }
+            });
+
+            let handle2 = s.spawn(move || {
+                barrier2.wait();
+                let mut cursor = tx_clone.cursor_write::<tables::HeaderNumbers>().unwrap();
+                for i in 0..10u64 {
+                    cursor.upsert(alloy_primitives::B256::repeat_byte(i as u8), &i).unwrap();
+                }
+            });
+
+            handle1.join().unwrap();
+            handle2.join().unwrap();
+        });
+
+        tx.commit().unwrap();
+
+        let tx = db.tx().unwrap();
+        for i in 0..10u64 {
+            let hash = tx.get::<tables::CanonicalHeaders>(i).unwrap();
+            assert_eq!(hash, Some(alloy_primitives::B256::repeat_byte(i as u8)));
+
+            let num = tx
+                .get::<tables::HeaderNumbers>(alloy_primitives::B256::repeat_byte(i as u8))
+                .unwrap();
+            assert_eq!(num, Some(i));
+        }
     }
 }

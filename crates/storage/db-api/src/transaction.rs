@@ -5,6 +5,29 @@ use crate::{
 };
 use std::fmt::Debug;
 
+/// Source of arena hint value after floor was applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArenaHintSource {
+    /// Raw estimate was used (no floor applied)
+    #[default]
+    Estimated = 0,
+    /// Floor was applied (estimate was below minimum)
+    Floored = 1,
+}
+
+/// Estimation stats for a single table's arena hint.
+///
+/// Used for tracking whether arena hint estimation is working or always hitting floor.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArenaHintEstimationStats {
+    /// Raw calculated estimate before floor
+    pub estimated: usize,
+    /// Final value used after floor
+    pub actual: usize,
+    /// Source of the final value
+    pub source: ArenaHintSource,
+}
+
 /// Helper adapter type for accessing [`DbTx`] cursor.
 pub type CursorTy<TX, T> = <TX as DbTx>::Cursor<T>;
 
@@ -76,4 +99,58 @@ pub trait DbTxMut: Send {
     fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError>;
     /// `DupCursor` mut.
     fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError>;
+
+    /// Enables parallel writes mode, allowing multiple threads to write to different tables
+    /// simultaneously. Must be called before any parallel cursor operations.
+    fn enable_parallel_writes(&self) -> Result<(), DatabaseError> {
+        Ok(())
+    }
+
+    /// Returns whether parallel writes mode is currently enabled.
+    fn is_parallel_writes_enabled(&self) -> bool {
+        false
+    }
+
+    /// Commits all sub-transactions created during parallel writes.
+    fn commit_subtxns(&self) -> Result<(), DatabaseError> {
+        Ok(())
+    }
+
+    /// Commits all sub-transactions and records arena stats as Prometheus metrics.
+    ///
+    /// This is the preferred method when metrics are enabled, as it collects per-table
+    /// arena allocation statistics for observability.
+    fn commit_subtxns_with_metrics(&self) -> Result<(), DatabaseError> {
+        self.commit_subtxns()
+    }
+
+    /// Enables parallel writes mode only for the specified tables.
+    ///
+    /// This creates subtransactions only for the listed tables, allowing parallel
+    /// writes to those tables while other tables continue using the main transaction.
+    fn enable_parallel_writes_for_tables(&self, tables: &[&str]) -> Result<(), DatabaseError> {
+        let hints: Vec<_> = tables.iter().map(|&t| (t, 0usize)).collect();
+        self.enable_parallel_writes_for_tables_with_hints(&hints)
+    }
+
+    /// Enables parallel writes mode only for the specified tables with arena size hints.
+    ///
+    /// Similar to [`enable_parallel_writes_for_tables`], but allows specifying an arena_hint
+    /// for each table to guide page pre-allocation. An arena_hint of 0 means use
+    /// equal distribution among all subtransactions.
+    ///
+    /// # Arguments
+    /// * `tables` - Slice of (table_name, arena_hint) tuples.
+    fn enable_parallel_writes_for_tables_with_hints(
+        &self,
+        _tables: &[(&str, usize)],
+    ) -> Result<(), DatabaseError> {
+        Ok(())
+    }
+
+    /// Records arena hint estimation stats for a table.
+    ///
+    /// Tracks whether arena hint estimation is working or always hitting floor/cap.
+    /// This is a no-op by default; implementations may override to record metrics.
+    fn record_arena_estimation(&self, _table: &'static str, _stats: &ArenaHintEstimationStats) {}
 }

@@ -2,7 +2,7 @@ use crate::{
     error::{mdbx_result, Error, Result},
     flags::*,
     mdbx_try_optional,
-    transaction::{TransactionKind, RW},
+    transaction::{TransactionKind, TransactionPtr, RW},
     TableObject, Transaction,
 };
 use ffi::{
@@ -20,6 +20,14 @@ where
 {
     txn: Transaction<K>,
     cursor: *mut ffi::MDBX_cursor,
+    /// Optional transaction pointer for parallel writes. When set, write operations
+    /// use this pointer directly instead of going through `self.txn.txn_execute()`.
+    /// This is needed because `new_with_ptr` opens a cursor on a subtransaction,
+    /// but stores the parent transaction in `txn`.
+    ///
+    /// Uses `TransactionPtr` to ensure proper mutex locking for thread-safety,
+    /// as MDBX requires serialized access to transactions.
+    owned_txn_ptr: Option<TransactionPtr>,
 }
 
 impl<K> Cursor<K>
@@ -33,7 +41,48 @@ where
                 mdbx_result(ffi::mdbx_cursor_open(txn_ptr, dbi, &mut cursor))
             })??;
         }
-        Ok(Self { txn, cursor })
+        Ok(Self { txn, cursor, owned_txn_ptr: None })
+    }
+
+    /// Creates a new cursor using a specific transaction pointer.
+    ///
+    /// This is used for parallel writes where the cursor should be opened on
+    /// a subtransaction rather than the parent transaction. The cursor stores
+    /// this pointer and uses it directly for write operations.
+    ///
+    /// The transaction pointer's cursor count is incremented on creation and
+    /// decremented when the cursor is dropped.
+    pub(crate) fn new_with_ptr(
+        txn: Transaction<K>,
+        dbi: ffi::MDBX_dbi,
+        txn_ptr: TransactionPtr,
+    ) -> Result<Self> {
+        let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
+        txn_ptr.txn_execute_fail_on_timeout(|ptr| unsafe {
+            mdbx_result(ffi::mdbx_cursor_open(ptr, dbi, &mut cursor))
+        })??;
+        txn_ptr.increment_cursor_count();
+        Ok(Self { txn, cursor, owned_txn_ptr: Some(txn_ptr) })
+    }
+
+    /// Executes a closure on the transaction pointer.
+    ///
+    /// If this cursor was created with `new_with_ptr`, uses the stored txn pointer
+    /// with proper locking. Otherwise, delegates to `self.txn.txn_execute()`.
+    fn execute_on_txn<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
+        if let Some(ref txn_ptr) = self.owned_txn_ptr {
+            txn_ptr.txn_execute_fail_on_timeout(f)
+        } else {
+            self.txn.txn_execute(|txn_ptr| f(txn_ptr))
+        }
+    }
+
+    /// Returns whether this cursor has an owned transaction pointer (for parallel writes).
+    pub fn has_owned_txn_ptr(&self) -> bool {
+        self.owned_txn_ptr.is_some()
     }
 
     fn new_at_position(other: &Self) -> Result<Self> {
@@ -42,7 +91,8 @@ where
 
             let res = ffi::mdbx_cursor_copy(other.cursor(), cursor);
 
-            let s = Self { txn: other.txn.clone(), cursor };
+            let s =
+                Self { txn: other.txn.clone(), cursor, owned_txn_ptr: other.owned_txn_ptr.clone() };
 
             mdbx_result(res)?;
 
@@ -90,25 +140,52 @@ where
             let mut data_val = slice_to_val(data);
             let key_ptr = key_val.iov_base;
             let data_ptr = data_val.iov_base;
-            self.txn.txn_execute(|txn| {
-                let v = mdbx_result(ffi::mdbx_cursor_get(
-                    self.cursor,
-                    &mut key_val,
-                    &mut data_val,
-                    op,
-                ))?;
+
+            // For parallel cursors (with owned_txn_ptr), bypass locking entirely.
+            // For normal cursors, use transaction locking.
+            if let Some(ref txn_ptr) = self.owned_txn_ptr {
+                // Parallel cursor path - no locking needed, subtxns are independent
+                let rc = ffi::mdbx_cursor_get(self.cursor, &mut key_val, &mut data_val, op);
+                let v = mdbx_result(rc)?;
+
+                // Check for NULL data pointer (can happen on partial matches)
+                if data_val.iov_base.is_null() && data_val.iov_len > 0 {
+                    return Err(Error::NotFound);
+                }
+                // Check for NULL key pointer (can happen on partial matches)
+                if key_val.iov_base.is_null() && key_val.iov_len > 0 {
+                    return Err(Error::NotFound);
+                }
+
                 assert_ne!(data_ptr, data_val.iov_base);
-                let key_out = {
-                    // MDBX wrote in new key
-                    if ptr::eq(key_ptr, key_val.iov_base) {
-                        None
-                    } else {
-                        Some(Key::decode_val::<K>(txn, key_val)?)
-                    }
+                let key_out = if ptr::eq(key_ptr, key_val.iov_base) {
+                    None
+                } else {
+                    Some(Key::decode_val::<K>(txn_ptr.as_ptr(), key_val)?)
                 };
-                let data_out = Value::decode_val::<K>(txn, data_val)?;
+                let data_out = Value::decode_val::<K>(txn_ptr.as_ptr(), data_val)?;
                 Ok((key_out, data_out, v))
-            })?
+            } else {
+                // Normal cursor path - use transaction locking
+                self.txn.txn_execute(|txn| {
+                    let v = mdbx_result(ffi::mdbx_cursor_get(
+                        self.cursor,
+                        &mut key_val,
+                        &mut data_val,
+                        op,
+                    ))?;
+                    assert_ne!(data_ptr, data_val.iov_base);
+                    let key_out = {
+                        if ptr::eq(key_ptr, key_val.iov_base) {
+                            None
+                        } else {
+                            Some(Key::decode_val::<K>(txn, key_val)?)
+                        }
+                    };
+                    let data_out = Value::decode_val::<K>(txn, data_val)?;
+                    Ok((key_out, data_out, v))
+                })?
+            }
         }
     }
 
@@ -438,11 +515,20 @@ impl Cursor<RW> {
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
         let mut data_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
-        mdbx_result(unsafe {
-            self.txn.txn_execute(|_| {
-                ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits())
-            })?
-        })?;
+
+        unsafe {
+            if self.owned_txn_ptr.is_some() {
+                // Bypass locking entirely for parallel cursors - they have independent subtxns
+                let ret = ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits());
+                mdbx_result(ret)?;
+            } else {
+                // Use normal path with locking for non-parallel cursors
+                let ret = self.txn.txn_execute(|_| {
+                    ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits())
+                })?;
+                mdbx_result(ret)?;
+            }
+        }
 
         Ok(())
     }
@@ -455,9 +541,8 @@ impl Cursor<RW> {
     /// current key, if the database was opened with [`DatabaseFlags::DUP_SORT`].
     pub fn del(&mut self, flags: WriteFlags) -> Result<()> {
         mdbx_result(unsafe {
-            self.txn.txn_execute(|_| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
+            self.execute_on_txn(|_txn_ptr| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
         })?;
-
         Ok(())
     }
 }
@@ -485,11 +570,17 @@ where
     K: TransactionKind,
 {
     fn drop(&mut self) {
-        // To be able to close a cursor of a timed out transaction, we need to renew it first.
-        // Hence the usage of `txn_execute_renew_on_timeout` here.
-        let _ = self
-            .txn
-            .txn_execute_renew_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
+        if let Some(ref txn_ptr) = self.owned_txn_ptr {
+            // Cursor was opened on a subtransaction - close on that transaction
+            let _ = txn_ptr
+                .txn_execute_fail_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
+            txn_ptr.decrement_cursor_count();
+        } else {
+            // Standard cursor - use parent transaction with renew-on-timeout
+            let _ = self
+                .txn
+                .txn_execute_renew_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
+        }
     }
 }
 
@@ -504,6 +595,292 @@ const unsafe fn slice_to_val(slice: Option<&[u8]>) -> ffi::MDBX_val {
 
 unsafe impl<K> Send for Cursor<K> where K: TransactionKind {}
 unsafe impl<K> Sync for Cursor<K> where K: TransactionKind {}
+
+/// A cursor for parallel writes that borrows from the transaction.
+///
+/// This cursor type provides compile-time safety: it cannot outlive the parallel writes
+/// session because it immutably borrows the transaction. When `commit_subtxns(&mut self)`
+/// or `abort_subtxns(&mut self)` is called, the borrow checker ensures no `ParallelCursor`
+/// exists.
+///
+/// # Example
+/// ```ignore
+/// let txn = env.begin_rw_txn()?;
+/// txn.enable_parallel_writes(&[dbi])?;
+/// {
+///     let mut cursor = txn.cursor_with_dbi_parallel(dbi)?;
+///     cursor.put(b"key", b"value", WriteFlags::empty())?;
+/// } // cursor dropped, borrow released
+/// txn.commit_subtxns()?; // OK - no outstanding borrows
+/// txn.commit()?;
+/// ```
+pub struct ParallelCursor<'txn> {
+    /// Borrow of the parent transaction - prevents commit_subtxns while cursor exists
+    _txn: &'txn Transaction<RW>,
+    /// The raw cursor pointer
+    cursor: *mut ffi::MDBX_cursor,
+    /// Transaction pointer for the subtransaction
+    txn_ptr: TransactionPtr,
+}
+
+impl<'txn> ParallelCursor<'txn> {
+    /// Creates a new parallel cursor on the given DBI.
+    pub(crate) fn new(
+        txn: &'txn Transaction<RW>,
+        dbi: ffi::MDBX_dbi,
+        txn_ptr: TransactionPtr,
+    ) -> Result<Self> {
+        let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
+        txn_ptr.txn_execute_fail_on_timeout(|ptr| unsafe {
+            mdbx_result(ffi::mdbx_cursor_open(ptr, dbi, &mut cursor))
+        })??;
+        Ok(Self { _txn: txn, cursor, txn_ptr })
+    }
+
+    /// Returns a raw pointer to the underlying MDBX cursor.
+    #[inline]
+    pub const fn cursor(&self) -> *mut ffi::MDBX_cursor {
+        self.cursor
+    }
+
+    /// Puts a key/data pair into the database.
+    pub fn put(&mut self, key: &[u8], data: &[u8], flags: WriteFlags) -> Result<()> {
+        let key_val = ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let mut data_val =
+            ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
+
+        let ret =
+            unsafe { ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits()) };
+        mdbx_result(ret)?;
+        Ok(())
+    }
+
+    /// Deletes the current key/data pair.
+    pub fn del(&mut self, flags: WriteFlags) -> Result<()> {
+        mdbx_result(unsafe { ffi::mdbx_cursor_del(self.cursor, flags.bits()) })?;
+        Ok(())
+    }
+
+    /// Position at first key/data item.
+    pub fn first<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_FIRST)
+    }
+
+    /// Position at last key/data item.
+    pub fn last<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_LAST)
+    }
+
+    /// Position at next data item.
+    #[expect(clippy::should_implement_trait)]
+    pub fn next<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_NEXT)
+    }
+
+    /// Position at previous data item.
+    pub fn prev<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_PREV)
+    }
+
+    /// Position at specified key.
+    pub fn set<Value>(&mut self, key: &[u8]) -> Result<Option<Value>>
+    where
+        Value: TableObject,
+    {
+        self.get_value(Some(key), None, MDBX_SET_KEY)
+    }
+
+    /// Position at specified key, returning key and value.
+    pub fn set_key<Key, Value>(&mut self, key: &[u8]) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(Some(key), None, MDBX_SET_KEY)
+    }
+
+    /// Position at first key >= specified key.
+    pub fn set_range<Key, Value>(&mut self, key: &[u8]) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(Some(key), None, MDBX_SET_RANGE)
+    }
+
+    /// Return key/data at current cursor position.
+    pub fn get_current<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_GET_CURRENT)
+    }
+
+    /// [`DatabaseFlags::DUP_SORT`]-only: Position at first data item of current key.
+    pub fn first_dup<Value>(&mut self) -> Result<Option<Value>>
+    where
+        Value: TableObject,
+    {
+        self.get_value(None, None, MDBX_FIRST_DUP)
+    }
+
+    /// [`DatabaseFlags::DUP_SORT`]-only: Position at last data item of current key.
+    pub fn last_dup<Value>(&mut self) -> Result<Option<Value>>
+    where
+        Value: TableObject,
+    {
+        self.get_value(None, None, MDBX_LAST_DUP)
+    }
+
+    /// [`DatabaseFlags::DUP_SORT`]-only: Position at next data item of current key.
+    pub fn next_dup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_NEXT_DUP)
+    }
+
+    /// [`DatabaseFlags::DUP_SORT`]-only: Position at previous data item of current key.
+    pub fn prev_dup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_PREV_DUP)
+    }
+
+    /// [`DatabaseFlags::DUP_SORT`]-only: Position at key/data pair.
+    pub fn get_both<Value>(&mut self, k: &[u8], v: &[u8]) -> Result<Option<Value>>
+    where
+        Value: TableObject,
+    {
+        self.get_value(Some(k), Some(v), MDBX_GET_BOTH)
+    }
+
+    /// [`DatabaseFlags::DUP_SORT`]-only: Position at given key and at first data >= specified.
+    pub fn get_both_range<Value>(&mut self, k: &[u8], v: &[u8]) -> Result<Option<Value>>
+    where
+        Value: TableObject,
+    {
+        self.get_value(Some(k), Some(v), MDBX_GET_BOTH_RANGE)
+    }
+
+    /// Position at first key > current key.
+    pub fn next_nodup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_NEXT_NODUP)
+    }
+
+    /// Position at last key < current key.
+    pub fn prev_nodup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_PREV_NODUP)
+    }
+
+    fn get_full<Key, Value>(
+        &mut self,
+        key: Option<&[u8]>,
+        data: Option<&[u8]>,
+        op: MDBX_cursor_op,
+    ) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        let (k, v, _) = mdbx_try_optional!(self.get::<Key, Value>(key, data, op));
+        Ok(Some((k.unwrap(), v)))
+    }
+
+    fn get_value<Value>(
+        &mut self,
+        key: Option<&[u8]>,
+        data: Option<&[u8]>,
+        op: MDBX_cursor_op,
+    ) -> Result<Option<Value>>
+    where
+        Value: TableObject,
+    {
+        let (_, v, _) = mdbx_try_optional!(self.get::<(), Value>(key, data, op));
+        Ok(Some(v))
+    }
+
+    fn get<Key, Value>(
+        &self,
+        key: Option<&[u8]>,
+        data: Option<&[u8]>,
+        op: MDBX_cursor_op,
+    ) -> Result<(Option<Key>, Value, bool)>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        unsafe {
+            let mut key_val = slice_to_val(key);
+            let mut data_val = slice_to_val(data);
+            let key_ptr = key_val.iov_base;
+            let data_ptr = data_val.iov_base;
+
+            let rc = ffi::mdbx_cursor_get(self.cursor, &mut key_val, &mut data_val, op);
+            let v = mdbx_result(rc)?;
+
+            if data_val.iov_base.is_null() && data_val.iov_len > 0 {
+                return Err(Error::NotFound);
+            }
+            if key_val.iov_base.is_null() && key_val.iov_len > 0 {
+                return Err(Error::NotFound);
+            }
+
+            assert_ne!(data_ptr, data_val.iov_base);
+            let key_out = if ptr::eq(key_ptr, key_val.iov_base) {
+                None
+            } else {
+                Some(Key::decode_val::<RW>(self.txn_ptr.as_ptr(), key_val)?)
+            };
+            let data_out = Value::decode_val::<RW>(self.txn_ptr.as_ptr(), data_val)?;
+            Ok((key_out, data_out, v))
+        }
+    }
+}
+
+impl Drop for ParallelCursor<'_> {
+    fn drop(&mut self) {
+        unsafe { ffi::mdbx_cursor_close(self.cursor) }
+    }
+}
+
+impl fmt::Debug for ParallelCursor<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ParallelCursor").finish_non_exhaustive()
+    }
+}
+
+// SAFETY: Access to cursor is protected by the transaction borrow
+unsafe impl Send for ParallelCursor<'_> {}
+unsafe impl Sync for ParallelCursor<'_> {}
 
 /// An iterator over the key/value pairs in an MDBX database.
 #[derive(Debug)]

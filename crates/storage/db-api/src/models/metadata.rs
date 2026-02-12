@@ -209,4 +209,15 @@ impl StorageSettings {
             self.account_history_in_rocksdb ||
             self.storages_history_in_rocksdb
     }
+
+    /// Returns `true` if all v2 storage features are enabled.
+    pub const fn is_v2(&self) -> bool {
+        self.receipts_in_static_files &&
+            self.transaction_senders_in_static_files &&
+            self.account_changesets_in_static_files &&
+            self.storage_changesets_in_static_files &&
+            self.storages_history_in_rocksdb &&
+            self.transaction_hash_numbers_in_rocksdb &&
+            self.account_history_in_rocksdb
+    }
 }

@@ -6644,6 +6644,135 @@ LIBMDBX_API int mdbx_env_chk_encount_problem(MDBX_chk_context_t *ctx);
 
 /** end of chk @} */
 
+/** \defgroup c_parallel Parallel Write Transactions
+ * @{
+ *
+ * These APIs enable parallel writes within a single transaction by partitioning
+ * page allocations. Each subtransaction gets its own page range and per-txn
+ * I/O resources, allowing thread-safe parallel cursor operations.
+ *
+ * \note This is a reth-specific extension to libmdbx.
+ *
+ * Usage pattern:
+ * 1. Begin a write transaction and open all DBIs
+ * 2. Create subtransactions with mdbx_txn_create_subtxns() - each bound to a specific DBI
+ * 3. Perform parallel writes using cursors on each subtransaction (DBI enforced)
+ * 4. Commit subtransactions with mdbx_subtx_commit()
+ * 5. Commit the parent transaction
+ */
+
+/** \brief Page range for sub-allocator used in parallel writes.
+ *
+ * This structure defines a contiguous range of pages that a subtransaction
+ * can allocate from without coordinating with other subtransactions.
+ */
+typedef struct MDBX_page_range {
+  uint64_t begin; /**< First page number in range (inclusive) */
+  uint64_t end;   /**< Last page number in range (exclusive) */
+} MDBX_page_range_t;
+
+/** \brief Specification for a parallel subtransaction.
+ *
+ * Used with mdbx_txn_create_subtxns() to create multiple subtransactions
+ * atomically, each bound to a specific DBI.
+ */
+typedef struct MDBX_subtxn_spec {
+  MDBX_dbi dbi;           /**< DBI this subtxn will write to (enforced) */
+  size_t arena_hint;      /**< Estimated pages needed (0 = use equal distribution) */
+} MDBX_subtxn_spec_t;
+
+/** \brief Create multiple subtransactions for parallel writes.
+ *
+ * Creates all subtransactions atomically, each bound to a specific DBI.
+ * This enforces the invariant that each DBI has at most one subtxn.
+ *
+ * Pages are distributed from parent's reclaimed GC pages (repnl) and
+ * loose_pages. No EOF pre-reservation is done. If a subtxn exhausts its
+ * pre-claimed pages, it returns MDBX_MAP_FULL and the caller must handle
+ * synchronized fallback to parent allocation.
+ *
+ * Each subtransaction can only open cursors on its assigned DBI. Attempting
+ * to open a cursor on a different DBI will fail with MDBX_EINVAL.
+ *
+ * \param [in] parent       The parent write transaction (must be WRITEMAP).
+ * \param [in] specs        Array of subtxn specifications.
+ * \param [in] count        Number of subtxns to create.
+ * \param [out] subtxns     Array to receive subtxn handles (must be pre-allocated).
+ *
+ * \returns A non-zero error value on failure and 0 on success.
+ * \retval MDBX_EINVAL      Invalid parameters or duplicate DBIs in specs.
+ * \retval MDBX_INCOMPATIBLE  Parent is not WRITEMAP mode.
+ */
+LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
+                                         const MDBX_subtxn_spec_t *specs,
+                                         size_t count,
+                                         MDBX_txn **subtxns);
+
+/** \brief Commit a subtransaction, merging its changes to the parent.
+ *
+ * Commits the subtransaction by merging its dirtylist into the parent
+ * transaction. After this call, the subtransaction handle is invalidated.
+ *
+ * All subtransactions must be committed before the parent can be committed.
+ *
+ * \param [in] subtxn   A subtransaction handle created by mdbx_txn_create_subtxns().
+ *
+ * \returns A non-zero error value on failure and 0 on success.
+ * \retval MDBX_EINVAL   subtxn is NULL or not a subtransaction.
+ * \retval MDBX_BAD_TXN  subtxn has an error or was already committed.
+ */
+LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn);
+
+/** \brief Abort a subtransaction, discarding its changes.
+ *
+ * Aborts the subtransaction, discarding all writes. The pages allocated
+ * by this subtransaction are NOT returned to the parent's allocator.
+ *
+ * \param [in] subtxn   A subtransaction handle created by mdbx_txn_create_subtxns().
+ *
+ * \returns A non-zero error value on failure and 0 on success.
+ */
+LIBMDBX_API int mdbx_subtx_abort(MDBX_txn *subtxn);
+
+/** \brief Check if a transaction is a parallel subtransaction.
+ *
+ * \param [in] txn   A transaction handle.
+ *
+ * \returns Non-zero if txn is a parallel subtransaction, 0 otherwise.
+ */
+LIBMDBX_API int mdbx_txn_is_subtx(const MDBX_txn *txn);
+
+/** \brief Statistics for a parallel subtransaction.
+ *
+ * Contains metrics about page allocation and fallback behavior.
+ */
+typedef struct MDBX_subtxn_stats {
+  size_t arena_page_allocations; /**< Pages allocated from pre-distributed arena */
+  size_t arena_refill_events;    /**< Times fallback to parent was needed */
+  size_t arena_initial_pages;    /**< Initial pages distributed to this subtxn */
+  size_t arena_refill_pages;     /**< Additional pages acquired from parent during fallback */
+  size_t pages_from_gc;          /**< Pages acquired from parent's repnl (GC) */
+  size_t pages_from_eof;         /**< Pages acquired via EOF extension */
+  size_t pages_unused;           /**< Pages returned to parent on commit (not consumed) */
+  size_t arena_hint;             /**< Original arena hint for this subtxn */
+  MDBX_dbi assigned_dbi;         /**< DBI this subtxn is bound to */
+} MDBX_subtxn_stats;
+
+/** \brief Get statistics for a parallel subtransaction.
+ *
+ * Retrieves allocation and fallback metrics for a subtransaction.
+ *
+ * \param [in] subtxn   A subtransaction handle created by mdbx_txn_create_subtxns().
+ * \param [out] stats   Pointer to stats structure to fill.
+ *
+ * \returns A non-zero error value on failure and 0 on success.
+ * \retval MDBX_EINVAL   subtxn or stats is NULL, or subtxn is not a subtransaction.
+ * \retval MDBX_BAD_TXN  subtxn has an invalid signature.
+ */
+LIBMDBX_API int mdbx_subtxn_get_stats(const MDBX_txn *subtxn, MDBX_subtxn_stats *stats);
+
+/** end of c_parallel @} */
+
 /** end of c_api @} */
 
 #ifdef __cplusplus

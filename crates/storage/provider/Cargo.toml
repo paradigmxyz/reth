@@ -40,7 +40,7 @@ alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 revm-database.workspace = true
-revm-state = { workspace = true, optional = true }
+revm-state.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -87,8 +87,8 @@ rand.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
+edge = ["reth-storage-api/edge", "rocksdb"]
 rocksdb = ["reth-storage-api/rocksdb", "dep:rocksdb"]
-edge = ["rocksdb"]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
@@ -103,7 +103,6 @@ test-utils = [
     "reth-trie-db/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
-    "revm-state",
     "tokio",
     "reth-tasks/test-utils",
 ]

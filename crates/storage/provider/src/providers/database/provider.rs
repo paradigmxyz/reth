@@ -82,6 +82,8 @@ use std::{
 };
 use tracing::{debug, instrument, trace};
 
+use super::ArenaHints;
+
 /// Determines the commit order for database operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CommitOrder {
@@ -210,6 +212,10 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     minimum_pruning_distance: u64,
     /// Database provider metrics
     metrics: metrics::DatabaseProviderMetrics,
+    /// Per-table arena hint estimation metrics (for parallel writes)
+    arena_hint_metrics: metrics::ArenaHintMetrics,
+    /// Arena hint input metrics for correlation analysis (for parallel writes)
+    arena_input_metrics: metrics::ArenaHintInputMetrics,
 }
 
 impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
@@ -374,6 +380,8 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
+            arena_hint_metrics: metrics::ArenaHintMetrics::default(),
+            arena_input_metrics: metrics::ArenaHintInputMetrics::default(),
         }
     }
 
@@ -438,7 +446,7 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Executes a closure with a `RocksDB` batch, automatically registering it for commit.
     ///
     /// This helper encapsulates all the cfg-gated `RocksDB` batch handling.
@@ -594,6 +602,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
+            // This must happen BEFORE enabling parallel writes since it uses the main transaction
             if !self.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
@@ -627,59 +636,292 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            // Pre-compute merged hashed state and trie updates before write section
+            // Use parallel writes when StorageSettings has all v2 features enabled
+            let use_parallel_writes =
+                save_mode.with_state() && self.cached_storage_settings().is_v2();
+            let (merged_hashed_state, merged_trie) = if save_mode.with_state() {
+                let start = Instant::now();
+                let merged_hashed_state: Arc<HashedPostStateSorted> =
+                    HashedPostStateSorted::merge_batch(
+                        blocks.iter().rev().map(|b| b.trie_data().hashed_state),
+                    );
+                timings.write_hashed_state += start.elapsed();
+
+                let start = Instant::now();
+                let merged_trie: Arc<TrieUpdatesSorted> =
+                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
+                timings.write_trie_updates += start.elapsed();
+
+                (merged_hashed_state, merged_trie)
+            } else {
+                (Arc::new(HashedPostStateSorted::default()), Arc::new(TrieUpdatesSorted::default()))
+            };
+
+            // Sequential block index writes (fast, no parallelization needed)
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
                 let start = Instant::now();
                 self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
                 timings.insert_block += start.elapsed();
-
-                if save_mode.with_state() {
-                    let execution_output = block.execution_outcome();
-
-                    // Write state and changesets to the database.
-                    // Must be written after blocks because of the receipt lookup.
-                    // Skip receipts/account changesets if they're being written to static files.
-                    let start = Instant::now();
-                    self.write_state(
-                        WriteStateInput::Single {
-                            outcome: execution_output,
-                            block: recovered_block.number(),
-                        },
-                        OriginalValuesKnown::No,
-                        StateWriteConfig {
-                            write_receipts: !sf_ctx.write_receipts,
-                            write_account_changesets: !sf_ctx.write_account_changesets,
-                            write_storage_changesets: !sf_ctx.write_storage_changesets,
-                        },
-                    )?;
-                    timings.write_state += start.elapsed();
-                }
             }
 
-            // Write all hashed state and trie updates in single batches.
-            // This reduces cursor open/close overhead from N calls to 1.
+            // Write state, hashed state, and trie updates
             if save_mode.with_state() {
-                // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
-                let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
-                );
-                if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
-                }
-                timings.write_hashed_state += start.elapsed();
+                let state_write_config = StateWriteConfig {
+                    write_receipts: !sf_ctx.write_receipts,
+                    write_account_changesets: !sf_ctx.write_account_changesets,
+                    write_storage_changesets: !sf_ctx.write_storage_changesets,
+                };
 
-                let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
+                // In edge mode, we parallelize writes with 7 threads (one per DBI):
+                // - Thread 1: PlainAccountState
+                // - Thread 2: Bytecodes
+                // - Thread 3: PlainStorageState
+                // - Thread 4: HashedAccounts
+                // - Thread 5: HashedStorages
+                // - Thread 6: AccountsTrie
+                // - Thread 7: StoragesTrie
+                if use_parallel_writes {
+                    let mut edge_timings = metrics::EdgeWriteTimings::default();
+                    let total_start = Instant::now();
+
+                    // PREPROCESSING: Merge all block states and prepare data for parallel writes
+                    let preprocess_start = Instant::now();
+                    let mut merged_state = StateChangeset::default();
+                    for block in blocks.iter() {
+                        let execution_output = block.execution_outcome();
+                        let (plain_state, reverts) = execution_output
+                            .state
+                            .to_plain_state_and_reverts(OriginalValuesKnown::No);
+
+                        // Write reverts sequentially (they need block-by-block ordering)
+                        self.write_state_reverts(
+                            reverts,
+                            block.recovered_block().number(),
+                            state_write_config,
+                        )?;
+
+                        // Merge plain state changes
+                        merged_state.accounts.extend(plain_state.accounts);
+                        merged_state.storage.extend(plain_state.storage);
+                        merged_state.contracts.extend(plain_state.contracts);
+                    }
+
+                    // Prepare state writes (sorts and converts to final format)
+                    let prepared = self.prepare_state_writes_from_parts(
+                        merged_state.accounts,
+                        merged_state.contracts,
+                        merged_state.storage,
+                    );
+
+                    // Sort hashed storages by hashed address for optimal DB writes
+                    let hashed_storages: Vec<_> = merged_hashed_state
+                        .account_storages()
+                        .iter()
+                        .sorted_by_key(|(addr, _)| *addr)
+                        .map(|(addr, storage)| (*addr, storage))
+                        .collect();
+
+                    // Sort trie storage tries by hashed address for optimal DB writes
+                    let trie_storage_tries: Vec<_> = merged_trie
+                        .storage_tries_ref()
+                        .iter()
+                        .sorted_by_key(|(addr, _)| *addr)
+                        .map(|(addr, trie)| (*addr, trie))
+                        .collect();
+
+                    edge_timings.preprocessing = preprocess_start.elapsed();
+
+                    // Collect input counts for arena hint estimation
+                    let num_accounts = prepared.accounts.len();
+                    let num_storage: usize = prepared.storage.iter().map(|s| s.storage.len()).sum();
+                    let num_contracts = prepared.contracts.len();
+                    let num_account_trie_nodes = merged_trie.account_nodes_ref().len();
+                    let num_storage_trie_nodes: usize = merged_trie
+                        .storage_tries_ref()
+                        .values()
+                        .map(|t| t.storage_nodes_ref().len())
+                        .sum();
+                    let num_storage_trie_addresses = merged_trie.storage_tries_ref().len();
+
+                    // Record input metrics for correlation analysis
+                    self.arena_input_metrics.record(&metrics::ArenaHintInputs {
+                        num_accounts,
+                        num_storage,
+                        num_contracts,
+                        num_account_trie_nodes,
+                        num_storage_trie_nodes,
+                        num_storage_trie_addresses,
+                    });
+
+                    // Compute arena hints from prepared data and enable parallel writes
+                    let hints = ArenaHints::estimate(
+                        num_accounts,
+                        num_storage,
+                        num_contracts,
+                        num_account_trie_nodes,
+                        num_storage_trie_nodes,
+                    );
+
+                    // Record per-table arena hint estimation quality metrics (provider-level)
+                    self.arena_hint_metrics
+                        .record(tables::PlainAccountState::NAME, &hints.details.plain_accounts);
+                    self.arena_hint_metrics
+                        .record(tables::PlainStorageState::NAME, &hints.details.plain_storage);
+                    self.arena_hint_metrics
+                        .record(tables::Bytecodes::NAME, &hints.details.bytecodes);
+                    self.arena_hint_metrics
+                        .record(tables::HashedAccounts::NAME, &hints.details.hashed_accounts);
+                    self.arena_hint_metrics
+                        .record(tables::HashedStorages::NAME, &hints.details.hashed_storages);
+                    self.arena_hint_metrics
+                        .record(tables::AccountsTrie::NAME, &hints.details.account_trie);
+                    self.arena_hint_metrics
+                        .record(tables::StoragesTrie::NAME, &hints.details.storage_trie);
+
+                    // Record DB-level arena estimation metrics
+                    self.tx.record_arena_estimation(
+                        tables::PlainAccountState::NAME,
+                        &hints.details.plain_accounts.to_estimation_stats(),
+                    );
+                    self.tx.record_arena_estimation(
+                        tables::PlainStorageState::NAME,
+                        &hints.details.plain_storage.to_estimation_stats(),
+                    );
+                    self.tx.record_arena_estimation(
+                        tables::Bytecodes::NAME,
+                        &hints.details.bytecodes.to_estimation_stats(),
+                    );
+                    self.tx.record_arena_estimation(
+                        tables::HashedAccounts::NAME,
+                        &hints.details.hashed_accounts.to_estimation_stats(),
+                    );
+                    self.tx.record_arena_estimation(
+                        tables::HashedStorages::NAME,
+                        &hints.details.hashed_storages.to_estimation_stats(),
+                    );
+                    self.tx.record_arena_estimation(
+                        tables::AccountsTrie::NAME,
+                        &hints.details.account_trie.to_estimation_stats(),
+                    );
+                    self.tx.record_arena_estimation(
+                        tables::StoragesTrie::NAME,
+                        &hints.details.storage_trie.to_estimation_stats(),
+                    );
+
+                    self.tx.enable_parallel_writes_for_tables_with_hints(&[
+                        (tables::PlainAccountState::NAME, hints.plain_accounts),
+                        (tables::PlainStorageState::NAME, hints.plain_storage),
+                        (tables::Bytecodes::NAME, hints.bytecodes),
+                        (tables::HashedAccounts::NAME, hints.hashed_accounts),
+                        (tables::HashedStorages::NAME, hints.hashed_storages),
+                        (tables::AccountsTrie::NAME, hints.account_trie),
+                        (tables::StoragesTrie::NAME, hints.storage_trie),
+                    ])?;
+
+                    // SPAWN 7 THREADS: One per DBI for maximum parallelism
+                    let parallel_start = Instant::now();
+
+                    std::thread::scope(|s| {
+                        // Thread 1: PlainAccountState
+                        let t1 = s.spawn(|| self.write_plain_accounts_only(&prepared.accounts));
+
+                        // Thread 2: Bytecodes
+                        let t2 = s.spawn(|| self.write_bytecodes_only(&prepared.contracts));
+
+                        // Thread 3: PlainStorageState
+                        let t3 = s.spawn(|| self.write_plain_storage_only(&prepared.storage));
+
+                        // Thread 4: HashedAccounts
+                        let t4 = s.spawn(|| {
+                            self.write_hashed_accounts_only(merged_hashed_state.accounts())
+                        });
+
+                        // Thread 5: HashedStorages
+                        let t5 = s.spawn(|| self.write_hashed_storages_only(&hashed_storages));
+
+                        // Thread 6: AccountsTrie
+                        let t6 = s.spawn(|| {
+                            self.write_account_trie_only(merged_trie.account_nodes_ref())
+                        });
+
+                        // Thread 7: StoragesTrie
+                        let t7 = s.spawn(|| self.write_storage_trie_only(&trie_storage_tries));
+
+                        // Collect timings
+                        edge_timings.plain_accounts =
+                            t1.join().expect("plain_accounts thread panicked")?;
+                        edge_timings.bytecodes = t2.join().expect("bytecodes thread panicked")?;
+                        edge_timings.plain_storage =
+                            t3.join().expect("plain_storage thread panicked")?;
+                        edge_timings.hashed_accounts =
+                            t4.join().expect("hashed_accounts thread panicked")?;
+                        edge_timings.hashed_storages =
+                            t5.join().expect("hashed_storages thread panicked")?;
+                        let (_, account_trie_duration) =
+                            t6.join().expect("account_trie thread panicked")?;
+                        edge_timings.account_trie = account_trie_duration;
+                        let (_, storage_trie_op_counts, storage_trie_duration) =
+                            t7.join().expect("storage_trie thread panicked")?;
+                        edge_timings.storage_trie = storage_trie_duration;
+                        edge_timings.storage_trie_op_counts = storage_trie_op_counts.into();
+
+                        Ok::<_, ProviderError>(())
+                    })?;
+
+                    edge_timings.parallel_wall = parallel_start.elapsed();
+                    edge_timings.total = total_start.elapsed();
+                    edge_timings.subtxn_count = 7;
+                    self.metrics.record_edge_writes(&edge_timings);
+
+                    // Also update the standard timings for backward compatibility
+                    timings.write_state = edge_timings
+                        .plain_accounts
+                        .max(edge_timings.bytecodes)
+                        .max(edge_timings.plain_storage);
+                    timings.write_hashed_state =
+                        edge_timings.hashed_accounts.max(edge_timings.hashed_storages);
+                    timings.write_trie_updates =
+                        edge_timings.account_trie.max(edge_timings.storage_trie);
                 }
-                timings.write_trie_updates += start.elapsed();
+
+                if !use_parallel_writes {
+                    // Sequential path for non-edge mode
+                    for block in blocks.iter() {
+                        let recovered_block = block.recovered_block();
+                        let execution_output = block.execution_outcome();
+
+                        let start = Instant::now();
+                        self.write_state(
+                            WriteStateInput::Single {
+                                outcome: execution_output,
+                                block: recovered_block.number(),
+                            },
+                            OriginalValuesKnown::No,
+                            state_write_config,
+                        )?;
+                        timings.write_state += start.elapsed();
+                    }
+
+                    if !merged_hashed_state.is_empty() {
+                        self.write_hashed_state(&merged_hashed_state)?;
+                    }
+                    if !merged_trie.is_empty() {
+                        self.write_trie_updates_sorted(&merged_trie)?;
+                    }
+                }
             }
 
-            // Full mode: update history indices
+            // Commit parallel subtransactions if enabled (MUST happen before parent writes)
+            // Use commit_subtxns_with_metrics to record arena allocation stats as Prometheus
+            // metrics
+            if use_parallel_writes {
+                self.tx.commit_subtxns_with_metrics()?;
+            }
+
+            // Full mode: update history indices (parent can safely write now)
             if save_mode.with_state() {
                 let start = Instant::now();
                 self.update_history_indices(first_number..=last_block_number)?;
@@ -987,6 +1229,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
+            arena_hint_metrics: metrics::ArenaHintMetrics::default(),
+            arena_input_metrics: metrics::ArenaHintInputMetrics::default(),
         }
     }
 
@@ -1262,7 +1506,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Insert history index to the database.
     ///
     /// For each updated partial key, this function retrieves the last shard from the database
@@ -2218,7 +2462,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> StateWriter
     for DatabaseProvider<TX, N>
 {
     type Receipt = ReceiptTy<N>;
@@ -2845,8 +3089,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         for (hashed_address, storage_trie_updates) in storage_tries {
             let mut db_storage_trie_cursor =
                 DatabaseStorageTrieCursor::new(cursor, *hashed_address);
-            num_entries +=
+            let (entries, _op_counts) =
                 db_storage_trie_cursor.write_storage_trie_updates_sorted(storage_trie_updates)?;
+            num_entries += entries;
             cursor = db_storage_trie_cursor.cursor;
         }
 
@@ -2995,7 +3240,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypes> HistoryWriter for DatabaseProvider<TX, N> {
     fn unwind_account_history_indices<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
@@ -3139,7 +3384,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {
     fn take_block_and_execution_above(
@@ -3182,7 +3427,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> BlockWriter
     for DatabaseProvider<TX, N>
 {
     type Block = BlockTy<N>;
@@ -4104,6 +4349,28 @@ mod tests {
         assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
 
         provider_rw.commit().unwrap();
+
+        // Verify data persisted correctly by reading in a new transaction
+        {
+            let provider = factory.provider().unwrap();
+
+            // Verify AccountsTrie
+            let mut cursor = provider.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
+            let accounts_count = cursor.walk(None).unwrap().count();
+            // We started with 2 accounts, deleted 1, added 1 = 2 remaining
+            assert_eq!(accounts_count, 2, "AccountsTrie should have 2 entries after commit");
+
+            // Verify StoragesTrie
+            let mut cursor = provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap();
+            let storage_count = cursor.walk(None).unwrap().count();
+            // address1 had 2 entries, deleted 1 = 1 remaining; address2 was wiped = 0
+            assert_eq!(storage_count, 1, "StoragesTrie should have 1 entry after commit");
+
+            println!(
+                "Post-commit verification: AccountsTrie={}, StoragesTrie={}",
+                accounts_count, storage_count
+            );
+        }
     }
 
     #[test]
@@ -4282,5 +4549,651 @@ mod tests {
             Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
             Ok(_) => panic!("Expected error, got Ok"),
         }
+    }
+
+    #[test]
+    fn test_save_blocks_edge_mode_settings() {
+        use reth_db_api::models::StorageSettings;
+        use reth_storage_api::StorageSettingsCache;
+
+        let factory = create_test_provider_factory();
+
+        // Test 1: Verify edge mode detection
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        assert!(
+            factory.cached_storage_settings().is_v2(),
+            "Edge mode should be detected with all edge settings enabled"
+        );
+
+        // Test 2: Verify legacy mode is not edge mode
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        assert!(
+            !factory.cached_storage_settings().is_v2(),
+            "Legacy mode should NOT be detected as edge mode"
+        );
+
+        // Test 3: Verify partial edge settings are not edge mode
+        factory
+            .set_storage_settings_cache(StorageSettings::v1().with_receipts_in_static_files(true));
+        assert!(
+            !factory.cached_storage_settings().is_v2(),
+            "Partial edge settings should NOT be detected as edge mode"
+        );
+
+        // Test 4: Verify all conditions for edge mode (must use StorageSettings::v2())
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        assert!(
+            factory.cached_storage_settings().is_v2(),
+            "StorageSettings::v2() should enable edge mode"
+        );
+    }
+
+    #[test]
+    fn test_save_blocks_legacy_mode() {
+        use reth_chain_state::ExecutedBlock;
+        use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+
+        // Insert genesis block first
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                crate::OriginalValuesKnown::No,
+                StateWriteConfig::default(),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        // Prepare executed blocks for save_blocks
+        let blocks: Vec<ExecutedBlock> = data
+            .blocks
+            .iter()
+            .take(3)
+            .map(|(block, outcome)| {
+                let block_receipts = outcome.receipts().first().cloned().unwrap_or_default();
+                ExecutedBlock::new(
+                    Arc::new(block.clone()),
+                    Arc::new(BlockExecutionOutput {
+                        result: BlockExecutionResult {
+                            receipts: block_receipts,
+                            requests: Default::default(),
+                            gas_used: 0,
+                            blob_gas_used: 0,
+                        },
+                        state: outcome.state().clone(),
+                    }),
+                    ComputedTrieData::default(),
+                )
+            })
+            .collect();
+
+        // Call save_blocks with legacy mode (no parallel writes)
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(blocks.clone(), SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        // Verify blocks were saved correctly
+        let provider = factory.provider().unwrap();
+        for (i, (expected_block, _)) in data.blocks.iter().take(3).enumerate() {
+            let block_number = expected_block.number();
+
+            // Verify block header
+            let header = provider.header_by_number(block_number).unwrap();
+            assert!(header.is_some(), "Block {block_number} header should exist");
+            assert_eq!(
+                header.unwrap(),
+                expected_block.header().clone(),
+                "Block {block_number} header should match"
+            );
+
+            // Verify block body indices exist
+            let body_indices = provider.block_body_indices(block_number).unwrap();
+            assert!(body_indices.is_some(), "Block {block_number} body indices should exist");
+
+            // Verify transactions
+            let tx_count = expected_block.body().transaction_count();
+            let indices = body_indices.unwrap();
+            assert_eq!(
+                indices.tx_count as usize, tx_count,
+                "Block {block_number} tx count should match"
+            );
+
+            // Verify receipts exist
+            let receipts = provider.receipts_by_block(block_number.into()).unwrap();
+            assert!(receipts.is_some(), "Block {block_number} receipts should exist");
+            assert_eq!(
+                receipts.unwrap().len(),
+                data.blocks[i].1.receipts()[0].len(),
+                "Block {block_number} receipt count should match"
+            );
+        }
+    }
+
+    #[test]
+    fn test_save_blocks_edge_mode_parallel() {
+        use alloy_primitives::{map::HashMap, U256};
+        use reth_chain_state::ExecutedBlock;
+        use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+        use revm_database::states::BundleState;
+        use revm_state::AccountInfo;
+
+        let factory = create_test_provider_factory();
+
+        // Enable edge mode for parallel writes
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        assert!(factory.cached_storage_settings().is_v2(), "V2 mode should be enabled");
+
+        // Get initial db info for later comparison
+        let initial_info = factory.db_ref().db().info().unwrap();
+        let initial_last_pgno = initial_info.last_pgno();
+
+        let data = BlockchainTestData::default();
+
+        // Insert genesis block using save_blocks to properly initialize static files
+        let genesis_executed = ExecutedBlock::new(
+            Arc::new(data.genesis.clone().try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
+            ComputedTrieData::default(),
+        );
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        // Create blocks with LOTS of state changes to force page allocations
+        // 2000 accounts × 200 slots = 400,000 storage entries per block
+        // 3 blocks = 1.2 million total entries
+        let num_accounts = 2000;
+        let num_storage_slots = 200;
+
+        let mut blocks = Vec::new();
+        for block_num in 1u64..=3 {
+            let block = data
+                .blocks
+                .get(block_num as usize - 1)
+                .map(|(b, _)| b.clone())
+                .unwrap_or_else(|| data.blocks[0].0.clone());
+
+            // Create large bundle state with many accounts and storage
+            let mut bundle = BundleState::builder(block_num..=block_num);
+            for i in 0..num_accounts {
+                let address = Address::with_last_byte((i % 256) as u8);
+                bundle = bundle.state_present_account_info(
+                    address,
+                    AccountInfo { nonce: block_num, balance: U256::from(i), ..Default::default() },
+                );
+
+                // Add storage slots
+                let storage: HashMap<U256, (U256, U256)> = (0..num_storage_slots)
+                    .map(|s| (U256::from(s), (U256::ZERO, U256::from(block_num * 1000 + s as u64))))
+                    .collect();
+                bundle = bundle.state_storage(address, storage);
+            }
+
+            let outcome = BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: bundle.build(),
+            };
+
+            blocks.push(ExecutedBlock::new(
+                Arc::new(block.clone()),
+                Arc::new(outcome),
+                ComputedTrieData::default(),
+            ));
+        }
+
+        // Save blocks with parallel writes
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(blocks, SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        // Verify pages were allocated
+        let final_info = factory.db_ref().db().info().unwrap();
+        let final_last_pgno = final_info.last_pgno();
+
+        assert!(
+            final_last_pgno > initial_last_pgno,
+            "Should have allocated new pages: initial={}, final={}",
+            initial_last_pgno,
+            final_last_pgno
+        );
+
+        println!(
+            "SUCCESS: Allocated {} new pages with parallel subtxns",
+            final_last_pgno - initial_last_pgno
+        );
+
+        // Verify with read-only transaction
+        let provider_ro = factory.provider().unwrap();
+
+        // Sample verification of accounts
+        for i in 0..10u64 {
+            let test_addr = Address::with_last_byte((i % 256) as u8);
+            let account = provider_ro.basic_account(&test_addr).unwrap();
+            assert!(account.is_some(), "Account {} should exist", test_addr);
+            let acc = account.unwrap();
+            assert_eq!(acc.nonce, 3, "Account {} should have nonce 3 from last block", test_addr);
+        }
+
+        // Verify storage values
+        let test_addr = Address::with_last_byte(0);
+        let mut storage_cursor =
+            provider_ro.tx_ref().cursor_dup_read::<tables::PlainStorageState>().unwrap();
+        for slot in 0..5u64 {
+            let storage_key = B256::from(U256::from(slot));
+            let entry = storage_cursor.seek_by_key_subkey(test_addr, storage_key).unwrap();
+            let value = entry.filter(|e| e.key == storage_key).map(|e| e.value);
+            let expected = U256::from(3 * 1000 + slot); // block 3: value = 3*1000 + slot
+            assert!(value.is_some(), "Storage slot {} should exist for {}", slot, test_addr);
+            assert_eq!(value.unwrap(), expected, "Storage slot {} should have correct value", slot);
+        }
+
+        println!("✓ Read verification passed: accounts and storage values correct");
+    }
+
+    #[test]
+    fn test_save_blocks_edge_mode_stress_unique() {
+        use alloy_primitives::{map::HashMap, U256};
+        use reth_chain_state::ExecutedBlock;
+        use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+        use revm_database::states::BundleState;
+        use revm_state::AccountInfo;
+
+        let factory = create_test_provider_factory();
+
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        assert!(factory.cached_storage_settings().is_v2(), "V2 mode should be enabled");
+
+        let initial_info = factory.db_ref().db().info().unwrap();
+        let initial_last_pgno = initial_info.last_pgno();
+
+        let data = BlockchainTestData::default();
+
+        // Insert genesis block
+        let genesis_executed = ExecutedBlock::new(
+            Arc::new(data.genesis.clone().try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
+            ComputedTrieData::default(),
+        );
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        // 20 iterations with UNIQUE accounts per iteration
+        // Each iteration uses addresses in range [iteration*500, iteration*500+500)
+        // This tests pure inserts (no overwrites) forcing tree growth
+        // Each iteration saves all 5 blocks from test data with unique account state
+        let num_iterations = 20;
+        let accounts_per_iteration = 500;
+        let storage_slots_per_account = 50;
+
+        for iteration in 0..num_iterations {
+            let base_account = iteration * accounts_per_iteration;
+
+            // Generate test data starting at the right block number
+            let first_block_num = 1 + (iteration * 5) as u64;
+            let iteration_data = BlockchainTestData::default_from_number(first_block_num);
+
+            let mut blocks = Vec::new();
+            for (idx, (block, _)) in iteration_data.blocks.iter().enumerate() {
+                let block_num = first_block_num + idx as u64;
+                let mut bundle = BundleState::builder(block_num..=block_num);
+
+                for i in 0..accounts_per_iteration {
+                    let account_id = base_account + i;
+                    let mut addr_bytes = [0u8; 20];
+                    addr_bytes[16..20].copy_from_slice(&(account_id as u32).to_be_bytes());
+                    let address = Address::from(addr_bytes);
+
+                    bundle = bundle.state_present_account_info(
+                        address,
+                        AccountInfo {
+                            nonce: block_num,
+                            balance: U256::from(account_id + idx),
+                            ..Default::default()
+                        },
+                    );
+
+                    let storage: HashMap<U256, (U256, U256)> = (0..storage_slots_per_account)
+                        .map(|s| {
+                            (U256::from(s), (U256::ZERO, U256::from(block_num * 1000 + s as u64)))
+                        })
+                        .collect();
+                    bundle = bundle.state_storage(address, storage);
+                }
+
+                let outcome = BlockExecutionOutput {
+                    result: BlockExecutionResult {
+                        receipts: vec![],
+                        requests: Default::default(),
+                        gas_used: 0,
+                        blob_gas_used: 0,
+                    },
+                    state: bundle.build(),
+                };
+
+                blocks.push(ExecutedBlock::new(
+                    Arc::new(block.clone()),
+                    Arc::new(outcome),
+                    ComputedTrieData::default(),
+                ));
+            }
+
+            let start = std::time::Instant::now();
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw.save_blocks(blocks, SaveBlocksMode::Full).unwrap();
+            provider_rw.commit().unwrap();
+            let elapsed = start.elapsed();
+
+            println!(
+                "Iteration {}: {} unique accounts (base={}), {} storage slots each, 5 blocks, took {:?}",
+                iteration,
+                accounts_per_iteration,
+                base_account,
+                storage_slots_per_account,
+                elapsed
+            );
+        }
+
+        let final_info = factory.db_ref().db().info().unwrap();
+        let final_last_pgno = final_info.last_pgno();
+
+        let total_accounts = num_iterations * accounts_per_iteration;
+        let total_storage = total_accounts * storage_slots_per_account;
+        let total_blocks = num_iterations * 5;
+
+        println!("\n=== STRESS TEST UNIQUE ACCOUNTS COMPLETE ===");
+        println!("Total iterations: {}", num_iterations);
+        println!("Total blocks: {}", total_blocks);
+        println!("Total unique accounts: {}", total_accounts);
+        println!("Total storage entries: {}", total_storage);
+        println!(
+            "Pages allocated: {} (initial={}, final={})",
+            final_last_pgno - initial_last_pgno,
+            initial_last_pgno,
+            final_last_pgno
+        );
+
+        assert!(
+            final_last_pgno > initial_last_pgno,
+            "Should have allocated pages for {} unique accounts",
+            total_accounts
+        );
+
+        // Verify with read-only transaction
+        let provider_ro = factory.provider().unwrap();
+
+        // Sample verification from different iterations
+        let mut verified_accounts = 0;
+        for iteration in [0, 5, 10, 19].iter() {
+            let base_account = iteration * accounts_per_iteration;
+            for i in 0..5 {
+                let account_id = base_account + i;
+                let mut addr_bytes = [0u8; 20];
+                addr_bytes[16..20].copy_from_slice(&(account_id as u32).to_be_bytes());
+                let address = Address::from(addr_bytes);
+
+                let account = provider_ro.basic_account(&address).unwrap();
+                assert!(
+                    account.is_some(),
+                    "Account {} (iteration {}, id {}) should exist",
+                    address,
+                    iteration,
+                    account_id
+                );
+                verified_accounts += 1;
+
+                // Verify a storage slot
+                let storage_key = B256::from(U256::from(0u64));
+                let mut storage_cursor =
+                    provider_ro.tx_ref().cursor_dup_read::<tables::PlainStorageState>().unwrap();
+                let entry = storage_cursor.seek_by_key_subkey(address, storage_key).unwrap();
+                let value = entry.filter(|e| e.key == storage_key).map(|e| e.value);
+                assert!(value.is_some(), "Storage slot 0 should exist for account {}", address);
+            }
+        }
+
+        println!(
+            "✓ Read verification passed: {} accounts verified with correct storage",
+            verified_accounts
+        );
+    }
+
+    /// 5-minute continuous stress test for parallel subtxn writes.
+    /// Run with: cargo test -p reth-storage-provider
+    /// test_save_blocks_edge_mode_stress_5min -- --ignored --nocapture
+    #[test]
+    #[ignore] // Long-running test, run manually
+    fn test_save_blocks_edge_mode_stress_5min() {
+        use alloy_primitives::{map::HashMap, U256};
+        use reth_chain_state::ExecutedBlock;
+        use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+        use revm_database::states::BundleState;
+        use revm_state::AccountInfo;
+
+        // Configurable via env vars
+        let duration_secs: u64 =
+            std::env::var("STRESS_DURATION_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(300); // 5 minutes default
+        let accounts_per_iteration: usize =
+            std::env::var("STRESS_ACCOUNTS").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
+        let storage_slots: usize =
+            std::env::var("STRESS_STORAGE_SLOTS").ok().and_then(|s| s.parse().ok()).unwrap_or(50);
+        let blocks_per_iteration: usize =
+            std::env::var("STRESS_BLOCKS").ok().and_then(|s| s.parse().ok()).unwrap_or(5);
+
+        println!("=== PARALLEL SUBTXN STRESS TEST ===");
+        println!("Duration: {} seconds", duration_secs);
+        println!("Accounts per iteration: {}", accounts_per_iteration);
+        println!("Storage slots per account: {}", storage_slots);
+        println!("Blocks per iteration: {}", blocks_per_iteration);
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        assert!(factory.cached_storage_settings().is_v2());
+
+        let initial_info = factory.db_ref().db().info().unwrap();
+        let initial_last_pgno = initial_info.last_pgno();
+
+        // Insert genesis
+        let data = BlockchainTestData::default();
+        let genesis_executed = ExecutedBlock::new(
+            Arc::new(data.genesis.clone().try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
+            ComputedTrieData::default(),
+        );
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(vec![genesis_executed], SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        let start = std::time::Instant::now();
+        let duration = std::time::Duration::from_secs(duration_secs);
+        let mut iteration = 0u64;
+        let mut total_blocks = 0u64;
+        let mut total_accounts = 0u64;
+        let mut total_storage = 0u64;
+
+        while start.elapsed() < duration {
+            let base_account = (iteration * accounts_per_iteration as u64) as usize;
+            let first_block_num = 1 + (iteration * blocks_per_iteration as u64);
+            let iteration_data = BlockchainTestData::default_from_number(first_block_num);
+
+            let mut blocks = Vec::new();
+            for (idx, (block, _)) in
+                iteration_data.blocks.iter().take(blocks_per_iteration).enumerate()
+            {
+                let block_num = first_block_num + idx as u64;
+                let mut bundle = BundleState::builder(block_num..=block_num);
+
+                for i in 0..accounts_per_iteration {
+                    let account_id = base_account + i;
+                    let mut addr_bytes = [0u8; 20];
+                    addr_bytes[12..20].copy_from_slice(&(account_id as u64).to_be_bytes());
+                    let address = Address::from(addr_bytes);
+
+                    bundle = bundle.state_present_account_info(
+                        address,
+                        AccountInfo {
+                            nonce: block_num,
+                            balance: U256::from(account_id + idx),
+                            ..Default::default()
+                        },
+                    );
+
+                    let storage: HashMap<U256, (U256, U256)> = (0..storage_slots)
+                        .map(|s| {
+                            (U256::from(s), (U256::ZERO, U256::from(block_num * 1000 + s as u64)))
+                        })
+                        .collect();
+                    bundle = bundle.state_storage(address, storage);
+                }
+
+                blocks.push(ExecutedBlock::new(
+                    Arc::new(block.clone()),
+                    Arc::new(BlockExecutionOutput {
+                        result: BlockExecutionResult {
+                            receipts: vec![],
+                            requests: Default::default(),
+                            gas_used: 0,
+                            blob_gas_used: 0,
+                        },
+                        state: bundle.build(),
+                    }),
+                    ComputedTrieData::default(),
+                ));
+            }
+
+            let iter_start = std::time::Instant::now();
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw.save_blocks(blocks.clone(), SaveBlocksMode::Full).unwrap();
+            provider_rw.commit().unwrap();
+            let iter_elapsed = iter_start.elapsed();
+
+            total_blocks += blocks.len() as u64;
+            total_accounts += (accounts_per_iteration * blocks.len()) as u64;
+            total_storage += (accounts_per_iteration * storage_slots * blocks.len()) as u64;
+
+            if iteration % 10 == 0 {
+                let elapsed = start.elapsed().as_secs();
+                let remaining = duration_secs.saturating_sub(elapsed);
+
+                let provider_ro = factory.provider().unwrap();
+
+                let mut verified_accounts = 0;
+                let mut verified_storage = 0;
+                for i in (0..accounts_per_iteration).step_by(50) {
+                    let account_id = base_account + i;
+                    let mut addr_bytes = [0u8; 20];
+                    addr_bytes[12..20].copy_from_slice(&(account_id as u64).to_be_bytes());
+                    let address = Address::from(addr_bytes);
+
+                    let account = provider_ro.basic_account(&address).unwrap();
+                    assert!(
+                        account.is_some(),
+                        "Account {} should exist after commit (iteration {})",
+                        account_id,
+                        iteration
+                    );
+                    verified_accounts += 1;
+
+                    let mut storage_cursor = provider_ro
+                        .tx_ref()
+                        .cursor_dup_read::<tables::PlainStorageState>()
+                        .unwrap();
+                    for s in (0..storage_slots).step_by(10) {
+                        let slot = B256::from(U256::from(s));
+                        let entry = storage_cursor.seek_by_key_subkey(address, slot).unwrap();
+                        let value = entry.filter(|e| e.key == slot).map(|e| e.value);
+                        assert!(
+                            value.is_some(),
+                            "Storage slot {} for account {} should exist",
+                            s,
+                            account_id
+                        );
+                        verified_storage += 1;
+                    }
+                }
+
+                let plain_account_count = provider_ro
+                    .tx_ref()
+                    .cursor_read::<tables::PlainAccountState>()
+                    .unwrap()
+                    .walk(None)
+                    .unwrap()
+                    .count();
+                let plain_storage_count = provider_ro
+                    .tx_ref()
+                    .cursor_read::<tables::PlainStorageState>()
+                    .unwrap()
+                    .walk(None)
+                    .unwrap()
+                    .count();
+
+                drop(provider_ro);
+
+                println!(
+                    "[{:3}s] Iteration {:4}: {} blocks, {:?}/iter, {} remaining | verified: {} accounts, {} storage | tables: {} accounts, {} storage",
+                    elapsed,
+                    iteration,
+                    blocks.len(),
+                    iter_elapsed,
+                    remaining,
+                    verified_accounts,
+                    verified_storage,
+                    plain_account_count,
+                    plain_storage_count
+                );
+            }
+
+            iteration += 1;
+        }
+
+        let final_info = factory.db_ref().db().info().unwrap();
+        let final_last_pgno = final_info.last_pgno();
+        let elapsed = start.elapsed();
+
+        println!("\n=== STRESS TEST COMPLETE ===");
+        println!("Duration: {:?}", elapsed);
+        println!("Iterations: {}", iteration);
+        println!("Total blocks: {}", total_blocks);
+        println!("Total accounts: {}", total_accounts);
+        println!("Total storage entries: {}", total_storage);
+        println!("Pages allocated: {} -> {}", initial_last_pgno, final_last_pgno);
+        println!("Iterations/sec: {:.2}", iteration as f64 / elapsed.as_secs_f64());
+        println!("Blocks/sec: {:.2}", total_blocks as f64 / elapsed.as_secs_f64());
+
+        assert!(final_last_pgno > initial_last_pgno, "Should have allocated pages");
+        println!("\n✓ NO CORRUPTION DETECTED");
     }
 }
