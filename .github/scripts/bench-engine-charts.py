@@ -45,15 +45,10 @@ def parse_combined_csv(path: str) -> list[dict]:
     return rows
 
 
-def seq_axis(rows: list[dict]) -> list[int]:
-    """Return 1-based sequential indices for the X axis."""
-    return list(range(1, len(rows) + 1))
-
-
 def plot_latency_and_throughput(feature: list[dict], baseline: list[dict] | None, out: Path):
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
 
-    feat_x = seq_axis(feature)
+    feat_x = [r["block_number"] for r in feature]
     feat_lat = [r["new_payload_latency_us"] / 1_000 for r in feature]
     feat_ggas = []
     for r in feature:
@@ -61,7 +56,7 @@ def plot_latency_and_throughput(feature: list[dict], baseline: list[dict] | None
         feat_ggas.append(r["gas_used"] / lat_s / GIGAGAS if lat_s > 0 else 0)
 
     if baseline:
-        base_x = seq_axis(baseline)
+        base_x = [r["block_number"] for r in baseline]
         base_lat = [r["new_payload_latency_us"] / 1_000 for r in baseline]
         base_ggas = []
         for r in baseline:
@@ -78,7 +73,7 @@ def plot_latency_and_throughput(feature: list[dict], baseline: list[dict] | None
         ax1.legend()
 
     ax2.plot(feat_x, feat_ggas, linewidth=0.8, color="#2ca02c", label="feature")
-    ax2.set_xlabel("Block #")
+    ax2.set_xlabel("Block Number")
     ax2.set_ylabel("Ggas/s")
     ax2.set_title("Execution Throughput per Block")
     ax2.grid(True, alpha=0.3)
@@ -100,12 +95,12 @@ def plot_wait_breakdown(feature: list[dict], baseline: list[dict] | None, out: P
     fig, axes = plt.subplots(len(series), 1, figsize=(12, 3 * len(series)), sharex=True)
     for ax, (label, key, color) in zip(axes, series):
         if baseline:
-            bx = [i + 1 for i, r in enumerate(baseline) if r[key] is not None]
+            bx = [r["block_number"] for r in baseline if r[key] is not None]
             by = [r[key] / 1_000 for r in baseline if r[key] is not None]
             if bx:
                 ax.plot(bx, by, linewidth=0.8, color="#aaaaaa", label="main", alpha=0.7)
 
-        fx = [i + 1 for i, r in enumerate(feature) if r[key] is not None]
+        fx = [r["block_number"] for r in feature if r[key] is not None]
         fy = [r[key] / 1_000 for r in feature if r[key] is not None]
         if fx:
             ax.plot(fx, fy, linewidth=0.8, color=color, label="feature")
@@ -116,7 +111,7 @@ def plot_wait_breakdown(feature: list[dict], baseline: list[dict] | None, out: P
         if baseline:
             ax.legend()
 
-    axes[-1].set_xlabel("Block #")
+    axes[-1].set_xlabel("Block Number")
     fig.suptitle("Wait Time Breakdown per Block", fontsize=14, y=1.01)
     fig.tight_layout()
     fig.savefig(out, dpi=150, bbox_inches="tight")
