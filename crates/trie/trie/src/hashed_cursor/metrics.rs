@@ -2,7 +2,7 @@ use super::{HashedCursor, HashedStorageCursor};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use std::time::{Duration, Instant};
-use tracing::debug_span;
+use tracing::trace_span;
 
 #[cfg(feature = "metrics")]
 use crate::TrieType;
@@ -112,7 +112,7 @@ impl HashedCursorMetricsCache {
 
     /// Record the span for metrics.
     pub fn record_span(&self, name: &'static str) {
-        let _span = debug_span!(
+        let _span = trace_span!(
             target: "trie::trie_cursor",
             "Hashed cursor metrics",
             name,

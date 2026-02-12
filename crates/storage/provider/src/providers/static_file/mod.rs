@@ -11,13 +11,18 @@ mod writer;
 pub use writer::{StaticFileProviderRW, StaticFileProviderRWRefMut};
 
 mod metrics;
+
+#[cfg(test)]
+mod writer_tests;
+
 use reth_nippy_jar::NippyJar;
 use reth_static_file_types::{SegmentHeader, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{ops::Deref, sync::Arc};
 
 /// Alias type for each specific `NippyJar`.
-type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, StaticFileSegment), LoadedJar>;
+type LoadedJarRef<'a> =
+    reth_primitives_traits::dashmap::mapref::one::Ref<'a, (u64, StaticFileSegment), LoadedJar>;
 
 /// Helper type to reuse an associated static file mmap handle on created cursors.
 #[derive(Debug)]
@@ -743,8 +748,9 @@ mod tests {
                 .unwrap();
 
             // Check that the segment header has changeset offsets
-            assert!(provider.user_header().changeset_offsets().is_some());
-            let offsets = provider.user_header().changeset_offsets().unwrap();
+            let offsets = provider.read_changeset_offsets().unwrap();
+            assert!(offsets.is_some());
+            let offsets = offsets.unwrap();
             assert_eq!(offsets.len(), 10); // Should have 10 blocks worth of offsets
 
             // Verify each block has the expected number of changes
@@ -854,7 +860,8 @@ mod tests {
         let (static_dir, _) = create_test_static_files_dir();
 
         let blocks_per_file = 10;
-        let files_per_range = 3;
+        // 3 main files (jar, dat, idx) + 1 csoff sidecar file for changeset segments
+        let files_per_range = 4;
         let file_set_count = 3;
         let initial_file_count = files_per_range * file_set_count;
         let tip = blocks_per_file * file_set_count - 1;
@@ -923,7 +930,7 @@ mod tests {
                 )?;
 
                 // Check offsets are valid
-                let offsets = provider.user_header().changeset_offsets();
+                let offsets = provider.read_changeset_offsets().unwrap();
                 assert!(offsets.is_some(), "Should have changeset offsets");
             }
 
@@ -1087,8 +1094,9 @@ mod tests {
                 .unwrap();
 
             // Check that the segment header has changeset offsets
-            assert!(provider.user_header().changeset_offsets().is_some());
-            let offsets = provider.user_header().changeset_offsets().unwrap();
+            let offsets = provider.read_changeset_offsets().unwrap();
+            assert!(offsets.is_some());
+            let offsets = offsets.unwrap();
             assert_eq!(offsets.len(), 10); // Should have 10 blocks worth of offsets
 
             // Verify each block has the expected number of changes
@@ -1189,7 +1197,8 @@ mod tests {
         let (static_dir, _) = create_test_static_files_dir();
 
         let blocks_per_file = 10;
-        let files_per_range = 3;
+        // 3 main files (jar, dat, idx) + 1 csoff sidecar file for changeset segments
+        let files_per_range = 4;
         let file_set_count = 3;
         let initial_file_count = files_per_range * file_set_count;
         let tip = blocks_per_file * file_set_count - 1;
@@ -1248,7 +1257,7 @@ mod tests {
                     tip,
                     None,
                 )?;
-                let offsets = provider.user_header().changeset_offsets();
+                let offsets = provider.read_changeset_offsets()?;
                 assert!(offsets.is_some(), "Should have changeset offsets");
             }
 
@@ -1350,5 +1359,43 @@ mod tests {
                 assert_eq!(result.unwrap().key, keys[i]);
             }
         }
+    }
+
+    #[test]
+    fn test_last_block_flushed_on_commit() {
+        let (static_dir, _) = create_test_static_files_dir();
+
+        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
+            .expect("Failed to create static file provider");
+
+        let address = Address::from([5u8; 20]);
+        let key = B256::with_last_byte(1);
+
+        // Write changes for a single block without calling increment_block explicitly
+        // (append_storage_changeset calls it internally), then commit
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+
+            // Append a single block's changeset (block 0)
+            writer
+                .append_storage_changeset(
+                    vec![StorageBeforeTx { address, key, value: U256::from(42) }],
+                    0,
+                )
+                .unwrap();
+
+            // Commit without any subsequent block - the current block's offset should be flushed
+            writer.commit().unwrap();
+        }
+
+        // Verify highest block is 0
+        let highest = sf_rw.get_highest_static_file_block(StaticFileSegment::StorageChangeSets);
+        assert_eq!(highest, Some(0), "Should have block 0 after commit");
+
+        // Verify the data is actually readable via the high-level API
+        let result = sf_rw.get_storage_before_block(0, address, key).unwrap();
+        assert!(result.is_some(), "Should be able to read the changeset entry");
+        let entry = result.unwrap();
+        assert_eq!(entry.value, U256::from(42));
     }
 }

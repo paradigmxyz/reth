@@ -3,7 +3,7 @@
 use crate::engine::EngineApiKind;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256Map, B256Set},
     BlockNumber, B256,
 };
 use reth_chain_state::{DeferredTrieData, EthPrimitives, ExecutedBlock, LazyOverlay};
@@ -25,7 +25,7 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// __All__ unique executed blocks by block hash that are connected to the canonical chain.
     ///
     /// This includes blocks of all forks.
-    pub(crate) blocks_by_hash: HashMap<B256, ExecutedBlock<N>>,
+    pub(crate) blocks_by_hash: B256Map<ExecutedBlock<N>>,
     /// Executed blocks grouped by their respective block number.
     ///
     /// This maps unique block number to all known blocks for that height.
@@ -33,7 +33,7 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// Note: there can be multiple blocks at the same height due to forks.
     pub(crate) blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock<N>>>,
     /// Map of any parent block hash to its children.
-    pub(crate) parent_to_child: HashMap<B256, HashSet<B256>>,
+    pub(crate) parent_to_child: B256Map<B256Set>,
     /// Currently tracked canonical head of the chain.
     pub(crate) current_canonical_head: BlockNumHash,
     /// The engine API variant of this handler
@@ -50,10 +50,10 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Returns a new, empty tree state that points to the given canonical head.
     pub fn new(current_canonical_head: BlockNumHash, engine_kind: EngineApiKind) -> Self {
         Self {
-            blocks_by_hash: HashMap::default(),
+            blocks_by_hash: B256Map::default(),
             blocks_by_number: BTreeMap::new(),
             current_canonical_head,
-            parent_to_child: HashMap::default(),
+            parent_to_child: B256Map::default(),
             engine_kind,
             cached_canonical_overlay: None,
         }
@@ -178,7 +178,7 @@ impl<N: NodePrimitives> TreeState<N> {
     /// ## Returns
     ///
     /// The removed block and the block hashes of its children.
-    fn remove_by_hash(&mut self, hash: B256) -> Option<(ExecutedBlock<N>, HashSet<B256>)> {
+    fn remove_by_hash(&mut self, hash: B256) -> Option<(ExecutedBlock<N>, B256Set)> {
         let executed = self.blocks_by_hash.remove(&hash)?;
 
         // Remove this block from collection of children of its parent block.
@@ -489,7 +489,7 @@ mod tests {
 
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[0].recovered_block().hash()),
-            Some(&HashSet::from_iter([blocks[1].recovered_block().hash()]))
+            Some(&B256Set::from_iter([blocks[1].recovered_block().hash()]))
         );
 
         assert!(!tree_state.parent_to_child.contains_key(&blocks[1].recovered_block().hash()));
@@ -498,7 +498,7 @@ mod tests {
 
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[1].recovered_block().hash()),
-            Some(&HashSet::from_iter([blocks[2].recovered_block().hash()]))
+            Some(&B256Set::from_iter([blocks[2].recovered_block().hash()]))
         );
         assert!(tree_state.parent_to_child.contains_key(&blocks[1].recovered_block().hash()));
 
@@ -586,11 +586,11 @@ mod tests {
 
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[2].recovered_block().hash()),
-            Some(&HashSet::from_iter([blocks[3].recovered_block().hash()]))
+            Some(&B256Set::from_iter([blocks[3].recovered_block().hash()]))
         );
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[3].recovered_block().hash()),
-            Some(&HashSet::from_iter([blocks[4].recovered_block().hash()]))
+            Some(&B256Set::from_iter([blocks[4].recovered_block().hash()]))
         );
     }
 
@@ -636,11 +636,11 @@ mod tests {
 
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[2].recovered_block().hash()),
-            Some(&HashSet::from_iter([blocks[3].recovered_block().hash()]))
+            Some(&B256Set::from_iter([blocks[3].recovered_block().hash()]))
         );
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[3].recovered_block().hash()),
-            Some(&HashSet::from_iter([blocks[4].recovered_block().hash()]))
+            Some(&B256Set::from_iter([blocks[4].recovered_block().hash()]))
         );
     }
 
@@ -686,11 +686,11 @@ mod tests {
 
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[2].recovered_block().hash()),
-            Some(&HashSet::from_iter([blocks[3].recovered_block().hash()]))
+            Some(&B256Set::from_iter([blocks[3].recovered_block().hash()]))
         );
         assert_eq!(
             tree_state.parent_to_child.get(&blocks[3].recovered_block().hash()),
-            Some(&HashSet::from_iter([blocks[4].recovered_block().hash()]))
+            Some(&B256Set::from_iter([blocks[4].recovered_block().hash()]))
         );
     }
 }

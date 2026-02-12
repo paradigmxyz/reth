@@ -1,6 +1,6 @@
 //! Database adapters for payload building.
 use alloy_primitives::{
-    map::{Entry, HashMap},
+    map::{AddressMap, B256Map, Entry, HashMap, U256Map},
     Address, B256, U256,
 };
 use core::cell::RefCell;
@@ -31,9 +31,9 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 #[derive(Debug, Clone, Default)]
 pub struct CachedReads {
     /// Block state account with storage.
-    pub accounts: HashMap<Address, CachedAccount>,
+    pub accounts: AddressMap<CachedAccount>,
     /// Created contracts.
-    pub contracts: HashMap<B256, Bytecode>,
+    pub contracts: B256Map<Bytecode>,
     /// Block hash mapped to the block number.
     pub block_hashes: HashMap<u64, B256>,
 }
@@ -52,12 +52,7 @@ impl CachedReads {
     }
 
     /// Inserts an account info into the cache.
-    pub fn insert_account(
-        &mut self,
-        address: Address,
-        info: AccountInfo,
-        storage: HashMap<U256, U256>,
-    ) {
+    pub fn insert_account(&mut self, address: Address, info: AccountInfo, storage: U256Map<U256>) {
         self.accounts.insert(address, CachedAccount { info: Some(info), storage });
     }
 
@@ -201,12 +196,12 @@ pub struct CachedAccount {
     /// Account state.
     pub info: Option<AccountInfo>,
     /// Account's storage.
-    pub storage: HashMap<U256, U256>,
+    pub storage: U256Map<U256>,
 }
 
 impl CachedAccount {
     fn new(info: Option<AccountInfo>) -> Self {
-        Self { info, storage: HashMap::default() }
+        Self { info, storage: U256Map::default() }
     }
 }
 

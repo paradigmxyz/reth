@@ -70,7 +70,7 @@ where
         });
 
         // Spawn a task caching bad blocks
-        executor.spawn(Box::pin(async move {
+        executor.spawn_task(Box::pin(async move {
             while let Some(event) = stream.next().await {
                 if let ConsensusEngineEvent::InvalidBlock(block) = event &&
                     let Ok(recovered) =

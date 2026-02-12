@@ -38,6 +38,7 @@ reth-storage-errors.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-static-file-types.workspace = true
+reth-tasks.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 
@@ -120,9 +121,10 @@ test-utils = [
     "dep:reth-ethereum-primitives",
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
+    "reth-tasks/test-utils",
 ]
-rocksdb = ["reth-provider/rocksdb"]
-edge = ["reth-provider/edge", "reth-db-common/edge", "rocksdb"]
+rocksdb = ["reth-provider/rocksdb", "reth-db-common/rocksdb"]
+edge = ["rocksdb"]
 
 [[bench]]
 name = "criterion"

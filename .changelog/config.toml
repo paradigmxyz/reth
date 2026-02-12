@@ -1,0 +1,20 @@
+# Changelogs configuration for reth
+# https://github.com/wevm/changelogs
+
+# How to bump packages that depend on changed packages
+dependent_bump = "patch"
+
+[changelog]
+# Generate per-crate changelogs (vs single root changelog)
+format = "per-crate"
+
+# Fixed groups: all always share the same version
+# reth binaries share version
+[[fixed]]
+members = ["reth"]
+
+# Packages to ignore (internal/test-only crates)
+ignore = [
+    "reth-testing-utils",
+    "reth-bench",
+]

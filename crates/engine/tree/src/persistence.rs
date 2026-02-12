@@ -9,8 +9,9 @@ use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
     DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
 };
-use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
+use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
+use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
         mpsc::{Receiver, SendError, Sender},
@@ -20,7 +21,7 @@ use std::{
     time::Instant,
 };
 use thiserror::Error;
-use tracing::{debug, error};
+use tracing::{debug, error, instrument};
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -73,17 +74,6 @@ where
             pending_safe_block: None,
         }
     }
-
-    /// Prunes block data before the given block number according to the configured prune
-    /// configuration.
-    fn prune_before(&mut self, block_num: u64) -> Result<PrunerOutput, PrunerError> {
-        debug!(target: "engine::persistence", ?block_num, "Running pruner");
-        let start_time = Instant::now();
-        // TODO: doing this properly depends on pruner segment changes
-        let result = self.pruner.run(block_num);
-        self.metrics.prune_before_duration_seconds.record(start_time.elapsed());
-        result
-    }
 }
 
 impl<N> PersistenceService<N>
@@ -116,11 +106,6 @@ where
                         let _ = self
                             .sync_metrics_tx
                             .send(MetricEvent::SyncHeight { height: block_number });
-
-                        if self.pruner.is_pruning_needed(block_number) {
-                            // We log `PrunerOutput` inside the `Pruner`
-                            let _ = self.prune_before(block_number)?;
-                        }
                     }
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
@@ -134,6 +119,7 @@ where
         Ok(())
     }
 
+    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(new_tip_num))]
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,
@@ -151,6 +137,7 @@ where
         Ok(new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }))
     }
 
+    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = blocks.len()))]
     fn on_save_blocks(
         &mut self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
@@ -159,7 +146,6 @@ where
         let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
         let block_count = blocks.len();
 
-        // Take any pending finalized/safe block updates to commit together
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
 
@@ -167,16 +153,22 @@ where
 
         let start_time = Instant::now();
 
-        if last_block.is_some() {
+        if let Some(last) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
-            // Commit pending finalized/safe block updates in the same transaction
             if let Some(finalized) = pending_finalized {
                 provider_rw.save_finalized_block_number(finalized)?;
             }
             if let Some(safe) = pending_safe {
                 provider_rw.save_safe_block_number(safe)?;
+            }
+
+            if self.pruner.is_pruning_needed(last.number) {
+                debug!(target: "engine::persistence", block_num=?last.number, "Running pruner");
+                let prune_start = Instant::now();
+                let _ = self.pruner.run_with_provider(&provider_rw, last.number)?;
+                self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
             }
 
             provider_rw.commit()?;
@@ -264,14 +256,11 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         // spawn the persistence service
         let db_service =
             PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
-        let join_handle = std::thread::Builder::new()
-            .name("Persistence Service".to_string())
-            .spawn(|| {
-                if let Err(err) = db_service.run() {
-                    error!(target: "engine::persistence", ?err, "Persistence service failed");
-                }
-            })
-            .unwrap();
+        let join_handle = spawn_os_thread("persistence", || {
+            if let Err(err) = db_service.run() {
+                error!(target: "engine::persistence", ?err, "Persistence service failed");
+            }
+        });
 
         PersistenceHandle {
             sender: db_service_tx,
