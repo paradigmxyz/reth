@@ -67,7 +67,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         }
     }
 
-    /// Converts this child into a [`ProofTrieNode`] having the given path.
+    /// Converts this child into a [`ProofTrieNodeV2`] having the given path.
     ///
     /// # Panics
     ///

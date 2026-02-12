@@ -1317,8 +1317,8 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNode, BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode,
-        StorageMultiProof, TrieMask, TrieNode,
+        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
+        TrieMask,
     };
 
     #[test]
