@@ -28,7 +28,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTC_WRAPPER: sccache
-  BENCH_BLOCKS: ${{ inputs.blocks || '500' }}
+  BENCH_BLOCKS: ${{ inputs.blocks || '1000' }}
   BENCH_RPC_URL: https://ethereum.reth.rs/rpc
   SCHELK_MOUNT: /reth-bench
   JWT_SECRET: /reth-bench/jwt.hex
