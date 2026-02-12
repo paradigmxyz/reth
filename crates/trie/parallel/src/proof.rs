@@ -325,15 +325,7 @@ mod tests {
             reth_provider::providers::OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(factory);
         let runtime = reth_tasks::Runtime::test();
-        let storage_worker_count = runtime.proof_storage_worker_pool().current_num_threads();
-        let account_worker_count = runtime.proof_account_worker_pool().current_num_threads();
-        let proof_worker_handle = ProofWorkerHandle::new(
-            &runtime,
-            task_ctx,
-            storage_worker_count,
-            account_worker_count,
-            false,
-        );
+        let proof_worker_handle = ProofWorkerHandle::new(&runtime, task_ctx, false, false);
 
         let parallel_result = ParallelProof::new(Default::default(), proof_worker_handle.clone())
             .decoded_multiproof(targets.clone())

@@ -285,25 +285,9 @@ where
 
         // Create and spawn the storage proof task.
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        let mut storage_worker_count =
-            self.executor.proof_storage_worker_pool().current_num_threads();
-        let mut account_worker_count =
-            self.executor.proof_account_worker_pool().current_num_threads();
-
-        // Halve proof workers for small blocks — fewer txs means fewer state changes,
-        // so most workers would be idle overhead.
-        if transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD {
-            storage_worker_count /= 2;
-            account_worker_count /= 2;
-        }
-
-        let proof_handle = ProofWorkerHandle::new(
-            &self.executor,
-            task_ctx,
-            storage_worker_count,
-            account_worker_count,
-            v2_proofs_enabled,
-        );
+        let halve_workers = transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
+        let proof_handle =
+            ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers, v2_proofs_enabled);
 
         if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(

@@ -133,8 +133,7 @@ impl ProofWorkerHandle {
     pub fn new<Factory>(
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
-        storage_worker_count: usize,
-        account_worker_count: usize,
+        halve_workers: bool,
         v2_proofs_enabled: bool,
     ) -> Self
     where
@@ -151,10 +150,17 @@ impl ProofWorkerHandle {
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
+        let divisor = if halve_workers { 2 } else { 1 };
+        let storage_worker_count =
+            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
+        let account_worker_count =
+            runtime.proof_account_worker_pool().current_num_threads() / divisor;
+
         debug!(
             target: "trie::proof_task",
             storage_worker_count,
             account_worker_count,
+            halve_workers,
             ?v2_proofs_enabled,
             "Spawning proof worker pools"
         );
@@ -2006,15 +2012,7 @@ mod tests {
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();
-        let storage_worker_count = runtime.proof_storage_worker_pool().current_num_threads();
-        let account_worker_count = runtime.proof_account_worker_pool().current_num_threads();
-        let proof_handle = ProofWorkerHandle::new(
-            &runtime,
-            ctx,
-            storage_worker_count,
-            account_worker_count,
-            false,
-        );
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, false);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();
