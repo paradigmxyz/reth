@@ -4939,14 +4939,17 @@ mod tests {
         let mut trie = new_test_trie(
             [
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
-                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(TrieMask::new(0b1001))),
+                (
+                    Nibbles::from_nibbles([0x5]),
+                    SparseNode::new_branch(TrieMask::new(0b1001), TrieMask::new(0b1000)),
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
                     SparseNode::new_ext(Nibbles::from_nibbles([0x2, 0x3])),
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3]),
-                    SparseNode::new_branch(TrieMask::new(0b0101)),
+                    SparseNode::new_branch(TrieMask::new(0b0101), TrieMask::new(0b0101)),
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
@@ -5001,7 +5004,10 @@ mod tests {
         //
         let mut trie = new_test_trie(
             [
-                (Nibbles::default(), SparseNode::new_branch(TrieMask::new(0b0011))),
+                (
+                    Nibbles::default(),
+                    SparseNode::new_branch(TrieMask::new(0b0011), TrieMask::new(0b0011)),
+                ),
                 (Nibbles::from_nibbles([0x0]), SparseNode::new_leaf(leaf_key([0x1, 0x2], 63))),
                 (Nibbles::from_nibbles([0x1]), SparseNode::new_leaf(leaf_key([0x3, 0x4], 63))),
             ]
@@ -5061,7 +5067,10 @@ mod tests {
         let mut trie = new_test_trie(
             [
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
-                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(TrieMask::new(0b0011))),
+                (
+                    Nibbles::from_nibbles([0x5]),
+                    SparseNode::new_branch(TrieMask::new(0b0011), TrieMask::new(0b0011)),
+                ),
                 (Nibbles::from_nibbles([0x5, 0x0]), SparseNode::new_leaf(leaf_key([0x1, 0x2], 62))),
                 (Nibbles::from_nibbles([0x5, 0x1]), SparseNode::new_leaf(leaf_key([0x3, 0x4], 62))),
             ]
@@ -5110,9 +5119,15 @@ mod tests {
         //
         let mut trie = new_test_trie(
             [
-                (Nibbles::default(), SparseNode::new_branch(TrieMask::new(0b0101))),
+                (
+                    Nibbles::default(),
+                    SparseNode::new_branch(TrieMask::new(0b0101), TrieMask::new(0b0001)),
+                ),
                 (Nibbles::from_nibbles([0x0]), SparseNode::new_leaf(leaf_key([0x1, 0x2], 63))),
-                (Nibbles::from_nibbles([0x2]), SparseNode::new_branch(TrieMask::new(0b0011))),
+                (
+                    Nibbles::from_nibbles([0x2]),
+                    SparseNode::new_branch(TrieMask::new(0b0011), TrieMask::new(0b0011)),
+                ),
                 (Nibbles::from_nibbles([0x2, 0x0]), SparseNode::new_leaf(leaf_key([0x3, 0x4], 62))),
                 (Nibbles::from_nibbles([0x2, 0x1]), SparseNode::new_leaf(leaf_key([0x5, 0x6], 62))),
             ]
@@ -5172,7 +5187,7 @@ mod tests {
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x1, 0x2, 0x3]))),
                 (
                     Nibbles::from_nibbles([0x1, 0x2, 0x3]),
-                    SparseNode::new_branch(TrieMask::new(0b0011000)),
+                    SparseNode::new_branch(TrieMask::new(0b0011000), TrieMask::new(0b0001000)),
                 ),
                 (
                     Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x3]),
@@ -5184,7 +5199,7 @@ mod tests {
                 ),
                 (
                     Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5]),
-                    SparseNode::new_branch(TrieMask::new(0b0011)),
+                    SparseNode::new_branch(TrieMask::new(0b0011), TrieMask::new(0b0011)),
                 ),
                 (
                     Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x0]),
@@ -5245,7 +5260,10 @@ mod tests {
         //
         let mut trie = new_test_trie(
             [
-                (Nibbles::default(), SparseNode::new_branch(TrieMask::new(0b0011))),
+                (
+                    Nibbles::default(),
+                    SparseNode::new_branch(TrieMask::new(0b0011), TrieMask::new(0b0001)),
+                ),
                 (Nibbles::from_nibbles([0x0]), SparseNode::new_leaf(leaf_key([0x1, 0x2], 63))),
                 (Nibbles::from_nibbles([0x1]), SparseNode::Hash(B256::repeat_byte(0xab))),
             ]
@@ -5335,6 +5353,8 @@ mod tests {
                     Nibbles::default(),
                     SparseNode::Branch {
                         state_mask: TrieMask::new(0b0011),
+                        leaf_mask: TrieMask::new(0b0010), /* nibble 1 is a leaf, nibble 0 is
+                                                           * extension */
                         state: make_revealed(B256::repeat_byte(0x10)),
                     },
                 ),
@@ -5349,6 +5369,7 @@ mod tests {
                     Nibbles::from_nibbles([0x0, 0x1]),
                     SparseNode::Branch {
                         state_mask: TrieMask::new(0b11100),
+                        leaf_mask: TrieMask::new(0b11100), // nibbles 2, 3, 4 are all leaves
                         state: make_revealed(B256::repeat_byte(0x30)),
                     },
                 ),
@@ -5965,14 +5986,17 @@ mod tests {
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
-                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1101.into())),
+                (
+                    Nibbles::from_nibbles([0x5]),
+                    SparseNode::new_branch(0b1101.into(), 0b0100.into())
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
                     SparseNode::new_ext(Nibbles::from_nibbles([0x2, 0x3]))
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3]),
-                    SparseNode::new_branch(0b1010.into())
+                    SparseNode::new_branch(0b1010.into(), 0b1010.into())
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
@@ -5986,12 +6010,18 @@ mod tests {
                     Nibbles::from_nibbles([0x5, 0x2]),
                     SparseNode::new_leaf(leaf_key([0x0, 0x1, 0x3], 62))
                 ),
-                (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3]),
+                    SparseNode::new_branch(0b1010.into(), 0b0010.into())
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x1]),
                     SparseNode::new_leaf(leaf_key([0x0, 0x2], 61))
                 ),
-                (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3]),
+                    SparseNode::new_branch(0b0101.into(), 0b0101.into())
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
                     SparseNode::new_leaf(leaf_key([0x2], 60))
@@ -6028,14 +6058,17 @@ mod tests {
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
-                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
+                (
+                    Nibbles::from_nibbles([0x5]),
+                    SparseNode::new_branch(0b1001.into(), 0b0000.into())
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
                     SparseNode::new_ext(Nibbles::from_nibbles([0x2, 0x3]))
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3]),
-                    SparseNode::new_branch(0b1010.into())
+                    SparseNode::new_branch(0b1010.into(), 0b1010.into())
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
@@ -6045,12 +6078,18 @@ mod tests {
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]),
                     SparseNode::new_leaf(leaf_key([], 59))
                 ),
-                (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3]),
+                    SparseNode::new_branch(0b1010.into(), 0b0010.into())
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x1]),
                     SparseNode::new_leaf(leaf_key([0x0, 0x2], 61))
                 ),
-                (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3]),
+                    SparseNode::new_branch(0b0101.into(), 0b0101.into())
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
                     SparseNode::new_leaf(leaf_key([0x2], 60))
@@ -6084,17 +6123,26 @@ mod tests {
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
-                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
+                (
+                    Nibbles::from_nibbles([0x5]),
+                    SparseNode::new_branch(0b1001.into(), 0b0001.into())
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
                     SparseNode::new_leaf(leaf_key([0x2, 0x3, 0x3], 62))
                 ),
-                (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3]),
+                    SparseNode::new_branch(0b1010.into(), 0b0010.into())
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x1]),
                     SparseNode::new_leaf(leaf_key([0x0, 0x2], 61))
                 ),
-                (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3]),
+                    SparseNode::new_branch(0b0101.into(), 0b0101.into())
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
                     SparseNode::new_leaf(leaf_key([0x2], 60))
@@ -6126,7 +6174,10 @@ mod tests {
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
-                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
+                (
+                    Nibbles::from_nibbles([0x5]),
+                    SparseNode::new_branch(0b1001.into(), 0b0001.into())
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
                     SparseNode::new_leaf(leaf_key([0x2, 0x3, 0x3], 62))
@@ -6135,7 +6186,10 @@ mod tests {
                     Nibbles::from_nibbles([0x5, 0x3]),
                     SparseNode::new_ext(Nibbles::from_nibbles([0x3]))
                 ),
-                (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3]),
+                    SparseNode::new_branch(0b0101.into(), 0b0101.into())
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
                     SparseNode::new_leaf(leaf_key([0x2], 60))
@@ -6165,7 +6219,10 @@ mod tests {
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
-                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
+                (
+                    Nibbles::from_nibbles([0x5]),
+                    SparseNode::new_branch(0b1001.into(), 0b1001.into())
+                ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
                     SparseNode::new_leaf(leaf_key([0x2, 0x3, 0x3], 62))
@@ -6583,7 +6640,7 @@ mod tests {
         // Check that the branch node exists with only two nibbles set
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b101.into()))
+            Some(&SparseNode::new_branch(0b101.into(), 0b101.into()))
         );
 
         // Insert the leaf for the second key
@@ -6592,7 +6649,7 @@ mod tests {
         // Check that the branch node was updated and another nibble was set
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b111.into()))
+            Some(&SparseNode::new_branch(0b111.into(), 0b111.into()))
         );
 
         // Generate the proof for the third key and reveal it in the sparse trie
@@ -6618,7 +6675,7 @@ mod tests {
         // Check that nothing changed in the branch node
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b111.into()))
+            Some(&SparseNode::new_branch(0b111.into(), 0b111.into()))
         );
 
         // Generate the nodes for the full trie with all three key using the hash builder, and
@@ -6704,7 +6761,7 @@ mod tests {
         // Check that the branch node exists
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b11.into()))
+            Some(&SparseNode::new_branch(0b11.into(), 0b01.into()))
         );
 
         // Remove the leaf for the first key
@@ -6805,7 +6862,7 @@ mod tests {
         // Check that the extension node was turned into a branch node
         assert_matches!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, state: SparseNodeState::Dirty }) if *state_mask == TrieMask::new(0b11)
+            Some(SparseNode::Branch { state_mask, state: SparseNodeState::Dirty, .. }) if *state_mask == TrieMask::new(0b11)
         );
 
         // Generate the proof for the first key and reveal it in the sparse trie
@@ -6831,7 +6888,7 @@ mod tests {
         // Check that the branch node wasn't overwritten by the extension node in the proof
         assert_matches!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, state: SparseNodeState::Dirty }) if *state_mask == TrieMask::new(0b11)
+            Some(SparseNode::Branch { state_mask, state: SparseNodeState::Dirty, .. }) if *state_mask == TrieMask::new(0b11)
         );
     }
 
@@ -7987,7 +8044,7 @@ mod tests {
                 (
                     // Branch at 0x123, child 4
                     Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3]),
-                    SparseNode::new_branch(TrieMask::new(0b10000)),
+                    SparseNode::new_branch(TrieMask::new(0b10000), TrieMask::new(0)),
                 ),
                 (
                     // Blinded node at 0x1234
@@ -8016,7 +8073,11 @@ mod tests {
             [
                 // Root is a branch with child 0x1 (blinded) and 0x5 (revealed leaf)
                 // So we set Bit 1 and Bit 5 in the state_mask
-                (Nibbles::default(), SparseNode::new_branch(TrieMask::new(0b100010))),
+                // leaf_mask has bit 5 set (leaf at 0x5), bit 1 not set (hash at 0x1)
+                (
+                    Nibbles::default(),
+                    SparseNode::new_branch(TrieMask::new(0b100010), TrieMask::new(0b100000)),
+                ),
                 (path_to_blind, SparseNode::Hash(blinded_hash)),
                 (
                     Nibbles::from_nibbles_unchecked([0x5]),
