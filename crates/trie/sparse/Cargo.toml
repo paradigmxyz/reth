@@ -58,6 +58,7 @@ std = [
     "alloy-primitives/std",
     "alloy-rlp/std",
     "alloy-trie/std",
+    "arrayvec/std",
     "reth-execution-errors/std",
     "reth-primitives-traits/std",
     "reth-primitives-traits/rayon",
