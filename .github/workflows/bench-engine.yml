@@ -205,7 +205,6 @@ jobs:
             commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
           git push origin bench-charts
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          git checkout -
 
       # Compare against baseline and comment on PR
       - name: Compare & comment
