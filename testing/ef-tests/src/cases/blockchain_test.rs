@@ -257,7 +257,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Compute and check the post state root
         let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+            HashedPostState::from_bundle_state_adaptive::<KeccakKeyHasher>(output.state.state());
         let (computed_state_root, _) = StateRoot::overlay_root_with_updates(
             provider.tx_ref(),
             &hashed_state.clone_into_sorted(),

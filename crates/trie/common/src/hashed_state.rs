@@ -52,20 +52,7 @@ impl HashedPostState {
     ) -> Self {
         state
             .into_par_iter()
-            .map(|(address, account)| {
-                let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                );
-
-                (
-                    hashed_address,
-                    hashed_account,
-                    (!hashed_storage.is_empty()).then_some(hashed_storage),
-                )
-            })
+            .map(|(address, account)| Self::hash_bundle_account::<KH>(address, account))
             .collect()
     }
 
@@ -78,21 +65,48 @@ impl HashedPostState {
     ) -> Self {
         state
             .into_iter()
-            .map(|(address, account)| {
-                let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                );
-
-                (
-                    hashed_address,
-                    hashed_account,
-                    (!hashed_storage.is_empty()).then_some(hashed_storage),
-                )
-            })
+            .map(|(address, account)| Self::hash_bundle_account::<KH>(address, account))
             .collect()
+    }
+
+    /// Initialize [`HashedPostState`] from bundle state, choosing between sequential and parallel
+    /// hashing based on the number of accounts.
+    ///
+    /// For small account counts (≤ [`Self::ADAPTIVE_THRESHOLD`]), sequential iteration avoids
+    /// rayon's fixed scheduling overhead (~10-15µs), which exceeds the hashing work itself.
+    #[cfg(feature = "rayon")]
+    pub fn from_bundle_state_adaptive<KH: KeyHasher>(
+        state: &HashMap<Address, BundleAccount>,
+    ) -> Self {
+        if state.len() <= Self::ADAPTIVE_THRESHOLD {
+            state
+                .iter()
+                .map(|(address, account)| Self::hash_bundle_account::<KH>(address, account))
+                .collect()
+        } else {
+            Self::from_bundle_state::<KH>(state)
+        }
+    }
+
+    /// Account count at or below which sequential hashing outperforms rayon parallel iteration.
+    ///
+    /// Determined via microbenchmark: rayon's fixed overhead (~10-15µs) exceeds sequential hashing
+    /// cost for ≤32 accounts.
+    const ADAPTIVE_THRESHOLD: usize = 32;
+
+    /// Hashes a single bundle account entry into the tuple expected by [`FromIterator`].
+    fn hash_bundle_account<KH: KeyHasher>(
+        address: &Address,
+        account: &BundleAccount,
+    ) -> (B256, Option<Account>, Option<HashedStorage>) {
+        let hashed_address = KH::hash_key(address);
+        let hashed_account = account.info.as_ref().map(Into::into);
+        let hashed_storage = HashedStorage::from_plain_storage(
+            account.status,
+            account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+        );
+
+        (hashed_address, hashed_account, (!hashed_storage.is_empty()).then_some(hashed_storage))
     }
 
     /// Construct [`HashedPostState`] from a single [`HashedStorage`].

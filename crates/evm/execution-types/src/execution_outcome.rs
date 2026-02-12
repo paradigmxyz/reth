@@ -208,9 +208,9 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Returns [`HashedPostState`] for this execution outcome.
-    /// See [`HashedPostState::from_bundle_state`] for more info.
+    /// See [`HashedPostState::from_bundle_state_adaptive`] for more info.
     pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
+        HashedPostState::from_bundle_state_adaptive::<KH>(&self.bundle.state)
     }
 
     /// Transform block number to the index of block.

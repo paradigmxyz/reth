@@ -342,7 +342,7 @@ async fn test_pipeline() -> eyre::Result<()> {
 
         // Convert bundle state to hashed post state and compute state root
         let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+            HashedPostState::from_bundle_state_adaptive::<KeccakKeyHasher>(output.state.state());
         let (state_root, _trie_updates) = StateRoot::overlay_root_with_updates(
             provider.tx_ref(),
             &hashed_state.clone().into_sorted(),

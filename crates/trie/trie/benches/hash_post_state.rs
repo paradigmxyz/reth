@@ -9,7 +9,7 @@ pub fn hash_post_state(c: &mut Criterion) {
     let mut group = c.benchmark_group("Hash Post State");
     group.sample_size(20);
 
-    for size in [100, 1_000, 3_000, 5_000, 10_000] {
+    for size in [10, 20, 32, 50, 100, 1_000, 3_000, 5_000, 10_000] {
         // Too slow.
         #[expect(unexpected_cfgs)]
         if cfg!(codspeed) && size > 1_000 {
@@ -26,6 +26,15 @@ pub fn hash_post_state(c: &mut Criterion) {
         // parallel
         group.bench_function(BenchmarkId::new("parallel hashing", size), |b| {
             b.iter(|| HashedPostState::from_bundle_state::<KeccakKeyHasher>(&state))
+        });
+
+        // adaptive
+        let state_map: std::collections::HashMap<Address, BundleAccount> =
+            state.iter().map(|(k, v)| (*k, v.clone())).collect();
+        let state_map: alloy_primitives::map::HashMap<Address, BundleAccount> =
+            state_map.into_iter().collect();
+        group.bench_function(BenchmarkId::new("adaptive hashing", size), |b| {
+            b.iter(|| HashedPostState::from_bundle_state_adaptive::<KeccakKeyHasher>(&state_map))
         });
     }
 }

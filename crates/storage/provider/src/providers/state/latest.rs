@@ -144,7 +144,7 @@ impl<Provider: DBProvider> StateProofProvider for LatestStateProviderRef<'_, Pro
 
 impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_, Provider> {
     fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+        HashedPostState::from_bundle_state_adaptive::<KeccakKeyHasher>(bundle_state.state())
     }
 }
 
