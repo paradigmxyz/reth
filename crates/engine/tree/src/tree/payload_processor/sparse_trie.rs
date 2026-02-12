@@ -11,7 +11,7 @@ use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::ParallelIterator;
-use reth_primitives_traits::{dashmap::mapref::entry, Account, ParallelBridgeBuffered};
+use reth_primitives_traits::{Account, ParallelBridgeBuffered};
 use reth_tasks::Runtime;
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, Nibbles,
