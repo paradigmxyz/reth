@@ -501,25 +501,25 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_to, _) =
+        let output =
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
-        if range.is_empty() {
+        if output.block_range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
             })
         }
 
-        self.ensure_consistency(provider, input.checkpoint.block_number, Some(unwind_to))?;
+        self.ensure_consistency(provider, input.checkpoint.block_number, Some(output.unwind_to))?;
 
         // Unwind account and storage changesets, as well as receipts.
         //
         // This also updates `PlainStorageState` and `PlainAccountState`.
-        let bundle_state_with_receipts = provider.take_state_above(unwind_to)?;
+        let bundle_state_with_receipts = provider.take_state_above(output.unwind_to)?;
 
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
             // Get the blocks for the unwound range.
-            let blocks = provider.recovered_block_range(range.clone())?;
+            let blocks = provider.recovered_block_range(output.block_range.clone())?;
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
                 bundle_state_with_receipts,
@@ -538,7 +538,7 @@ where
         // Update the checkpoint.
         let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
         if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
-            for block_number in range {
+            for block_number in output.block_range.clone() {
                 stage_checkpoint.progress.processed -= provider
                     .header_by_number(block_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
@@ -546,9 +546,9 @@ where
             }
         }
         let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {
-            StageCheckpoint::new(unwind_to).with_execution_stage_checkpoint(stage_checkpoint)
+            StageCheckpoint::new(output.unwind_to).with_execution_stage_checkpoint(stage_checkpoint)
         } else {
-            StageCheckpoint::new(unwind_to)
+            StageCheckpoint::new(output.unwind_to)
         };
 
         Ok(UnwindOutput { checkpoint })

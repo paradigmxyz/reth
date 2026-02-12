@@ -38,6 +38,17 @@ pub struct TransactionRangeOutput {
     pub is_final_range: bool,
 }
 
+/// Return type for [`UnwindInput::unwind_block_range_with_threshold`].
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct UnwindBlockRangeOutput {
+    /// The block range to unwind.
+    pub block_range: RangeInclusive<BlockNumber>,
+    /// The block number to unwind to.
+    pub unwind_to: BlockNumber,
+    /// Whether this is the final range to unwind.
+    pub is_final_range: bool,
+}
+
 impl ExecInput {
     /// Return the checkpoint of the stage or default.
     pub fn checkpoint(&self) -> StageCheckpoint {
@@ -177,14 +188,11 @@ pub struct UnwindInput {
 impl UnwindInput {
     /// Return next block range that needs to be unwound.
     pub fn unwind_block_range(&self) -> RangeInclusive<BlockNumber> {
-        self.unwind_block_range_with_threshold(u64::MAX).0
+        self.unwind_block_range_with_threshold(u64::MAX).block_range
     }
 
     /// Return the next block range to unwind and the block we're unwinding to.
-    pub fn unwind_block_range_with_threshold(
-        &self,
-        threshold: u64,
-    ) -> (RangeInclusive<BlockNumber>, BlockNumber, bool) {
+    pub fn unwind_block_range_with_threshold(&self, threshold: u64) -> UnwindBlockRangeOutput {
         // +1 is to skip the block we're unwinding to
         let mut start = self.unwind_to + 1;
         let end = self.checkpoint;
@@ -194,7 +202,7 @@ impl UnwindInput {
         let unwind_to = start - 1;
 
         let is_final_range = unwind_to == self.unwind_to;
-        (start..=end.block_number, unwind_to, is_final_range)
+        UnwindBlockRangeOutput { block_range: start..=end.block_number, unwind_to, is_final_range }
     }
 }
 

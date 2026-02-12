@@ -176,10 +176,9 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress, _) =
-            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let output = input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        provider.unwind_storage_hashing_range(range)?;
+        provider.unwind_storage_hashing_range(output.block_range)?;
 
         let mut stage_checkpoint =
             input.checkpoint.storage_hashing_stage_checkpoint().unwrap_or_default();
@@ -187,7 +186,7 @@ where
         stage_checkpoint.progress = stage_checkpoint_progress(provider)?;
 
         Ok(UnwindOutput {
-            checkpoint: StageCheckpoint::new(unwind_progress)
+            checkpoint: StageCheckpoint::new(output.unwind_to)
                 .with_storage_hashing_stage_checkpoint(stage_checkpoint),
         })
     }

@@ -159,13 +159,12 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress, _) =
-            input.unwind_block_range_with_threshold(self.commit_threshold);
+        let output = input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        provider.unwind_account_history_indices_range(range)?;
+        provider.unwind_account_history_indices_range(output.block_range)?;
 
         // from HistoryIndex higher than that number.
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(output.unwind_to) })
     }
 }
 
