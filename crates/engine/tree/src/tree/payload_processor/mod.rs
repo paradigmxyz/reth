@@ -291,7 +291,7 @@ where
 
         // Cap proof workers for small blocks — fewer txs means fewer state changes,
         // so most workers would be idle overhead.
-        if transaction_count > 0 && transaction_count <= 30 {
+        if transaction_count <= 30 {
             storage_worker_count = storage_worker_count.min(16);
             account_worker_count = account_worker_count.min(16);
         }
