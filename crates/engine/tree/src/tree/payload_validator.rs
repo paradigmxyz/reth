@@ -443,11 +443,8 @@ where
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
         if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
-            state_provider = Box::new(CachedStateProvider::<_, false>::new(
-                state_provider,
-                caches,
-                cache_metrics,
-            ));
+            state_provider =
+                Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics));
         };
 
         if self.config.state_provider_metrics() {

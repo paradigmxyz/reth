@@ -96,10 +96,21 @@ pub struct CachedStateProvider<S, const PREWARM: bool = false> {
     metrics: CachedStateMetrics,
 }
 
-impl<S, const PREWARM: bool> CachedStateProvider<S, PREWARM> {
+impl<S> CachedStateProvider<S> {
     /// Creates a new [`CachedStateProvider`] from an [`ExecutionCache`], state provider, and
     /// [`CachedStateMetrics`].
     pub const fn new(
+        state_provider: S,
+        caches: ExecutionCache,
+        metrics: CachedStateMetrics,
+    ) -> Self {
+        Self { state_provider, caches, metrics }
+    }
+}
+
+impl<S> CachedStateProvider<S, true> {
+    /// Creates a new [`CachedStateProvider`] with prewarming enabled.
+    pub const fn new_prewarm(
         state_provider: S,
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
@@ -858,7 +869,7 @@ mod tests {
 
         let caches = ExecutionCache::new(1000);
         let state_provider =
-            CachedStateProvider::<_, false>::new(provider, caches, CachedStateMetrics::zeroed());
+            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
@@ -878,7 +889,7 @@ mod tests {
 
         let caches = ExecutionCache::new(1000);
         let state_provider =
-            CachedStateProvider::<_, false>::new(provider, caches, CachedStateMetrics::zeroed());
+            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
