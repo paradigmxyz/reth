@@ -83,6 +83,7 @@ pub trait ExecutableTxTuple: Send + 'static {
 
     /// Iterator over [`ExecutableTxTuple::Tx`].
     type IntoIter: IntoParallelIterator<Item = Self::RawTx, Iter: IndexedParallelIterator>
+        + IntoIterator<Item = Self::RawTx>
         + Send
         + 'static;
     /// Converter that can be used to convert a [`ExecutableTxTuple::RawTx`] to a
@@ -99,7 +100,10 @@ where
     RawTx: Send + Sync + 'static,
     Tx: Clone + Send + Sync + 'static,
     Err: core::error::Error + Send + Sync + 'static,
-    I: IntoParallelIterator<Item = RawTx, Iter: IndexedParallelIterator> + Send + 'static,
+    I: IntoParallelIterator<Item = RawTx, Iter: IndexedParallelIterator>
+        + IntoIterator<Item = RawTx>
+        + Send
+        + 'static,
     F: Fn(RawTx) -> Result<Tx, Err> + Send + Sync + 'static,
 {
     type RawTx = RawTx;
@@ -130,43 +134,70 @@ where
     type Recovered = <T::Tx as ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>>>::Recovered;
 }
 
+/// Wraps `Either<L, R>` to implement both [`IntoParallelIterator`] and [`IntoIterator`],
+/// mapping items through [`Either::Left`] / [`Either::Right`] on demand without collecting.
+#[derive(Debug)]
+pub struct EitherIter<L, R>(Either<L, R>);
+
+impl<L, R> IntoParallelIterator for EitherIter<L, R>
+where
+    L: IntoParallelIterator,
+    R: IntoParallelIterator,
+    L::Iter: IndexedParallelIterator,
+    R::Iter: IndexedParallelIterator,
+{
+    type Item = Either<L::Item, R::Item>;
+    type Iter = Either<
+        rayon::iter::Map<L::Iter, fn(L::Item) -> Either<L::Item, R::Item>>,
+        rayon::iter::Map<R::Iter, fn(R::Item) -> Either<L::Item, R::Item>>,
+    >;
+
+    fn into_par_iter(self) -> Self::Iter {
+        match self.0 {
+            Either::Left(l) => Either::Left(l.into_par_iter().map(Either::Left)),
+            Either::Right(r) => Either::Right(r.into_par_iter().map(Either::Right)),
+        }
+    }
+}
+
+impl<L, R> IntoIterator for EitherIter<L, R>
+where
+    L: IntoIterator,
+    R: IntoIterator,
+{
+    type Item = Either<L::Item, R::Item>;
+    type IntoIter = Either<
+        core::iter::Map<L::IntoIter, fn(L::Item) -> Either<L::Item, R::Item>>,
+        core::iter::Map<R::IntoIter, fn(R::Item) -> Either<L::Item, R::Item>>,
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self.0 {
+            Either::Left(l) => Either::Left(l.into_iter().map(Either::Left)),
+            Either::Right(r) => Either::Right(r.into_iter().map(Either::Right)),
+        }
+    }
+}
+
+// SAFETY: `EitherIter` is just a newtype over `Either<L, R>`.
+unsafe impl<L: Send, R: Send> Send for EitherIter<L, R> {}
+
 impl<A: ExecutableTxTuple, B: ExecutableTxTuple> ExecutableTxTuple for Either<A, B> {
     type RawTx = Either<A::RawTx, B::RawTx>;
     type Tx = Either<A::Tx, B::Tx>;
     type Error = Either<A::Error, B::Error>;
-    type IntoIter = Either<
-        rayon::iter::Map<
-            <A::IntoIter as IntoParallelIterator>::Iter,
-            fn(A::RawTx) -> Either<A::RawTx, B::RawTx>,
-        >,
-        rayon::iter::Map<
-            <B::IntoIter as IntoParallelIterator>::Iter,
-            fn(B::RawTx) -> Either<A::RawTx, B::RawTx>,
-        >,
-    >;
+    type IntoIter = EitherIter<A::IntoIter, B::IntoIter>;
     type Convert = Either<A::Convert, B::Convert>;
 
     fn into_parts(self) -> (Self::IntoIter, Self::Convert) {
         match self {
             Self::Left(a) => {
                 let (iter, convert) = a.into_parts();
-                (
-                    Either::Left(
-                        iter.into_par_iter()
-                            .map(Either::Left as fn(A::RawTx) -> Either<A::RawTx, B::RawTx>),
-                    ),
-                    Either::Left(convert),
-                )
+                (EitherIter(Either::Left(iter)), Either::Left(convert))
             }
             Self::Right(b) => {
                 let (iter, convert) = b.into_parts();
-                (
-                    Either::Right(
-                        iter.into_par_iter()
-                            .map(Either::Right as fn(B::RawTx) -> Either<A::RawTx, B::RawTx>),
-                    ),
-                    Either::Right(convert),
-                )
+                (EitherIter(Either::Right(iter)), Either::Right(convert))
             }
         }
     }
