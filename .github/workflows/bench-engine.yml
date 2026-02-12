@@ -1,6 +1,9 @@
 # Runs engine benchmarks by replaying real blocks via the Engine API against a reth
 # node backed by a local snapshot managed with schelk.
 #
+# Benchmarks are run sequentially: first on main (baseline), then on the feature
+# branch (candidate). Charts overlay both runs for comparison.
+#
 # The self-hosted runner must have:
 #   - schelk initialised (virgin + scratch volumes, ramdisk)
 #   - A JWT secret at /reth-bench/jwt.hex
@@ -47,46 +50,151 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: true
+          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
 
-      # Try to fetch pre-built binaries from MinIO cache, fall back to building
-      - name: Fetch or build binaries
+      # ── Build binaries for both branches ──────────────────────────
+      - name: Build feature branch binaries
         run: |
           MC="mc --config-dir /home/ubuntu/.mc"
           COMMIT="${{ github.event.pull_request.head.sha || github.sha }}"
           BUCKET="minio/reth-binaries/${COMMIT}"
 
           if $MC stat "${BUCKET}/reth" &>/dev/null && $MC stat "${BUCKET}/reth-bench" &>/dev/null; then
-            echo "Cache hit for ${COMMIT}, downloading binaries..."
-            mkdir -p target/profiling
-            $MC cp "${BUCKET}/reth" target/profiling/reth
-            $MC cp "${BUCKET}/reth-bench" /home/ubuntu/.cargo/bin/reth-bench
-            chmod +x target/profiling/reth /home/ubuntu/.cargo/bin/reth-bench
+            echo "Cache hit for feature ${COMMIT}"
+            mkdir -p /tmp/bench-bin/feature
+            $MC cp "${BUCKET}/reth" /tmp/bench-bin/feature/reth
+            $MC cp "${BUCKET}/reth-bench" /tmp/bench-bin/feature/reth-bench
+            chmod +x /tmp/bench-bin/feature/*
           else
-            echo "Cache miss for ${COMMIT}, building from source..."
+            echo "Cache miss for feature ${COMMIT}, building..."
             rustup show active-toolchain || rustup default stable
             make profiling
             make install-reth-bench
+            mkdir -p /tmp/bench-bin/feature
+            cp target/profiling/reth /tmp/bench-bin/feature/reth
+            cp "$(which reth-bench)" /tmp/bench-bin/feature/reth-bench
           fi
 
-      # Clean up any leftover state from cancelled runs
+      - name: Build main branch binaries
+        if: github.event_name == 'pull_request'
+        run: |
+          MC="mc --config-dir /home/ubuntu/.mc"
+          MAIN_SHA=$(git rev-parse origin/main)
+          BUCKET="minio/reth-binaries/${MAIN_SHA}"
+
+          if $MC stat "${BUCKET}/reth" &>/dev/null && $MC stat "${BUCKET}/reth-bench" &>/dev/null; then
+            echo "Cache hit for main ${MAIN_SHA}"
+            mkdir -p /tmp/bench-bin/main
+            $MC cp "${BUCKET}/reth" /tmp/bench-bin/main/reth
+            $MC cp "${BUCKET}/reth-bench" /tmp/bench-bin/main/reth-bench
+            chmod +x /tmp/bench-bin/main/*
+          else
+            echo "Cache miss for main ${MAIN_SHA}, building..."
+            git checkout origin/main
+            rustup show active-toolchain || rustup default stable
+            make profiling
+            make install-reth-bench
+            mkdir -p /tmp/bench-bin/main
+            cp target/profiling/reth /tmp/bench-bin/main/reth
+            cp "$(which reth-bench)" /tmp/bench-bin/main/reth-bench
+            git checkout -
+          fi
+
+      # ── Clean up any leftover state ───────────────────────────────
       - name: Pre-flight cleanup
         run: |
           pkill -9 reth || true
           mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
 
-      # Mount the scratch volume with change tracking
-      - name: Mount snapshot
+      # ── Run baseline (main) benchmark on PRs ─────────────────────
+      - name: Mount snapshot (main)
+        if: github.event_name == 'pull_request'
         run: |
           sudo schelk mount -y
           sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
 
-      # Start reth in the background and wait for it to be ready
-      - name: Start reth
+      - name: Start reth (main)
+        if: github.event_name == 'pull_request'
         run: |
-          target/profiling/reth node \
+          /tmp/bench-bin/main/reth node \
+            --datadir "$SCHELK_MOUNT/datadir" \
+            --authrpc.jwtsecret "$JWT_SECRET" \
+            --debug.startup-sync-state-idle \
+            --engine.accept-execution-requests-hash \
+            --http \
+            --http.port 8545 \
+            --ws \
+            --ws.api all \
+            --authrpc.port 8551 \
+            > /tmp/reth-bench-node-main.log 2>&1 &
+
+          echo "RETH_PID=$!" >> "$GITHUB_ENV"
+
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8545 -X POST \
+              -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+              > /dev/null 2>&1; then
+              echo "reth (main) is ready after ${i}s"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "::error::reth (main) failed to start within 60s"
+              cat /tmp/reth-bench-node-main.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Warmup (main)
+        if: github.event_name == 'pull_request'
+        run: |
+          /tmp/bench-bin/main/reth-bench new-payload-fcu \
+            --rpc-url "$BENCH_RPC_URL" \
+            --engine-rpc-url http://127.0.0.1:8551 \
+            --jwt-secret "$JWT_SECRET" \
+            --advance 50 \
+            --reth-new-payload
+
+      - name: Run benchmark (main)
+        if: github.event_name == 'pull_request'
+        run: |
+          /tmp/bench-bin/main/reth-bench new-payload-fcu \
+            --rpc-url "$BENCH_RPC_URL" \
+            --engine-rpc-url http://127.0.0.1:8551 \
+            --jwt-secret "$JWT_SECRET" \
+            --advance "$BENCH_BLOCKS" \
+            --reth-new-payload \
+            --output /tmp/bench-results-main
+
+      - name: Stop reth (main)
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -n "${RETH_PID:-}" ] && kill -0 "$RETH_PID" 2>/dev/null; then
+            kill "$RETH_PID"
+            for i in $(seq 1 30); do
+              kill -0 "$RETH_PID" 2>/dev/null || break
+              sleep 1
+            done
+            kill -9 "$RETH_PID" 2>/dev/null || true
+          fi
+
+      - name: Recover snapshot (main)
+        if: github.event_name == 'pull_request' && always()
+        run: mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+
+      # ── Run feature branch benchmark ──────────────────────────────
+      - name: Mount snapshot (feature)
+        run: |
+          sudo schelk mount -y
+          sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+
+      - name: Start reth (feature)
+        run: |
+          /tmp/bench-bin/feature/reth node \
             --datadir "$SCHELK_MOUNT/datadir" \
             --authrpc.jwtsecret "$JWT_SECRET" \
             --debug.startup-sync-state-idle \
@@ -100,37 +208,34 @@ jobs:
 
           echo "RETH_PID=$!" >> "$GITHUB_ENV"
 
-          # Wait for the engine API to be ready
           for i in $(seq 1 60); do
             if curl -sf http://127.0.0.1:8545 -X POST \
               -H 'Content-Type: application/json' \
               -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
               > /dev/null 2>&1; then
-              echo "reth is ready after ${i}s"
+              echo "reth (feature) is ready after ${i}s"
               break
             fi
             if [ "$i" -eq 60 ]; then
-              echo "::error::reth failed to start within 60s"
+              echo "::error::reth (feature) failed to start within 60s"
               cat /tmp/reth-bench-node.log
               exit 1
             fi
             sleep 1
           done
 
-      # Warmup: run 50 blocks to prime caches without collecting results
-      - name: Warmup
+      - name: Warmup (feature)
         run: |
-          reth-bench new-payload-fcu \
+          /tmp/bench-bin/feature/reth-bench new-payload-fcu \
             --rpc-url "$BENCH_RPC_URL" \
             --engine-rpc-url http://127.0.0.1:8551 \
             --jwt-secret "$JWT_SECRET" \
             --advance 50 \
             --reth-new-payload
 
-      # Run the benchmark
-      - name: Run benchmark
+      - name: Run benchmark (feature)
         run: |
-          reth-bench new-payload-fcu \
+          /tmp/bench-bin/feature/reth-bench new-payload-fcu \
             --rpc-url "$BENCH_RPC_URL" \
             --engine-rpc-url http://127.0.0.1:8551 \
             --jwt-secret "$JWT_SECRET" \
@@ -138,8 +243,7 @@ jobs:
             --reth-new-payload \
             --output /tmp/bench-results
 
-      # Stop reth
-      - name: Stop reth
+      - name: Stop reth (feature)
         if: always()
         run: |
           if [ -n "${RETH_PID:-}" ] && kill -0 "$RETH_PID" 2>/dev/null; then
@@ -151,12 +255,11 @@ jobs:
             kill -9 "$RETH_PID" 2>/dev/null || true
           fi
 
-      # Recover the snapshot to pristine state
-      - name: Recover snapshot
+      - name: Recover snapshot (feature)
         if: always()
         run: mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
 
-      # Parse results and generate summary
+      # ── Results & charts ──────────────────────────────────────────
       - name: Parse results
         id: results
         if: success()
@@ -167,16 +270,16 @@ jobs:
             --output-summary /tmp/bench-summary.json \
             --output-markdown /tmp/bench-comment.md
 
-      # Generate charts
       - name: Generate charts
         if: success()
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
-          uv run --with matplotlib python3 .github/scripts/bench-engine-charts.py \
-            /tmp/bench-results/combined_latency.csv \
-            --output-dir /tmp/bench-charts
+          CHART_ARGS="/tmp/bench-results/combined_latency.csv --output-dir /tmp/bench-charts"
+          if [ -f /tmp/bench-results-main/combined_latency.csv ]; then
+            CHART_ARGS="$CHART_ARGS --baseline /tmp/bench-results-main/combined_latency.csv"
+          fi
+          uv run --with matplotlib python3 .github/scripts/bench-engine-charts.py $CHART_ARGS
 
-      # Upload results as artifacts
       - name: Upload results
         if: success()
         uses: actions/upload-artifact@v4
@@ -184,15 +287,14 @@ jobs:
           name: bench-engine-results
           path: |
             /tmp/bench-results/
+            /tmp/bench-results-main/
             /tmp/bench-summary.json
             /tmp/bench-charts/
 
-      # Cache baseline results on main
       - name: Cache baseline
         if: github.ref == 'refs/heads/main' && success()
         run: cp /tmp/bench-summary.json /reth-bench/baseline.json
 
-      # Push charts to bench-charts branch for embedding in PR comments
       - name: Push charts
         id: push-charts
         if: github.event_name == 'pull_request' && success()
@@ -216,7 +318,6 @@ jobs:
           git push origin bench-charts
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      # Compare against baseline and comment on PR
       - name: Compare & comment
         if: github.event_name == 'pull_request' && success()
         uses: actions/github-script@v7
@@ -278,10 +379,11 @@ jobs:
               });
             }
 
-      # Upload node log on failure
       - name: Upload node log
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: reth-node-log
-          path: /tmp/reth-bench-node.log
+          path: |
+            /tmp/reth-bench-node-main.log
+            /tmp/reth-bench-node.log
