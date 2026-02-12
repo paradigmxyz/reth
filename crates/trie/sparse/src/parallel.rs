@@ -6,7 +6,6 @@ use crate::{
 };
 use alloc::{borrow::Cow, boxed::Box, vec, vec::Vec};
 use alloy_primitives::{
-    b256,
     map::{Entry, HashMap},
     B256, U256,
 };
