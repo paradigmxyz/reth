@@ -1567,6 +1567,7 @@ mod tests {
                               + BlockNumReader,
             > + Clone
             + Send
+            + Sync
             + 'static,
     {
         let runtime = get_test_runtime();

@@ -144,6 +144,7 @@ impl ProofWorkerHandle {
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
             + Clone
             + Send
+            + Sync
             + 'static,
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
@@ -166,17 +167,16 @@ impl ProofWorkerHandle {
         );
 
         let storage_pool = runtime.proof_storage_worker_pool();
-        let task_ctx_for_storage = task_ctx.clone();
-        let cached_storage_roots_for_storage = cached_storage_roots.clone();
+        {
+            let task_ctx = task_ctx.clone();
+            let storage_work_rx = storage_work_rx;
+            let storage_available_workers = storage_available_workers.clone();
+            let cached_storage_roots = cached_storage_roots.clone();
 
-        for worker_id in 0..storage_worker_count {
-            let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
-            let task_ctx_clone = task_ctx_for_storage.clone();
-            let work_rx_clone = storage_work_rx.clone();
-            let storage_available_workers_clone = storage_available_workers.clone();
-            let cached_storage_roots = cached_storage_roots_for_storage.clone();
+            storage_pool.spawn_broadcast(move |ctx| {
+                let worker_id = ctx.index();
+                let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
 
-            storage_pool.spawn(move || {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
                 #[cfg(feature = "metrics")]
@@ -184,11 +184,11 @@ impl ProofWorkerHandle {
 
                 let _guard = span.enter();
                 let worker = StorageProofWorker::new(
-                    task_ctx_clone,
-                    work_rx_clone,
+                    task_ctx.clone(),
+                    storage_work_rx.clone(),
                     worker_id,
-                    storage_available_workers_clone,
-                    cached_storage_roots,
+                    storage_available_workers.clone(),
+                    cached_storage_roots.clone(),
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
@@ -207,16 +207,15 @@ impl ProofWorkerHandle {
         }
 
         let account_pool = runtime.proof_account_worker_pool();
+        {
+            let storage_work_tx = storage_work_tx.clone();
+            let account_available_workers = account_available_workers.clone();
+            let cached_storage_roots = cached_storage_roots;
 
-        for worker_id in 0..account_worker_count {
-            let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
-            let task_ctx_clone = task_ctx.clone();
-            let work_rx_clone = account_work_rx.clone();
-            let storage_work_tx_clone = storage_work_tx.clone();
-            let account_available_workers_clone = account_available_workers.clone();
-            let cached_storage_roots = cached_storage_roots.clone();
+            account_pool.spawn_broadcast(move |ctx| {
+                let worker_id = ctx.index();
+                let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
 
-            account_pool.spawn(move || {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
                 #[cfg(feature = "metrics")]
@@ -224,12 +223,12 @@ impl ProofWorkerHandle {
 
                 let _guard = span.enter();
                 let worker = AccountProofWorker::new(
-                    task_ctx_clone,
-                    work_rx_clone,
+                    task_ctx.clone(),
+                    account_work_rx.clone(),
                     worker_id,
-                    storage_work_tx_clone,
-                    account_available_workers_clone,
-                    cached_storage_roots,
+                    storage_work_tx.clone(),
+                    account_available_workers.clone(),
+                    cached_storage_roots.clone(),
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
