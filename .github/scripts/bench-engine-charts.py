@@ -79,21 +79,22 @@ def plot_gas_per_second(rows: list[dict], out: Path):
 
 def plot_wait_breakdown(rows: list[dict], out: Path):
     blocks = [r["block_number"] for r in rows]
-    persistence_ms = [r["persistence_wait_us"] / 1_000 for r in rows]
-    exec_cache_ms = [r["execution_cache_wait_us"] / 1_000 for r in rows]
-    sparse_trie_ms = [r["sparse_trie_wait_us"] / 1_000 for r in rows]
+    series = [
+        ("Persistence Wait", [r["persistence_wait_us"] / 1_000 for r in rows], "#d62728"),
+        ("State Cache Wait", [r["execution_cache_wait_us"] / 1_000 for r in rows], "#ff7f0e"),
+        ("Trie Cache Wait", [r["sparse_trie_wait_us"] / 1_000 for r in rows], "#9467bd"),
+    ]
 
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(blocks, persistence_ms, linewidth=0.8, label="Persistence Wait", color="#d62728")
-    ax.plot(blocks, exec_cache_ms, linewidth=0.8, label="Execution Cache Wait", color="#ff7f0e")
-    ax.plot(blocks, sparse_trie_ms, linewidth=0.8, label="Sparse Trie Wait", color="#9467bd")
-    ax.set_xlabel("Block Number")
-    ax.set_ylabel("Wait Time (ms)")
-    ax.set_title("Wait Time Breakdown per Block")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
+    fig, axes = plt.subplots(len(series), 1, figsize=(12, 3 * len(series)), sharex=True)
+    for ax, (label, data, color) in zip(axes, series):
+        ax.plot(blocks, data, linewidth=0.8, color=color)
+        ax.set_ylabel("ms")
+        ax.set_title(label)
+        ax.grid(True, alpha=0.3)
+    axes[-1].set_xlabel("Block Number")
+    fig.suptitle("Wait Time Breakdown per Block", fontsize=14, y=1.01)
     fig.tight_layout()
-    fig.savefig(out, dpi=150)
+    fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
