@@ -41,7 +41,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Build ${{ matrix.chain.bin }}
-        run: make ${{ matrix.chain.build }}
+        run: make PROFILE=hivetests ${{ matrix.chain.build }}
       - name: Run sync
         run: |
           ${{ matrix.chain.bin }} node \
