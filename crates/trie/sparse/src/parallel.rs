@@ -3054,7 +3054,12 @@ impl SparseSubtrie {
                                     // Memoize the hash of a previously blinded node in a new
                                     // extension node.
                                     hash: Some(*hash),
-                                    store_in_db_trie: None,
+                                    // Inherit `store_in_db_trie` from the child branch
+                                    // node masks so that the memoized hash can be used
+                                    // without needing to fetch the child branch.
+                                    store_in_db_trie: Some(masks.is_some_and(|m| {
+                                        !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
+                                    })),
                                 });
                             }
                             _ => unreachable!("checked that node is either a hash or non-existent"),
