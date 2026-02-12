@@ -58,6 +58,7 @@ reth-node-metrics.workspace = true
 reth-consensus.workspace = true
 
 # alloy
+alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 
 # tracing
@@ -68,8 +69,14 @@ aquamarine.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 
 [dev-dependencies]
+alloy-node-bindings = "1.6.3"
+alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-rpc-types-eth.workspace = true
 backon.workspace = true
+serde_json.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+toml.workspace = true
 
 [features]
 default = [
@@ -106,10 +113,12 @@ asm-keccak = [
     "reth-primitives/asm-keccak",
     "reth-ethereum-cli/asm-keccak",
     "reth-node-ethereum/asm-keccak",
+    "alloy-primitives/asm-keccak",
 ]
 keccak-cache-global = [
     "reth-node-core/keccak-cache-global",
     "reth-node-ethereum/keccak-cache-global",
+    "alloy-primitives/keccak-cache-global",
 ]
 jemalloc = [
     "reth-cli-util/jemalloc",
