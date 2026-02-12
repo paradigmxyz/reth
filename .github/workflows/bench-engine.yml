@@ -55,52 +55,49 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
 
-      # ── Build binaries for both branches ──────────────────────────
-      - name: Build feature branch binaries
+      # ── Build binaries for both branches (in parallel) ────────────
+      - name: Build binaries
         run: |
           MC="mc --config-dir /home/ubuntu/.mc"
-          COMMIT="${{ github.event.pull_request.head.sha || github.sha }}"
-          BUCKET="minio/reth-binaries/${COMMIT}"
+          FEAT_COMMIT="${{ github.event.pull_request.head.sha || github.sha }}"
+          MAIN_SHA=$(git rev-parse origin/main 2>/dev/null || echo "")
+          mkdir -p /tmp/bench-bin/{main,feature}
+          rustup show active-toolchain || rustup default stable
 
-          if $MC stat "${BUCKET}/reth" &>/dev/null && $MC stat "${BUCKET}/reth-bench" &>/dev/null; then
-            echo "Cache hit for feature ${COMMIT}"
-            mkdir -p /tmp/bench-bin/feature
-            $MC cp "${BUCKET}/reth" /tmp/bench-bin/feature/reth
-            $MC cp "${BUCKET}/reth-bench" /tmp/bench-bin/feature/reth-bench
-            chmod +x /tmp/bench-bin/feature/*
-          else
-            echo "Cache miss for feature ${COMMIT}, building..."
-            rustup show active-toolchain || rustup default stable
-            make profiling
-            make install-reth-bench
-            mkdir -p /tmp/bench-bin/feature
-            cp target/profiling/reth /tmp/bench-bin/feature/reth
-            cp "$(which reth-bench)" /tmp/bench-bin/feature/reth-bench
+          fetch_or_build() {
+            local label=$1 commit=$2 srcdir=$3 outdir=$4
+            local bucket="minio/reth-binaries/${commit}"
+
+            if $MC stat "${bucket}/reth" &>/dev/null && $MC stat "${bucket}/reth-bench" &>/dev/null; then
+              echo "Cache hit for ${label} ${commit}"
+              $MC cp "${bucket}/reth" "${outdir}/reth"
+              $MC cp "${bucket}/reth-bench" "${outdir}/reth-bench"
+              chmod +x "${outdir}"/*
+            else
+              echo "Cache miss for ${label} ${commit}, building..."
+              make -C "${srcdir}" profiling
+              cargo install --path "${srcdir}/bin/reth-bench" --profile profiling --root "${outdir}"
+              cp "${srcdir}/target/profiling/reth" "${outdir}/reth"
+              mv "${outdir}/bin/reth-bench" "${outdir}/reth-bench"
+              rm -rf "${outdir}/bin" "${outdir}/.crates.toml" "${outdir}/.crates2.json"
+            fi
+          }
+
+          # Build main in a worktree (parallel with feature) on PRs
+          if [ -n "$MAIN_SHA" ] && [ "${{ github.event_name }}" = "pull_request" ]; then
+            git worktree add /tmp/reth-main origin/main
+            fetch_or_build "main" "$MAIN_SHA" "/tmp/reth-main" "/tmp/bench-bin/main" &
+            MAIN_PID=$!
           fi
 
-      - name: Build main branch binaries
-        if: github.event_name == 'pull_request'
-        run: |
-          MC="mc --config-dir /home/ubuntu/.mc"
-          MAIN_SHA=$(git rev-parse origin/main)
-          BUCKET="minio/reth-binaries/${MAIN_SHA}"
+          # Build feature in the current worktree
+          fetch_or_build "feature" "$FEAT_COMMIT" "." "/tmp/bench-bin/feature" &
+          FEAT_PID=$!
 
-          if $MC stat "${BUCKET}/reth" &>/dev/null && $MC stat "${BUCKET}/reth-bench" &>/dev/null; then
-            echo "Cache hit for main ${MAIN_SHA}"
-            mkdir -p /tmp/bench-bin/main
-            $MC cp "${BUCKET}/reth" /tmp/bench-bin/main/reth
-            $MC cp "${BUCKET}/reth-bench" /tmp/bench-bin/main/reth-bench
-            chmod +x /tmp/bench-bin/main/*
-          else
-            echo "Cache miss for main ${MAIN_SHA}, building..."
-            git checkout origin/main
-            rustup show active-toolchain || rustup default stable
-            make profiling
-            make install-reth-bench
-            mkdir -p /tmp/bench-bin/main
-            cp target/profiling/reth /tmp/bench-bin/main/reth
-            cp "$(which reth-bench)" /tmp/bench-bin/main/reth-bench
-            git checkout -
+          wait $FEAT_PID || exit 1
+          if [ -n "${MAIN_PID:-}" ]; then
+            wait $MAIN_PID || exit 1
+            git worktree remove /tmp/reth-main
           fi
 
       # ── Clean up any leftover state ───────────────────────────────
