@@ -355,7 +355,17 @@ where
         }
     }
 
+    /// Maximum number of transactions for which the sequential (non-rayon) conversion
+    /// path is used. Below this threshold the fixed overhead of rayon thread-pool dispatch,
+    /// out-of-order channels, and BTreeMap reordering exceeds the benefit of parallelism.
+    const SEQUENTIAL_TX_THRESHOLD: usize = 64;
+
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
+    ///
+    /// For small blocks (≤ [`Self::SEQUENTIAL_TX_THRESHOLD`] transactions), conversion runs
+    /// sequentially in a single `spawn_blocking` task, avoiding rayon dispatch, out-of-order
+    /// channels, and BTreeMap reordering overhead. For larger blocks the existing parallel
+    /// pipeline is used.
     #[expect(clippy::type_complexity)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
@@ -364,48 +374,74 @@ where
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
     ) {
-        let (ooo_tx, ooo_rx) = mpsc::channel();
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
 
-        // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
-        rayon::spawn(move || {
-            let (transactions, convert) = transactions.into_parts();
-            transactions.into_par_iter().enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
-                let tx = convert.convert(tx);
-                let tx = tx.map(|tx| {
-                    let (tx_env, tx) = tx.into_parts();
-                    WithTxEnv { tx_env, tx: Arc::new(tx) }
-                });
-                // Only send Ok(_) variants to prewarming task.
-                if let Ok(tx) = &tx {
-                    let _ = prewarm_tx.send(tx.clone());
-                }
-                let _ = ooo_tx.send((idx, tx));
-            });
-        });
+        let (transactions, convert) = transactions.into_parts();
+        let par_iter = transactions.into_par_iter();
+        let tx_count = par_iter.len();
 
-        // Spawn a task that processes out-of-order transactions from the task above and sends them
-        // to the execution task in order.
-        self.executor.spawn_blocking(move || {
-            let mut next_for_execution = 0;
-            let mut queue = BTreeMap::new();
-            while let Ok((idx, tx)) = ooo_rx.recv() {
-                if next_for_execution == idx {
-                    let _ = execute_tx.send(tx);
-                    next_for_execution += 1;
-
-                    while let Some(entry) = queue.first_entry() &&
-                        *entry.key() == next_for_execution
-                    {
-                        let _ = execute_tx.send(entry.remove());
-                        next_for_execution += 1;
+        if tx_count <= Self::SEQUENTIAL_TX_THRESHOLD {
+            // Fast path: process transactions sequentially in a single task.
+            // Avoids rayon thread-pool dispatch, the out-of-order channel, and the
+            // BTreeMap reorder task — significant fixed overhead for small blocks.
+            //
+            // Collect the raw txs first (cheap — just moves/copies of `Bytes` handles),
+            // then iterate and convert sequentially.
+            self.executor.spawn_blocking(move || {
+                let raw_txs: Vec<_> = par_iter.collect();
+                for raw in raw_txs {
+                    let tx = convert.convert(raw);
+                    let tx = tx.map(|tx| {
+                        let (tx_env, tx) = tx.into_parts();
+                        WithTxEnv { tx_env, tx: Arc::new(tx) }
+                    });
+                    if let Ok(ref tx) = tx {
+                        let _ = prewarm_tx.send(tx.clone());
                     }
-                } else {
-                    queue.insert(idx, tx);
+                    if execute_tx.send(tx).is_err() {
+                        break;
+                    }
                 }
-            }
-        });
+            });
+        } else {
+            // Parallel path: use rayon for large blocks.
+            let (ooo_tx, ooo_rx) = mpsc::channel();
+            rayon::spawn(move || {
+                par_iter.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
+                    let tx = convert.convert(tx);
+                    let tx = tx.map(|tx| {
+                        let (tx_env, tx) = tx.into_parts();
+                        WithTxEnv { tx_env, tx: Arc::new(tx) }
+                    });
+                    if let Ok(ref tx) = tx {
+                        let _ = prewarm_tx.send(tx.clone());
+                    }
+                    let _ = ooo_tx.send((idx, tx));
+                });
+            });
+
+            // Reorder out-of-order results back into sequential order.
+            self.executor.spawn_blocking(move || {
+                let mut next_for_execution = 0;
+                let mut queue = BTreeMap::new();
+                while let Ok((idx, tx)) = ooo_rx.recv() {
+                    if next_for_execution == idx {
+                        let _ = execute_tx.send(tx);
+                        next_for_execution += 1;
+
+                        while let Some(entry) = queue.first_entry() &&
+                            *entry.key() == next_for_execution
+                        {
+                            let _ = execute_tx.send(entry.remove());
+                            next_for_execution += 1;
+                        }
+                    } else {
+                        queue.insert(idx, tx);
+                    }
+                }
+            });
+        }
 
         (prewarm_rx, execute_rx)
     }
