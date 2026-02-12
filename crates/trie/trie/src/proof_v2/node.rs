@@ -122,9 +122,14 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     /// - If the node is a [`Self::Branch`] or [`Self::RlpNode`]
     pub(crate) fn trim_short_key_prefix(&mut self, len: usize) {
         match self {
-            Self::Leaf { short_key, .. } |
-            Self::Branch { node: BranchNodeV2 { key: short_key, .. }, .. } => {
+            Self::Leaf { short_key, .. } => {
                 *short_key = trim_nibbles_prefix(short_key, len);
+            }
+            Self::Branch { node: BranchNodeV2 { key, hash, .. }, .. } => {
+                *key = trim_nibbles_prefix(key, len);
+                if key.is_empty() {
+                    *hash = None;
+                }
             }
             Self::RlpNode(_) => {
                 panic!("Cannot call `trim_short_key_prefix` on RlpNode")
