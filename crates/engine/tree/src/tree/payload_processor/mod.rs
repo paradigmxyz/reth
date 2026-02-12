@@ -98,12 +98,7 @@ pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 
-/// Maximum proof workers to spawn per pool (storage/account) for small blocks.
-///
-/// Blocks with ≤30 transactions produce fewer state changes, so most workers would be idle
-/// overhead. Capping at 16 reduces MDBX read transactions and spawn cost while preserving the
-/// sparse trie cache chain.
-const SMALL_BLOCK_MAX_PROOF_WORKERS: usize = 16;
+
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
@@ -296,11 +291,11 @@ where
         let mut account_worker_count =
             self.executor.proof_account_worker_pool().current_num_threads();
 
-        // Cap proof workers for small blocks — fewer txs means fewer state changes,
+        // Halve proof workers for small blocks — fewer txs means fewer state changes,
         // so most workers would be idle overhead.
         if transaction_count <= Self::SMALL_BLOCK_TX_THRESHOLD {
-            storage_worker_count = storage_worker_count.min(SMALL_BLOCK_MAX_PROOF_WORKERS);
-            account_worker_count = account_worker_count.min(SMALL_BLOCK_MAX_PROOF_WORKERS);
+            storage_worker_count /= 2;
+            account_worker_count /= 2;
         }
 
         let proof_handle = ProofWorkerHandle::new(
