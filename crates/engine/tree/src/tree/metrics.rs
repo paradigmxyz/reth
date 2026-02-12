@@ -12,12 +12,13 @@ use reth_primitives_traits::constants::gas_units::MEGAGAS;
 use reth_trie::updates::TrieUpdates;
 use std::time::{Duration, Instant};
 
-/// Width of each gas bucket in gas units (10 Mgas).
-const GAS_BUCKET_SIZE: u64 = 10 * MEGAGAS;
+/// Upper bounds for each gas bucket. The last bucket is a catch-all for
+/// everything above the final threshold: <5M, 5-10M, 10-20M, 20-30M, 30-40M, >40M.
+const GAS_BUCKET_THRESHOLDS: [u64; 5] =
+    [5 * MEGAGAS, 10 * MEGAGAS, 20 * MEGAGAS, 30 * MEGAGAS, 40 * MEGAGAS];
 
-/// Number of gas buckets. The last bucket is a catch-all for everything above
-/// `(NUM_GAS_BUCKETS - 1) * GAS_BUCKET_SIZE`.
-const NUM_GAS_BUCKETS: usize = 5;
+/// Total number of gas buckets (thresholds + 1 catch-all).
+const NUM_GAS_BUCKETS: usize = GAS_BUCKET_THRESHOLDS.len() + 1;
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
@@ -280,21 +281,23 @@ impl GasBucketMetrics {
     }
 
     fn bucket_index(gas_used: u64) -> usize {
-        let idx = gas_used / GAS_BUCKET_SIZE;
-        (idx as usize).min(NUM_GAS_BUCKETS - 1)
+        GAS_BUCKET_THRESHOLDS
+            .iter()
+            .position(|&threshold| gas_used < threshold)
+            .unwrap_or(GAS_BUCKET_THRESHOLDS.len())
     }
 
-    /// Returns a human-readable label like `<10M`, `10-20M`, … `>40M`.
+    /// Returns a human-readable label like `<5M`, `5-10M`, … `>40M`.
     fn bucket_label(index: usize) -> String {
-        let m = GAS_BUCKET_SIZE / 1_000_000;
         if index == 0 {
-            format!("<{m}M")
-        } else if index < NUM_GAS_BUCKETS - 1 {
-            let lo = m * index as u64;
-            let hi = lo + m;
+            let hi = GAS_BUCKET_THRESHOLDS[0] / MEGAGAS;
+            format!("<{hi}M")
+        } else if index < GAS_BUCKET_THRESHOLDS.len() {
+            let lo = GAS_BUCKET_THRESHOLDS[index - 1] / MEGAGAS;
+            let hi = GAS_BUCKET_THRESHOLDS[index] / MEGAGAS;
             format!("{lo}-{hi}M")
         } else {
-            let lo = m * index as u64;
+            let lo = GAS_BUCKET_THRESHOLDS[GAS_BUCKET_THRESHOLDS.len() - 1] / MEGAGAS;
             format!(">{lo}M")
         }
     }
