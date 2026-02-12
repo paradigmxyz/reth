@@ -109,6 +109,7 @@ test-utils = [
     "alloy-primitives/rand",
     "reth-evm/test-utils",
     "reth-evm-ethereum/test-utils",
+    "reth-tasks/test-utils",
 ]
 arbitrary = [
     "proptest",

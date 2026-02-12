@@ -29,11 +29,8 @@ jobs:
       RUST_BACKTRACE: 1
     strategy:
       matrix:
-        network: ["ethereum", "optimism"]
+        network: ["ethereum"]
         storage: ["stable", "edge"]
-        exclude:
-          - network: optimism
-            storage: edge
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
@@ -46,18 +43,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - if: matrix.network == 'ethereum'
-        name: Run tests
+      - name: Run tests
         run: |
           cargo nextest run \
+            --no-fail-fast \
             --locked --features "asm-keccak ${{ matrix.network }} ${{ matrix.storage == 'edge' && 'edge' || '' }}" \
             --workspace --exclude ef-tests \
             -E "kind(test) and not binary(e2e_testsuite)"
-      - if: matrix.network == 'optimism'
-        name: Run tests
-        run: |
-          cargo nextest run \
-            --locked -p reth-optimism-node
 
   integration-success:
     name: integration success
@@ -73,7 +65,7 @@ jobs:
 
   era-files:
     name: era1 file integration tests once a day
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' && github.repository == 'paradigmxyz/reth'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -85,4 +77,4 @@ jobs:
         with:
           cache-on-failure: true
       - name: run era1 files integration tests
-        run: cargo nextest run --release --package reth-era --test it -- --ignored
+        run: cargo nextest run --no-fail-fast --release --package reth-era --test it -- --ignored

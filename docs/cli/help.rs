@@ -137,8 +137,11 @@ fn main() -> io::Result<()> {
 
     // Generate root SUMMARY.mdx.
     if args.root_summary {
-        let root_summary: String =
-            output.iter().map(|(cmd, _)| cmd_summary(cmd, args.root_indentation)).collect();
+        let root_summary: String = output
+            .iter()
+            .map(|(cmd, _)| cmd_summary(cmd, args.root_indentation))
+            .chain(once("\n".to_string()))
+            .collect();
 
         let path = Path::new(args.root_dir.as_str());
         if args.verbose {
@@ -265,7 +268,7 @@ fn generate_sidebar_files(
     output: &[(Cmd, String)],
     verbose: bool,
 ) -> io::Result<()> {
-    // Group commands by their root command name (reth or op-reth)
+    // Group commands by their root command name
     // Also create a map of commands to their help output
     let mut commands_by_root: std::collections::HashMap<String, Vec<&Cmd>> =
         std::collections::HashMap::new();
@@ -285,7 +288,6 @@ fn generate_sidebar_files(
         let sidebar_content = generate_sidebar_ts(&root_name, cmds, root_help, &help_map)?;
         let file_name = match root_name.as_str() {
             "reth" => "sidebar-cli-reth.ts",
-            "op-reth" => "sidebar-cli-op-reth.ts",
             _ => {
                 if verbose {
                     println!("Skipping unknown command: {}", root_name);
@@ -337,7 +339,6 @@ fn generate_sidebar_ts(
     // Generate TypeScript code
     let var_name = match root_name {
         "reth" => "rethCliSidebar",
-        "op-reth" => "opRethCliSidebar",
         _ => "cliSidebar",
     };
 
@@ -459,7 +460,6 @@ fn preprocess_help(s: &str) -> Cow<'_, str> {
             //  rustup available targets:
             //    aarch64-apple-darwin
             //    x86_64-unknown-linux-gnu
-            //    x86_64-pc-windows-gnu
             (
                 r"default: reth/.*-[0-9A-Fa-f]{6,10}/([_\w]+)-(\w+)-(\w+)(-\w+)?",
                 "default: reth/<VERSION>-<SHA>/<ARCH>",

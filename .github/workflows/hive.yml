@@ -5,7 +5,7 @@ name: hive
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 0 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,27 +15,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare-reth-stable:
-    uses: ./.github/workflows/prepare-reth.yml
+  build-reth-stable:
+    uses: ./.github/workflows/docker-test.yml
     with:
-      image_tag: ghcr.io/paradigmxyz/reth:latest
-      binary_name: reth
-      cargo_features: "asm-keccak"
+      hive_target: hive-stable
       artifact_name: "reth-stable"
+    secrets: inherit
 
-  prepare-reth-edge:
-    uses: ./.github/workflows/prepare-reth.yml
+  build-reth-edge:
+    uses: ./.github/workflows/docker-test.yml
     with:
-      image_tag: ghcr.io/paradigmxyz/reth:latest
-      binary_name: reth
-      cargo_features: "asm-keccak edge"
+      hive_target: hive-edge
       artifact_name: "reth-edge"
+    secrets: inherit
 
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on:
-      group: Reth
+    runs-on: depot-ubuntu-latest-4
     steps:
       - uses: actions/checkout@v6
       - name: Checkout hive tests
@@ -187,12 +184,11 @@ jobs:
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/paris.*
     needs:
-      - prepare-reth-stable
-      - prepare-reth-edge
+      - build-reth-stable
+      - build-reth-edge
       - prepare-hive
     name: ${{ matrix.storage }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
-    runs-on:
-      group: Reth
+    runs-on: depot-ubuntu-latest-4
     permissions:
       issues: write
     steps:

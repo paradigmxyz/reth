@@ -22,12 +22,6 @@ pub struct NetworkMetrics {
     /// Number of peers known to the node
     pub(crate) tracked_peers: Gauge,
 
-    /// Cumulative number of failures of pending sessions
-    pub(crate) pending_session_failures: Counter,
-
-    /// Total number of sessions closed
-    pub(crate) closed_sessions: Counter,
-
     /// Number of active incoming connections
     pub(crate) incoming_connections: Gauge,
 
@@ -75,6 +69,68 @@ pub struct NetworkMetrics {
     ///
     /// Duration in seconds.
     pub(crate) acc_duration_poll_swarm: Gauge,
+}
+
+/// Metrics for closed sessions, split by direction.
+#[derive(Debug)]
+pub struct ClosedSessionsMetrics {
+    /// Sessions closed from active (established) connections.
+    pub active: Counter,
+    /// Sessions closed from incoming pending connections.
+    pub incoming_pending: Counter,
+    /// Sessions closed from outgoing pending connections.
+    pub outgoing_pending: Counter,
+}
+
+impl Default for ClosedSessionsMetrics {
+    fn default() -> Self {
+        Self {
+            active: metrics::counter!("network_closed_sessions", "direction" => "active"),
+            incoming_pending: metrics::counter!("network_closed_sessions", "direction" => "incoming_pending"),
+            outgoing_pending: metrics::counter!("network_closed_sessions", "direction" => "outgoing_pending"),
+        }
+    }
+}
+
+/// Metrics for pending session failures, split by direction.
+#[derive(Debug)]
+pub struct PendingSessionFailureMetrics {
+    /// Failures on incoming pending sessions.
+    pub inbound: Counter,
+    /// Failures on outgoing pending sessions.
+    pub outbound: Counter,
+}
+
+impl Default for PendingSessionFailureMetrics {
+    fn default() -> Self {
+        Self {
+            inbound: metrics::counter!("network_pending_session_failures", "direction" => "inbound"),
+            outbound: metrics::counter!("network_pending_session_failures", "direction" => "outbound"),
+        }
+    }
+}
+
+/// Metrics for backed off peers, split by reason.
+#[derive(Metrics)]
+#[metrics(scope = "network.backed_off_peers")]
+pub struct BackedOffPeersMetrics {
+    /// Peers backed off because they reported too many peers.
+    pub too_many_peers: Counter,
+    /// Peers backed off after a graceful session close.
+    pub graceful_close: Counter,
+    /// Peers backed off due to connection or protocol errors.
+    pub connection_error: Counter,
+}
+
+impl BackedOffPeersMetrics {
+    /// Increments the counter for the given backoff reason.
+    pub fn increment_for_reason(&self, reason: crate::peers::BackoffReason) {
+        match reason {
+            crate::peers::BackoffReason::TooManyPeers => self.too_many_peers.increment(1),
+            crate::peers::BackoffReason::GracefulClose => self.graceful_close.increment(1),
+            crate::peers::BackoffReason::ConnectionError => self.connection_error.increment(1),
+        }
+    }
 }
 
 /// Metrics for `SessionManager`

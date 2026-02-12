@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn test_legacy_settings_skip_rocksdb_tx_creation() {
-        let provider = TestProvider::new(StorageSettings::legacy());
+        let provider = TestProvider::new(StorageSettings::v1());
 
         let result = provider.with_rocksdb_tx(|tx| {
             assert!(tx.is_none(), "legacy settings should pass None tx");
@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn test_rocksdb_settings_create_tx() {
         let settings =
-            StorageSettings { account_history_in_rocksdb: true, ..StorageSettings::legacy() };
+            StorageSettings { account_history_in_rocksdb: true, ..StorageSettings::v1() };
         let provider = TestProvider::new(settings);
 
         let result = provider.with_rocksdb_tx(|tx| {

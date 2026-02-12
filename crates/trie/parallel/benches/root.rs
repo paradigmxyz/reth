@@ -68,7 +68,11 @@ pub fn calculate_state_root(c: &mut Criterion) {
             b.iter_with_setup(
                 || {
                     let trie_input = TrieInput::from_state(updated_state.clone());
-                    ParallelStateRoot::new(factory.clone(), trie_input.prefix_sets.freeze())
+                    ParallelStateRoot::new(
+                        factory.clone(),
+                        trie_input.prefix_sets.freeze(),
+                        reth_tasks::Runtime::test(),
+                    )
                 },
                 |calculator| calculator.incremental_root(),
             );

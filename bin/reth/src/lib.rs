@@ -51,6 +51,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+// Used in feature flags only (`asm-keccak`, `keccak-cache-global`)
+use alloy_primitives as _;
+
 pub mod cli;
 
 /// Re-exported utils.
@@ -205,12 +208,9 @@ pub mod rpc {
     }
 }
 
-/// Ress subprotocol installation.
-pub mod ress;
-
 // re-export for convenience
 #[doc(inline)]
-pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
+pub use reth_cli_runner::{CliContext, CliRunner};
 
 // for rendering diagrams
 use aquamarine as _;
@@ -218,3 +218,4 @@ use aquamarine as _;
 // used in main
 use clap as _;
 use reth_cli_util as _;
+use tracing as _;

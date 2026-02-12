@@ -177,11 +177,10 @@ where
                         stats.borrow_mut().dispatched_missing_root_count += 1;
 
                         let mut calculator = storage_calculator.borrow_mut();
-                        let proof =
-                            calculator.storage_proof(hashed_address, &mut [B256::ZERO.into()])?;
+                        let root_node = calculator.storage_root_node(hashed_address)?;
                         let storage_root = calculator
-                            .compute_root_hash(&proof)?
-                            .expect("storage_proof with dummy target always returns root");
+                            .compute_root_hash(&[root_node])?
+                            .expect("storage_root_node returns a node at empty path");
 
                         cached_storage_roots.insert(hashed_address, storage_root);
                         storage_root
@@ -195,10 +194,10 @@ where
                 let hashed_address = *hashed_address;
                 let account = *account;
                 let mut calculator = storage_calculator.borrow_mut();
-                let proof = calculator.storage_proof(hashed_address, &mut [B256::ZERO.into()])?;
+                let root_node = calculator.storage_root_node(hashed_address)?;
                 let storage_root = calculator
-                    .compute_root_hash(&proof)?
-                    .expect("storage_proof with dummy target always returns root");
+                    .compute_root_hash(&[root_node])?
+                    .expect("storage_root_node returns a node at empty path");
 
                 cached_storage_roots.insert(hashed_address, storage_root);
                 (account, storage_root)

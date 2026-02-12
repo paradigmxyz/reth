@@ -1,4 +1,5 @@
 use crate::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor};
+use alloy_consensus::transaction::Either;
 use alloy_evm::{block::ExecutableTxParts, RecoveredTx};
 use rayon::prelude::*;
 use reth_primitives_traits::TxTy;
@@ -21,10 +22,55 @@ pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error>;
 }
 
+/// Converts a raw transaction into an executable transaction.
+///
+/// This trait abstracts the conversion logic (e.g., decoding, signature recovery) that is
+/// parallelized in the engine.
+pub trait ConvertTx<RawTx>: Send + Sync + 'static {
+    /// The executable transaction type.
+    type Tx;
+    /// Errors that may occur during conversion.
+    type Error;
+    /// Converts a raw transaction.
+    fn convert(&self, raw: RawTx) -> Result<Self::Tx, Self::Error>;
+}
+
+// Blanket impl so closures still work.
+impl<F, RawTx, Tx, Err> ConvertTx<RawTx> for F
+where
+    F: Fn(RawTx) -> Result<Tx, Err> + Send + Sync + 'static,
+{
+    type Tx = Tx;
+    type Error = Err;
+    fn convert(&self, raw: RawTx) -> Result<Tx, Err> {
+        self(raw)
+    }
+}
+
+impl<A, B, RA, RB> ConvertTx<Either<RA, RB>> for Either<A, B>
+where
+    A: ConvertTx<RA>,
+    B: ConvertTx<RB>,
+{
+    type Tx = Either<A::Tx, B::Tx>;
+    type Error = Either<A::Error, B::Error>;
+    fn convert(&self, raw: Either<RA, RB>) -> Result<Self::Tx, Self::Error> {
+        match (self, raw) {
+            (Self::Left(a), Either::Left(raw)) => {
+                a.convert(raw).map(Either::Left).map_err(Either::Left)
+            }
+            (Self::Right(b), Either::Right(raw)) => {
+                b.convert(raw).map(Either::Right).map_err(Either::Right)
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
 /// A helper trait representing a pair of a "raw" transactions iterator and a closure that can be
 /// used to convert them to an executable transaction. This tuple is used in the engine to
 /// parallelize heavy work like decoding or recovery.
-pub trait ExecutableTxTuple: Into<(Self::IntoIter, Self::Convert)> + Send + 'static {
+pub trait ExecutableTxTuple: Send + 'static {
     /// Raw transaction that can be converted to an [`ExecutableTxTuple::Tx`]
     ///
     /// This can be any type that can be converted to an [`ExecutableTxTuple::Tx`]. For example,
@@ -39,10 +85,13 @@ pub trait ExecutableTxTuple: Into<(Self::IntoIter, Self::Convert)> + Send + 'sta
     type IntoIter: IntoParallelIterator<Item = Self::RawTx, Iter: IndexedParallelIterator>
         + Send
         + 'static;
-    /// Closure that can be used to convert a [`ExecutableTxTuple::RawTx`] to a
+    /// Converter that can be used to convert a [`ExecutableTxTuple::RawTx`] to a
     /// [`ExecutableTxTuple::Tx`]. This might involve heavy work like decoding or recovery
     /// and will be parallelized in the engine.
-    type Convert: Fn(Self::RawTx) -> Result<Self::Tx, Self::Error> + Send + Sync + 'static;
+    type Convert: ConvertTx<Self::RawTx, Tx = Self::Tx, Error = Self::Error>;
+
+    /// Decomposes into the raw transaction iterator and converter.
+    fn into_parts(self) -> (Self::IntoIter, Self::Convert);
 }
 
 impl<RawTx, Tx, Err, I, F> ExecutableTxTuple for (I, F)
@@ -59,6 +108,10 @@ where
 
     type IntoIter = I;
     type Convert = F;
+
+    fn into_parts(self) -> (I, F) {
+        self
+    }
 }
 
 /// Iterator over executable transactions.
@@ -75,4 +128,46 @@ where
     T: ExecutableTxTuple<Tx: ExecutableTxFor<Evm, Recovered: Send + Sync>>,
 {
     type Recovered = <T::Tx as ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>>>::Recovered;
+}
+
+impl<A: ExecutableTxTuple, B: ExecutableTxTuple> ExecutableTxTuple for Either<A, B> {
+    type RawTx = Either<A::RawTx, B::RawTx>;
+    type Tx = Either<A::Tx, B::Tx>;
+    type Error = Either<A::Error, B::Error>;
+    type IntoIter = Either<
+        rayon::iter::Map<
+            <A::IntoIter as IntoParallelIterator>::Iter,
+            fn(A::RawTx) -> Either<A::RawTx, B::RawTx>,
+        >,
+        rayon::iter::Map<
+            <B::IntoIter as IntoParallelIterator>::Iter,
+            fn(B::RawTx) -> Either<A::RawTx, B::RawTx>,
+        >,
+    >;
+    type Convert = Either<A::Convert, B::Convert>;
+
+    fn into_parts(self) -> (Self::IntoIter, Self::Convert) {
+        match self {
+            Self::Left(a) => {
+                let (iter, convert) = a.into_parts();
+                (
+                    Either::Left(
+                        iter.into_par_iter()
+                            .map(Either::Left as fn(A::RawTx) -> Either<A::RawTx, B::RawTx>),
+                    ),
+                    Either::Left(convert),
+                )
+            }
+            Self::Right(b) => {
+                let (iter, convert) = b.into_parts();
+                (
+                    Either::Right(
+                        iter.into_par_iter()
+                            .map(Either::Right as fn(B::RawTx) -> Either<A::RawTx, B::RawTx>),
+                    ),
+                    Either::Right(convert),
+                )
+            }
+        }
+    }
 }

@@ -1,7 +1,7 @@
 //! Test case definitions
 
 use crate::result::{CaseResult, Error};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::prelude::*;
 use std::{
     fmt::Debug,
     path::{Path, PathBuf},
@@ -10,7 +10,7 @@ use std::{
 /// A single test case, capable of loading a JSON description of itself and running it.
 ///
 /// See <https://ethereum-tests.readthedocs.io/> for test specs.
-pub trait Case: Debug + Sync + Sized {
+pub trait Case: Debug + Send + Sync + Sized + 'static {
     /// A description of the test.
     fn description(&self) -> String {
         "no description".to_string()
@@ -22,7 +22,7 @@ pub trait Case: Debug + Sync + Sized {
     fn load(path: &Path) -> Result<Self, Error>;
 
     /// Run the test.
-    fn run(&self) -> Result<(), Error>;
+    fn run(self) -> Result<(), Error>;
 }
 
 /// A container for multiple test cases.
@@ -34,10 +34,10 @@ pub struct Cases<T> {
 
 impl<T: Case> Cases<T> {
     /// Run the contained test cases.
-    pub fn run(&self) -> Vec<CaseResult> {
+    pub fn run(self) -> Vec<CaseResult> {
         self.test_cases
-            .par_iter()
-            .map(|(path, case)| CaseResult::new(path, case, case.run()))
+            .into_par_iter()
+            .map(|(path, case)| CaseResult::new(&path, case.description(), case.run()))
             .collect()
     }
 }

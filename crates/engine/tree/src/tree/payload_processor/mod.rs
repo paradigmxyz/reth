@@ -11,11 +11,10 @@ use crate::tree::{
     StateProviderBuilder, TreeConfig,
 };
 use alloy_eip7928::BlockAccessList;
-use alloy_eips::eip1898::BlockWithParent;
+use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use executor::WorkloadExecutor;
 use metrics::{Counter, Histogram};
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
@@ -24,8 +23,8 @@ use rayon::prelude::*;
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
-    TxEnvFor,
+    ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook,
+    SpecFor, TxEnvFor,
 };
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
@@ -34,13 +33,15 @@ use reth_provider::{
     StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
+use reth_tasks::Runtime;
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{RevealableSparseTrie, SparseStateTrie};
-use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
+use reth_trie_sparse::{
+    ParallelSparseTrie, ParallelismThresholds, RevealableSparseTrie, SparseStateTrie,
+};
 use std::{
     collections::BTreeMap,
     ops::Not,
@@ -54,7 +55,6 @@ use std::{
 use tracing::{debug, debug_span, instrument, warn, Span};
 
 pub mod bal;
-pub mod executor;
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
@@ -108,7 +108,7 @@ where
     Evm: ConfigureEvm,
 {
     /// The executor used by to spawn tasks.
-    executor: WorkloadExecutor,
+    executor: Runtime,
     /// The most recent cache used for execution.
     execution_cache: PayloadExecutionCache,
     /// Metrics for trie operations
@@ -145,13 +145,13 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     /// Returns a reference to the workload executor driving payload tasks.
-    pub const fn executor(&self) -> &WorkloadExecutor {
+    pub const fn executor(&self) -> &Runtime {
         &self.executor
     }
 
     /// Creates a new payload processor.
     pub fn new(
-        executor: WorkloadExecutor,
+        executor: Runtime,
         evm_config: Evm,
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
@@ -253,15 +253,13 @@ where
             // When BAL is present, use BAL prewarming and send BAL to multiproof
             debug!(target: "engine::tree::payload_processor", "BAL present, using BAL prewarming");
 
-            // Send BAL message immediately to MultiProofTask
-            let _ = to_multi_proof.send(MultiProofMessage::BlockAccessList(Arc::clone(&bal)));
-
-            // Spawn with BAL prewarming
+            // The prewarm task converts the BAL to HashedPostState and sends it on
+            // to_multi_proof after slot prefetching completes.
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
                 provider_builder.clone(),
-                None, // Don't send proof targets when BAL is present
+                Some(to_multi_proof.clone()),
                 Some(bal),
                 v2_proofs_enabled,
             )
@@ -279,18 +277,10 @@ where
 
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        let storage_worker_count = config.storage_worker_count();
-        let account_worker_count = config.account_worker_count();
-        let proof_handle = ProofWorkerHandle::new(
-            self.executor.handle().clone(),
-            task_ctx,
-            storage_worker_count,
-            account_worker_count,
-            v2_proofs_enabled,
-            storage_filter,
-        );
+        let proof_handle =
+            ProofWorkerHandle::new(&self.executor, task_ctx, v2_proofs_enabled, storage_filter);
 
-        if !config.enable_sparse_trie_as_cache() {
+        if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(
                 proof_handle.clone(),
                 to_sparse_trie,
@@ -309,7 +299,7 @@ where
                 let provider = provider_builder.build().expect("failed to build provider");
                 let provider = if let Some(saved_cache) = saved_cache {
                     let (cache, metrics, _disable_metrics) = saved_cache.split();
-                    Box::new(CachedStateProvider::new(provider, cache, metrics))
+                    Box::new(CachedStateProvider::<_, false>::new(provider, cache, metrics))
                         as Box<dyn StateProvider>
                 } else {
                     Box::new(provider)
@@ -382,9 +372,9 @@ where
 
         // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
         rayon::spawn(move || {
-            let (transactions, convert) = transactions.into();
+            let (transactions, convert) = transactions.into_parts();
             transactions.into_par_iter().enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
-                let tx = convert(tx);
+                let tx = convert.convert(tx);
                 let tx = tx.map(|tx| {
                     let (tx_env, tx) = tx.into_parts();
                     WithTxEnv { tx_env, tx: Arc::new(tx) }
@@ -426,7 +416,7 @@ where
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
@@ -435,11 +425,7 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        if self.disable_transaction_prewarming {
-            // if no transactions should be executed we clear them but still spawn the task for
-            // caching updates
-            transactions = mpsc::channel().1;
-        }
+        let skip_prewarm = self.disable_transaction_prewarming;
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -468,7 +454,9 @@ where
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking(move || {
-                let mode = if let Some(bal) = bal {
+                let mode = if skip_prewarm {
+                    PrewarmMode::Skipped
+                } else if let Some(bal) = bal {
                     PrewarmMode::BlockAccessList(bal)
                 } else {
                     PrewarmMode::Transactions(transactions)
@@ -503,7 +491,6 @@ where
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
@@ -515,14 +502,16 @@ where
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
-        let disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
+        let disable_trie_cache = config.disable_trie_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
         let chunk_size =
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
+        let executor = self.executor.clone();
 
+        let parent_span = Span::current();
         self.executor.spawn_blocking(move || {
-            let _enter = debug_span!(target: "engine::tree::payload_processor", "sparse_trie_task")
+            let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 
             // Reuse a stored SparseStateTrie if available, applying continuation logic.
@@ -553,7 +542,7 @@ where
                         .with_updates(true)
                 });
 
-            let mut task = if disable_sparse_trie_as_cache {
+            let mut task = if disable_trie_cache {
                 SpawnedSparseTrieTask::Cleared(SparseTrieTask::new(
                     sparse_trie_rx,
                     proof_worker_handle,
@@ -562,10 +551,11 @@ where
                 ))
             } else {
                 SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_trie(
+                    &executor,
                     from_multi_proof,
                     proof_worker_handle,
                     trie_metrics.clone(),
-                    sparse_state_trie,
+                    sparse_state_trie.with_skip_proof_node_filtering(true),
                     chunk_size,
                 ))
             };
@@ -722,6 +712,18 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
             .expect("state_root is None")
             .recv()
             .map_err(|_| ParallelStateRootError::Other("sparse trie task dropped".to_string()))?
+    }
+
+    /// Takes the state root receiver out of the handle for use with custom waiting logic
+    /// (e.g., timeout-based waiting).
+    ///
+    /// # Panics
+    ///
+    /// If payload processing was started without background tasks.
+    pub const fn take_state_root_rx(
+        &mut self,
+    ) -> mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
+        self.state_root.take().expect("state_root is None")
     }
 
     /// Returns a state hook to be used to send state updates to this task.
@@ -976,6 +978,9 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used to determine parallel worker count for prewarming.
     /// A value of 0 indicates the count is unknown.
     pub transaction_count: usize,
+    /// Withdrawals included in the block.
+    /// Used to generate prefetch targets for withdrawal addresses.
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
@@ -989,6 +994,7 @@ where
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
             transaction_count: 0,
+            withdrawals: None,
         }
     }
 }
@@ -998,9 +1004,7 @@ mod tests {
     use super::PayloadExecutionCache;
     use crate::tree::{
         cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
-        payload_processor::{
-            evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
-        },
+        payload_processor::{evm_state_to_hashed_post_state, PayloadProcessor},
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };
@@ -1102,7 +1106,7 @@ mod tests {
     #[test]
     fn on_inserted_executed_block_populates_cache() {
         let payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::default(),
+            reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
@@ -1131,7 +1135,7 @@ mod tests {
     #[test]
     fn on_inserted_executed_block_skips_on_parent_mismatch() {
         let payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::default(),
+            reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
@@ -1266,7 +1270,7 @@ mod tests {
         }
 
         let mut payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::default(),
+            reth_tasks::Runtime::test(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),

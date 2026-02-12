@@ -78,6 +78,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     rocksdb_provider: RocksDBProvider,
     /// Changeset cache for trie unwinding
     changeset_cache: ChangesetCache,
+    /// Task runtime for spawning parallel I/O work.
+    runtime: reth_tasks::Runtime,
 }
 
 impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>> {
@@ -100,12 +102,13 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
         // Load storage settings from database at init time. Creates a temporary provider
         // to read persisted settings, falling back to legacy defaults if none exist.
         //
         // Both factory and all providers it creates should share these cached settings.
-        let legacy_settings = StorageSettings::legacy();
+        let legacy_settings = StorageSettings::v1();
         let storage_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),
@@ -115,6 +118,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Arc::new(RwLock::new(legacy_settings)),
             rocksdb_provider.clone(),
             ChangesetCache::new(),
+            runtime.clone(),
         )
         .storage_settings()?
         .unwrap_or(legacy_settings);
@@ -128,6 +132,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             storage_settings: Arc::new(RwLock::new(storage_settings)),
             rocksdb_provider,
             changeset_cache: ChangesetCache::new(),
+            runtime,
         })
     }
 
@@ -142,8 +147,9 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
-        Self::new(db, chain_spec, static_file_provider, rocksdb_provider)
+        Self::new(db, chain_spec, static_file_provider, rocksdb_provider, runtime)
             .and_then(Self::assert_consistent)
     }
 }
@@ -208,12 +214,14 @@ impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        runtime: reth_tasks::Runtime,
     ) -> RethResult<Self> {
         Self::new(
             init_db(path, args).map_err(RethError::msg)?,
             chain_spec,
             static_file_provider,
             rocksdb_provider,
+            runtime,
         )
         .map_err(RethError::Provider)
     }
@@ -237,6 +245,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
+            self.runtime.clone(),
         ))
     }
 
@@ -255,6 +264,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
+            self.runtime.clone(),
         )))
     }
 
@@ -274,6 +284,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
+            self.runtime.clone(),
         ))
     }
 
@@ -732,6 +743,7 @@ where
             storage_settings,
             rocksdb_provider,
             changeset_cache,
+            runtime,
         } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
@@ -742,6 +754,7 @@ where
             .field("storage_settings", &*storage_settings.read())
             .field("rocksdb_provider", &rocksdb_provider)
             .field("changeset_cache", &changeset_cache)
+            .field("runtime", &runtime)
             .finish()
     }
 }
@@ -757,6 +770,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             storage_settings: self.storage_settings.clone(),
             rocksdb_provider: self.rocksdb_provider.clone(),
             changeset_cache: self.changeset_cache.clone(),
+            runtime: self.runtime.clone(),
         }
     }
 }
@@ -822,6 +836,7 @@ mod tests {
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
             RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
+            reth_tasks::Runtime::test(),
         )
         .unwrap();
         let provider = factory.provider().unwrap();

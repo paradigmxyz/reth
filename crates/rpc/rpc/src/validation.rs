@@ -511,7 +511,7 @@ where
         let this = self.clone();
         let (tx, rx) = oneshot::channel();
 
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(Box::pin(async move {
             let result = Self::validate_builder_submission_v3(&this, request)
                 .await
                 .map_err(ErrorObject::from);
@@ -529,7 +529,7 @@ where
         let this = self.clone();
         let (tx, rx) = oneshot::channel();
 
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(Box::pin(async move {
             let result = Self::validate_builder_submission_v4(&this, request)
                 .await
                 .map_err(ErrorObject::from);
@@ -547,7 +547,7 @@ where
         let this = self.clone();
         let (tx, rx) = oneshot::channel();
 
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(Box::pin(async move {
             let result = Self::validate_builder_submission_v5(&this, request)
                 .await
                 .map_err(ErrorObject::from);

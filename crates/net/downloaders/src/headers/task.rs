@@ -78,7 +78,7 @@ impl<H: Sealable + Send + Sync + Unpin + 'static> TaskDownloader<H> {
             updates: UnboundedReceiverStream::new(updates_rx),
             downloader,
         };
-        spawner.spawn(downloader.boxed());
+        spawner.spawn_task(downloader.boxed());
 
         Self { from_downloader: ReceiverStream::new(headers_rx), to_downloader }
     }

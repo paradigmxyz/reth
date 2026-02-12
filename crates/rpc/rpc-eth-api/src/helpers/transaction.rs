@@ -82,13 +82,15 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
             let recovered = recover_raw_transaction::<PoolPooledTx<Self::Pool>>(&tx)?;
-            self.send_transaction(WithEncoded::new(tx, recovered)).await
+            self.send_transaction(TransactionOrigin::External, WithEncoded::new(tx, recovered))
+                .await
         }
     }
 
-    /// Submits the transaction to the pool.
+    /// Submits the transaction to the pool with the given [`TransactionOrigin`].
     fn send_transaction(
         &self,
+        origin: TransactionOrigin,
         tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send;
 
@@ -494,7 +496,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 request.as_mut().set_max_fee_per_blob_gas(blob_fee.to());
             }
 
-            if request.as_ref().blob_sidecar().is_some() &&
+            // Use `sidecar.is_some()` instead of `blob_sidecar().is_some()` to handle
+            // both EIP-4844 (v0) and EIP-7594 (v1) sidecar formats
+            if request.as_ref().sidecar.is_some() &&
                 request.as_ref().blob_versioned_hashes.is_none()
             {
                 request.as_mut().populate_blob_hashes();

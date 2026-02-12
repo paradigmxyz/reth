@@ -24,6 +24,18 @@ pub enum LeafUpdate {
     Touched,
 }
 
+impl LeafUpdate {
+    /// Returns true if the leaf update is a change.
+    pub const fn is_changed(&self) -> bool {
+        matches!(self, Self::Changed(_))
+    }
+
+    /// Returns true if the leaf update is a touched update.
+    pub const fn is_touched(&self) -> bool {
+        matches!(self, Self::Touched)
+    }
+}
+
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
 /// This trait abstracts over different sparse trie implementations (serial vs parallel)
@@ -176,6 +188,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// The root hash of the trie.
     fn root(&mut self) -> B256;
 
+    /// Returns true if the root node is cached and does not need any recomputation.
+    fn is_root_cached(&self) -> bool;
+
     /// Recalculates and updates the RLP hashes of subtries deeper than a certain level. The level
     /// is defined in the implementation.
     ///
@@ -263,14 +278,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Shrink the capacity of the sparse trie's value storage to the given size.
     /// This will reduce memory usage if the current capacity is higher than the given size.
     fn shrink_values_to(&mut self, size: usize);
-}
 
-/// Extension trait for sparse tries that support pruning.
-///
-/// This trait provides the `prune` method for sparse trie implementations that support
-/// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
-/// memory usage when caching tries across payload validations.
-pub trait SparseTrieExt: SparseTrie {
     /// Returns a cheap O(1) size hint for the trie representing the count of revealed
     /// (non-Hash) nodes.
     ///

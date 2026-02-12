@@ -117,8 +117,8 @@ fn correctly_decodes_branch_node_values() {
 
     let address = Address::random();
     let hashed_address = keccak256(address);
-    let hashed_slot1 = B256::with_last_byte(1);
-    let hashed_slot2 = B256::with_last_byte(2);
+    let hashed_slot1 = B256::repeat_byte(1);
+    let hashed_slot2 = B256::repeat_byte(2);
 
     // Insert account and slots into database
     provider.insert_account_for_hashing([(address, Some(Account::default()))]).unwrap();
