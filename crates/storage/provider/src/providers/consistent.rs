@@ -1313,7 +1313,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<(BlockNumberAddress, ChangesetEntry)>> {
-        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state;
+        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state();
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
@@ -1368,7 +1368,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         address: Address,
         storage_key: B256,
     ) -> ProviderResult<Option<ChangesetEntry>> {
-        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state;
+        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state();
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
@@ -1421,7 +1421,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         let database_start = range.start;
         let mut database_end = range.end;
 
-        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state;
+        let use_hashed = self.storage_provider.cached_storage_settings().use_hashed_state();
 
         if let Some(head_block) = &self.head_block {
             database_end = head_block.anchor().number;

@@ -149,36 +149,8 @@ export const rethCliSidebar: SidebarItem = {
                             collapsed: true,
                             items: [
                                 {
-                                    text: "reth db settings set receipts",
-                                    link: "/cli/reth/db/settings/set/receipts"
-                                },
-                                {
-                                    text: "reth db settings set transaction_senders",
-                                    link: "/cli/reth/db/settings/set/transaction_senders"
-                                },
-                                {
-                                    text: "reth db settings set account_changesets",
-                                    link: "/cli/reth/db/settings/set/account_changesets"
-                                },
-                                {
-                                    text: "reth db settings set storages_history",
-                                    link: "/cli/reth/db/settings/set/storages_history"
-                                },
-                                {
-                                    text: "reth db settings set transaction_hash_numbers",
-                                    link: "/cli/reth/db/settings/set/transaction_hash_numbers"
-                                },
-                                {
-                                    text: "reth db settings set account_history",
-                                    link: "/cli/reth/db/settings/set/account_history"
-                                },
-                                {
-                                    text: "reth db settings set storage_changesets",
-                                    link: "/cli/reth/db/settings/set/storage_changesets"
-                                },
-                                {
-                                    text: "reth db settings set use_hashed_state",
-                                    link: "/cli/reth/db/settings/set/use_hashed_state"
+                                    text: "reth db settings set v2",
+                                    link: "/cli/reth/db/settings/set/v2"
                                 }
                             ]
                         }
