@@ -148,10 +148,28 @@ let sR=true,sW=true,sF=true,fW=false,showTrails=false,trailW=1.5;
 const TRAIL_CAP=4096;let trailBuf=new Array(TRAIL_CAP);let trailStart=0,trailN=0;
 const TRC={1:"60,130,246",2:"255,80,80",3:"234,179,8"};
 let activePgs=0;
+const activeSet=new Set();
+let oMapDirty=false;
 let outR=0,outG=0,outB=0;
 let cacheTotalCached=0,cacheCachedPer=null,cacheStale=true;
 let hmMode=false,hmCounts=null;
 let cacheMode=false,resMap=null,faultCounts={};
+let zbCv=null,zbCx=null,zbDirty=true,zbW=0,zbH=0,zbPX=0,zbPY=0,zbSc=0,zbFlt=false;
+const BASE_LUT=new Uint32Array(256*32*2);
+function buildLUT(){
+  for(let dbi=0;dbi<256;dbi++){for(let hq=0;hq<32;hq++){const ht=hq/31;for(let c=0;c<2;c++){
+    let cf,cd;
+    if(c){cf=PAL[dbi];cd=PAL_DESAT[dbi]}else{cf=PAL_DARK[dbi];cd=PAL_DD[dbi]}
+    if(!cf)cf=PAL[255];if(!cd)cd=PAL_DESAT[255];
+    const r=Math.round(cd[0]+(cf[0]-cd[0])*ht);
+    const g=Math.round(cd[1]+(cf[1]-cd[1])*ht);
+    const b=Math.round(cd[2]+(cf[2]-cd[2])*ht);
+    BASE_LUT[(dbi*32+hq)*2+c]=(255<<24)|(b<<16)|(g<<8)|r;
+  }}}
+}
+buildLUT();
+function heatQ(pg){if(!hmMode||!hmCounts)return 31;const cnt=hmCounts[pg];return cnt>0?Math.min(31,Math.floor(Math.log2(cnt+1)*31/16)):0}
+function markZbDirty(){zbDirty=true}
 let showFlame=false;const FLAME_SECS=120;let flameData={},flameHead=0;
 const SPARK_SECS=60;let sparkData={},sparkAccum={};
 const cv=document.getElementById("map"),cx=cv.getContext("2d"),wr=document.getElementById("canvas-wrap");
@@ -170,7 +188,7 @@ function growTo(newNP){
   if(hmCounts){const nHm=new Uint32Array(newNP);nHm.set(hmCounts);hmCounts=nHm}
   if(resMap){const nRm=new Uint8Array(newNP);nRm.set(resMap);resMap=nRm}
   NP=newNP;GR=Math.ceil(NP/GC);
-  iD=null;oC=null;
+  iD=null;oC=null;markZbDirty();
 }
 function oX(){return fW?0:Math.max(0,(W-GC*sc)/2)}
 function oY(){return Math.max(0,(H-GR*sc)/2)}
@@ -192,24 +210,22 @@ function trailExpire(now){
     else break;
   }
 }
-function pC(pg,gy,flt,dA,dB,now){
+function pCBase(pg,flt){
   if(pg<0||pg>=NP)return false;
   const ow=oMap[pg];
   if(flt&&!sel.has(ow)){outR=25;outG=25;outB=28;return true}
-  let ht=1.0;
-  if(hmMode&&hmCounts){const cnt=hmCounts[pg];ht=cnt>0?Math.min(1,Math.log2(cnt+1)/16):0}
-  let cached=true;
-  if(cacheMode&&resMap&&pg<resMap.length)cached=!!resMap[pg];
-  let cf,cd;
-  if(cached){cf=PAL[ow];cd=PAL_DESAT[ow]}else{cf=PAL_DARK[ow];cd=PAL_DD[ow]}
-  if(!cf)cf=PAL[255];if(!cd)cd=PAL_DESAT[255];
-  outR=Math.round(cd[0]+(cf[0]-cd[0])*ht);
-  outG=Math.round(cd[1]+(cf[1]-cd[1])*ht);
-  outB=Math.round(cd[2]+(cf[2]-cd[2])*ht);
+  const hq=heatQ(pg);
+  const cached=(cacheMode&&resMap&&pg<resMap.length)?resMap[pg]?1:0:1;
+  const rgba=BASE_LUT[(ow*32+hq)*2+cached];
+  outR=rgba&0xFF;outG=(rgba>>8)&0xFF;outB=(rgba>>16)&0xFF;
+  return true;
+}
+function pC(pg,flt,now){
+  if(!pCBase(pg,flt))return false;
   const op=lOp[pg];
   if(op&&((op===1&&sR)||(op===2&&sW)||(op===3&&sF))){
     const age=now-lTs[pg];
-    if(age>=FADE){lOp[pg]=0;activePgs=Math.max(0,activePgs-1)}
+    if(age>=FADE){lOp[pg]=0;activePgs=Math.max(0,activePgs-1);activeSet.delete(pg)}
     else{const t=1-(age/FADE)*(age/FADE);const fl=FLASH_TINT[op];const fi=t*0.7;
       outR=Math.min(255,Math.round(outR+(fl[0]-outR)*fi));
       outG=Math.min(255,Math.round(outG+(fl[1]-outG)*fi));
@@ -247,6 +263,48 @@ function drawTrails(now){
     }
   }
 }
+function rebuildZoomBase(flt){
+  if(!zbCv){zbCv=document.createElement("canvas");zbCx=zbCv.getContext("2d")}
+  zbCv.width=W;zbCv.height=H;zbW=W;zbH=H;zbPX=pX;zbPY=pY;zbSc=sc;zbFlt=flt;
+  const zd=zbCx.createImageData(W,H),d=zd.data,ox=oX(),oy=oY(),ips=1/sc;
+  for(let sy=0;sy<H;sy++){
+    const wy0=Math.max(0,Math.floor(pY+(sy-oy)*ips)),wy1=Math.min(GR-1,Math.floor(pY+(sy-oy+1)*ips));
+    for(let sx=0;sx<W;sx++){
+      const wx0=Math.max(0,Math.floor(pX+(sx-ox)*ips)),wx1=Math.min(GC-1,Math.floor(pX+(sx-ox+1)*ips));
+      const o=(sy*W+sx)<<2;
+      if(wx1<0||wy1<0||wx0>=GC||wy0>=GR){d[o]=0;d[o+1]=0;d[o+2]=0;d[o+3]=255;continue}
+      const cpx=Math.floor((wx0+wx1)/2),cpy=Math.floor((wy0+wy1)/2);
+      const ci=cpy*GC+cpx;
+      if(ci>=0&&ci<NP&&pCBase(ci,flt)){d[o]=outR;d[o+1]=outG;d[o+2]=outB}
+      d[o+3]=255;
+    }
+  }
+  zbCx.putImageData(zd,0,0);
+}
+function drawActiveOverlay(now,flt){
+  if(activeSet.size===0)return;
+  const ox=oX(),oy=oY(),ips=1/sc;
+  const expired=[];
+  for(const pg of activeSet){
+    const op=lOp[pg];
+    if(!op){expired.push(pg);continue}
+    if((op===1&&!sR)||(op===2&&!sW)||(op===3&&!sF))continue;
+    const age=now-lTs[pg];
+    if(age>=FADE){lOp[pg]=0;activePgs=Math.max(0,activePgs-1);expired.push(pg);continue}
+    pCBase(pg,flt);
+    const t=1-(age/FADE)*(age/FADE);const fl=FLASH_TINT[op];const fi=t*0.7;
+    const r=Math.min(255,Math.round(outR+(fl[0]-outR)*fi));
+    const g=Math.min(255,Math.round(outG+(fl[1]-outG)*fi));
+    const b=Math.min(255,Math.round(outB+(fl[2]-outB)*fi));
+    const col=pg%GC,row=Math.floor(pg/GC);
+    const sx=ox+(col-pX)*sc,sy=oy+(row-pY)*sc;
+    if(sx<-sc||sy<-sc||sx>W||sy>H)continue;
+    const psz=Math.max(1,Math.ceil(sc));
+    cx.fillStyle=`rgb(${r},${g},${b})`;
+    cx.fillRect(Math.floor(sx),Math.floor(sy),psz,psz);
+  }
+  for(const pg of expired)activeSet.delete(pg);
+}
 function render(){
   if(!oMap||W<1||H<1)return;
   const flt=sel.size>0,now=performance.now();
@@ -259,7 +317,7 @@ function render(){
     const od=oCx.createImageData(vW,vH),d=od.data;
     for(let y=0;y<vH;y++){const gy=y0+y;for(let x=0;x<vW;x++){
       const i=gy*GC+(x0+x),o=(y*vW+x)<<2;
-      const ok=(i>=0&&i<NP)?pC(i,gy,flt,null,null,now):false;
+      const ok=(i>=0&&i<NP)?pC(i,flt,now):false;
       if(ok){d[o]=outR;d[o+1]=outG;d[o+2]=outB}else{d[o]=0;d[o+1]=0;d[o+2]=0}d[o+3]=255;
     }}
     oCx.putImageData(od,0,0);cx.imageSmoothingEnabled=false;cx.clearRect(0,0,W,H);
@@ -267,27 +325,14 @@ function render(){
     drawTrails(now);
     zmEl.textContent=sc.toFixed(sc>=10?0:1)+" px/page";
   }else{
-    if(!iD||iD.width!==W||iD.height!==H)iD=cx.createImageData(W,H);
-    const d=iD.data,ox=oX(),oy=oY(),ips=1/sc;
-    for(let sy=0;sy<H;sy++){
-      const wyC=pY+(sy-oy+.5)*ips,wy0=Math.max(0,Math.floor(pY+(sy-oy)*ips)),wy1=Math.min(GR-1,Math.floor(pY+(sy-oy+1)*ips));
-      for(let sx=0;sx<W;sx++){
-        const wxC=pX+(sx-ox+.5)*ips,wx0=Math.max(0,Math.floor(pX+(sx-ox)*ips)),wx1=Math.min(GC-1,Math.floor(pX+(sx-ox+1)*ips));
-        const o=(sy*W+sx)<<2;
-        if(wx1<0||wy1<0||wx0>=GC||wy0>=GR){d[o]=0;d[o+1]=0;d[o+2]=0;d[o+3]=255;continue}
-        let bPg=-1,bOp=0,bAge=FADE;
-        for(let py=wy0;py<=wy1;py++){for(let px=wx0;px<=wx1;px++){
-          const i=py*GC+px;if(i>=NP)continue;
-          const op=lOp[i];if(!op)continue;
-          if((op===1&&!sR)||(op===2&&!sW)||(op===3&&!sF))continue;
-          const age=now-lTs[i];if(age>=FADE)continue;
-          if(op>bOp||(op===bOp&&age<bAge)){bOp=op;bAge=age;bPg=i}
-        }}
-        const cpx=Math.floor(wxC),cpy=Math.floor(wyC),ci=cpy*GC+cpx;
-        const ok=bPg>=0?pC(bPg,cpy,flt,null,null,now):(ci>=0&&ci<NP)?pC(ci,cpy,flt,null,null,now):false;
-        if(ok){d[o]=outR;d[o+1]=outG;d[o+2]=outB}else{d[o]=0;d[o+1]=0;d[o+2]=0}d[o+3]=255;
-    }}
-    cx.putImageData(iD,0,0);drawTrails(now);const pp=1/sc;zmEl.textContent="1 px = "+pp.toFixed(pp>=10?0:1)+" pages";
+    if(zbDirty||!zbCv||zbW!==W||zbH!==H||zbPX!==pX||zbPY!==pY||zbSc!==sc||zbFlt!==flt){
+      rebuildZoomBase(flt);zbDirty=false;
+    }
+    cx.clearRect(0,0,W,H);
+    cx.drawImage(zbCv,0,0);
+    drawActiveOverlay(now,flt);
+    drawTrails(now);
+    const pp=1/sc;zmEl.textContent="1 px = "+pp.toFixed(pp>=10?0:1)+" pages";
   }
 }
 let anim=false;
@@ -315,7 +360,7 @@ function bldTbl(){
   DBIS.forEach(d=>{const tr=document.createElement("tr");tr.className="tbl-row";tr.dataset.dbiIndex=d.dbi_index;
     const c=PAL[d.dbi_index]||PAL[255];
     tr.innerHTML=`<td><div class="swatch-cell" style="background:rgb(${c[0]},${c[1]},${c[2]})"></div></td><td>${d.name}</td><td>${d.pages.toLocaleString()}</td><td>${fmtSz(d.size_mb)}</td><td><span class="pct-bar" style="width:${d.pct/mx*60}px;background:rgb(${c[0]},${c[1]},${c[2]})"></span>${d.pct}%</td>`;
-    tr.addEventListener("click",()=>{const i=d.dbi_index;if(sel.has(i))sel.delete(i);else sel.add(i);uAR();sched()});
+    tr.addEventListener("click",()=>{const i=d.dbi_index;if(sel.has(i))sel.delete(i);else sel.add(i);uAR();markZbDirty();sched()});
     tb.appendChild(tr);
   });
 }
@@ -325,8 +370,8 @@ function boot(){szCv();GC=Math.ceil(Math.sqrt(NP));GR=Math.ceil(NP/GC);mS=Math.m
 function zA(ns,sx,sy){ns=cl(ns,mS,xS);if(Math.abs(ns-sc)<1e-6)return;const b=s2w(sx,sy);sc=ns;if(fW){reflow();pY=b.wy-(sy-oY())/sc;cP()}else{pX=b.wx-(sx-oX())/sc;pY=b.wy-(sy-oY())/sc;cP()}sched()}
 document.getElementById("btn-zin").addEventListener("click",()=>zA(sc*1.3,W>>1,H>>1));
 document.getElementById("btn-zout").addEventListener("click",()=>zA(sc/1.3,W>>1,H>>1));
-document.getElementById("btn-reset").addEventListener("click",()=>{sc=mS;pX=0;pY=0;sel.clear();uAR();render()});
-document.getElementById("btn-clear").addEventListener("click",()=>{if(lOp)lOp.fill(0);if(hmCounts)hmCounts.fill(0);activePgs=0;sched()});
+document.getElementById("btn-reset").addEventListener("click",()=>{sc=mS;pX=0;pY=0;sel.clear();uAR();markZbDirty();render()});
+document.getElementById("btn-clear").addEventListener("click",()=>{if(lOp)lOp.fill(0);if(hmCounts)hmCounts.fill(0);activePgs=0;activeSet.clear();markZbDirty();sched()});
 wr.addEventListener("wheel",e=>{e.preventDefault();const r=cv.getBoundingClientRect();zA(sc*Math.exp(-(e.deltaMode===1?e.deltaY*16:e.deltaY)*.002),(e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H)},{passive:false});
 let drag=false,lCX=0,lCY=0;
 cv.addEventListener("pointerdown",e=>{drag=true;lCX=e.clientX;lCY=e.clientY;cv.setPointerCapture(e.pointerId);cv.style.cursor="grabbing"});
@@ -356,8 +401,8 @@ document.getElementById("chk-free").addEventListener("change",e=>{sF=e.target.ch
 document.getElementById("fade-slider").addEventListener("input",e=>{FADE=parseInt(e.target.value);document.getElementById("fade-val").textContent=(FADE/1000).toFixed(1)+"s"});
 document.getElementById("chk-trails").addEventListener("change",e=>{showTrails=e.target.checked;if(!showTrails){trailStart=0;trailN=0}sched()});
 document.getElementById("trail-width").addEventListener("input",e=>{trailW=parseFloat(e.target.value);document.getElementById("trail-w-val").textContent=trailW.toFixed(1);sched()});
-document.getElementById("chk-heatmap").addEventListener("change",e=>{hmMode=e.target.checked;sched()});
-document.getElementById("chk-cache").addEventListener("change",e=>{cacheMode=e.target.checked;sched()});
+document.getElementById("chk-heatmap").addEventListener("change",e=>{hmMode=e.target.checked;markZbDirty();sched()});
+document.getElementById("chk-cache").addEventListener("change",e=>{cacheMode=e.target.checked;markZbDirty();sched()});
 document.getElementById("chk-flame").addEventListener("change",e=>{
   showFlame=e.target.checked;const fw=document.getElementById("flame-wrap");
   const at=DBIS.filter(d=>d.pages>0);fw.style.height=showFlame?Math.min(at.length*8+24,200)+"px":"0";
@@ -390,8 +435,12 @@ function connectWS(){
       if(!prevLive||op>=prev){
         if(prev===0)activePgs++;
         lOp[pg]=op;lTs[pg]=now;
+        activeSet.add(pg);
       }
-      if(op===2&&dbi>0&&dbi<0xFE)oMap[pg]=dbi;
+      if(op===2&&dbi>0&&dbi<0xFE){const old=oMap[pg];if(old!==dbi){oMap[pg]=dbi;oMapDirty=true;
+        const di=DBI_IDX[dbi];if(di)di.pages++;
+        const oi=DBI_IDX[old];if(oi&&oi.pages>0)oi.pages--;
+      }}
       if(showTrails&&prevPg>=0&&prevPg!==pg)trailPush(prevPg,pg,op,now);
       prevPg=pg;
       if(op>=2){lastPg=pg;lastDbi=dbi;lastOp=op}else if(lastPg<0){lastPg=pg;lastDbi=dbi;lastOp=op}
@@ -489,7 +538,7 @@ function buildTreeInfo(info){
     }
     if(ipl>0)html+=`<div class="tree-stat">~${ipl.toLocaleString()} items/leaf</div>`;
     card.innerHTML=html;
-    card.addEventListener("click",()=>{const i=ti.dbi_index;if(sel.has(i))sel.delete(i);else sel.add(i);uAR();sched()});
+    card.addEventListener("click",()=>{const i=ti.dbi_index;if(sel.has(i))sel.delete(i);else sel.add(i);uAR();markZbDirty();sched()});
     el.appendChild(card);
   });
 }
@@ -512,6 +561,7 @@ function connectResidencyWS(){
         if(resMap[i]){cacheTotalCached++;if(cacheCachedPer){const dbi=oMap[i];if(dbi<cacheCachedPer.length)cacheCachedPer[dbi]++}}
       }
       cacheStale=true;
+      if(cacheMode)markZbDirty();
       updateCacheStats();
       if(cacheMode)sched();
     }else if(msgType===1){
@@ -533,6 +583,7 @@ function connectResidencyWS(){
         }
       }
       cacheStale=true;
+      if(cacheMode)markZbDirty();
       updateCacheStats();
       if(cacheMode)sched();
     }
@@ -581,6 +632,28 @@ async function init(){
   try{const r=await fetch("/api/tree_info");if(r.ok)treeInfo=await r.json()}catch(e){}
   if(treeInfo.length>0)buildTreeInfo(treeInfo);
   ldEl.style.display="none";cv.style.display="block";boot();connectWS();connectResidencyWS();
+  const flCv=document.getElementById("flame");
+  flCv.addEventListener("mousemove",e=>{
+    if(!showFlame)return;
+    const at=DBIS.filter(d=>d.pages>0);if(!at.length){tt.style.display="none";return}
+    const rect=flCv.getBoundingClientRect();
+    const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+    const lw=42,rw=flCv.width-lw;
+    const rowH=Math.max(4,Math.floor((flCv.height-14)/Math.max(1,at.length)));
+    const ri=Math.floor(my/rowH);
+    if(ri<0||ri>=at.length||mx<lw){tt.style.display="none";return}
+    const d=at[ri],c=PAL[d.dbi_index]||PAL[255];
+    const secIdx=Math.floor((mx-lw)/rw*FLAME_SECS);
+    const idx=((flameHead-FLAME_SECS+secIdx)%FLAME_SECS+FLAME_SECS)%FLAME_SECS;
+    const fd=flameData[d.dbi_index];
+    const ops=fd?fd[idx]:0;
+    const ago=FLAME_SECS-secIdx;
+    ttSw.style.background=`rgb(${c[0]},${c[1]},${c[2]})`;
+    ttNm.textContent=d.name;
+    ttDt.innerHTML=`${ops.toLocaleString()} ops/s \u00b7 ${ago}s ago`;
+    tt.style.display="block";tt.style.left=(e.clientX+14)+"px";tt.style.top=(e.clientY+14)+"px";
+  });
+  flCv.addEventListener("mouseleave",()=>{tt.style.display="none"});
   setInterval(()=>{
     DBIS.forEach(d=>{
       const v=sparkAccum[d.dbi_index]||0;
@@ -592,7 +665,13 @@ async function init(){
     DBIS.forEach(d=>drawSparkline(d));
     if(showFlame)drawFlame();
   },1000);
-  setInterval(()=>{if(!oMap)return;const ct={};let ur=0;for(let i=0;i<NP;i++){const o=oMap[i];ct[o]=(ct[o]||0)+1;if(o===0xFF)ur++}DBIS.forEach(d=>{d.pages=ct[d.dbi_index]||0;d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});bldTbl();uAR();const rf=NP-ur,gb=(NP*PS/(1024**3)).toFixed(2);document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${rf.toLocaleString()} ref \u00b7 ${ur.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`},2000);
+  setInterval(()=>{if(!oMap||!oMapDirty)return;oMapDirty=false;
+    DBIS.forEach(d=>{d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});
+    bldTbl();uAR();markZbDirty();sched();
+    const ur=DBIS.reduce((n,d)=>d.dbi_index===0xFF?(d.pages+n):n,0);
+    const rf=NP-ur,gb=(NP*PS/(1024**3)).toFixed(2);
+    document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${rf.toLocaleString()} ref \u00b7 ${ur.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
+  },2000);
 }
 init();
 })();
