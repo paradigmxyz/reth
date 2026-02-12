@@ -119,8 +119,14 @@ impl<N: NodePrimitives> ExExHandle<N> {
     ) -> (Self, UnboundedSender<ExExEvent>, ExExNotifications<P, E>) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let notifications =
-            ExExNotifications::new(node_head, provider, evm_config, notification_rx, wal_handle);
+        let notifications = ExExNotifications::new(
+            node_head,
+            provider,
+            evm_config,
+            notification_rx,
+            wal_handle,
+            is_stateful,
+        );
 
         (
             Self {

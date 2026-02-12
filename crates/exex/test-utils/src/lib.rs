@@ -302,6 +302,7 @@ pub async fn test_exex_context_with_chain_spec(
         components.components.evm_config.clone(),
         notifications_rx,
         wal.handle(),
+        false,
     );
 
     let ctx = ExExContext {

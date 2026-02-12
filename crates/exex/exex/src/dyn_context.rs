@@ -2,6 +2,7 @@
 //! without generic abstraction over [Node](`reth_node_api::FullNodeComponents`)
 
 use alloy_eips::BlockNumHash;
+use futures::Stream;
 use reth_chainspec::EthChainSpec;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_node_api::{FullNodeComponents, HeaderTy, NodePrimitives, NodeTypes, PrimitivesTy};
@@ -10,7 +11,7 @@ use reth_provider::BlockReader;
 use std::fmt::Debug;
 use tokio::sync::mpsc;
 
-use crate::{ExExContext, ExExEvent, ExExNotificationsStream};
+use crate::{ExExContext, ExExEvent, ExExNotification};
 
 // TODO(0xurb) - add `node` after abstractions
 /// Captures the context that an `ExEx` has access to.
@@ -35,7 +36,7 @@ pub struct ExExContextDyn<N: NodePrimitives = EthPrimitives> {
     ///
     /// Once an [`ExExNotification`](crate::ExExNotification) is sent over the channel, it is
     /// considered delivered by the node.
-    pub notifications: Box<dyn ExExNotificationsStream<N>>,
+    pub notifications: Box<dyn Stream<Item = eyre::Result<ExExNotification<N>>> + Unpin>,
 }
 
 impl<N: NodePrimitives> Debug for ExExContextDyn<N> {

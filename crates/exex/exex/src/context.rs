@@ -1,4 +1,4 @@
-use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
+use crate::{ExExContextDyn, ExExEvent, ExExNotifications};
 use alloy_eips::BlockNumHash;
 use reth_exex_types::ExExHead;
 use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
@@ -107,14 +107,14 @@ where
         self.components.task_executor()
     }
 
-    /// Sets notifications stream to [`crate::ExExNotificationsWithoutHead`], a stream of
-    /// notifications without a head.
+    /// Sets notifications stream to stateless mode, where notifications are passed through
+    /// without canonical checks or backfill.
     pub fn set_notifications_without_head(&mut self) {
         self.notifications.set_without_head();
     }
 
-    /// Sets notifications stream to [`crate::ExExNotificationsWithHead`], a stream of notifications
-    /// with the provided head.
+    /// Sets notifications stream to stateful mode with the provided head, enabling canonical
+    /// checks, backfill, and notification filtering.
     pub fn set_notifications_with_head(&mut self, head: ExExHead) {
         self.notifications.set_with_head(head);
     }
