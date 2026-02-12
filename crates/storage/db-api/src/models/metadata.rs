@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// These should be set during `init_genesis` or `init_db` depending on whether we want dictate
 /// behaviour of new or old nodes respectively.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Compact)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Compact, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
 pub struct StorageSettings {
@@ -101,70 +101,5 @@ impl StorageSettings {
     /// Returns `true` if any tables are configured to be stored in `RocksDB`.
     pub const fn any_in_rocksdb(&self) -> bool {
         self.storage_v2
-    }
-}
-
-/// Custom serialization: always writes the new shape.
-impl Serialize for StorageSettings {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-        let mut s = serializer.serialize_struct("StorageSettings", 1)?;
-        s.serialize_field("storage_v2", &self.storage_v2)?;
-        s.end()
-    }
-}
-
-/// Custom deserialization: accepts both the new shape (`storage_v2`)
-/// and the legacy shape with 8 individual booleans.
-///
-/// Legacy settings are mapped conservatively: `storage_v2 = true` only if all 7 routing
-/// booleans were `true` (matching `StorageSettings::v2()`). Otherwise `storage_v2 = false`.
-impl<'de> Deserialize<'de> for StorageSettings {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct Legacy {
-            #[serde(default)]
-            receipts_in_static_files: bool,
-            #[serde(default)]
-            transaction_senders_in_static_files: bool,
-            #[serde(default)]
-            storages_history_in_rocksdb: bool,
-            #[serde(default)]
-            transaction_hash_numbers_in_rocksdb: bool,
-            #[serde(default)]
-            account_history_in_rocksdb: bool,
-            #[serde(default)]
-            account_changesets_in_static_files: bool,
-            #[serde(default)]
-            storage_changesets_in_static_files: bool,
-        }
-
-        let value = serde_json::Value::deserialize(deserializer)?;
-
-        if value.get("storage_v2").is_some() {
-            #[derive(Deserialize)]
-            struct New {
-                #[serde(default)]
-                storage_v2: bool,
-            }
-            let new: New = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
-            Ok(Self { storage_v2: new.storage_v2 })
-        } else {
-            let legacy: Legacy = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
-            let is_v2 = legacy.receipts_in_static_files &&
-                legacy.transaction_senders_in_static_files &&
-                legacy.storages_history_in_rocksdb &&
-                legacy.transaction_hash_numbers_in_rocksdb &&
-                legacy.account_history_in_rocksdb &&
-                legacy.account_changesets_in_static_files &&
-                legacy.storage_changesets_in_static_files;
-            Ok(Self { storage_v2: is_v2 })
-        }
     }
 }
