@@ -400,7 +400,7 @@ where
         };
 
         // Plan the strategy used for state root computation.
-        let strategy = self.plan_state_root_computation();
+        let strategy = self.plan_state_root_computation(input.transaction_count());
 
         debug!(
             target: "engine::tree::payload_validator",
@@ -1232,18 +1232,36 @@ where
         Ok(None)
     }
 
-    /// Determines the state root computation strategy based on configuration.
+    /// Determines the state root computation strategy based on configuration and block size.
+    ///
+    /// For small blocks (below the configured transaction count threshold), the sparse trie task's
+    /// coordination overhead (~5-6ms for channel setup, proof workers, multiproof gathering) is
+    /// disproportionate to the actual execution cost. These blocks fall back to parallel state root
+    /// computation.
     ///
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
-    const fn plan_state_root_computation(&self) -> StateRootStrategy {
+    fn plan_state_root_computation(&self, transaction_count: usize) -> StateRootStrategy {
         if self.config.state_root_fallback() {
-            StateRootStrategy::Synchronous
-        } else if self.config.use_state_root_task() {
-            StateRootStrategy::StateRootTask
-        } else {
-            StateRootStrategy::Parallel
+            return StateRootStrategy::Synchronous;
         }
+
+        if self.config.use_state_root_task() {
+            let threshold = self.config.small_block_tx_threshold();
+            if threshold > 0 && transaction_count < threshold {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    transaction_count,
+                    threshold,
+                    "Skipping StateRootTask for small block"
+                );
+                self.metrics.block_validation.state_root_task_small_block_skip_total.increment(1);
+                return StateRootStrategy::Parallel;
+            }
+            return StateRootStrategy::StateRootTask;
+        }
+
+        StateRootStrategy::Parallel
     }
 
     /// Called when an invalid block is encountered during validation.
