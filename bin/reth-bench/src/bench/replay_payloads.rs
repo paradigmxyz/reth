@@ -28,7 +28,10 @@ use crate::{
 use alloy_primitives::B256;
 use alloy_provider::{ext::EngineApi, network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
-use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV4, ForkchoiceState, JwtSecret};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionData, ExecutionPayloadEnvelopeV4, ExecutionPayloadSidecar,
+    ForkchoiceState, JwtSecret, PraguePayloadFields,
+};
 use clap::Parser;
 use eyre::Context;
 use reth_cli_runner::CliContext;
@@ -125,11 +128,11 @@ pub struct Command {
     #[arg(long, value_name = "WS_RPC_URL", verbatim_doc_comment)]
     ws_rpc_url: Option<String>,
 
-    /// Use `reth_newPayload*` endpoints instead of `engine_newPayload*`.
+    /// Use `reth_newPayload` endpoint instead of `engine_newPayload*`.
     ///
-    /// The `reth_newPayload*` endpoints are reth-specific extensions that wait for
-    /// persistence and cache updates to complete before processing the next payload,
-    /// and return server-side timing breakdowns (latency, persistence wait, cache wait).
+    /// The `reth_newPayload` endpoint is a reth-specific extension that takes `ExecutionData`
+    /// directly, waits for persistence and cache updates to complete before processing,
+    /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     reth_new_payload: bool,
 }
@@ -172,7 +175,7 @@ impl Command {
             );
         }
         if self.reth_new_payload {
-            info!("Using reth_newPayload* endpoints");
+            info!("Using reth_newPayload endpoint");
         }
 
         // Set up waiter based on configured options
@@ -259,11 +262,13 @@ impl Command {
                 "Executing gas ramp payload (newPayload + FCU)"
             );
 
+            let reth_data =
+                if self.reth_new_payload { payload.file.execution_data.clone() } else { None };
             let _ = call_new_payload_with_reth(
                 &auth_provider,
                 payload.version,
                 payload.file.params.clone(),
-                self.reth_new_payload,
+                reth_data,
             )
             .await?;
 
@@ -327,11 +332,22 @@ impl Command {
                 envelope.execution_requests.to_vec(),
             ))?;
 
+            let reth_data = self.reth_new_payload.then(|| ExecutionData {
+                payload: execution_payload.clone().into(),
+                sidecar: ExecutionPayloadSidecar::v4(
+                    CancunPayloadFields {
+                        versioned_hashes: Vec::new(),
+                        parent_beacon_block_root: B256::ZERO,
+                    },
+                    PraguePayloadFields { requests: envelope.execution_requests.clone().into() },
+                ),
+            });
+
             let server_timings = call_new_payload_with_reth(
                 &auth_provider,
                 EngineApiMessageVersion::V4,
                 params,
-                self.reth_new_payload,
+                reth_data,
             )
             .await?;
 

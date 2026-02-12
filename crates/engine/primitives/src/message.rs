@@ -143,7 +143,7 @@ impl Future for PendingPayloadId {
     }
 }
 
-/// Timing breakdown for `reth_newPayload*` responses.
+/// Timing breakdown for `reth_newPayload` responses.
 #[derive(Debug, Clone, Copy)]
 pub struct NewPayloadTimings {
     /// Server-side execution latency.
@@ -168,7 +168,7 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
-    /// Message with new payload used by `reth_newPayload*` endpoints.
+    /// Message with new payload used by `reth_newPayload` endpoint.
     ///
     /// Waits for persistence, execution cache, and sparse trie locks before processing,
     /// and returns detailed timing breakdown alongside the payload status.
@@ -257,7 +257,7 @@ where
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
-    /// Sends a new payload message used by `reth_newPayload*` endpoints.
+    /// Sends a new payload message used by `reth_newPayload` endpoint.
     ///
     /// Waits for persistence, execution cache, and sparse trie locks before processing,
     /// and returns detailed timing breakdown alongside the payload status.

@@ -156,7 +156,7 @@ impl Command {
         let total_blocks = benchmark_mode.total_blocks();
 
         if use_reth_namespace {
-            info!("Using reth_newPayload* endpoints");
+            info!("Using reth_newPayload endpoint");
         }
 
         let buffer_size = self.rpc_block_buffer_size;
@@ -235,11 +235,11 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
-            let (version, params) = block_to_new_payload(block, is_optimism)?;
+            let (version, params, execution_data) = block_to_new_payload(block, is_optimism)?;
             let start = Instant::now();
+            let reth_data = use_reth_namespace.then_some(execution_data);
             let server_timings =
-                call_new_payload_with_reth(&auth_provider, version, params, use_reth_namespace)
-                    .await?;
+                call_new_payload_with_reth(&auth_provider, version, params, reth_data).await?;
 
             let np_latency =
                 server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());

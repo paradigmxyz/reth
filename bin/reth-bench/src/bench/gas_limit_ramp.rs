@@ -48,11 +48,11 @@ pub struct Command {
     #[arg(long, value_name = "OUTPUT")]
     output: PathBuf,
 
-    /// Use `reth_newPayload*` endpoints instead of `engine_newPayload*`.
+    /// Use `reth_newPayload` endpoint instead of `engine_newPayload*`.
     ///
-    /// The `reth_newPayload*` endpoints are reth-specific extensions that wait for
-    /// persistence and cache updates to complete before processing the next payload,
-    /// and return server-side timing breakdowns (latency, persistence wait, cache wait).
+    /// The `reth_newPayload` endpoint is a reth-specific extension that takes `ExecutionData`
+    /// directly, waits for persistence and cache updates to complete before processing,
+    /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     reth_new_payload: bool,
 }
@@ -147,7 +147,7 @@ impl Command {
             }
         }
         if self.reth_new_payload {
-            info!("Using reth_newPayload* endpoints");
+            info!("Using reth_newPayload endpoint");
         }
 
         let mut blocks_processed = 0u64;
@@ -174,7 +174,7 @@ impl Command {
             // Regenerate the payload from the modified block, but keep the original sidecar
             // which contains the actual execution requests data (not just the hash)
             let (payload, _) = ExecutionPayload::from_block_unchecked(block_hash, &block);
-            let (version, params) = payload_to_new_payload(
+            let (version, params, execution_data) = payload_to_new_payload(
                 payload,
                 sidecar,
                 false,
@@ -185,14 +185,18 @@ impl Command {
             // Save payload to file with version info for replay
             let payload_path =
                 self.output.join(format!("payload_block_{}.json", block.header.number));
-            let file =
-                GasRampPayloadFile { version: version as u8, block_hash, params: params.clone() };
+            let file = GasRampPayloadFile {
+                version: version as u8,
+                block_hash,
+                params: params.clone(),
+                execution_data: Some(execution_data.clone()),
+            };
             let payload_json = serde_json::to_string_pretty(&file)?;
             std::fs::write(&payload_path, &payload_json)?;
             info!(target: "reth-bench", block_number = block.header.number, path = %payload_path.display(), "Saved payload");
 
-            let _ = call_new_payload_with_reth(&provider, version, params, self.reth_new_payload)
-                .await?;
+            let reth_data = self.reth_new_payload.then_some(execution_data);
+            let _ = call_new_payload_with_reth(&provider, version, params, reth_data).await?;
 
             let forkchoice_state = ForkchoiceState {
                 head_block_hash: block_hash,

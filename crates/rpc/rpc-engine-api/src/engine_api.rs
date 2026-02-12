@@ -260,23 +260,13 @@ where
         self.inner.accept_execution_requests_hash
     }
 
-    /// Like `new_payload_v1` but waits for persistence, execution cache, and sparse trie locks.
+    /// Waits for persistence, execution cache, and sparse trie locks before processing.
     ///
-    /// Used by `reth_newPayloadV1` endpoint.
-    pub async fn reth_new_payload_v1(
+    /// Used by `reth_newPayload` endpoint.
+    pub async fn reth_new_payload(
         &self,
         payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<RethPayloadStatus> {
-        let payload_or_attrs = PayloadOrAttributes::<
-            '_,
-            PayloadT::ExecutionData,
-            PayloadT::PayloadAttributes,
-        >::from_execution_payload(&payload);
-
-        self.inner
-            .validator
-            .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
-
         let (status, timings) = self.inner.beacon_consensus.reth_new_payload(payload).await?;
         Ok(RethPayloadStatus {
             status,
@@ -287,125 +277,14 @@ where
         })
     }
 
-    /// Metered version of `reth_new_payload_v1`.
-    pub async fn reth_new_payload_v1_metered(
+    /// Metered version of `reth_new_payload`.
+    pub async fn reth_new_payload_metered(
         &self,
         payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<RethPayloadStatus> {
+    ) -> RpcResult<RethPayloadStatus> {
         let start = Instant::now();
-        let res = Self::reth_new_payload_v1(self, payload).await;
+        let res = Self::reth_new_payload(self, payload).await;
         self.inner.metrics.latency.new_payload_v1.record(start.elapsed());
-        res
-    }
-
-    /// Like `new_payload_v2` but waits for persistence, execution cache, and sparse trie locks.
-    ///
-    /// Used by `reth_newPayloadV2` endpoint.
-    pub async fn reth_new_payload_v2(
-        &self,
-        payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<RethPayloadStatus> {
-        let payload_or_attrs = PayloadOrAttributes::<
-            '_,
-            PayloadT::ExecutionData,
-            PayloadT::PayloadAttributes,
-        >::from_execution_payload(&payload);
-        self.inner
-            .validator
-            .validate_version_specific_fields(EngineApiMessageVersion::V2, payload_or_attrs)?;
-
-        let (status, timings) = self.inner.beacon_consensus.reth_new_payload(payload).await?;
-        Ok(RethPayloadStatus {
-            status,
-            latency_us: timings.latency.as_micros() as u64,
-            persistence_wait_us: timings.persistence_wait.map(|d| d.as_micros() as u64),
-            execution_cache_wait_us: timings.execution_cache_wait.as_micros() as u64,
-            sparse_trie_wait_us: timings.sparse_trie_wait.as_micros() as u64,
-        })
-    }
-
-    /// Metered version of `reth_new_payload_v2`.
-    pub async fn reth_new_payload_v2_metered(
-        &self,
-        payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<RethPayloadStatus> {
-        let start = Instant::now();
-        let res = Self::reth_new_payload_v2(self, payload).await;
-        self.inner.metrics.latency.new_payload_v2.record(start.elapsed());
-        res
-    }
-
-    /// Like `new_payload_v3` but waits for persistence, execution cache, and sparse trie locks.
-    ///
-    /// Used by `reth_newPayloadV3` endpoint.
-    pub async fn reth_new_payload_v3(
-        &self,
-        payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<RethPayloadStatus> {
-        let payload_or_attrs = PayloadOrAttributes::<
-            '_,
-            PayloadT::ExecutionData,
-            PayloadT::PayloadAttributes,
-        >::from_execution_payload(&payload);
-        self.inner
-            .validator
-            .validate_version_specific_fields(EngineApiMessageVersion::V3, payload_or_attrs)?;
-
-        let (status, timings) = self.inner.beacon_consensus.reth_new_payload(payload).await?;
-        Ok(RethPayloadStatus {
-            status,
-            latency_us: timings.latency.as_micros() as u64,
-            persistence_wait_us: timings.persistence_wait.map(|d| d.as_micros() as u64),
-            execution_cache_wait_us: timings.execution_cache_wait.as_micros() as u64,
-            sparse_trie_wait_us: timings.sparse_trie_wait.as_micros() as u64,
-        })
-    }
-
-    /// Metered version of `reth_new_payload_v3`.
-    pub async fn reth_new_payload_v3_metered(
-        &self,
-        payload: PayloadT::ExecutionData,
-    ) -> RpcResult<RethPayloadStatus> {
-        let start = Instant::now();
-        let res = Self::reth_new_payload_v3(self, payload).await;
-        self.inner.metrics.latency.new_payload_v3.record(start.elapsed());
-        Ok(res?)
-    }
-
-    /// Like `new_payload_v4` but waits for persistence, execution cache, and sparse trie locks.
-    ///
-    /// Used by `reth_newPayloadV4` endpoint.
-    pub async fn reth_new_payload_v4(
-        &self,
-        payload: PayloadT::ExecutionData,
-    ) -> EngineApiResult<RethPayloadStatus> {
-        let payload_or_attrs = PayloadOrAttributes::<
-            '_,
-            PayloadT::ExecutionData,
-            PayloadT::PayloadAttributes,
-        >::from_execution_payload(&payload);
-        self.inner
-            .validator
-            .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
-
-        let (status, timings) = self.inner.beacon_consensus.reth_new_payload(payload).await?;
-        Ok(RethPayloadStatus {
-            status,
-            latency_us: timings.latency.as_micros() as u64,
-            persistence_wait_us: timings.persistence_wait.map(|d| d.as_micros() as u64),
-            execution_cache_wait_us: timings.execution_cache_wait.as_micros() as u64,
-            sparse_trie_wait_us: timings.sparse_trie_wait.as_micros() as u64,
-        })
-    }
-
-    /// Metered version of `reth_new_payload_v4`.
-    pub async fn reth_new_payload_v4_metered(
-        &self,
-        payload: PayloadT::ExecutionData,
-    ) -> RpcResult<RethPayloadStatus> {
-        let start = Instant::now();
-        let res = Self::reth_new_payload_v4(self, payload).await;
-        self.inner.metrics.latency.new_payload_v4.record(start.elapsed());
         Ok(res?)
     }
 }
@@ -1434,10 +1313,9 @@ where
     }
 }
 
-/// Implementation of `RethEngineApiServer` that mirrors `EngineApiServer` under the `reth_`
-/// namespace.
+/// Implementation of `RethEngineApiServer` under the `reth_` namespace.
 ///
-/// These endpoints wait for execution cache and sparse trie locks before processing.
+/// Waits for execution cache and sparse trie locks before processing.
 #[async_trait]
 impl<Provider, EngineT, Pool, Validator, ChainSpec> RethEngineApiServer
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
@@ -1448,78 +1326,9 @@ where
     Validator: EngineApiValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    /// Handler for `reth_newPayloadV1`
-    ///
-    /// Waits for execution cache and sparse trie locks before processing.
-    async fn reth_new_payload_v1(
-        &self,
-        payload: ExecutionPayloadV1,
-    ) -> RpcResult<RethPayloadStatus> {
-        trace!(target: "rpc::engine", "Serving reth_newPayloadV1");
-        let payload =
-            ExecutionData { payload: payload.into(), sidecar: ExecutionPayloadSidecar::none() };
-        Ok(self.reth_new_payload_v1_metered(payload).await?)
-    }
-
-    /// Handler for `reth_newPayloadV2`
-    ///
-    /// Waits for execution cache and sparse trie locks before processing.
-    async fn reth_new_payload_v2(
-        &self,
-        payload: ExecutionPayloadInputV2,
-    ) -> RpcResult<RethPayloadStatus> {
-        trace!(target: "rpc::engine", "Serving reth_newPayloadV2");
-        let payload = ExecutionData {
-            payload: payload.into_payload(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        };
-        Ok(self.reth_new_payload_v2_metered(payload).await?)
-    }
-
-    /// Handler for `reth_newPayloadV3`
-    ///
-    /// Waits for execution cache and sparse trie locks before processing.
-    async fn reth_new_payload_v3(
-        &self,
-        payload: ExecutionPayloadV3,
-        versioned_hashes: Vec<B256>,
-        parent_beacon_block_root: B256,
-    ) -> RpcResult<RethPayloadStatus> {
-        trace!(target: "rpc::engine", "Serving reth_newPayloadV3");
-        let payload = ExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
-                versioned_hashes,
-                parent_beacon_block_root,
-            }),
-        };
-        self.reth_new_payload_v3_metered(payload).await
-    }
-
-    /// Handler for `reth_newPayloadV4`
-    ///
-    /// Waits for execution cache and sparse trie locks before processing.
-    async fn reth_new_payload_v4(
-        &self,
-        payload: ExecutionPayloadV3,
-        versioned_hashes: Vec<B256>,
-        parent_beacon_block_root: B256,
-        requests: RequestsOrHash,
-    ) -> RpcResult<RethPayloadStatus> {
-        trace!(target: "rpc::engine", "Serving reth_newPayloadV4");
-
-        if requests.is_hash() && !self.inner.accept_execution_requests_hash {
-            return Err(EngineApiError::UnexpectedRequestsHash.into());
-        }
-
-        let payload = ExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::v4(
-                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
-                PraguePayloadFields { requests },
-            ),
-        };
-        self.reth_new_payload_v4_metered(payload).await
+    async fn reth_new_payload(&self, payload: ExecutionData) -> RpcResult<RethPayloadStatus> {
+        trace!(target: "rpc::engine", "Serving reth_newPayload");
+        self.reth_new_payload_metered(payload).await
     }
 }
 
@@ -1532,7 +1341,7 @@ where
     fn into_rpc_module(self) -> RpcModule<()> {
         let mut module = EngineApiServer::<EngineT>::into_rpc(self.clone()).remove_context();
 
-        // Merge reth_newPayload* endpoints
+        // Merge reth_newPayload endpoint
         module
             .merge(RethEngineApiServer::into_rpc(self).remove_context())
             .expect("No conflicting methods");

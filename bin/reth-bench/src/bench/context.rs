@@ -29,7 +29,7 @@ pub(crate) struct BenchContext {
     pub(crate) next_block: u64,
     /// Whether the chain is an OP rollup.
     pub(crate) is_optimism: bool,
-    /// Whether to use `reth_newPayload*` endpoints instead of `engine_newPayload*`.
+    /// Whether to use `reth_newPayload` endpoint instead of `engine_newPayload*`.
     pub(crate) use_reth_namespace: bool,
 }
 

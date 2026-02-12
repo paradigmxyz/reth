@@ -74,7 +74,7 @@ pub struct CacheWaitDurations {
 
 /// Trait for types that can wait for execution cache and sparse trie locks to become available.
 ///
-/// This is used by `reth_newPayload*` endpoints to ensure that payload processing
+/// This is used by `reth_newPayload` endpoint to ensure that payload processing
 /// waits for any ongoing operations to complete before starting.
 pub trait WaitForCaches {
     /// Waits for persistence and cache updates to complete.

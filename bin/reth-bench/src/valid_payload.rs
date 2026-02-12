@@ -6,8 +6,8 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::B256;
 use alloy_provider::{ext::EngineApi, network::AnyRpcBlock, Network, Provider};
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ForkchoiceState,
-    ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    ExecutionData, ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadSidecar,
+    ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
 };
 use alloy_transport::TransportResult;
 use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
@@ -163,10 +163,13 @@ where
     }
 }
 
+/// Converts an RPC block into versioned engine API params and an [`ExecutionData`].
+///
+/// Returns `(version, versioned_params, execution_data)`.
 pub(crate) fn block_to_new_payload(
     block: AnyRpcBlock,
     is_optimism: bool,
-) -> eyre::Result<(EngineApiMessageVersion, serde_json::Value)> {
+) -> eyre::Result<(EngineApiMessageVersion, serde_json::Value, ExecutionData)> {
     let block = block
         .into_inner()
         .map_header(|header| header.map(|h| h.into_header_with_defaults()))
@@ -181,13 +184,19 @@ pub(crate) fn block_to_new_payload(
     payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)
 }
 
+/// Converts an execution payload and sidecar into versioned engine API params and an
+/// [`ExecutionData`].
+///
+/// Returns `(version, versioned_params, execution_data)`.
 pub(crate) fn payload_to_new_payload(
     payload: ExecutionPayload,
     sidecar: ExecutionPayloadSidecar,
     is_optimism: bool,
     withdrawals_root: Option<B256>,
     target_version: Option<EngineApiMessageVersion>,
-) -> eyre::Result<(EngineApiMessageVersion, serde_json::Value)> {
+) -> eyre::Result<(EngineApiMessageVersion, serde_json::Value, ExecutionData)> {
+    let execution_data = ExecutionData { payload: payload.clone(), sidecar: sidecar.clone() };
+
     let (version, params) = match payload {
         ExecutionPayload::V3(payload) => {
             let cancun = sidecar.cancun().unwrap();
@@ -246,7 +255,7 @@ pub(crate) fn payload_to_new_payload(
         }
     };
 
-    Ok((version, params))
+    Ok((version, params, execution_data))
 }
 
 /// Calls the correct `engine_newPayload` method depending on the given [`ExecutionPayload`] and its
@@ -260,10 +269,10 @@ pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
     version: EngineApiMessageVersion,
     params: serde_json::Value,
 ) -> TransportResult<Option<NewPayloadTimingBreakdown>> {
-    call_new_payload_with_reth(provider, version, params, false).await
+    call_new_payload_with_reth(provider, version, params, None).await
 }
 
-/// Response from `reth_newPayload*` endpoints, which includes server-measured latency.
+/// Response from `reth_newPayload` endpoint, which includes server-measured latency.
 #[derive(Debug, Deserialize)]
 struct RethPayloadStatus {
     #[serde(flatten)]
@@ -277,7 +286,7 @@ struct RethPayloadStatus {
     sparse_trie_wait_us: u64,
 }
 
-/// Server-side timing breakdown from `reth_newPayload*` endpoints.
+/// Server-side timing breakdown from `reth_newPayload` endpoint.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct NewPayloadTimingBreakdown {
     /// Server-side execution latency.
@@ -290,31 +299,32 @@ pub(crate) struct NewPayloadTimingBreakdown {
     pub(crate) sparse_trie_wait: Duration,
 }
 
-/// Calls either `engine_newPayload*` or `reth_newPayload*` depending on the `use_reth_namespace`
-/// flag.
+/// Calls either `engine_newPayload*` or `reth_newPayload` depending on whether
+/// `reth_execution_data` is provided.
 ///
-/// When `use_reth_namespace` is true, uses the `reth_newPayload*` endpoints which wait for
-/// persistence and cache updates to complete before processing.
+/// When `reth_execution_data` is `Some`, uses the `reth_newPayload` endpoint which takes
+/// `ExecutionData` directly and waits for persistence and cache updates to complete.
 ///
-/// Returns the server-reported execution latency when using the reth namespace, or `None` for
+/// Returns the server-reported timing breakdown when using the reth namespace, or `None` for
 /// the standard engine namespace.
 pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
     provider: P,
     version: EngineApiMessageVersion,
     params: serde_json::Value,
-    use_reth_namespace: bool,
+    reth_execution_data: Option<ExecutionData>,
 ) -> TransportResult<Option<NewPayloadTimingBreakdown>> {
-    let method =
-        if use_reth_namespace { version.reth_method_name() } else { version.method_name() };
+    if let Some(execution_data) = reth_execution_data {
+        let method = "reth_newPayload";
+        let reth_params = serde_json::to_value((execution_data.clone(),))
+            .expect("ExecutionData serialization cannot fail");
 
-    debug!(target: "reth-bench", method, "Sending newPayload");
+        debug!(target: "reth-bench", method, "Sending newPayload");
 
-    if use_reth_namespace {
-        let mut resp: RethPayloadStatus = provider.client().request(method, &params).await?;
+        let mut resp: RethPayloadStatus = provider.client().request(method, &reth_params).await?;
 
         while !resp.status.is_valid() {
             if resp.status.is_invalid() {
-                error!(target: "reth-bench", status=?resp.status, ?params, "Invalid {method}",);
+                error!(target: "reth-bench", status=?resp.status, "Invalid {method}");
                 return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
                     std::io::Error::other(format!("Invalid {method}: {:?}", resp.status)),
                 )))
@@ -324,7 +334,7 @@ pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
                     "invalid range: no canonical state found for parent of requested block",
                 ))
             }
-            resp = provider.client().request(method, &params).await?;
+            resp = provider.client().request(method, &reth_params).await?;
         }
 
         Ok(Some(NewPayloadTimingBreakdown {
@@ -334,6 +344,10 @@ pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
             sparse_trie_wait: Duration::from_micros(resp.sparse_trie_wait_us),
         }))
     } else {
+        let method = version.method_name();
+
+        debug!(target: "reth-bench", method, "Sending newPayload");
+
         let mut status: PayloadStatus = provider.client().request(method, &params).await?;
 
         while !status.is_valid() {
