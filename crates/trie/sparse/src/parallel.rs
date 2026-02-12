@@ -2294,7 +2294,7 @@ impl ParallelSparseTrie {
                             masks,
                             branch.hash,
                         )?
-                } else if !SparseSubtrieType::path_len_is_upper(path.len() + 1) {
+                } else if !SparseSubtrieType::path_len_is_upper(branch_path.len() + 1) {
                     // If a branch is at the cutoff level of the trie then it will be in the upper
                     // trie, but all of its children will be in a lower trie.
                     // Check if a child node would be in the lower subtrie, and
