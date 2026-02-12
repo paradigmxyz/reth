@@ -66,6 +66,10 @@ export const rethCliSidebar: SidebarItem = {
                     ]
                 },
                 {
+                    text: "reth db copy",
+                    link: "/cli/reth/db/copy"
+                },
+                {
                     text: "reth db diff",
                     link: "/cli/reth/db/diff"
                 },
