@@ -816,11 +816,14 @@ impl SparseTrie for ParallelSparseTrie {
 
         // If there is a parent branch node (very likely, unless the leaf is at the root) execute
         // any required changes for that node, relative to the removed leaf.
-        if let (Some(branch_path), &Some(SparseNode::Branch { mut state_mask, .. })) =
-            (&branch_parent_path, &branch_parent_node)
+        if let (
+            Some(branch_path),
+            &Some(SparseNode::Branch { mut state_mask, mut leaf_mask, .. }),
+        ) = (&branch_parent_path, &branch_parent_node)
         {
             let child_nibble = leaf_path.get_unchecked(branch_path.len());
             state_mask.unset_bit(child_nibble);
+            leaf_mask.unset_bit(child_nibble);
 
             let new_branch_node = if state_mask.count_bits() == 1 {
                 // If only one child is left set in the branch node, we need to collapse it. Get
@@ -873,8 +876,8 @@ impl SparseTrie for ParallelSparseTrie {
                 new_branch_node
             } else {
                 // If more than one child is left set in the branch, we just re-insert it with the
-                // updated state_mask.
-                SparseNode::new_branch(state_mask)
+                // updated state_mask and leaf_mask.
+                SparseNode::new_branch(state_mask, leaf_mask)
             };
 
             let branch_subtrie = self.subtrie_for_path_mut(branch_path);
@@ -2202,9 +2205,21 @@ impl ParallelSparseTrie {
                     for idx in branch.state_mask.iter() {
                         let mut child_path = path;
                         child_path.push_unchecked(idx);
-                        self.lower_subtrie_for_path_mut(&child_path)
-                            .expect("child_path must have a lower subtrie")
-                            .reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+                        let subtrie = self
+                            .lower_subtrie_for_path_mut(&child_path)
+                            .expect("child_path must have a lower subtrie");
+                        subtrie.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+
+                        // If the revealed child is a leaf, update the parent branch's leaf_mask
+                        // in the upper subtrie
+                        if matches!(subtrie.nodes.get(&child_path), Some(SparseNode::Leaf { .. })) {
+                            if let Some(SparseNode::Branch { leaf_mask, .. }) =
+                                self.upper_subtrie.nodes.get_mut(&path)
+                            {
+                                leaf_mask.set_bit(idx);
+                            }
+                        }
+
                         stack_ptr += 1;
                     }
                 }
@@ -2785,9 +2800,17 @@ impl SparseSubtrie {
                     self.nodes.reserve(3);
                     let branch_path = current.slice(..common);
                     let new_leaf_path = path.slice(..=common);
-                    let branch = SparseNode::new_split_branch(
+
+                    // The new child is always a leaf. The old extension's child is not a leaf -
+                    // it's either an extension (if key is non-empty) or the extension's original
+                    // child (which is unknown but definitely not a leaf since extensions only
+                    // point to branches).
+                    let key = current.slice(common + 1..);
+                    let branch = SparseNode::new_split_branch_with_leaf_info(
                         current.get_unchecked(common),
+                        false, // old child is not a leaf (either extension or branch)
                         path.get_unchecked(common),
+                        true, // new child is always a leaf
                     );
 
                     self.nodes.insert(branch_path, branch);
@@ -2799,7 +2822,6 @@ impl SparseSubtrie {
                     let mut inserted_nodes = vec![branch_path, new_leaf_path];
 
                     // recreate extension to previous child if needed
-                    let key = current.slice(common + 1..);
                     if !key.is_empty() {
                         let ext_path = current.slice(..=common);
                         self.nodes.insert(ext_path, SparseNode::new_ext(key));
@@ -2811,11 +2833,12 @@ impl SparseSubtrie {
 
                 Ok(LeafUpdateStep::continue_with(current))
             }
-            SparseNode::Branch { state_mask, .. } => {
+            SparseNode::Branch { state_mask, leaf_mask, .. } => {
                 let nibble = path.get_unchecked(current.len());
                 current.push_unchecked(nibble);
                 if !state_mask.is_bit_set(nibble) {
                     state_mask.set_bit(nibble);
+                    leaf_mask.set_bit(nibble);
                     let new_leaf = SparseNode::new_leaf(path.slice(current.len()..));
                     self.nodes.insert(current, new_leaf);
                     return Ok(LeafUpdateStep::complete_with_insertions(vec![current], None))
@@ -2859,12 +2882,14 @@ impl SparseSubtrie {
             TrieNode::Branch(branch) => {
                 // Update the branch node entry in the nodes map, handling cases where a blinded
                 // node is now replaced with a revealed node.
+                // Note: leaf_mask is initialized empty and will be populated during child reveals
                 match self.nodes.entry(path) {
                     Entry::Occupied(mut entry) => match entry.get() {
                         // Replace a hash node with a fully revealed branch node.
                         SparseNode::Hash(hash) => {
                             entry.insert(SparseNode::Branch {
                                 state_mask: branch.state_mask,
+                                leaf_mask: TrieMask::default(),
                                 state: SparseNodeState::Cached {
                                     // Memoize the hash of a previously blinded node in the new
                                     // branch node.
@@ -2878,7 +2903,8 @@ impl SparseSubtrie {
                         _ => unreachable!("checked that node is either a hash or non-existent"),
                     },
                     Entry::Vacant(entry) => {
-                        entry.insert(SparseNode::new_branch(branch.state_mask));
+                        entry
+                            .insert(SparseNode::new_branch(branch.state_mask, TrieMask::default()));
                     }
                 }
 
@@ -2892,6 +2918,15 @@ impl SparseSubtrie {
                         // Reveal each child node or hash it has, but only if the child is on
                         // the same level as the parent.
                         self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+
+                        // If the revealed child is a leaf, update the parent branch's leaf_mask
+                        if matches!(self.nodes.get(&child_path), Some(SparseNode::Leaf { .. })) {
+                            if let Some(SparseNode::Branch { leaf_mask, .. }) =
+                                self.nodes.get_mut(&path)
+                            {
+                                leaf_mask.set_bit(idx);
+                            }
+                        }
                     }
                     stack_ptr += 1;
                 }
@@ -3295,7 +3330,7 @@ impl SparseSubtrieInner {
                     return
                 }
             }
-            SparseNode::Branch { state_mask, state } => {
+            SparseNode::Branch { state_mask, state, .. } => {
                 if let Some((rlp_node, store_in_db_trie)) = state
                     .cached_rlp_node()
                     .zip(state.store_in_db_trie())

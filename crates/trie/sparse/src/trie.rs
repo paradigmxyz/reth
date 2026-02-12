@@ -355,6 +355,9 @@ pub enum SparseNode {
     Branch {
         /// The bitmask representing children present in the branch node.
         state_mask: TrieMask,
+        /// The bitmask representing which children are leaf nodes.
+        /// This is always a subset of `state_mask`.
+        leaf_mask: TrieMask,
         /// Tracker for the node's state, e.g. cached `RlpNode` tracking.
         state: SparseNodeState,
     },
@@ -367,22 +370,46 @@ impl SparseNode {
             TrieNode::EmptyRoot => Self::Empty,
             TrieNode::Leaf(leaf) => Self::new_leaf(leaf.key),
             TrieNode::Extension(ext) => Self::new_ext(ext.key),
-            TrieNode::Branch(branch) => Self::new_branch(branch.state_mask),
+            TrieNode::Branch(branch) => Self::new_branch(branch.state_mask, TrieMask::default()),
         }
     }
 
-    /// Create new [`SparseNode::Branch`] from state mask.
-    pub const fn new_branch(state_mask: TrieMask) -> Self {
-        Self::Branch { state_mask, state: SparseNodeState::Dirty }
+    /// Create new [`SparseNode::Branch`] from state mask and leaf mask.
+    pub const fn new_branch(state_mask: TrieMask, leaf_mask: TrieMask) -> Self {
+        Self::Branch { state_mask, leaf_mask, state: SparseNodeState::Dirty }
     }
 
-    /// Create new [`SparseNode::Branch`] with two bits set.
+    /// Create new [`SparseNode::Branch`] with two bits set, both pointing to leaf children.
     pub const fn new_split_branch(bit_a: u8, bit_b: u8) -> Self {
         let state_mask = TrieMask::new(
             // set bits for both children
             (1u16 << bit_a) | (1u16 << bit_b),
         );
-        Self::Branch { state_mask, state: SparseNodeState::Dirty }
+        // Both children are leaves when splitting
+        let leaf_mask = state_mask;
+        Self::Branch { state_mask, leaf_mask, state: SparseNodeState::Dirty }
+    }
+
+    /// Create new [`SparseNode::Branch`] with two bits set, specifying which is a leaf.
+    ///
+    /// - `bit_a` and `bit_b` are nibble indices for the children
+    /// - `bit_a_is_leaf` and `bit_b_is_leaf` indicate whether each child is a leaf node
+    pub const fn new_split_branch_with_leaf_info(
+        bit_a: u8,
+        bit_a_is_leaf: bool,
+        bit_b: u8,
+        bit_b_is_leaf: bool,
+    ) -> Self {
+        let state_mask = TrieMask::new((1u16 << bit_a) | (1u16 << bit_b));
+        let mut leaf_mask_val = 0u16;
+        if bit_a_is_leaf {
+            leaf_mask_val |= 1u16 << bit_a;
+        }
+        if bit_b_is_leaf {
+            leaf_mask_val |= 1u16 << bit_b;
+        }
+        let leaf_mask = TrieMask::new(leaf_mask_val);
+        Self::Branch { state_mask, leaf_mask, state: SparseNodeState::Dirty }
     }
 
     /// Create new [`SparseNode::Extension`] from the key slice.
