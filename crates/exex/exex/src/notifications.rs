@@ -171,16 +171,40 @@ where
         };
 
         // Update the head block hash to the parent hash of the first committed block.
-        let committed_chain =
-            notification.committed_chain().expect("committed_chain should be set");
-        let new_exex_head =
-            (committed_chain.first().parent_hash(), committed_chain.first().number() - 1).into();
-        debug!(target: "exex::notifications", old_exex_head = ?exex_head.block, new_exex_head = ?new_exex_head, "ExEx head updated");
-        self.exex_head.as_mut().expect("exex_head should be set").block = new_exex_head;
+        let old_block = exex_head.block;
+        let new_block = notification
+            .committed_chain()
+            .expect("committed_chain should be set")
+            .first()
+            .parent_num_hash();
+        self.exex_head = Some(ExExHead { block: new_block });
+        debug!(target: "exex::notifications", old_exex_head = ?old_block, new_exex_head = ?new_block, "ExEx head updated");
 
         // Return an inverted notification. See the documentation for
         // `ExExNotification::into_inverted`.
         Ok(Some(notification.into_inverted()))
+    }
+
+    /// Updates the ExEx head based on the delivered notification.
+    ///
+    /// This should be called when delivering a notification to track what the ExEx has processed.
+    /// Only updates the head if `is_stateful` is true.
+    fn update_exex_head(&mut self, notification: &ExExNotification<E::Primitives>) {
+        if !self.is_stateful {
+            return
+        }
+
+        // Update head based on notification type
+        let head = match notification {
+            ExExNotification::ChainCommitted { new } |
+            ExExNotification::ChainReorged { new, .. } => new.tip().num_hash(),
+            ExExNotification::ChainReverted { old } => {
+                // After a revert, the head should be the parent of the first reverted block
+                old.first().parent_num_hash()
+            }
+        };
+
+        self.exex_head = Some(ExExHead { block: head });
     }
 
     /// Compares the ExEx head against a target block number, and backfills if needed.
@@ -201,8 +225,6 @@ where
 
         let exex_head = self.exex_head.as_ref().expect("exex_head should be set");
 
-        let backfill_job_factory =
-            BackfillJobFactory::new(self.evm_config.clone(), self.provider.clone());
         match exex_head.block.number.cmp(&target_block) {
             std::cmp::Ordering::Less => {
                 // ExEx is behind the target block, start backfill
@@ -212,6 +234,8 @@ where
                     target_block,
                     "ExEx is behind the target block, starting backfill"
                 );
+                let backfill_job_factory =
+                    BackfillJobFactory::new(self.evm_config.clone(), self.provider.clone());
                 let backfill = backfill_job_factory
                     .backfill(exex_head.block.number + 1..=target_block)
                     .into_stream();
@@ -241,15 +265,21 @@ where
 
         // Branch based on whether we have a head
         if this.exex_head.is_none() {
-            // Stateless mode: simple pass-through
-            return this.notifications.poll_recv(cx).map(|opt| opt.map(Ok))
+            // No head set yet - pass through and auto-populate head if stateful
+            match this.notifications.poll_recv(cx) {
+                Poll::Ready(Some(notification)) => {
+                    this.update_exex_head(&notification);
+                    return Poll::Ready(Some(Ok(notification)))
+                }
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => return Poll::Pending,
+            }
         }
-
-        // Stateful mode: full check logic
 
         // 1. Check canonical state (one-time)
         if this.pending_check_canonical {
             if let Some(notification) = this.check_canonical()? {
+                this.update_exex_head(&notification);
                 return Poll::Ready(Some(Ok(notification)))
             }
             this.pending_check_canonical = false;
@@ -264,14 +294,15 @@ where
         // 3. Poll backfill job if running
         if let Some(backfill_job) = &mut this.backfill_job {
             if let Some(chain) = ready!(backfill_job.poll_next_unpin(cx)).transpose()? {
-                return Poll::Ready(Some(Ok(ExExNotification::ChainCommitted {
-                    new: Arc::new(chain),
-                })))
+                let notification = ExExNotification::ChainCommitted { new: Arc::new(chain) };
+                this.update_exex_head(&notification);
+                return Poll::Ready(Some(Ok(notification)))
             }
             this.backfill_job = None;
 
             // If we just finished backfill and have a pending notification, deliver it
             if let Some(pending) = this.pending_notification.take() {
+                this.update_exex_head(&pending);
                 return Poll::Ready(Some(Ok(pending)))
             }
         }
@@ -310,6 +341,7 @@ where
                 }
             }
 
+            this.update_exex_head(&notification);
             return Poll::Ready(Some(Ok(notification)))
         }
     }
