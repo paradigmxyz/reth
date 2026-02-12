@@ -103,8 +103,11 @@ impl SparseTrieUpdate {
 pub enum MultiProofMessage {
     /// Prefetch proof targets
     PrefetchProofs(VersionedMultiProofTargets),
-    /// New state update from transaction execution with its source
-    StateUpdate(Source, EvmState),
+    /// New state update from transaction execution with its source.
+    ///
+    /// The state is pre-hashed to [`HashedPostState`] at the sender (`state_hook`) to avoid
+    /// cloning the full [`EvmState`] which includes bytecodes and `original_info`.
+    StateUpdate(Source, HashedPostState),
     /// State update that can be applied to the sparse trie without any new proofs.
     ///
     /// It can be the case when all accounts and storage slots from the state update were already
@@ -201,6 +204,7 @@ impl Drop for StateHookSender {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
@@ -218,6 +222,41 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
                 .into_iter()
                 .filter(|(_slot, value)| value.is_changed())
                 .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                .peekable();
+
+            if destroyed {
+                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
+            } else if changed_storage_iter.peek().is_some() {
+                hashed_state
+                    .storages
+                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+            }
+        }
+    }
+
+    hashed_state
+}
+
+/// Converts an [`EvmState`] by reference into a [`HashedPostState`], avoiding cloning.
+///
+/// Only copies nonce (`u64`), balance (`U256`), and `code_hash` (`B256`) from `AccountInfo` —
+/// all Copy types. Bytecode and `original_info` are not touched.
+pub(crate) fn evm_state_to_hashed_post_state_ref(update: &EvmState) -> HashedPostState {
+    let mut hashed_state = HashedPostState::with_capacity(update.len());
+
+    for (address, account) in update {
+        if account.is_touched() {
+            let hashed_address = keccak256(*address);
+
+            let destroyed = account.is_selfdestructed();
+            let info = if destroyed { None } else { Some((&account.info).into()) };
+            hashed_state.accounts.insert(hashed_address, info);
+
+            let mut changed_storage_iter = account
+                .storage
+                .iter()
+                .filter(|(_slot, value)| value.is_changed())
+                .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value))
                 .peekable();
 
             if destroyed {
@@ -847,7 +886,7 @@ impl MultiProofTask {
         all_proofs_processed && no_pending && updates_finished
     }
 
-    /// Handles state updates.
+    /// Handles pre-hashed state updates.
     ///
     /// Returns how many proof dispatches were spawned (including an `EmptyProof` for already
     /// fetched targets).
@@ -855,11 +894,10 @@ impl MultiProofTask {
         level = "debug",
         target = "engine::tree::payload_processor::multiproof",
         skip(self, update),
-        fields(accounts = update.len(), chunks = 0)
+        fields(accounts = update.accounts.len(), chunks = 0)
     )]
-    fn on_state_update(&mut self, source: Source, update: EvmState) -> u64 {
-        let hashed_state_update = evm_state_to_hashed_post_state(update);
-        self.on_hashed_state_update(source, hashed_state_update)
+    fn on_state_update(&mut self, source: Source, update: HashedPostState) -> u64 {
+        self.on_hashed_state_update(source, update)
     }
 
     /// Processes a hashed state update and dispatches multiproofs as needed.
@@ -1094,7 +1132,7 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                let update_len = update.len();
+                let update_len = update.accounts.len();
                 batch_metrics.state_update_proofs_requested += self.on_state_update(source, update);
                 trace!(
                     target: "engine::tree::payload_processor::multiproof",
@@ -2125,8 +2163,16 @@ mod tests {
             .unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(VersionedMultiProofTargets::Legacy(targets2)))
             .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), state_update1)).unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), state_update2)).unwrap();
+        tx.send(MultiProofMessage::StateUpdate(
+            source.into(),
+            evm_state_to_hashed_post_state(state_update1),
+        ))
+        .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(
+            source.into(),
+            evm_state_to_hashed_post_state(state_update2),
+        ))
+        .unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(VersionedMultiProofTargets::Legacy(
             targets3.clone(),
         )))
@@ -2165,9 +2211,14 @@ mod tests {
         }
 
         // Step 2: The pending message should be StateUpdate1 (preserved ordering)
+        let hashed_state_addr1 = keccak256(state_addr1);
+        let hashed_state_addr2 = keccak256(state_addr2);
         match pending_msg {
             Some(MultiProofMessage::StateUpdate(_src, update)) => {
-                assert!(update.contains_key(&state_addr1), "Should be first StateUpdate");
+                assert!(
+                    update.accounts.contains_key(&hashed_state_addr1),
+                    "Should be first StateUpdate"
+                );
             }
             _ => panic!("StateUpdate1 was lost or reordered! The ordering fix is broken."),
         }
@@ -2175,7 +2226,10 @@ mod tests {
         // Step 3: Next in channel should be StateUpdate2
         match task.rx.try_recv() {
             Ok(MultiProofMessage::StateUpdate(_src, update)) => {
-                assert!(update.contains_key(&state_addr2), "Should be second StateUpdate");
+                assert!(
+                    update.accounts.contains_key(&hashed_state_addr2),
+                    "Should be second StateUpdate"
+                );
             }
             _ => panic!("StateUpdate2 was lost!"),
         }
@@ -2233,7 +2287,11 @@ mod tests {
         let tx = task.tx.clone();
         tx.send(MultiProofMessage::PrefetchProofs(VersionedMultiProofTargets::Legacy(prefetch1)))
             .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), state_update)).unwrap();
+        tx.send(MultiProofMessage::StateUpdate(
+            source.into(),
+            evm_state_to_hashed_post_state(state_update),
+        ))
+        .unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(VersionedMultiProofTargets::Legacy(
             prefetch2.clone(),
         )))

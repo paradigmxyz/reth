@@ -2,8 +2,8 @@
 
 use crate::tree::{
     multiproof::{
-        dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
-        VersionedMultiProofTargets, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+        dispatch_with_chunking, MultiProofMessage, VersionedMultiProofTargets,
+        DEFAULT_MAX_TARGETS_FOR_CHUNKING,
     },
     payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate},
 };
@@ -321,8 +321,10 @@ where
         }
     }
 
-    /// Runs the hashing task that drains updates from the channel and converts them to
-    /// `HashedPostState` in parallel.
+    /// Runs the hashing task that drains updates from the channel and forwards them.
+    ///
+    /// `StateUpdate` messages arrive pre-hashed (as `HashedPostState`), so this task
+    /// only needs to forward them without additional conversion.
     fn run_hashing_task(
         updates: CrossbeamReceiver<MultiProofMessage>,
         hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
@@ -332,9 +334,7 @@ where
                 MultiProofMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
-                MultiProofMessage::StateUpdate(_, state) => {
-                    let _span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing state update", update_len = state.len()).entered();
-                    let hashed = evm_state_to_hashed_post_state(state);
+                MultiProofMessage::StateUpdate(_, hashed) => {
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 MultiProofMessage::FinishedStateUpdates => {

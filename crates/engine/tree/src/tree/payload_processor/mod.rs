@@ -733,7 +733,10 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
+                // Hash by reference to avoid cloning the full EvmState (which includes bytecodes
+                // and original_info). Only nonce, balance, and code_hash (all Copy) are extracted.
+                let hashed = multiproof::evm_state_to_hashed_post_state_ref(state);
+                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), hashed));
             }
         }
     }
