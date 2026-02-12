@@ -134,6 +134,8 @@ impl<C: ChainSpecParser> Command<C> {
                 if provider_rw.cached_storage_settings().use_hashed_state {
                     tx.clear::<tables::HashedAccounts>()?;
                     tx.clear::<tables::HashedStorages>()?;
+                    reset_stage_checkpoint(tx, StageId::AccountHashing)?;
+                    reset_stage_checkpoint(tx, StageId::StorageHashing)?;
                 } else {
                     tx.clear::<tables::PlainAccountState>()?;
                     tx.clear::<tables::PlainStorageState>()?;

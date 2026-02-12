@@ -174,7 +174,7 @@ impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_
 impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvider
     for LatestStateProviderRef<'_, Provider>
 {
-    /// Get storage.
+    /// Get storage by plain (unhashed) storage key slot.
     fn storage(
         &self,
         account: Address,

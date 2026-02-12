@@ -318,6 +318,7 @@ impl RocksDBProvider {
             let unique_keys: HashSet<_> = changesets
                 .into_iter()
                 .map(|(block_addr, entry)| {
+                    // entry.key is a hashed storage key
                     (block_addr.address(), entry.key.as_b256(), checkpoint + 1)
                 })
                 .collect();

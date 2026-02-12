@@ -1,11 +1,10 @@
+use crate::ChangesetEntry;
 use alloy_primitives::{Address, BlockNumber, B256};
 use auto_impl::auto_impl;
 use core::ops::{RangeBounds, RangeInclusive};
 use reth_db_api::models::BlockNumberAddress;
 use reth_db_models::AccountBeforeTx;
 use reth_storage_errors::provider::ProviderResult;
-
-use crate::ChangesetEntry;
 
 /// History Writer
 #[auto_impl(&, Box)]

@@ -506,6 +506,7 @@ impl<
             + NodePrimitivesProvider,
     > StateProvider for HistoricalStateProviderRef<'_, Provider>
 {
+    /// Expects a plain (unhashed) storage key slot.
     fn storage(
         &self,
         address: Address,
