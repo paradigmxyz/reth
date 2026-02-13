@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn test_packed_legacy_conversion() {
         let nibbles = vec![0x0A, 0x0B, 0x0C, 0x0D];
-        let legacy = StoredNibblesSubKey::from(nibbles.clone());
+        let legacy = StoredNibblesSubKey::from(nibbles);
         let packed: PackedStoredNibblesSubKey = legacy.clone().into();
         let back: StoredNibblesSubKey = packed.into();
         assert_eq!(legacy, back);
