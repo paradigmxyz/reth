@@ -1040,7 +1040,7 @@ Engine:
           [default: 1s]
 
       --engine.small-block-tx-threshold <SMALL_BLOCK_TX_THRESHOLD>
-          Transaction count threshold below which blocks skip the StateRootTask in favor of parallel state root computation. The sparse trie task has fixed coordination overhead (~5-6ms) that exceeds the benefit for small blocks. Set to 0 to disable
+          Transaction count threshold below which blocks skip the StateRootTask in favor of synchronous (serial) state root computation. The sparse trie task has fixed coordination overhead (~5-6ms) that exceeds the benefit for small blocks. Set to 0 to disable
 
           [default: 30]
 

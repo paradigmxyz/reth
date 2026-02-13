@@ -410,8 +410,8 @@ pub struct EngineArgs {
     pub state_root_task_timeout: Option<Duration>,
 
     /// Transaction count threshold below which blocks skip the `StateRootTask` in favor of
-    /// parallel state root computation. The sparse trie task has fixed coordination overhead
-    /// (~5-6ms) that exceeds the benefit for small blocks. Set to 0 to disable.
+    /// synchronous (serial) state root computation. The sparse trie task has fixed coordination
+    /// overhead (~5-6ms) that exceeds the benefit for small blocks. Set to 0 to disable.
     #[arg(long = "engine.small-block-tx-threshold", default_value_t = DefaultEngineValues::get_global().small_block_tx_threshold)]
     pub small_block_tx_threshold: usize,
 }

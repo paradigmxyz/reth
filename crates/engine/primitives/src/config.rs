@@ -72,7 +72,7 @@ pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
 ///
 /// For blocks with fewer transactions than this threshold, the coordination overhead of the sparse
 /// trie task (~5-6ms for channel setup, proof workers, multiproof gathering) exceeds the benefit.
-/// These blocks fall back to parallel state root computation instead.
+/// These blocks fall back to synchronous (serial) state root computation instead.
 pub const DEFAULT_SMALL_BLOCK_TX_THRESHOLD: usize = 30;
 
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
@@ -194,7 +194,7 @@ pub struct TreeConfig {
     /// If `None`, the timeout fallback is disabled.
     state_root_task_timeout: Option<Duration>,
     /// Transaction count threshold below which blocks skip the `StateRootTask` in favor of
-    /// parallel state root computation. Set to 0 to disable.
+    /// synchronous (serial) state root computation. Set to 0 to disable.
     small_block_tx_threshold: usize,
 }
 

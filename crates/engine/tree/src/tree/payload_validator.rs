@@ -1236,8 +1236,8 @@ where
     ///
     /// For small blocks (below the configured transaction count threshold), the sparse trie task's
     /// coordination overhead (~5-6ms for channel setup, proof workers, multiproof gathering) is
-    /// disproportionate to the actual execution cost. These blocks fall back to parallel state root
-    /// computation.
+    /// disproportionate to the actual execution cost. These blocks fall back to synchronous
+    /// (serial) state root computation.
     ///
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
@@ -1253,10 +1253,10 @@ where
                     target: "engine::tree::payload_validator",
                     transaction_count,
                     threshold,
-                    "Skipping StateRootTask for small block"
+                    "Skipping StateRootTask for small block, using serial state root"
                 );
                 self.metrics.block_validation.state_root_task_small_block_skip_total.increment(1);
-                return StateRootStrategy::Parallel;
+                return StateRootStrategy::Synchronous;
             }
             return StateRootStrategy::StateRootTask;
         }
