@@ -748,7 +748,6 @@ impl SparseTrie for ParallelSparseTrie {
                     provider,
                     full_path,
                     &remaining_child_path,
-                    true, // recurse_into_extension
                 )?;
 
                 let (new_branch_node, remove_child) = Self::branch_changes_on_leaf_removal(
@@ -1132,7 +1131,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                 if depth == max_depth {
                     let path_to_prune = if is_extension {
                         // If this is a child of extension node, we want to prune the extension node
-                        // itself to prserve invariant of both extension and branch nodes being
+                        // itself to preserve invariant of both extension and branch nodes being
                         // revealed.
                         path
                     } else {
@@ -1722,51 +1721,15 @@ impl ParallelSparseTrie {
                         let mut grandchild_path = *path;
                         grandchild_path.extend(&ext.key);
 
-                        // If extension node child branch is blinded, make sure to request reveal
-                        // for the extension itself because proof workers consider branch and
-                        // extension nodes to be coupled.
-                        if let Err(err) = self.pre_validate_reveal_chain(&grandchild_path, provider)
-                        {
-                            if let SparseTrieErrorKind::BlindedNode { path: blinded, hash } =
-                                err.kind() &&
-                                blinded == &grandchild_path
-                            {
-                                Err(SparseTrieErrorKind::BlindedNode { path: *path, hash: *hash }
-                                    .into())
-                            } else {
-                                Err(err)
-                            }
-                        } else {
-                            Ok(())
-                        }
-                    } else {
-                        Ok(())
+                        return self.pre_validate_reveal_chain(&grandchild_path, provider);
                     }
+
+                    Ok(())
                 }
                 // Provider cannot reveal this node - operation would fail
                 None => Err(SparseTrieErrorKind::BlindedNode { path: *path, hash: *hash }.into()),
             },
-            // Already-revealed extension: recursively validate its child
-            Some(SparseNode::Extension { key, .. }) => {
-                let mut child_path = *path;
-                child_path.extend(key);
-
-                // If extension node child branch is blinded, make sure to request reveal for the
-                // extension itself because proof workers consider branch and extension nodes to be
-                // coupled.
-                if let Err(err) = self.pre_validate_reveal_chain(&child_path, provider) {
-                    if let SparseTrieErrorKind::BlindedNode { path: blinded, hash } = err.kind() &&
-                        blinded == &child_path
-                    {
-                        Err(SparseTrieErrorKind::BlindedNode { path: *path, hash: *hash }.into())
-                    } else {
-                        Err(err)
-                    }
-                } else {
-                    Ok(())
-                }
-            }
-            // Leaf, Branch, Empty, or missing: no further validation needed
+            // Leaf, Extension, Branch, Empty, or missing: no further validation needed
             _ => Ok(()),
         }
     }
@@ -1785,7 +1748,6 @@ impl ParallelSparseTrie {
         provider: P,
         full_path: &Nibbles, // only needed for logs
         remaining_child_path: &Nibbles,
-        recurse_into_extension: bool,
     ) -> SparseTrieResult<SparseNode> {
         let remaining_child_subtrie = self.subtrie_for_path_mut(remaining_child_path);
 
@@ -1833,46 +1795,6 @@ impl ParallelSparseTrie {
 
         if let Some(masks) = remaining_child_masks {
             self.branch_node_masks.insert(*remaining_child_path, masks);
-        }
-
-        // If `recurse_into_extension` is true, and the remaining child is an extension node, then
-        // its child will be ensured to be revealed as well. This is required for generation of
-        // trie updates; without revealing the grandchild branch it's not always possible to know
-        // if the tree mask bit should be set for the child extension on its parent branch.
-        if let SparseNode::Extension { key, .. } = &remaining_child_node &&
-            recurse_into_extension
-        {
-            let mut remaining_grandchild_path = *remaining_child_path;
-            remaining_grandchild_path.extend(key);
-
-            trace!(
-                target: "trie::parallel_sparse",
-                remaining_grandchild_path = ?remaining_grandchild_path,
-                child_path = ?remaining_child_path,
-                leaf_full_path = ?full_path,
-                "Revealing child of extension node, which is the last remaining child of the branch"
-            );
-
-            if let Err(err) = self.reveal_remaining_child_on_leaf_removal(
-                provider,
-                full_path,
-                &remaining_grandchild_path,
-                false, // recurse_into_extension
-            ) {
-                // If extension node child branch is blinded, make sure to request reveal for the
-                // extension itself because proof workers consider branch and extension nodes to be
-                // coupled.
-                if let SparseTrieErrorKind::NodeNotFoundInProvider { path } = err.kind() &&
-                    path == &remaining_grandchild_path
-                {
-                    return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
-                        path: *remaining_child_path,
-                    }
-                    .into());
-                }
-
-                return Err(err);
-            }
         }
 
         Ok(remaining_child_node)
