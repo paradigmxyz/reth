@@ -1213,6 +1213,7 @@ impl SparseTrie for ParallelSparseTrie {
                 // Branch collapsed to a leaf - remove the branch node
                 let branch_subtrie = self.subtrie_for_path_mut(branch_path);
                 branch_subtrie.nodes.remove(branch_path);
+                // Note: Subtrie clearing happens later after values are moved in became_leaf_info
             }
             // Note: if new_branch_node is None, the branch collapsed to a leaf which is
             // tracked in the grandparent's leaf_mask, not as a node in the nodes HashMap.
@@ -1272,6 +1273,65 @@ impl SparseTrie for ParallelSparseTrie {
 
             // Update the parent branch's leaf_mask and leaf_short_keys if a child became a leaf
             if let Some((node_path, short_key, full_path)) = became_leaf_info {
+                // Determine where the parent is (the branch that will track this new leaf)
+                let parent_path = if node_path.is_empty() {
+                    node_path
+                } else {
+                    node_path.slice(..node_path.len() - 1)
+                };
+                let parent_subtrie_type = SparseSubtrieType::from_path(&parent_path);
+                let value_subtrie_type = SparseSubtrieType::from_path(&full_path);
+
+                // If the value is in a different subtrie than the parent, move it.
+                // This happens when a branch at the root of a lower subtrie collapses
+                // and the leaf needs to be tracked by a parent in the upper subtrie.
+                let parent_is_upper = matches!(parent_subtrie_type, SparseSubtrieType::Upper);
+                let value_is_lower = matches!(value_subtrie_type, SparseSubtrieType::Lower(_));
+                if parent_is_upper && value_is_lower {
+                    // Value should end up in upper subtrie. Check if it was already moved
+                    // by move_value_on_collapse earlier, or if we need to move it now.
+                    if let Some(leaf) = self.upper_subtrie.inner.values.get_mut(&full_path) {
+                        // Already in upper subtrie, just update key_len
+                        leaf.key_len = short_key.len();
+                        leaf.state = SparseNodeState::Dirty;
+                    } else if let SparseSubtrieType::Lower(idx) = value_subtrie_type {
+                        // Still in lower subtrie, move it and update key_len
+                        if let Some(subtrie) = self.lower_subtries[idx].as_revealed_mut() {
+                            if let Some(mut leaf) = subtrie.inner.values.remove(&full_path) {
+                                leaf.key_len = short_key.len();
+                                leaf.state = SparseNodeState::Dirty;
+                                self.upper_subtrie.inner.values.insert(full_path, leaf);
+
+                                // Clear the lower subtrie if it's now empty
+                                if subtrie.nodes.is_empty() && subtrie.inner.values.is_empty() {
+                                    self.lower_subtries[idx].clear();
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Value stays in the same subtrie, just update key_len
+                    // Check upper subtrie first (it might have been moved earlier)
+                    let leaf_updated =
+                        if let Some(leaf) = self.upper_subtrie.inner.values.get_mut(&full_path) {
+                            leaf.key_len = short_key.len();
+                            leaf.state = SparseNodeState::Dirty;
+                            true
+                        } else {
+                            false
+                        };
+                    if !leaf_updated {
+                        if let SparseSubtrieType::Lower(idx) = value_subtrie_type {
+                            if let Some(subtrie) = self.lower_subtries[idx].as_revealed_mut() {
+                                if let Some(leaf) = subtrie.inner.values.get_mut(&full_path) {
+                                    leaf.key_len = short_key.len();
+                                    leaf.state = SparseNodeState::Dirty;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if node_path.is_empty() {
                     // Branch at root collapsed to a leaf - insert a RootLeaf at root
                     self.upper_subtrie
@@ -10541,5 +10601,167 @@ mod tests {
 
         let root2 = trie.root();
         assert_ne!(root1, root2, "Root hash should change after adding a leaf");
+    }
+
+    #[test]
+    fn sparse_trie_fuzz_minimal_repro() {
+        // Regression test for key_len not being updated when a branch collapses
+        // to a leaf across subtrie boundaries.
+        //
+        // Scenario:
+        // - Insert accounts at: 0x0a00..., 0x8910..., 0xe5d0..., 0xf3b0..., 0xfff0...
+        // - Remove accounts at: 0xe5d0..., 0xfff0...
+        // - After removing 0xff, the branch at 0xf collapses and 0xf3b0... becomes a leaf child of
+        //   the root branch. The value's key_len must be updated to match the new short key length.
+        let key_0a = pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x0, 0xa]));
+        let key_89 = pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x8, 0x9, 0x1, 0x0]));
+        let key_e5 = pad_nibbles_right(Nibbles::from_nibbles_unchecked([0xe, 0x5, 0xd, 0x0]));
+        let key_f3 = pad_nibbles_right(Nibbles::from_nibbles_unchecked([0xf, 0x3, 0xb, 0x0]));
+        let key_ff = pad_nibbles_right(Nibbles::from_nibbles_unchecked([0xf, 0xf, 0xf, 0x0]));
+
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = ParallelSparseTrie::default().with_updates(true);
+
+        // Insert all keys
+        sparse.update_leaf(key_0a, value_encoded(), &provider).unwrap();
+        sparse.update_leaf(key_89, value_encoded(), &provider).unwrap();
+        sparse.update_leaf(key_e5, value_encoded(), &provider).unwrap();
+        sparse.update_leaf(key_f3, value_encoded(), &provider).unwrap();
+        sparse.update_leaf(key_ff, value_encoded(), &provider).unwrap();
+
+        // Compute root after inserts
+        let sparse_root_after_inserts = sparse.root();
+
+        // Build expected state using hash builder
+        let mut state = BTreeMap::from([
+            (key_0a, value()),
+            (key_89, value()),
+            (key_e5, value()),
+            (key_f3, value()),
+            (key_ff, value()),
+        ]);
+        let (hash_builder_root_after_inserts, _, _, _, _) = run_hash_builder(
+            state.clone(),
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            state.keys().copied(),
+        );
+        assert_eq!(
+            sparse_root_after_inserts, hash_builder_root_after_inserts,
+            "roots should match after inserts"
+        );
+
+        // Remove keys - this triggers the branch collapse
+        sparse.remove_leaf(&key_e5, &provider).unwrap();
+        sparse.remove_leaf(&key_ff, &provider).unwrap();
+
+        // Compute root after removals
+        let sparse_root_after_removes = sparse.root();
+
+        // Build expected state after removals
+        state.remove(&key_e5);
+        state.remove(&key_ff);
+        let (hash_builder_root_after_removes, _, _, _, _) = run_hash_builder(
+            state.clone(),
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            state.keys().copied(),
+        );
+
+        assert_eq!(
+            sparse_root_after_removes, hash_builder_root_after_removes,
+            "roots should match after removals"
+        );
+    }
+
+    #[test]
+    fn sparse_trie_fuzz_repro_2() {
+        // Reproduction from fuzz test - deletion of multiple keys including f3b0
+        // and f390 where the branch at 0xf3 has two children.
+        let keys_to_insert = [
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x0, 0xa])), // 0x0a...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x0, 0xd, 0x9])), // 0x0d9...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x1, 0x6])), // 0x16...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x1, 0xd, 0x4])), // 0x1d4...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x4, 0x0, 0xa])), // 0x40a...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x4, 0xf, 0xd])), // 0x4fd...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x8, 0x2, 0x5])), // 0x825...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x8, 0x9, 0x1])), // 0x891...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x9, 0xb, 0xe])), // 0x9be...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0xd, 0x7, 0xa])), // 0xd7a...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0xe, 0x5, 0xd])), // 0xe5d...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0xf, 0x3, 0x9])), // 0xf39...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0xf, 0x3, 0xb])), // 0xf3b...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0xf, 0xf, 0xf])), // 0xfff...
+        ];
+
+        let keys_to_delete = [
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x0, 0xa])), // 0x0a...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x0, 0xd, 0x9])), // 0x0d9...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x4, 0xf, 0xd])), // 0x4fd...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x8, 0x9, 0x1])), // 0x891...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x9, 0xb, 0xe])), // 0x9be...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0xd, 0x7, 0xa])), // 0xd7a...
+            pad_nibbles_right(Nibbles::from_nibbles_unchecked([0xf, 0x3, 0xb])), // 0xf3b...
+        ];
+
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = ParallelSparseTrie::default().with_updates(true);
+
+        // Insert all keys
+        for key in &keys_to_insert {
+            sparse.update_leaf(*key, value_encoded(), &provider).unwrap();
+        }
+
+        // Compute root after inserts
+        let sparse_root_after_inserts = sparse.root();
+
+        // Build expected state using hash builder
+        let mut state: BTreeMap<_, _> = keys_to_insert.iter().map(|k| (*k, value())).collect();
+        let (hash_builder_root_after_inserts, _, _, _, _) = run_hash_builder(
+            state.clone(),
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            state.keys().copied(),
+        );
+        assert_eq!(
+            sparse_root_after_inserts, hash_builder_root_after_inserts,
+            "roots should match after inserts"
+        );
+
+        // Remove keys
+        for key in &keys_to_delete {
+            state.remove(key);
+            sparse.remove_leaf(key, &provider).unwrap();
+        }
+
+        // Compute root after removals
+        let sparse_root_after_removes = sparse.root();
+
+        let (hash_builder_root_after_removes, _, _, _, _) = run_hash_builder(
+            state.clone(),
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            state.keys().copied(),
+        );
+
+        assert_eq!(
+            sparse_root_after_removes, hash_builder_root_after_removes,
+            "roots should match after removals"
+        );
     }
 }
