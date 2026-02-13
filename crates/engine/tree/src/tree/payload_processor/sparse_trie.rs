@@ -1,6 +1,5 @@
 //! Sparse Trie task related functionality.
 
-use super::executor::WorkloadExecutor;
 use crate::tree::{
     multiproof::{
         dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
@@ -13,6 +12,7 @@ use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, ParallelBridgeBuffered};
+use reth_tasks::Runtime;
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, Nibbles,
     TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
@@ -28,7 +28,7 @@ use reth_trie_parallel::{
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    DeferredDrops, LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt,
+    DeferredDrops, LeafUpdate, ParallelSparseTrie, SparseStateTrie, SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
@@ -44,8 +44,8 @@ where
     BPF: TrieNodeProviderFactory + Send + Sync,
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    A: SparseTrie + SparseTrieExt + Send + Sync + Default,
-    S: SparseTrie + SparseTrieExt + Send + Sync + Default + Clone,
+    A: SparseTrie + Send + Sync + Default,
+    S: SparseTrie + Send + Sync + Default + Clone,
 {
     Cleared(SparseTrieTask<BPF, A, S>),
     Cached(SparseTrieCacheTask<A, S>),
@@ -56,8 +56,8 @@ where
     BPF: TrieNodeProviderFactory + Send + Sync + Clone,
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    A: SparseTrie + SparseTrieExt + Send + Sync + Default,
-    S: SparseTrie + SparseTrieExt + Send + Sync + Default + Clone,
+    A: SparseTrie + Send + Sync + Default,
+    S: SparseTrie + Send + Sync + Default + Clone,
 {
     pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         match self {
@@ -72,6 +72,7 @@ where
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
+        disable_pruning: bool,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         match self {
             Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
@@ -80,6 +81,7 @@ where
                 max_storage_tries,
                 max_nodes_capacity,
                 max_values_capacity,
+                disable_pruning,
             ),
         }
     }
@@ -97,7 +99,7 @@ where
 }
 
 /// A task responsible for populating the sparse trie.
-pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
+pub(super) struct SparseTrieTask<BPF, A = ParallelSparseTrie, S = ParallelSparseTrie>
 where
     BPF: TrieNodeProviderFactory + Send + Sync,
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
@@ -117,8 +119,8 @@ where
     BPF: TrieNodeProviderFactory + Send + Sync + Clone,
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    A: SparseTrie + SparseTrieExt + Send + Sync + Default,
-    S: SparseTrie + SparseTrieExt + Send + Sync + Default + Clone,
+    A: SparseTrie + Send + Sync + Default,
+    S: SparseTrie + Send + Sync + Default + Clone,
 {
     /// Creates a new sparse trie task with the given trie.
     pub(super) const fn new(
@@ -212,7 +214,7 @@ where
 const MAX_PENDING_UPDATES: usize = 100;
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
-pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie> {
+pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparseTrie> {
     /// Sender for proof results.
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Receiver for proof results directly from workers.
@@ -277,12 +279,12 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
 
 impl<A, S> SparseTrieCacheTask<A, S>
 where
-    A: SparseTrieExt + Default,
-    S: SparseTrieExt + Default + Clone,
+    A: SparseTrie + Default,
+    S: SparseTrie + Default + Clone,
 {
     /// Creates a new sparse trie, pre-populating with an existing [`SparseStateTrie`].
     pub(super) fn new_with_trie(
-        executor: &WorkloadExecutor,
+        executor: &Runtime,
         updates: CrossbeamReceiver<MultiProofMessage>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,
@@ -343,6 +345,9 @@ where
                 MultiProofMessage::EmptyProof { .. } | MultiProofMessage::BlockAccessList(_) => {
                     continue
                 }
+                MultiProofMessage::HashedStateUpdate(state) => {
+                    SparseTrieTaskMessage::HashedState(state)
+                }
             };
             if hashed_state_tx.send(msg).is_err() {
                 break;
@@ -353,16 +358,23 @@ where
     /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
     ///
     /// Should be called after the state root result has been sent.
+    ///
+    /// When `disable_pruning` is true, the trie is preserved without any node pruning,
+    /// storage trie eviction, or capacity shrinking, keeping the full cache intact for
+    /// benchmarking purposes.
     pub(super) fn into_trie_for_reuse(
         self,
         prune_depth: usize,
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
+        disable_pruning: bool,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         let Self { mut trie, .. } = self;
-        trie.prune(prune_depth, max_storage_tries);
-        trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        if !disable_pruning {
+            trie.prune(prune_depth, max_storage_tries);
+            trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        }
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
     }
@@ -404,7 +416,9 @@ where
                     let update = match message {
                         Ok(m) => m,
                         Err(_) => {
-                            break
+                            return Err(ParallelStateRootError::Other(
+                                "updates channel disconnected before state root calculation".to_string(),
+                            ))
                         }
                     };
 
@@ -483,7 +497,7 @@ where
     }
 
     #[instrument(
-        level = "debug",
+        level = "trace",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
@@ -515,7 +529,7 @@ where
 
     /// Processes a hashed state update and encodes all state changes as trie updates.
     #[instrument(
-        level = "debug",
+        level = "trace",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
@@ -1028,4 +1042,60 @@ where
     );
 
     Ok(elapsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{keccak256, Address, U256};
+    use reth_trie_sparse::ParallelSparseTrie;
+
+    #[test]
+    fn test_run_hashing_task_hashed_state_update_forwards() {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
+
+        let address = keccak256(Address::random());
+        let slot = keccak256(U256::from(42).to_be_bytes::<32>());
+        let value = U256::from(999);
+
+        let mut hashed_state = HashedPostState::default();
+        hashed_state.accounts.insert(
+            address,
+            Some(Account { balance: U256::from(100), nonce: 1, bytecode_hash: None }),
+        );
+        let mut storage = reth_trie::HashedStorage::new(false);
+        storage.storage.insert(slot, value);
+        hashed_state.storages.insert(address, storage);
+
+        let expected_state = hashed_state.clone();
+
+        let handle = std::thread::spawn(move || {
+            SparseTrieCacheTask::<ParallelSparseTrie, ParallelSparseTrie>::run_hashing_task(
+                updates_rx,
+                hashed_state_tx,
+            );
+        });
+
+        updates_tx.send(MultiProofMessage::HashedStateUpdate(hashed_state)).unwrap();
+        updates_tx.send(MultiProofMessage::FinishedStateUpdates).unwrap();
+        drop(updates_tx);
+
+        let SparseTrieTaskMessage::HashedState(received) = hashed_state_rx.recv().unwrap() else {
+            panic!("expected HashedState message");
+        };
+
+        let account = received.accounts.get(&address).unwrap().unwrap();
+        assert_eq!(account.balance, expected_state.accounts[&address].unwrap().balance);
+        assert_eq!(account.nonce, expected_state.accounts[&address].unwrap().nonce);
+
+        let storage = received.storages.get(&address).unwrap();
+        assert_eq!(*storage.storage.get(&slot).unwrap(), value);
+
+        let second = hashed_state_rx.recv().unwrap();
+        assert!(matches!(second, SparseTrieTaskMessage::FinishedStateUpdates));
+
+        assert!(hashed_state_rx.recv().is_err());
+        handle.join().unwrap();
+    }
 }

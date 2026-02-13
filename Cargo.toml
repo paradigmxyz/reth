@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.10.2"
+version = "1.11.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -83,8 +83,6 @@ members = [
     "crates/prune/db",
     "crates/prune/prune",
     "crates/prune/types",
-    "crates/ress/protocol",
-    "crates/ress/provider",
     "crates/revm/",
     "crates/rpc/ipc/",
     "crates/rpc/rpc-api/",
@@ -101,7 +99,6 @@ members = [
     "crates/stages/api/",
     "crates/stages/stages/",
     "crates/stages/types/",
-    "crates/stateless",
     "crates/static-file/static-file",
     "crates/static-file/types/",
     "crates/storage/codecs/",
@@ -125,7 +122,6 @@ members = [
     "crates/trie/db",
     "crates/trie/parallel/",
     "crates/trie/sparse",
-    "crates/trie/sparse-parallel/",
     "crates/trie/trie",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
@@ -310,6 +306,11 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 
+[profile.maxperf-symbols]
+inherits = "maxperf"
+debug = "full"
+strip = "none"
+
 [profile.reproducible]
 inherits = "release"
 panic = "abort"
@@ -418,7 +419,6 @@ reth-rpc-convert = { path = "crates/rpc/rpc-convert" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types", default-features = false }
-reth-stateless = { path = "crates/stateless", default-features = false }
 reth-static-file = { path = "crates/static-file/static-file" }
 reth-static-file-types = { path = "crates/static-file/types", default-features = false }
 reth-storage-api = { path = "crates/storage/storage-api", default-features = false }
@@ -434,10 +434,7 @@ reth-trie-common = { path = "crates/trie/common", default-features = false }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
-reth-trie-sparse-parallel = { path = "crates/trie/sparse-parallel" }
 reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-features = false }
-reth-ress-protocol = { path = "crates/ress/protocol" }
-reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
 revm = { version = "34.0.0", default-features = false }
@@ -451,15 +448,15 @@ op-revm = { version = "15.0.0", default-features = false }
 revm-inspectors = "0.34.2"
 
 # eth
-alloy-dyn-abi = "1.5.4"
-alloy-primitives = { version = "1.5.4", default-features = false, features = ["map-foldhash"] }
-alloy-sol-types = { version = "1.5.4", default-features = false }
+alloy-dyn-abi = "1.5.6"
+alloy-primitives = { version = "1.5.6", default-features = false, features = ["map-foldhash"] }
+alloy-sol-types = { version = "1.5.6", default-features = false }
 
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.3.0", default-features = false }
 alloy-evm = { version = "0.27.2", default-features = false }
-alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
+alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 
 alloy-hardforks = "0.4.5"
@@ -550,7 +547,7 @@ strum_macros = "0.27"
 syn = "2.0"
 thiserror = { version = "2.0.0", default-features = false }
 tar = "0.4.44"
-tracing = { version = "0.1.0", default-features = false }
+tracing = { version = "0.1.0", default-features = false, features = ["attributes"] }
 tracing-appender = "0.2"
 url = { version = "2.3", default-features = false }
 zstd = "0.13"

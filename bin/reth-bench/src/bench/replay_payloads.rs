@@ -14,6 +14,7 @@
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
     bench::{
+        helpers::parse_duration,
         output::{
             write_benchmark_results, CombinedResult, GasRampPayloadFile, NewPayloadResult,
             TotalGasOutput, TotalGasRow,
@@ -30,7 +31,6 @@ use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV4, ForkchoiceState, JwtSecret};
 use clap::Parser;
 use eyre::Context;
-use humantime::parse_duration;
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_api::EngineApiMessageVersion;
@@ -78,6 +78,9 @@ pub struct Command {
     output: Option<PathBuf>,
 
     /// How long to wait after a forkchoice update before sending the next payload.
+    ///
+    /// Accepts a duration string (e.g. `100ms`, `2s`) or a bare integer treated as
+    /// milliseconds (e.g. `400`).
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
 
@@ -166,7 +169,7 @@ impl Command {
         let mut waiter = match (self.wait_time, self.wait_for_persistence) {
             (Some(duration), true) => {
                 let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
-                let sub = setup_persistence_subscription(ws_url).await?;
+                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
                 Some(PersistenceWaiter::with_duration_and_subscription(
                     duration,
                     sub,
@@ -177,7 +180,7 @@ impl Command {
             (Some(duration), false) => Some(PersistenceWaiter::with_duration(duration)),
             (None, true) => {
                 let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
-                let sub = setup_persistence_subscription(ws_url).await?;
+                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
                 Some(PersistenceWaiter::with_subscription(
                     sub,
                     self.persistence_threshold,
@@ -338,7 +341,8 @@ impl Command {
             };
 
             let current_duration = total_benchmark_duration.elapsed();
-            info!(target: "reth-bench", %combined_result);
+            let progress = format!("{}/{}", i + 1, payloads.len());
+            info!(target: "reth-bench", progress, %combined_result);
 
             if let Some(w) = &mut waiter {
                 w.on_block(block_number).await?;

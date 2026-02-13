@@ -589,7 +589,7 @@ impl EthMessageID {
 
     /// Returns the max value for the given version.
     pub const fn max(version: EthVersion) -> u8 {
-        if version.is_eth69() {
+        if version as u8 >= EthVersion::Eth69 as u8 {
             Self::BlockRangeUpdate.to_u8()
         } else {
             Self::Receipts.to_u8()
@@ -935,6 +935,13 @@ mod tests {
         .unwrap();
 
         assert!(matches!(decoded, StatusMessage::Legacy(s) if s == status));
+    }
+
+    #[test]
+    fn eth_message_id_max_includes_block_range_update() {
+        assert_eq!(EthMessageID::max(EthVersion::Eth69), EthMessageID::BlockRangeUpdate.to_u8(),);
+        assert_eq!(EthMessageID::max(EthVersion::Eth70), EthMessageID::BlockRangeUpdate.to_u8(),);
+        assert_eq!(EthMessageID::max(EthVersion::Eth68), EthMessageID::Receipts.to_u8());
     }
 
     #[test]

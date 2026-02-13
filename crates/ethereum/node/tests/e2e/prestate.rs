@@ -12,7 +12,7 @@ use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
 use reth_rpc_server_types::RpcModuleSelection;
-use reth_tasks::TaskManager;
+use reth_tasks::Runtime;
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -29,8 +29,7 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     let mut genesis: Genesis = MAINNET.genesis().clone();
     genesis.coinbase = address!("0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5");
 
-    let exec = TaskManager::current();
-    let exec = exec.executor();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let expected_frame = expected_snapshot_frame()?;
     let prestate_mode = match &expected_frame {
@@ -63,7 +62,7 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     );
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(exec)
+        .testing_node(runtime)
         .node(EthereumNode::default())
         .launch()
         .await?;

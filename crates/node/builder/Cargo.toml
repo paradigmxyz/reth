@@ -50,7 +50,7 @@ reth-rpc-eth-types.workspace = true
 reth-rpc-layer.workspace = true
 reth-stages.workspace = true
 reth-static-file.workspace = true
-reth-tasks.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"] }
 reth-tokio-util.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
@@ -120,6 +120,7 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
     "reth-node-ethereum/test-utils",
     "reth-primitives-traits/test-utils",
+    "reth-tasks/test-utils",
 ]
 op = [
     "reth-db/op",

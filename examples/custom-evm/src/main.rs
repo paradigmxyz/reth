@@ -35,7 +35,7 @@ use reth_ethereum::{
         node::EthereumAddOns,
         EthereumNode,
     },
-    tasks::TaskManager,
+    tasks::Runtime,
     EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
@@ -121,7 +121,7 @@ pub fn prague_custom() -> &'static Precompiles {
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
-    let tasks = TaskManager::current();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
 
     // create a custom chain spec
     let spec = ChainSpec::builder()
@@ -138,7 +138,7 @@ async fn main() -> eyre::Result<()> {
         NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
 
     let handle = NodeBuilder::new(node_config)
-        .testing_node(tasks.executor())
+        .testing_node(runtime)
         // configure the node with regular ethereum types
         .with_types::<EthereumNode>()
         // use default ethereum components but with our executor

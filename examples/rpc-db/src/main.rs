@@ -31,7 +31,7 @@ use reth_ethereum::{
         builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig},
         EthApiBuilder,
     },
-    tasks::TokioTaskExecutor,
+    tasks::{Runtime, TokioTaskExecutor},
 };
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
@@ -49,11 +49,13 @@ async fn main() -> eyre::Result<()> {
         DatabaseArguments::new(ClientVersion::default()),
     )?;
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
     let factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, DatabaseEnv>>::new(
         db.clone(),
         spec.clone(),
         StaticFileProvider::read_only(db_path.join("static_files"), true)?,
         RocksDBProvider::builder(db_path.join("rocksdb")).build().unwrap(),
+        runtime,
     )?;
 
     // 2. Set up the blockchain provider using only the database provider and a noop for the tree to

@@ -1,6 +1,7 @@
 //! Engine tree configuration.
 
 use alloy_eips::merge::EPOCH_SLOTS;
+use core::time::Duration;
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
@@ -63,6 +64,9 @@ pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 ///
 /// Storage tries beyond this limit are cleared (but allocations preserved).
 pub const DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES: usize = 100;
+
+/// Default timeout for the state root task before spawning a sequential fallback.
+pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
 
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
@@ -175,6 +179,13 @@ pub struct TreeConfig {
     sparse_trie_prune_depth: usize,
     /// Maximum number of storage tries to retain after pruning.
     sparse_trie_max_storage_tries: usize,
+    /// Whether to fully disable sparse trie cache pruning between blocks.
+    disable_sparse_trie_cache_pruning: bool,
+    /// Timeout for the state root task before spawning a sequential fallback computation.
+    /// If `Some`, after waiting this duration for the state root task, a sequential state root
+    /// computation is spawned in parallel and whichever finishes first is used.
+    /// If `None`, the timeout fallback is disabled.
+    state_root_task_timeout: Option<Duration>,
 }
 
 impl Default for TreeConfig {
@@ -207,6 +218,8 @@ impl Default for TreeConfig {
             disable_trie_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            disable_sparse_trie_cache_pruning: false,
+            state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
         }
     }
 }
@@ -241,6 +254,7 @@ impl TreeConfig {
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
         sparse_trie_max_storage_tries: usize,
+        state_root_task_timeout: Option<Duration>,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -270,6 +284,8 @@ impl TreeConfig {
             disable_trie_cache: false,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            disable_sparse_trie_cache_pruning: false,
+            state_root_task_timeout,
         }
     }
 
@@ -616,6 +632,28 @@ impl TreeConfig {
     /// Setter for maximum storage tries to retain.
     pub const fn with_sparse_trie_max_storage_tries(mut self, max_tries: usize) -> Self {
         self.sparse_trie_max_storage_tries = max_tries;
+        self
+    }
+
+    /// Returns whether sparse trie cache pruning is disabled.
+    pub const fn disable_sparse_trie_cache_pruning(&self) -> bool {
+        self.disable_sparse_trie_cache_pruning
+    }
+
+    /// Setter for whether to disable sparse trie cache pruning.
+    pub const fn with_disable_sparse_trie_cache_pruning(mut self, value: bool) -> Self {
+        self.disable_sparse_trie_cache_pruning = value;
+        self
+    }
+
+    /// Returns the state root task timeout.
+    pub const fn state_root_task_timeout(&self) -> Option<Duration> {
+        self.state_root_task_timeout
+    }
+
+    /// Setter for state root task timeout.
+    pub const fn with_state_root_task_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.state_root_task_timeout = timeout;
         self
     }
 }

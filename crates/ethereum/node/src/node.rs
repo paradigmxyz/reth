@@ -107,26 +107,16 @@ impl EthereumNode {
     /// use reth_chainspec::MAINNET;
     /// use reth_node_ethereum::EthereumNode;
     ///
-    /// let factory = EthereumNode::provider_factory_builder()
-    ///     .open_read_only(MAINNET.clone(), "datadir")
-    ///     .unwrap();
+    /// fn demo(runtime: reth_tasks::Runtime) {
+    ///     let factory = EthereumNode::provider_factory_builder()
+    ///         .open_read_only(MAINNET.clone(), "datadir", runtime)
+    ///         .unwrap();
+    /// }
     /// ```
     ///
-    /// # Open a Providerfactory manually with all required components
-    ///
-    /// ```no_run
-    /// use reth_chainspec::ChainSpecBuilder;
-    /// use reth_db::open_db_read_only;
-    /// use reth_node_ethereum::EthereumNode;
-    /// use reth_provider::providers::{RocksDBProvider, StaticFileProvider};
-    ///
-    /// let factory = EthereumNode::provider_factory_builder()
-    ///     .db(open_db_read_only("db", Default::default()).unwrap())
-    ///     .chainspec(ChainSpecBuilder::mainnet().build().into())
-    ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
-    ///     .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())
-    ///     .build_provider_factory();
-    /// ```
+    /// See also [`ProviderFactory::new`](reth_provider::ProviderFactory::new) for constructing
+    /// a [`ProviderFactory`](reth_provider::ProviderFactory) manually with all required
+    /// components.
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
         ProviderFactoryBuilder::default()
     }
@@ -513,7 +503,7 @@ where
             // it doesn't impact the first block or the first gossiped blob transaction, so we
             // initialize this in the background
             let kzg_settings = validator.validator().kzg_settings().clone();
-            ctx.task_executor().spawn_blocking(async move {
+            ctx.task_executor().spawn_blocking_task(async move {
                 let _ = kzg_settings.get();
                 debug!(target: "reth::cli", "Initialized KZG settings");
             });

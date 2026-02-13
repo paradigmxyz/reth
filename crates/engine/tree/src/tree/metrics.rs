@@ -8,8 +8,17 @@ use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
+use reth_primitives_traits::constants::gas_units::MEGAGAS;
 use reth_trie::updates::TrieUpdates;
 use std::time::{Duration, Instant};
+
+/// Upper bounds for each gas bucket. The last bucket is a catch-all for
+/// everything above the final threshold: <5M, 5-10M, 10-20M, 20-30M, 30-40M, >40M.
+const GAS_BUCKET_THRESHOLDS: [u64; 5] =
+    [5 * MEGAGAS, 10 * MEGAGAS, 20 * MEGAGAS, 30 * MEGAGAS, 40 * MEGAGAS];
+
+/// Total number of gas buckets (thresholds + 1 catch-all).
+const NUM_GAS_BUCKETS: usize = GAS_BUCKET_THRESHOLDS.len() + 1;
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
@@ -235,6 +244,65 @@ impl ForkchoiceUpdatedMetrics {
     }
 }
 
+/// Per-gas-bucket newPayload metrics, initialized once via [`Self::new_with_labels`].
+#[derive(Clone, Metrics)]
+#[metrics(scope = "consensus.engine.beacon")]
+pub(crate) struct NewPayloadGasBucketMetrics {
+    /// Latency for new payload calls in this gas bucket.
+    pub(crate) new_payload_gas_bucket_latency: Histogram,
+    /// Gas per second for new payload calls in this gas bucket.
+    pub(crate) new_payload_gas_bucket_gas_per_second: Histogram,
+}
+
+/// Holds pre-initialized [`NewPayloadGasBucketMetrics`] instances, one per gas bucket.
+#[derive(Debug)]
+pub(crate) struct GasBucketMetrics {
+    buckets: [NewPayloadGasBucketMetrics; NUM_GAS_BUCKETS],
+}
+
+impl Default for GasBucketMetrics {
+    fn default() -> Self {
+        Self {
+            buckets: std::array::from_fn(|i| {
+                let label = Self::bucket_label(i);
+                NewPayloadGasBucketMetrics::new_with_labels(&[("gas_bucket", label)])
+            }),
+        }
+    }
+}
+
+impl GasBucketMetrics {
+    fn record(&self, gas_used: u64, elapsed: Duration) {
+        let idx = Self::bucket_index(gas_used);
+        self.buckets[idx].new_payload_gas_bucket_latency.record(elapsed);
+        self.buckets[idx]
+            .new_payload_gas_bucket_gas_per_second
+            .record(gas_used as f64 / elapsed.as_secs_f64());
+    }
+
+    fn bucket_index(gas_used: u64) -> usize {
+        GAS_BUCKET_THRESHOLDS
+            .iter()
+            .position(|&threshold| gas_used < threshold)
+            .unwrap_or(GAS_BUCKET_THRESHOLDS.len())
+    }
+
+    /// Returns a human-readable label like `<5M`, `5-10M`, … `>40M`.
+    fn bucket_label(index: usize) -> String {
+        if index == 0 {
+            let hi = GAS_BUCKET_THRESHOLDS[0] / MEGAGAS;
+            format!("<{hi}M")
+        } else if index < GAS_BUCKET_THRESHOLDS.len() {
+            let lo = GAS_BUCKET_THRESHOLDS[index - 1] / MEGAGAS;
+            let hi = GAS_BUCKET_THRESHOLDS[index] / MEGAGAS;
+            format!("{lo}-{hi}M")
+        } else {
+            let lo = GAS_BUCKET_THRESHOLDS[GAS_BUCKET_THRESHOLDS.len() - 1] / MEGAGAS;
+            format!(">{lo}M")
+        }
+    }
+}
+
 /// Metrics for engine newPayload responses.
 #[derive(Metrics)]
 #[metrics(scope = "consensus.engine.beacon")]
@@ -245,6 +313,9 @@ pub(crate) struct NewPayloadStatusMetrics {
     /// Start time of the latest new payload call.
     #[metric(skip)]
     pub(crate) latest_start_at: Option<Instant>,
+    /// Gas-bucket-labeled latency and gas/s histograms.
+    #[metric(skip)]
+    pub(crate) gas_bucket: GasBucketMetrics,
     /// The total count of new payload messages received.
     pub(crate) new_payload_messages: Counter,
     /// The total count of new payload messages that we responded to with
@@ -321,6 +392,7 @@ impl NewPayloadStatusMetrics {
         self.new_payload_messages.increment(1);
         self.new_payload_latency.record(elapsed);
         self.new_payload_last.set(elapsed);
+        self.gas_bucket.record(gas_used, elapsed);
         if let Some(latest_forkchoice_updated_at) = latest_forkchoice_updated_at.take() {
             self.forkchoice_updated_new_payload_time_diff
                 .record(start - latest_forkchoice_updated_at);
@@ -365,6 +437,8 @@ pub struct BlockValidationMetrics {
     pub state_root_parallel_fallback_total: Counter,
     /// Total number of times the state root task failed but the fallback succeeded.
     pub state_root_task_fallback_success_total: Counter,
+    /// Total number of times the state root task timed out and a sequential fallback was spawned.
+    pub state_root_task_timeout_total: Counter,
     /// Latest state root duration, ie the time spent blocked waiting for the state root.
     pub state_root_duration: Gauge,
     /// Histogram for state root duration ie the time spent blocked waiting for the state root

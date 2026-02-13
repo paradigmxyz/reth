@@ -58,6 +58,7 @@ where
     pending_check_canonical: bool,
     pending_check_backfill: bool,
     config: ExExConfig,
+    backfill_job_factory: BackfillJobFactory<E, P>,
     backfill_job: Option<StreamBackfillJob<E, P, Chain<E::Primitives>>>,
     pending_notification: Option<ExExNotification<E::Primitives>>,
 }
@@ -83,10 +84,11 @@ where
 
 impl<P, E> ExExNotifications<P, E>
 where
+    P: Clone,
     E: ConfigureEvm,
 {
     /// Creates a new stream of [`ExExNotifications`].
-    pub const fn new(
+    pub fn new(
         node_head: BlockNumHash,
         provider: P,
         evm_config: E,
@@ -94,6 +96,7 @@ where
         wal_handle: WalHandle<E::Primitives>,
         config: ExExConfig,
     ) -> Self {
+        let backfill_job_factory = BackfillJobFactory::new(evm_config.clone(), provider.clone());
         Self {
             initial_node_head: node_head,
             provider,
@@ -104,6 +107,7 @@ where
             pending_check_canonical: false,
             pending_check_backfill: false,
             config,
+            backfill_job_factory,
             backfill_job: None,
             pending_notification: None,
         }
@@ -147,6 +151,20 @@ where
     pub fn with_head(mut self, exex_head: ExExHead) -> Self {
         self.set_with_head(exex_head);
         self
+    }
+
+    /// Sets custom thresholds for the backfill job.
+    ///
+    /// These thresholds control how many blocks are included in each backfill notification.
+    /// Only takes effect when the stream is configured with a head.
+    ///
+    /// By default, the backfill job uses [`BackfillJobFactory`] defaults (up to 500,000 blocks
+    /// per batch, bounded by 30s execution time).
+    pub fn set_backfill_thresholds(
+        &mut self,
+        thresholds: reth_stages_api::ExecutionStageThresholds,
+    ) {
+        self.backfill_job_factory = self.backfill_job_factory.clone().with_thresholds(thresholds);
     }
 }
 
@@ -284,10 +302,8 @@ where
                     (exex_head.block.number + 1, target_block)
                 };
 
-                let backfill_job_factory =
-                    BackfillJobFactory::new(self.evm_config.clone(), self.provider.clone());
                 let backfill =
-                    backfill_job_factory.backfill(backfill_start..=backfill_end).into_stream();
+                    self.backfill_job_factory.backfill(backfill_start..=backfill_end).into_stream();
                 self.backfill_job = Some(backfill);
             }
             std::cmp::Ordering::Equal => {
