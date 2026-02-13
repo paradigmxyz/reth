@@ -1581,7 +1581,7 @@ where
                                     persistence_wait = ?persistence_wait,
                                     execution_cache_wait = ?cache_wait.execution_cache,
                                     sparse_trie_wait = ?cache_wait.sparse_trie,
-                                    "Locks acquired for reth_newPayload"
+                                    "Peresistence finished and caches updated for reth_newPayload"
                                 );
 
                                 let start = Instant::now();
