@@ -1371,7 +1371,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     );
 
     let gas_limit = transaction.gas_limit();
-    if gas_limit < gas.initial_gas || gas_limit < gas.floor_gas {
+    if gas_limit < gas.initial_total_gas || gas_limit < gas.floor_gas {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
     } else {
         Ok(())
