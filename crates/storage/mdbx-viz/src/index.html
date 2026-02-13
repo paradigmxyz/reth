@@ -7,10 +7,13 @@
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{background:#0d1117;color:#c9d1d9;font-family:'SF Mono','Fira Code','Cascadia Code',monospace;height:100%;overflow:hidden}
 body{display:flex;flex-direction:row;height:100%}
-#main-panel{flex:1;display:flex;flex-direction:column;padding:16px 16px 16px 16px;overflow:hidden;min-width:0}
-#side-panel{width:480px;flex-shrink:0;border-left:1px solid #30363d;overflow-y:auto;padding:16px;background:#161b22}
+#main-panel{flex:1;display:flex;flex-direction:column;padding:16px;overflow:hidden;min-width:0}
+#side-panel{flex:0 0 540px;border-left:1px solid #30363d;overflow-y:auto;padding:16px;background:#161b22}
 h1{color:#f0f6fc;font-size:18px;margin-bottom:2px}
 .subtitle{color:#8b949e;font-size:12px;margin-bottom:10px}
+.sub-row{display:flex;align-items:baseline;gap:12px;margin-bottom:6px;flex-wrap:wrap}
+.sub-row .subtitle{margin-bottom:0;flex-shrink:0}
+.sub-row .viz-controls{margin-bottom:0;margin-left:auto}
 .controls{margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .controls button{background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:3px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px}
 .controls button:hover{background:#30363d}
@@ -80,12 +83,31 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
 .utbl-cache{width:36px;text-align:right;color:#4ade80;font-weight:600}
 .utbl-diff{width:42px;text-align:right;font-size:9px}
 .utbl-faults{width:28px;text-align:right;color:#d946ef;font-size:9px}
+#block-panel::-webkit-scrollbar,#side-panel::-webkit-scrollbar{width:6px}
+#block-panel::-webkit-scrollbar-track,#side-panel::-webkit-scrollbar-track{background:#161b22}
+#block-panel::-webkit-scrollbar-thumb,#side-panel::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}
+#block-panel::-webkit-scrollbar-thumb:hover,#side-panel::-webkit-scrollbar-thumb:hover{background:#484f58}
+#block-panel,#side-panel{scrollbar-width:thin;scrollbar-color:#30363d #161b22}
 </style>
 </head>
 <body>
 <div id="main-panel">
   <h1>MDBX Live Viz</h1>
-  <div class="subtitle" id="subtitle">Loading...</div>
+  <div class="sub-row">
+    <div class="subtitle" id="subtitle">Loading...</div>
+    <div class="viz-controls">
+      <label><input type="checkbox" id="chk-read" checked> <span style="color:#3c82f6">&#9632;</span> Reads</label>
+      <label><input type="checkbox" id="chk-write" checked> <span style="color:#ef4444">&#9632;</span> Writes</label>
+      <label><input type="checkbox" id="chk-free" checked> <span style="color:#eab308">&#9632;</span> Frees</label>
+      <label><input type="checkbox" id="chk-fixw"> Fixed Width</label>
+      <label><input type="checkbox" id="chk-trails"> Trails</label>
+      <label><input type="checkbox" id="chk-heatmap"> Heatmap</label>
+      <label><input type="checkbox" id="chk-flame"> Timeline</label>
+      <label><input type="checkbox" id="chk-cache"> Page Cache</label>
+      <label>Fade: <input type="range" id="fade-slider" min="200" max="8000" value="2000" step="100"> <span class="fade-val" id="fade-val">2.0s</span></label>
+      <label>Trail W: <input type="range" id="trail-width" min="0.5" max="6" value="1.5" step="0.5"> <span class="fade-val" id="trail-w-val">1.5</span></label>
+    </div>
+  </div>
   <div class="status-bar">
     <span><span class="dot connecting" id="ws-dot"></span><span id="ws-status">Connecting</span></span>
     <span class="stat-label">Events/s: <span class="stat-value" id="evt-rate">0</span></span>
@@ -116,28 +138,8 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
   </div>
 </div>
 <div id="side-panel">
-  <div class="viz-controls">
-    <div style="margin-bottom:6px">
-      <label><input type="checkbox" id="chk-read" checked> <span style="color:#3c82f6">&#9632;</span> Reads</label>
-      <label><input type="checkbox" id="chk-write" checked> <span style="color:#ef4444">&#9632;</span> Writes</label>
-      <label><input type="checkbox" id="chk-free" checked> <span style="color:#eab308">&#9632;</span> Frees</label>
-      <label><input type="checkbox" id="chk-fixw"> Fixed Width</label>
-      <label><input type="checkbox" id="chk-trails"> Trails</label>
-      <label><input type="checkbox" id="chk-heatmap"> Heatmap</label>
-      <label><input type="checkbox" id="chk-flame"> Timeline</label>
-      <label><input type="checkbox" id="chk-cache"> Page Cache</label>
-    </div>
-    <div>
-      <label>Fade: <input type="range" id="fade-slider" min="200" max="8000" value="2000" step="100">
-      <span class="fade-val" id="fade-val">2.0s</span></label>
-    </div>
-    <div>
-      <label>Trail width: <input type="range" id="trail-width" min="0.5" max="6" value="1.5" step="0.5">
-      <span class="fade-val" id="trail-w-val">1.5</span></label>
-    </div>
-  </div>
-  <h2 style="margin-top:12px">Blocks <span id="block-live" style="color:#4ade80" onclick="window._goLive&&window._goLive()">&#x25CF; LIVE</span></h2>
-  <div id="block-panel" style="max-height:320px;overflow-y:auto"></div>
+  <h2>Blocks <span id="block-live" style="color:#4ade80" onclick="window._goLive&&window._goLive()">&#x25CF; LIVE</span></h2>
+  <div id="block-panel" style="max-height:172px;overflow-y:auto"></div>
   <h2 style="margin-top:12px">Tables <span id="cache-total" style="color:#8b949e;font-weight:400;font-size:11px"></span> <span id="cache-ago" style="color:#8b949e;font-weight:400;font-size:10px"></span></h2>
   <div id="unified-tables"></div>
   <h2 style="margin-top:12px">Table Details</h2>
@@ -193,7 +195,7 @@ buildLUT();
 function heatQ(pg){if(!hmMode||!hmCounts)return 31;const cnt=hmCounts[pg];return cnt>0?Math.min(31,Math.floor(Math.log2(cnt+1)*31/16)):0}
 function rollingFaults(dbi){let s=0;for(const w of faultWindow)s+=(w[dbi]||0);return s}
 function markZbDirty(){zbDirty=true}
-let blockRecording=null,blockHistory=[],replayMode=false,replayBlockRef=null,replayTimer=null;
+let blockRecording=null,blockHistory=[],replayMode=false,replayBlockRef=null,replayTimer=null,liveSnapshot=null;
 const BLOCK_HISTORY_CAP=15;
 let showFlame=false;const FLAME_SECS=120;let flameData={},flameHead=0;
 const SPARK_SECS=60;let sparkData={},sparkAccum={};
@@ -207,12 +209,15 @@ const sel=new Set();let tEv=0,rEv=0,lRT=performance.now();
 function cl(v,a,b){return Math.max(a,Math.min(b,v))}
 function growTo(newNP){
   if(newNP<=NP)return;
-  const nOm=new Uint8Array(newNP);nOm.set(oMap);nOm.fill(0xFF,NP);oMap=nOm;
+  const oldNP=NP;
+  const nOm=new Uint8Array(newNP);nOm.set(oMap);nOm.fill(0xFF,oldNP);oMap=nOm;
   const nOp=new Uint8Array(newNP);nOp.set(lOp);lOp=nOp;
   const nTs=new Float64Array(newNP);nTs.set(lTs);lTs=nTs;
   if(hmCounts){const nHm=new Uint32Array(newNP);nHm.set(hmCounts);hmCounts=nHm}
   if(resMap){const nRm=new Uint8Array(newNP);nRm.set(resMap);resMap=nRm}
+  unrefCount+=newNP-oldNP;
   NP=newNP;GR=Math.ceil(NP/GC);
+  oMapDirty=true;
   iD=null;oC=null;markZbDirty();
 }
 function oX(){return 0}
@@ -391,7 +396,7 @@ function bldTbl(){
 }
 function uAR(){document.querySelectorAll(".tbl-row").forEach(r=>{sel.has(parseInt(r.dataset.dbiIndex,10))?r.classList.add("active"):r.classList.remove("active")});document.querySelectorAll(".utbl-row").forEach(r=>{sel.has(parseInt(r.dataset.dbiIndex,10))?r.classList.add("active"):r.classList.remove("active")})}
 function reflow(){if(!fW)return;GC=Math.max(1,Math.floor(W/sc));GR=Math.ceil(NP/GC);pX=0;cP()}
-function boot(){szCv();GC=Math.ceil(Math.sqrt(NP));GR=Math.ceil(NP/GC);mS=Math.min(W/GC,H/GR,1);sc=mS;pX=0;pY=0;render()}
+function boot(){szCv();const aspect=W>0&&H>0?W/H:1;GC=Math.max(1,Math.ceil(Math.sqrt(NP*aspect)));GR=Math.ceil(NP/GC);mS=Math.min(W/GC,H/GR,1);sc=mS;pX=0;pY=0;render()}
 function zA(ns,sx,sy){ns=cl(ns,mS,xS);if(Math.abs(ns-sc)<1e-6)return;const b=s2w(sx,sy);sc=ns;if(fW){reflow();pY=b.wy-(sy-oY())/sc;cP()}else{pX=b.wx-(sx-oX())/sc;pY=b.wy-(sy-oY())/sc;cP()}sched()}
 document.getElementById("btn-zin").addEventListener("click",()=>zA(sc*1.3,W>>1,H>>1));
 document.getElementById("btn-zout").addEventListener("click",()=>zA(sc/1.3,W>>1,H>>1));
@@ -445,19 +450,28 @@ function connectWS(){
   let lagTimer=0;
   ws.onmessage=msg=>{
     if(typeof msg.data==="string"){try{const j=JSON.parse(msg.data);if(j.lagged){const el=document.getElementById("lag-warn"),lc=document.getElementById("lag-count");lc.textContent=j.lagged.toLocaleString();el.style.display="inline";clearTimeout(lagTimer);lagTimer=setTimeout(()=>{el.style.display="none"},5000)}}catch(e){}return}
-    if(!oMap)return;const v=new DataView(msg.data);let off=0;const now=performance.now();let cnt=0;
-    let lastPg=-1,lastDbi=0,lastOp=0,prevPg=-1,maxPg=NP;
+    if(!oMap)return;const v=new DataView(msg.data);const now=performance.now();let cnt=0;
+    let lastPg=-1,lastDbi=0,lastOp=0,prevPg=-1;
+    {let scan=0,maxPg=NP;while(scan+8<=msg.data.byteLength){const pg=v.getUint32(scan,true),op=v.getUint8(scan+6);scan+=8;if(op>=4)continue;if(pg>=maxPg)maxPg=pg+1}if(maxPg>NP)growTo(maxPg)}
+    let off=0;
     while(off+8<=msg.data.byteLength){
       const pg=v.getUint32(off,true),dbi=v.getUint16(off+4,true),op=v.getUint8(off+6);off+=8;
-      if(op===4){blockRecording={number:pg,events:[],before:{},startTime:performance.now()};updateBlockPanel();continue}
+      if(op===4){blockRecording={number:pg,events:[],before:{}};updateBlockPanel();continue}
       if(op===5){
         if(blockRecording&&blockRecording.number===pg){
           blockRecording.txCount=dbi;
-          blockRecording.duration=performance.now()-blockRecording.startTime;
           let r=0,w=0,f=0;
           for(const e of blockRecording.events){if(e.op===1)r++;else if(e.op===2)w++;else if(e.op===3)f++}
           blockRecording.reads=r;blockRecording.writes=w;blockRecording.frees=f;
           blockRecording.uniquePages=Object.keys(blockRecording.before).length;
+          blockRecording.panelSnapshot={
+            dbiPages:DBIS.map(d=>d.pages),
+            cacheCachedPer:cacheCachedPer?cacheCachedPer.slice():null,
+            cachePrevPer:cachePrevPer?cachePrevPer.slice():null,
+            cacheTotalCached,cachePrevTotal,unrefCount,
+            faultWindow:faultWindow.map(w=>({...w})),
+            faultCurrent:{...faultCurrent}
+          };
           blockHistory.push(blockRecording);
           if(blockHistory.length>BLOCK_HISTORY_CAP)blockHistory.shift();
           blockRecording=null;
@@ -469,8 +483,7 @@ function connectWS(){
         if(!(pg in blockRecording.before))blockRecording.before[pg]={om:oMap[pg],rm:resMap?resMap[pg]:0};
         blockRecording.events.push({pg,dbi,op});
       }
-      if(pg>=maxPg)maxPg=pg+1;
-      if(pg>=NP){if(maxPg>NP)growTo(maxPg);if(pg>=NP)continue}cnt++;
+      if(pg>=NP)continue;cnt++;
       if(op===1)cntR++;else if(op===2)cntW++;else if(op===3)cntF++;
       if(cacheMode&&resMap&&op===1&&pg<resMap.length&&!resMap[pg]){faultCounts[dbi]=(faultCounts[dbi]||0)+1;faultCurrent[dbi]=(faultCurrent[dbi]||0)+1;if(blockRecording){blockRecording.faults=(blockRecording.faults||0)+1}}
              if(resMap&&pg<resMap.length&&op!==3)resMap[pg]=1;
@@ -539,6 +552,9 @@ function drawFlame(){
 }
 function buildUnifiedPanel(){
   const el=document.getElementById("unified-tables");if(!el)return;el.innerHTML="";
+  const hdr=document.createElement("div");hdr.className="utbl-row";hdr.style.cssText="cursor:default;border-bottom:1px solid #30363d;margin-bottom:2px;padding-bottom:4px";
+  hdr.innerHTML='<div class="utbl-sw" style="visibility:hidden"></div><div class="utbl-name" style="color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">Table</div><div class="utbl-spark" style="width:80px;text-align:center;color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">Activity</div><div class="utbl-cache" style="color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">Cache</div><div class="utbl-diff" style="color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">C.Diff</div><div class="utbl-faults" style="color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">Fault</div>';
+  el.appendChild(hdr);
   DBIS.forEach(d=>{
     if(d.pages<=0&&d.dbi_index>2)return;
     const c=PAL[d.dbi_index]||PAL[255];
@@ -613,13 +629,28 @@ function updateBlockPanel(){
   for(let i=blockHistory.length-1;i>=0;i--){
     const b=blockHistory[i],isReplaying=replayMode&&replayBlockRef===b;
     const c=document.createElement("div");c.className="block-card"+(isReplaying?" replaying":"");
-    const dur=b.duration<1000?b.duration.toFixed(0)+"ms":(b.duration/1000).toFixed(1)+"s";
-    c.innerHTML=`<div class="block-num">&#x25B6; #${b.number.toLocaleString()} &nbsp;${b.txCount}tx &nbsp;${dur}</div><div class="block-stat"><span style="color:#3c82f6">R:${b.reads.toLocaleString()}</span> <span style="color:#ef4444">W:${b.writes.toLocaleString()}</span> <span style="color:#eab308">F:${b.frees.toLocaleString()}</span>${b.faults?` <span style="color:#d946ef">${b.faults}f</span>`:""} &nbsp;${(b.uniquePages||0).toLocaleString()} pages</div>`;
+    const total=b.reads+b.writes+b.frees;
+    c.innerHTML=`<div class="block-num">&#x25B6; #${b.number.toLocaleString()} &nbsp;${b.txCount}tx &nbsp;${total.toLocaleString()} ops</div><div class="block-stat"><span style="color:#3c82f6">R:${b.reads.toLocaleString()}</span> <span style="color:#ef4444">W:${b.writes.toLocaleString()}</span> <span style="color:#eab308">F:${b.frees.toLocaleString()}</span>${b.faults?` <span style="color:#d946ef">${b.faults}f</span>`:""} &nbsp;${(b.uniquePages||0).toLocaleString()} pages</div>`;
     c.addEventListener("click",()=>startReplay(b));
     el.appendChild(c);
   }
 }
+function snapPanelState(){
+  return{dbiPages:DBIS.map(d=>d.pages),cacheCachedPer:cacheCachedPer?cacheCachedPer.slice():null,cachePrevPer:cachePrevPer?cachePrevPer.slice():null,cacheTotalCached,cachePrevTotal,unrefCount,faultWindow:faultWindow.map(w=>({...w})),faultCurrent:{...faultCurrent}};
+}
+function applyPanelSnap(snap){
+  DBIS.forEach((d,i)=>{d.pages=snap.dbiPages[i]||0;d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});
+  if(snap.cacheCachedPer&&cacheCachedPer){for(let i=0;i<cacheCachedPer.length;i++)cacheCachedPer[i]=snap.cacheCachedPer[i]||0}
+  cachePrevPer=snap.cachePrevPer?snap.cachePrevPer.slice():null;
+  cacheTotalCached=snap.cacheTotalCached;cachePrevTotal=snap.cachePrevTotal;
+  unrefCount=snap.unrefCount;
+  faultWindow=snap.faultWindow.map(w=>({...w}));faultCurrent={...snap.faultCurrent};
+  cacheStale=true;bldTbl();updateCacheStats();
+  const rf=NP-unrefCount,gb=(NP*PS/(1024**3)).toFixed(2);
+  document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${rf.toLocaleString()} ref \u00b7 ${unrefCount.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
+}
 function startReplay(block){
+  if(!liveSnapshot)liveSnapshot=snapPanelState();
   replayMode=true;replayBlockRef=block;
   if(replayTimer){cancelAnimationFrame(replayTimer);replayTimer=null}
   lOp.fill(0);activeSet.clear();activePgs=0;
@@ -631,6 +662,7 @@ function startReplay(block){
     oMap[pg]=snap.om;
     if(resMap&&pg<resMap.length)resMap[pg]=snap.rm;
   }
+  if(block.panelSnapshot)applyPanelSnap(block.panelSnapshot);
   markZbDirty();sched();
   document.getElementById("block-live").style.color="#8b949e";
   updateBlockPanel();
@@ -664,6 +696,7 @@ function goLive(){
   if(replayTimer){cancelAnimationFrame(replayTimer);replayTimer=null}
   lOp.fill(0);activeSet.clear();activePgs=0;
   trailStart=0;trailN=0;
+  if(liveSnapshot){applyPanelSnap(liveSnapshot);liveSnapshot=null}
   oMapDirty=true;cacheStale=true;
   markZbDirty();sched();
   document.getElementById("block-live").style.color="#4ade80";
@@ -677,6 +710,7 @@ function connectResidencyWS(){
   ws.onerror=()=>ws.close();
   ws.onmessage=msg=>{
     if(!msg.data||msg.data.byteLength<1)return;
+    if(replayMode)return;
     const v=new DataView(msg.data);
     const msgType=v.getUint8(0);
     if(msgType===0){
@@ -815,8 +849,8 @@ async function init(){
       await new Promise(r=>setTimeout(r,0));
       const ct={};for(let i=0;i<NP;i++){const o=oMap[i];ct[o]=(ct[o]||0)+1}
       DBIS.forEach(d=>{d.pages=ct[d.dbi_index]||0;d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});
-    }else oMap=new Uint8Array(NP);
-  }catch(e){oMap=new Uint8Array(NP)}
+    }else{oMap=new Uint8Array(NP);oMap.fill(0xFF)}
+  }catch(e){oMap=new Uint8Array(NP);oMap.fill(0xFF)}
   unrefCount=oMap.reduce((n,b)=>n+(b===0xFF?1:0),0);const ref=NP-unrefCount;
   const gb=(NP*PS/(1024**3)).toFixed(2);
   document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${ref.toLocaleString()} ref \u00b7 ${unrefCount.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
