@@ -8,7 +8,8 @@ use reth_db_api::{
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::StorageTrieUpdatesSorted,
-    BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
+    BranchNodeCompact, Nibbles, PackedStorageTrieEntry, PackedStoredNibbles,
+    PackedStoredNibblesSubKey, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
@@ -203,6 +204,192 @@ where
 impl<C> TrieStorageCursor for DatabaseStorageTrieCursor<C>
 where
     C: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send,
+{
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.hashed_address = hashed_address;
+    }
+}
+
+// ── Storage v2: packed nibble encoding ─────────────────────────────────
+
+/// Wrapper struct for database transaction implementing trie cursor factory trait
+/// using packed nibble encoding (storage v2).
+#[derive(Debug, Clone)]
+pub struct PackedDatabaseTrieCursorFactory<T>(T);
+
+impl<T> PackedDatabaseTrieCursorFactory<T> {
+    /// Create new [`PackedDatabaseTrieCursorFactory`].
+    pub const fn new(tx: T) -> Self {
+        Self(tx)
+    }
+}
+
+impl<TX> TrieCursorFactory for PackedDatabaseTrieCursorFactory<&TX>
+where
+    TX: DbTx,
+{
+    type AccountTrieCursor<'a>
+        = PackedDatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrieV2>>
+    where
+        Self: 'a;
+
+    type StorageTrieCursor<'a>
+        = PackedDatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrieV2>>
+    where
+        Self: 'a;
+
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+        Ok(PackedDatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrieV2>()?))
+    }
+
+    fn storage_trie_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+        Ok(PackedDatabaseStorageTrieCursor::new(
+            self.0.cursor_dup_read::<tables::StoragesTrieV2>()?,
+            hashed_address,
+        ))
+    }
+}
+
+/// A cursor over the account trie using packed nibble encoding (storage v2).
+#[derive(Debug)]
+pub struct PackedDatabaseAccountTrieCursor<C>(C);
+
+impl<C> PackedDatabaseAccountTrieCursor<C> {
+    /// Create a new packed account trie cursor.
+    pub const fn new(cursor: C) -> Self {
+        Self(cursor)
+    }
+}
+
+impl<C> TrieCursor for PackedDatabaseAccountTrieCursor<C>
+where
+    C: DbCursorRO<tables::AccountsTrieV2> + Send,
+{
+    fn seek_exact(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self.0.seek_exact(PackedStoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
+    }
+
+    fn seek(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self.0.seek(PackedStoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
+    }
+
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self.0.next()?.map(|value| (value.0 .0, value.1)))
+    }
+
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        Ok(self.0.current()?.map(|(k, _)| k.0))
+    }
+
+    fn reset(&mut self) {}
+}
+
+/// A cursor over the storage tries using packed nibble encoding (storage v2).
+#[derive(Debug)]
+pub struct PackedDatabaseStorageTrieCursor<C> {
+    /// The underlying cursor.
+    pub cursor: C,
+    /// Hashed address used for cursor positioning.
+    hashed_address: B256,
+}
+
+impl<C> PackedDatabaseStorageTrieCursor<C> {
+    /// Create a new packed storage trie cursor.
+    pub const fn new(cursor: C, hashed_address: B256) -> Self {
+        Self { cursor, hashed_address }
+    }
+}
+
+impl<C> PackedDatabaseStorageTrieCursor<C>
+where
+    C: DbCursorRO<tables::StoragesTrieV2>
+        + DbCursorRW<tables::StoragesTrieV2>
+        + DbDupCursorRO<tables::StoragesTrieV2>
+        + DbDupCursorRW<tables::StoragesTrieV2>,
+{
+    /// Writes storage updates that are already sorted.
+    pub fn write_storage_trie_updates_sorted(
+        &mut self,
+        updates: &StorageTrieUpdatesSorted,
+    ) -> Result<usize, DatabaseError> {
+        if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
+            self.cursor.delete_current_duplicates()?;
+        }
+
+        let mut num_entries = 0;
+        for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
+        {
+            num_entries += 1;
+            let nibbles = PackedStoredNibblesSubKey(*nibbles);
+            if self
+                .cursor
+                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
+                .filter(|e| e.nibbles == nibbles)
+                .is_some()
+            {
+                self.cursor.delete_current()?;
+            }
+
+            if let Some(node) = maybe_updated {
+                self.cursor.upsert(
+                    self.hashed_address,
+                    &PackedStorageTrieEntry { nibbles, node: node.clone() },
+                )?;
+            }
+        }
+
+        Ok(num_entries)
+    }
+}
+
+impl<C> TrieCursor for PackedDatabaseStorageTrieCursor<C>
+where
+    C: DbCursorRO<tables::StoragesTrieV2> + DbDupCursorRO<tables::StoragesTrieV2> + Send,
+{
+    fn seek_exact(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self
+            .cursor
+            .seek_by_key_subkey(self.hashed_address, PackedStoredNibblesSubKey(key))?
+            .filter(|e| e.nibbles == PackedStoredNibblesSubKey(key))
+            .map(|value| (value.nibbles.0, value.node)))
+    }
+
+    fn seek(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self
+            .cursor
+            .seek_by_key_subkey(self.hashed_address, PackedStoredNibblesSubKey(key))?
+            .map(|value| (value.nibbles.0, value.node)))
+    }
+
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self.cursor.next_dup()?.map(|(_, v)| (v.nibbles.0, v.node)))
+    }
+
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        Ok(self.cursor.current()?.map(|(_, v)| v.nibbles.0))
+    }
+
+    fn reset(&mut self) {}
+}
+
+impl<C> TrieStorageCursor for PackedDatabaseStorageTrieCursor<C>
+where
+    C: DbCursorRO<tables::StoragesTrieV2> + DbDupCursorRO<tables::StoragesTrieV2> + Send,
 {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.hashed_address = hashed_address;
