@@ -156,15 +156,11 @@ impl ProofWorkerHandle {
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
-        let storage_worker_count = runtime.proof_storage_worker_pool().current_num_threads();
-        let account_worker_count = runtime.proof_account_worker_pool().current_num_threads();
-
-        // Halve worker counts for small blocks, ensuring at least 1 worker per pool.
-        let (storage_worker_count, account_worker_count) = if halve_workers {
-            (storage_worker_count.div_ceil(2), account_worker_count.div_ceil(2))
-        } else {
-            (storage_worker_count, account_worker_count)
-        };
+        let divisor = if halve_workers { 2 } else { 1 };
+        let storage_worker_count =
+            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
+        let account_worker_count =
+            runtime.proof_account_worker_pool().current_num_threads() / divisor;
 
         debug!(
             target: "trie::proof_task",
