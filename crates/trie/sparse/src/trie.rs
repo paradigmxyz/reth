@@ -337,13 +337,6 @@ pub enum SparseNode {
     Empty,
     /// The hash of the node that was not revealed.
     Hash(B256),
-    /// Sparse leaf node with remaining key suffix.
-    Leaf {
-        /// Remaining key suffix for the leaf node.
-        key: Nibbles,
-        /// Tracker for the node's state, e.g. cached `RlpNode` tracking.
-        state: SparseNodeState,
-    },
     /// A leaf node that is at the root of the trie (path is empty).
     /// This variant is used when the entire trie contains only a single key-value pair.
     RootLeaf {
@@ -367,69 +360,111 @@ pub enum SparseNode {
         /// The bitmask representing which children are leaf nodes.
         /// This is always a subset of `state_mask`.
         leaf_mask: TrieMask,
+        /// Short keys (key suffixes) for leaf children, ordered by nibble index.
+        /// The i-th element corresponds to the i-th set bit in `leaf_mask` (counting from LSB).
+        /// Invariant: `leaf_short_keys.len() == leaf_mask.count_ones()`.
+        leaf_short_keys: Vec<Nibbles>,
         /// Tracker for the node's state, e.g. cached `RlpNode` tracking.
         state: SparseNodeState,
     },
 }
 
 impl SparseNode {
-    /// Create new [`SparseNode::Branch`] from state mask and leaf mask.
-    pub const fn new_branch(state_mask: TrieMask, leaf_mask: TrieMask) -> Self {
-        Self::Branch { state_mask, leaf_mask, state: SparseNodeState::Dirty }
+    /// Create new [`SparseNode::Branch`] from state mask only.
+    ///
+    /// The leaf_mask is set to empty (no leaf children). Use this when all children are non-leaf
+    /// nodes (branch, extension, or hash).
+    #[inline]
+    pub fn new_branch(state_mask: TrieMask) -> Self {
+        Self::Branch {
+            state_mask,
+            leaf_mask: TrieMask::default(),
+            leaf_short_keys: Vec::new(),
+            state: SparseNodeState::Dirty,
+        }
     }
 
     /// Create new [`SparseNode::Branch`] with two bits set, both pointing to leaf children.
-    pub const fn new_split_branch(bit_a: u8, bit_b: u8) -> Self {
-        let state_mask = TrieMask::new(
-            // set bits for both children
-            (1u16 << bit_a) | (1u16 << bit_b),
-        );
-        // Both children are leaves when splitting
+    ///
+    /// The short keys must be provided in ascending nibble order.
+    /// - `bit_a` and `bit_b` are nibble indices for the children
+    /// - `short_key_a` and `short_key_b` are the short keys for each leaf child
+    #[inline]
+    pub fn new_split_branch(
+        bit_a: u8,
+        short_key_a: Nibbles,
+        bit_b: u8,
+        short_key_b: Nibbles,
+    ) -> Self {
+        let state_mask = TrieMask::new((1u16 << bit_a) | (1u16 << bit_b));
         let leaf_mask = state_mask;
-        Self::Branch { state_mask, leaf_mask, state: SparseNodeState::Dirty }
+        let leaf_short_keys = if bit_a < bit_b {
+            vec![short_key_a, short_key_b]
+        } else {
+            vec![short_key_b, short_key_a]
+        };
+        Self::Branch { state_mask, leaf_mask, leaf_short_keys, state: SparseNodeState::Dirty }
     }
 
     /// Create new [`SparseNode::Branch`] with two bits set, specifying which is a leaf.
     ///
     /// - `bit_a` and `bit_b` are nibble indices for the children
-    /// - `bit_a_is_leaf` and `bit_b_is_leaf` indicate whether each child is a leaf node
-    pub const fn new_split_branch_with_leaf_info(
+    /// - `short_key_a` is the short key if `bit_a` is a leaf, otherwise `None`
+    /// - `short_key_b` is the short key if `bit_b` is a leaf, otherwise `None`
+    #[inline]
+    pub fn new_split_branch_with_keys(
         bit_a: u8,
-        bit_a_is_leaf: bool,
+        short_key_a: Option<Nibbles>,
         bit_b: u8,
-        bit_b_is_leaf: bool,
+        short_key_b: Option<Nibbles>,
     ) -> Self {
         let state_mask = TrieMask::new((1u16 << bit_a) | (1u16 << bit_b));
         let mut leaf_mask_val = 0u16;
-        if bit_a_is_leaf {
-            leaf_mask_val |= 1u16 << bit_a;
+        let mut leaf_short_keys = Vec::with_capacity(2);
+
+        // Collect leaf keys in ascending nibble order
+        let (first_bit, first_key, second_bit, second_key) = if bit_a < bit_b {
+            (bit_a, short_key_a, bit_b, short_key_b)
+        } else {
+            (bit_b, short_key_b, bit_a, short_key_a)
+        };
+
+        if let Some(key) = first_key {
+            leaf_mask_val |= 1u16 << first_bit;
+            leaf_short_keys.push(key);
         }
-        if bit_b_is_leaf {
-            leaf_mask_val |= 1u16 << bit_b;
+        if let Some(key) = second_key {
+            leaf_mask_val |= 1u16 << second_bit;
+            leaf_short_keys.push(key);
         }
+
         let leaf_mask = TrieMask::new(leaf_mask_val);
-        Self::Branch { state_mask, leaf_mask, state: SparseNodeState::Dirty }
+        Self::Branch { state_mask, leaf_mask, leaf_short_keys, state: SparseNodeState::Dirty }
     }
 
     /// Create new [`SparseNode::Extension`] from the key slice.
+    #[inline]
     pub const fn new_ext(key: Nibbles) -> Self {
         Self::Extension { key, state: SparseNodeState::Dirty }
     }
 
-    /// Create new [`SparseNode::Leaf`] from leaf key and value.
-    pub const fn new_leaf(key: Nibbles) -> Self {
-        Self::Leaf { key, state: SparseNodeState::Dirty }
-    }
-
     /// Create new [`SparseNode::RootLeaf`] from leaf key.
     /// This should be used when the leaf is at the root of the trie (path is empty).
+    #[inline]
     pub const fn new_root_leaf(key: Nibbles) -> Self {
         Self::RootLeaf { key, state: SparseNodeState::Dirty }
     }
 
     /// Returns `true` if the node is a hash node.
+    #[inline]
     pub const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash(_))
+    }
+
+    /// Returns `true` if the node is a leaf node (either `RootLeaf`).
+    #[inline]
+    pub const fn is_leaf(&self) -> bool {
+        matches!(self, Self::RootLeaf { .. })
     }
 
     /// Returns the cached [`RlpNode`] of the node, if it's available.
@@ -437,7 +472,6 @@ impl SparseNode {
         match &self {
             Self::Empty => None,
             Self::Hash(hash) => Some(Cow::Owned(RlpNode::word_rlp(hash))),
-            Self::Leaf { state, .. } |
             Self::RootLeaf { state, .. } |
             Self::Extension { state, .. } |
             Self::Branch { state, .. } => state.cached_rlp_node().map(Cow::Borrowed),
@@ -449,7 +483,6 @@ impl SparseNode {
         match &self {
             Self::Empty => None,
             Self::Hash(hash) => Some(*hash),
-            Self::Leaf { state, .. } |
             Self::RootLeaf { state, .. } |
             Self::Extension { state, .. } |
             Self::Branch { state, .. } => state.cached_hash(),
@@ -465,7 +498,6 @@ impl SparseNode {
             Self::Empty | Self::Hash(_) => {
                 panic!("Cannot set hash for Empty or Hash nodes")
             }
-            Self::Leaf { state, .. } |
             Self::RootLeaf { state, .. } |
             Self::Extension { state, .. } |
             Self::Branch { state, .. } => {
@@ -475,12 +507,158 @@ impl SparseNode {
     }
 
     /// Returns the memory size of this node in bytes.
-    pub const fn memory_size(&self) -> usize {
+    pub fn memory_size(&self) -> usize {
         match self {
-            Self::Empty | Self::Hash(_) | Self::Branch { .. } => core::mem::size_of::<Self>(),
-            Self::Leaf { key, .. } | Self::RootLeaf { key, .. } | Self::Extension { key, .. } => {
+            Self::Empty | Self::Hash(_) => core::mem::size_of::<Self>(),
+            Self::RootLeaf { key, .. } | Self::Extension { key, .. } => {
                 core::mem::size_of::<Self>() + key.len()
             }
+            Self::Branch { leaf_short_keys, .. } => {
+                let mut size = core::mem::size_of::<Self>();
+                size += leaf_short_keys.capacity() * core::mem::size_of::<Nibbles>();
+                for key in leaf_short_keys {
+                    size += key.len();
+                }
+                size
+            }
+        }
+    }
+
+    /// Returns the rank (0-based index) of a nibble within the leaf_mask.
+    ///
+    /// The rank is the number of bits set in `leaf_mask` at positions less than `nibble`.
+    /// This is used to index into `leaf_short_keys`.
+    #[inline]
+    pub fn leaf_rank(leaf_mask: TrieMask, nibble: u8) -> usize {
+        debug_assert!(nibble < 16);
+        let mask_below = (1u16 << nibble) - 1;
+        (leaf_mask.get() & mask_below).count_ones() as usize
+    }
+
+    /// Gets the short key for a leaf child at the given nibble.
+    ///
+    /// Returns `None` if the nibble is not a leaf child (not set in `leaf_mask`).
+    #[inline]
+    pub fn get_leaf_short_key(&self, nibble: u8) -> Option<&Nibbles> {
+        match self {
+            Self::Branch { leaf_mask, leaf_short_keys, .. } => {
+                if !leaf_mask.is_bit_set(nibble) {
+                    return None;
+                }
+                let idx = Self::leaf_rank(*leaf_mask, nibble);
+                leaf_short_keys.get(idx)
+            }
+            _ => None,
+        }
+    }
+
+    /// Sets the short key for a leaf child at the given nibble.
+    ///
+    /// If the nibble is already a leaf, updates the short key.
+    /// If the nibble is not a leaf (but is set in state_mask), adds it as a leaf.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the node is not a Branch or if the nibble is not set in state_mask.
+    #[inline]
+    pub fn set_leaf_short_key(&mut self, nibble: u8, short_key: Nibbles) {
+        match self {
+            Self::Branch { state_mask, leaf_mask, leaf_short_keys, state } => {
+                debug_assert!(state_mask.is_bit_set(nibble), "nibble must be set in state_mask");
+
+                if leaf_mask.is_bit_set(nibble) {
+                    // Update existing
+                    let idx = Self::leaf_rank(*leaf_mask, nibble);
+                    leaf_short_keys[idx] = short_key;
+                } else {
+                    // Insert new
+                    leaf_mask.set_bit(nibble);
+                    let idx = Self::leaf_rank(*leaf_mask, nibble);
+                    leaf_short_keys.insert(idx, short_key);
+                }
+                *state = SparseNodeState::Dirty;
+            }
+            _ => panic!("set_leaf_short_key called on non-Branch node"),
+        }
+    }
+
+    /// Removes the short key for a leaf child at the given nibble.
+    ///
+    /// Returns the removed short key, or `None` if the nibble was not a leaf.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the node is not a Branch.
+    #[inline]
+    pub fn remove_leaf_short_key(&mut self, nibble: u8) -> Option<Nibbles> {
+        match self {
+            Self::Branch { leaf_mask, leaf_short_keys, state, .. } => {
+                if !leaf_mask.is_bit_set(nibble) {
+                    return None;
+                }
+                let idx = Self::leaf_rank(*leaf_mask, nibble);
+                leaf_mask.unset_bit(nibble);
+                *state = SparseNodeState::Dirty;
+                Some(leaf_short_keys.remove(idx))
+            }
+            _ => panic!("remove_leaf_short_key called on non-Branch node"),
+        }
+    }
+
+    /// Adds a new child to a branch node.
+    ///
+    /// If `short_key` is `Some`, the child is marked as a leaf.
+    /// If `short_key` is `None`, the child is marked as a non-leaf.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the node is not a Branch or if the nibble is already set in state_mask.
+    #[inline]
+    pub fn add_child(&mut self, nibble: u8, short_key: Option<Nibbles>) {
+        match self {
+            Self::Branch { state_mask, leaf_mask, leaf_short_keys, state } => {
+                debug_assert!(
+                    !state_mask.is_bit_set(nibble),
+                    "nibble must not already be set in state_mask"
+                );
+
+                state_mask.set_bit(nibble);
+                if let Some(key) = short_key {
+                    leaf_mask.set_bit(nibble);
+                    let idx = Self::leaf_rank(*leaf_mask, nibble);
+                    leaf_short_keys.insert(idx, key);
+                }
+                *state = SparseNodeState::Dirty;
+            }
+            _ => panic!("add_child called on non-Branch node"),
+        }
+    }
+
+    /// Removes a child from a branch node.
+    ///
+    /// Returns the short key if the child was a leaf, or `None` if it was not.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the node is not a Branch or if the nibble is not set in state_mask.
+    #[inline]
+    pub fn remove_child(&mut self, nibble: u8) -> Option<Nibbles> {
+        match self {
+            Self::Branch { state_mask, leaf_mask, leaf_short_keys, state } => {
+                debug_assert!(state_mask.is_bit_set(nibble), "nibble must be set in state_mask");
+
+                state_mask.unset_bit(nibble);
+                *state = SparseNodeState::Dirty;
+
+                if leaf_mask.is_bit_set(nibble) {
+                    let idx = Self::leaf_rank(*leaf_mask, nibble);
+                    leaf_mask.unset_bit(nibble);
+                    Some(leaf_short_keys.remove(idx))
+                } else {
+                    None
+                }
+            }
+            _ => panic!("remove_child called on non-Branch node"),
         }
     }
 }
