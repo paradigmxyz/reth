@@ -21,5 +21,7 @@ pub use state::{from_reverts_auto, DatabaseHashedPostState, DatabaseStateRoot};
 pub use storage::{hashed_storage_from_reverts_with_provider, DatabaseStorageRoot};
 pub use trie_cursor::{
     DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
+    PackedDatabaseAccountTrieCursor, PackedDatabaseStorageTrieCursor,
+    PackedDatabaseTrieCursorFactory,
 };
 pub use witness::DatabaseTrieWitness;

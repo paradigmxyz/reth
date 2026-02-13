@@ -94,7 +94,7 @@ impl reth_codecs::Compact for StoredNibblesSubKey {
     }
 }
 
-/// Packed representation of nibbles for the AccountsTrie (storage v2).
+/// Packed representation of nibbles for the `AccountsTrie` (storage v2).
 ///
 /// Stores 2 nibbles per byte via [`Nibbles::pack`], right-padded to 32 bytes + 1 nibble-count
 /// byte = 33 bytes fixed. This halves the key size compared to [`StoredNibbles`] while
@@ -150,12 +150,12 @@ impl reth_codecs::Compact for PackedStoredNibbles {
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let nibble_count = buf[32] as usize;
-        let packed_len = (nibble_count + 1) / 2;
+        let packed_len = nibble_count.div_ceil(2);
         (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
     }
 }
 
-/// Packed representation of nibbles as a DupSort subkey for StoragesTrie (storage v2).
+/// Packed representation of nibbles as a `DupSort` subkey for `StoragesTrie` (storage v2).
 ///
 /// Stores 2 nibbles per byte via [`Nibbles::pack`], right-padded to 32 bytes + 1 nibble-count
 /// byte = 33 bytes fixed. This halves the subkey size compared to [`StoredNibblesSubKey`]
@@ -218,7 +218,7 @@ impl reth_codecs::Compact for PackedStoredNibblesSubKey {
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let nibble_count = buf[32] as usize;
-        let packed_len = (nibble_count + 1) / 2;
+        let packed_len = nibble_count.div_ceil(2);
         (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
     }
 }
