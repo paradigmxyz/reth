@@ -1642,7 +1642,6 @@ mod tests {
         );
 
         // Stateful ExEx: Should NOT receive the pipeline notification
-        // (the manager skipped it due to the filtering logic)
         let no_pipeline_notif = tokio::time::timeout(
             std::time::Duration::from_millis(200),
             stateful_notifications.next(),

@@ -48,7 +48,7 @@ where
     E: ConfigureEvm,
 {
     /// The node's head at the time of creation.
-    node_head: BlockNumHash,
+    initial_node_head: BlockNumHash,
     provider: P,
     evm_config: E,
     notifications: Receiver<(crate::ExExNotificationSource, ExExNotification<E::Primitives>)>,
@@ -67,7 +67,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExNotifications")
-            .field("node_head", &self.node_head)
+            .field("initial_node_head", &self.initial_node_head)
             .field("provider", &self.provider)
             .field("evm_config", &self.evm_config)
             .field("notifications", &self.notifications)
@@ -94,7 +94,7 @@ where
         config: ExExConfig,
     ) -> Self {
         Self {
-            node_head,
+            initial_node_head: node_head,
             provider,
             evm_config,
             notifications,
@@ -108,9 +108,8 @@ where
         }
     }
 
-    /// Sets this stream to stateless mode (without a head).
-    ///
-    /// In this mode, notifications are passed through without canonical checks or backfill.
+    /// Sets to the stream to process all notifications sent from the manager without canonical or
+    /// backfill checks.
     pub fn set_without_head(&mut self) {
         self.exex_head = None;
         self.pending_check_canonical = false;
@@ -119,9 +118,11 @@ where
         self.pending_notification = None;
     }
 
-    /// Sets this stream to stateful mode with the provided head.
+    /// Sets the stream to process notifications with canonical and backfill checks based on the
+    /// provided head.
     ///
-    /// The behavior is determined by the configuration set in the constructor.
+    /// The stream will only emit notifications for blocks that are committed or reverted after the
+    /// given head.
     pub fn set_with_head(&mut self, exex_head: ExExHead) {
         self.exex_head = Some(exex_head);
         self.pending_check_canonical = true;
@@ -130,17 +131,18 @@ where
         self.pending_notification = None;
     }
 
-    /// Returns a new instance in stateless mode (without a head).
-    ///
-    /// In this mode, notifications are passed through without canonical checks or backfill.
+    /// Sets the stream to process all notifications sent from the manager without canonical or
+    /// backfill checks, and returns a new modified stream.
     pub fn without_head(mut self) -> Self {
         self.set_without_head();
         self
     }
 
-    /// Returns a new instance in stateful mode with the provided head.
+    /// Sets the stream to process notifications with canonical and backfill checks based on the
+    /// provided head, and returns a new modified stream.
     ///
-    /// The behavior is determined by the configuration set in the constructor.
+    /// The stream will only emit notifications for blocks that are committed or reverted after the
+    /// given head.
     pub fn with_head(mut self, exex_head: ExExHead) -> Self {
         self.set_with_head(exex_head);
         self
@@ -158,12 +160,9 @@ where
     /// we're not on the canonical chain and we need to revert the notification with the ExEx
     /// head block.
     fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification<E::Primitives>>> {
-        debug_assert!(self.exex_head.is_some(), "check_canonical called without exex_head");
-
         let exex_head = self.exex_head.as_ref().expect("exex_head should be set");
-
         if self.provider.is_known(exex_head.block.hash)? &&
-            exex_head.block.number <= self.node_head.number
+            exex_head.block.number <= self.initial_node_head.number
         {
             // we have the targeted block and that block is below the current head
             debug!(target: "exex::notifications", "ExEx head is on the canonical chain");
@@ -178,7 +177,7 @@ where
             self.wal_handle.get_committed_notification_by_block_hash(&exex_head.block.hash)?
         else {
             // it's possible that the exex head is further ahead
-            if exex_head.block.number > self.node_head.number {
+            if exex_head.block.number > self.initial_node_head.number {
                 debug!(target: "exex::notifications", "ExEx head is ahead of the canonical chain");
                 return Ok(None);
             }
@@ -207,7 +206,8 @@ where
     /// Updates the ExEx head based on the delivered notification.
     ///
     /// This should be called when delivering a notification to track what the ExEx has processed.
-    /// Only updates the head if `skip_pipeline_notifs` is true.
+    /// Only updates the head if `skip_pipeline_notifs` is true as if its false notifications are
+    /// guaranteed to be in order and not have gaps.
     fn update_exex_head(&mut self, notification: &ExExNotification<E::Primitives>) {
         if !self.config.skip_pipeline_notifications {
             return
@@ -240,8 +240,6 @@ where
     ///   Nothing to do.
     /// - ExEx is ahead of the target block (`exex_head.number > target_block`). Nothing to do.
     fn check_backfill(&mut self, target_block: u64) -> eyre::Result<()> {
-        debug_assert!(self.exex_head.is_some(), "check_backfill called without exex_head");
-
         let exex_head = self.exex_head.as_ref().expect("exex_head should be set");
 
         match exex_head.block.number.cmp(&target_block) {
@@ -262,8 +260,9 @@ where
                         "Gap exceeds max backfill distance, backfilling only recent blocks"
                     );
                     // Backfill only the last max_distance blocks before target
-                    let start =
-                        target_block.saturating_sub(max_distance).max(exex_head.block.number + 1);
+                    let start = target_block
+                        .saturating_sub(max_distance.saturating_sub(1))
+                        .max(exex_head.block.number + 1);
                     (start, target_block)
                 } else {
                     debug!(
@@ -303,31 +302,7 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        // Branch based on whether we have a head
-        if this.exex_head.is_none() {
-            // No head set yet - pass through and auto-populate head if skip_pipeline_notifs is set
-            loop {
-                match this.notifications.poll_recv(cx) {
-                    Poll::Ready(Some((source, notification))) => {
-                        // Filter out pipeline notifications if configured
-                        if this.config.skip_pipeline_notifications && source.is_pipeline() {
-                            debug!(
-                                target: "exex::notifications",
-                                "Skipping pipeline notification (skip_pipeline_notifs = true)"
-                            );
-                            continue
-                        }
-
-                        this.update_exex_head(&notification);
-                        return Poll::Ready(Some(Ok(notification)))
-                    }
-                    Poll::Ready(None) => return Poll::Ready(None),
-                    Poll::Pending => return Poll::Pending,
-                }
-            }
-        }
-
-        // 1. Check canonical state (one-time)
+        // 1. Check canonical state (one-time if true)
         if this.pending_check_canonical {
             if let Some(notification) = this.check_canonical()? {
                 this.update_exex_head(&notification);
@@ -336,9 +311,9 @@ where
             this.pending_check_canonical = false;
         }
 
-        // 2. Check backfill need (one-time)
+        // 2. Check backfill need (one-time if true)
         if this.pending_check_backfill {
-            this.check_backfill(this.node_head.number)?;
+            this.check_backfill(this.initial_node_head.number)?;
             this.pending_check_backfill = false;
         }
 
@@ -364,40 +339,32 @@ where
                 return Poll::Ready(None)
             };
 
-            // Filter out pipeline notifications if configured
-            if this.config.skip_pipeline_notifications && source.is_pipeline() {
+            if !this.config.skip_pipeline_notifications {
+                return Poll::Ready(Some(Ok(notification)))
+            }
+
+            // Only config.skip_pipeline_notifications = true reaches beyond this point
+            if source.is_pipeline() {
                 debug!(
                     target: "exex::notifications",
-                    "Skipping pipeline notification (skip_pipeline_notifs = true)"
+                    "Skipping pipeline notification"
                 );
                 continue
             }
 
             if let Some(committed) = notification.committed_chain() {
-                let exex_head = this.exex_head.as_ref().unwrap();
+                // Check if we need to backfill up to the block before this notification
+                this.check_backfill(committed.first().number() - 1)?;
 
-                // Skip notifications at or below exex head
-                if exex_head.block.number >= committed.tip().number() {
-                    continue
-                }
+                // If a backfill job was created, store the notification and return
+                // Pending
+                if this.backfill_job.is_some() {
+                    // Store this notification to deliver after backfill
+                    this.pending_notification = Some(notification);
 
-                // If skip_pipeline_notifs is set, check for gaps and trigger backfill
-                if this.config.skip_pipeline_notifications {
-                    let first_block_number = committed.first().number();
-
-                    // Check if we need to backfill up to the block before this notification
-                    this.check_backfill(first_block_number - 1)?;
-
-                    // If a backfill job was created, store the notification and return
-                    // Pending
-                    if this.backfill_job.is_some() {
-                        // Store this notification to deliver after backfill
-                        this.pending_notification = Some(notification);
-
-                        // Wake to poll the backfill job immediately
-                        cx.waker().wake_by_ref();
-                        return Poll::Pending
-                    }
+                    // Wake to poll the backfill job immediately
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending
                 }
             }
 
@@ -732,7 +699,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_notifications_with_continuous_backfill() -> eyre::Result<()> {
+    async fn test_notifications_with_continuous_backfill_for_skip_pipeline_notifications(
+    ) -> eyre::Result<()> {
         reth_tracing::init_test_tracing();
         let mut rng = generators::rng();
 
@@ -747,12 +715,12 @@ mod tests {
 
         let provider = BlockchainProvider::new(provider_factory.clone())?;
 
-        // Create blocks 1, 2, 3 in the database
+        // Create blocks 1-7 in the database
         let mut blocks = Vec::new();
         let mut parent_hash = genesis_hash;
         let mut parent_number = genesis_block.number;
 
-        for _ in 0..3 {
+        for _ in 0..7 {
             let block = random_block(
                 &mut rng,
                 parent_number + 1,
@@ -774,38 +742,154 @@ mod tests {
         // ExEx is at genesis (block 0)
         let exex_head = ExExHead { block: node_head };
 
-        // Send a notification for block 3 (skipping blocks 1 and 2)
-        let notification_block_3 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![blocks[2].clone()], Default::default(), BTreeMap::new())),
-        };
+        // Test 1: Full backfill (max_backfill_distance = None)
+        {
+            let (notifications_tx, notifications_rx) = mpsc::channel(2);
 
-        let (notifications_tx, notifications_rx) = mpsc::channel(1);
-        notifications_tx
-            .send((crate::ExExNotificationSource::BlockchainTree, notification_block_3.clone()))
-            .await?;
+            // Send a notification for block 3 (skipping blocks 1 and 2)
+            let notification_block_3 = ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(
+                    vec![blocks[2].clone()],
+                    Default::default(),
+                    BTreeMap::new(),
+                )),
+            };
+            notifications_tx
+                .send((crate::ExExNotificationSource::BlockchainTree, notification_block_3.clone()))
+                .await?;
 
-        let mut notifications = ExExNotifications::new(
-            node_head,
-            provider.clone(),
-            EthEvmConfig::mainnet(),
-            notifications_rx,
-            wal.handle(),
-            crate::ExExConfig { skip_pipeline_notifications: true, max_backfill_distance: None },
-        )
-        .with_head(exex_head);
+            // Send a notification for block 7 (skipping blocks 4, 5, 6)
+            let notification_block_7 = ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(
+                    vec![blocks[6].clone()],
+                    Default::default(),
+                    BTreeMap::new(),
+                )),
+            };
+            notifications_tx
+                .send((crate::ExExNotificationSource::BlockchainTree, notification_block_7.clone()))
+                .await?;
 
-        // First notification should be backfill for blocks 1-2 (gap between genesis and block 3)
-        let backfill_1_2 = notifications.next().await.transpose()?;
-        assert!(backfill_1_2.is_some());
-        if let Some(ExExNotification::ChainCommitted { new }) = &backfill_1_2 {
-            assert_eq!(new.first().number(), 1);
-            assert_eq!(new.tip().number(), 2);
-        } else {
-            panic!("Expected backfill notification for blocks 1-2");
+            let mut notifications_full_backfill = ExExNotifications::new(
+                node_head,
+                provider.clone(),
+                EthEvmConfig::mainnet(),
+                notifications_rx,
+                wal.handle(),
+                crate::ExExConfig {
+                    skip_pipeline_notifications: true,
+                    max_backfill_distance: None,
+                },
+            )
+            .with_head(exex_head);
+
+            // First notification should be backfill for blocks 1-2 (gap before block 3)
+            let backfill_1_2 = notifications_full_backfill.next().await.transpose()?;
+            assert!(backfill_1_2.is_some());
+            if let Some(ExExNotification::ChainCommitted { new }) = &backfill_1_2 {
+                assert_eq!(new.first().number(), 1);
+                assert_eq!(new.tip().number(), 2);
+            } else {
+                panic!("Expected backfill notification for blocks 1-2");
+            }
+
+            // Second notification should be the original block 3 notification
+            assert_eq!(
+                notifications_full_backfill.next().await.transpose()?,
+                Some(notification_block_3)
+            );
+
+            // Third notification should be backfill for blocks 4-6 (gap before block 7)
+            let backfill_4_6 = notifications_full_backfill.next().await.transpose()?;
+            assert!(backfill_4_6.is_some());
+            if let Some(ExExNotification::ChainCommitted { new }) = &backfill_4_6 {
+                assert_eq!(new.first().number(), 4);
+                assert_eq!(new.tip().number(), 6);
+            } else {
+                panic!("Expected backfill notification for blocks 4-6");
+            }
+
+            // Fourth notification should be the original block 7 notification
+            assert_eq!(
+                notifications_full_backfill.next().await.transpose()?,
+                Some(notification_block_7)
+            );
         }
 
-        // Second notification should be the original block 3 notification
-        assert_eq!(notifications.next().await.transpose()?, Some(notification_block_3));
+        // Test 2: Constrained backfill (max_backfill_distance = Some(2))
+        {
+            let (notifications_tx, notifications_rx) = mpsc::channel(2);
+
+            // Send a notification for block 3 (skipping blocks 1 and 2)
+            let notification_block_3 = ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(
+                    vec![blocks[2].clone()],
+                    Default::default(),
+                    BTreeMap::new(),
+                )),
+            };
+            notifications_tx
+                .send((crate::ExExNotificationSource::BlockchainTree, notification_block_3.clone()))
+                .await?;
+
+            // Send a notification for block 7 (skipping blocks 4, 5, 6)
+            let notification_block_7 = ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(
+                    vec![blocks[6].clone()],
+                    Default::default(),
+                    BTreeMap::new(),
+                )),
+            };
+            notifications_tx
+                .send((crate::ExExNotificationSource::BlockchainTree, notification_block_7.clone()))
+                .await?;
+
+            let mut notifications_constrained_backfill = ExExNotifications::new(
+                node_head,
+                provider.clone(),
+                EthEvmConfig::mainnet(),
+                notifications_rx,
+                wal.handle(),
+                crate::ExExConfig {
+                    skip_pipeline_notifications: true,
+                    max_backfill_distance: Some(2),
+                },
+            )
+            .with_head(exex_head);
+
+            // First notification should be backfill for blocks 1-2 (gap equals max_distance, so
+            // backfills all)
+            let backfill_1_2 = notifications_constrained_backfill.next().await.transpose()?;
+            assert!(backfill_1_2.is_some());
+            if let Some(ExExNotification::ChainCommitted { new }) = &backfill_1_2 {
+                assert_eq!(new.first().number(), 1);
+                assert_eq!(new.tip().number(), 2);
+            } else {
+                panic!("Expected backfill notification for blocks 1-2");
+            }
+
+            // Second notification should be the original block 3 notification
+            assert_eq!(
+                notifications_constrained_backfill.next().await.transpose()?,
+                Some(notification_block_3)
+            );
+
+            // Third notification should be backfill for blocks 5-6 (constrained to 2 blocks)
+            let backfill_5_6 = notifications_constrained_backfill.next().await.transpose()?;
+            assert!(backfill_5_6.is_some());
+            if let Some(ExExNotification::ChainCommitted { new }) = &backfill_5_6 {
+                assert_eq!(new.first().number(), 5);
+                assert_eq!(new.tip().number(), 6);
+            } else {
+                panic!("Expected backfill notification for blocks 5-6");
+            }
+
+            // Fourth notification should be the original block 7 notification
+            assert_eq!(
+                notifications_constrained_backfill.next().await.transpose()?,
+                Some(notification_block_7)
+            );
+        }
 
         Ok(())
     }

@@ -107,14 +107,12 @@ where
         self.components.task_executor()
     }
 
-    /// Sets notifications stream to stateless mode, where notifications are passed through
-    /// without canonical checks or backfill.
+    /// Sets notifications stream to a stream of notifications without a head.
     pub fn set_notifications_without_head(&mut self) {
         self.notifications.set_without_head();
     }
 
-    /// Sets notifications stream to stateful mode with the provided head, enabling canonical
-    /// checks, backfill, and notification filtering.
+    /// Sets notifications stream to a stream of notifications with the provided head.
     pub fn set_notifications_with_head(&mut self, head: ExExHead) {
         self.notifications.set_with_head(head);
     }
