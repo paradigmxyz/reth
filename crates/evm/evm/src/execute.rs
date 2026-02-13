@@ -501,6 +501,7 @@ where
 
         // extract the built block access list (EIP-7928, Amsterdam) and compute its hash
         let block_access_list = result.clone().block_access_list;
+        tracing::debug!("Bal in reth {:?}", block_access_list);
         let block_access_list_hash =
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
