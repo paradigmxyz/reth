@@ -1,9 +1,9 @@
 //! Perform DNS lookups
 
+use dashmap::DashMap;
 use hickory_resolver::name_server::ConnectionProvider;
 pub use hickory_resolver::{ResolveError, TokioResolver};
-use parking_lot::RwLock;
-use std::{collections::HashMap, future::Future};
+use std::future::Future;
 use tracing::trace;
 
 /// A type that can lookup DNS entries
@@ -72,25 +72,25 @@ impl Resolver for DnsResolver {
 
 /// A [Resolver] that uses an in memory map to lookup entries
 #[derive(Debug, Default)]
-pub struct MapResolver(RwLock<HashMap<String, String>>);
+pub struct MapResolver(DashMap<String, String>);
 
 // === impl MapResolver ===
 
 impl MapResolver {
     /// Inserts a key-value pair into the map.
     pub fn insert(&self, k: String, v: String) -> Option<String> {
-        self.0.write().insert(k, v)
+        self.0.insert(k, v)
     }
 
     /// Returns the value corresponding to the key
     pub fn get(&self, k: &str) -> Option<String> {
-        self.0.read().get(k).cloned()
+        self.0.get(k).map(|entry| entry.value().clone())
     }
 
     /// Removes a key from the map, returning the value at the key if the key was previously in the
     /// map.
     pub fn remove(&self, k: &str) -> Option<String> {
-        self.0.write().remove(k)
+        self.0.remove(k).map(|(_, v)| v)
     }
 }
 

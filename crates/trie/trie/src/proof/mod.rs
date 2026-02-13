@@ -367,7 +367,7 @@ where
 
         let target_nibbles = targets.into_iter().map(Nibbles::unpack).collect::<Vec<_>>();
         let mut prefix_set = self.prefix_set;
-        prefix_set.extend_keys(target_nibbles.clone());
+        prefix_set.extend_keys(target_nibbles.iter().copied());
 
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
 

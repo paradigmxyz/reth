@@ -138,7 +138,7 @@ impl<N: ProviderNodeTypes> PipelineSync<N> {
                 let (tx, rx) = oneshot::channel();
 
                 let pipeline = pipeline.take().expect("exists");
-                self.pipeline_task_spawner.spawn_critical_blocking(
+                self.pipeline_task_spawner.spawn_critical_blocking_task(
                     "pipeline task",
                     Box::pin(async move {
                         let result = pipeline.run_as_fut(Some(target)).await;

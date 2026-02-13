@@ -64,7 +64,7 @@ impl Command {
             let executor = task_executor.clone();
             let pprof_dump_dir = data_dir.pprof_dumps();
 
-            let handle = task_executor.spawn_critical("metrics server", async move {
+            let handle = task_executor.spawn_critical_task("metrics server", async move {
                 let config = MetricServerConfig::new(
                     listen_addr,
                     VersionInfo {

@@ -1,7 +1,5 @@
 import { SidebarItem } from "vocs";
 import { rethCliSidebar } from "./sidebar-cli-reth";
-import { opRethCliSidebar } from "./sidebar-cli-op-reth";
-
 export const sidebar: SidebarItem[] = [
     {
         text: "Introduction",
@@ -65,6 +63,10 @@ export const sidebar: SidebarItem[] = [
                         link: "/run/overview",
                     },
                     {
+                        text: "Signature Verification",
+                        link: "/installation/binaries#signature-verification",
+                    },
+                    {
                         text: "Networks",
                         // link: "/run/networks",
                         items: [
@@ -75,16 +77,6 @@ export const sidebar: SidebarItem[] = [
                                 //     {
                                 //         text: "Snapshots",
                                 //         link: "/run/ethereum/snapshots"
-                                //     }
-                                // ]
-                            },
-                            {
-                                text: "OP-stack",
-                                link: "/run/opstack",
-                                // items: [
-                                //     {
-                                //         text: "Caveats OP-Mainnet",
-                                //         link: "/run/opstack/op-mainnet-caveats"
                                 //     }
                                 // ]
                             },
@@ -125,10 +117,6 @@ export const sidebar: SidebarItem[] = [
                         text: "Profiling",
                         link: "/run/faq/profiling"
                     },
-                    {
-                        text: "Sync OP Mainnet",
-                        link: "/run/faq/sync-op-mainnet"
-                    }
                 ]
             }
         ]
@@ -179,43 +167,6 @@ export const sidebar: SidebarItem[] = [
                     }
                 ]
             },
-            // TODO
-            // {
-            //     text: "Build a custom node",
-            //     items: [
-            //         {
-            //             text: "Prerequisites and Considerations",
-            //             link: "/sdk/custom-node/prerequisites"
-            //         },
-            //         {
-            //             text: "What modifications and how",
-            //             link: "/sdk/custom-node/modifications"
-            //         }
-            //     ]
-            // },
-            // {
-            //     text: "Examples",
-            //     items: [
-            //         {
-            //             text: "How to modify an existing node",
-            //             items: [
-            //                 {
-            //                     text: "Additional features: RPC endpoints, services",
-            //                     link: "/sdk/examples/modify-node"
-            //                 }
-            //             ]
-            //         },
-            //         {
-            //             text: "How to use standalone components",
-            //             items: [
-            //                 {
-            //                     text: "Interact with the disk directly + caveats",
-            //                     link: "/sdk/examples/standalone-components"
-            //                 }
-            //             ]
-            //         }
-            //     ]
-            // }
         ]
     },
     {
@@ -290,8 +241,7 @@ export const sidebar: SidebarItem[] = [
         link: "/cli/cli",
         collapsed: false,
         items: [
-            rethCliSidebar,
-            opRethCliSidebar
+            rethCliSidebar
         ]
     },
 ]

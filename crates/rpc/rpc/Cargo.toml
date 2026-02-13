@@ -72,10 +72,6 @@ revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
 jsonrpsee.workspace = true
-http.workspace = true
-http-body.workspace = true
-hyper.workspace = true
-jsonwebtoken.workspace = true
 serde_json.workspace = true
 jsonrpsee-types.workspace = true
 
@@ -83,7 +79,6 @@ jsonrpsee-types.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
-tower.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true
 

@@ -992,7 +992,7 @@ where
 
         let new_canonical_blocks = node.provider().canonical_state_stream();
         let c = cache.clone();
-        node.task_executor().spawn_critical(
+        node.task_executor().spawn_critical_task(
             "cache canonical blocks task",
             Box::pin(async move {
                 cache_new_blocks_task(c, new_canonical_blocks).await;
@@ -1192,6 +1192,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
             .pending_block_kind(self.config.pending_block_kind)
             .raw_tx_forwarder(self.config.raw_tx_forwarder)
             .evm_memory_limit(self.config.rpc_evm_memory_limit)
+            .force_blob_sidecar_upcasting(self.config.force_blob_sidecar_upcasting)
     }
 }
 
@@ -1351,6 +1352,7 @@ where
             tree_config,
             invalid_block_hook,
             changeset_cache,
+            ctx.node.task_executor().clone(),
         ))
     }
 }

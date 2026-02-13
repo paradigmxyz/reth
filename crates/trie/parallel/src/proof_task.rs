@@ -42,10 +42,11 @@ use alloy_primitives::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use dashmap::DashMap;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofError};
+use reth_primitives_traits::dashmap::{self, DashMap};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
+use reth_tasks::Runtime;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedCursorMetricsCache, InstrumentedHashedCursor},
     node_iter::{TrieElement, TrieNodeIter},
@@ -74,7 +75,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tokio::runtime::Handle;
 use tracing::{debug, debug_span, error, trace};
 
 #[cfg(feature = "metrics")]
@@ -132,16 +132,12 @@ impl ProofWorkerHandle {
     /// Workers run until the last handle is dropped.
     ///
     /// # Parameters
-    /// - `executor`: Tokio runtime handle for spawning blocking tasks
+    /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
-    /// - `storage_worker_count`: Number of storage workers to spawn
-    /// - `account_worker_count`: Number of account workers to spawn
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
     pub fn new<Factory>(
-        executor: Handle,
+        runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
-        storage_worker_count: usize,
-        account_worker_count: usize,
         v2_proofs_enabled: bool,
     ) -> Self
     where
@@ -153,12 +149,13 @@ impl ProofWorkerHandle {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
-        // Initialize availability counters at zero. Each worker will increment when it
-        // successfully initializes, ensuring only healthy workers are counted.
-        let storage_available_workers = Arc::new(AtomicUsize::new(0));
-        let account_available_workers = Arc::new(AtomicUsize::new(0));
+        let storage_available_workers = Arc::<AtomicUsize>::default();
+        let account_available_workers = Arc::<AtomicUsize>::default();
 
-        let cached_storage_roots = Arc::new(DashMap::new());
+        let cached_storage_roots = Arc::<DashMap<_, _>>::default();
+
+        let storage_worker_count = runtime.proof_storage_worker_pool().current_num_threads();
+        let account_worker_count = runtime.proof_account_worker_pool().current_num_threads();
 
         debug!(
             target: "trie::proof_task",
@@ -168,18 +165,18 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
-        let parent_span =
-            debug_span!(target: "trie::proof_task", "storage proof workers", ?storage_worker_count)
-                .entered();
-        // Spawn storage workers
+        let storage_pool = runtime.proof_storage_worker_pool();
+        let task_ctx_for_storage = task_ctx.clone();
+        let cached_storage_roots_for_storage = cached_storage_roots.clone();
+
         for worker_id in 0..storage_worker_count {
             let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
-            let task_ctx_clone = task_ctx.clone();
+            let task_ctx_clone = task_ctx_for_storage.clone();
             let work_rx_clone = storage_work_rx.clone();
             let storage_available_workers_clone = storage_available_workers.clone();
-            let cached_storage_roots = cached_storage_roots.clone();
+            let cached_storage_roots = cached_storage_roots_for_storage.clone();
 
-            executor.spawn_blocking(move || {
+            storage_pool.spawn(move || {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
                 #[cfg(feature = "metrics")]
@@ -208,12 +205,9 @@ impl ProofWorkerHandle {
                 }
             });
         }
-        drop(parent_span);
 
-        let parent_span =
-            debug_span!(target: "trie::proof_task", "account proof workers", ?account_worker_count)
-                .entered();
-        // Spawn account workers
+        let account_pool = runtime.proof_account_worker_pool();
+
         for worker_id in 0..account_worker_count {
             let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
             let task_ctx_clone = task_ctx.clone();
@@ -222,7 +216,7 @@ impl ProofWorkerHandle {
             let account_available_workers_clone = account_available_workers.clone();
             let cached_storage_roots = cached_storage_roots.clone();
 
-            executor.spawn_blocking(move || {
+            account_pool.spawn(move || {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
                 #[cfg(feature = "metrics")]
@@ -252,7 +246,6 @@ impl ProofWorkerHandle {
                 }
             });
         }
-        drop(parent_span);
 
         Self {
             storage_work_tx,
@@ -470,9 +463,7 @@ where
         let span = debug_span!(
             target: "trie::proof_task",
             "Storage proof calculation",
-            ?hashed_address,
             target_slots = ?target_slots.len(),
-            worker_id = self.id,
         );
         let _span_guard = span.enter();
 
@@ -517,24 +508,23 @@ where
             panic!("compute_v2_storage_proof only accepts StorageProofInput::V2")
         };
 
-        // If targets is empty it means the caller only wants the root hash. The V2 proof calculator
-        // will do nothing given no targets, so instead we give it a fake target so it always
-        // returns at least the root.
-        if targets.is_empty() {
-            targets.push(proof_v2::Target::new(B256::ZERO));
-        }
-
         let span = debug_span!(
             target: "trie::proof_task",
             "V2 Storage proof calculation",
-            ?hashed_address,
             targets = ?targets.len(),
-            worker_id = self.id,
         );
         let _span_guard = span.enter();
 
         let proof_start = Instant::now();
-        let proof = calculator.storage_proof(hashed_address, &mut targets)?;
+
+        // If targets is empty it means the caller only wants the root node.
+        let proof = if targets.is_empty() {
+            let root_node = calculator.storage_root_node(hashed_address)?;
+            vec![root_node]
+        } else {
+            calculator.storage_proof(hashed_address, &mut targets)?
+        };
+
         let root = calculator.compute_root_hash(&proof)?;
 
         trace!(
@@ -1303,7 +1293,6 @@ where
             "Account multiproof calculation",
             targets = targets.len(),
             num_slots = targets.values().map(|slots| slots.len()).sum::<usize>(),
-            worker_id=self.worker_id,
         );
         let _span_guard = span.enter();
 
@@ -1369,7 +1358,6 @@ where
             "Account V2 multiproof calculation",
             account_targets = account_targets.len(),
             storage_targets = storage_targets.values().map(|t| t.len()).sum::<usize>(),
-            worker_id = self.worker_id,
         );
         let _span_guard = span.enter();
 
@@ -1518,7 +1506,6 @@ where
             target: "trie::proof_task",
             "Blinded account node calculation",
             ?path,
-            worker_id,
         );
         let _span_guard = span.enter();
 
@@ -1626,7 +1613,6 @@ where
                         let _guard = debug_span!(
                             target: "trie::proof_task",
                             "Waiting for storage proof",
-                            ?hashed_address,
                         );
                         // Block on this specific storage proof receiver - enables interleaved
                         // parallelism
@@ -1810,13 +1796,32 @@ fn dispatch_storage_proofs(
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &Vec<proof_v2::Target>,
-    storage_targets: B256Map<Vec<proof_v2::Target>>,
+    mut storage_targets: B256Map<Vec<proof_v2::Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
 
+    // Collect hashed addresses from account targets that need their storage roots computed
+    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+
+    // For storage targets with associated account proofs, ensure the first target has
+    // min_len(0) so the root node is returned for storage root computation
+    for (hashed_address, targets) in &mut storage_targets {
+        if account_target_addresses.contains(hashed_address) &&
+            let Some(first) = targets.first_mut()
+        {
+            *first = first.with_min_len(0);
+        }
+    }
+
+    // Sort storage targets by address for optimal dispatch order.
+    // Since trie walk processes accounts in lexicographical order, dispatching in the same order
+    // reduces head-of-line blocking when consuming results.
+    let mut sorted_storage_targets: Vec<_> = storage_targets.into_iter().collect();
+    sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
+
     // Dispatch all proofs for targeted storage slots
-    for (hashed_address, targets) in storage_targets {
+    for (hashed_address, targets) in sorted_storage_targets {
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let input = StorageProofInput::new(hashed_address, targets);
@@ -1990,7 +1995,6 @@ enum AccountWorkerJob {
 mod tests {
     use super::*;
     use reth_provider::test_utils::create_test_provider_factory;
-    use tokio::{runtime::Builder, task};
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
@@ -1999,25 +2003,21 @@ mod tests {
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
     #[test]
     fn spawn_proof_workers_creates_handle() {
-        let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
-        runtime.block_on(async {
-            let handle = tokio::runtime::Handle::current();
-            let provider_factory = create_test_provider_factory();
-            let changeset_cache = reth_trie_db::ChangesetCache::new();
-            let factory = reth_provider::providers::OverlayStateProviderFactory::new(
-                provider_factory,
-                changeset_cache,
-            );
-            let ctx = test_ctx(factory);
+        let provider_factory = create_test_provider_factory();
+        let changeset_cache = reth_trie_db::ChangesetCache::new();
+        let factory = reth_provider::providers::OverlayStateProviderFactory::new(
+            provider_factory,
+            changeset_cache,
+        );
+        let ctx = test_ctx(factory);
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false);
+        let runtime = reth_tasks::Runtime::test();
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false);
 
-            // Verify handle can be cloned
-            let _cloned_handle = proof_handle.clone();
+        // Verify handle can be cloned
+        let _cloned_handle = proof_handle.clone();
 
-            // Workers shut down automatically when handle is dropped
-            drop(proof_handle);
-            task::yield_now().await;
-        });
+        // Workers shut down automatically when handle is dropped
+        drop(proof_handle);
     }
 }

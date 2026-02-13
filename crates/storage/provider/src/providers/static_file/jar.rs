@@ -17,6 +17,7 @@ use reth_db::static_file::{
 use reth_db_api::table::{Decompress, Value};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{SealedHeader, SignedTransaction};
+use reth_static_file_types::{ChangesetOffset, ChangesetOffsetReader};
 use reth_storage_api::range_size_hint;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
@@ -89,6 +90,63 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
     /// Returns the total size of the data and offsets files (from the in-memory mmap).
     pub fn size(&self) -> usize {
         self.jar.value().size()
+    }
+
+    /// Reads a changeset offset from the sidecar file for a given block.
+    ///
+    /// Returns `None` if:
+    /// - The segment is not change-based
+    /// - The block is not in the block range
+    /// - The sidecar file doesn't exist
+    pub fn read_changeset_offset(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<Option<ChangesetOffset>> {
+        let header = self.user_header();
+        if !header.segment().is_change_based() {
+            return Ok(None);
+        }
+
+        let Some(index) = header.changeset_offset_index(block_number) else {
+            return Ok(None);
+        };
+
+        let csoff_path = self.data_path().with_extension("csoff");
+        if !csoff_path.exists() {
+            return Ok(None);
+        }
+
+        let len = header.changeset_offsets_len();
+        let mut reader =
+            ChangesetOffsetReader::new(&csoff_path, len).map_err(ProviderError::other)?;
+        reader.get(index).map_err(ProviderError::other)
+    }
+
+    /// Reads all changeset offsets from the sidecar file.
+    ///
+    /// Returns `None` if:
+    /// - The segment is not change-based
+    /// - The sidecar file doesn't exist
+    pub fn read_changeset_offsets(&self) -> ProviderResult<Option<Vec<ChangesetOffset>>> {
+        let header = self.user_header();
+        if !header.segment().is_change_based() {
+            return Ok(None);
+        }
+
+        let len = header.changeset_offsets_len();
+        if len == 0 {
+            return Ok(Some(Vec::new()));
+        }
+
+        let csoff_path = self.data_path().with_extension("csoff");
+        if !csoff_path.exists() {
+            return Ok(None);
+        }
+
+        let mut reader =
+            ChangesetOffsetReader::new(&csoff_path, len).map_err(ProviderError::other)?;
+        let offsets = reader.get_range(0, len).map_err(ProviderError::other)?;
+        Ok(Some(offsets))
     }
 }
 

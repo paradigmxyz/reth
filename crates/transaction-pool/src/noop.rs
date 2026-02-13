@@ -19,10 +19,10 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::{Address, TxHash, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
-use std::{collections::HashSet, marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
 /// A [`TransactionPool`] implementation that does nothing.
@@ -84,14 +84,13 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
     }
 
-    async fn add_transactions(
+    async fn add_transactions_with_origins(
         &self,
-        _origin: TransactionOrigin,
-        transactions: Vec<Self::Transaction>,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         transactions
             .into_iter()
-            .map(|transaction| {
+            .map(|(_, transaction)| {
                 let hash = *transaction.hash();
                 Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
             })
@@ -231,6 +230,13 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         vec![]
     }
 
+    fn prune_transactions(
+        &self,
+        _hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
     fn retain_unknown<A>(&self, _announcement: &mut A)
     where
         A: HandleMempoolData,
@@ -312,7 +318,7 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         vec![]
     }
 
-    fn unique_senders(&self) -> HashSet<Address> {
+    fn unique_senders(&self) -> AddressSet {
         Default::default()
     }
 

@@ -37,7 +37,7 @@ async fn can_handle_invalid_payload_then_valid() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         2,
         chain_spec.clone(),
         false,
@@ -154,7 +154,7 @@ async fn can_handle_multiple_invalid_payloads() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         2,
         chain_spec.clone(),
         false,
@@ -255,7 +255,7 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         2,
         chain_spec.clone(),
         false,

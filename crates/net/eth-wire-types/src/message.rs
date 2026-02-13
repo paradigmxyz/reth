@@ -34,6 +34,9 @@ pub enum MessageError {
     /// Flags an unrecognized message ID for a given protocol version.
     #[error("message id {1:?} is invalid for version {0:?}")]
     Invalid(EthVersion, EthMessageID),
+    /// Expected a Status message but received a different message type.
+    #[error("expected status message but received {0:?}")]
+    ExpectedStatusMessage(EthMessageID),
     /// Thrown when rlp decoding a message failed.
     #[error("RLP error: {0}")]
     RlpError(#[from] alloy_rlp::Error),
@@ -57,6 +60,29 @@ pub struct ProtocolMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
 }
 
 impl<N: NetworkPrimitives> ProtocolMessage<N> {
+    /// Decode only a Status message from RLP bytes.
+    ///
+    /// This is used during the eth handshake where only a Status message is a valid response.
+    /// Returns an error if the message is not a Status message.
+    pub fn decode_status(
+        version: EthVersion,
+        buf: &mut &[u8],
+    ) -> Result<StatusMessage, MessageError> {
+        let message_type = EthMessageID::decode(buf)?;
+
+        if message_type != EthMessageID::Status {
+            return Err(MessageError::ExpectedStatusMessage(message_type))
+        }
+
+        let status = if version < EthVersion::Eth69 {
+            StatusMessage::Legacy(Status::decode(buf)?)
+        } else {
+            StatusMessage::Eth69(StatusEth69::decode(buf)?)
+        };
+
+        Ok(status)
+    }
+
     /// Create a new `ProtocolMessage` from a message type and message rlp bytes.
     ///
     /// This will enforce decoding according to the given [`EthVersion`] of the connection.
@@ -563,7 +589,7 @@ impl EthMessageID {
 
     /// Returns the max value for the given version.
     pub const fn max(version: EthVersion) -> u8 {
-        if version.is_eth69() {
+        if version as u8 >= EthVersion::Eth69 as u8 {
             Self::BlockRangeUpdate.to_u8()
         } else {
             Self::Receipts.to_u8()
@@ -880,5 +906,62 @@ mod tests {
         .unwrap();
 
         assert_eq!(protocol_message, decoded);
+    }
+
+    #[test]
+    fn decode_status_success() {
+        use crate::{Status, StatusMessage};
+        use alloy_hardforks::{ForkHash, ForkId};
+        use alloy_primitives::{B256, U256};
+
+        let status = Status {
+            version: EthVersion::Eth68,
+            chain: alloy_chains::Chain::mainnet(),
+            total_difficulty: U256::from(100u64),
+            blockhash: B256::random(),
+            genesis: B256::random(),
+            forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+        };
+
+        let protocol_message = ProtocolMessage::<EthNetworkPrimitives>::from(EthMessage::Status(
+            StatusMessage::Legacy(status),
+        ));
+        let encoded = encode(protocol_message);
+
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_status(
+            EthVersion::Eth68,
+            &mut &encoded[..],
+        )
+        .unwrap();
+
+        assert!(matches!(decoded, StatusMessage::Legacy(s) if s == status));
+    }
+
+    #[test]
+    fn eth_message_id_max_includes_block_range_update() {
+        assert_eq!(EthMessageID::max(EthVersion::Eth69), EthMessageID::BlockRangeUpdate.to_u8(),);
+        assert_eq!(EthMessageID::max(EthVersion::Eth70), EthMessageID::BlockRangeUpdate.to_u8(),);
+        assert_eq!(EthMessageID::max(EthVersion::Eth68), EthMessageID::Receipts.to_u8());
+    }
+
+    #[test]
+    fn decode_status_rejects_non_status() {
+        let msg = EthMessage::<EthNetworkPrimitives>::GetBlockBodies(RequestPair {
+            request_id: 1,
+            message: crate::GetBlockBodies::default(),
+        });
+        let protocol_message =
+            ProtocolMessage { message_type: EthMessageID::GetBlockBodies, message: msg };
+        let encoded = encode(protocol_message);
+
+        let result = ProtocolMessage::<EthNetworkPrimitives>::decode_status(
+            EthVersion::Eth68,
+            &mut &encoded[..],
+        );
+
+        assert!(matches!(
+            result,
+            Err(MessageError::ExpectedStatusMessage(EthMessageID::GetBlockBodies))
+        ));
     }
 }

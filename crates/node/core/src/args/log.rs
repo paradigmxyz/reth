@@ -8,8 +8,11 @@ use reth_tracing::{
 };
 use std::{fmt, fmt::Display};
 use tracing::{level_filters::LevelFilter, Level};
+
 /// Constant to convert megabytes to bytes
 const MB_TO_BYTES: u64 = 1024 * 1024;
+
+const PROFILER_TRACING_FILTER: &str = "debug";
 
 /// The log configuration.
 #[derive(Debug, Args)]
@@ -70,7 +73,7 @@ pub struct LogArgs {
         long = "log.samply.filter",
         value_name = "FILTER",
         global = true,
-        default_value = "debug",
+        default_value = PROFILER_TRACING_FILTER,
         hide = true
     )]
     pub samply_filter: String,
@@ -84,7 +87,7 @@ pub struct LogArgs {
         long = "log.tracy.filter",
         value_name = "FILTER",
         global = true,
-        default_value = "debug",
+        default_value = PROFILER_TRACING_FILTER,
         hide = true
     )]
     pub tracy_filter: String,
@@ -167,10 +170,16 @@ impl LogArgs {
             tracer = tracer.with_samply(config);
         }
 
-        #[cfg(feature = "tracy")]
         if self.tracy {
-            let config = self.layer_info(LogFormat::Terminal, self.tracy_filter.clone(), false);
-            tracer = tracer.with_tracy(config);
+            #[cfg(feature = "tracy")]
+            {
+                let config = self.layer_info(LogFormat::Terminal, self.tracy_filter.clone(), false);
+                tracer = tracer.with_tracy(config);
+            }
+            #[cfg(not(feature = "tracy"))]
+            {
+                tracing::warn!("`--log.tracy` requested but `tracy` feature was not compiled in");
+            }
         }
 
         tracer.init_with_layers_and_reload(layers, enable_reload)

@@ -146,6 +146,24 @@ impl DatabaseArguments {
         }
     }
 
+    /// Create database arguments suitable for testing.
+    ///
+    /// Uses a small geometry (64MB max, 4MB growth) to avoid exhausting the system's
+    /// virtual memory map limit (`vm.max_map_count`) when many test databases are open
+    /// concurrently.
+    pub fn test() -> Self {
+        Self {
+            geometry: Geometry {
+                size: Some(0..(64 * MEGABYTE)),
+                growth_step: Some(4 * MEGABYTE as isize),
+                shrink_threshold: Some(0),
+                page_size: Some(PageSize::Set(default_page_size())),
+            },
+            max_read_transaction_duration: Some(MaxReadTransactionDuration::Unbounded),
+            ..Self::new(ClientVersion::default())
+        }
+    }
+
     /// Sets the upper size limit of the db environment, the maximum database size in bytes.
     pub const fn with_geometry_max_size(mut self, max_size: Option<usize>) -> Self {
         if let Some(max_size) = max_size {
@@ -222,7 +240,7 @@ impl DatabaseArguments {
 }
 
 /// Wrapper for the libmdbx environment: [Environment]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DatabaseEnv {
     /// Libmdbx-sys environment.
     inner: Environment,
@@ -643,12 +661,11 @@ mod tests {
     use std::str::FromStr;
     use tempfile::TempDir;
 
-    /// Create database for testing
-    fn create_test_db(kind: DatabaseEnvKind) -> Arc<DatabaseEnv> {
-        Arc::new(create_test_db_with_path(
-            kind,
-            &tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep(),
-        ))
+    /// Create database for testing. Returns the `TempDir` to prevent cleanup until test ends.
+    fn create_test_db(kind: DatabaseEnvKind) -> (TempDir, DatabaseEnv) {
+        let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+        let env = create_test_db_with_path(kind, tempdir.path());
+        (tempdir, env)
     }
 
     /// Create database for testing with specified path
@@ -673,13 +690,13 @@ mod tests {
 
     #[test]
     fn db_creation() {
-        create_test_db(DatabaseEnvKind::RW);
+        let _tempdir = create_test_db(DatabaseEnvKind::RW);
     }
 
     #[test]
     fn db_drop_orphan_table() {
-        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep();
-        let db = create_test_db_with_path(DatabaseEnvKind::RW, &path);
+        let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+        let db = create_test_db_with_path(DatabaseEnvKind::RW, tempdir.path());
 
         // Create an orphan table by manually creating it
         let orphan_table_name = "OrphanTestTable";
@@ -718,7 +735,7 @@ mod tests {
 
     #[test]
     fn db_manual_put_get() {
-        let env = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
 
         let value = Header::default();
         let key = 1u64;
@@ -737,7 +754,7 @@ mod tests {
 
     #[test]
     fn db_dup_cursor_delete_first() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
@@ -777,7 +794,7 @@ mod tests {
 
     #[test]
     fn db_cursor_walk() {
-        let env = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
 
         let value = Header::default();
         let key = 1u64;
@@ -802,7 +819,7 @@ mod tests {
 
     #[test]
     fn db_cursor_walk_range() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
         // PUT (0, 0), (1, 0), (2, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -866,7 +883,7 @@ mod tests {
 
     #[test]
     fn db_cursor_walk_range_on_dup_table() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
         let address0 = Address::ZERO;
         let address1 = Address::with_last_byte(1);
@@ -926,7 +943,7 @@ mod tests {
     #[expect(clippy::reversed_empty_ranges)]
     #[test]
     fn db_cursor_walk_range_invalid() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
         // PUT (0, 0), (1, 0), (2, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -954,7 +971,7 @@ mod tests {
 
     #[test]
     fn db_walker() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
         // PUT (0, 0), (1, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -984,7 +1001,7 @@ mod tests {
 
     #[test]
     fn db_reverse_walker() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
         // PUT (0, 0), (1, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1014,7 +1031,7 @@ mod tests {
 
     #[test]
     fn db_walk_back() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
         // PUT (0, 0), (1, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1053,7 +1070,7 @@ mod tests {
 
     #[test]
     fn db_cursor_seek_exact_or_previous_key() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1077,7 +1094,7 @@ mod tests {
 
     #[test]
     fn db_cursor_insert() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1117,7 +1134,7 @@ mod tests {
 
     #[test]
     fn db_cursor_insert_dup() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
@@ -1135,7 +1152,7 @@ mod tests {
 
     #[test]
     fn db_cursor_delete_current_non_existent() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let key1 = Address::with_last_byte(1);
@@ -1165,7 +1182,7 @@ mod tests {
 
     #[test]
     fn db_cursor_insert_wherever_cursor_is() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         // PUT
@@ -1198,7 +1215,7 @@ mod tests {
 
     #[test]
     fn db_cursor_append() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1225,7 +1242,7 @@ mod tests {
 
     #[test]
     fn db_cursor_append_failure() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1260,7 +1277,7 @@ mod tests {
 
     #[test]
     fn db_cursor_upsert() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
@@ -1295,7 +1312,7 @@ mod tests {
 
     #[test]
     fn db_cursor_dupsort_append() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
         let transition_id = 2;
 
@@ -1359,7 +1376,8 @@ mod tests {
 
     #[test]
     fn db_closure_put_get() {
-        let path = TempDir::new().expect(ERROR_TEMPDIR).keep();
+        let tempdir = TempDir::new().expect(ERROR_TEMPDIR);
+        let path = tempdir.path();
 
         let value = Account {
             nonce: 18446744073709551615,
@@ -1370,7 +1388,7 @@ mod tests {
             .expect(ERROR_ETH_ADDRESS);
 
         {
-            let env = create_test_db_with_path(DatabaseEnvKind::RW, &path);
+            let env = create_test_db_with_path(DatabaseEnvKind::RW, path);
 
             // PUT
             let result = env.update(|tx| {
@@ -1381,7 +1399,7 @@ mod tests {
         }
 
         let env = DatabaseEnv::open(
-            &path,
+            path,
             DatabaseEnvKind::RO,
             DatabaseArguments::new(ClientVersion::default()),
         )
@@ -1396,7 +1414,7 @@ mod tests {
 
     #[test]
     fn db_dup_sort() {
-        let env = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
             .expect(ERROR_ETH_ADDRESS);
 
@@ -1440,7 +1458,7 @@ mod tests {
 
     #[test]
     fn db_walk_dup_with_not_existing_key() {
-        let env = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
             .expect(ERROR_ETH_ADDRESS);
 
@@ -1468,7 +1486,7 @@ mod tests {
 
     #[test]
     fn db_iterate_over_all_dup_values() {
-        let env = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
         let key1 = Address::from_str("0x1111111111111111111111111111111111111111")
             .expect(ERROR_ETH_ADDRESS);
         let key2 = Address::from_str("0x2222222222222222222222222222222222222222")
@@ -1514,7 +1532,7 @@ mod tests {
 
     #[test]
     fn dup_value_with_same_subkey() {
-        let env = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
         let key1 = Address::new([0x11; 20]);
         let key2 = Address::new([0x22; 20]);
 
@@ -1557,7 +1575,7 @@ mod tests {
 
     #[test]
     fn db_sharded_key() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
         let real_key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         let shards = 5;

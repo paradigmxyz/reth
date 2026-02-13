@@ -18,7 +18,7 @@ use std::{sync::Arc, time::Duration};
 async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, _tasks, wallet) = setup::<EthereumNode>(
+    let (mut nodes, wallet) = setup::<EthereumNode>(
         2,
         Arc::new(
             ChainSpecBuilder::default()
@@ -74,7 +74,7 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, _) = setup_engine::<EthereumNode>(
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
         2,
         chain_spec.clone(),
         false,
@@ -116,7 +116,7 @@ async fn test_long_reorg() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, _) = setup_engine::<EthereumNode>(
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
         2,
         chain_spec.clone(),
         false,
@@ -172,7 +172,7 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, _) = setup_engine::<EthereumNode>(
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
         2,
         chain_spec.clone(),
         false,
@@ -236,7 +236,7 @@ async fn test_tx_propagation() -> eyre::Result<()> {
     };
 
     // Setup 10 nodes
-    let (mut nodes, _tasks, _) = setup_engine_with_connection::<EthereumNode>(
+    let (mut nodes, _) = setup_engine_with_connection::<EthereumNode>(
         10,
         chain_spec.clone(),
         false,

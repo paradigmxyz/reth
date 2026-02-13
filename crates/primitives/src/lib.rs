@@ -18,6 +18,18 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+// These are used as optional dependencies solely for feature forwarding.
+#[cfg(feature = "alloy-eips")]
+use alloy_eips as _;
+#[cfg(feature = "alloy-genesis")]
+use alloy_genesis as _;
+#[cfg(feature = "alloy-primitives")]
+use alloy_primitives as _;
+#[cfg(feature = "alloy-rlp")]
+use alloy_rlp as _;
+#[cfg(feature = "reth-codecs")]
+use reth_codecs as _;
+
 mod block;
 mod receipt;
 pub use reth_static_file_types as static_file;

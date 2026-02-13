@@ -10,7 +10,10 @@ use crate::{
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
 use alloy_eips::{BlockNumberOrTag, Decodable2718, Encodable2718};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes};
+use alloy_primitives::{
+    map::{AddressSet, HashSet},
+    Address, BlockHash, BlockNumber, Bytes,
+};
 use alloy_rlp::Encodable;
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
@@ -28,7 +31,6 @@ use reth_tasks::TaskSpawner;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Borrow,
-    collections::HashSet,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::Arc,
@@ -227,7 +229,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 .boxed()
             };
             reload_accounts_fut = rx.fuse();
-            task_spawner.spawn_blocking(fut);
+            task_spawner.spawn_blocking_task(fut);
         }
 
         // check if we have a new finalized block
@@ -241,7 +243,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
             pool.delete_blobs(blobs);
             // and also do periodic cleanup
             let pool = pool.clone();
-            task_spawner.spawn_blocking(Box::pin(async move {
+            task_spawner.spawn_blocking_task(Box::pin(async move {
                 debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
                 pool.cleanup_blobs();
             }));
@@ -515,7 +517,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     let pool = pool.clone();
                     let spawner = task_spawner.clone();
                     let client = client.clone();
-                    task_spawner.spawn(Box::pin(async move {
+                    task_spawner.spawn_task(Box::pin(async move {
                         // Start converting not eaerlier than 4 seconds into current slot to ensure
                         // that our pool only contains valid transactions for the next block (as
                         // it's not Osaka yet).
@@ -563,7 +565,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                                 let converter = BlobSidecarConverter::new();
                                 let pool = pool.clone();
-                                spawner.spawn(Box::pin(async move {
+                                spawner.spawn_task(Box::pin(async move {
                                     // Convert sidecar to EIP-7594 format
                                     let Some(sidecar) = converter.convert(sidecar).await else {
                                         return;
@@ -670,7 +672,7 @@ fn load_accounts<Client, I>(
     client: Client,
     at: BlockHash,
     addresses: I,
-) -> Result<LoadedAccounts, Box<(HashSet<Address>, ProviderError)>>
+) -> Result<LoadedAccounts, Box<(AddressSet, ProviderError)>>
 where
     I: IntoIterator<Item = Address>,
     Client: StateProviderFactory,
@@ -865,7 +867,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_fs_util as fs;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use reth_tasks::TaskManager;
+    use reth_tasks::Runtime;
 
     #[test]
     fn changed_acc_entry() {
@@ -904,10 +906,9 @@ mod tests {
 
         txpool.add_transaction(TransactionOrigin::Local, transaction.clone()).await.unwrap();
 
-        let handle = tokio::runtime::Handle::current();
-        let manager = TaskManager::new(handle);
+        let rt = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
         let config = LocalTransactionBackupConfig::with_local_txs_backup(transactions_path.clone());
-        manager.executor().spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
+        rt.spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
             backup_local_transactions_task(shutdown, txpool.clone(), config)
         });
 
@@ -916,8 +917,7 @@ mod tests {
 
         assert_eq!(*tx_to_cmp.hash(), *tx_on_finish.hash());
 
-        // shutdown the executor
-        manager.graceful_shutdown();
+        rt.graceful_shutdown();
 
         let data = fs::read(transactions_path).unwrap();
 

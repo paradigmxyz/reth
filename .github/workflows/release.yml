@@ -17,11 +17,9 @@ on:
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
   IMAGE_NAME: ${{ github.repository_owner }}/reth
-  OP_IMAGE_NAME: ${{ github.repository_owner }}/op-reth
   REPRODUCIBLE_IMAGE_NAME: ${{ github.repository_owner }}/reth-reproducible
   CARGO_TERM_COLOR: always
   DOCKER_IMAGE_NAME_URL: https://ghcr.io/${{ github.repository_owner }}/reth
-  DOCKER_OP_IMAGE_NAME_URL: https://ghcr.io/${{ github.repository_owner }}/op-reth
   RUSTC_WRAPPER: "sccache"
 
 jobs:
@@ -87,10 +85,6 @@ jobs:
             os: macos-14
             profile: maxperf
             allow_fail: false
-          - target: x86_64-pc-windows-gnu
-            os: ubuntu-24.04
-            profile: maxperf
-            allow_fail: false
           - target: riscv64gc-unknown-linux-gnu
             os: ubuntu-24.04
             profile: maxperf
@@ -98,8 +92,6 @@ jobs:
         build:
           - command: build
             binary: reth
-          - command: op-build
-            binary: op-reth
     steps:
       - uses: actions/checkout@v6
       - uses: rui314/setup-mold@v1
@@ -126,8 +118,7 @@ jobs:
       - name: Move binary
         run: |
           mkdir artifacts
-          [[ "${{ matrix.configs.target }}" == *windows* ]] && ext=".exe"
-          mv "target/${{ matrix.configs.target }}/${{ matrix.configs.profile }}/${{ matrix.build.binary }}${ext}" ./artifacts
+          mv "target/${{ matrix.configs.target }}/${{ matrix.configs.profile }}/${{ matrix.build.binary }}" ./artifacts
 
       - name: Configure GPG and create artifacts
         env:
@@ -244,21 +235,9 @@ jobs:
           |:---:|:---:|:---:|:---|
           | <img src="https://www.svgrepo.com/download/473700/linux.svg" width="50"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc) |
           | <img src="https://www.svgrepo.com/download/473700/linux.svg" width="50"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz.asc) |
-          | <img src="https://www.svgrepo.com/download/513083/windows-174.svg" width="50"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz.asc) |
           | <img src="https://www.svgrepo.com/download/511330/apple-173.svg" width="50"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz.asc) |
           | <img src="https://www.svgrepo.com/download/511330/apple-173.svg" width="50"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz.asc) |
           | <img src="https://www.svgrepo.com/download/473589/docker.svg" width="50"/> | Docker | [${{ env.IMAGE_NAME }}](${{ env.DOCKER_IMAGE_NAME_URL }}) | - |
-
-          ### OP-Reth
-
-          | System | Architecture | Binary | PGP Signature |
-          |:---:|:---:|:---:|:---|
-          | <img src="https://www.svgrepo.com/download/473700/linux.svg" width="50"/> | x86_64 | [op-reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc) |
-          | <img src="https://www.svgrepo.com/download/473700/linux.svg" width="50"/> | aarch64 | [op-reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz.asc) |
-          | <img src="https://www.svgrepo.com/download/513083/windows-174.svg" width="50"/> | x86_64 | [op-reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz.asc) |
-          | <img src="https://www.svgrepo.com/download/511330/apple-173.svg" width="50"/> | x86_64 | [op-reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz.asc) |
-          | <img src="https://www.svgrepo.com/download/511330/apple-173.svg" width="50"/> | aarch64 | [op-reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz.asc) |
-          | <img src="https://www.svgrepo.com/download/473589/docker.svg" width="50"/> | Docker | [${{ env.OP_IMAGE_NAME }}](${{ env.DOCKER_OP_IMAGE_NAME_URL }}) | - |
           ENDBODY
           )
           assets=()

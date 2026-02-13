@@ -10,8 +10,8 @@ use reth_codecs_derive::CompactZstd;
 #[derive(CompactZstd)]
 #[reth_codecs(crate = "crate")]
 #[reth_zstd(
-    compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
-    decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR
+    compressor = reth_zstd_compressors::with_receipt_compressor,
+    decompressor = reth_zstd_compressors::with_receipt_decompressor
 )]
 struct CompactOpReceipt<'a> {
     tx_type: OpTxType,

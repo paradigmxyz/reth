@@ -92,7 +92,7 @@ impl<
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](node::NodeCommand).
     ///
-    /// This command will be run on the [default tokio runtime](reth_cli_runner::tokio_runtime).
+    /// This command will be run on the default tokio runtime.
     ///
     ///
     /// # Example
@@ -131,7 +131,7 @@ impl<
     /// ````
     pub fn run<L, Fut>(self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
         C: ChainSpecParser<ChainSpec = ChainSpec>,
     {
@@ -143,12 +143,12 @@ impl<
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](node::NodeCommand).
     ///
-    /// This command will be run on the [default tokio runtime](reth_cli_runner::tokio_runtime).
+    /// This command will be run on the default tokio runtime.
     pub fn run_with_components<N>(
         self,
         components: impl CliComponentsBuilder<N>,
         launcher: impl AsyncFnOnce(
-            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>,
             Ext,
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
@@ -180,7 +180,7 @@ impl<
     /// ```
     pub fn with_runner<L, Fut>(self, runner: CliRunner, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
         C: ChainSpecParser<ChainSpec = ChainSpec>,
     {
@@ -196,7 +196,7 @@ impl<
         runner: CliRunner,
         components: impl CliComponentsBuilder<N>,
         launcher: impl AsyncFnOnce(
-            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>,
             Ext,
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>

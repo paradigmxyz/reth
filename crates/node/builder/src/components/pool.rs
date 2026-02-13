@@ -1,15 +1,16 @@
 //! Pool component for the node builder.
 
 use crate::{BuilderContext, FullNodeTypes};
-use alloy_primitives::Address;
+use alloy_primitives::map::AddressSet;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{BlockTy, NodeTypes, TxTy};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, BlobStore, CoinbaseTipOrdering, PoolConfig, PoolTransaction,
-    SubPoolLimit, TransactionPool, TransactionValidationTaskExecutor, TransactionValidator,
+    SubPoolLimit, TransactionOrdering, TransactionPool, TransactionValidationTaskExecutor,
+    TransactionValidator,
 };
-use std::{collections::HashSet, future::Future};
+use std::future::Future;
 
 /// A type that knows how to build the transaction pool.
 pub trait PoolBuilder<Node: FullNodeTypes, Evm>: Send {
@@ -62,7 +63,7 @@ pub struct PoolBuilderConfigOverrides {
     /// Minimum base fee required by the protocol.
     pub minimal_protocol_basefee: Option<u64>,
     /// Addresses that will be considered as local. Above exemptions apply.
-    pub local_addresses: HashSet<Address>,
+    pub local_addresses: AddressSet,
     /// Additional tasks to validate new transactions.
     pub additional_validation_tasks: Option<usize>,
 }
@@ -174,10 +175,31 @@ where
     where
         BS: BlobStore,
     {
-        let ctx = self.ctx;
-        let transaction_pool = self.build(blob_store, pool_config);
-        // Spawn maintenance tasks using standalone functions
-        spawn_maintenance_tasks(ctx, transaction_pool.clone(), transaction_pool.config())?;
+        self.build_with_ordering_and_spawn_maintenance_task(
+            CoinbaseTipOrdering::default(),
+            blob_store,
+            pool_config,
+        )
+    }
+
+    /// Build the transaction pool with a custom [`TransactionOrdering`] and spawn its maintenance
+    /// tasks.
+    pub fn build_with_ordering_and_spawn_maintenance_task<BS, O>(
+        self,
+        ordering: O,
+        blob_store: BS,
+        pool_config: PoolConfig,
+    ) -> eyre::Result<reth_transaction_pool::Pool<TransactionValidationTaskExecutor<V>, O, BS>>
+    where
+        BS: BlobStore,
+        O: TransactionOrdering<Transaction = V::Transaction>,
+    {
+        let TxPoolBuilder { ctx, validator, .. } = self;
+
+        let transaction_pool =
+            reth_transaction_pool::Pool::new(validator, ordering, blob_store, pool_config.clone());
+
+        spawn_maintenance_tasks(ctx, transaction_pool.clone(), &pool_config)?;
 
         Ok(transaction_pool)
     }
@@ -256,7 +278,7 @@ where
     let chain_events = ctx.provider().canonical_state_stream();
     let client = ctx.provider().clone();
 
-    ctx.task_executor().spawn_critical(
+    ctx.task_executor().spawn_critical_task(
         "txpool maintenance task",
         reth_transaction_pool::maintain::maintain_transaction_pool_future(
             client,

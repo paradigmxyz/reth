@@ -2,7 +2,11 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
+use alloy_primitives::{
+    keccak256,
+    map::{AddressMap, B256Map, HashMap},
+    Address, B256, U256,
+};
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
@@ -114,14 +118,7 @@ where
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
-    #[cfg(feature = "edge")]
-    {
-        init_genesis_with_settings(factory, StorageSettings::edge())
-    }
-    #[cfg(not(feature = "edge"))]
-    {
-        init_genesis_with_settings(factory, StorageSettings::legacy())
-    }
+    init_genesis_with_settings(factory, StorageSettings::base())
 }
 
 /// Write the genesis block if it has not already been written with [`StorageSettings`].
@@ -173,7 +170,7 @@ where
                     return Err(InitStorageError::UninitializedDatabase)
                 }
 
-                let stored = factory.storage_settings()?.unwrap_or_else(StorageSettings::legacy);
+                let stored = factory.storage_settings()?.unwrap_or_else(StorageSettings::v1);
                 if stored != genesis_storage_settings {
                     warn!(
                         target: "reth::storage",
@@ -211,6 +208,26 @@ where
     // Behaviour reserved only for new nodes should be set in the storage settings.
     provider_rw.write_storage_settings(genesis_storage_settings)?;
 
+    // For non-zero genesis blocks, set expected_block_start BEFORE insert_genesis_state.
+    // When block_range is None, next_block_number() uses expected_block_start. By default,
+    // expected_block_start comes from find_fixed_range which returns the file range start (0),
+    // not the genesis block number. This would cause increment_block(N) to fail.
+    let static_file_provider = provider_rw.static_file_provider();
+    if genesis_block_number > 0 {
+        if genesis_storage_settings.storage_v2 {
+            static_file_provider
+                .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
+                .user_header_mut()
+                .set_expected_block_start(genesis_block_number);
+        }
+        if genesis_storage_settings.storage_v2 {
+            static_file_provider
+                .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
+                .user_header_mut()
+                .set_expected_block_start(genesis_block_number);
+        }
+    }
+
     insert_genesis_hashes(&provider_rw, alloc.iter())?;
     insert_genesis_history(&provider_rw, alloc.iter())?;
 
@@ -228,16 +245,11 @@ where
         provider_rw.save_stage_checkpoint(stage, checkpoint)?;
     }
 
-    // Static file segments start empty, so we need to initialize the genesis block.
-    //
-    // We do not do this for changesets because they get initialized in `insert_state` /
-    // `write_state` / `write_state_reverts`. If the node is configured for writing changesets to
-    // static files they will be written there, otherwise they will be written to the DB.
+    // Static file segments start empty, so we need to initialize the block range.
+    // For genesis blocks with non-zero block numbers, we use get_writer() instead of
+    // latest_writer() and set_block_range() to ensure static files start at the correct block.
     let static_file_provider = provider_rw.static_file_provider();
 
-    // Static file segments start empty, so we need to initialize the genesis block.
-    // For genesis blocks with non-zero block numbers, we need to use get_writer() instead of
-    // latest_writer() to ensure the genesis block is stored in the correct static file range.
     static_file_provider
         .get_writer(genesis_block_number, StaticFileSegment::Receipts)?
         .user_header_mut()
@@ -247,7 +259,7 @@ where
         .user_header_mut()
         .set_block_range(genesis_block_number, genesis_block_number);
 
-    if genesis_storage_settings.transaction_senders_in_static_files {
+    if genesis_storage_settings.storage_v2 {
         static_file_provider
             .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
             .user_header_mut()
@@ -293,10 +305,11 @@ where
 {
     let capacity = alloc.size_hint().1.unwrap_or(0);
     let mut state_init: BundleStateInit =
-        HashMap::with_capacity_and_hasher(capacity, Default::default());
-    let mut reverts_init = HashMap::with_capacity_and_hasher(capacity, Default::default());
-    let mut contracts: HashMap<B256, Bytecode> =
-        HashMap::with_capacity_and_hasher(capacity, Default::default());
+        AddressMap::with_capacity_and_hasher(capacity, Default::default());
+    let mut reverts_init: AddressMap<_> =
+        AddressMap::with_capacity_and_hasher(capacity, Default::default());
+    let mut contracts: B256Map<Bytecode> =
+        B256Map::with_capacity_and_hasher(capacity, Default::default());
 
     for (address, account) in alloc {
         let bytecode_hash = if let Some(code) = &account.code {
@@ -325,7 +338,7 @@ where
                         let value = U256::from_be_bytes(value.0);
                         (*key, (U256::ZERO, value))
                     })
-                    .collect::<HashMap<_, _>>()
+                    .collect::<B256Map<_>>()
             })
             .unwrap_or_default();
 
@@ -416,6 +429,40 @@ where
     insert_history(provider, alloc, genesis_block_number)
 }
 
+/// Inserts account history indices for genesis accounts.
+pub fn insert_genesis_account_history<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
+{
+    let genesis_block_number = provider.chain_spec().genesis_header().number();
+    insert_account_history(provider, alloc, genesis_block_number)
+}
+
+/// Inserts storage history indices for genesis accounts.
+pub fn insert_genesis_storage_history<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
+{
+    let genesis_block_number = provider.chain_spec().genesis_header().number();
+    insert_storage_history(provider, alloc, genesis_block_number)
+}
+
 /// Inserts history indices for genesis accounts and storage.
 ///
 /// Writes to either MDBX or `RocksDB` based on storage settings configuration,
@@ -432,16 +479,50 @@ where
         + RocksDBProviderFactory
         + NodePrimitivesProvider,
 {
+    insert_account_history(provider, alloc.clone(), block)?;
+    insert_storage_history(provider, alloc, block)?;
+    Ok(())
+}
+
+/// Inserts account history indices at the given block.
+pub fn insert_account_history<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+    block: u64,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
+{
     provider.with_rocksdb_batch(|batch| {
         let mut writer = EitherWriter::new_accounts_history(provider, batch)?;
         let list = BlockNumberList::new([block]).expect("single block always fits");
-        for (addr, _) in alloc.clone() {
+        for (addr, _) in alloc {
             writer.upsert_account_history(ShardedKey::last(*addr), &list)?;
         }
         trace!(target: "reth::cli", "Inserted account history");
         Ok(((), writer.into_raw_rocksdb_batch()))
     })?;
 
+    Ok(())
+}
+
+/// Inserts storage history indices at the given block.
+pub fn insert_storage_history<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+    block: u64,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
+{
     provider.with_rocksdb_batch(|batch| {
         let mut writer = EitherWriter::new_storages_history(provider, batch)?;
         let list = BlockNumberList::new([block]).expect("single block always fits");
@@ -887,6 +968,7 @@ mod tests {
                 MAINNET.clone(),
                 static_file_provider,
                 rocksdb_provider,
+                reth_tasks::Runtime::test(),
             )
             .unwrap(),
         );
@@ -945,12 +1027,12 @@ mod tests {
             let provider = factory.provider().unwrap();
             let tx = provider.tx_ref();
             (
-                collect_table_entries::<Arc<DatabaseEnv>, tables::AccountsHistory>(tx).unwrap(),
-                collect_table_entries::<Arc<DatabaseEnv>, tables::StoragesHistory>(tx).unwrap(),
+                collect_table_entries::<DatabaseEnv, tables::AccountsHistory>(tx).unwrap(),
+                collect_table_entries::<DatabaseEnv, tables::StoragesHistory>(tx).unwrap(),
             )
         };
 
-        #[cfg(feature = "edge")]
+        #[cfg(feature = "rocksdb")]
         {
             let settings = factory.cached_storage_settings();
             let rocksdb = factory.rocksdb_provider();
@@ -970,7 +1052,7 @@ mod tests {
                 )
             };
 
-            let (accounts, storages) = if settings.account_history_in_rocksdb {
+            let (accounts, storages) = if settings.storage_v2 {
                 collect_rocksdb(&rocksdb)
             } else {
                 collect_from_mdbx(&factory)
@@ -979,7 +1061,7 @@ mod tests {
             assert_eq!(storages, expected_storages);
         }
 
-        #[cfg(not(feature = "edge"))]
+        #[cfg(not(feature = "rocksdb"))]
         {
             let (accounts, storages) = collect_from_mdbx(&factory);
             assert_eq!(accounts, expected_accounts);
@@ -990,13 +1072,10 @@ mod tests {
     #[test]
     fn warn_storage_settings_mismatch() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        init_genesis_with_settings(&factory, StorageSettings::legacy()).unwrap();
+        init_genesis_with_settings(&factory, StorageSettings::v1()).unwrap();
 
         // Request different settings - should warn but succeed
-        let result = init_genesis_with_settings(
-            &factory,
-            StorageSettings::legacy().with_receipts_in_static_files(true),
-        );
+        let result = init_genesis_with_settings(&factory, StorageSettings::v2());
 
         // Should succeed (warning is logged, not an error)
         assert!(result.is_ok());
@@ -1005,7 +1084,7 @@ mod tests {
     #[test]
     fn allow_same_storage_settings() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        let settings = StorageSettings::legacy().with_receipts_in_static_files(true);
+        let settings = StorageSettings::v2();
         init_genesis_with_settings(&factory, settings).unwrap();
 
         let result = init_genesis_with_settings(&factory, settings);
