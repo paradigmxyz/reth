@@ -1,0 +1,359 @@
+# Runs engine benchmarks by replaying real blocks via the Engine API against a reth
+# node backed by a local snapshot managed with schelk.
+#
+# Runs the same binary twice on the same block range (snapshot recovered between
+# runs) to measure variance and overlay both runs on charts.
+#
+# The self-hosted runner must have:
+#   - schelk initialised (virgin + scratch volumes, ramdisk)
+#   - A JWT secret at /reth-bench/jwt.hex
+#   - The BENCH_RPC_URL secret set to a reference RPC endpoint
+#
+# See docs/repo/ci.md for runner setup instructions.
+
+name: bench-reth
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      blocks:
+        description: "Number of blocks to benchmark"
+        required: false
+        default: "50"
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: sccache
+  BENCH_BLOCKS: ${{ inputs.blocks || '1000' }}
+  BENCH_RPC_URL: https://ethereum.reth.rs/rpc
+  SCHELK_MOUNT: /reth-bench
+  JWT_SECRET: /reth-bench/jwt.hex
+
+concurrency:
+  group: bench-reth
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  reth-bench:
+    name: reth-bench
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      # ── Build binaries ─────────────────────────────────────────────
+      - name: Fetch or build binaries
+        run: |
+          MC="mc --config-dir /home/ubuntu/.mc"
+          COMMIT="${{ github.event.pull_request.head.sha || github.sha }}"
+          BUCKET="minio/reth-binaries/${COMMIT}"
+
+          if $MC stat "${BUCKET}/reth" &>/dev/null && $MC stat "${BUCKET}/reth-bench" &>/dev/null; then
+            echo "Cache hit for ${COMMIT}, downloading binaries..."
+            mkdir -p target/profiling
+            $MC cp "${BUCKET}/reth" target/profiling/reth
+            $MC cp "${BUCKET}/reth-bench" /home/ubuntu/.cargo/bin/reth-bench
+            chmod +x target/profiling/reth /home/ubuntu/.cargo/bin/reth-bench
+          else
+            echo "Cache miss for ${COMMIT}, building from source..."
+            rustup show active-toolchain || rustup default stable
+            make profiling
+            make install-reth-bench
+          fi
+
+      # ── Clean up any leftover state ───────────────────────────────
+      - name: Pre-flight cleanup
+        run: |
+          pkill -9 reth || true
+          mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+
+      # ── Run 1 ──────────────────────────────────────────────────────
+      - name: Mount snapshot (run 1)
+        run: |
+          sudo schelk mount -y
+          sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+
+      - name: Start reth (run 1)
+        run: |
+          target/profiling/reth node \
+            --datadir "$SCHELK_MOUNT/datadir" \
+            --authrpc.jwtsecret "$JWT_SECRET" \
+            --debug.startup-sync-state-idle \
+            --engine.accept-execution-requests-hash \
+            --http \
+            --http.port 8545 \
+            --ws \
+            --ws.api all \
+            --authrpc.port 8551 \
+            > /tmp/reth-bench-node-run1.log 2>&1 &
+
+          echo "RETH_PID=$!" >> "$GITHUB_ENV"
+
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8545 -X POST \
+              -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+              > /dev/null 2>&1; then
+              echo "reth (run 1) is ready after ${i}s"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "::error::reth (run 1) failed to start within 60s"
+              cat /tmp/reth-bench-node-run1.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Warmup (run 1)
+        run: |
+          reth-bench new-payload-fcu \
+            --rpc-url "$BENCH_RPC_URL" \
+            --engine-rpc-url http://127.0.0.1:8551 \
+            --jwt-secret "$JWT_SECRET" \
+            --advance 50 \
+            --reth-new-payload
+
+      - name: Run benchmark (run 1)
+        run: |
+          reth-bench new-payload-fcu \
+            --rpc-url "$BENCH_RPC_URL" \
+            --engine-rpc-url http://127.0.0.1:8551 \
+            --jwt-secret "$JWT_SECRET" \
+            --advance "$BENCH_BLOCKS" \
+            --reth-new-payload \
+            --output /tmp/bench-results-run1
+
+      - name: Stop reth (run 1)
+        if: always()
+        run: |
+          if [ -n "${RETH_PID:-}" ] && kill -0 "$RETH_PID" 2>/dev/null; then
+            kill "$RETH_PID"
+            for i in $(seq 1 30); do
+              kill -0 "$RETH_PID" 2>/dev/null || break
+              sleep 1
+            done
+            kill -9 "$RETH_PID" 2>/dev/null || true
+          fi
+
+      - name: Recover snapshot (run 1)
+        if: always()
+        run: mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+
+      # ── Run 2 ──────────────────────────────────────────────────────
+      - name: Mount snapshot (run 2)
+        run: |
+          sudo schelk mount -y
+          sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+
+      - name: Start reth (run 2)
+        run: |
+          target/profiling/reth node \
+            --datadir "$SCHELK_MOUNT/datadir" \
+            --authrpc.jwtsecret "$JWT_SECRET" \
+            --debug.startup-sync-state-idle \
+            --engine.accept-execution-requests-hash \
+            --http \
+            --http.port 8545 \
+            --ws \
+            --ws.api all \
+            --authrpc.port 8551 \
+            > /tmp/reth-bench-node-run2.log 2>&1 &
+
+          echo "RETH_PID=$!" >> "$GITHUB_ENV"
+
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8545 -X POST \
+              -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+              > /dev/null 2>&1; then
+              echo "reth (run 2) is ready after ${i}s"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "::error::reth (run 2) failed to start within 60s"
+              cat /tmp/reth-bench-node-run2.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Warmup (run 2)
+        run: |
+          reth-bench new-payload-fcu \
+            --rpc-url "$BENCH_RPC_URL" \
+            --engine-rpc-url http://127.0.0.1:8551 \
+            --jwt-secret "$JWT_SECRET" \
+            --advance 50 \
+            --reth-new-payload
+
+      - name: Run benchmark (run 2)
+        run: |
+          reth-bench new-payload-fcu \
+            --rpc-url "$BENCH_RPC_URL" \
+            --engine-rpc-url http://127.0.0.1:8551 \
+            --jwt-secret "$JWT_SECRET" \
+            --advance "$BENCH_BLOCKS" \
+            --reth-new-payload \
+            --output /tmp/bench-results
+
+      - name: Stop reth (run 2)
+        if: always()
+        run: |
+          if [ -n "${RETH_PID:-}" ] && kill -0 "$RETH_PID" 2>/dev/null; then
+            kill "$RETH_PID"
+            for i in $(seq 1 30); do
+              kill -0 "$RETH_PID" 2>/dev/null || break
+              sleep 1
+            done
+            kill -9 "$RETH_PID" 2>/dev/null || true
+          fi
+
+      - name: Recover snapshot (run 2)
+        if: always()
+        run: mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+
+      # ── Results & charts ──────────────────────────────────────────
+      - name: Parse results
+        id: results
+        if: success()
+        run: |
+          SUMMARY_ARGS="/tmp/bench-results/combined_latency.csv /tmp/bench-results/total_gas.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --output-summary /tmp/bench-summary.json"
+          SUMMARY_ARGS="$SUMMARY_ARGS --output-markdown /tmp/bench-comment.md"
+          if [ -f /tmp/bench-results-run1/combined_latency.csv ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv /tmp/bench-results-run1/combined_latency.csv"
+          fi
+          python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
+
+      - name: Generate charts
+        if: success()
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          CHART_ARGS="/tmp/bench-results/combined_latency.csv --output-dir /tmp/bench-charts"
+          if [ -f /tmp/bench-results-run1/combined_latency.csv ]; then
+            CHART_ARGS="$CHART_ARGS --baseline /tmp/bench-results-run1/combined_latency.csv"
+          fi
+          uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
+
+      - name: Upload results
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-reth-results
+          path: |
+            /tmp/bench-results/
+            /tmp/bench-results-run1/
+            /tmp/bench-summary.json
+            /tmp/bench-charts/
+
+      - name: Cache baseline
+        if: github.ref == 'refs/heads/main' && success()
+        run: cp /tmp/bench-summary.json /reth-bench/baseline.json
+
+      - name: Push charts
+        id: push-charts
+        if: github.event_name == 'pull_request' && success()
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          RUN_ID=${{ github.run_id }}
+          CHART_DIR="pr/${PR_NUMBER}/${RUN_ID}"
+
+          if git fetch origin bench-charts 2>/dev/null; then
+            git checkout bench-charts
+          else
+            git checkout --orphan bench-charts
+            git rm -rf . 2>/dev/null || true
+          fi
+
+          mkdir -p "${CHART_DIR}"
+          cp /tmp/bench-charts/*.png "${CHART_DIR}/"
+          git add "${CHART_DIR}"
+          git -c user.name="github-actions" -c user.email="github-actions@github.com" \
+            commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
+          git push origin bench-charts
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Compare & comment
+        if: github.event_name == 'pull_request' && success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let comment = '';
+            try {
+              comment = fs.readFileSync('/tmp/bench-comment.md', 'utf8');
+            } catch (e) {
+              comment = '⚠️ Engine benchmark completed but failed to generate comparison.';
+            }
+
+            const sha = '${{ steps.push-charts.outputs.sha }}';
+            const prNumber = context.issue.number;
+            const runId = '${{ github.run_id }}';
+            const baseUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${sha}/pr/${prNumber}/${runId}`;
+
+            const charts = [
+              { file: 'latency_throughput.png', label: 'Latency & Throughput' },
+              { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
+              { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
+            ];
+
+            let chartMarkdown = '\n\n### Charts\n\n';
+            for (const chart of charts) {
+              chartMarkdown += `<details><summary>${chart.label}</summary>\n\n`;
+              chartMarkdown += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
+              chartMarkdown += `</details>\n\n`;
+            }
+
+            comment += chartMarkdown;
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const marker = '<!-- bench-reth-results -->';
+            const existing = comments.find(c => c.body.includes(marker));
+
+            const body = `${marker}\n${comment}`;
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Upload node log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reth-node-log
+          path: |
+            /tmp/reth-bench-node-run1.log
+            /tmp/reth-bench-node-run2.log
