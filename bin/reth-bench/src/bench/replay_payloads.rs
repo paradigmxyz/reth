@@ -341,7 +341,8 @@ impl Command {
             };
 
             let current_duration = total_benchmark_duration.elapsed();
-            info!(target: "reth-bench", %combined_result);
+            let progress = format!("{}/{}", i + 1, payloads.len());
+            info!(target: "reth-bench", progress, %combined_result);
 
             if let Some(w) = &mut waiter {
                 w.on_block(block_number).await?;

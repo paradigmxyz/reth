@@ -9,7 +9,7 @@ use reth_eth_wire_types::{
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
-use reth_network_peers::PeerId;
+use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind};
 use reth_tokio_util::EventStream;
 use std::{
@@ -153,8 +153,13 @@ pub trait NetworkEventListenerProvider: NetworkPeersEvents {
 pub enum DiscoveryEvent {
     /// Discovered a node
     NewNode(DiscoveredEvent),
-    /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
-    EnrForkId(PeerId, ForkId),
+    /// Retrieved a [`ForkId`] from the peer via ENR request.
+    ///
+    /// Contains the full [`NodeRecord`] (peer ID + address) and the reported [`ForkId`].
+    /// Used to verify fork compatibility before admitting the peer.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-868>
+    EnrForkId(NodeRecord, ForkId),
 }
 
 /// Represents events related to peer discovery in the network.

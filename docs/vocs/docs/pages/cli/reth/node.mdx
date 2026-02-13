@@ -293,6 +293,11 @@ Networking:
 
           Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
 
+      --enforce-enr-fork-id
+          Enforce EIP-868 ENR fork ID validation for discovered peers.
+
+          When enabled, peers discovered without a confirmed fork ID are not added to the peer set until their fork ID is verified via EIP-868 ENR request. This filters out peers from other networks that pollute the discovery table.
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -1021,6 +1026,9 @@ Engine:
           Maximum number of storage tries to retain after sparse trie pruning
 
           [default: 100]
+
+      --engine.disable-sparse-trie-cache-pruning
+          Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved without any node pruning or storage trie eviction between blocks. Useful for benchmarking the effects of retaining the full trie cache
 
       --engine.state-root-task-timeout <STATE_ROOT_TASK_TIMEOUT>
           Configure the timeout for the state root task before spawning a sequential fallback. If the state root task takes longer than this, a sequential computation starts in parallel and whichever finishes first is used.

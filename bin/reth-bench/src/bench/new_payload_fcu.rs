@@ -153,6 +153,7 @@ impl Command {
             ..
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
+        let total_blocks = benchmark_mode.total_blocks();
         let buffer_size = self.rpc_block_buffer_size;
 
         // Use a oneshot channel to propagate errors from the spawned task
@@ -206,6 +207,7 @@ impl Command {
         });
 
         let mut results = Vec::new();
+        let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
@@ -249,8 +251,13 @@ impl Command {
 
             // Exclude time spent waiting on the block prefetch channel from the benchmark duration.
             // We want to measure engine throughput, not RPC fetch latency.
+            blocks_processed += 1;
             let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
-            info!(target: "reth-bench", %combined_result);
+            let progress = match total_blocks {
+                Some(total) => format!("{blocks_processed}/{total}"),
+                None => format!("{blocks_processed}"),
+            };
+            info!(target: "reth-bench", progress, %combined_result);
 
             if let Some(w) = &mut waiter {
                 w.on_block(block_number).await?;

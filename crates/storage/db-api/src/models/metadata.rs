@@ -43,11 +43,19 @@ pub struct StorageSettings {
 impl StorageSettings {
     /// Returns the default base `StorageSettings`.
     ///
-    /// Always returns [`Self::v1()`]. Use the `--storage.v2` CLI flag to opt into
-    /// [`Self::v2()`] at runtime. The `rocksdb` feature only makes the v2 backend
-    /// *available*; it does not activate it by default.
+    /// When the `edge` feature is enabled, returns [`Self::v2()`] so that CI and
+    /// edge builds automatically use v2 storage defaults. Otherwise returns
+    /// [`Self::v1()`]. The `--storage.v2` CLI flag can also opt into v2 at runtime
+    /// regardless of feature flags.
     pub const fn base() -> Self {
-        Self::v1()
+        #[cfg(feature = "edge")]
+        {
+            Self::v2()
+        }
+        #[cfg(not(feature = "edge"))]
+        {
+            Self::v1()
+        }
     }
 
     /// Creates `StorageSettings` for v2 nodes with all storage features enabled:
@@ -65,7 +73,7 @@ impl StorageSettings {
             storages_history_in_rocksdb: true,
             transaction_hash_numbers_in_rocksdb: true,
             account_history_in_rocksdb: true,
-            use_hashed_state: false,
+            use_hashed_state: true,
         }
     }
 

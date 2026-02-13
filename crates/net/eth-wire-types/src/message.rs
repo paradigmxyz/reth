@@ -1035,6 +1035,13 @@ mod tests {
     }
 
     #[test]
+    fn eth_message_id_max_includes_block_range_update() {
+        assert_eq!(EthMessageID::max(EthVersion::Eth69), EthMessageID::BlockRangeUpdate.to_u8(),);
+        assert_eq!(EthMessageID::max(EthVersion::Eth70), EthMessageID::BlockRangeUpdate.to_u8(),);
+        assert_eq!(EthMessageID::max(EthVersion::Eth68), EthMessageID::Receipts.to_u8());
+    }
+
+    #[test]
     fn decode_status_rejects_non_status() {
         let msg = EthMessage::<EthNetworkPrimitives>::GetBlockBodies(RequestPair {
             request_id: 1,

@@ -38,7 +38,7 @@ use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, StorageChangeSetReader,
+    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, State};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
@@ -146,7 +146,8 @@ where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
-                          + BlockNumReader,
+                          + BlockNumReader
+                          + StorageSettingsCache,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
@@ -907,6 +908,12 @@ where
     /// Returns `ProviderResult<Result<...>>` where the outer `ProviderResult` captures
     /// unrecoverable errors from the sequential fallback (e.g. DB errors), while the inner
     /// `Result` captures parallel state root task errors that can still fall back to serial.
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_validator",
+        name = "await_state_root",
+        skip_all
+    )]
     fn await_state_root_with_timeout<Tx, Err, R: Send + Sync + 'static>(
         &self,
         handle: &mut PayloadHandle<Tx, Err, R>,
@@ -1520,7 +1527,8 @@ where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
-                          + BlockNumReader,
+                          + BlockNumReader
+                          + StorageSettingsCache,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
