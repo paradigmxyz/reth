@@ -19,7 +19,7 @@ use crate::{common::WithConfigs, exex::BoxedLaunchExEx};
 /// Can launch execution extensions.
 pub struct ExExLauncher<Node: FullNodeComponents> {
     head: Head,
-    extensions: Vec<(String, reth_exex::ExExConfig, Box<dyn BoxedLaunchExEx<Node>>)>,
+    extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
     components: Node,
     config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     /// The threshold for the number of blocks in the WAL before emitting a warning.
@@ -31,7 +31,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     pub const fn new(
         head: Head,
         components: Node,
-        extensions: Vec<(String, reth_exex::ExExConfig, Box<dyn BoxedLaunchExEx<Node>>)>,
+        extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
         config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     ) -> Self {
         Self {
@@ -81,11 +81,10 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         let mut exex_handles = Vec::with_capacity(extensions.len());
         let mut exexes = Vec::with_capacity(extensions.len());
 
-        for (id, config, exex) in extensions {
+        for (id, exex) in extensions {
             // create a new exex handle
             let (handle, events, notifications) = ExExHandle::new(
                 id.clone(),
-                config,
                 head,
                 components.provider().clone(),
                 components.evm_config().clone(),
@@ -170,7 +169,7 @@ impl<Node: FullNodeComponents> Debug for ExExLauncher<Node> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ExExLauncher")
             .field("head", &self.head)
-            .field("extensions", &self.extensions.iter().map(|(id, _, _)| id).collect::<Vec<_>>())
+            .field("extensions", &self.extensions.iter().map(|(id, _)| id).collect::<Vec<_>>())
             .field("components", &"...")
             .field("config_container", &self.config_container)
             .field("wal_blocks_warning", &self.wal_blocks_warning)

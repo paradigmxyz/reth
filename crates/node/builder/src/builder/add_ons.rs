@@ -11,7 +11,7 @@ pub struct AddOns<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// Additional `NodeHooks` that are called at specific points in the node's launch lifecycle.
     pub hooks: NodeHooks<Node, AddOns>,
     /// The `ExExs` (execution extensions) of the node.
-    pub exexs: Vec<(String, reth_exex::ExExConfig, Box<dyn BoxedLaunchExEx<Node>>)>,
+    pub exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
     /// Additional captured addons.
     pub add_ons: AddOns,
 }

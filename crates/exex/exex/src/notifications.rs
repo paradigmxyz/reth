@@ -7,6 +7,7 @@ use reth_evm::ConfigureEvm;
 use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
+use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::debug;
 use std::{
     fmt::Debug,
@@ -18,7 +19,7 @@ use tokio::sync::mpsc::Receiver;
 
 /// Configuration for ExEx notification handling and backfill behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ExExConfig {
+pub struct ExExNotificationsConfig {
     /// Skip notifications from the pipeline.
     ///
     /// When true, only `BlockchainTree` notifications will be delivered.
@@ -55,11 +56,23 @@ where
     notifications: Receiver<(crate::ExExNotificationSource, ExExNotification<E::Primitives>)>,
     wal_handle: WalHandle<E::Primitives>,
     exex_head: Option<ExExHead>,
+
+    /// If true, then we need to check if the ExEx head is on the canonical chain and if not,
+    /// revert its head.
     pending_check_canonical: bool,
+    /// If true, then we need to check if the ExEx head is behind the node head and if so, backfill
+    /// the missing blocks.
     pending_check_backfill: bool,
-    config: ExExConfig,
+    /// Factory for creating backfill jobs.
     backfill_job_factory: BackfillJobFactory<E, P>,
+    /// The backfill job to run before consuming any additional notifications.
     backfill_job: Option<StreamBackfillJob<E, P, Chain<E::Primitives>>>,
+
+    /// Configuration to determine how the stream handles notifications and backfill.
+    config: ExExNotificationsConfig,
+    /// The pending notification to consume after the backfill job is complete.
+    ///
+    /// This is only relevant if `config.skip_pipeline_notifications` is true.
     pending_notification: Option<ExExNotification<E::Primitives>>,
 }
 
@@ -89,16 +102,15 @@ where
 {
     /// Creates a new stream of [`ExExNotifications`].
     pub fn new(
-        node_head: BlockNumHash,
+        initial_node_head: BlockNumHash,
         provider: P,
         evm_config: E,
         notifications: Receiver<(crate::ExExNotificationSource, ExExNotification<E::Primitives>)>,
         wal_handle: WalHandle<E::Primitives>,
-        config: ExExConfig,
     ) -> Self {
         let backfill_job_factory = BackfillJobFactory::new(evm_config.clone(), provider.clone());
         Self {
-            initial_node_head: node_head,
+            initial_node_head,
             provider,
             evm_config,
             notifications,
@@ -106,7 +118,7 @@ where
             exex_head: None,
             pending_check_canonical: false,
             pending_check_backfill: false,
-            config,
+            config: ExExNotificationsConfig::default(),
             backfill_job_factory,
             backfill_job: None,
             pending_notification: None,
@@ -115,12 +127,10 @@ where
 
     /// Sets to the stream to process all notifications sent from the manager without canonical or
     /// backfill checks.
-    pub fn set_without_head(&mut self) {
+    pub const fn set_without_head(&mut self) {
         self.exex_head = None;
         self.pending_check_canonical = false;
         self.pending_check_backfill = false;
-        self.backfill_job = None;
-        self.pending_notification = None;
     }
 
     /// Sets the stream to process notifications with canonical and backfill checks based on the
@@ -128,17 +138,15 @@ where
     ///
     /// The stream will only emit notifications for blocks that are committed or reverted after the
     /// given head.
-    pub fn set_with_head(&mut self, exex_head: ExExHead) {
+    pub const fn set_with_head(&mut self, exex_head: ExExHead) {
         self.exex_head = Some(exex_head);
         self.pending_check_canonical = true;
         self.pending_check_backfill = true;
-        self.backfill_job = None;
-        self.pending_notification = None;
     }
 
     /// Sets the stream to process all notifications sent from the manager without canonical or
     /// backfill checks, and returns a new modified stream.
-    pub fn without_head(mut self) -> Self {
+    pub const fn without_head(mut self) -> Self {
         self.set_without_head();
         self
     }
@@ -148,7 +156,7 @@ where
     ///
     /// The stream will only emit notifications for blocks that are committed or reverted after the
     /// given head.
-    pub fn with_head(mut self, exex_head: ExExHead) -> Self {
+    pub const fn with_head(mut self, exex_head: ExExHead) -> Self {
         self.set_with_head(exex_head);
         self
     }
@@ -156,15 +164,32 @@ where
     /// Sets custom thresholds for the backfill job.
     ///
     /// These thresholds control how many blocks are included in each backfill notification.
-    /// Only takes effect when the stream is configured with a head.
+    /// Only takes effect when the stream is configured with a head or if
+    /// `config.skip_pipeline_notifications` is true.
     ///
     /// By default, the backfill job uses [`BackfillJobFactory`] defaults (up to 500,000 blocks
     /// per batch, bounded by 30s execution time).
-    pub fn set_backfill_thresholds(
-        &mut self,
-        thresholds: reth_stages_api::ExecutionStageThresholds,
-    ) {
-        self.backfill_job_factory = self.backfill_job_factory.clone().with_thresholds(thresholds);
+    ///
+    /// If your ExEx is memory-constrained, consider setting a lower `max_blocks` value to
+    /// reduce the size of each backfill notification.
+    pub fn with_backfill_thresholds(mut self, thresholds: ExecutionStageThresholds) -> Self {
+        self.backfill_job_factory = self.backfill_job_factory.with_thresholds(thresholds);
+        self
+    }
+
+    /// Sets the config for the notifications stream.
+    ///
+    /// See [`ExExNotificationsConfig`] for details on the available configuration options.
+    pub const fn set_with_config(&mut self, config: ExExNotificationsConfig) {
+        self.config = config;
+    }
+
+    /// Sets the config for the notifications stream.
+    ///
+    /// See [`ExExNotificationsConfig`] for details on the available configuration options.
+    pub const fn with_config(mut self, config: ExExNotificationsConfig) -> Self {
+        self.config = config;
+        self
     }
 }
 
@@ -288,9 +313,7 @@ where
                         "Gap exceeds max backfill distance, backfilling only recent blocks"
                     );
                     // Backfill only the last max_distance blocks before target
-                    let start = target_block
-                        .saturating_sub(max_distance.saturating_sub(1))
-                        .max(exex_head.block.number + 1);
+                    let start = target_block.saturating_sub(max_distance.saturating_sub(1));
                     (start, target_block)
                 } else {
                     debug!(
@@ -378,7 +401,9 @@ where
                 continue
             }
 
-            if let Some(committed) = notification.committed_chain() {
+            if this.exex_head.is_some() &&
+                let Some(committed) = notification.committed_chain()
+            {
                 // Check if we need to backfill up to the block before this notification
                 this.check_backfill(committed.first().number() - 1)?;
 
@@ -473,7 +498,6 @@ mod tests {
             EthEvmConfig::mainnet(),
             notifications_rx,
             wal.handle(),
-            crate::ExExConfig::default(),
         )
         .with_head(exex_head);
 
@@ -544,7 +568,6 @@ mod tests {
             EthEvmConfig::mainnet(),
             notifications_rx,
             wal.handle(),
-            crate::ExExConfig::default(),
         )
         .with_head(exex_head);
 
@@ -628,7 +651,6 @@ mod tests {
             EthEvmConfig::mainnet(),
             notifications_rx,
             wal.handle(),
-            crate::ExExConfig::default(),
         )
         .with_head(exex_head);
 
@@ -707,7 +729,6 @@ mod tests {
             EthEvmConfig::mainnet(),
             notifications_rx,
             wal.handle(),
-            crate::ExExConfig::default(),
         )
         .with_head(exex_head);
 
@@ -802,12 +823,12 @@ mod tests {
                 EthEvmConfig::mainnet(),
                 notifications_rx,
                 wal.handle(),
-                crate::ExExConfig {
-                    skip_pipeline_notifications: true,
-                    max_backfill_distance: None,
-                },
             )
-            .with_head(exex_head);
+            .with_head(exex_head)
+            .with_config(ExExNotificationsConfig {
+                skip_pipeline_notifications: true,
+                max_backfill_distance: None,
+            });
 
             // First notification should be backfill for blocks 1-2 (gap before block 3)
             let backfill_1_2 = notifications_full_backfill.next().await.transpose()?;
@@ -876,12 +897,12 @@ mod tests {
                 EthEvmConfig::mainnet(),
                 notifications_rx,
                 wal.handle(),
-                crate::ExExConfig {
-                    skip_pipeline_notifications: true,
-                    max_backfill_distance: Some(2),
-                },
             )
-            .with_head(exex_head);
+            .with_head(exex_head)
+            .with_config(ExExNotificationsConfig {
+                skip_pipeline_notifications: true,
+                max_backfill_distance: Some(2),
+            });
 
             // First notification should be backfill for blocks 1-2 (gap equals max_distance, so
             // backfills all)
@@ -914,6 +935,182 @@ mod tests {
             assert_eq!(
                 notifications_constrained_backfill.next().await.transpose()?,
                 Some(notification_block_7)
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stateful_exex_skips_pipeline_notifications() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+        let mut rng = generators::rng();
+
+        let temp_dir = tempfile::tempdir()?;
+        let wal = Wal::new(temp_dir.path())?;
+
+        let provider_factory = create_test_provider_factory();
+        let genesis_hash = init_genesis(&provider_factory)?;
+        let genesis_block = provider_factory
+            .block(genesis_hash.into())?
+            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+        let provider = BlockchainProvider::new(provider_factory.clone())?;
+
+        let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
+
+        // Test 1: STATELESS ExEx - should receive ALL notifications (including pipeline)
+        {
+            let (notifications_tx, notifications_rx) = mpsc::channel(2);
+
+            // Block for pipeline notification (simulating backfill)
+            let pipeline_block = random_block(&mut rng, 1, BlockParams::default()).try_recover()?;
+
+            // Block for blockchain tree notification (live sync)
+            let tree_block = random_block(&mut rng, 2, BlockParams::default()).try_recover()?;
+
+            // Create notifications
+            let pipeline_notification = ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(
+                    vec![pipeline_block],
+                    Default::default(),
+                    BTreeMap::new(),
+                )),
+            };
+
+            let tree_notification = ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(vec![tree_block], Default::default(), BTreeMap::new())),
+            };
+
+            // Send both types of notifications
+            notifications_tx
+                .send((crate::ExExNotificationSource::Pipeline, pipeline_notification.clone()))
+                .await?;
+            notifications_tx
+                .send((crate::ExExNotificationSource::BlockchainTree, tree_notification.clone()))
+                .await?;
+
+            let mut stateless_notifications = ExExNotifications::new(
+                node_head,
+                provider.clone(),
+                EthEvmConfig::mainnet(),
+                notifications_rx,
+                wal.handle(),
+            );
+
+            // Stateless ExEx should receive the pipeline notification
+            assert_eq!(
+                stateless_notifications.next().await.transpose()?,
+                Some(pipeline_notification),
+                "Stateless ExEx: Expected ChainCommitted notification from pipeline"
+            );
+
+            // Stateless ExEx should also receive the tree notification
+            assert_eq!(
+                stateless_notifications.next().await.transpose()?,
+                Some(tree_notification),
+                "Stateless ExEx: Expected ChainCommitted notification from blockchain tree"
+            );
+        }
+
+        // Test 2: STATEFUL ExEx - should SKIP pipeline notifications
+        {
+            // Create and insert blocks 1-2 into the database for proper gap detection
+            let mut parent_hash = genesis_hash;
+            let mut parent_number = genesis_block.number;
+
+            for _ in 0..2 {
+                let block = random_block(
+                    &mut rng,
+                    parent_number + 1,
+                    BlockParams {
+                        parent: Some(parent_hash),
+                        tx_count: Some(0),
+                        ..Default::default()
+                    },
+                )
+                .try_recover()?;
+                let provider_rw = provider_factory.provider_rw()?;
+                provider_rw.insert_block(&block)?;
+                provider_rw.commit()?;
+
+                parent_hash = block.hash();
+                parent_number = block.number;
+            }
+
+            // Set ExEx head to block 2
+            let exex_head =
+                ExExHead { block: BlockNumHash { number: parent_number, hash: parent_hash } };
+
+            let (notifications_tx, notifications_rx) = mpsc::channel(2);
+
+            // Block for pipeline notification (simulating backfill) - block 3
+            // This should be SKIPPED by stateful ExEx
+            let pipeline_block = random_block(
+                &mut rng,
+                3,
+                BlockParams { parent: Some(parent_hash), tx_count: Some(0), ..Default::default() },
+            )
+            .try_recover()?;
+
+            // Insert block 3 into database
+            let provider_rw = provider_factory.provider_rw()?;
+            provider_rw.insert_block(&pipeline_block)?;
+            provider_rw.commit()?;
+
+            // Create notifications
+            let pipeline_notification = ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(
+                    vec![pipeline_block.clone()],
+                    Default::default(),
+                    BTreeMap::new(),
+                )),
+            };
+
+            // Block for blockchain tree notification (live sync) - also block 3
+            // This should be RECEIVED by stateful ExEx
+            let tree_notification = ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(
+                    vec![pipeline_block.clone()],
+                    Default::default(),
+                    BTreeMap::new(),
+                )),
+            };
+
+            // Send both types of notifications for the SAME block
+            // Pipeline notification should be skipped, tree notification should be received
+            notifications_tx
+                .send((crate::ExExNotificationSource::Pipeline, pipeline_notification.clone()))
+                .await?;
+            notifications_tx
+                .send((crate::ExExNotificationSource::BlockchainTree, tree_notification.clone()))
+                .await?;
+
+            let mut stateful_notifications = ExExNotifications::new(
+                BlockNumHash { number: parent_number, hash: parent_hash },
+                provider.clone(),
+                EthEvmConfig::mainnet(),
+                notifications_rx,
+                wal.handle(),
+            )
+            .with_head(exex_head)
+            .with_config(ExExNotificationsConfig {
+                skip_pipeline_notifications: true,
+                max_backfill_distance: None,
+            });
+
+            // Stateful ExEx should SKIP the pipeline notification and only receive the tree
+            // notification
+            assert_eq!(
+                stateful_notifications.next().await.transpose()?,
+                Some(tree_notification),
+                "Stateful ExEx: Should skip pipeline notification and receive tree notification"
+            );
+
+            // Ensure no more notifications are available (pipeline was filtered out)
+            drop(notifications_tx);
+            assert!(
+                stateful_notifications.next().await.is_none(),
+                "Stateful ExEx: No more notifications should be available"
             );
         }
 

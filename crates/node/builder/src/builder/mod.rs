@@ -639,31 +639,6 @@ where
         }
     }
 
-    /// Installs an `ExEx` (Execution Extension) in the node with custom configuration.
-    ///
-    /// This allows configuring ExEx behavior such as whether to skip pipeline notifications
-    /// and the maximum backfill distance.
-    ///
-    /// # Note
-    ///
-    /// The `ExEx` ID must be unique.
-    pub fn install_exex_with_config<F, R, E>(
-        self,
-        exex_id: impl Into<String>,
-        config: reth_exex::ExExConfig,
-        exex: F,
-    ) -> Self
-    where
-        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
-        R: Future<Output = eyre::Result<E>> + Send,
-        E: Future<Output = eyre::Result<()>> + Send,
-    {
-        Self {
-            builder: self.builder.install_exex_with_config(exex_id, config, exex),
-            task_executor: self.task_executor,
-        }
-    }
-
     /// Installs an `ExEx` (Execution Extension) in the node if the condition is true.
     ///
     /// # Note
@@ -677,31 +652,6 @@ where
     {
         if cond {
             self.install_exex(exex_id, exex)
-        } else {
-            self
-        }
-    }
-
-    /// Installs an `ExEx` (Execution Extension) in the node with custom configuration if the
-    /// condition is true.
-    ///
-    /// # Note
-    ///
-    /// The `ExEx` ID must be unique.
-    pub fn install_exex_with_config_if<F, R, E>(
-        self,
-        cond: bool,
-        exex_id: impl Into<String>,
-        config: reth_exex::ExExConfig,
-        exex: F,
-    ) -> Self
-    where
-        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
-        R: Future<Output = eyre::Result<E>> + Send,
-        E: Future<Output = eyre::Result<()>> + Send,
-    {
-        if cond {
-            self.install_exex_with_config(exex_id, config, exex)
         } else {
             self
         }

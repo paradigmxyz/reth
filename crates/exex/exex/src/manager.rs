@@ -1,4 +1,3 @@
-use super::ExExConfig;
 use crate::{
     wal::Wal, ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight, WalHandle,
 };
@@ -91,7 +90,7 @@ pub struct ExExHandle<N: NodePrimitives = EthPrimitives> {
     /// Metrics for an `ExEx`.
     metrics: ExExMetrics,
     /// Channel to send [`ExExNotification`]s to the `ExEx`.
-    sender: PollSender<(ExExNotificationSource, ExExNotification<N>)>,
+    sender: PollSender<NotificationPayload<N>>,
     /// Channel to receive [`ExExEvent`]s from the `ExEx`.
     receiver: UnboundedReceiver<ExExEvent>,
     /// The ID of the next notification to send to this `ExEx`.
@@ -109,7 +108,6 @@ impl<N: NodePrimitives> ExExHandle<N> {
     /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
     pub fn new<P: Clone, E: ConfigureEvm<Primitives = N>>(
         id: String,
-        config: ExExConfig,
         node_head: BlockNumHash,
         provider: P,
         evm_config: E,
@@ -117,15 +115,8 @@ impl<N: NodePrimitives> ExExHandle<N> {
     ) -> (Self, UnboundedSender<ExExEvent>, ExExNotifications<P, E>) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let notifications = ExExNotifications::new(
-            node_head,
-            provider,
-            evm_config,
-            notification_rx,
-            wal_handle,
-            config,
-        );
-
+        let notifications =
+            ExExNotifications::new(node_head, provider, evm_config, notification_rx, wal_handle);
         (
             Self {
                 id: id.clone(),
@@ -243,7 +234,7 @@ pub struct ExExManager<P, N: NodePrimitives> {
     exex_handles: Vec<ExExHandle<N>>,
 
     /// [`ExExNotification`] channel from the [`ExExManagerHandle`]s.
-    handle_rx: UnboundedReceiver<(ExExNotificationSource, ExExNotification<N>)>,
+    handle_rx: UnboundedReceiver<NotificationPayload<N>>,
 
     /// The minimum notification ID currently present in the buffer.
     min_id: usize,
@@ -584,7 +575,7 @@ where
 #[derive(Debug)]
 pub struct ExExManagerHandle<N: NodePrimitives = EthPrimitives> {
     /// Channel to send notifications to the `ExEx` manager.
-    exex_tx: UnboundedSender<(ExExNotificationSource, ExExNotification<N>)>,
+    exex_tx: UnboundedSender<NotificationPayload<N>>,
     /// The number of `ExEx`'s running on the node.
     num_exexs: usize,
     /// A watch channel denoting whether the manager is ready for new notifications or not.
@@ -630,7 +621,7 @@ impl<N: NodePrimitives> ExExManagerHandle<N> {
         &self,
         source: ExExNotificationSource,
         notification: ExExNotification<N>,
-    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification<N>)>> {
+    ) -> Result<(), SendError<NotificationPayload<N>>> {
         self.exex_tx.send((source, notification))
     }
 
@@ -642,7 +633,7 @@ impl<N: NodePrimitives> ExExManagerHandle<N> {
         &mut self,
         source: ExExNotificationSource,
         notification: ExExNotification<N>,
-    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification<N>)>> {
+    ) -> Result<(), SendError<NotificationPayload<N>>> {
         self.ready().await;
         self.exex_tx.send((source, notification))
     }
@@ -734,7 +725,6 @@ mod tests {
 
         let (mut exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
             "test_exex".to_string(),
-            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -755,7 +745,6 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
-            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -778,7 +767,6 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
-            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -807,7 +795,6 @@ mod tests {
 
         let (exex_handle, _, _) = ExExHandle::new(
             "test_exex".to_string(),
-            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -868,7 +855,6 @@ mod tests {
 
         let (exex_handle, _, _) = ExExHandle::new(
             "test_exex".to_string(),
-            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -921,7 +907,6 @@ mod tests {
 
         let (exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
             "test_exex".to_string(),
-            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -977,7 +962,6 @@ mod tests {
         // Create two `ExExHandle` instances
         let (exex_handle1, event_tx1, _) = ExExHandle::new(
             "test_exex1".to_string(),
-            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -985,7 +969,6 @@ mod tests {
         );
         let (exex_handle2, event_tx2, _) = ExExHandle::new(
             "test_exex2".to_string(),
-            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -1036,7 +1019,6 @@ mod tests {
         // Create two `ExExHandle` instances
         let (exex_handle1, event_tx1, _) = ExExHandle::new(
             "test_exex1".to_string(),
-            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -1044,7 +1026,6 @@ mod tests {
         );
         let (exex_handle2, event_tx2, _) = ExExHandle::new(
             "test_exex2".to_string(),
-            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -1101,7 +1082,6 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
-            ExExConfig::default(),
             Default::default(),
             (),
             EthEvmConfig::mainnet(),
@@ -1171,7 +1151,6 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            ExExConfig::default(),
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1229,7 +1208,6 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            ExExConfig::default(),
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1281,7 +1259,6 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            ExExConfig::default(),
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1327,7 +1304,6 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            ExExConfig::default(),
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1390,7 +1366,6 @@ mod tests {
 
         let (exex_handle, events_tx, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            ExExConfig::default(),
             Default::default(),
             provider.clone(),
             EthEvmConfig::mainnet(),
@@ -1490,7 +1465,6 @@ mod tests {
         // 1. Setup Manager with Capacity = 1
         let (exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            ExExConfig::default(),
             Default::default(),
             provider,
             EthEvmConfig::mainnet(),
@@ -1548,131 +1522,6 @@ mod tests {
         assert!(
             result.is_ok(),
             "Deadlock detected! Manager failed to wake up and process Pending Item #100."
-        );
-    }
-
-    #[tokio::test]
-    async fn test_stateful_exex_skips_pipeline_notifications() {
-        reth_tracing::init_test_tracing();
-
-        // Create test provider and initialize genesis
-        let provider_factory = create_test_provider_factory();
-        init_genesis(&provider_factory).unwrap();
-        let provider = BlockchainProvider::new(provider_factory.clone()).unwrap();
-
-        // Create WAL for ExEx manager
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wal = Wal::new(temp_dir.path()).unwrap();
-
-        // STATELESS ExEx - should receive ALL notifications
-        let (stateless_handle, _stateless_events_tx, mut stateless_notifications) = ExExHandle::new(
-            "stateless_exex".to_string(),
-            ExExConfig { skip_pipeline_notifications: false, max_backfill_distance: None },
-            Default::default(),
-            provider.clone(),
-            EthEvmConfig::mainnet(),
-            wal.handle(),
-        );
-
-        // STATEFUL ExEx - should SKIP pipeline notifications
-        let (stateful_handle, _stateful_events_tx, mut stateful_notifications) = ExExHandle::new(
-            "stateful_exex".to_string(),
-            ExExConfig { skip_pipeline_notifications: true, max_backfill_distance: None },
-            Default::default(),
-            provider.clone(),
-            EthEvmConfig::mainnet(),
-            wal.handle(),
-        );
-
-        // Create manager with both ExEx handles
-        let exex_manager = ExExManager::new(
-            provider_factory,
-            vec![stateless_handle, stateful_handle],
-            10, // buffer capacity
-            wal,
-            empty_finalized_header_stream(),
-        );
-
-        let manager_handle = exex_manager.handle();
-
-        // Spawn manager in background
-        tokio::spawn(async move {
-            exex_manager.await.ok();
-        });
-
-        // Helper to create test blocks
-        let mut rng = generators::rng();
-
-        // Block for pipeline notification (simulating backfill)
-        let pipeline_block =
-            random_block(&mut rng, 33, BlockParams::default()).try_recover().unwrap();
-
-        // Block for blockchain tree notification (live sync)
-        let tree_block = random_block(&mut rng, 34, BlockParams::default()).try_recover().unwrap();
-
-        // Create notifications
-        let pipeline_notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![pipeline_block], Default::default(), Default::default())),
-        };
-
-        let tree_notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![tree_block], Default::default(), Default::default())),
-        };
-
-        // STEP 1: Send PIPELINE notification
-        // Expected: stateless ExEx receives it, stateful ExEx skips it
-        manager_handle
-            .send(ExExNotificationSource::Pipeline, pipeline_notification.clone())
-            .unwrap();
-
-        // Give the manager time to process
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        // Stateless ExEx: Should receive the pipeline notification
-        let stateless_notif1 =
-            tokio::time::timeout(std::time::Duration::from_secs(1), stateless_notifications.next())
-                .await
-                .expect("Timeout: stateless ExEx should receive pipeline notification")
-                .unwrap()
-                .unwrap();
-
-        assert_eq!(
-            stateless_notif1, pipeline_notification,
-            "Stateless ExEx: Expected ChainCommitted notification from pipeline"
-        );
-
-        // Stateful ExEx: Should NOT receive the pipeline notification
-        let no_pipeline_notif = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            stateful_notifications.next(),
-        )
-        .await;
-
-        assert!(
-            no_pipeline_notif.is_err(),
-            "Stateful ExEx should NOT receive pipeline notification - it should be filtered out"
-        );
-
-        // STEP 2: Send BLOCKCHAIN TREE notification
-        // Expected: BOTH ExExs receive it (no filtering for tree notifications)
-        manager_handle
-            .send(ExExNotificationSource::BlockchainTree, tree_notification.clone())
-            .unwrap();
-
-        // Give the manager time to process
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        // Stateless ExEx: Should receive the tree notification
-        let stateless_notif2 =
-            tokio::time::timeout(std::time::Duration::from_secs(1), stateless_notifications.next())
-                .await
-                .expect("Timeout: stateless ExEx should receive tree notification")
-                .unwrap()
-                .unwrap();
-
-        assert_eq!(
-            stateless_notif2, tree_notification,
-            "Stateless ExEx: Expected ChainCommitted notification from blockchain tree"
         );
     }
 }

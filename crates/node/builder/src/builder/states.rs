@@ -215,30 +215,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.add_ons.exexs.push((exex_id.into(), reth_exex::ExExConfig::default(), Box::new(exex)));
-        self
-    }
-
-    /// Installs an `ExEx` (Execution Extension) in the node with custom configuration.
-    ///
-    /// This allows configuring ExEx behavior such as whether to skip pipeline notifications
-    /// and the maximum backfill distance.
-    ///
-    /// # Note
-    ///
-    /// The `ExEx` ID must be unique.
-    pub fn install_exex_with_config<F, R, E>(
-        mut self,
-        exex_id: impl Into<String>,
-        config: reth_exex::ExExConfig,
-        exex: F,
-    ) -> Self
-    where
-        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
-        R: Future<Output = eyre::Result<E>> + Send,
-        E: Future<Output = eyre::Result<()>> + Send,
-    {
-        self.add_ons.exexs.push((exex_id.into(), config, Box::new(exex)));
+        self.add_ons.exexs.push((exex_id.into(), Box::new(exex)));
         self
     }
 
