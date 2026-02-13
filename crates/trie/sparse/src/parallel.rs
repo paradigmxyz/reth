@@ -6892,11 +6892,7 @@ mod tests {
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
                 (
                     Nibbles::from_nibbles([0x5]),
-                    new_test_branch(
-                        0b1101.into(),
-                        0b0100.into(),
-                        vec![leaf_key([0x0, 0x1, 0x3], 62)]
-                    )
+                    new_test_branch(0b1101.into(), 0b0000.into(), vec![])
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
@@ -6909,6 +6905,10 @@ mod tests {
                         0b1010.into(),
                         vec![leaf_key([], 59), leaf_key([], 59)]
                     )
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x2]),
+                    SparseNode::new_root_leaf(leaf_key([0x0, 0x1, 0x3], 62))
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3]),
