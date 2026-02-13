@@ -204,7 +204,11 @@ where
     /// we're not on the canonical chain and we need to revert the notification with the ExEx
     /// head block.
     fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification<E::Primitives>>> {
-        let exex_head = self.exex_head.as_ref().expect("exex_head should be set");
+        let exex_head = if let Some(exex_head) = self.exex_head {
+            exex_head
+        } else {
+            return Ok(None);
+        };
 
         // The user can set the ExEx head to the zero hash to skip canonical checks. This can be
         // useful in the case where the user sets a historical block number to backfill
