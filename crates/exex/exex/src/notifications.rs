@@ -293,7 +293,11 @@ where
     ///   Nothing to do.
     /// - ExEx is ahead of the target block (`exex_head.number > target_block`). Nothing to do.
     fn check_backfill(&mut self, target_block: u64) -> eyre::Result<()> {
-        let exex_head = self.exex_head.as_ref().expect("exex_head should be set");
+        let exex_head = if let Some(exex_head) = self.exex_head {
+            exex_head
+        } else {
+            return Ok(());
+        };
 
         match exex_head.block.number.cmp(&target_block) {
             std::cmp::Ordering::Less => {
@@ -401,9 +405,7 @@ where
                 continue
             }
 
-            if this.exex_head.is_some() &&
-                let Some(committed) = notification.committed_chain()
-            {
+            if let Some(committed) = notification.committed_chain() {
                 // Check if we need to backfill up to the block before this notification
                 this.check_backfill(committed.first().number() - 1)?;
 
