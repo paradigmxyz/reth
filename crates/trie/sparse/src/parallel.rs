@@ -899,8 +899,19 @@ impl SparseTrie for ParallelSparseTrie {
                     branch_parent_path = Some(curr_path);
                     branch_parent_node = Some(curr_node.clone());
                     // The leaf value is stored in the subtrie determined by the full path,
-                    // which may be different from where the branch is located
-                    leaf_subtrie_type = SparseSubtrieType::from_path(full_path);
+                    // but only if that subtrie is revealed. Otherwise it's in the same
+                    // subtrie as the branch.
+                    let path_subtrie_type = SparseSubtrieType::from_path(full_path);
+                    leaf_subtrie_type = match path_subtrie_type {
+                        SparseSubtrieType::Upper => SparseSubtrieType::Upper,
+                        SparseSubtrieType::Lower(idx) => {
+                            if self.lower_subtries[idx].as_revealed_ref().is_some() {
+                                SparseSubtrieType::Lower(idx)
+                            } else {
+                                curr_subtrie_type
+                            }
+                        }
+                    };
                     break;
                 }
                 FindNextToLeafOutcome::ContinueFrom(next_path) => {
@@ -991,14 +1002,6 @@ impl SparseTrie for ParallelSparseTrie {
         };
         leaf_subtrie.inner.values.remove(full_path);
 
-        // If we removed a value from a lower subtrie and it's now empty, clear the subtrie
-        if let SparseSubtrieType::Lower(idx) = leaf_subtrie_type {
-            let subtrie = self.lower_subtries[idx].as_revealed_ref();
-            if subtrie.is_some_and(|s| s.nodes.is_empty() && s.inner.values.is_empty()) {
-                self.lower_subtries[idx].clear();
-            }
-        }
-
         for (subtrie_type, path) in paths_to_mark_dirty {
             let node = match subtrie_type {
                 SparseSubtrieType::Upper => self.upper_subtrie.nodes.get_mut(&path),
@@ -1019,6 +1022,15 @@ impl SparseTrie for ParallelSparseTrie {
                         "only branch and extension nodes can be marked dirty when removing a leaf"
                     )
                 }
+            }
+        }
+
+        // If we removed a value from a lower subtrie and it's now empty, clear the subtrie.
+        // This must happen after marking nodes dirty, since clearing makes the subtrie blind.
+        if let SparseSubtrieType::Lower(idx) = leaf_subtrie_type {
+            let subtrie = self.lower_subtries[idx].as_revealed_ref();
+            if subtrie.is_some_and(|s| s.nodes.is_empty() && s.inner.values.is_empty()) {
+                self.lower_subtries[idx].clear();
             }
         }
 
