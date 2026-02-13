@@ -803,19 +803,19 @@ ipnet = "2.11"
 # =============================================================================
 
 # revm staging patches
-revm = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
-revm-bytecode = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
-revm-database = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
-revm-database-interface = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
-revm-state = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
-revm-primitives = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
-revm-interpreter = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
-revm-precompile = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
-revm-context = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
-revm-context-interface = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
-revm-handler = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
-revm-inspector = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
-op-revm = { git = "https://github.com/Rimeeeeee/revm", branch = "expose-gas-7778" }
+revm = { git = "https://github.com/bluealloy/revm", branch = "main" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "main" }
+revm-database = { git = "https://github.com/bluealloy/revm", branch = "main" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "main" }
+revm-state = { git = "https://github.com/bluealloy/revm", branch = "main" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "main" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "main" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "main" }
+revm-context = { git = "https://github.com/bluealloy/revm", branch = "main" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "main" }
+revm-handler = { git = "https://github.com/bluealloy/revm", branch = "main" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", branch = "main" }
+op-revm = { git = "https://github.com/bluealloy/revm", branch = "main" }
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", branch = "staging" }
 
 # alloy-evm bal-devnet2 patches
