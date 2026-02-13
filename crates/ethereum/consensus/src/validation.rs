@@ -26,6 +26,7 @@ pub fn validate_block_post_execution<B, R, ChainSpec>(
     receipts: &[R],
     requests: &Requests,
     receipt_root_bloom: Option<(B256, Bloom)>,
+    block_access_list_hash: &Option<B256>,
     gas_spent: Option<u64>,
 ) -> Result<(), ConsensusError>
 where
@@ -47,6 +48,15 @@ where
             gas: GotExpected { got: cumulative_gas_used, expected: block.header().gas_used() },
             gas_spent_by_tx: gas_spent_by_transactions(receipts),
         })
+    }
+
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().number()) {
+        let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
+        if block_access_list_hash.unwrap_or_default() != block_bal_hash {
+            return Err(ConsensusError::BlockAccessListHashMismatch(
+                (block_access_list_hash.unwrap_or_default(), block_bal_hash).into(),
+            ))
+        }
     }
 
     // Before Byzantium, receipts contained state root that would mean that expensive

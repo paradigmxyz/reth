@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=gas-traces#7dba33ee86ba6ad276672ecc8f26d7d88d73ae71"
+source = "git+https://github.com/Soubhik-10/evm?branch=bal-valid#9754d3406e573775d96dcb21531302307652a7a4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -414,7 +414,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=gas-traces#7dba33ee86ba6ad276672ecc8f26d7d88d73ae71"
+source = "git+https://github.com/Soubhik-10/evm?branch=bal-valid#9754d3406e573775d96dcb21531302307652a7a4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -2107,9 +2107,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.55"
+version = "1.2.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47b26a0954ae34af09b50f0de26458fa95369a0d478d8236d3f93082b219bd29"
+checksum = "aebf35691d1bfb0ac386a69bac2fde4dd276fb618cf8bf4f5318fe285e821bb2"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -5549,9 +5549,9 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libc"
-version = "0.2.181"
+version = "0.2.182"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "459427e2af2b9c839b132acb702a1c654d95e10f8c326bfc2ad11310e458b1c5"
+checksum = "6800badb6cb2082ffd7b6a67e6125bb39f18782f793520caee8cb8846be06112"
 
 [[package]]
 name = "libgit2-sys"
@@ -6472,7 +6472,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "15.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "auto_impl",
  "revm",
@@ -11272,7 +11272,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "34.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -11290,7 +11290,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "8.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "bitvec",
  "phf",
@@ -11301,7 +11301,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "13.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -11317,7 +11317,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "14.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -11332,7 +11332,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "10.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -11345,7 +11345,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "9.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "auto_impl",
  "either",
@@ -11358,7 +11358,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "15.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -11376,7 +11376,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "15.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "auto_impl",
  "either",
@@ -11412,7 +11412,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "32.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11424,7 +11424,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "32.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11447,7 +11447,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "22.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -11458,7 +11458,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "9.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=main#0ee852ce8d9e8d595ebd8c8ec2cb7aab60447f71"
+source = "git+https://github.com/bluealloy/revm?branch=main#0b344969e05a9afa6388ebfff05201ecf4e6c95d"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.10.0",
