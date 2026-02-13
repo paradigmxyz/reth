@@ -2181,8 +2181,19 @@ impl ParallelSparseTrie {
             return;
         }
 
-        // Try to get the previous child's subtrie (if it's a lower subtrie)
-        let Some(prev_child_subtrie) = self.lower_subtrie_for_path_mut(prev_child_path) else {
+        // If the value is already in the upper subtrie, no move is needed.
+        // This can happen when a previous collapse already moved it.
+        if self.upper_subtrie.inner.values.contains_key(leaf_full_path) {
+            return;
+        }
+
+        // Try to get the previous child's subtrie (if it's a lower subtrie and already revealed).
+        // We use index-based access to avoid revealing a blind subtrie.
+        let Some(idx) = SparseSubtrieType::from_path(prev_child_path).lower_index() else {
+            return;
+        };
+
+        let Some(prev_child_subtrie) = self.lower_subtries[idx].as_revealed_mut() else {
             return;
         };
 
@@ -2667,11 +2678,11 @@ impl ParallelSparseTrie {
 
         for (index, subtrie) in self.lower_subtries.iter_mut().enumerate() {
             if let Some(subtrie) = subtrie.take_revealed_if(|subtrie| {
-                prefix_set.contains(&subtrie.path) ||
-                    subtrie
-                        .nodes
-                        .get(&subtrie.path)
-                        .is_some_and(|n| n.cached_rlp_node().is_none())
+                // Only take subtries that have a node at their root path
+                let root_node = subtrie.nodes.get(&subtrie.path);
+                root_node.is_some() &&
+                    (prefix_set.contains(&subtrie.path) ||
+                        root_node.is_some_and(|n| n.cached_rlp_node().is_none()))
             }) {
                 let prefix_set = if prefix_set.all() {
                     unchanged_prefix_set = PrefixSetMut::all();
@@ -5310,15 +5321,24 @@ mod tests {
         assert_eq!(unchanged_prefix_set, PrefixSetMut::from(prefix_set.iter().copied()));
     }
 
+    // Helper function to create a test subtrie with a root node
+    fn new_test_subtrie(path: Nibbles) -> Box<SparseSubtrie> {
+        let mut subtrie = SparseSubtrie::new(path);
+        // Add a Hash node at the root path so the subtrie can be taken by
+        // take_changed_lower_subtries
+        subtrie.nodes.insert(path, SparseNode::Hash(B256::ZERO));
+        Box::new(subtrie)
+    }
+
     #[test]
     fn test_get_changed_subtries() {
         // Create a trie with three subtries
         let mut trie = ParallelSparseTrie::default();
-        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+        let subtrie_1 = new_test_subtrie(Nibbles::from_nibbles([0x0, 0x0]));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
+        let subtrie_2 = new_test_subtrie(Nibbles::from_nibbles([0x1, 0x0]));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
+        let subtrie_3 = new_test_subtrie(Nibbles::from_nibbles([0x3, 0x0]));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
@@ -5368,11 +5388,11 @@ mod tests {
     fn test_get_changed_subtries_all() {
         // Create a trie with three subtries
         let mut trie = ParallelSparseTrie::default();
-        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+        let subtrie_1 = new_test_subtrie(Nibbles::from_nibbles([0x0, 0x0]));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
+        let subtrie_2 = new_test_subtrie(Nibbles::from_nibbles([0x1, 0x0]));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
+        let subtrie_3 = new_test_subtrie(Nibbles::from_nibbles([0x3, 0x0]));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
