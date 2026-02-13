@@ -108,8 +108,7 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
             result: ResultAndState::new(
                 ExecutionResult::Success {
                     reason: SuccessReason::Return,
-                    gas_used: 0,
-                    gas_refunded: 0,
+                    gas: Default::default(),
                     logs: vec![],
                     output: Output::Call(Bytes::from(vec![])),
                 },
@@ -117,7 +116,6 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
             ),
             tx_type: tx.into_parts().1.tx().tx_type(),
             blob_gas_used: 0,
-            floor_cost: Some(0),
         })
     }
 
