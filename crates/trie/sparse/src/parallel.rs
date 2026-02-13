@@ -4590,14 +4590,40 @@ mod tests {
         }
 
         fn has_leaf(self, path: &Nibbles, expected_key: &Nibbles) -> Self {
-            match self.subtrie.nodes.get(path) {
-                Some(SparseNode::RootLeaf { key, .. }) => {
-                    assert_eq!(
-                        *key, *expected_key,
-                        "Expected leaf at {path:?} to have key {expected_key:?}, found {key:?}",
-                    );
+            if path.is_empty() {
+                // Root leaf case - check for RootLeaf at root
+                match self.subtrie.nodes.get(path) {
+                    Some(SparseNode::RootLeaf { key, .. }) => {
+                        assert_eq!(
+                            *key, *expected_key,
+                            "Expected root leaf at {path:?} to have key {expected_key:?}, found {key:?}",
+                        );
+                    }
+                    node => panic!("Expected root leaf node at {path:?}, found {node:?}"),
                 }
-                node => panic!("Expected leaf node at {path:?}, found {node:?}"),
+            } else {
+                // Non-root leaf case - check parent branch's leaf_mask and leaf_short_keys
+                let parent_path = path.slice(..path.len() - 1);
+                let nibble = path.get_unchecked(path.len() - 1);
+
+                match self.subtrie.nodes.get(&parent_path) {
+                    Some(node @ SparseNode::Branch { leaf_mask, .. }) => {
+                        assert!(
+                            leaf_mask.is_bit_set(nibble),
+                            "Expected nibble {nibble} to be set in parent branch's leaf_mask at {parent_path:?}, leaf_mask={leaf_mask:?}",
+                        );
+                        let short_key = node.get_leaf_short_key(nibble).expect(
+                            "leaf_mask bit is set but get_leaf_short_key returned None",
+                        );
+                        assert_eq!(
+                            *short_key, *expected_key,
+                            "Expected leaf at {path:?} to have short key {expected_key:?}, found {short_key:?}",
+                        );
+                    }
+                    node => panic!(
+                        "Expected parent branch node at {parent_path:?} for leaf at {path:?}, found {node:?}",
+                    ),
+                }
             }
             self
         }
