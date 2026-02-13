@@ -855,7 +855,9 @@ impl SparseTrie for ParallelSparseTrie {
         // Therefore, first traverse the trie in order to find the leaf node and at most its parent
         // and grandparent.
 
-        let leaf_path;
+        // Path to the leaf node (if the leaf exists as a separate node like RootLeaf).
+        // None if the leaf is tracked in a branch's leaf_mask.
+        let mut leaf_node_path: Option<Nibbles> = None;
         let leaf_subtrie_type;
 
         let mut branch_parent_path: Option<Nibbles> = None;
@@ -885,9 +887,20 @@ impl SparseTrie for ParallelSparseTrie {
                     return Err(SparseTrieErrorKind::BlindedNode { path: curr_path, hash }.into())
                 }
                 FindNextToLeafOutcome::Found => {
-                    // this node is the target leaf
-                    leaf_path = curr_path;
+                    // this node is the target leaf (RootLeaf)
+                    leaf_node_path = Some(curr_path);
                     leaf_subtrie_type = curr_subtrie_type;
+                    break;
+                }
+                FindNextToLeafOutcome::FoundInBranch(_nibble) => {
+                    // the leaf is a child of this branch, tracked in leaf_mask
+                    // (no separate node exists for the leaf)
+                    paths_to_mark_dirty.push((SparseSubtrieType::from_path(&curr_path), curr_path));
+                    branch_parent_path = Some(curr_path);
+                    branch_parent_node = Some(curr_node.clone());
+                    // The leaf value is stored in the subtrie determined by the full path,
+                    // which may be different from where the branch is located
+                    leaf_subtrie_type = SparseSubtrieType::from_path(full_path);
                     break;
                 }
                 FindNextToLeafOutcome::ContinueFrom(next_path) => {
@@ -946,7 +959,7 @@ impl SparseTrie for ParallelSparseTrie {
             (&branch_parent_path, &branch_parent_node)
         {
             let mut check_mask = *state_mask;
-            let child_nibble = leaf_path.get_unchecked(branch_path.len());
+            let child_nibble = full_path.get_unchecked(branch_path.len());
             check_mask.unset_bit(child_nibble);
 
             if check_mask.count_bits() == 1 {
@@ -977,6 +990,15 @@ impl SparseTrie for ParallelSparseTrie {
             }
         };
         leaf_subtrie.inner.values.remove(full_path);
+
+        // If we removed a value from a lower subtrie and it's now empty, clear the subtrie
+        if let SparseSubtrieType::Lower(idx) = leaf_subtrie_type {
+            let subtrie = self.lower_subtries[idx].as_revealed_ref();
+            if subtrie.is_some_and(|s| s.nodes.is_empty() && s.inner.values.is_empty()) {
+                self.lower_subtries[idx].clear();
+            }
+        }
+
         for (subtrie_type, path) in paths_to_mark_dirty {
             let node = match subtrie_type {
                 SparseSubtrieType::Upper => self.upper_subtrie.nodes.get_mut(&path),
@@ -999,13 +1021,17 @@ impl SparseTrie for ParallelSparseTrie {
                 }
             }
         }
-        self.remove_node(&leaf_path);
 
-        // If the leaf was at the root replace its node with the empty value. We can stop execution
-        // here, all remaining logic is related to the ancestors of the leaf.
-        if leaf_path.is_empty() {
-            self.upper_subtrie.nodes.insert(leaf_path, SparseNode::Empty);
-            return Ok(())
+        // If the leaf exists as a separate node (RootLeaf), remove it
+        if let Some(leaf_path) = leaf_node_path {
+            self.remove_node(&leaf_path);
+
+            // If the leaf was at the root replace its node with the empty value. We can stop
+            // execution here, all remaining logic is related to the ancestors of the leaf.
+            if leaf_path.is_empty() {
+                self.upper_subtrie.nodes.insert(leaf_path, SparseNode::Empty);
+                return Ok(())
+            }
         }
 
         // If there is a parent branch node (very likely, unless the leaf is at the root) execute
@@ -1020,7 +1046,7 @@ impl SparseTrie for ParallelSparseTrie {
             }),
         ) = (&branch_parent_path, &branch_parent_node)
         {
-            let child_nibble = leaf_path.get_unchecked(branch_path.len());
+            let child_nibble = full_path.get_unchecked(branch_path.len());
 
             // Create mutable copies of the branch fields
             let mut state_mask = *orig_state_mask;
@@ -1045,7 +1071,7 @@ impl SparseTrie for ParallelSparseTrie {
 
                 trace!(
                     target: "trie::parallel_sparse",
-                    ?leaf_path,
+                    ?full_path,
                     ?branch_path,
                     remaining_child_nibble,
                     "Branch node has only one child",
@@ -1088,20 +1114,38 @@ impl SparseTrie for ParallelSparseTrie {
                     remaining_child_node.as_ref(),
                 );
 
-                if remove_child {
-                    let mut remaining_child_path = *branch_path;
-                    remaining_child_path.push_unchecked(remaining_child_nibble);
+                let mut remaining_child_path = *branch_path;
+                remaining_child_path.push_unchecked(remaining_child_nibble);
 
-                    // Move leaf value if needed (when collapsing across subtrie boundaries)
-                    if let CollapsedNode::LeafInParent { full_path: leaf_full_path, .. } =
-                        &collapsed
-                    {
+                // Check if remaining child is in a different subtrie than the branch
+                let branch_subtrie = SparseSubtrieType::from_path(branch_path);
+                let child_subtrie = SparseSubtrieType::from_path(&remaining_child_path);
+                let child_in_different_subtrie = core::mem::discriminant(&branch_subtrie) !=
+                    core::mem::discriminant(&child_subtrie);
+
+                // Move leaf value if needed (when collapsing across subtrie boundaries)
+                if let CollapsedNode::LeafInParent { full_path: leaf_full_path, .. } = &collapsed {
+                    if child_in_different_subtrie {
                         self.move_value_on_collapse(
                             branch_path,
                             leaf_full_path,
                             &remaining_child_path,
                         );
+
+                        // If the lower subtrie is now empty after moving the value, clear it
+                        if let SparseSubtrieType::Lower(idx) = child_subtrie {
+                            let subtrie = self.lower_subtries[idx].as_revealed_ref();
+                            if subtrie
+                                .is_some_and(|s| s.nodes.is_empty() && s.inner.values.is_empty())
+                            {
+                                self.lower_subtries[idx].clear();
+                            }
+                        }
                     }
+                }
+
+                // Remove the child node only if there's actually a node to remove
+                if remove_child {
                     self.remove_node(&remaining_child_path);
                 }
 
@@ -1128,10 +1172,15 @@ impl SparseTrie for ParallelSparseTrie {
                 })
             };
 
-            // Insert the new branch/extension node if we have one
+            // Insert the new branch/extension node if we have one, or remove the old one
+            // if the branch collapsed to a leaf
             if let Some(node) = new_branch_node {
                 let branch_subtrie = self.subtrie_for_path_mut(branch_path);
                 branch_subtrie.nodes.insert(*branch_path, node);
+            } else {
+                // Branch collapsed to a leaf - remove the branch node
+                let branch_subtrie = self.subtrie_for_path_mut(branch_path);
+                branch_subtrie.nodes.remove(branch_path);
             }
             // Note: if new_branch_node is None, the branch collapsed to a leaf which is
             // tracked in the grandparent's leaf_mask, not as a node in the nodes HashMap.
@@ -1184,19 +1233,25 @@ impl SparseTrie for ParallelSparseTrie {
             }
 
             // Update the parent branch's leaf_mask and leaf_short_keys if a child became a leaf
-            if let Some((node_path, short_key, _full_path)) = became_leaf_info &&
-                !node_path.is_empty()
-            {
-                let parent_path = node_path.slice(..node_path.len() - 1);
-                let child_nibble = node_path.get_unchecked(node_path.len() - 1);
-                let parent_subtrie = self.subtrie_for_path_mut(&parent_path);
-                if let Some(SparseNode::Branch { leaf_mask, leaf_short_keys, state, .. }) =
-                    parent_subtrie.nodes.get_mut(&parent_path)
-                {
-                    leaf_mask.set_bit(child_nibble);
-                    let idx = SparseNode::leaf_rank(*leaf_mask, child_nibble);
-                    leaf_short_keys.insert(idx, short_key);
-                    *state = SparseNodeState::Dirty;
+            if let Some((node_path, short_key, full_path)) = became_leaf_info {
+                if node_path.is_empty() {
+                    // Branch at root collapsed to a leaf - insert a RootLeaf at root
+                    self.upper_subtrie
+                        .nodes
+                        .insert(Nibbles::default(), SparseNode::new_root_leaf(full_path));
+                } else {
+                    // Non-root branch collapsed to a leaf - update parent's leaf_mask
+                    let parent_path = node_path.slice(..node_path.len() - 1);
+                    let child_nibble = node_path.get_unchecked(node_path.len() - 1);
+                    let parent_subtrie = self.subtrie_for_path_mut(&parent_path);
+                    if let Some(SparseNode::Branch { leaf_mask, leaf_short_keys, state, .. }) =
+                        parent_subtrie.nodes.get_mut(&parent_path)
+                    {
+                        leaf_mask.set_bit(child_nibble);
+                        let idx = SparseNode::leaf_rank(*leaf_mask, child_nibble);
+                        leaf_short_keys.insert(idx, short_key);
+                        *state = SparseNodeState::Dirty;
+                    }
                 }
             }
         };
@@ -1409,7 +1464,7 @@ impl SparseTrie for ParallelSparseTrie {
                     // We hit a blinded node - cannot determine if leaf exists
                     return Err(LeafLookupError::BlindedNode { path: curr_path, hash });
                 }
-                FindNextToLeafOutcome::Found => {
+                FindNextToLeafOutcome::Found | FindNextToLeafOutcome::FoundInBranch(_) => {
                     panic!("target leaf {full_path:?} found at path {curr_path:?}, even though value wasn't in values hashmap");
                 }
                 FindNextToLeafOutcome::ContinueFrom(next_path) => {
@@ -1935,13 +1990,26 @@ impl ParallelSparseTrie {
                 }
                 FindNextToLeafOutcome::ContinueFrom(child_path)
             }
-            SparseNode::Branch { state_mask, .. } => {
+            SparseNode::Branch { state_mask, leaf_mask, leaf_short_keys, .. } => {
                 if leaf_full_path.len() == from_path.len() {
                     return FindNextToLeafOutcome::NotFound
                 }
 
                 let nibble = leaf_full_path.get_unchecked(from_path.len());
                 if !state_mask.is_bit_set(nibble) {
+                    return FindNextToLeafOutcome::NotFound
+                }
+
+                // Check if this child is a leaf tracked in leaf_mask
+                if leaf_mask.is_bit_set(nibble) {
+                    let idx = SparseNode::leaf_rank(*leaf_mask, nibble);
+                    let short_key = &leaf_short_keys[idx];
+                    // The remaining path after nibble should match short_key
+                    let remaining_path = leaf_full_path.slice(from_path.len() + 1..);
+                    if &remaining_path == short_key {
+                        return FindNextToLeafOutcome::FoundInBranch(nibble)
+                    }
+                    // Short key doesn't match - leaf not found
                     return FindNextToLeafOutcome::NotFound
                 }
 
@@ -2891,8 +2959,12 @@ pub struct SparseSubtrie {
 /// Returned by the `find_next_to_leaf` method to indicate either that the leaf has been found,
 /// traversal should be continued from the given path, or the leaf is not in the trie.
 enum FindNextToLeafOutcome {
-    /// `Found` indicates that the leaf was found at the given path.
+    /// `Found` indicates that the leaf was found at the given path (the current node is a
+    /// RootLeaf).
     Found,
+    /// `FoundInBranch` indicates that the leaf is a child of the current branch node, tracked
+    /// in its `leaf_mask`. The contained nibble is the child's position.
+    FoundInBranch(u8),
     /// `ContinueFrom` indicates that traversal should continue from the given path.
     ContinueFrom(Nibbles),
     /// `NotFound` indicates that there is no way to traverse to the leaf, as it is not in the
@@ -5718,8 +5790,7 @@ mod tests {
                 ),
                 // Note: In the new design, leaves that are children of branches are NOT stored
                 // as separate nodes. They are tracked via the branch's leaf_mask and
-                // leaf_short_keys. We still need to insert their values though.
-                (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_root_leaf(leaf_key([0x7], 62))),
+                // leaf_short_keys. Values are inserted by new_test_trie.
             ]
             .into_iter(),
         );
@@ -5775,23 +5846,17 @@ mod tests {
         // After removing 0x012, branch becomes a leaf
         //
         let mut trie = new_test_trie(
-            [
-                (
-                    Nibbles::default(),
-                    // state_mask=0b0011 (children at 0 and 1), leaf_mask=0b0011 (both are leaves)
-                    new_test_branch(
-                        TrieMask::new(0b0011),
-                        TrieMask::new(0b0011),
-                        vec![leaf_key([0x1, 0x2], 63), leaf_key([0x3, 0x4], 63)], /* short keys
-                                                                                   * for nibbles
-                                                                                   * 0 and 1 */
-                    ),
+            [(
+                Nibbles::default(),
+                // state_mask=0b0011 (children at 0 and 1), leaf_mask=0b0011 (both are leaves)
+                new_test_branch(
+                    TrieMask::new(0b0011),
+                    TrieMask::new(0b0011),
+                    vec![leaf_key([0x1, 0x2], 63), leaf_key([0x3, 0x4], 63)], /* short keys
+                                                                               * for nibbles
+                                                                               * 0 and 1 */
                 ),
-                // Leaves are tracked in branch's leaf_mask, but we still need RootLeaf nodes
-                // and values for them
-                (Nibbles::from_nibbles([0x0]), SparseNode::new_root_leaf(leaf_key([0x1, 0x2], 63))),
-                (Nibbles::from_nibbles([0x1]), SparseNode::new_root_leaf(leaf_key([0x3, 0x4], 63))),
-            ]
+            )]
             .into_iter(),
         );
 
@@ -5856,14 +5921,8 @@ mod tests {
                         vec![leaf_key([0x1, 0x2], 62), leaf_key([0x3, 0x4], 62)],
                     ),
                 ),
-                (
-                    Nibbles::from_nibbles([0x5, 0x0]),
-                    SparseNode::new_root_leaf(leaf_key([0x1, 0x2], 62)),
-                ),
-                (
-                    Nibbles::from_nibbles([0x5, 0x1]),
-                    SparseNode::new_root_leaf(leaf_key([0x3, 0x4], 62)),
-                ),
+                // No RootLeaf nodes - leaves are tracked only in branch's leaf_mask.
+                // Values are inserted by new_test_trie based on leaf_mask/leaf_short_keys.
             ]
             .into_iter(),
         );
@@ -5948,19 +6007,19 @@ mod tests {
         let other_leaf_full_value = pad_nibbles_right(Nibbles::from_nibbles([0x2, 0x1, 0x5, 0x6]));
         assert_matches!(upper_subtrie.inner.values.get(&other_leaf_full_value), Some(_));
 
-        // Check that the root branch still exists unchanged
+        // Check that the root branch's leaf_mask was updated to include nibble 2
+        // and the state_mask still has children at nibbles 0 and 2
         assert_matches!(
             upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch{ state_mask, .. })
+            Some(SparseNode::Branch{ state_mask, leaf_mask, leaf_short_keys, .. })
             if *state_mask == 0b0101.into()
+                && *leaf_mask == 0b0101.into()
+                && leaf_short_keys.len() == 2
         );
 
-        // Check that the inner branch became a leaf (now RootLeaf since it's in upper trie)
-        assert_matches!(
-            upper_subtrie.nodes.get(&Nibbles::from_nibbles([0x2])),
-            Some(SparseNode::RootLeaf{ key, ..})
-            if key == &leaf_key([0x1, 0x5, 0x6], 63)
-        );
+        // Check that the inner branch was removed (its child became a leaf tracked in
+        // root's leaf_mask)
+        assert_matches!(upper_subtrie.nodes.get(&Nibbles::from_nibbles([0x2])), None);
     }
 
     #[test]
