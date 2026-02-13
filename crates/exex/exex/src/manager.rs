@@ -106,7 +106,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
     /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
-    pub fn new<P: Clone, E: ConfigureEvm<Primitives = N>>(
+    pub fn new<P, E: ConfigureEvm<Primitives = N>>(
         id: String,
         node_head: BlockNumHash,
         provider: P,

@@ -100,7 +100,7 @@ where
     P: Clone,
     E: ConfigureEvm,
 {
-    /// Creates a new stream of [`ExExNotifications`].
+    /// Creates a new instance of [`ExExNotifications`].
     pub fn new(
         initial_node_head: BlockNumHash,
         provider: P,
