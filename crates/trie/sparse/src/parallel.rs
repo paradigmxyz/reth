@@ -587,15 +587,6 @@ impl SparseTrie for ParallelSparseTrie {
             match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
                 FindNextToLeafOutcome::NotFound => return Ok(()), // leaf isn't in the trie
                 FindNextToLeafOutcome::BlindedNode(hash) => {
-                    // If we hit a blinded node that is a child of an extension node, we need to
-                    // request reveal for the extension as proof workers consider branch and
-                    // extension nodes to be coupled.
-                    if let Some(ext_path) = ext_grandparent_path &&
-                        branch_parent_path.is_none_or(|path| path.len() < ext_path.len())
-                    {
-                        return Err(SparseTrieErrorKind::BlindedNode { path: ext_path, hash }.into())
-                    }
-
                     return Err(SparseTrieErrorKind::BlindedNode { path: curr_path, hash }.into())
                 }
                 FindNextToLeafOutcome::Found => {
@@ -1006,7 +997,6 @@ impl SparseTrie for ParallelSparseTrie {
         let mut curr_path = Nibbles::new(); // start traversal from root
         let mut curr_subtrie = self.upper_subtrie.as_ref();
         let mut curr_subtrie_is_upper = true;
-        let mut prev_node = None;
 
         loop {
             let curr_node = curr_subtrie.nodes.get(&curr_path).unwrap();
@@ -1014,16 +1004,6 @@ impl SparseTrie for ParallelSparseTrie {
             match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
                 FindNextToLeafOutcome::NotFound => return Ok(LeafLookup::NonExistent),
                 FindNextToLeafOutcome::BlindedNode(hash) => {
-                    if let Some(&SparseNode::Extension { key, .. }) = prev_node {
-                        // If we hit a blinded node that is a child of an extension node, we need to
-                        // request reveal for the extension as proof workers consider branch and
-                        // extension nodes to be coupled.
-                        return Err(LeafLookupError::BlindedNode {
-                            path: curr_path.slice(0..curr_path.len() - key.len()),
-                            hash,
-                        });
-                    }
-
                     return Err(LeafLookupError::BlindedNode { path: curr_path, hash });
                 }
                 FindNextToLeafOutcome::Found => {
@@ -1041,7 +1021,6 @@ impl SparseTrie for ParallelSparseTrie {
                     }
                 }
             }
-            prev_node = Some(curr_node);
         }
     }
 
