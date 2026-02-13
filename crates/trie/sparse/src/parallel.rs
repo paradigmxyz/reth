@@ -904,6 +904,18 @@ impl SparseTrie for ParallelSparseTrie {
                     // the leaf is a child of this branch, tracked in leaf_mask
                     // (no separate node exists for the leaf)
                     paths_to_mark_dirty.push((SparseSubtrieType::from_path(&curr_path), curr_path));
+
+                    // If there is already a branch set, and an extension before it, then that
+                    // extension is not the immediate parent of this branch and is no longer
+                    // relevant.
+                    match (&branch_parent_path, &ext_grandparent_path) {
+                        (Some(branch), Some(ext)) if branch.len() > ext.len() => {
+                            ext_grandparent_path = None;
+                            ext_grandparent_node = None;
+                        }
+                        _ => (),
+                    };
+
                     branch_parent_path = Some(curr_path);
                     branch_parent_node = Some(curr_node.clone());
                     // The leaf value is stored in the subtrie determined by the full path,
