@@ -3,7 +3,7 @@
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_trie_sparse::SparseStateTrie;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tracing::debug;
 
 /// Type alias for the sparse trie type used in preservation.
@@ -37,7 +37,7 @@ impl SharedPreservedSparseTrie {
     ///
     /// Returns the time spent waiting for the lock.
     pub(super) fn wait_for_availability(&self) -> std::time::Duration {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let _guard = self.0.lock();
         let elapsed = start.elapsed();
         if elapsed.as_millis() > 5 {

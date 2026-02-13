@@ -50,7 +50,7 @@ use std::{
         mpsc::{self, channel},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, instrument, warn, Span};
 
@@ -67,9 +67,9 @@ use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CacheWaitDurations {
     /// Time spent waiting for the execution cache lock.
-    pub execution_cache: std::time::Duration,
+    pub execution_cache: Duration,
     /// Time spent waiting for the sparse trie lock.
-    pub sparse_trie: std::time::Duration,
+    pub sparse_trie: Duration,
 }
 
 /// Trait for types that can wait for execution cache and sparse trie locks to become available.
@@ -1044,7 +1044,7 @@ impl PayloadExecutionCache {
     /// This is useful for synchronization before starting payload processing.
     ///
     /// Returns the time spent waiting for the lock.
-    pub fn wait_for_availability(&self) -> std::time::Duration {
+    pub fn wait_for_availability(&self) -> Duration {
         let start = Instant::now();
         // Acquire write lock to wait for any current holders to finish
         let _guard = self.inner.write();
