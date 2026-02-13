@@ -30,11 +30,11 @@ pub struct ExExContextDyn<N: NodePrimitives = EthPrimitives> {
     /// Additionally, the exex can preemptively emit a `FinishedHeight` event to specify what
     /// blocks to receive notifications for.
     pub events: mpsc::UnboundedSender<ExExEvent>,
-    /// Channel to receive [`ExExNotification`](crate::ExExNotification)s.
+    /// Channel to receive [`ExExNotification`]s.
     ///
     /// # Important
     ///
-    /// Once an [`ExExNotification`](crate::ExExNotification) is sent over the channel, it is
+    /// Once an [`ExExNotification`] is sent over the channel, it is
     /// considered delivered by the node.
     pub notifications: Box<dyn Stream<Item = eyre::Result<ExExNotification<N>>> + Unpin>,
 }
