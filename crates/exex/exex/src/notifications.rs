@@ -379,7 +379,7 @@ where
             }
             this.backfill_job = None;
 
-            // If we just finished backfill and have a pending notification, deliver it
+            // If we just finished backfill and have a pending notification, deliver it.
             if let Some(pending) = this.pending_notification.take() {
                 this.update_exex_head(&pending);
                 return Poll::Ready(Some(Ok(pending)))
@@ -392,11 +392,23 @@ where
                 return Poll::Ready(None)
             };
 
+            // 5. In case the exex is ahead of the new tip, we must skip it
+            if let Some(committed) = notification.committed_chain() {
+                // inclusive check because we should start with `exex.head + 1`
+                if let Some(exex_head) = this.exex_head &&
+                    exex_head.block.number >= committed.tip().number()
+                {
+                    continue
+                }
+            }
+
+            // If skip_pipeline_notifications is false, we can deliver the notification.
             if !this.config.skip_pipeline_notifications {
                 return Poll::Ready(Some(Ok(notification)))
             }
 
-            // Only config.skip_pipeline_notifications = true reaches beyond this point
+            // If skip_pipeline_notifications is true (it must be here) and this notification is
+            // from the pipeline, skip it.
             if source.is_pipeline() {
                 debug!(
                     target: "exex::notifications",
@@ -405,8 +417,9 @@ where
                 continue
             }
 
+            // Check if we need to backfill.
             if let Some(committed) = notification.committed_chain() {
-                // Check if we need to backfill up to the block before this notification
+                // Check if we need to backfill up to the block before this notification.
                 this.check_backfill(committed.first().number() - 1)?;
 
                 // If a backfill job was created, store the notification and return
@@ -421,6 +434,7 @@ where
                 }
             }
 
+            // Update the head and deliver the notification.
             this.update_exex_head(&notification);
             return Poll::Ready(Some(Ok(notification)))
         }
