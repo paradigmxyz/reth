@@ -3538,16 +3538,20 @@ impl SparseSubtrie {
                         self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
 
                         // If the revealed child is a RootLeaf (leaf at child's subtrie root),
-                        // update the parent branch's leaf_mask and leaf_short_keys
+                        // update the parent branch's leaf_mask and leaf_short_keys.
+                        // Only update if the bit is not already set - if set, the leaf's
+                        // reveal_node already updated the parent when it was revealed.
                         if let Some(SparseNode::RootLeaf { key, .. }) = self.nodes.get(&child_path)
                         {
                             let key = *key;
                             if let Some(SparseNode::Branch { leaf_mask, leaf_short_keys, .. }) =
                                 self.nodes.get_mut(&path)
                             {
-                                leaf_mask.set_bit(idx);
-                                let rank = SparseNode::leaf_rank(*leaf_mask, idx);
-                                leaf_short_keys.insert(rank, key);
+                                if !leaf_mask.is_bit_set(idx) {
+                                    leaf_mask.set_bit(idx);
+                                    let rank = SparseNode::leaf_rank(*leaf_mask, idx);
+                                    leaf_short_keys.insert(rank, key);
+                                }
                             }
                         }
                     }
