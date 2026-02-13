@@ -125,7 +125,9 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
         match result {
             ExecutionResult::Success { output, .. } => Ok(output.into_data()),
             ExecutionResult::Revert { output, .. } => Err(Self::from_revert(output)),
-            ExecutionResult::Halt { reason, gas } => Err(Self::from_evm_halt(reason, gas.used())),
+            ExecutionResult::Halt { reason, gas, .. } => {
+                Err(Self::from_evm_halt(reason, gas.used()))
+            }
         }
     }
 }
