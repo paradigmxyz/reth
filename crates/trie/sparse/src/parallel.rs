@@ -630,12 +630,82 @@ impl SparseTrie for ParallelSparseTrie {
             }
         }
 
-        // If the leaf was inserted in the upper subtrie, add it to values now
+        // If the update completed in the upper subtrie traversal, insert the value
         if let Some(key_len) = upper_subtrie_leaf_key_len {
             self.upper_subtrie
                 .inner
                 .values
                 .insert(full_path, SparseNodeLeaf::new(key_len, value_to_insert.clone()));
+        }
+
+        // Check all upper subtrie branches for leaves that cross into lower subtries.
+        // These leaves need to be converted to RootLeaf nodes in their respective lower subtries.
+        // This handles both new leaves and existing leaves that were split.
+        let branches_to_process: Vec<_> = self
+            .upper_subtrie
+            .nodes
+            .iter()
+            .filter_map(|(path, node)| {
+                if let SparseNode::Branch { leaf_mask, .. } = node {
+                    // Only process branches where children would cross into lower subtrie territory
+                    if path.len() == UPPER_TRIE_MAX_DEPTH - 1 && !leaf_mask.is_empty() {
+                        return Some(*path)
+                    }
+                }
+                None
+            })
+            .collect();
+
+        for branch_path in branches_to_process {
+            // Collect all leaf children that need conversion
+            let leaves_to_convert: Vec<(u8, Nibbles, Nibbles)> =
+                if let Some(SparseNode::Branch { leaf_mask, leaf_short_keys, .. }) =
+                    self.upper_subtrie.nodes.get(&branch_path)
+                {
+                    let mut leaves = Vec::new();
+                    let mut key_idx = 0;
+                    for nibble in leaf_mask.iter() {
+                        let short_key = leaf_short_keys[key_idx];
+                        let mut child_path = branch_path;
+                        child_path.push_unchecked(nibble);
+                        leaves.push((nibble, child_path, short_key));
+                        key_idx += 1;
+                    }
+                    leaves
+                } else {
+                    Vec::new()
+                };
+
+            // Now update the branch and create RootLeaf nodes
+            for (nibble, child_path, short_key) in leaves_to_convert {
+                // Update the branch
+                if let Some(SparseNode::Branch { leaf_mask, leaf_short_keys, state, .. }) =
+                    self.upper_subtrie.nodes.get_mut(&branch_path)
+                {
+                    let rank = SparseNode::leaf_rank(*leaf_mask, nibble);
+                    leaf_short_keys.remove(rank);
+                    leaf_mask.unset_bit(nibble);
+                    *state = SparseNodeState::Dirty;
+                }
+
+                // Compute full path and move value
+                let mut leaf_full_path = child_path;
+                leaf_full_path.extend(&short_key);
+
+                let value = self.upper_subtrie.inner.values.remove(&leaf_full_path);
+
+                // Create RootLeaf in lower subtrie
+                let lower_subtrie = self.subtrie_for_path_mut(&child_path);
+                lower_subtrie.nodes.insert(child_path, SparseNode::new_root_leaf(short_key));
+
+                // Move value if it exists
+                if let Some(v) = value {
+                    lower_subtrie
+                        .inner
+                        .values
+                        .insert(leaf_full_path, SparseNodeLeaf::new(short_key.len(), v.value));
+                }
+            }
         }
 
         // Move nodes from upper subtrie to lower subtries
@@ -648,29 +718,44 @@ impl SparseTrie for ParallelSparseTrie {
             let node =
                 self.upper_subtrie.nodes.remove(node_path).expect("node belongs to upper subtrie");
 
-            // If it's a root leaf node, extract its value before getting mutable reference to
-            // subtrie. Note: Non-root leaves (SparseNode::Leaf) no longer exist - they're only
-            // in values HashMap.
-            let leaf_value = if let SparseNode::RootLeaf { key, .. } = &node {
-                let mut leaf_full_path = *node_path;
-                leaf_full_path.extend(key);
-                Some((
-                    leaf_full_path,
-                    self.upper_subtrie
+            // Collect leaf values to move. For RootLeaf nodes, extract the single leaf value.
+            // For Branch nodes, extract values for all leaves tracked via leaf_mask.
+            let leaf_values: Vec<(Nibbles, SparseNodeLeaf)> = match &node {
+                SparseNode::RootLeaf { key, .. } => {
+                    let mut leaf_full_path = *node_path;
+                    leaf_full_path.extend(key);
+                    let value = self
+                        .upper_subtrie
                         .inner
                         .values
                         .remove(&leaf_full_path)
-                        .expect("root leaf nodes have associated values entries"),
-                ))
-            } else {
-                None
+                        .expect("root leaf nodes have associated values entries");
+                    vec![(leaf_full_path, value)]
+                }
+                SparseNode::Branch { leaf_mask, leaf_short_keys, .. } => {
+                    let mut values = Vec::new();
+                    let mut key_idx = 0;
+                    for nibble in leaf_mask.iter() {
+                        let short_key = &leaf_short_keys[key_idx];
+                        let mut leaf_full_path = *node_path;
+                        leaf_full_path.push_unchecked(nibble);
+                        leaf_full_path.extend(short_key);
+                        if let Some(value) = self.upper_subtrie.inner.values.remove(&leaf_full_path)
+                        {
+                            values.push((leaf_full_path, value));
+                        }
+                        key_idx += 1;
+                    }
+                    values
+                }
+                _ => vec![],
             };
 
             // Get or create the subtrie with the exact node path (not truncated to 2 nibbles).
             let subtrie = self.subtrie_for_path_mut(node_path);
 
-            // Insert the leaf value if we have one
-            if let Some((leaf_full_path, value)) = leaf_value {
+            // Insert all leaf values
+            for (leaf_full_path, value) in leaf_values {
                 subtrie.inner.values.insert(leaf_full_path, value);
             }
 
@@ -3133,6 +3218,14 @@ impl SparseSubtrie {
                     ),
                 );
 
+                // Update the existing leaf's key_len in values since its short key changed.
+                // The existing leaf is now tracked by the branch's leaf_mask/leaf_short_keys,
+                // but its value is still in the values HashMap. We need to update its key_len
+                // to match the new short key length.
+                if let Some(existing_value) = self.inner.values.get_mut(&current) {
+                    existing_value.key_len = existing_leaf_short_key.len();
+                }
+
                 // The original leaf is being converted to an extension. Signal this to the caller
                 // so the parent branch's leaf_mask can be updated (the parent may be in a
                 // different subtrie).
@@ -3229,7 +3322,62 @@ impl SparseSubtrie {
                     ))
                 }
 
-                // If the nibble is set, we can continue traversing the branch.
+                // If the nibble is set in leaf_mask, we need to split the existing leaf
+                // into a branch that contains both the existing and new leaves.
+                if leaf_mask.is_bit_set(nibble) {
+                    let rank = SparseNode::leaf_rank(*leaf_mask, nibble);
+                    let existing_leaf_short_key = leaf_short_keys.remove(rank);
+                    leaf_mask.unset_bit(nibble);
+                    *state = SparseNodeState::Dirty;
+
+                    // Compute the full path of the existing leaf
+                    let mut existing_full_path = current;
+                    existing_full_path.extend(&existing_leaf_short_key);
+
+                    // Find the common prefix between existing and new leaf paths
+                    let common = existing_full_path.common_prefix_length(path);
+
+                    // Compute short keys for both leaves (the portion after the new branch)
+                    let existing_leaf_nibble = existing_full_path.get_unchecked(common);
+                    let new_leaf_nibble = path.get_unchecked(common);
+                    let new_existing_leaf_short_key = existing_full_path.slice(common + 1..);
+                    let new_leaf_short_key = path.slice(common + 1..);
+
+                    // Create the new branch with both leaves
+                    let branch_path = path.slice(..common);
+                    self.nodes.insert(
+                        branch_path,
+                        SparseNode::new_split_branch(
+                            existing_leaf_nibble,
+                            new_existing_leaf_short_key,
+                            new_leaf_nibble,
+                            new_leaf_short_key,
+                        ),
+                    );
+
+                    // If the branch is deeper than the current node, we need an extension
+                    let mut inserted_nodes = vec![branch_path];
+                    if common > current.len() {
+                        // Create extension from current to branch
+                        let ext_key = path.slice(current.len()..common);
+                        self.nodes.insert(current, SparseNode::new_ext(ext_key));
+                        inserted_nodes.push(current);
+                    }
+
+                    // Update the existing leaf's key_len in values since its short key changed.
+                    if let Some(existing_value) = self.inner.values.get_mut(&existing_full_path) {
+                        existing_value.key_len = new_existing_leaf_short_key.len();
+                    }
+
+                    let new_leaf_key_len = path.len() - common - 1;
+                    return Ok(LeafUpdateStep::complete_with_insertions(
+                        inserted_nodes,
+                        None,
+                        new_leaf_key_len,
+                    ))
+                }
+
+                // If the nibble is set but it's not a leaf, continue traversing.
                 Ok(LeafUpdateStep::continue_with(current))
             }
         }
@@ -4590,8 +4738,8 @@ mod tests {
         }
 
         fn has_leaf(self, path: &Nibbles, expected_key: &Nibbles) -> Self {
-            if path.is_empty() {
-                // Root leaf case - check for RootLeaf at root
+            if *path == self.subtrie.path {
+                // Root leaf case - check for RootLeaf at subtrie root
                 match self.subtrie.nodes.get(path) {
                     Some(SparseNode::RootLeaf { key, .. }) => {
                         assert_eq!(
