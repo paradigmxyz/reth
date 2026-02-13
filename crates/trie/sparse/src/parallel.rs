@@ -376,7 +376,7 @@ impl SparseTrie for ParallelSparseTrie {
         &mut self,
         full_path: Nibbles,
         value: Vec<u8>,
-        provider: P,
+        _provider: P,
     ) -> SparseTrieResult<()> {
         trace!(
             target: "trie::parallel_sparse",
@@ -404,8 +404,6 @@ impl SparseTrie for ParallelSparseTrie {
             return Ok(());
         }
 
-        let retain_updates = self.updates_enabled();
-
         // Insert value into upper subtrie temporarily. We'll move it to the correct subtrie
         // during traversal, or clean it up if we error.
         self.upper_subtrie.inner.values.insert(full_path, value.clone());
@@ -420,11 +418,8 @@ impl SparseTrie for ParallelSparseTrie {
         // `new_nodes` to keep track of any nodes that were created during the traversal.
         let mut new_nodes = Vec::new();
         let mut next = Some(Nibbles::default());
-        let mut parent_extension: Option<Nibbles> = None;
         // Track the original node that was modified (path, original_node) for rollback
         let mut modified_original: Option<(Nibbles, SparseNode)> = None;
-        // Track inserted branch masks for rollback
-        let mut inserted_masks: Vec<Nibbles> = Vec::new();
 
         // Traverse the upper subtrie to find the node to update or the subtrie to update.
         //
@@ -442,117 +437,21 @@ impl SparseTrie for ParallelSparseTrie {
 
             // Traverse the next node, keeping track of any changed nodes and the next step in the
             // trie. If traversal fails, clean up the value we inserted and propagate the error.
-            let step_result =
-                self.upper_subtrie.update_next_node(current, &full_path, retain_updates);
+            let step_result = self.upper_subtrie.update_next_node(current, &full_path);
 
-            if let Err(err) = step_result {
+            if step_result.is_err() {
                 self.upper_subtrie.inner.values.remove(&full_path);
-
-                // Handle case when a blinded branch node is hit that is a child of an extension
-                // node. In those cases we need to request reveal for the extension
-                // node because proof workers consider branch and extension nodes to
-                // be coupled.
-                if let SparseTrieErrorKind::BlindedNode { path, hash } = err.kind() &&
-                    let Some(ext) = parent_extension
-                {
-                    debug_assert_eq!(path, &current);
-                    return Err(SparseTrieErrorKind::BlindedNode { path: ext, hash: *hash }.into());
-                }
-
-                return Err(err);
+                return step_result.map(|_| ());
             }
 
             match step_result? {
-                LeafUpdateStep::Continue { next_node, parent_extension_path } => {
+                LeafUpdateStep::Continue { next_node } => {
                     next = Some(next_node);
-                    parent_extension = parent_extension_path;
                     // Clear modified_original since we haven't actually modified anything yet
                     modified_original = None;
                 }
-                LeafUpdateStep::Complete { inserted_nodes, extension_to_reveal } => {
+                LeafUpdateStep::Complete { inserted_nodes } => {
                     new_nodes.extend(inserted_nodes);
-
-                    if let Some((reveal_path, child_path)) = extension_to_reveal {
-                        let subtrie = self.subtrie_for_path_mut(&child_path);
-                        let reveal_masks = if subtrie
-                            .nodes
-                            .get(&child_path)
-                            .expect("node must exist")
-                            .is_hash()
-                        {
-                            debug!(
-                                target: "trie::parallel_sparse",
-                                child_path = ?reveal_path,
-                                leaf_full_path = ?full_path,
-                                "Extension node child not revealed in update_leaf, falling back to db",
-                            );
-                            let revealed_node = match provider.trie_node(&child_path) {
-                                Ok(node) => node,
-                                Err(e) => {
-                                    self.rollback_insert(
-                                        &full_path,
-                                        &new_nodes,
-                                        &inserted_masks,
-                                        modified_original.take(),
-                                    );
-                                    return Err(e);
-                                }
-                            };
-                            if let Some(RevealedNode { node, tree_mask, hash_mask }) = revealed_node
-                            {
-                                let decoded = match TrieNodeV2::decode(&mut &node[..]) {
-                                    Ok(d) => d,
-                                    Err(e) => {
-                                        self.rollback_insert(
-                                            &full_path,
-                                            &new_nodes,
-                                            &inserted_masks,
-                                            modified_original.take(),
-                                        );
-                                        return Err(e.into());
-                                    }
-                                };
-                                trace!(
-                                    target: "trie::parallel_sparse",
-                                    ?reveal_path,
-                                    ?decoded,
-                                    ?tree_mask,
-                                    ?hash_mask,
-                                    "Revealing child (from upper)",
-                                );
-                                let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
-                                if let Err(e) = subtrie.reveal_node(child_path, &decoded, masks) {
-                                    self.rollback_insert(
-                                        &full_path,
-                                        &new_nodes,
-                                        &inserted_masks,
-                                        modified_original.take(),
-                                    );
-                                    return Err(e);
-                                }
-                                masks
-                            } else {
-                                self.rollback_insert(
-                                    &full_path,
-                                    &new_nodes,
-                                    &inserted_masks,
-                                    modified_original.take(),
-                                );
-                                return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
-                                    path: reveal_path,
-                                }
-                                .into())
-                            }
-                        } else {
-                            None
-                        };
-
-                        if let Some(_masks) = reveal_masks {
-                            self.branch_node_masks.insert(reveal_path, _masks);
-                            inserted_masks.push(reveal_path);
-                        }
-                    }
-
                     next = None;
                 }
                 LeafUpdateStep::NodeNotFound => {
@@ -620,23 +519,12 @@ impl SparseTrie for ParallelSparseTrie {
 
             // If we didn't update the target leaf, we need to call update_leaf on the subtrie
             // to ensure that the leaf is updated correctly.
-            match subtrie.update_leaf(full_path, value, provider, retain_updates, parent_extension)
-            {
-                Ok(Some((revealed_path, revealed_masks))) => {
-                    self.branch_node_masks.insert(revealed_path, revealed_masks);
+            if let Err(e) = subtrie.update_leaf(full_path, value) {
+                // Clean up: remove the value from lower subtrie if it was inserted
+                if let Some(lower) = self.lower_subtrie_for_path_mut(&full_path) {
+                    lower.inner.values.remove(&full_path);
                 }
-                Ok(None) => {}
-                Err(e) => {
-                    // Clean up: remove the value from lower subtrie if it was inserted
-                    if let Some(lower) = self.lower_subtrie_for_path_mut(&full_path) {
-                        lower.inner.values.remove(&full_path);
-                    }
-                    // Clean up any branch masks that were inserted during upper subtrie traversal
-                    for mask_path in &inserted_masks {
-                        self.branch_node_masks.remove(mask_path);
-                    }
-                    return Err(e);
-                }
+                return Err(e);
             }
         }
 
@@ -1512,37 +1400,6 @@ impl ParallelSparseTrie {
         let target_key =
             if full_path.starts_with(path) { full_key } else { Self::nibbles_to_padded_b256(path) };
         (target_key, min_len)
-    }
-
-    /// Rolls back a partial update by removing the value, removing any inserted nodes,
-    /// removing any inserted branch masks, and restoring any modified original node.
-    /// This ensures `update_leaf` is atomic - either it succeeds completely or leaves the trie
-    /// unchanged.
-    fn rollback_insert(
-        &mut self,
-        full_path: &Nibbles,
-        inserted_nodes: &[Nibbles],
-        inserted_masks: &[Nibbles],
-        modified_original: Option<(Nibbles, SparseNode)>,
-    ) {
-        self.upper_subtrie.inner.values.remove(full_path);
-        for node_path in inserted_nodes {
-            // Try upper subtrie first - nodes may be there even if path length suggests lower
-            if self.upper_subtrie.nodes.remove(node_path).is_none() {
-                // Not in upper, try lower subtrie
-                if let Some(subtrie) = self.lower_subtrie_for_path_mut(node_path) {
-                    subtrie.nodes.remove(node_path);
-                }
-            }
-        }
-        // Remove any branch masks that were inserted
-        for mask_path in inserted_masks {
-            self.branch_node_masks.remove(mask_path);
-        }
-        // Restore the original node that was modified
-        if let Some((path, original_node)) = modified_original {
-            self.upper_subtrie.nodes.insert(path, original_node);
-        }
     }
 
     /// Creates a new revealed sparse trie from the given root node.
@@ -2655,25 +2512,17 @@ impl SparseSubtrie {
     ///
     /// This method is atomic: if an error occurs during structural changes, all modifications
     /// are rolled back and the trie state is unchanged.
-    pub fn update_leaf(
-        &mut self,
-        full_path: Nibbles,
-        value: Vec<u8>,
-        provider: impl TrieNodeProvider,
-        retain_updates: bool,
-        mut parent_extension: Option<Nibbles>,
-    ) -> SparseTrieResult<Option<(Nibbles, BranchNodeMasks)>> {
+    pub fn update_leaf(&mut self, full_path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
         debug_assert!(full_path.starts_with(&self.path));
 
         // Check if value already exists - if so, just update it (no structural changes needed)
         if let Entry::Occupied(mut e) = self.inner.values.entry(full_path) {
             e.insert(value);
-            return Ok(None)
+            return Ok(())
         }
 
         // Here we are starting at the root of the subtrie, and traversing from there.
         let mut current = Some(self.path);
-        let mut revealed = None;
 
         // Track inserted nodes and modified original for rollback on error
         let mut inserted_nodes: Vec<Nibbles> = Vec::new();
@@ -2687,103 +2536,21 @@ impl SparseSubtrie {
                 modified_original = Some((current_path, node.clone()));
             }
 
-            let step_result = self.update_next_node(current_path, &full_path, retain_updates);
+            let step_result = self.update_next_node(current_path, &full_path);
 
             if let Err(err) = step_result {
                 self.rollback_leaf_insert(&full_path, &inserted_nodes, modified_original.take());
-
-                // Handle case when a blinded branch node is hit that is a child of an extension
-                // node. In those cases we need to request reveal for the extension
-                // node because proof workers consider branch and extension nodes to
-                // be coupled.
-                if let SparseTrieErrorKind::BlindedNode { path, hash } = err.kind() &&
-                    let Some(ext) = parent_extension
-                {
-                    debug_assert_eq!(Some(path), current.as_ref());
-                    return Err(SparseTrieErrorKind::BlindedNode { path: ext, hash: *hash }.into());
-                }
-
                 return Err(err);
             }
 
             match step_result? {
-                LeafUpdateStep::Continue { next_node, parent_extension_path } => {
+                LeafUpdateStep::Continue { next_node } => {
                     current = Some(next_node);
-                    parent_extension = parent_extension_path;
                     // Clear modified_original since we haven't actually modified anything yet
                     modified_original = None;
                 }
-                LeafUpdateStep::Complete { inserted_nodes: new_inserted, extension_to_reveal } => {
+                LeafUpdateStep::Complete { inserted_nodes: new_inserted } => {
                     inserted_nodes.extend(new_inserted);
-
-                    if let Some((reveal_path, child_path)) = extension_to_reveal &&
-                        self.nodes.get(&child_path).expect("node must exist").is_hash()
-                    {
-                        debug!(
-                            target: "trie::parallel_sparse",
-                            child_path = ?reveal_path,
-                            leaf_full_path = ?full_path,
-                            "Extension node child not revealed in update_leaf, falling back to db",
-                        );
-                        let revealed_node = match provider.trie_node(&child_path) {
-                            Ok(node) => node,
-                            Err(e) => {
-                                self.rollback_leaf_insert(
-                                    &full_path,
-                                    &inserted_nodes,
-                                    modified_original.take(),
-                                );
-                                return Err(e);
-                            }
-                        };
-                        if let Some(RevealedNode { node, tree_mask, hash_mask }) = revealed_node {
-                            let decoded = match TrieNodeV2::decode(&mut &node[..]) {
-                                Ok(d) => d,
-                                Err(e) => {
-                                    self.rollback_leaf_insert(
-                                        &full_path,
-                                        &inserted_nodes,
-                                        modified_original.take(),
-                                    );
-                                    return Err(e.into());
-                                }
-                            };
-                            trace!(
-                                target: "trie::parallel_sparse",
-                                ?reveal_path,
-                                ?decoded,
-                                ?tree_mask,
-                                ?hash_mask,
-                                "Revealing child (from lower)",
-                            );
-                            let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
-                            if let Err(e) = self.reveal_node(child_path, &decoded, masks) {
-                                self.rollback_leaf_insert(
-                                    &full_path,
-                                    &inserted_nodes,
-                                    modified_original.take(),
-                                );
-                                return Err(e);
-                            }
-
-                            debug_assert_eq!(
-                                revealed, None,
-                                "Only a single blinded node should be revealed during update_leaf"
-                            );
-                            revealed = masks.map(|masks| (reveal_path, masks));
-                        } else {
-                            self.rollback_leaf_insert(
-                                &full_path,
-                                &inserted_nodes,
-                                modified_original.take(),
-                            );
-                            return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
-                                path: reveal_path,
-                            }
-                            .into())
-                        }
-                    }
-
                     current = None;
                 }
                 LeafUpdateStep::NodeNotFound => {
@@ -2795,7 +2562,7 @@ impl SparseSubtrie {
         // Only insert the value after all structural changes succeed
         self.inner.values.insert(full_path, value);
 
-        Ok(revealed)
+        Ok(())
     }
 
     /// Rollback structural changes made during a failed leaf insert.
@@ -2832,7 +2599,6 @@ impl SparseSubtrie {
         &mut self,
         mut current: Nibbles,
         path: &Nibbles,
-        retain_updates: bool,
     ) -> SparseTrieResult<LeafUpdateStep> {
         debug_assert!(path.starts_with(&self.path));
         debug_assert!(current.starts_with(&self.path));
@@ -2847,7 +2613,7 @@ impl SparseSubtrie {
                 // the subtrie.
                 let path = path.slice(self.path.len()..);
                 *node = SparseNode::new_leaf(path);
-                Ok(LeafUpdateStep::complete_with_insertions(vec![current], None))
+                Ok(LeafUpdateStep::complete_with_insertions(vec![current]))
             }
             SparseNode::Hash(hash) => {
                 Err(SparseTrieErrorKind::BlindedNode { path: current, hash: *hash }.into())
@@ -2885,29 +2651,19 @@ impl SparseSubtrie {
                 self.nodes
                     .insert(existing_leaf_path, SparseNode::new_leaf(current.slice(common + 1..)));
 
-                Ok(LeafUpdateStep::complete_with_insertions(
-                    vec![branch_path, new_leaf_path, existing_leaf_path],
-                    None,
-                ))
+                Ok(LeafUpdateStep::complete_with_insertions(vec![
+                    branch_path,
+                    new_leaf_path,
+                    existing_leaf_path,
+                ]))
             }
             SparseNode::Extension { key, .. } => {
-                let mut child_path = current;
-                child_path.extend(key);
+                current.extend(key);
 
-                if !path.starts_with(&child_path) {
+                if !path.starts_with(&current) {
                     // find the common prefix
-                    let common = child_path.common_prefix_length(path);
-                    *key = child_path.slice(child_path.len() - key.len()..common);
-
-                    // If branch node updates retention is enabled, we need to query the
-                    // extension node child to later set the hash mask for a parent branch node
-                    // correctly.
-                    //
-                    // We request reveal for the extension node's path as proof workers consider
-                    // branch and extension nodes coupled.
-                    let reveal_path = retain_updates.then_some((current, child_path));
-
-                    current = child_path;
+                    let common = current.common_prefix_length(path);
+                    *key = current.slice(current.len() - key.len()..common);
 
                     // create state mask for new branch node
                     // NOTE: this might overwrite the current extension node
@@ -2935,10 +2691,10 @@ impl SparseSubtrie {
                         inserted_nodes.push(ext_path);
                     }
 
-                    return Ok(LeafUpdateStep::complete_with_insertions(inserted_nodes, reveal_path))
+                    return Ok(LeafUpdateStep::complete_with_insertions(inserted_nodes))
                 }
 
-                Ok(LeafUpdateStep::continue_with(child_path, Some(current)))
+                Ok(LeafUpdateStep::continue_with(current))
             }
             SparseNode::Branch { state_mask, .. } => {
                 let nibble = path.get_unchecked(current.len());
@@ -2947,11 +2703,11 @@ impl SparseSubtrie {
                     state_mask.set_bit(nibble);
                     let new_leaf = SparseNode::new_leaf(path.slice(current.len()..));
                     self.nodes.insert(current, new_leaf);
-                    return Ok(LeafUpdateStep::complete_with_insertions(vec![current], None))
+                    return Ok(LeafUpdateStep::complete_with_insertions(vec![current]))
                 }
 
                 // If the nibble is set, we can continue traversing the branch.
-                Ok(LeafUpdateStep::continue_with(current, None))
+                Ok(LeafUpdateStep::continue_with(current))
             }
         }
     }
@@ -3707,18 +3463,11 @@ pub enum LeafUpdateStep {
     Continue {
         /// The next node path to process
         next_node: Nibbles,
-        /// Path to the parent, if it was an extension node. This is used to properly request
-        /// reveals.
-        parent_extension_path: Option<Nibbles>,
     },
     /// Update is complete with nodes inserted
     Complete {
         /// The node paths that were inserted during this step
         inserted_nodes: Vec<Nibbles>,
-        /// Tuple of the extension node path to reveal and its child path. Before requesting
-        /// reveal, it should be verified that the child node (second element of the tuple) is not
-        /// revealed yet.
-        extension_to_reveal: Option<(Nibbles, Nibbles)>,
     },
     /// The node was not found
     #[default]
@@ -3727,16 +3476,13 @@ pub enum LeafUpdateStep {
 
 impl LeafUpdateStep {
     /// Creates a step to continue with the next node
-    pub const fn continue_with(next_node: Nibbles, parent_extension_path: Option<Nibbles>) -> Self {
-        Self::Continue { next_node, parent_extension_path }
+    pub const fn continue_with(next_node: Nibbles) -> Self {
+        Self::Continue { next_node }
     }
 
     /// Creates a step indicating completion with inserted nodes
-    pub const fn complete_with_insertions(
-        inserted_nodes: Vec<Nibbles>,
-        extension_to_reveal: Option<(Nibbles, Nibbles)>,
-    ) -> Self {
-        Self::Complete { inserted_nodes, extension_to_reveal }
+    pub const fn complete_with_insertions(inserted_nodes: Vec<Nibbles>) -> Self {
+        Self::Complete { inserted_nodes }
     }
 }
 
