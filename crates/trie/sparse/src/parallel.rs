@@ -1234,13 +1234,19 @@ impl SparseTrie for ParallelSparseTrie {
                             }
                         }
 
-                        // Move value if needed and remove the child
+                        // Move value if needed
                         if let CollapsedNode::LeafInParent { full_path: leaf_full_path, .. } =
                             &new_collapsed
                         {
                             self.move_value_on_collapse(&ext_path, leaf_full_path, branch_path);
                         }
-                        self.remove_node(branch_path);
+
+                        // Only remove the child node if the branch was replaced with a node
+                        // (e.g., extension). If collapsed was LeafInParent, the branch was
+                        // already removed earlier when new_branch_node was None.
+                        if matches!(collapsed, CollapsedNode::Node(_)) {
+                            self.remove_node(branch_path);
+                        }
                     }
                 }
             } else if let Some(CollapsedNode::LeafInParent { short_key, full_path }) =
