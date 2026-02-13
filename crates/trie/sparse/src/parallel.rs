@@ -678,6 +678,14 @@ impl SparseTrie for ParallelSparseTrie {
 
             // Now update the branch and create RootLeaf nodes
             for (nibble, child_path, short_key) in leaves_to_convert {
+                // Check if the lower subtrie already has a node for this leaf (e.g., from
+                // reveal_nodes). If so, skip this leaf - it's already properly set up and we
+                // don't want to overwrite a cached RootLeaf with a dirty one.
+                let lower_subtrie = self.subtrie_for_path_mut(&child_path);
+                if lower_subtrie.nodes.contains_key(&child_path) {
+                    continue;
+                }
+
                 // Update the branch
                 if let Some(SparseNode::Branch { leaf_mask, leaf_short_keys, state, .. }) =
                     self.upper_subtrie.nodes.get_mut(&branch_path)
