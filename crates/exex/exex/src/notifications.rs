@@ -1,6 +1,7 @@
 use crate::{BackfillJobFactory, ExExNotification, StreamBackfillJob, WalHandle};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
+use alloy_primitives::B256;
 use futures::{Stream, StreamExt};
 use reth_evm::ConfigureEvm;
 use reth_exex_types::ExExHead;
@@ -161,6 +162,15 @@ where
     /// head block.
     fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification<E::Primitives>>> {
         let exex_head = self.exex_head.as_ref().expect("exex_head should be set");
+
+        // The user can set the ExEx head to the zero hash to skip canonical checks. This can be
+        // useful in the case where the user sets a historical block number to backfill
+        // from without needing to know the hash.
+        if exex_head.block.hash == B256::ZERO {
+            debug!(target: "exex::notifications", "No ExEx block hash set, skipping canonical check");
+            return Ok(None)
+        }
+
         if self.provider.is_known(exex_head.block.hash)? &&
             exex_head.block.number <= self.initial_node_head.number
         {
