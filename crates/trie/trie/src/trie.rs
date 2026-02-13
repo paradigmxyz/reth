@@ -699,7 +699,7 @@ where
         Span::current().record("storage_root", format!("{root:?}"));
 
         let removed_keys = storage_node_iter.walker.take_removed_keys();
-        trie_updates.finalize(hash_builder, removed_keys);
+        trie_updates.finalize(hash_builder, removed_keys, root);
 
         let stats = tracker.finish();
 
