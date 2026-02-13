@@ -1555,14 +1555,14 @@ impl SparseTrie for ParallelSparseTrie {
         }
     }
 
-    /// O(1) size hint based on total node count (including hash stubs).
+    /// O(1) size hint based on total node count (including hash stubs and leaves).
     fn size_hint(&self) -> usize {
-        let upper_count = self.upper_subtrie.nodes.len();
+        let upper_count = self.upper_subtrie.nodes.len() + self.upper_subtrie.inner.values.len();
         let lower_count: usize = self
             .lower_subtries
             .iter()
             .filter_map(|s| s.as_revealed_ref())
-            .map(|s| s.nodes.len())
+            .map(|s| s.nodes.len() + s.inner.values.len())
             .sum();
         upper_count + lower_count
     }
@@ -1575,6 +1575,8 @@ impl SparseTrie for ParallelSparseTrie {
         // Collects "effective pruned roots" - children of nodes at max_depth with computed hashes.
         // We replace nodes with Hash stubs inline during traversal.
         let mut effective_pruned_roots = Vec::<Nibbles>::new();
+        // Collect leaf value paths to remove (leaves are not in nodes, so tracked separately)
+        let mut leaf_values_to_remove = Vec::<Nibbles>::new();
         let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
         stack.push((Nibbles::default(), 0));
 
@@ -1590,23 +1592,28 @@ impl SparseTrie for ParallelSparseTrie {
                 continue;
             }
 
-            // Get children to visit from current node (immutable access)
-            let children: SmallVec<[Nibbles; 16]> = {
+            // Get children to visit from current node (immutable access), and collect leaf
+            // children to prune if at max_depth.
+            let (children, leaf_children): (SmallVec<[Nibbles; 16]>, SmallVec<[Nibbles; 16]>) = {
                 let Some(subtrie) = self.subtrie_for_path(&path) else { continue };
                 let Some(node) = subtrie.nodes.get(&path) else { continue };
 
                 match node {
                     SparseNode::Empty | SparseNode::Hash(_) | SparseNode::RootLeaf { .. } => {
-                        SmallVec::new()
+                        (SmallVec::new(), SmallVec::new())
                     }
                     SparseNode::Extension { key, .. } => {
                         let mut child = path;
                         child.extend(key);
-                        SmallVec::from_slice(&[child])
+                        (SmallVec::from_slice(&[child]), SmallVec::new())
                     }
-                    SparseNode::Branch { state_mask, .. } => {
+                    SparseNode::Branch { state_mask, leaf_mask, leaf_short_keys, .. } => {
                         let mut children = SmallVec::new();
-                        let mut mask = state_mask.get();
+                        let mut leaf_children = SmallVec::new();
+                        let non_leaf_mask = state_mask.get() & !leaf_mask.get();
+
+                        // Collect non-leaf children (exist in nodes)
+                        let mut mask = non_leaf_mask;
                         while mask != 0 {
                             let nibble = mask.trailing_zeros() as u8;
                             mask &= mask - 1;
@@ -1614,10 +1621,39 @@ impl SparseTrie for ParallelSparseTrie {
                             child.push_unchecked(nibble);
                             children.push(child);
                         }
-                        children
+
+                        // At max_depth, collect leaf children to prune (they're not in nodes)
+                        if depth == max_depth {
+                            let mut mask = leaf_mask.get();
+                            let mut short_key_idx = 0;
+                            while mask != 0 {
+                                let nibble = mask.trailing_zeros() as u8;
+                                mask &= mask - 1;
+                                let mut leaf_path = path;
+                                leaf_path.push_unchecked(nibble);
+                                leaf_path.extend(&leaf_short_keys[short_key_idx]);
+                                leaf_children.push(leaf_path);
+                                short_key_idx += 1;
+                            }
+                        }
+
+                        (children, leaf_children)
                     }
                 }
             };
+
+            // At max_depth, clear leaf children from the parent branch and collect their paths
+            if depth == max_depth && !leaf_children.is_empty() {
+                leaf_values_to_remove.extend(leaf_children);
+                // Clear leaf_mask and leaf_short_keys from the branch
+                if let Some(subtrie) = self.subtrie_for_path_mut_untracked(&path) &&
+                    let Some(SparseNode::Branch { leaf_mask, leaf_short_keys, .. }) =
+                        subtrie.nodes.get_mut(&path)
+                {
+                    *leaf_mask = TrieMask::default();
+                    leaf_short_keys.clear();
+                }
+            }
 
             // Process children - either continue traversal or prune
             for child in children {
@@ -1641,6 +1677,10 @@ impl SparseTrie for ParallelSparseTrie {
                 }
             }
         }
+
+        // Add leaf paths to effective_pruned_roots so they get handled by the retain logic below.
+        // Leaf values need to be removed from the subtrie that contains their parent branch.
+        effective_pruned_roots.extend(leaf_values_to_remove);
 
         if effective_pruned_roots.is_empty() {
             return 0;
@@ -9414,8 +9454,10 @@ mod tests {
         }
 
         assert_eq!(root_before, trie.root(), "root hash should be preserved");
-        // Root + extension + 2 hash stubs (for the two leaves' parent branches)
-        assert_eq!(trie.size_hint(), 4, "root + extension + hash stubs after prune(1)");
+        // Extension (root) + branch (with leaf_mask cleared, leaves pruned)
+        // With the new leaf representation, leaves are stored in values not nodes.
+        // After pruning, the branch's leaf children are removed from values.
+        assert_eq!(trie.size_hint(), 2, "extension + branch after prune(1)");
     }
 
     #[test]
