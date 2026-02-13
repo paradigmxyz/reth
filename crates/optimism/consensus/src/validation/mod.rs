@@ -557,7 +557,7 @@ mod tests {
             receipts: vec![],
             requests: Requests::default(),
             gas_used: GAS_USED,
-            block_access_list_hash: Default::default(),
+            block_access_list: Default::default(),
         };
         validate_block_post_execution(&header, &chainspec, &result, None).unwrap();
     }
@@ -579,7 +579,7 @@ mod tests {
             receipts: vec![],
             requests: Requests::default(),
             gas_used: GAS_USED,
-            block_access_list_hash: Default::default(),
+            block_access_list: Default::default(),
         };
         assert!(matches!(
             validate_block_post_execution(&header, &chainspec, &result, None).unwrap_err(),

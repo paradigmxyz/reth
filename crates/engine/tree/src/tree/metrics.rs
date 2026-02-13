@@ -424,7 +424,7 @@ mod tests {
                 requests: Requests::default(),
                 gas_used: 21000,
                 blob_gas_used: 0,
-                block_access_list_hash: Default::default(),
+                block_access_list: Default::default(),
             },
         };
 
