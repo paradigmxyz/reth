@@ -274,15 +274,19 @@ impl SparseTrie for ParallelSparseTrie {
                     .expect("just revealed")
                     .reveal_node(node.path, &node.node, node.masks)?;
 
-                // For boundary leaves, update the parent branch's leaf_mask in upper subtrie
-                if node.path.len() == UPPER_TRIE_MAX_DEPTH && matches!(node.node, TrieNode::Leaf(_))
-                {
-                    let parent_path = node.path.slice(..node.path.len() - 1);
-                    let leaf_nibble = node.path.get_unchecked(node.path.len() - 1);
-                    if let Some(SparseNode::Branch { leaf_mask, .. }) =
-                        self.upper_subtrie.nodes.get_mut(&parent_path)
-                    {
-                        leaf_mask.set_bit(leaf_nibble);
+                // For boundary leaves, update the parent branch's leaf_mask and
+                // leaf_short_keys in upper subtrie
+                if node.path.len() == UPPER_TRIE_MAX_DEPTH {
+                    if let TrieNode::Leaf(leaf) = &node.node {
+                        let parent_path = node.path.slice(..node.path.len() - 1);
+                        let leaf_nibble = node.path.get_unchecked(node.path.len() - 1);
+                        if let Some(SparseNode::Branch { leaf_mask, leaf_short_keys, .. }) =
+                            self.upper_subtrie.nodes.get_mut(&parent_path)
+                        {
+                            leaf_mask.set_bit(leaf_nibble);
+                            let rank = SparseNode::leaf_rank(*leaf_mask, leaf_nibble);
+                            leaf_short_keys.insert(rank, leaf.key);
+                        }
                     }
                 }
             }
@@ -358,7 +362,7 @@ impl SparseTrie for ParallelSparseTrie {
                     // can cause multiple re-allocations as the hashmap grows.
                     subtrie.nodes.reserve(nodes.len());
 
-                    let mut boundary_leaves: Vec<(Nibbles, u8)> = Vec::new();
+                    let mut boundary_leaves: Vec<(Nibbles, u8, Nibbles)> = Vec::new();
                     for node in nodes {
                         // For boundary leaves, check reachability from upper subtrie's parent
                         // branch
@@ -381,13 +385,14 @@ impl SparseTrie for ParallelSparseTrie {
                         if res.is_err() {
                             return (subtrie_idx, subtrie, boundary_leaves, res.map(|_| ()))
                         }
-                        // Track boundary leaves to update parent's leaf_mask after parallel work
-                        if node.path.len() == UPPER_TRIE_MAX_DEPTH &&
-                            matches!(node.node, TrieNode::Leaf(_))
-                        {
-                            let parent_path = node.path.slice(..node.path.len() - 1);
-                            let leaf_nibble = node.path.get_unchecked(node.path.len() - 1);
-                            boundary_leaves.push((parent_path, leaf_nibble));
+                        // Track boundary leaves to update parent's leaf_mask and
+                        // leaf_short_keys after parallel work
+                        if node.path.len() == UPPER_TRIE_MAX_DEPTH {
+                            if let TrieNode::Leaf(leaf) = &node.node {
+                                let parent_path = node.path.slice(..node.path.len() - 1);
+                                let leaf_nibble = node.path.get_unchecked(node.path.len() - 1);
+                                boundary_leaves.push((parent_path, leaf_nibble, leaf.key));
+                            }
                         }
                     }
                     (subtrie_idx, subtrie, boundary_leaves, Ok(()))
@@ -402,12 +407,15 @@ impl SparseTrie for ParallelSparseTrie {
                 if res.is_err() {
                     any_err = res;
                 }
-                // Update leaf_mask for boundary leaves' parent branches in upper subtrie
-                for (parent_path, leaf_nibble) in boundary_leaves {
-                    if let Some(SparseNode::Branch { leaf_mask, .. }) =
+                // Update leaf_mask and leaf_short_keys for boundary leaves' parent
+                // branches in upper subtrie
+                for (parent_path, leaf_nibble, short_key) in boundary_leaves {
+                    if let Some(SparseNode::Branch { leaf_mask, leaf_short_keys, .. }) =
                         self.upper_subtrie.nodes.get_mut(&parent_path)
                     {
                         leaf_mask.set_bit(leaf_nibble);
+                        let rank = SparseNode::leaf_rank(*leaf_mask, leaf_nibble);
+                        leaf_short_keys.insert(rank, short_key);
                     }
                 }
             }
@@ -2283,7 +2291,37 @@ impl ParallelSparseTrie {
                     );
                 }
                 RlpNodePathStackItem::Leaf { full_path, is_in_prefix_set } => {
-                    self.upper_subtrie.inner.rlp_node_leaf(prefix_set, full_path, is_in_prefix_set);
+                    // Try upper subtrie first, then check lower subtrie for boundary leaves
+                    if self.upper_subtrie.inner.values.contains_key(&full_path) {
+                        self.upper_subtrie.inner.rlp_node_leaf(
+                            prefix_set,
+                            full_path,
+                            is_in_prefix_set,
+                        );
+                    } else if full_path.len() >= UPPER_TRIE_MAX_DEPTH {
+                        // Boundary leaves may have values stored in lower subtries
+                        let index = path_subtrie_index_unchecked(&full_path);
+                        self.lower_subtries[index]
+                            .as_revealed_mut()
+                            .expect("lower subtrie must exist for boundary leaf")
+                            .inner
+                            .rlp_node_leaf(prefix_set, full_path, is_in_prefix_set);
+                        // Move the computed RLP node from lower subtrie's stack to upper subtrie's
+                        let rlp_stack_item = self.lower_subtries[index]
+                            .as_revealed_mut()
+                            .unwrap()
+                            .inner
+                            .buffers
+                            .rlp_node_stack
+                            .pop()
+                            .expect("rlp_node_leaf should have pushed to stack");
+                        self.upper_subtrie.inner.buffers.rlp_node_stack.push(rlp_stack_item);
+                    } else {
+                        panic!(
+                            "leaf value not found for path {:?} in upper or lower subtrie",
+                            full_path
+                        );
+                    }
                 }
             }
         }

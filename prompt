@@ -1,0 +1,12 @@
+We are going to remove the SparseNode::Leaf variant, such that leaves are entirely tracked via `values` and not `nodes` hashmaps.
+
+Guidelines:
+
+* Do _not_ remove the SparseNode::RootLeaf variant
+* Do _not_ modify the definition of SparseNodeLeaf
+* Do _not_ change the key of `values`, it must remain the full B256 key
+* The "key suffix" of a leaf is called its "short key", use the correct naming in documentation and code
+* Add a `leaf_short_keys: Vec<Nibbles>` field to Branch, to allow getting the full key of child leaf
+* RlpNodePathStackItem will need to become an enum, with a variant `Inner` which captures its existing fields, and a variant `Leaf` which tracks a leaf's full key and is_in_prefix_set
+
+Use the oracle to ensure the requirements are understood. Ask me questions about anything which is unclear or which requires a decision not included here.

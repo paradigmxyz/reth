@@ -1,0 +1,50 @@
+# Original Prompt
+
+We are going to remove the SparseNode::Leaf variant, such that leaves are entirely tracked via `values` and not `nodes` hashmaps.
+
+Guidelines:
+
+* Do _not_ remove the SparseNode::RootLeaf variant
+* Do _not_ modify the definition of SparseNodeLeaf
+* Do _not_ change the key of `values`, it must remain the full B256 key
+* The "key suffix" of a leaf is called its "short key", use the correct naming in documentation and code
+* Add a `leaf_short_keys: Vec<Nibbles>` field to Branch, to allow getting the full key of child leaf
+* RlpNodePathStackItem will need to become an enum, with a variant `Inner` which captures its existing fields, and a variant `Leaf` which tracks a leaf's full key and is_in_prefix_set
+* Tests should test the same behavior as before; if they were previously checking a leaf field value from `nodes`, they should now check it through `values`.
+
+Use the oracle to ensure the requirements are understood. Ask me questions about anything which is unclear or which requires a decision not included here.
+
+# Question/answers:
+
+>  1. leaf_short_keys indexing: The oracle recommends using rank/select on leaf_mask to index into leaf_short_keys. This means leaf_short_keys.len() == leaf_mask.count_ones(). Is this acceptable, or would you    █
+>     prefer a different structure like [Option<Nibbles>; 16] or SmallVec<[(u8, Nibbles); N]>?                                                                                                                      █
+
+`leaf_short_keys.len() == leaf_mask.count_ones()` is the intention
+
+>  2. Subtrie values separation: Looking at the code, each subtrie has its own values HashMap in SparseSubtrieInner. When moving values between subtries, should I:                                                 █
+>       • Keep the current structure (each subtrie has its own values)                                                                                                                                              █
+>       • Or consolidate to a single top-level values HashMap?                                                                                                                                                      █
+
+Each subtrie should continue to maintain its own values HashMap
+
+>  3. RlpNodePathStackItem::Leaf variant: Should this variant contain:                                                                                                                                              █
+>       • Just full_path: Nibbles and is_in_prefix_set: bool, or                                                                                                                                                    █
+>       • Also short_key: Nibbles (for computing the leaf RLP without re-deriving)?                                                                                                                                 █
+
+Keep it simple, rederiving is cheap, just include full_path and is_in_prefix_set
+
+>  4. Branch helper methods: Should I add helper methods to SparseNode::Branch like:                                                                                                                                █
+>       • get_leaf_short_key(&self, child_nibble: u8) -> Option<&Nibbles>                                                                                                                                           ▃
+>       • set_leaf_short_key(&mut self, child_nibble: u8, short_key: Nibbles)                                                                                                                                       █
+>       • remove_leaf_short_key(&mut self, child_nibble: u8) -> Option<Nibbles>                                                                                                                                     █
+
+Add whatever helper methods are useful and make the code easier to read. #[inline] them though
+
+>  5. new_split_branch and similar constructors: These currently assume both children are leaves (or track leaf info). With leaf_short_keys, I'll need to pass the short keys as well. Should these constructors    █
+>     take Option<Nibbles> for each child's short key?
+
+Refactor the constructors in whatever way makes sense. The only caveat is that it should not be possible to construct an invalid Branch value with the constructor (e.g. mask bit is set but Vec is missing the leaf short key)
+
+# Other notes
+
+* Use debug_asserts! to enforce invariants which must be observed from outside the current function, e.g. in constructors
