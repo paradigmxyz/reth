@@ -4,7 +4,7 @@ use crate::dirs::{LogsDir, PlatformPath};
 use clap::{ArgAction, Args, ValueEnum};
 use reth_tracing::{
     tracing_subscriber::filter::Directive, FileInfo, FileWorkerGuard, LayerInfo, Layers, LogFormat,
-    RethTracer, Tracer, TracingInitResult,
+    RethTracer, Tracer,
 };
 use std::{fmt, fmt::Display};
 use tracing::{level_filters::LevelFilter, Level};
@@ -129,7 +129,7 @@ impl LogArgs {
     ///
     /// Returns the file worker guard if a file worker was configured.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        self.init_tracing_with_layers(Layers::new(), false).map(|r| r.into_guard())
+        self.init_tracing_with_layers(Layers::new(), false)
     }
 
     /// Initializes tracing with the configured options from cli args.
@@ -141,12 +141,12 @@ impl LogArgs {
     /// * `layers` - Pre-configured layers to include
     /// * `enable_reload` - If true, enables runtime log level changes
     ///
-    /// Returns the tracing result containing the file worker guard.
+    /// Returns the file worker guard if a file worker was configured.
     pub fn init_tracing_with_layers(
         &self,
         layers: Layers,
         enable_reload: bool,
-    ) -> eyre::Result<TracingInitResult> {
+    ) -> eyre::Result<Option<FileWorkerGuard>> {
         let mut tracer = RethTracer::new();
 
         let stdout = self.layer_info(self.log_stdout_format, self.log_stdout_filter.clone(), true);

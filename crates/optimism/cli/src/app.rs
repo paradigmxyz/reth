@@ -128,8 +128,7 @@ where
 
             // Enable reload support if debug RPC namespace is available
             let enable_reload = self.cli.command.debug_namespace_enabled();
-            self.guard =
-                self.cli.logs.init_tracing_with_layers(layers, enable_reload)?.into_guard();
+            self.guard = self.cli.logs.init_tracing_with_layers(layers, enable_reload)?;
             info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
 
             match otlp_status {

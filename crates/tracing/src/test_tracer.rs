@@ -1,6 +1,7 @@
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
 
-use crate::{Layers, Tracer, TracingInitResult};
+use crate::{Layers, Tracer};
 
 ///  Initializes a tracing subscriber for tests.
 ///
@@ -18,11 +19,11 @@ impl Tracer for TestTracer {
         self,
         _layers: Layers,
         _enable_reload: bool,
-    ) -> eyre::Result<TracingInitResult> {
+    ) -> eyre::Result<Option<WorkerGuard>> {
         let _ = tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_default_env())
             .with_writer(std::io::stderr)
             .try_init();
-        Ok(TracingInitResult { file_guard: None })
+        Ok(None)
     }
 }

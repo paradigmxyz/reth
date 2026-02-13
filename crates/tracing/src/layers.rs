@@ -86,55 +86,36 @@ impl Layers {
 
     /// Adds a stdout layer with specified formatting and filtering.
     ///
-    /// # Type Parameters
-    /// * `S` - The type of subscriber that will use these layers.
-    ///
     /// # Arguments
     /// * `format` - The log message format.
-    /// * `directive` - Directive for the default logging level.
-    /// * `filter` - Additional filter directives as a string.
+    /// * `default_directive` - Directive for the default logging level.
+    /// * `filters` - Additional filter directives as a string.
     /// * `color` - Optional color configuration for the log messages.
+    /// * `reloadable` - If true, wraps the filter in a reload layer so it can be changed at
+    ///   runtime, and returns the reload handle.
     ///
     /// # Returns
-    /// An `eyre::Result<()>` indicating the success or failure of the operation.
+    /// An `eyre::Result` with an optional [`LogFilterReloadHandle`] (present when `reloadable` is
+    /// true).
     pub(crate) fn stdout(
         &mut self,
         format: LogFormat,
         default_directive: Directive,
         filters: &str,
         color: Option<String>,
-    ) -> eyre::Result<()> {
+        reloadable: bool,
+    ) -> eyre::Result<Option<LogFilterReloadHandle>> {
         let filter = build_env_filter(Some(default_directive), filters)?;
-        let layer = format.apply(filter, color, None);
-        self.add_layer(layer);
-        Ok(())
-    }
-
-    /// Adds a stdout layer with reloadable filter support.
-    ///
-    /// This is similar to [`Self::stdout`] but wraps the filter in a reload layer,
-    /// allowing the filter to be changed at runtime via the returned handle.
-    ///
-    /// # Arguments
-    /// * `format` - The log message format.
-    /// * `default_directive` - Directive for the default logging level.
-    /// * `filters` - Additional filter directives as a string.
-    /// * `color` - Optional color configuration for the log messages.
-    ///
-    /// # Returns
-    /// An `eyre::Result<LogFilterReloadHandle>` containing the handle to reload the filter.
-    pub(crate) fn stdout_reloadable(
-        &mut self,
-        format: LogFormat,
-        default_directive: Directive,
-        filters: &str,
-        color: Option<String>,
-    ) -> eyre::Result<LogFilterReloadHandle> {
-        let filter = build_env_filter(Some(default_directive), filters)?;
-        let (reloadable_filter, handle) = reload::Layer::new(filter);
-        let layer = format.apply_reloadable(reloadable_filter, color);
-        self.add_layer(layer);
-        Ok(handle)
+        if reloadable {
+            let (reloadable_filter, handle) = reload::Layer::new(filter);
+            let layer = format.apply_reloadable(reloadable_filter, color);
+            self.add_layer(layer);
+            Ok(Some(handle))
+        } else {
+            let layer = format.apply(filter, color, None);
+            self.add_layer(layer);
+            Ok(None)
+        }
     }
 
     /// Adds a file logging layer to the layers collection.
