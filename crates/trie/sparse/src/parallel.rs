@@ -1230,6 +1230,7 @@ impl SparseTrieExt for ParallelSparseTrie {
             }
 
             // Get children to visit from current node (immutable access)
+            let mut is_extension = false;
             let children: SmallVec<[Nibbles; 16]> = {
                 let Some(subtrie) = self.subtrie_for_path(&path) else { continue };
                 let Some(node) = subtrie.nodes.get(&path) else { continue };
@@ -1241,6 +1242,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                     SparseNode::Extension { key, .. } => {
                         let mut child = path;
                         child.extend(key);
+                        is_extension = true;
                         SmallVec::from_slice(&[child])
                     }
                     SparseNode::Branch { state_mask, .. } => {
@@ -1261,18 +1263,26 @@ impl SparseTrieExt for ParallelSparseTrie {
             // Process children - either continue traversal or prune
             for child in children {
                 if depth == max_depth {
+                    let path_to_prune = if is_extension {
+                        // If this is a child of extension node, we want to prune the extension node
+                        // itself to prserve invariant of both extension and branch nodes being
+                        // revealed.
+                        path
+                    } else {
+                        child
+                    };
                     // Check if child has a computed hash and replace inline
                     let hash = self
-                        .subtrie_for_path(&child)
-                        .and_then(|s| s.nodes.get(&child))
+                        .subtrie_for_path(&path_to_prune)
+                        .and_then(|s| s.nodes.get(&path_to_prune))
                         .filter(|n| !n.is_hash())
                         .and_then(|n| n.hash());
 
                     if let Some(hash) = hash {
                         // Use untracked access to avoid marking subtrie as modified during pruning
-                        if let Some(subtrie) = self.subtrie_for_path_mut_untracked(&child) {
-                            subtrie.nodes.insert(child, SparseNode::Hash(hash));
-                            effective_pruned_roots.push((child, hash));
+                        if let Some(subtrie) = self.subtrie_for_path_mut_untracked(&path_to_prune) {
+                            subtrie.nodes.insert(path_to_prune, SparseNode::Hash(hash));
+                            effective_pruned_roots.push((path_to_prune, hash));
                         }
                     }
                 } else {
