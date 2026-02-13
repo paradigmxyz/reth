@@ -152,11 +152,13 @@ impl<N: NodePrimitives> ExExHandle<N> {
                         return Poll::Ready(Ok(()))
                     }
                 }
-                // Do not handle [ExExNotification::ChainReorged] and
-                // [ExExNotification::ChainReverted] cases and always send the
-                // notification, because the ExEx should be aware of the reorgs and reverts lower
-                // than its finished height
-                ExExNotification::ChainReorged { .. } | ExExNotification::ChainReverted { .. } => {}
+                // Always send reorg/revert notifications regardless of finished height,
+                // and reset the finished height because it references a block on the old
+                // chain that is no longer canonical. The ExEx will re-establish the finished
+                // height after processing the reorg.
+                ExExNotification::ChainReorged { .. } | ExExNotification::ChainReverted { .. } => {
+                    self.finished_height = None;
+                }
             }
         }
 
@@ -1304,6 +1306,80 @@ mod tests {
 
         // Ensure the notification ID was incremented
         assert_eq!(exex_handle.next_notification_id, 23);
+    }
+
+    /// Regression test for <https://github.com/paradigmxyz/reth/issues/19755>.
+    ///
+    /// During a reorg the manager must reset `finished_height` so that subsequent
+    /// `ChainCommitted` notifications on the new fork are not incorrectly skipped.
+    /// Without the reset, `finished_height` still references a block on the old chain
+    /// and the number-only comparison causes the manager to drop notifications for
+    /// blocks that the ExEx has never seen on the new fork.
+    #[tokio::test]
+    async fn test_exex_reorg_resets_finished_height() {
+        let provider_factory = create_test_provider_factory();
+        init_genesis(&provider_factory).unwrap();
+        let provider = BlockchainProvider::new(provider_factory).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Default::default(),
+            provider,
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+
+        // Simulate: ExEx has processed up to block 56 on the old fork.
+        exex_handle.finished_height = Some(BlockNumHash::new(56, B256::random()));
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // Step 1: A reorg occurs — send ChainReorged notification.
+        let reorg_notification = ExExNotification::ChainReorged {
+            old: Arc::new(Chain::default()),
+            new: Arc::new(Chain::default()),
+        };
+        match exex_handle.send(&mut cx, &(100, reorg_notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received = notifications.next().await.unwrap().unwrap();
+                assert_eq!(received, reorg_notification);
+            }
+            Poll::Pending | Poll::Ready(Err(_)) => {
+                panic!("Reorg notification should be sent")
+            }
+        }
+
+        // KEY ASSERTION: finished_height must be reset after the reorg notification,
+        // because it referenced a block on the old (now non-canonical) chain.
+        assert!(
+            exex_handle.finished_height.is_none(),
+            "finished_height should be reset after reorg"
+        );
+
+        // Step 2: A new ChainCommitted for block 55 on the new fork arrives.
+        // Without the fix, this would be skipped because the old finished_height (56)
+        // was >= 55. With the fix, finished_height is None so the notification is sent.
+        let mut block55: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        block55.set_hash(B256::new([0x55; 32]));
+        block55.set_block_number(55);
+
+        let commit_notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![block55], Default::default(), Default::default())),
+        };
+        match exex_handle.send(&mut cx, &(101, commit_notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received = notifications.next().await.unwrap().unwrap();
+                assert_eq!(received, commit_notification);
+            }
+            Poll::Pending | Poll::Ready(Err(_)) => {
+                panic!("ChainCommitted(55) on the new fork should NOT be skipped after a reorg")
+            }
+        }
+
+        assert_eq!(exex_handle.next_notification_id, 102);
     }
 
     #[tokio::test]
