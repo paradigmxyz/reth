@@ -7,8 +7,8 @@
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{background:#0d1117;color:#c9d1d9;font-family:'SF Mono','Fira Code','Cascadia Code',monospace;height:100%;overflow:hidden}
 body{display:flex;flex-direction:row;height:100%}
-#main-panel{flex:1;display:flex;flex-direction:column;padding:16px 16px 16px 24px;overflow:hidden;min-width:0}
-#side-panel{width:420px;flex-shrink:0;border-left:1px solid #30363d;overflow-y:auto;padding:16px;background:#161b22}
+#main-panel{flex:1;display:flex;flex-direction:column;padding:16px 16px 16px 16px;overflow:hidden;min-width:0}
+#side-panel{width:480px;flex-shrink:0;border-left:1px solid #30363d;overflow-y:auto;padding:16px;background:#161b22}
 h1{color:#f0f6fc;font-size:18px;margin-bottom:2px}
 .subtitle{color:#8b949e;font-size:12px;margin-bottom:10px}
 .controls{margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -33,7 +33,8 @@ canvas{display:block;image-rendering:pixelated;width:100%;height:100%}
 .viz-controls input[type=checkbox]{accent-color:#58a6ff}
 .viz-controls input[type=range]{width:100px;accent-color:#58a6ff}
 .fade-val{color:#c9d1d9;min-width:35px;display:inline-block}
-table{width:100%;border-collapse:collapse;font-size:11px;background:#0d1117;border:1px solid #30363d;border-radius:6px;overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:11px;background:#0d1117;border:1px solid #30363d;border-radius:6px;overflow:hidden;table-layout:fixed}
+td,th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 th{text-align:left;padding:6px 8px;background:#1c2128;color:#8b949e;font-weight:500;border-bottom:1px solid #30363d;font-size:10px;text-transform:uppercase;position:sticky;top:0}
 td{padding:5px 8px;border-bottom:1px solid #21262d}
 tr.tbl-row{cursor:pointer;transition:background 0.1s}
@@ -62,6 +63,23 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
 .cache-pct{color:#4ade80;font-weight:600;min-width:36px;text-align:right}
 .cache-label{color:#8b949e;min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fault-cnt{color:#d946ef;font-size:10px;margin-left:4px}
+.block-card{background:#1c2128;border:1px solid #30363d;border-radius:4px;padding:6px 8px;margin-bottom:3px;font-size:10px;cursor:pointer;transition:border-color 0.15s}
+.block-card:hover{border-color:#58a6ff}
+.block-card.replaying{border-color:#f59e0b;background:#1e1b13}
+.block-card.recording{border-color:#4ade80;animation:pulse-border 1s infinite}
+.block-card .block-num{color:#f0f6fc;font-weight:600;font-size:11px}
+.block-card .block-stat{color:#8b949e;margin-top:1px}
+@keyframes pulse-border{0%,100%{border-color:#4ade80}50%{border-color:#166534}}
+#block-live{cursor:pointer;font-size:10px;margin-left:6px;user-select:none}
+.utbl-row{display:flex;align-items:center;gap:4px;padding:2px 0;font-size:10px;cursor:pointer}
+.utbl-row:hover{background:#1c2128}
+.utbl-row.active{background:#1c2128;outline:1px solid #58a6ff}
+.utbl-sw{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.utbl-name{width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8b949e}
+.utbl-spark{flex-shrink:0}
+.utbl-cache{width:36px;text-align:right;color:#4ade80;font-weight:600}
+.utbl-diff{width:42px;text-align:right;font-size:9px}
+.utbl-faults{width:28px;text-align:right;color:#d946ef;font-size:9px}
 </style>
 </head>
 <body>
@@ -118,12 +136,12 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
       <span class="fade-val" id="trail-w-val">1.5</span></label>
     </div>
   </div>
-  <h2>Page Cache <span id="cache-total" style="color:#8b949e;font-weight:400;font-size:11px"></span> <span id="cache-ago" style="color:#8b949e;font-weight:400;font-size:10px"></span></h2>
-  <div id="cache-stats"></div>
+  <h2 style="margin-top:12px">Blocks <span id="block-live" style="color:#4ade80" onclick="window._goLive&&window._goLive()">&#x25CF; LIVE</span></h2>
+  <div id="block-panel" style="max-height:320px;overflow-y:auto"></div>
+  <h2 style="margin-top:12px">Tables <span id="cache-total" style="color:#8b949e;font-weight:400;font-size:11px"></span> <span id="cache-ago" style="color:#8b949e;font-weight:400;font-size:10px"></span></h2>
+  <div id="unified-tables"></div>
   <h2 style="margin-top:12px">Table Details</h2>
   <table><thead><tr><th></th><th>Table</th><th>Pages</th><th>Size</th><th>%</th></tr></thead><tbody id="tbl-body"></tbody></table>
-  <h2 style="margin-top:12px">Activity</h2>
-  <div id="sparklines"></div>
   <h2 style="margin-top:12px">B-Tree Structure</h2>
   <div id="tree-info"></div>
 </div>
@@ -156,7 +174,7 @@ let unrefCount=0;
 let outR=0,outG=0,outB=0;
 let cacheTotalCached=0,cacheCachedPer=null,cachePrevPer=null,cachePrevTotal=0,cacheStale=true;
 let hmMode=false,hmCounts=null;
-let cacheMode=false,resMap=null,faultCounts={};
+let cacheMode=false,resMap=null,faultCounts={},faultWindow=[],faultCurrent={};
 let cacheLastUpdate=0;
 let zbCv=null,zbCx=null,zbDirty=true,zbW=0,zbH=0,zbPX=0,zbPY=0,zbSc=0,zbFlt=false;
 const BASE_LUT=new Uint32Array(256*32*2);
@@ -173,7 +191,10 @@ function buildLUT(){
 }
 buildLUT();
 function heatQ(pg){if(!hmMode||!hmCounts)return 31;const cnt=hmCounts[pg];return cnt>0?Math.min(31,Math.floor(Math.log2(cnt+1)*31/16)):0}
+function rollingFaults(dbi){let s=0;for(const w of faultWindow)s+=(w[dbi]||0);return s}
 function markZbDirty(){zbDirty=true}
+let blockRecording=null,blockHistory=[],replayMode=false,replayBlockRef=null,replayTimer=null;
+const BLOCK_HISTORY_CAP=15;
 let showFlame=false;const FLAME_SECS=120;let flameData={},flameHead=0;
 const SPARK_SECS=60;let sparkData={},sparkAccum={};
 const cv=document.getElementById("map"),cx=cv.getContext("2d"),wr=document.getElementById("canvas-wrap");
@@ -194,7 +215,7 @@ function growTo(newNP){
   NP=newNP;GR=Math.ceil(NP/GC);
   iD=null;oC=null;markZbDirty();
 }
-function oX(){return fW?0:Math.max(0,(W-GC*sc)/2)}
+function oX(){return 0}
 function oY(){return Math.max(0,(H-GR*sc)/2)}
 function cP(){const vw=W/sc,vh=H/sc;pX=cl(pX,0,Math.max(0,GC-vw));pY=cl(pY,0,Math.max(0,GR-vh))}
 function s2w(sx,sy){return{wx:pX+(sx-oX())/sc,wy:pY+(sy-oY())/sc}}
@@ -368,7 +389,7 @@ function bldTbl(){
     tb.appendChild(tr);
   });
 }
-function uAR(){document.querySelectorAll(".tbl-row").forEach(r=>{parseInt(r.dataset.dbiIndex,10);sel.has(parseInt(r.dataset.dbiIndex,10))?r.classList.add("active"):r.classList.remove("active")})}
+function uAR(){document.querySelectorAll(".tbl-row").forEach(r=>{sel.has(parseInt(r.dataset.dbiIndex,10))?r.classList.add("active"):r.classList.remove("active")});document.querySelectorAll(".utbl-row").forEach(r=>{sel.has(parseInt(r.dataset.dbiIndex,10))?r.classList.add("active"):r.classList.remove("active")})}
 function reflow(){if(!fW)return;GC=Math.max(1,Math.floor(W/sc));GR=Math.ceil(NP/GC);pX=0;cP()}
 function boot(){szCv();GC=Math.ceil(Math.sqrt(NP));GR=Math.ceil(NP/GC);mS=Math.min(W/GC,H/GR,1);sc=mS;pX=0;pY=0;render()}
 function zA(ns,sx,sy){ns=cl(ns,mS,xS);if(Math.abs(ns-sc)<1e-6)return;const b=s2w(sx,sy);sc=ns;if(fW){reflow();pY=b.wy-(sy-oY())/sc;cP()}else{pX=b.wx-(sx-oX())/sc;pY=b.wy-(sy-oY())/sc;cP()}sched()}
@@ -428,19 +449,33 @@ function connectWS(){
     let lastPg=-1,lastDbi=0,lastOp=0,prevPg=-1,maxPg=NP;
     while(off+8<=msg.data.byteLength){
       const pg=v.getUint32(off,true),dbi=v.getUint16(off+4,true),op=v.getUint8(off+6);off+=8;
+      if(op===4){blockRecording={number:pg,events:[],before:{},startTime:performance.now()};updateBlockPanel();continue}
+      if(op===5){
+        if(blockRecording&&blockRecording.number===pg){
+          blockRecording.txCount=dbi;
+          blockRecording.duration=performance.now()-blockRecording.startTime;
+          let r=0,w=0,f=0;
+          for(const e of blockRecording.events){if(e.op===1)r++;else if(e.op===2)w++;else if(e.op===3)f++}
+          blockRecording.reads=r;blockRecording.writes=w;blockRecording.frees=f;
+          blockRecording.uniquePages=Object.keys(blockRecording.before).length;
+          blockHistory.push(blockRecording);
+          if(blockHistory.length>BLOCK_HISTORY_CAP)blockHistory.shift();
+          blockRecording=null;
+          updateBlockPanel();
+        }
+        continue;
+      }
+      if(blockRecording){
+        if(!(pg in blockRecording.before))blockRecording.before[pg]={om:oMap[pg],rm:resMap?resMap[pg]:0};
+        blockRecording.events.push({pg,dbi,op});
+      }
       if(pg>=maxPg)maxPg=pg+1;
       if(pg>=NP){if(maxPg>NP)growTo(maxPg);if(pg>=NP)continue}cnt++;
       if(op===1)cntR++;else if(op===2)cntW++;else if(op===3)cntF++;
-      if(cacheMode&&resMap&&op===1&&pg<resMap.length&&!resMap[pg]){faultCounts[dbi]=(faultCounts[dbi]||0)+1}
+      if(cacheMode&&resMap&&op===1&&pg<resMap.length&&!resMap[pg]){faultCounts[dbi]=(faultCounts[dbi]||0)+1;faultCurrent[dbi]=(faultCurrent[dbi]||0)+1;if(blockRecording){blockRecording.faults=(blockRecording.faults||0)+1}}
              if(resMap&&pg<resMap.length&&op!==3)resMap[pg]=1;
              if(hmCounts)hmCounts[pg]++;
       if(sparkAccum[dbi]!==undefined)sparkAccum[dbi]++;
-      const prev=lOp[pg],prevLive=prev&&(now-lTs[pg])<FADE;
-      if(!prevLive||op>=prev){
-        if(prev===0)activePgs++;
-        lOp[pg]=op;lTs[pg]=now;
-        activeSet.add(pg);
-      }
       if(op===2&&dbi>0&&dbi<0xFE){const old=oMap[pg];if(old!==dbi){oMap[pg]=dbi;oMapDirty=true;
         const di=DBI_IDX[dbi];if(di)di.pages++;
         const oi=DBI_IDX[old];if(oi&&oi.pages>0)oi.pages--;
@@ -451,6 +486,13 @@ function connectWS(){
         const oi=DBI_IDX[old];if(oi&&oi.pages>0)oi.pages--;
         if(old===0xFF)unrefCount--;
       }}
+      if(replayMode)continue;
+      const prev=lOp[pg],prevLive=prev&&(now-lTs[pg])<FADE;
+      if(!prevLive||op>=prev){
+        if(prev===0)activePgs++;
+        lOp[pg]=op;lTs[pg]=now;
+        activeSet.add(pg);
+      }
       if(showTrails&&prevPg>=0&&prevPg!==pg)trailPush(prevPg,pg,op,now);
       prevPg=pg;
       if(op>=2){lastPg=pg;lastDbi=dbi;lastOp=op}else if(lastPg<0){lastPg=pg;lastDbi=dbi;lastOp=op}
@@ -461,7 +503,7 @@ function connectWS(){
     document.getElementById("cnt-free").textContent=cntF.toLocaleString();
     if(lastPg>=0){const inf=DBI_IDX[lastDbi];const nm=inf?inf.name:"dbi"+lastDbi;const opN=lastOp===1?"R":lastOp===2?"W":"F";document.getElementById("evt-latest").textContent=opN+" pg"+lastPg.toLocaleString()+" "+nm}
     const el=now-lRT;if(el>=1000){document.getElementById("evt-rate").textContent=Math.round(rEv/(el/1000)).toLocaleString();rEv=0;lRT=now}
-    if(cnt>0)kick();
+    if(cnt>0&&!replayMode)kick();
   };
 }
 function szFlame(){
@@ -495,18 +537,26 @@ function drawFlame(){
     ctx.fillText("-"+s+"s",x,ay+10);
   }
 }
-function buildSparklines(){
-  const el=document.getElementById("sparklines");if(!el)return;el.innerHTML="";
+function buildUnifiedPanel(){
+  const el=document.getElementById("unified-tables");if(!el)return;el.innerHTML="";
   DBIS.forEach(d=>{
     if(d.pages<=0&&d.dbi_index>2)return;
-    const row=document.createElement("div");row.className="spark-row";
     const c=PAL[d.dbi_index]||PAL[255];
-    const sw=document.createElement("div");sw.style.cssText=`width:10px;height:10px;border-radius:2px;background:rgb(${c[0]},${c[1]},${c[2]})`;
-    const lb=document.createElement("span");lb.className="spark-label";lb.textContent=d.name;
-    const cv=document.createElement("canvas");cv.className="spark-cv";cv.width=120;cv.height=20;cv.style.width="120px";cv.style.height="20px";
-    const vl=document.createElement("span");vl.className="spark-val";vl.textContent="0";
-    row.append(sw,lb,cv,vl);el.appendChild(row);
-    d._sparkCv=cv;d._sparkCtx=cv.getContext("2d");d._sparkVal=vl;
+    const row=document.createElement("div");row.className="utbl-row";
+    row.dataset.dbiIndex=d.dbi_index;
+    const sw=document.createElement("div");sw.className="utbl-sw";
+    sw.style.background=`rgb(${c[0]},${c[1]},${c[2]})`;
+    const nm=document.createElement("div");nm.className="utbl-name";nm.textContent=d.name;
+    const cv=document.createElement("canvas");cv.className="utbl-spark";cv.width=80;cv.height=16;
+    cv.style.cssText="width:80px;height:16px;border:1px solid #21262d;border-radius:2px;background:#0d1117";
+    const cp=document.createElement("div");cp.className="utbl-cache";
+    const cd=document.createElement("div");cd.className="utbl-diff";
+    const ft=document.createElement("div");ft.className="utbl-faults";
+    row.append(sw,nm,cv,cp,cd,ft);
+    row.addEventListener("click",()=>{const i=d.dbi_index;if(sel.has(i))sel.delete(i);else sel.add(i);uAR();markZbDirty();sched()});
+    el.appendChild(row);
+    d._sparkCv=cv;d._sparkCtx=cv.getContext("2d");
+    d._cacheEl=cp;d._diffEl=cd;d._faultEl=ft;
   });
 }
 function drawSparkline(d){
@@ -552,6 +602,74 @@ function buildTreeInfo(info){
     el.appendChild(card);
   });
 }
+function updateBlockPanel(){
+  const el=document.getElementById("block-panel");if(!el)return;
+  el.innerHTML="";
+  if(blockRecording){
+    const c=document.createElement("div");c.className="block-card recording";
+    c.innerHTML=`<div class="block-num">&#x23F1; #${blockRecording.number.toLocaleString()} recording\u2026</div><div class="block-stat">${blockRecording.events.length.toLocaleString()} events</div>`;
+    el.appendChild(c);
+  }
+  for(let i=blockHistory.length-1;i>=0;i--){
+    const b=blockHistory[i],isReplaying=replayMode&&replayBlockRef===b;
+    const c=document.createElement("div");c.className="block-card"+(isReplaying?" replaying":"");
+    const dur=b.duration<1000?b.duration.toFixed(0)+"ms":(b.duration/1000).toFixed(1)+"s";
+    c.innerHTML=`<div class="block-num">&#x25B6; #${b.number.toLocaleString()} &nbsp;${b.txCount}tx &nbsp;${dur}</div><div class="block-stat"><span style="color:#3c82f6">R:${b.reads.toLocaleString()}</span> <span style="color:#ef4444">W:${b.writes.toLocaleString()}</span> <span style="color:#eab308">F:${b.frees.toLocaleString()}</span>${b.faults?` <span style="color:#d946ef">${b.faults}f</span>`:""} &nbsp;${(b.uniquePages||0).toLocaleString()} pages</div>`;
+    c.addEventListener("click",()=>startReplay(b));
+    el.appendChild(c);
+  }
+}
+function startReplay(block){
+  replayMode=true;replayBlockRef=block;
+  if(replayTimer){cancelAnimationFrame(replayTimer);replayTimer=null}
+  lOp.fill(0);activeSet.clear();activePgs=0;
+  if(hmCounts)hmCounts.fill(0);
+  trailStart=0;trailN=0;
+  for(const pgStr in block.before){
+    const pg=parseInt(pgStr,10);if(pg>=NP)continue;
+    const snap=block.before[pg];
+    oMap[pg]=snap.om;
+    if(resMap&&pg<resMap.length)resMap[pg]=snap.rm;
+  }
+  markZbDirty();sched();
+  document.getElementById("block-live").style.color="#8b949e";
+  updateBlockPanel();
+  const events=block.events;
+  const batchSize=Math.max(1,Math.ceil(events.length/60));
+  let idx=0;
+  function step(){
+    if(!replayMode){replayTimer=null;return}
+    const end=Math.min(idx+batchSize,events.length);
+    const now=performance.now();
+    for(let i=idx;i<end;i++){
+      const e=events[i];
+      if(e.pg>=NP)continue;
+      if(hmCounts)hmCounts[e.pg]++;
+      if(cacheMode&&resMap&&e.op===1&&e.pg<resMap.length&&!resMap[e.pg]){faultCounts[e.dbi]=(faultCounts[e.dbi]||0)+1;faultCurrent[e.dbi]=(faultCurrent[e.dbi]||0)+1}
+      if(resMap&&e.pg<resMap.length&&e.op!==3)resMap[e.pg]=1;
+      lOp[e.pg]=e.op;lTs[e.pg]=now;
+      activeSet.add(e.pg);activePgs++;
+      if(e.op===2&&e.dbi>0&&e.dbi<0xFE)oMap[e.pg]=e.dbi;
+      if(showTrails&&i>0){const p=events[i-1];if(p.pg!==e.pg)trailPush(p.pg,e.pg,e.op,now)}
+    }
+    idx=end;
+    markZbDirty();kick();
+    if(idx<events.length){replayTimer=requestAnimationFrame(step)}
+    else{replayTimer=null;updateBlockPanel()}
+  }
+  replayTimer=requestAnimationFrame(step);
+}
+function goLive(){
+  replayMode=false;replayBlockRef=null;
+  if(replayTimer){cancelAnimationFrame(replayTimer);replayTimer=null}
+  lOp.fill(0);activeSet.clear();activePgs=0;
+  trailStart=0;trailN=0;
+  oMapDirty=true;cacheStale=true;
+  markZbDirty();sched();
+  document.getElementById("block-live").style.color="#4ade80";
+  updateBlockPanel();updateCacheStats();
+}
+window._goLive=goLive;
 function connectResidencyWS(){
   const ws=new WebSocket(`${location.protocol==="https:"?"wss:":"ws:"}//${location.host}/ws_residency`);
   ws.binaryType="arraybuffer";
@@ -604,6 +722,7 @@ function connectResidencyWS(){
       }
       cacheStale=true;
       cacheLastUpdate=performance.now();
+      faultWindow.push({...faultCurrent});if(faultWindow.length>3)faultWindow.shift();faultCurrent={};
       if(cacheMode)markZbDirty();
       updateCacheStats();
       if(cacheMode)sched();
@@ -627,6 +746,7 @@ function connectResidencyWS(){
       }
       cacheStale=true;
       cacheLastUpdate=performance.now();
+      faultWindow.push({...faultCurrent});if(faultWindow.length>3)faultWindow.shift();faultCurrent={};
       if(cacheMode)markZbDirty();
       updateCacheStats();
       if(cacheMode)sched();
@@ -642,7 +762,6 @@ function updateCacheStats(){
     cacheStatsPending=false;
     if(!cacheStale||!cacheCachedPer)return;
     cacheStale=false;
-    const el=document.getElementById("cache-stats");if(!el)return;
     const limit=Math.min(resMap?resMap.length:0,NP);
     const totalPct=limit>0?(cacheTotalCached/limit*100).toFixed(1):"0";
     const prevTotalPct=limit>0?(cachePrevTotal/limit*100):0;
@@ -650,21 +769,22 @@ function updateCacheStats(){
     const tdS=cachePrevPer?(totalDiff>=0?"+":"")+totalDiff.toFixed(2)+"%":"";
     const tdC=totalDiff>0?"#4ade80":totalDiff<0?"#f87171":"#8b949e";
     document.getElementById("cache-total").innerHTML=`${cacheTotalCached.toLocaleString()}/${limit.toLocaleString()} (${totalPct}%) ${cachePrevPer?`<span style="color:${tdC}">${tdS}</span>`:""}`;
-    el.innerHTML="";
     DBIS.forEach(d=>{
-      const total=d.pages;if(total<=0)return;
+      if(!d._cacheEl)return;
+      const total=d.pages;if(total<=0){d._cacheEl.textContent="-";d._diffEl.textContent="";d._faultEl.textContent="";return}
       const cached=cacheCachedPer[d.dbi_index]||0;
       const pct=total>0?(cached/total*100):0;
+      d._cacheEl.textContent=pct.toFixed(1)+"%";
+      d._cacheEl.style.color=pct>50?"#4ade80":"#f87171";
       const prevCached=cachePrevPer?cachePrevPer[d.dbi_index]||0:0;
       const prevPct=total>0?(prevCached/total*100):0;
       const diff=cachePrevPer?(pct-prevPct):0;
-      const ds=cachePrevPer?((diff>=0?"+":"")+diff.toFixed(2)+"%"):"";
-      const dc=diff>0?"#4ade80":diff<0?"#f87171":"#8b949e";
-      const c=PAL[d.dbi_index]||PAL[255];
-      const fc=faultCounts[d.dbi_index]||0;
-      const row=document.createElement("div");row.className="cache-stat";
-      row.innerHTML=`<span class="cache-label">${d.name}</span><div class="cache-bar"><div class="cache-fill" style="width:${pct.toFixed(1)}%;background:rgb(${c[0]},${c[1]},${c[2]})"></div></div><span class="cache-pct">${pct.toFixed(1)}%</span>${cachePrevPer?`<span style="color:${dc};font-size:9px;min-width:46px;text-align:right">${ds}</span>`:""}${fc>0?`<span class="fault-cnt">${fc.toLocaleString()}f</span>`:""}`;
-      el.appendChild(row);
+      if(cachePrevPer){
+        d._diffEl.textContent=(diff>=0?"+":"")+diff.toFixed(2)+"%";
+        d._diffEl.style.color=diff>0?"#4ade80":diff<0?"#f87171":"#8b949e";
+      }
+      const fc=rollingFaults(d.dbi_index);
+      d._faultEl.textContent=fc>0?fc+"f":"";
     });
     cachePrevPer=cacheCachedPer.slice();
     cachePrevTotal=cacheTotalCached;
@@ -703,7 +823,7 @@ async function init(){
   lOp=new Uint8Array(NP);lTs=new Float64Array(NP);hmCounts=new Uint32Array(NP);
   cacheCachedPer=new Array(DBIS.length).fill(0);
   DBIS.forEach(d=>{sparkData[d.dbi_index]={ring:new Array(SPARK_SECS).fill(0),head:0};sparkAccum[d.dbi_index]=0;flameData[d.dbi_index]=new Array(FLAME_SECS).fill(0)});
-  bldTbl();buildSparklines();
+  bldTbl();buildUnifiedPanel();
   let treeInfo=[];
   try{const r=await fetch("/api/tree_info");if(r.ok)treeInfo=await r.json()}catch(e){}
   if(treeInfo.length>0)buildTreeInfo(treeInfo);
@@ -741,7 +861,7 @@ async function init(){
     DBIS.forEach(d=>drawSparkline(d));
     if(showFlame)drawFlame();
   },1000);
-  setInterval(()=>{if(!oMap||!oMapDirty)return;oMapDirty=false;
+  setInterval(()=>{if(!oMap||!oMapDirty||replayMode)return;oMapDirty=false;
     DBIS.forEach(d=>{d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});
     bldTbl();uAR();markZbDirty();sched();
     const rf=NP-unrefCount,gb=(NP*PS/(1024**3)).toFixed(2);

@@ -129,3 +129,4 @@ op = [
     "reth-evm/op",
     "reth-primitives-traits/op",
 ]
+pageviz = ["reth-engine-tree/pageviz"]

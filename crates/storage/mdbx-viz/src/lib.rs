@@ -20,6 +20,17 @@ use tokio::sync::broadcast;
 
 pub mod walker;
 
+unsafe extern "C" {
+    fn mdbx_pageviz_emit_block_marker(op: u8, block_number: u32, tx_count: u16);
+}
+
+pub fn pageviz_emit_block_marker(block_number: u64, start: bool, tx_count: u16) {
+    unsafe {
+        let op = if start { 4u8 } else { 5u8 };
+        mdbx_pageviz_emit_block_marker(op, block_number as u32, tx_count);
+    }
+}
+
 #[derive(Clone, Default, Serialize)]
 struct ResidencyStats {
     total_pages: u64,

@@ -73,6 +73,7 @@ reth-prune-types = { workspace = true, optional = true }
 reth-stages = { workspace = true, optional = true }
 reth-static-file = { workspace = true, optional = true }
 reth-tracing = { workspace = true, optional = true }
+reth-mdbx-viz = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
@@ -150,6 +151,7 @@ rocksdb = [
     "reth-e2e-test-utils/rocksdb",
 ]
 edge = ["rocksdb"]
+pageviz = ["dep:reth-mdbx-viz"]
 
 [[test]]
 name = "e2e_testsuite"

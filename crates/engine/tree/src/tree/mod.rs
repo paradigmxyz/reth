@@ -2677,7 +2677,17 @@ where
 
         let start = Instant::now();
 
+        #[cfg(feature = "pageviz")]
+        reth_mdbx_viz::pageviz_emit_block_marker(block_num_hash.number, true, 0);
+
         let executed = execute(&mut self.payload_validator, input, ctx)?;
+
+        #[cfg(feature = "pageviz")]
+        reth_mdbx_viz::pageviz_emit_block_marker(
+            block_num_hash.number,
+            false,
+            executed.recovered_block().senders().len() as u16,
+        );
 
         // if the parent is the canonical head, we can insert the block as the pending block
         if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()

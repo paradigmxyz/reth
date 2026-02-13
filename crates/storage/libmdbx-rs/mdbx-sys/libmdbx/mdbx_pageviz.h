@@ -38,9 +38,11 @@
  *   bits 55..32  dbi  (lower 24 bits of a uint32_t)
  *   bits 31..0   pgno (uint32_t page number) */
 
-#define MDBX_PAGEVIZ_OP_READ  1
-#define MDBX_PAGEVIZ_OP_WRITE 2
-#define MDBX_PAGEVIZ_OP_FREE  3
+#define MDBX_PAGEVIZ_OP_READ        1
+#define MDBX_PAGEVIZ_OP_WRITE       2
+#define MDBX_PAGEVIZ_OP_FREE        3
+#define MDBX_PAGEVIZ_OP_BLOCK_START 4
+#define MDBX_PAGEVIZ_OP_BLOCK_END   5
 
 #define MDBX_PAGEVIZ_ENCODE(op, dbi, pgno)                                    \
   (((uint64_t)(op) << 56) | ((uint64_t)((dbi) & 0x00FFFFFFu) << 32) |         \
@@ -185,6 +187,8 @@ uint64_t mdbx_pageviz_dropped(mdbx_pageviz_state_t *state, uint32_t ring_idx);
 void mdbx_pageviz_set_mapping(void *base, size_t len, uint32_t mdbx_page_size);
 int mdbx_pageviz_get_mapping(void **out_base, size_t *out_len,
                               uint32_t *out_mdbx_ps, uint32_t *out_sys_ps);
+void mdbx_pageviz_emit_block_marker(uint8_t op, uint32_t block_number,
+                                     uint16_t tx_count);
 
 #endif /* MDBX_PAGEVIZ */
 #endif /* MDBX_PAGEVIZ_H */

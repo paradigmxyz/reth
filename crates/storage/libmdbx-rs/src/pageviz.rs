@@ -13,6 +13,8 @@ pub enum PageOp {
     Read = 1,
     Write = 2,
     Free = 3,
+    BlockStart = 4,
+    BlockEnd = 5,
 }
 
 impl PageOp {
@@ -21,8 +23,14 @@ impl PageOp {
             1 => Some(Self::Read),
             2 => Some(Self::Write),
             3 => Some(Self::Free),
+            4 => Some(Self::BlockStart),
+            5 => Some(Self::BlockEnd),
             _ => None,
         }
+    }
+
+    pub fn is_block_marker(self) -> bool {
+        matches!(self, Self::BlockStart | Self::BlockEnd)
     }
 }
 
@@ -110,6 +118,7 @@ impl PageVizDrainer {
                 let state = state_addr as *mut std::ffi::c_void;
                 let mut buf = [0u64; DRAIN_BUF_LEN];
                 let mut coalesced: HashMap<u32, PageEvent> = HashMap::new();
+                let mut markers: Vec<PageEvent> = Vec::new();
                 let mut read_counter: usize = 0;
 
                 while running.load(Ordering::Relaxed) {
@@ -142,14 +151,18 @@ impl PageVizDrainer {
                             }
                             for &raw in &buf[..count as usize] {
                                 if let Some(evt) = PageEvent::decode(raw) {
-                                    coalesced.insert(evt.pgno, evt);
+                                    if evt.op.is_block_marker() {
+                                        markers.push(evt);
+                                    } else {
+                                        coalesced.insert(evt.pgno, evt);
+                                    }
                                 }
                             }
                         }
                     }
 
-                    if !coalesced.is_empty() {
-                        let events: Vec<PageEvent> = if coalesced.len() > OVERLOAD_THRESHOLD {
+                    if !coalesced.is_empty() || !markers.is_empty() {
+                        let mut events: Vec<PageEvent> = if coalesced.len() > OVERLOAD_THRESHOLD {
                             coalesced
                                 .drain()
                                 .filter(|(_, evt)| {
@@ -165,6 +178,8 @@ impl PageVizDrainer {
                         } else {
                             coalesced.drain().map(|(_, evt)| evt).collect()
                         };
+
+                        events.extend(markers.drain(..));
 
                         if tx.send(events).is_err() {
                             break;
