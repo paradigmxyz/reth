@@ -373,16 +373,6 @@ pub enum SparseNode {
 }
 
 impl SparseNode {
-    /// Create new sparse node from [`TrieNode`].
-    pub fn from_node(node: TrieNode) -> Self {
-        match node {
-            TrieNode::EmptyRoot => Self::Empty,
-            TrieNode::Leaf(leaf) => Self::new_leaf(leaf.key),
-            TrieNode::Extension(ext) => Self::new_ext(ext.key),
-            TrieNode::Branch(branch) => Self::new_branch(branch.state_mask, TrieMask::default()),
-        }
-    }
-
     /// Create new [`SparseNode::Branch`] from state mask and leaf mask.
     pub const fn new_branch(state_mask: TrieMask, leaf_mask: TrieMask) -> Self {
         Self::Branch { state_mask, leaf_mask, state: SparseNodeState::Dirty }

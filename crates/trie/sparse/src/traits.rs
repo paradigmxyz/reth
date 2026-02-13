@@ -11,7 +11,7 @@ use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 
-use crate::{provider::TrieNodeProvider, SparseNodeLeaf};
+use crate::provider::TrieNodeProvider;
 
 /// Describes an update to a leaf in the sparse trie.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -215,7 +215,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// - The value does not exists in the trie, so it cannot be revealed
     /// - The value has not yet been revealed. In order to determine which is true, one would need
     ///   an exclusion proof.
-    fn get_leaf(&self, full_path: &Nibbles) -> Option<&SparseNodeLeaf>;
+    fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>>;
 
     /// Attempts to find a leaf node at the specified path.
     ///

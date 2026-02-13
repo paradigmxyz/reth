@@ -1107,7 +1107,7 @@ impl SparseTrie for ParallelSparseTrie {
         }
     }
 
-    fn get_leaf(&self, full_path: &Nibbles) -> Option<&SparseNodeLeaf> {
+    fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
         // `subtrie_for_path` is intended for a node path, but here we are using a full key path. So
         // we need to check if the subtrie that the key might belong to has any nodes; if not then
         // the key's portion of the trie doesn't have enough depth to reach into the subtrie, and
@@ -1115,10 +1115,10 @@ impl SparseTrie for ParallelSparseTrie {
         if let Some(subtrie) = self.subtrie_for_path(full_path) &&
             !subtrie.is_empty()
         {
-            return subtrie.inner.values.get(full_path);
+            return subtrie.inner.values.get(full_path).map(|leaf| &leaf.value);
         }
 
-        self.upper_subtrie.inner.values.get(full_path)
+        self.upper_subtrie.inner.values.get(full_path).map(|leaf| &leaf.value)
     }
 
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
@@ -8422,7 +8422,7 @@ mod tests {
 
         // get_leaf_value should find the value
         assert!(
-            trie.get_leaf(&full_path).is_some(),
+            trie.get_leaf_value(&full_path).is_some(),
             "get_leaf_value should find the value in lower subtrie"
         );
     }
@@ -8456,11 +8456,11 @@ mod tests {
             "value should be in upper subtrie after update_leaf"
         );
 
-        // Verify the value can be retrieved via get_leaf
-        // Before the fix, this would return None because get_leaf only
+        // Verify the value can be retrieved via get_leaf_value
+        // Before the fix, this would return None because get_leaf_value only
         // checked the lower subtrie based on the path length
-        let retrieved = trie.get_leaf(&full_path);
-        assert_eq!(retrieved.map(|l| &l.value), Some(&value));
+        let retrieved = trie.get_leaf_value(&full_path);
+        assert_eq!(retrieved, Some(&value));
     }
 
     /// Test that `get_leaf_value` works for values in both upper and lower subtries.
@@ -8484,8 +8484,8 @@ mod tests {
         trie.update_leaf(path2, value2.clone(), &provider).unwrap();
 
         // Both values should be retrievable
-        assert_eq!(trie.get_leaf(&path1).map(|l| &l.value), Some(&value1));
-        assert_eq!(trie.get_leaf(&path2).map(|l| &l.value), Some(&value2));
+        assert_eq!(trie.get_leaf_value(&path1), Some(&value1));
+        assert_eq!(trie.get_leaf_value(&path2), Some(&value2));
     }
 
     /// Test that `get_leaf_value` works for storage tries which are often very sparse.
@@ -8504,7 +8504,7 @@ mod tests {
         trie.update_leaf(slot_path, slot_value.clone(), &provider).unwrap();
 
         // Value should be retrievable
-        assert_eq!(trie.get_leaf(&slot_path).map(|l| &l.value), Some(&slot_value));
+        assert_eq!(trie.get_leaf_value(&slot_path), Some(&slot_value));
     }
 
     #[test]
@@ -8555,7 +8555,7 @@ mod tests {
         for i in 0..16u8 {
             let path = pad_nibbles_right(Nibbles::from_nibbles([i, 0x1, 0x2, 0x3, 0x4, 0x5]));
             assert!(
-                parallel.get_leaf(&path).is_none(),
+                parallel.get_leaf_value(&path).is_none(),
                 "value at {:?} should be removed after prune",
                 path
             );
@@ -8802,7 +8802,7 @@ mod tests {
         assert_eq!(root_before, trie.root(), "root hash should be preserved");
 
         for key in &keys {
-            assert!(trie.get_leaf(key).is_none(), "value should be pruned");
+            assert!(trie.get_leaf_value(key).is_none(), "value should be pruned");
         }
     }
 
@@ -8946,7 +8946,7 @@ mod tests {
         // Verify the leaf was actually inserted
         let full_path = Nibbles::unpack(b256_key);
         assert_eq!(
-            trie.get_leaf(&full_path).map(|l| &l.value),
+            trie.get_leaf_value(&full_path),
             Some(&new_value),
             "New leaf value should be retrievable"
         );
@@ -9341,7 +9341,7 @@ mod tests {
 
         // No value should be inserted
         assert!(
-            trie.get_leaf(&full_path).is_none(),
+            trie.get_leaf_value(&full_path).is_none(),
             "No value should exist for non-existent key after Touched update"
         );
     }

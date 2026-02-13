@@ -197,17 +197,12 @@ where
 
     /// Returns reference to bytes representing leaf value for the target account.
     pub fn get_account_value(&self, account: &B256) -> Option<&Vec<u8>> {
-        self.state.as_revealed_ref()?.get_leaf(&Nibbles::unpack(account)).map(|leaf| &leaf.value)
+        self.state.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(account))
     }
 
     /// Returns reference to bytes representing leaf value for the target account and storage slot.
     pub fn get_storage_slot_value(&self, account: &B256, slot: &B256) -> Option<&Vec<u8>> {
-        self.storage
-            .tries
-            .get(account)?
-            .as_revealed_ref()?
-            .get_leaf(&Nibbles::unpack(slot))
-            .map(|leaf| &leaf.value)
+        self.storage.tries.get(account)?.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(slot))
     }
 
     /// Returns reference to state trie if it was revealed.
@@ -1759,7 +1754,7 @@ mod tests {
             Ok(LeafLookup::Exists)
         ));
         assert_eq!(
-            sparse.state_trie_ref().unwrap().get_leaf(&full_path_0).map(|l| &l.value),
+            sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0),
             Some(&leaf_value)
         );
 
@@ -1770,7 +1765,7 @@ mod tests {
             sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::NonExistent)
         ));
-        assert!(sparse.state_trie_ref().unwrap().get_leaf(&full_path_0).is_none());
+        assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
 
         // Reveal multiproof again and check that the state trie still does not contain the leaf
         // node and value, because they were already revealed before
@@ -1779,7 +1774,7 @@ mod tests {
             sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::NonExistent)
         ));
-        assert!(sparse.state_trie_ref().unwrap().get_leaf(&full_path_0).is_none());
+        assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
     }
 
     #[test]
@@ -1826,7 +1821,7 @@ mod tests {
             Ok(LeafLookup::Exists)
         ));
         assert_eq!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf(&full_path_0).map(|l| &l.value),
+            sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf_value(&full_path_0),
             Some(&leaf_value)
         );
 
@@ -1837,7 +1832,11 @@ mod tests {
             sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::NonExistent)
         ));
-        assert!(sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf(&full_path_0).is_none());
+        assert!(sparse
+            .storage_trie_ref(&B256::ZERO)
+            .unwrap()
+            .get_leaf_value(&full_path_0)
+            .is_none());
 
         // Reveal multiproof again and check that the storage trie still does not contain the leaf
         // node and value, because they were already revealed before
@@ -1846,7 +1845,11 @@ mod tests {
             sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::NonExistent)
         ));
-        assert!(sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf(&full_path_0).is_none());
+        assert!(sparse
+            .storage_trie_ref(&B256::ZERO)
+            .unwrap()
+            .get_leaf_value(&full_path_0)
+            .is_none());
     }
 
     #[test]
@@ -1892,17 +1895,17 @@ mod tests {
             Ok(LeafLookup::Exists)
         ));
         assert_eq!(
-            sparse.state_trie_ref().unwrap().get_leaf(&full_path_0).map(|l| &l.value),
+            sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0),
             Some(&leaf_value)
         );
 
         // Remove the leaf node
         sparse.remove_account_leaf(&full_path_0, &provider_factory).unwrap();
-        assert!(sparse.state_trie_ref().unwrap().get_leaf(&full_path_0).is_none());
+        assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
 
         // Reveal again - should skip already revealed paths
         sparse.reveal_account_v2_proof_nodes(v2_proof_nodes).unwrap();
-        assert!(sparse.state_trie_ref().unwrap().get_leaf(&full_path_0).is_none());
+        assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
     }
 
     #[test]
@@ -1940,17 +1943,25 @@ mod tests {
             Ok(LeafLookup::Exists)
         ));
         assert_eq!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf(&full_path_0).map(|l| &l.value),
+            sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf_value(&full_path_0),
             Some(&storage_value)
         );
 
         // Remove the leaf node
         sparse.remove_storage_leaf(B256::ZERO, &full_path_0, &provider_factory).unwrap();
-        assert!(sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf(&full_path_0).is_none());
+        assert!(sparse
+            .storage_trie_ref(&B256::ZERO)
+            .unwrap()
+            .get_leaf_value(&full_path_0)
+            .is_none());
 
         // Reveal again - should skip already revealed paths
         sparse.reveal_storage_v2_proof_nodes(B256::ZERO, v2_proof_nodes).unwrap();
-        assert!(sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf(&full_path_0).is_none());
+        assert!(sparse
+            .storage_trie_ref(&B256::ZERO)
+            .unwrap()
+            .get_leaf_value(&full_path_0)
+            .is_none());
     }
 
     #[test]
