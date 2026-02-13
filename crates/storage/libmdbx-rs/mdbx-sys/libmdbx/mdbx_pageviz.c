@@ -107,8 +107,9 @@ int mdbx_pageviz_get_mapping(void **out_base, size_t *out_len,
 /* ── Block marker emit (non-inline wrapper for Rust FFI) ──────────────── */
 
 void mdbx_pageviz_emit_block_marker(uint8_t op, uint32_t block_number,
-                                     uint16_t tx_count) {
-  mdbx_pageviz_emit(op, (uint32_t)tx_count, block_number);
+                                     uint16_t tx_count, uint8_t duration_encoded,
+                                     uint8_t gas_encoded) {
+  mdbx_pageviz_emit(op, ((uint32_t)gas_encoded << 24) | ((uint32_t)duration_encoded << 16) | (uint32_t)tx_count, block_number);
 }
 
 #else /* !MDBX_PAGEVIZ */

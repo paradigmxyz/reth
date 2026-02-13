@@ -2678,7 +2678,10 @@ where
         let start = Instant::now();
 
         #[cfg(feature = "pageviz")]
-        reth_mdbx_viz::pageviz_emit_block_marker(block_num_hash.number, true, 0);
+        reth_mdbx_viz::pageviz_emit_block_marker(block_num_hash.number, true, 0, 0, 0);
+
+        #[cfg(feature = "pageviz")]
+        let pageviz_start = std::time::Instant::now();
 
         let executed = execute(&mut self.payload_validator, input, ctx)?;
 
@@ -2687,6 +2690,8 @@ where
             block_num_hash.number,
             false,
             executed.recovered_block().senders().len() as u16,
+            pageviz_start.elapsed().as_millis() as u32,
+            executed.recovered_block().gas_used(),
         );
 
         // if the parent is the canonical head, we can insert the block as the pending block

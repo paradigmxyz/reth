@@ -21,13 +21,15 @@ use tokio::sync::broadcast;
 pub mod walker;
 
 unsafe extern "C" {
-    fn mdbx_pageviz_emit_block_marker(op: u8, block_number: u32, tx_count: u16);
+    fn mdbx_pageviz_emit_block_marker(op: u8, block_number: u32, tx_count: u16, duration_encoded: u8, gas_encoded: u8);
 }
 
-pub fn pageviz_emit_block_marker(block_number: u64, start: bool, tx_count: u16) {
+pub fn pageviz_emit_block_marker(block_number: u64, start: bool, tx_count: u16, duration_ms: u32, gas_used: u64) {
+    let dur_enc = if duration_ms == 0 { 0u8 } else { ((duration_ms as f64).log2() * 20.0).round().min(255.0) as u8 };
+    let gas_enc = if gas_used == 0 { 0u8 } else { ((gas_used as f64).log2() * 10.0).round().min(255.0) as u8 };
     unsafe {
         let op = if start { 4u8 } else { 5u8 };
-        mdbx_pageviz_emit_block_marker(op, block_number as u32, tx_count);
+        mdbx_pageviz_emit_block_marker(op, block_number as u32, tx_count, dur_enc, gas_enc);
     }
 }
 
@@ -84,9 +86,17 @@ fn encode_events(events: &[PageEvent]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(events.len() * WIRE_EVENT_SIZE);
     for ev in events {
         buf.extend_from_slice(&ev.pgno.to_le_bytes());
-        buf.extend_from_slice(&(ev.dbi as u16).to_le_bytes());
-        buf.push(ev.op as u8);
-        buf.push(0);
+        if ev.op.is_block_marker() {
+            let tx_lo = (ev.dbi & 0xFF) as u8;
+            let gas = ((ev.dbi >> 24) & 0xFF) as u8;
+            buf.extend_from_slice(&u16::to_le_bytes((gas as u16) << 8 | tx_lo as u16));
+            buf.push(ev.op as u8);
+            buf.push(((ev.dbi >> 16) & 0xFF) as u8);
+        } else {
+            buf.extend_from_slice(&(ev.dbi as u16).to_le_bytes());
+            buf.push(ev.op as u8);
+            buf.push(0u8);
+        }
     }
     buf
 }

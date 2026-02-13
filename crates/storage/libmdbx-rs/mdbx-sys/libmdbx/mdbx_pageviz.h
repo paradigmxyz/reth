@@ -188,7 +188,8 @@ void mdbx_pageviz_set_mapping(void *base, size_t len, uint32_t mdbx_page_size);
 int mdbx_pageviz_get_mapping(void **out_base, size_t *out_len,
                               uint32_t *out_mdbx_ps, uint32_t *out_sys_ps);
 void mdbx_pageviz_emit_block_marker(uint8_t op, uint32_t block_number,
-                                     uint16_t tx_count);
+                                     uint16_t tx_count, uint8_t duration_encoded,
+                                     uint8_t gas_encoded);
 
 #endif /* MDBX_PAGEVIZ */
 #endif /* MDBX_PAGEVIZ_H */

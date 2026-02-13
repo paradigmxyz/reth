@@ -74,15 +74,18 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
 .block-card .block-stat{color:#8b949e;margin-top:1px}
 @keyframes pulse-border{0%,100%{border-color:#4ade80}50%{border-color:#166534}}
 #block-live{cursor:pointer;font-size:10px;margin-left:6px;user-select:none}
-.utbl-row{display:flex;align-items:center;gap:4px;padding:2px 0;font-size:10px;cursor:pointer}
+.utbl-row{display:flex;align-items:center;gap:6px;padding:3px 4px;font-size:10px;cursor:pointer}
 .utbl-row:hover{background:#1c2128}
 .utbl-row.active{background:#1c2128;outline:1px solid #58a6ff}
 .utbl-sw{width:8px;height:8px;border-radius:2px;flex-shrink:0}
-.utbl-name{width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8b949e}
+.utbl-name{width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8b949e}
 .utbl-spark{flex-shrink:0}
-.utbl-cache{width:36px;text-align:right;color:#4ade80;font-weight:600}
-.utbl-diff{width:42px;text-align:right;font-size:9px}
-.utbl-faults{width:28px;text-align:right;color:#d946ef;font-size:9px}
+.utbl-cache{flex:1;min-width:0}
+.utbl-cache-bar-wrap{width:100%;height:6px;background:#21262d;border-radius:3px;overflow:hidden}
+.utbl-cache-fill{height:100%;border-radius:3px;transition:width 0.3s}
+.utbl-cache-pct{text-align:center;font-size:9px;color:#4ade80;font-weight:600;margin-top:1px;line-height:1}
+.utbl-diff{width:52px;text-align:right;font-size:9px}
+.utbl-faults{width:36px;text-align:right;color:#d946ef;font-size:9px}
 #block-panel::-webkit-scrollbar,#side-panel::-webkit-scrollbar{width:6px}
 #block-panel::-webkit-scrollbar-track,#side-panel::-webkit-scrollbar-track{background:#161b22}
 #block-panel::-webkit-scrollbar-thumb,#side-panel::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}
@@ -100,12 +103,12 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
       <label><input type="checkbox" id="chk-write" checked> <span style="color:#ef4444">&#9632;</span> Writes</label>
       <label><input type="checkbox" id="chk-free" checked> <span style="color:#eab308">&#9632;</span> Frees</label>
       <label><input type="checkbox" id="chk-fixw"> Fixed Width</label>
-      <label><input type="checkbox" id="chk-trails"> Trails</label>
+      <label><input type="checkbox" id="chk-trails" checked> Trails</label>
       <label><input type="checkbox" id="chk-heatmap"> Heatmap</label>
       <label><input type="checkbox" id="chk-flame"> Timeline</label>
       <label><input type="checkbox" id="chk-cache"> Page Cache</label>
       <label>Fade: <input type="range" id="fade-slider" min="200" max="8000" value="2000" step="100"> <span class="fade-val" id="fade-val">2.0s</span></label>
-      <label>Trail W: <input type="range" id="trail-width" min="0.5" max="6" value="1.5" step="0.5"> <span class="fade-val" id="trail-w-val">1.5</span></label>
+      <label>Trail W: <input type="range" id="trail-width" min="0.5" max="6" value="1.0" step="0.5"> <span class="fade-val" id="trail-w-val">1.0</span></label>
     </div>
   </div>
   <div class="status-bar">
@@ -166,7 +169,7 @@ PAL[0xFF]=[28,28,32];PAL_DESAT[0xFF]=[28,28,32];PAL_DARK[0xFF]=[16,16,18];PAL_DD
 const FLASH_TINT={1:[140,180,255],2:[255,140,140],3:[255,220,100]};
 let NP=0,PS=4096,GC=0,GR=0,DBIS=[],DBI_IDX={},oMap=null,lOp=null,lTs=null,FADE=2000;
 let cntR=0,cntW=0,cntF=0;
-let sR=true,sW=true,sF=true,fW=false,showTrails=false,trailW=1.5;
+let sR=true,sW=true,sF=true,fW=false,showTrails=true,trailW=1.0;
 const TRAIL_CAP=4096;let trailBuf=new Array(TRAIL_CAP);let trailStart=0,trailN=0;
 const TRC={1:"60,130,246",2:"255,80,80",3:"234,179,8"};
 let activePgs=0;
@@ -197,6 +200,7 @@ function rollingFaults(dbi){let s=0;for(const w of faultWindow)s+=(w[dbi]||0);re
 function markZbDirty(){zbDirty=true}
 let blockRecording=null,blockHistory=[],replayMode=false,replayBlockRef=null,replayTimer=null,liveSnapshot=null;
 const BLOCK_HISTORY_CAP=15;
+let blockPanelDirty=false;
 let showFlame=false;const FLAME_SECS=120;let flameData={},flameHead=0;
 const SPARK_SECS=60;let sparkData={},sparkAccum={};
 const cv=document.getElementById("map"),cx=cv.getContext("2d"),wr=document.getElementById("canvas-wrap");
@@ -256,7 +260,7 @@ function pC(pg,flt,now){
   if(op&&((op===1&&sR)||(op===2&&sW)||(op===3&&sF))){
     const age=now-lTs[pg];
     if(age>=FADE){lOp[pg]=0;activePgs=Math.max(0,activePgs-1);activeSet.delete(pg)}
-    else{const t=1-(age/FADE)*(age/FADE);const fl=FLASH_TINT[op];const fi=t*0.7;
+    else{const a2=Math.max(0,age);const t=1-(a2/FADE)*(a2/FADE);const fl=FLASH_TINT[op];const fi=t*0.7;
       outR=Math.min(255,Math.round(outR+(fl[0]-outR)*fi));
       outG=Math.min(255,Math.round(outG+(fl[1]-outG)*fi));
       outB=Math.min(255,Math.round(outB+(fl[2]-outB)*fi))}
@@ -272,6 +276,7 @@ function drawTrails(now){
     const idx=(trailStart+j)%TRAIL_CAP;
     const t=trailBuf[idx];
     const age=now-t.ts;if(age>=FADE)continue;
+    if((t.op===1&&!sR)||(t.op===2&&!sW)||(t.op===3&&!sF))continue;
     const a=1-Math.pow(age/FADE,2);
     const f=pg2s(t.from),e=pg2s(t.to);
     (paths[t.op]||(paths[t.op]=[])).push({fx:f.sx,fy:f.sy,ex:e.sx,ey:e.sy,a});
@@ -322,7 +327,7 @@ function drawActiveOverlay(now,flt){
     const age=now-lTs[pg];
     if(age>=FADE){lOp[pg]=0;activePgs=Math.max(0,activePgs-1);expired.push(pg);continue}
     pCBase(pg,flt);
-    const t=1-(age/FADE)*(age/FADE);const fl=FLASH_TINT[op];const fi=t*0.7;
+    const a2=Math.max(0,age);const t=1-(a2/FADE)*(a2/FADE);const fl=FLASH_TINT[op];const fi=t*0.7;
     const r=Math.min(255,Math.round(outR+(fl[0]-outR)*fi));
     const g=Math.min(255,Math.round(outG+(fl[1]-outG)*fi));
     const b=Math.min(255,Math.round(outB+(fl[2]-outB)*fi));
@@ -378,7 +383,7 @@ function rLoop(){
     document.getElementById("fps-counter").textContent=Math.round(fpsFrames/((fpsNow-fpsLast)/1000));
     fpsFrames=0;fpsLast=fpsNow;
   }
-  if(act>0)requestAnimationFrame(rLoop);else{anim=false;document.getElementById("fps-counter").textContent="-"}
+  if(act>0&&!(replayMode&&!replayTimer))requestAnimationFrame(rLoop);else{anim=false;document.getElementById("fps-counter").textContent="-"}
 }
 function kick(){if(!anim){anim=true;requestAnimationFrame(rLoop)}}
 let schedPending=false;
@@ -455,11 +460,14 @@ function connectWS(){
     {let scan=0,maxPg=NP;while(scan+8<=msg.data.byteLength){const pg=v.getUint32(scan,true),op=v.getUint8(scan+6);scan+=8;if(op>=4)continue;if(pg>=maxPg)maxPg=pg+1}if(maxPg>NP)growTo(maxPg)}
     let off=0;
     while(off+8<=msg.data.byteLength){
-      const pg=v.getUint32(off,true),dbi=v.getUint16(off+4,true),op=v.getUint8(off+6);off+=8;
-      if(op===4){blockRecording={number:pg,events:[],before:{}};updateBlockPanel();continue}
+      const pg=v.getUint32(off,true),dbi=v.getUint16(off+4,true),op=v.getUint8(off+6),rsv=v.getUint8(off+7);off+=8;
+      if(op===4){if(!replayMode){blockRecording={number:pg,events:[],before:{},faults:0,startTime:performance.now()};blockPanelDirty=true}continue}
       if(op===5){
-        if(blockRecording&&blockRecording.number===pg){
-          blockRecording.txCount=dbi;
+        if(!replayMode&&blockRecording&&blockRecording.number===pg){
+          const txCount=dbi&0xFF,gasEnc=(dbi>>8)&0xFF;
+          blockRecording.txCount=txCount;
+          blockRecording.duration=rsv>0?Math.pow(2,rsv/20.0):0;
+          blockRecording.gasUsed=gasEnc>0?Math.pow(2,gasEnc/10.0):0;
           let r=0,w=0,f=0;
           for(const e of blockRecording.events){if(e.op===1)r++;else if(e.op===2)w++;else if(e.op===3)f++}
           blockRecording.reads=r;blockRecording.writes=w;blockRecording.frees=f;
@@ -475,7 +483,7 @@ function connectWS(){
           blockHistory.push(blockRecording);
           if(blockHistory.length>BLOCK_HISTORY_CAP)blockHistory.shift();
           blockRecording=null;
-          updateBlockPanel();
+          blockPanelDirty=true;
         }
         continue;
       }
@@ -506,7 +514,7 @@ function connectWS(){
         lOp[pg]=op;lTs[pg]=now;
         activeSet.add(pg);
       }
-      if(showTrails&&prevPg>=0&&prevPg!==pg)trailPush(prevPg,pg,op,now);
+      if(showTrails&&prevPg>=0&&prevPg!==pg&&!((op===1&&!sR)||(op===2&&!sW)||(op===3&&!sF)))trailPush(prevPg,pg,op,now);
       prevPg=pg;
       if(op>=2){lastPg=pg;lastDbi=dbi;lastOp=op}else if(lastPg<0){lastPg=pg;lastDbi=dbi;lastOp=op}
     }
@@ -553,7 +561,7 @@ function drawFlame(){
 function buildUnifiedPanel(){
   const el=document.getElementById("unified-tables");if(!el)return;el.innerHTML="";
   const hdr=document.createElement("div");hdr.className="utbl-row";hdr.style.cssText="cursor:default;border-bottom:1px solid #30363d;margin-bottom:2px;padding-bottom:4px";
-  hdr.innerHTML='<div class="utbl-sw" style="visibility:hidden"></div><div class="utbl-name" style="color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">Table</div><div class="utbl-spark" style="width:80px;text-align:center;color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">Activity</div><div class="utbl-cache" style="color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">Cache</div><div class="utbl-diff" style="color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">C.Diff</div><div class="utbl-faults" style="color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">Fault</div>';
+  hdr.innerHTML='<div class="utbl-sw" style="visibility:hidden"></div><div class="utbl-name" style="color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">Table</div><div class="utbl-spark" style="width:80px;text-align:center;color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">Activity</div><div class="utbl-cache" style="color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px;text-align:center">Cache</div><div class="utbl-diff" style="color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px">Diff</div><div class="utbl-faults" style="color:#8b949e;font-weight:500;text-transform:uppercase;font-size:9px" title="Page faults over last 3 residency updates">Fault<span style="font-size:7px;text-transform:none"> (3)</span></div>';
   el.appendChild(hdr);
   DBIS.forEach(d=>{
     if(d.pages<=0&&d.dbi_index>2)return;
@@ -566,13 +574,18 @@ function buildUnifiedPanel(){
     const cv=document.createElement("canvas");cv.className="utbl-spark";cv.width=80;cv.height=16;
     cv.style.cssText="width:80px;height:16px;border:1px solid #21262d;border-radius:2px;background:#0d1117";
     const cp=document.createElement("div");cp.className="utbl-cache";
+    const cpBar=document.createElement("div");cpBar.className="utbl-cache-bar-wrap";
+    const cpFill=document.createElement("div");cpFill.className="utbl-cache-fill";cpFill.style.width="0%";cpFill.style.background=`rgb(${c[0]},${c[1]},${c[2]})`;
+    cpBar.appendChild(cpFill);
+    const cpPct=document.createElement("div");cpPct.className="utbl-cache-pct";
+    cp.append(cpBar,cpPct);
     const cd=document.createElement("div");cd.className="utbl-diff";
     const ft=document.createElement("div");ft.className="utbl-faults";
     row.append(sw,nm,cv,cp,cd,ft);
     row.addEventListener("click",()=>{const i=d.dbi_index;if(sel.has(i))sel.delete(i);else sel.add(i);uAR();markZbDirty();sched()});
     el.appendChild(row);
     d._sparkCv=cv;d._sparkCtx=cv.getContext("2d");
-    d._cacheEl=cp;d._diffEl=cd;d._faultEl=ft;
+    d._cacheEl=cp;d._cacheFill=cpFill;d._cachePct=cpPct;d._diffEl=cd;d._faultEl=ft;
   });
 }
 function drawSparkline(d){
@@ -618,19 +631,25 @@ function buildTreeInfo(info){
     el.appendChild(card);
   });
 }
+function fmtGas(g){if(g>=1e6)return(g/1e6).toFixed(1)+"M";if(g>=1e3)return(g/1e3).toFixed(0)+"K";return g.toFixed(0)}
 function updateBlockPanel(){
+  blockPanelDirty=false;
   const el=document.getElementById("block-panel");if(!el)return;
   el.innerHTML="";
   if(blockRecording){
     const c=document.createElement("div");c.className="block-card recording";
-    c.innerHTML=`<div class="block-num">&#x23F1; #${blockRecording.number.toLocaleString()} recording\u2026</div><div class="block-stat">${blockRecording.events.length.toLocaleString()} events</div>`;
+    const elapsed=performance.now()-blockRecording.startTime;
+    const elStr=elapsed<1000?elapsed.toFixed(0)+"ms":(elapsed/1000).toFixed(1)+"s";
+    c.innerHTML=`<div class="block-num">&#x23F1; #${blockRecording.number.toLocaleString()} recording\u2026</div><div class="block-stat">${blockRecording.events.length.toLocaleString()} events &nbsp;${elStr}</div>`;
     el.appendChild(c);
   }
   for(let i=blockHistory.length-1;i>=0;i--){
     const b=blockHistory[i],isReplaying=replayMode&&replayBlockRef===b;
     const c=document.createElement("div");c.className="block-card"+(isReplaying?" replaying":"");
     const total=b.reads+b.writes+b.frees;
-    c.innerHTML=`<div class="block-num">&#x25B6; #${b.number.toLocaleString()} &nbsp;${b.txCount}tx &nbsp;${total.toLocaleString()} ops</div><div class="block-stat"><span style="color:#3c82f6">R:${b.reads.toLocaleString()}</span> <span style="color:#ef4444">W:${b.writes.toLocaleString()}</span> <span style="color:#eab308">F:${b.frees.toLocaleString()}</span>${b.faults?` <span style="color:#d946ef">${b.faults}f</span>`:""} &nbsp;${(b.uniquePages||0).toLocaleString()} pages</div>`;
+    const dur=b.duration>0?(b.duration<1000?b.duration.toFixed(0)+"ms":(b.duration/1000).toFixed(1)+"s"):"";
+    const gas=b.gasUsed>0?fmtGas(b.gasUsed)+"gas":"";
+    c.innerHTML=`<div class="block-num">&#x25B6; #${b.number.toLocaleString()} &nbsp;${b.txCount}tx${dur?" &nbsp;"+dur:""}${gas?" &nbsp;"+gas:""} &nbsp;${total.toLocaleString()} ops</div><div class="block-stat"><span style="color:#3c82f6">R:${b.reads.toLocaleString()}</span> <span style="color:#ef4444">W:${b.writes.toLocaleString()}</span> <span style="color:#eab308">F:${b.frees.toLocaleString()}</span>${b.faults?` <span style="color:#d946ef">${b.faults}f</span>`:""} &nbsp;${(b.uniquePages||0).toLocaleString()} pages</div>`;
     c.addEventListener("click",()=>startReplay(b));
     el.appendChild(c);
   }
@@ -650,6 +669,7 @@ function applyPanelSnap(snap){
   document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${rf.toLocaleString()} ref \u00b7 ${unrefCount.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
 }
 function startReplay(block){
+  if(replayMode&&replayBlockRef===block&&replayTimer)return;
   if(!liveSnapshot)liveSnapshot=snapPanelState();
   replayMode=true;replayBlockRef=block;
   if(replayTimer){cancelAnimationFrame(replayTimer);replayTimer=null}
@@ -680,14 +700,20 @@ function startReplay(block){
       if(cacheMode&&resMap&&e.op===1&&e.pg<resMap.length&&!resMap[e.pg]){faultCounts[e.dbi]=(faultCounts[e.dbi]||0)+1;faultCurrent[e.dbi]=(faultCurrent[e.dbi]||0)+1}
       if(resMap&&e.pg<resMap.length&&e.op!==3)resMap[e.pg]=1;
       lOp[e.pg]=e.op;lTs[e.pg]=now;
-      activeSet.add(e.pg);activePgs++;
+      if(!activeSet.has(e.pg)){activeSet.add(e.pg);activePgs++}
       if(e.op===2&&e.dbi>0&&e.dbi<0xFE)oMap[e.pg]=e.dbi;
-      if(showTrails&&i>0){const p=events[i-1];if(p.pg!==e.pg)trailPush(p.pg,e.pg,e.op,now)}
+      if(showTrails&&i>0&&!((e.op===1&&!sR)||(e.op===2&&!sW)||(e.op===3&&!sF))){const p=events[i-1];if(p.pg!==e.pg)trailPush(p.pg,e.pg,e.op,now)}
     }
     idx=end;
     markZbDirty();kick();
     if(idx<events.length){replayTimer=requestAnimationFrame(step)}
-    else{replayTimer=null;updateBlockPanel()}
+    else{
+      replayTimer=null;
+      const pin=performance.now()+FADE*10;
+      for(const pg of activeSet)lTs[pg]=pin;
+      markZbDirty();sched();
+      updateBlockPanel();
+    }
   }
   replayTimer=requestAnimationFrame(step);
 }
@@ -805,11 +831,11 @@ function updateCacheStats(){
     document.getElementById("cache-total").innerHTML=`${cacheTotalCached.toLocaleString()}/${limit.toLocaleString()} (${totalPct}%) ${cachePrevPer?`<span style="color:${tdC}">${tdS}</span>`:""}`;
     DBIS.forEach(d=>{
       if(!d._cacheEl)return;
-      const total=d.pages;if(total<=0){d._cacheEl.textContent="-";d._diffEl.textContent="";d._faultEl.textContent="";return}
+      const total=d.pages;if(total<=0){if(d._cachePct)d._cachePct.textContent="-";if(d._cacheFill)d._cacheFill.style.width="0%";d._diffEl.textContent="";d._faultEl.textContent="";return}
       const cached=cacheCachedPer[d.dbi_index]||0;
       const pct=total>0?(cached/total*100):0;
-      d._cacheEl.textContent=pct.toFixed(1)+"%";
-      d._cacheEl.style.color=pct>50?"#4ade80":"#f87171";
+      if(d._cacheFill)d._cacheFill.style.width=pct.toFixed(1)+"%";
+      if(d._cachePct){d._cachePct.textContent=pct.toFixed(1)+"%";d._cachePct.style.color=pct>50?"#4ade80":"#f87171"}
       const prevCached=cachePrevPer?cachePrevPer[d.dbi_index]||0:0;
       const prevPct=total>0?(prevCached/total*100):0;
       const diff=cachePrevPer?(pct-prevPct):0;
@@ -910,6 +936,7 @@ async function init(){
     else txt=Math.floor(ago/3600)+"h ago";
     document.getElementById("cache-ago").textContent=txt;
   },1000);
+  setInterval(()=>{if(blockPanelDirty)updateBlockPanel()},250);
   setInterval(()=>{
     if(activeSet.size<5000)return;
     const now=performance.now();
