@@ -154,6 +154,40 @@ impl Decode for StoredNibblesSubKey {
     }
 }
 
+impl Encode for PackedStoredNibbles {
+    type Encoded = [u8; 33];
+
+    fn encode(self) -> Self::Encoded {
+        let mut out = [0u8; 33];
+        let packed = self.0.pack();
+        out[..packed.len()].copy_from_slice(&packed);
+        out[32] = self.0.len() as u8;
+        out
+    }
+}
+
+impl Decode for PackedStoredNibbles {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::from_compact(value, value.len()).0)
+    }
+}
+
+impl Encode for PackedStoredNibblesSubKey {
+    type Encoded = Vec<u8>;
+
+    fn encode(self) -> Self::Encoded {
+        let mut buf = Vec::with_capacity(33);
+        self.to_compact(&mut buf);
+        buf
+    }
+}
+
+impl Decode for PackedStoredNibblesSubKey {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::from_compact(value, value.len()).0)
+    }
+}
+
 impl Encode for PruneSegment {
     type Encoded = [u8; 1];
 

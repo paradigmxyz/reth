@@ -94,6 +94,135 @@ impl reth_codecs::Compact for StoredNibblesSubKey {
     }
 }
 
+/// Packed representation of nibbles for the AccountsTrie (storage v2).
+///
+/// Stores 2 nibbles per byte via [`Nibbles::pack`], right-padded to 32 bytes + 1 nibble-count
+/// byte = 33 bytes fixed. This halves the key size compared to [`StoredNibbles`] while
+/// preserving sort order under `memcmp`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Index)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "test-utils", derive(arbitrary::Arbitrary))]
+pub struct PackedStoredNibbles(pub Nibbles);
+
+impl From<Nibbles> for PackedStoredNibbles {
+    #[inline]
+    fn from(value: Nibbles) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Vec<u8>> for PackedStoredNibbles {
+    #[inline]
+    fn from(value: Vec<u8>) -> Self {
+        Self(Nibbles::from_nibbles_unchecked(value))
+    }
+}
+
+impl From<StoredNibbles> for PackedStoredNibbles {
+    #[inline]
+    fn from(value: StoredNibbles) -> Self {
+        Self(value.0)
+    }
+}
+
+impl From<PackedStoredNibbles> for StoredNibbles {
+    #[inline]
+    fn from(value: PackedStoredNibbles) -> Self {
+        Self(value.0)
+    }
+}
+
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for PackedStoredNibbles {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        assert!(self.0.len() <= 64);
+
+        let packed = self.0.pack();
+        buf.put_slice(&packed);
+        static ZERO: &[u8; 32] = &[0; 32];
+        buf.put_slice(&ZERO[packed.len()..]);
+        buf.put_u8(self.0.len() as u8);
+        33
+    }
+
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        let nibble_count = buf[32] as usize;
+        let packed_len = (nibble_count + 1) / 2;
+        (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
+    }
+}
+
+/// Packed representation of nibbles as a DupSort subkey for StoragesTrie (storage v2).
+///
+/// Stores 2 nibbles per byte via [`Nibbles::pack`], right-padded to 32 bytes + 1 nibble-count
+/// byte = 33 bytes fixed. This halves the subkey size compared to [`StoredNibblesSubKey`]
+/// (65 → 33 bytes) while preserving sort order under `memcmp`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deref)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "test-utils", derive(arbitrary::Arbitrary))]
+pub struct PackedStoredNibblesSubKey(pub Nibbles);
+
+impl From<Nibbles> for PackedStoredNibblesSubKey {
+    #[inline]
+    fn from(value: Nibbles) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Vec<u8>> for PackedStoredNibblesSubKey {
+    #[inline]
+    fn from(value: Vec<u8>) -> Self {
+        Self(Nibbles::from_nibbles_unchecked(value))
+    }
+}
+
+impl From<PackedStoredNibblesSubKey> for Nibbles {
+    #[inline]
+    fn from(value: PackedStoredNibblesSubKey) -> Self {
+        value.0
+    }
+}
+
+impl From<StoredNibblesSubKey> for PackedStoredNibblesSubKey {
+    #[inline]
+    fn from(value: StoredNibblesSubKey) -> Self {
+        Self(value.0)
+    }
+}
+
+impl From<PackedStoredNibblesSubKey> for StoredNibblesSubKey {
+    #[inline]
+    fn from(value: PackedStoredNibblesSubKey) -> Self {
+        Self(value.0)
+    }
+}
+
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for PackedStoredNibblesSubKey {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        assert!(self.0.len() <= 64);
+
+        let packed = self.0.pack();
+        buf.put_slice(&packed);
+        static ZERO: &[u8; 32] = &[0; 32];
+        buf.put_slice(&ZERO[packed.len()..]);
+        buf.put_u8(self.0.len() as u8);
+        33
+    }
+
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        let nibble_count = buf[32] as usize;
+        let packed_len = (nibble_count + 1) / 2;
+        (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +278,73 @@ mod tests {
         let (subkey, remaining) = StoredNibblesSubKey::from_compact(&buf, 65);
         assert_eq!(subkey.0.to_vec(), vec![0x02, 0x04]);
         assert_eq!(remaining, &[] as &[u8]);
+    }
+
+    #[test]
+    fn test_packed_stored_nibbles_roundtrip() {
+        let stored = PackedStoredNibbles::from(vec![0x0A, 0x0B, 0x0C]);
+        let mut buf = BytesMut::with_capacity(33);
+        let len = stored.to_compact(&mut buf);
+        assert_eq!(len, 33);
+        assert_eq!(buf[0], 0xAB);
+        assert_eq!(buf[1], 0xC0);
+        assert_eq!(buf[32], 3);
+
+        let (roundtrip, _) = PackedStoredNibbles::from_compact(&buf, 33);
+        assert_eq!(roundtrip.0.to_vec(), vec![0x0A, 0x0B, 0x0C]);
+    }
+
+    #[test]
+    fn test_packed_stored_nibbles_subkey_roundtrip() {
+        let subkey = PackedStoredNibblesSubKey::from(vec![0x02, 0x04]);
+        let mut buf = BytesMut::with_capacity(33);
+        let len = subkey.to_compact(&mut buf);
+        assert_eq!(len, 33);
+        assert_eq!(buf[0], 0x24);
+        assert_eq!(buf[32], 2);
+
+        let (roundtrip, _) = PackedStoredNibblesSubKey::from_compact(&buf, 33);
+        assert_eq!(roundtrip.0.to_vec(), vec![0x02, 0x04]);
+    }
+
+    #[test]
+    fn test_packed_sort_order_preserved() {
+        let cases: Vec<Vec<u8>> = vec![
+            vec![0x01],
+            vec![0x01, 0x00],
+            vec![0x01, 0x02],
+            vec![0x02],
+            vec![0x03, 0x0A],
+            vec![0x03, 0x0B],
+            vec![0x04, 0x00],
+            vec![0x0A, 0x0B, 0x0C, 0x0D],
+        ];
+
+        let mut packed_bufs: Vec<Vec<u8>> = Vec::new();
+        for nibbles in &cases {
+            let subkey = PackedStoredNibblesSubKey::from(nibbles.clone());
+            let mut buf = BytesMut::with_capacity(33);
+            subkey.to_compact(&mut buf);
+            packed_bufs.push(buf.to_vec());
+        }
+
+        for i in 1..packed_bufs.len() {
+            assert!(
+                packed_bufs[i - 1] < packed_bufs[i],
+                "sort order broken: {:?} should be < {:?}",
+                cases[i - 1],
+                cases[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_packed_legacy_conversion() {
+        let nibbles = vec![0x0A, 0x0B, 0x0C, 0x0D];
+        let legacy = StoredNibblesSubKey::from(nibbles.clone());
+        let packed: PackedStoredNibblesSubKey = legacy.clone().into();
+        let back: StoredNibblesSubKey = packed.into();
+        assert_eq!(legacy, back);
     }
 
     #[test]
