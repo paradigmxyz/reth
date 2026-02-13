@@ -7,8 +7,8 @@
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{background:#0d1117;color:#c9d1d9;font-family:'SF Mono','Fira Code','Cascadia Code',monospace;height:100%;overflow:hidden}
 body{display:flex;flex-direction:row;height:100%}
-#main-panel{flex:1;display:flex;flex-direction:column;padding:16px;overflow:hidden;min-width:0}
-#side-panel{width:340px;flex-shrink:0;border-left:1px solid #30363d;overflow-y:auto;padding:16px;background:#161b22}
+#main-panel{flex:1;display:flex;flex-direction:column;padding:16px 16px 16px 24px;overflow:hidden;min-width:0}
+#side-panel{width:420px;flex-shrink:0;border-left:1px solid #30363d;overflow-y:auto;padding:16px;background:#161b22}
 h1{color:#f0f6fc;font-size:18px;margin-bottom:2px}
 .subtitle{color:#8b949e;font-size:12px;margin-bottom:10px}
 .controls{margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -41,7 +41,9 @@ tr.tbl-row:hover td{background:#1c2128}
 tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
 .pct-bar{display:inline-block;height:6px;border-radius:3px;margin-right:6px;vertical-align:middle}
 .swatch-cell{width:12px;height:12px;border-radius:2px;flex-shrink:0}
-#loading{display:flex;align-items:center;justify-content:center;height:100%;color:#8b949e;font-size:14px}
+#loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#8b949e;font-size:14px;gap:12px}
+#load-bar-wrap{width:280px;height:6px;background:#21262d;border-radius:3px;overflow:hidden;display:none}
+#load-bar{height:100%;width:0;background:#58a6ff;border-radius:3px;transition:width 0.15s}
 #flame-wrap{border:1px solid #30363d;border-radius:0 0 6px 6px;margin-top:-1px;background:#0d1117}
 #flame-wrap canvas{display:block}
 .spark-row{display:flex;align-items:center;gap:6px;margin-bottom:3px;font-size:10px}
@@ -88,7 +90,7 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
     <span class="zoom-info" id="zoom-info"></span>
   </div>
   <div id="canvas-wrap">
-    <div id="loading">Loading page map&hellip;</div>
+    <div id="loading"><span id="load-text">Loading page map&hellip;</span><div id="load-bar-wrap"><div id="load-bar"></div></div></div>
     <canvas id="map" style="display:none"></canvas>
   </div>
   <div id="flame-wrap" style="height:0;overflow:hidden;transition:height 0.2s">
@@ -116,14 +118,14 @@ tr.tbl-row.active td{background:#1c2128;outline:1px solid #58a6ff}
       <span class="fade-val" id="trail-w-val">1.5</span></label>
     </div>
   </div>
-  <h2>Table Details</h2>
+  <h2>Page Cache <span id="cache-total" style="color:#8b949e;font-weight:400;font-size:11px"></span> <span id="cache-ago" style="color:#8b949e;font-weight:400;font-size:10px"></span></h2>
+  <div id="cache-stats"></div>
+  <h2 style="margin-top:12px">Table Details</h2>
   <table><thead><tr><th></th><th>Table</th><th>Pages</th><th>Size</th><th>%</th></tr></thead><tbody id="tbl-body"></tbody></table>
   <h2 style="margin-top:12px">Activity</h2>
   <div id="sparklines"></div>
   <h2 style="margin-top:12px">B-Tree Structure</h2>
   <div id="tree-info"></div>
-  <h2 style="margin-top:12px">Page Cache <span id="cache-total" style="color:#8b949e;font-weight:400;font-size:11px"></span></h2>
-  <div id="cache-stats"></div>
 </div>
 <div id="tooltip">
   <div class="tt-row"><div class="tt-swatch" id="tt-swatch"></div><div class="tt-name" id="tt-name"></div></div>
@@ -150,10 +152,12 @@ const TRC={1:"60,130,246",2:"255,80,80",3:"234,179,8"};
 let activePgs=0;
 const activeSet=new Set();
 let oMapDirty=false;
+let unrefCount=0;
 let outR=0,outG=0,outB=0;
-let cacheTotalCached=0,cacheCachedPer=null,cacheStale=true;
+let cacheTotalCached=0,cacheCachedPer=null,cachePrevPer=null,cachePrevTotal=0,cacheStale=true;
 let hmMode=false,hmCounts=null;
 let cacheMode=false,resMap=null,faultCounts={};
+let cacheLastUpdate=0;
 let zbCv=null,zbCx=null,zbDirty=true,zbW=0,zbH=0,zbPX=0,zbPY=0,zbSc=0,zbFlt=false;
 const BASE_LUT=new Uint32Array(256*32*2);
 function buildLUT(){
@@ -440,6 +444,12 @@ function connectWS(){
       if(op===2&&dbi>0&&dbi<0xFE){const old=oMap[pg];if(old!==dbi){oMap[pg]=dbi;oMapDirty=true;
         const di=DBI_IDX[dbi];if(di)di.pages++;
         const oi=DBI_IDX[old];if(oi&&oi.pages>0)oi.pages--;
+        if(old===0xFF)unrefCount--;
+      }}
+      if(op===3){const old=oMap[pg];if(old!==1){oMap[pg]=1;oMapDirty=true;
+        const di=DBI_IDX[1];if(di)di.pages++;
+        const oi=DBI_IDX[old];if(oi&&oi.pages>0)oi.pages--;
+        if(old===0xFF)unrefCount--;
       }}
       if(showTrails&&prevPg>=0&&prevPg!==pg)trailPush(prevPg,pg,op,now);
       prevPg=pg;
@@ -552,15 +562,48 @@ function connectResidencyWS(){
     const v=new DataView(msg.data);
     const msgType=v.getUint8(0);
     if(msgType===0){
-      if(!resMap||resMap.length!==msg.data.byteLength-1)resMap=new Uint8Array(msg.data.byteLength-1);
       const src=new Uint8Array(msg.data,1);
-      resMap.set(src);
-      cacheTotalCached=0;
-      if(cacheCachedPer)cacheCachedPer.fill(0);
-      for(let i=0;i<Math.min(resMap.length,NP,oMap?oMap.length:0);i++){
-        if(resMap[i]){cacheTotalCached++;if(cacheCachedPer){const dbi=oMap[i];if(dbi<cacheCachedPer.length)cacheCachedPer[dbi]++}}
+      const newLen=src.length;
+      if(!resMap||resMap.length!==newLen){
+        const oldMap=resMap;const oldLen=oldMap?oldMap.length:0;
+        resMap=new Uint8Array(newLen);
+        if(oldMap){
+          const shared=Math.min(oldLen,newLen,NP);
+          for(let i=0;i<shared;i++){
+            const ns=src[i],os=oldMap[i];
+            if(ns!==os){
+              const dbi=oMap?oMap[i]:0;
+              if(ns&&!os){cacheTotalCached++;if(cacheCachedPer&&dbi<cacheCachedPer.length)cacheCachedPer[dbi]++}
+              else if(!ns&&os){cacheTotalCached--;if(cacheCachedPer&&dbi<cacheCachedPer.length)cacheCachedPer[dbi]--}
+            }
+            resMap[i]=ns;
+          }
+          for(let i=shared;i<newLen;i++){
+            resMap[i]=src[i];
+            if(src[i]){cacheTotalCached++;if(cacheCachedPer&&oMap){const dbi=oMap[i];if(dbi<cacheCachedPer.length)cacheCachedPer[dbi]++}}
+          }
+        }else{
+          resMap.set(src);
+          cacheTotalCached=0;if(cacheCachedPer)cacheCachedPer.fill(0);
+          const lim=Math.min(newLen,NP,oMap?oMap.length:0);
+          for(let i=0;i<lim;i++){
+            if(src[i]){cacheTotalCached++;if(cacheCachedPer){const dbi=oMap[i];if(dbi<cacheCachedPer.length)cacheCachedPer[dbi]++}}
+          }
+        }
+      }else{
+        const lim=Math.min(newLen,NP,oMap?oMap.length:0);
+        for(let i=0;i<lim;i++){
+          const ns=src[i],os=resMap[i];
+          if(ns!==os){
+            const dbi=oMap?oMap[i]:0;
+            if(ns&&!os){cacheTotalCached++;if(cacheCachedPer&&dbi<cacheCachedPer.length)cacheCachedPer[dbi]++}
+            else if(!ns&&os){cacheTotalCached--;if(cacheCachedPer&&dbi<cacheCachedPer.length)cacheCachedPer[dbi]--}
+          }
+          resMap[i]=ns;
+        }
       }
       cacheStale=true;
+      cacheLastUpdate=performance.now();
       if(cacheMode)markZbDirty();
       updateCacheStats();
       if(cacheMode)sched();
@@ -583,29 +626,48 @@ function connectResidencyWS(){
         }
       }
       cacheStale=true;
+      cacheLastUpdate=performance.now();
       if(cacheMode)markZbDirty();
       updateCacheStats();
       if(cacheMode)sched();
     }
   };
 }
+let cacheStatsPending=false;
 function updateCacheStats(){
   if(!cacheStale||!cacheCachedPer)return;
-  cacheStale=false;
-  const el=document.getElementById("cache-stats");if(!el)return;
-  const limit=Math.min(resMap?resMap.length:0,NP);
-  const totalPct=limit>0?(cacheTotalCached/limit*100).toFixed(1):"0";
-  document.getElementById("cache-total").textContent=`${cacheTotalCached.toLocaleString()}/${limit.toLocaleString()} (${totalPct}%)`;
-  el.innerHTML="";
-  DBIS.forEach(d=>{
-    const total=d.pages;if(total<=0)return;
-    const cached=cacheCachedPer[d.dbi_index]||0;
-    const pct=total>0?(cached/total*100):0;
-    const c=PAL[d.dbi_index]||PAL[255];
-    const fc=faultCounts[d.dbi_index]||0;
-    const row=document.createElement("div");row.className="cache-stat";
-    row.innerHTML=`<span class="cache-label">${d.name}</span><div class="cache-bar"><div class="cache-fill" style="width:${pct.toFixed(1)}%;background:rgb(${c[0]},${c[1]},${c[2]})"></div></div><span class="cache-pct">${pct.toFixed(1)}%</span>${fc>0?`<span class="fault-cnt">${fc.toLocaleString()}f</span>`:""}`;
-    el.appendChild(row);
+  if(cacheStatsPending)return;
+  cacheStatsPending=true;
+  requestAnimationFrame(()=>{
+    cacheStatsPending=false;
+    if(!cacheStale||!cacheCachedPer)return;
+    cacheStale=false;
+    const el=document.getElementById("cache-stats");if(!el)return;
+    const limit=Math.min(resMap?resMap.length:0,NP);
+    const totalPct=limit>0?(cacheTotalCached/limit*100).toFixed(1):"0";
+    const prevTotalPct=limit>0?(cachePrevTotal/limit*100):0;
+    const totalDiff=limit>0?(cacheTotalCached/limit*100-prevTotalPct):0;
+    const tdS=cachePrevPer?(totalDiff>=0?"+":"")+totalDiff.toFixed(2)+"%":"";
+    const tdC=totalDiff>0?"#4ade80":totalDiff<0?"#f87171":"#8b949e";
+    document.getElementById("cache-total").innerHTML=`${cacheTotalCached.toLocaleString()}/${limit.toLocaleString()} (${totalPct}%) ${cachePrevPer?`<span style="color:${tdC}">${tdS}</span>`:""}`;
+    el.innerHTML="";
+    DBIS.forEach(d=>{
+      const total=d.pages;if(total<=0)return;
+      const cached=cacheCachedPer[d.dbi_index]||0;
+      const pct=total>0?(cached/total*100):0;
+      const prevCached=cachePrevPer?cachePrevPer[d.dbi_index]||0:0;
+      const prevPct=total>0?(prevCached/total*100):0;
+      const diff=cachePrevPer?(pct-prevPct):0;
+      const ds=cachePrevPer?((diff>=0?"+":"")+diff.toFixed(2)+"%"):"";
+      const dc=diff>0?"#4ade80":diff<0?"#f87171":"#8b949e";
+      const c=PAL[d.dbi_index]||PAL[255];
+      const fc=faultCounts[d.dbi_index]||0;
+      const row=document.createElement("div");row.className="cache-stat";
+      row.innerHTML=`<span class="cache-label">${d.name}</span><div class="cache-bar"><div class="cache-fill" style="width:${pct.toFixed(1)}%;background:rgb(${c[0]},${c[1]},${c[2]})"></div></div><span class="cache-pct">${pct.toFixed(1)}%</span>${cachePrevPer?`<span style="color:${dc};font-size:9px;min-width:46px;text-align:right">${ds}</span>`:""}${fc>0?`<span class="fault-cnt">${fc.toLocaleString()}f</span>`:""}`;
+      el.appendChild(row);
+    });
+    cachePrevPer=cacheCachedPer.slice();
+    cachePrevTotal=cacheTotalCached;
   });
 }
 async function init(){
@@ -616,14 +678,28 @@ async function init(){
     document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 loading owner map\u2026`;
   }catch(e){document.getElementById("subtitle").textContent="Failed: "+e.message}
   try{
+    const lt=document.getElementById("load-text"),lbw=document.getElementById("load-bar-wrap"),lb=document.getElementById("load-bar");
+    lt.textContent="Downloading owner map\u2026";lbw.style.display="block";
     const r=await fetch("/api/owner_map");
-    if(r.ok){oMap=new Uint8Array(await r.arrayBuffer());const ct={};for(let i=0;i<NP;i++){const o=oMap[i];ct[o]=(ct[o]||0)+1}
+    if(r.ok){
+      const total=parseInt(r.headers.get("content-length")||"0",10)||NP;
+      const reader=r.body.getReader();
+      const buf=new Uint8Array(total||NP);let pos=0;
+      for(;;){const{done,value}=await reader.read();if(done)break;buf.set(value,pos);pos+=value.length;
+        const pct=total>0?Math.min(100,pos/total*100):0;
+        lb.style.width=pct.toFixed(1)+"%";
+        lt.textContent=`Downloading owner map\u2026 ${(pos/(1024*1024)).toFixed(1)}/${(total/(1024*1024)).toFixed(1)} MB`;
+      }
+      oMap=buf.length===pos?buf:buf.slice(0,pos);
+      lt.textContent="Processing owner map\u2026";lb.style.width="100%";
+      await new Promise(r=>setTimeout(r,0));
+      const ct={};for(let i=0;i<NP;i++){const o=oMap[i];ct[o]=(ct[o]||0)+1}
       DBIS.forEach(d=>{d.pages=ct[d.dbi_index]||0;d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});
     }else oMap=new Uint8Array(NP);
   }catch(e){oMap=new Uint8Array(NP)}
-  const unref=oMap.reduce((n,b)=>n+(b===0xFF?1:0),0),ref=NP-unref;
+  unrefCount=oMap.reduce((n,b)=>n+(b===0xFF?1:0),0);const ref=NP-unrefCount;
   const gb=(NP*PS/(1024**3)).toFixed(2);
-  document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${ref.toLocaleString()} ref \u00b7 ${unref.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
+  document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${ref.toLocaleString()} ref \u00b7 ${unrefCount.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
   lOp=new Uint8Array(NP);lTs=new Float64Array(NP);hmCounts=new Uint32Array(NP);
   cacheCachedPer=new Array(DBIS.length).fill(0);
   DBIS.forEach(d=>{sparkData[d.dbi_index]={ring:new Array(SPARK_SECS).fill(0),head:0};sparkAccum[d.dbi_index]=0;flameData[d.dbi_index]=new Array(FLAME_SECS).fill(0)});
@@ -668,10 +744,25 @@ async function init(){
   setInterval(()=>{if(!oMap||!oMapDirty)return;oMapDirty=false;
     DBIS.forEach(d=>{d.pct=NP>0?Math.round(d.pages/NP*10000)/100:0;d.size_mb=Math.round(d.pages*PS/(1024*1024)*10)/10});
     bldTbl();uAR();markZbDirty();sched();
-    const ur=DBIS.reduce((n,d)=>d.dbi_index===0xFF?(d.pages+n):n,0);
-    const rf=NP-ur,gb=(NP*PS/(1024**3)).toFixed(2);
-    document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${rf.toLocaleString()} ref \u00b7 ${ur.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
+    const rf=NP-unrefCount,gb=(NP*PS/(1024**3)).toFixed(2);
+    document.getElementById("subtitle").textContent=`${NP.toLocaleString()} pages \u00b7 ${rf.toLocaleString()} ref \u00b7 ${unrefCount.toLocaleString()} unref \u00b7 ${PS>=1024?(PS/1024)+"K":PS} \u00b7 ${gb} GB \u00b7 ${DBIS.length} tables`;
   },2000);
+  setInterval(()=>{
+    if(!cacheLastUpdate)return;
+    const ago=Math.round((performance.now()-cacheLastUpdate)/1000);
+    let txt;
+    if(ago<60)txt=ago+"s ago";
+    else if(ago<3600)txt=Math.floor(ago/60)+"m "+ago%60+"s ago";
+    else txt=Math.floor(ago/3600)+"h ago";
+    document.getElementById("cache-ago").textContent=txt;
+  },1000);
+  setInterval(()=>{
+    if(activeSet.size<5000)return;
+    const now=performance.now();
+    for(const pg of activeSet){
+      if(!lOp[pg]||now-lTs[pg]>=FADE){activeSet.delete(pg);if(lOp[pg]){lOp[pg]=0;activePgs=Math.max(0,activePgs-1)}}
+    }
+  },5000);
 }
 init();
 })();

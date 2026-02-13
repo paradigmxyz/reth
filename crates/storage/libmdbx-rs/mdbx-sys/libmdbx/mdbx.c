@@ -31855,6 +31855,7 @@ pgr_t page_new(MDBX_cursor *mc, const unsigned flags) {
     return ret;
 
   DEBUG("db %zu allocated new page %" PRIaPGNO, cursor_dbi(mc), ret.page->pgno);
+  MDBX_PAGEVIZ_WRITE(mc, ret.page->pgno);
   ret.page->flags = (uint16_t)flags;
   cASSERT(mc, *cursor_dbi_state(mc) & DBI_DIRTY);
   cASSERT(mc, mc->txn->flags & MDBX_TXN_DIRTY);
@@ -31883,6 +31884,7 @@ pgr_t page_new_large(MDBX_cursor *mc, const size_t npages) {
     return ret;
 
   DEBUG("dbi %zu allocated new large-page %" PRIaPGNO ", num %zu", cursor_dbi(mc), ret.page->pgno, npages);
+  MDBX_PAGEVIZ_WRITE(mc, ret.page->pgno);
   ret.page->flags = P_LARGE;
   cASSERT(mc, *cursor_dbi_state(mc) & DBI_DIRTY);
   cASSERT(mc, mc->txn->flags & MDBX_TXN_DIRTY);
