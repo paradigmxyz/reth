@@ -466,6 +466,7 @@ where
         self.executor.apply_pre_execution_changes()?;
         // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
         self.executor.evm_mut().db_mut().bump_bal_index();
+
         Ok(())
     }
 
