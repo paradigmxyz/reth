@@ -76,7 +76,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
             // Set up cancellation token for graceful shutdown on Ctrl+C
             let cancellation = CancellationToken::new();
             let cancellation_clone = cancellation.clone();
-            ctx.task_executor.spawn_critical("prune-ctrl-c", async move {
+            ctx.task_executor.spawn_critical_task("prune-ctrl-c", async move {
                 tokio::signal::ctrl_c().await.expect("failed to listen for ctrl-c");
                 cancellation_clone.cancel();
             });

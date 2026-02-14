@@ -7,6 +7,7 @@ use itertools::Itertools;
 use reth_execution_errors::{SparseTrieError, StateProofError, StorageRootError};
 use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_errors::db::DatabaseError;
+use reth_tasks::Runtime;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     node_iter::{TrieElement, TrieNodeIter},
@@ -16,13 +17,8 @@ use reth_trie::{
     walker::TrieWalker,
     HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use std::{
-    collections::HashMap,
-    sync::{mpsc, OnceLock},
-    time::Duration,
-};
+use std::{collections::HashMap, sync::mpsc};
 use thiserror::Error;
-use tokio::runtime::{Builder, Handle, Runtime};
 use tracing::*;
 
 /// Parallel incremental state root calculator.
@@ -41,6 +37,8 @@ pub struct ParallelStateRoot<Factory> {
     factory: Factory,
     // Prefix sets indicating which portions of the trie need to be recomputed.
     prefix_sets: TriePrefixSets,
+    /// The runtime handle for spawning blocking tasks.
+    runtime: Runtime,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -48,10 +46,11 @@ pub struct ParallelStateRoot<Factory> {
 
 impl<Factory> ParallelStateRoot<Factory> {
     /// Create new parallel state root calculator.
-    pub fn new(factory: Factory, prefix_sets: TriePrefixSets) -> Self {
+    pub fn new(factory: Factory, prefix_sets: TriePrefixSets, runtime: Runtime) -> Self {
         Self {
             factory,
             prefix_sets,
+            runtime,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
@@ -97,8 +96,7 @@ where
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
 
-        // Get runtime handle once outside the loop
-        let handle = get_tokio_runtime_handle();
+        let handle = self.runtime.handle().clone();
 
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
@@ -271,29 +269,6 @@ impl From<StateProofError> for ParallelStateRootError {
     }
 }
 
-/// Gets or creates a tokio runtime handle for spawning blocking tasks.
-/// This ensures we always have a runtime available for I/O operations.
-pub fn get_tokio_runtime_handle() -> Handle {
-    Handle::try_current().unwrap_or_else(|_| {
-        // Create a new runtime if no runtime is available
-        static RT: OnceLock<Runtime> = OnceLock::new();
-
-        let rt = RT.get_or_init(|| {
-            Builder::new_multi_thread()
-                .enable_all()
-                // Keep the threads alive for at least the block time (12 seconds) plus buffer.
-                // This prevents the costly process of spawning new threads on every
-                // new block, and instead reuses the existing threads.
-                .thread_keep_alive(Duration::from_secs(15))
-                .thread_name("trie-tokio-rt")
-                .build()
-                .expect("Failed to create tokio runtime")
-        });
-
-        rt.handle().clone()
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,8 +328,9 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
+        let runtime = reth_tasks::Runtime::test();
         assert_eq!(
-            ParallelStateRoot::new(overlay_factory.clone(), Default::default())
+            ParallelStateRoot::new(overlay_factory.clone(), Default::default(), runtime.clone())
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state.clone())
@@ -390,7 +366,7 @@ mod tests {
             overlay_factory.with_hashed_state_overlay(Some(Arc::new(hashed_state.into_sorted())));
 
         assert_eq!(
-            ParallelStateRoot::new(overlay_factory, prefix_sets.freeze())
+            ParallelStateRoot::new(overlay_factory, prefix_sets.freeze(), runtime)
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state)

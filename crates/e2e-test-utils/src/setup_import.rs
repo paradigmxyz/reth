@@ -15,7 +15,7 @@ use reth_provider::{
 };
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_stages_types::StageId;
-use reth_tasks::TaskManager;
+use reth_tasks::Runtime;
 use std::{path::Path, sync::Arc};
 use tempfile::TempDir;
 use tracing::{debug, info, span, Level};
@@ -24,8 +24,6 @@ use tracing::{debug, info, span, Level};
 pub struct ChainImportResult {
     /// The nodes that were created
     pub nodes: Vec<NodeHelperType<EthereumNode>>,
-    /// The task manager
-    pub task_manager: TaskManager,
     /// The wallet for testing
     pub wallet: Wallet,
     /// Temporary directories that must be kept alive for the duration of the test
@@ -68,8 +66,7 @@ pub async fn setup_engine_with_chain_import(
         + Copy
         + 'static,
 ) -> eyre::Result<ChainImportResult> {
-    let tasks = TaskManager::current();
-    let exec = tasks.executor();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
 
     let network_config = NetworkArgs {
         discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
@@ -129,6 +126,7 @@ pub async fn setup_engine_with_chain_import(
                     .with_default_tables()
                     .build()
                     .unwrap(),
+                reth_tasks::Runtime::test(),
             )?;
 
         // Initialize genesis if needed
@@ -221,7 +219,7 @@ pub async fn setup_engine_with_chain_import(
         let node = EthereumNode::default();
 
         let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-            .testing_node_with_datadir(exec.clone(), datadir.clone())
+            .testing_node_with_datadir(runtime.clone(), datadir.clone())
             .with_types_and_provider::<EthereumNode, BlockchainProvider<_>>()
             .with_components(node.components_builder())
             .with_add_ons(node.add_ons())
@@ -243,7 +241,6 @@ pub async fn setup_engine_with_chain_import(
 
     Ok(ChainImportResult {
         nodes,
-        task_manager: tasks,
         wallet: crate::Wallet::default().with_chain_id(chain_spec.chain.id()),
         _temp_dirs: temp_dirs,
     })
@@ -333,6 +330,7 @@ mod tests {
                     .with_default_tables()
                     .build()
                     .unwrap(),
+                reth_tasks::Runtime::test(),
             )
             .expect("failed to create provider factory");
 
@@ -397,6 +395,7 @@ mod tests {
                     .with_default_tables()
                     .build()
                     .unwrap(),
+                reth_tasks::Runtime::test(),
             )
             .expect("failed to create provider factory");
 
@@ -497,6 +496,7 @@ mod tests {
                 .with_default_tables()
                 .build()
                 .unwrap(),
+            reth_tasks::Runtime::test(),
         )
         .expect("failed to create provider factory");
 

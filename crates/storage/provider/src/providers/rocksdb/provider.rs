@@ -1,10 +1,8 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
-use crate::{
-    providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo},
-    STORAGE_POOL,
-};
+use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{
+    keccak256,
     map::{AddressMap, HashMap},
     Address, BlockNumber, TxNumber, B256,
 };
@@ -111,6 +109,15 @@ const DEFAULT_BLOCK_SIZE: usize = 16 * 1024;
 /// Default max background jobs for `RocksDB` compaction and flushing.
 const DEFAULT_MAX_BACKGROUND_JOBS: i32 = 6;
 
+/// Default max open file descriptors for `RocksDB`.
+///
+/// Caps the number of SST file handles `RocksDB` keeps open simultaneously.
+/// Set to 512 to stay within the common default OS `ulimit -n` of 1024,
+/// leaving headroom for MDBX, static files, and other I/O.
+/// `RocksDB` uses an internal table cache and re-opens files on demand,
+/// so this has negligible performance impact on read-heavy workloads.
+const DEFAULT_MAX_OPEN_FILES: i32 = 512;
+
 /// Default bytes per sync for `RocksDB` WAL writes (1 MB).
 const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 
@@ -202,6 +209,8 @@ impl RocksDBBuilder {
         options.set_compaction_pri(CompactionPri::MinOverlappingRatio);
 
         options.set_log_level(log_level);
+
+        options.set_max_open_files(DEFAULT_MAX_OPEN_FILES);
 
         // Delete obsolete WAL files immediately after all column families have flushed.
         // Both set to 0 means "delete ASAP, no archival".
@@ -1193,8 +1202,9 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
         ctx: RocksDBWriteCtx,
+        runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
-        if !ctx.storage_settings.any_in_rocksdb() {
+        if !ctx.storage_settings.storage_v2 {
             return Ok(());
         }
 
@@ -1202,12 +1212,12 @@ impl RocksDBProvider {
         let mut r_account_history = None;
         let mut r_storage_history = None;
 
-        let write_tx_hash = ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
-            ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
-        let write_account_history = ctx.storage_settings.account_history_in_rocksdb;
-        let write_storage_history = ctx.storage_settings.storages_history_in_rocksdb;
+        let write_tx_hash =
+            ctx.storage_settings.storage_v2 && ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
+        let write_account_history = ctx.storage_settings.storage_v2;
+        let write_storage_history = ctx.storage_settings.storage_v2;
 
-        STORAGE_POOL.in_place_scope(|s| {
+        runtime.storage_pool().in_place_scope(|s| {
             if write_tx_hash {
                 s.spawn(|_| {
                     r_tx_hash = Some(self.write_tx_hash_numbers(blocks, tx_nums, &ctx));
@@ -1327,7 +1337,8 @@ impl RocksDBProvider {
             for storage_block_reverts in reverts.storage {
                 for revert in storage_block_reverts {
                     for (slot, _) in revert.storage_revert {
-                        let key = B256::new(slot.to_be_bytes());
+                        let plain_key = B256::new(slot.to_be_bytes());
+                        let key = keccak256(plain_key);
                         storage_history
                             .entry((revert.address, key))
                             .or_default()

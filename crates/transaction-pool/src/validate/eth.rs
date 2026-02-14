@@ -230,7 +230,7 @@ where
         transaction: Tx,
         maybe_state: &mut Option<Box<dyn AccountInfoReader + Send>>,
     ) -> TransactionValidationOutcome<Tx> {
-        match self.validate_one_no_state(origin, transaction) {
+        match self.validate_stateless(origin, transaction) {
             Ok(transaction) => {
                 // stateless checks passed, pass transaction down stateful validation pipeline
                 // If we don't have a state provider yet, fetch the latest state
@@ -250,30 +250,33 @@ where
 
                 let state = maybe_state.as_deref().expect("provider is set");
 
-                self.validate_one_against_state(origin, transaction, state)
+                self.validate_stateful(origin, transaction, state)
             }
             Err(invalid_outcome) => invalid_outcome,
         }
     }
 
-    /// Validates a single transaction with the provided state provider.
+    /// Validates a single transaction against the given state provider, performing both
+    /// [stateless](Self::validate_stateless) and [stateful](Self::validate_stateful) checks.
     pub fn validate_one_with_state_provider(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
         state: impl AccountInfoReader,
     ) -> TransactionValidationOutcome<Tx> {
-        let tx = match self.validate_one_no_state(origin, transaction) {
+        let tx = match self.validate_stateless(origin, transaction) {
             Ok(tx) => tx,
             Err(invalid_outcome) => return invalid_outcome,
         };
-        self.validate_one_against_state(origin, tx, state)
+        self.validate_stateful(origin, tx, state)
     }
 
-    /// Performs stateless validation on single transaction. Returns unaltered input transaction
-    /// if all checks pass, so transaction can continue through to stateful validation as argument
-    /// to [`validate_one_against_state`](Self::validate_one_against_state).
-    fn validate_one_no_state(
+    /// Validates a single transaction without requiring any state access (stateless checks only).
+    ///
+    /// Checks tx type support, nonce bounds, size limits, gas limits, fee constraints, chain ID,
+    /// intrinsic gas, and blob tx pre-checks. Returns the unmodified transaction on success so it
+    /// can be passed to [`validate_stateful`](Self::validate_stateful).
+    pub fn validate_stateless(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
@@ -530,8 +533,11 @@ where
         Ok(transaction)
     }
 
-    /// Validates a single transaction using given state provider.
-    fn validate_one_against_state<P>(
+    /// Validates a single transaction against the given state (stateful checks only).
+    ///
+    /// Checks sender account balance, nonce, bytecode, and validates blob sidecars. The
+    /// transaction must have already passed [`validate_stateless`](Self::validate_stateless).
+    pub fn validate_stateful<P>(
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
@@ -1263,14 +1269,14 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
         // Spawn validation tasks, they are blocking because they perform db lookups
         for _ in 0..additional_tasks {
             let task = task.clone();
-            tasks.spawn_blocking(Box::pin(async move {
+            tasks.spawn_blocking_task(Box::pin(async move {
                 task.run().await;
             }));
         }
 
         // we spawn them on critical tasks because validation, especially for EIP-4844 can be quite
         // heavy
-        tasks.spawn_critical_blocking(
+        tasks.spawn_critical_blocking_task(
             "transaction-validation-service",
             Box::pin(async move {
                 task.run().await;

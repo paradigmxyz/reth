@@ -46,6 +46,7 @@ use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofErro
 use reth_primitives_traits::dashmap::{self, DashMap};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
+use reth_tasks::Runtime;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedCursorMetricsCache, InstrumentedHashedCursor},
     node_iter::{TrieElement, TrieNodeIter},
@@ -74,7 +75,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tokio::runtime::Handle;
 use tracing::{debug, debug_span, error, trace};
 
 #[cfg(feature = "metrics")]
@@ -132,16 +132,14 @@ impl ProofWorkerHandle {
     /// Workers run until the last handle is dropped.
     ///
     /// # Parameters
-    /// - `executor`: Tokio runtime handle for spawning blocking tasks
+    /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
-    /// - `storage_worker_count`: Number of storage workers to spawn
-    /// - `account_worker_count`: Number of account workers to spawn
+    /// - `halve_workers`: Whether to halve the worker pool size (for small blocks)
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
     pub fn new<Factory>(
-        executor: Handle,
+        runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
-        storage_worker_count: usize,
-        account_worker_count: usize,
+        halve_workers: bool,
         v2_proofs_enabled: bool,
     ) -> Self
     where
@@ -153,127 +151,117 @@ impl ProofWorkerHandle {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
-        // Initialize availability counters at zero. Each worker will increment when it
-        // successfully initializes, ensuring only healthy workers are counted.
         let storage_available_workers = Arc::<AtomicUsize>::default();
         let account_available_workers = Arc::<AtomicUsize>::default();
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
+        let divisor = if halve_workers { 2 } else { 1 };
+        let storage_worker_count =
+            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
+        let account_worker_count =
+            runtime.proof_account_worker_pool().current_num_threads() / divisor;
+
         debug!(
             target: "trie::proof_task",
             storage_worker_count,
             account_worker_count,
+            halve_workers,
             ?v2_proofs_enabled,
             "Spawning proof worker pools"
         );
 
-        let this = Self {
-            storage_work_tx: storage_work_tx.clone(),
+        let storage_pool = runtime.proof_storage_worker_pool();
+        let task_ctx_for_storage = task_ctx.clone();
+        let cached_storage_roots_for_storage = cached_storage_roots.clone();
+
+        for worker_id in 0..storage_worker_count {
+            let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
+            let task_ctx_clone = task_ctx_for_storage.clone();
+            let work_rx_clone = storage_work_rx.clone();
+            let storage_available_workers_clone = storage_available_workers.clone();
+            let cached_storage_roots = cached_storage_roots_for_storage.clone();
+
+            storage_pool.spawn(move || {
+                #[cfg(feature = "metrics")]
+                let metrics = ProofTaskTrieMetrics::default();
+                #[cfg(feature = "metrics")]
+                let cursor_metrics = ProofTaskCursorMetrics::new();
+
+                let _guard = span.enter();
+                let worker = StorageProofWorker::new(
+                    task_ctx_clone,
+                    work_rx_clone,
+                    worker_id,
+                    storage_available_workers_clone,
+                    cached_storage_roots,
+                    #[cfg(feature = "metrics")]
+                    metrics,
+                    #[cfg(feature = "metrics")]
+                    cursor_metrics,
+                )
+                .with_v2_proofs(v2_proofs_enabled);
+                if let Err(error) = worker.run() {
+                    error!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        ?error,
+                        "Storage worker failed"
+                    );
+                }
+            });
+        }
+
+        let account_pool = runtime.proof_account_worker_pool();
+
+        for worker_id in 0..account_worker_count {
+            let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
+            let task_ctx_clone = task_ctx.clone();
+            let work_rx_clone = account_work_rx.clone();
+            let storage_work_tx_clone = storage_work_tx.clone();
+            let account_available_workers_clone = account_available_workers.clone();
+            let cached_storage_roots = cached_storage_roots.clone();
+
+            account_pool.spawn(move || {
+                #[cfg(feature = "metrics")]
+                let metrics = ProofTaskTrieMetrics::default();
+                #[cfg(feature = "metrics")]
+                let cursor_metrics = ProofTaskCursorMetrics::new();
+
+                let _guard = span.enter();
+                let worker = AccountProofWorker::new(
+                    task_ctx_clone,
+                    work_rx_clone,
+                    worker_id,
+                    storage_work_tx_clone,
+                    account_available_workers_clone,
+                    cached_storage_roots,
+                    #[cfg(feature = "metrics")]
+                    metrics,
+                    #[cfg(feature = "metrics")]
+                    cursor_metrics,
+                )
+                .with_v2_proofs(v2_proofs_enabled);
+                if let Err(error) = worker.run() {
+                    error!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        ?error,
+                        "Account worker failed"
+                    );
+                }
+            });
+        }
+
+        Self {
+            storage_work_tx,
             account_work_tx,
-            storage_available_workers: storage_available_workers.clone(),
-            account_available_workers: account_available_workers.clone(),
+            storage_available_workers,
+            account_available_workers,
             storage_worker_count,
             account_worker_count,
             v2_proofs_enabled,
-        };
-
-        // Clone for the first spawn_blocking (storage workers)
-        let task_ctx_for_storage = task_ctx.clone();
-        let executor_for_storage = executor.clone();
-        let cached_storage_roots_for_storage = cached_storage_roots.clone();
-
-        executor_for_storage.clone().spawn_blocking(move || {
-            let parent_span =
-            debug_span!(target: "trie::proof_task", "storage proof workers", ?storage_worker_count)
-                .entered();
-            // Spawn storage workers
-            for worker_id in 0..storage_worker_count {
-                let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
-                let task_ctx_clone = task_ctx_for_storage.clone();
-                let work_rx_clone = storage_work_rx.clone();
-                let storage_available_workers_clone = storage_available_workers.clone();
-                let cached_storage_roots = cached_storage_roots_for_storage.clone();
-
-                executor_for_storage.spawn_blocking(move || {
-                    #[cfg(feature = "metrics")]
-                    let metrics = ProofTaskTrieMetrics::default();
-                    #[cfg(feature = "metrics")]
-                    let cursor_metrics = ProofTaskCursorMetrics::new();
-
-                    let _guard = span.enter();
-                    let worker = StorageProofWorker::new(
-                        task_ctx_clone,
-                        work_rx_clone,
-                        worker_id,
-                        storage_available_workers_clone,
-                        cached_storage_roots,
-                        #[cfg(feature = "metrics")]
-                        metrics,
-                        #[cfg(feature = "metrics")]
-                        cursor_metrics,
-                    )
-                    .with_v2_proofs(v2_proofs_enabled);
-                    if let Err(error) = worker.run() {
-                        error!(
-                            target: "trie::proof_task",
-                            worker_id,
-                            ?error,
-                            "Storage worker failed"
-                        );
-                    }
-                });
-            }
-            drop(parent_span);
-        });
-
-        executor.clone().spawn_blocking(move || {
-            let parent_span =
-            debug_span!(target: "trie::proof_task", "account proof workers", ?account_worker_count)
-                .entered();
-            // Spawn account workers
-            for worker_id in 0..account_worker_count {
-                let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
-                let task_ctx_clone = task_ctx.clone();
-                let work_rx_clone = account_work_rx.clone();
-                let storage_work_tx_clone = storage_work_tx.clone();
-                let account_available_workers_clone = account_available_workers.clone();
-                let cached_storage_roots = cached_storage_roots.clone();
-
-                executor.spawn_blocking(move || {
-                    #[cfg(feature = "metrics")]
-                    let metrics = ProofTaskTrieMetrics::default();
-                    #[cfg(feature = "metrics")]
-                    let cursor_metrics = ProofTaskCursorMetrics::new();
-
-                    let _guard = span.enter();
-                    let worker = AccountProofWorker::new(
-                        task_ctx_clone,
-                        work_rx_clone,
-                        worker_id,
-                        storage_work_tx_clone,
-                        account_available_workers_clone,
-                        cached_storage_roots,
-                        #[cfg(feature = "metrics")]
-                        metrics,
-                        #[cfg(feature = "metrics")]
-                        cursor_metrics,
-                    )
-                    .with_v2_proofs(v2_proofs_enabled);
-                    if let Err(error) = worker.run() {
-                        error!(
-                            target: "trie::proof_task",
-                            worker_id,
-                            ?error,
-                            "Account worker failed"
-                        );
-                    }
-                });
-            }
-            drop(parent_span);
-        });
-
-        this
+        }
     }
 
     /// Returns whether V2 storage proofs are enabled for this worker pool.
@@ -481,9 +469,7 @@ where
         let span = debug_span!(
             target: "trie::proof_task",
             "Storage proof calculation",
-            ?hashed_address,
             target_slots = ?target_slots.len(),
-            worker_id = self.id,
         );
         let _span_guard = span.enter();
 
@@ -531,9 +517,7 @@ where
         let span = debug_span!(
             target: "trie::proof_task",
             "V2 Storage proof calculation",
-            ?hashed_address,
             targets = ?targets.len(),
-            worker_id = self.id,
         );
         let _span_guard = span.enter();
 
@@ -1315,7 +1299,6 @@ where
             "Account multiproof calculation",
             targets = targets.len(),
             num_slots = targets.values().map(|slots| slots.len()).sum::<usize>(),
-            worker_id=self.worker_id,
         );
         let _span_guard = span.enter();
 
@@ -1381,7 +1364,6 @@ where
             "Account V2 multiproof calculation",
             account_targets = account_targets.len(),
             storage_targets = storage_targets.values().map(|t| t.len()).sum::<usize>(),
-            worker_id = self.worker_id,
         );
         let _span_guard = span.enter();
 
@@ -1530,7 +1512,6 @@ where
             target: "trie::proof_task",
             "Blinded account node calculation",
             ?path,
-            worker_id,
         );
         let _span_guard = span.enter();
 
@@ -1638,7 +1619,6 @@ where
                         let _guard = debug_span!(
                             target: "trie::proof_task",
                             "Waiting for storage proof",
-                            ?hashed_address,
                         );
                         // Block on this specific storage proof receiver - enables interleaved
                         // parallelism
@@ -2021,7 +2001,6 @@ enum AccountWorkerJob {
 mod tests {
     use super::*;
     use reth_provider::test_utils::create_test_provider_factory;
-    use tokio::{runtime::Builder, task};
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
@@ -2030,25 +2009,21 @@ mod tests {
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
     #[test]
     fn spawn_proof_workers_creates_handle() {
-        let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
-        runtime.block_on(async {
-            let handle = tokio::runtime::Handle::current();
-            let provider_factory = create_test_provider_factory();
-            let changeset_cache = reth_trie_db::ChangesetCache::new();
-            let factory = reth_provider::providers::OverlayStateProviderFactory::new(
-                provider_factory,
-                changeset_cache,
-            );
-            let ctx = test_ctx(factory);
+        let provider_factory = create_test_provider_factory();
+        let changeset_cache = reth_trie_db::ChangesetCache::new();
+        let factory = reth_provider::providers::OverlayStateProviderFactory::new(
+            provider_factory,
+            changeset_cache,
+        );
+        let ctx = test_ctx(factory);
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false);
+        let runtime = reth_tasks::Runtime::test();
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, false);
 
-            // Verify handle can be cloned
-            let _cloned_handle = proof_handle.clone();
+        // Verify handle can be cloned
+        let _cloned_handle = proof_handle.clone();
 
-            // Workers shut down automatically when handle is dropped
-            drop(proof_handle);
-            task::yield_now().await;
-        });
+        // Workers shut down automatically when handle is dropped
+        drop(proof_handle);
     }
 }

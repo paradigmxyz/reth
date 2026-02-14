@@ -115,6 +115,8 @@ pub enum MultiProofMessage {
         /// The state update that was used to calculate the proof
         state: HashedPostState,
     },
+    /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
+    HashedStateUpdate(HashedPostState),
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
     ///
     /// When received, the task generates a single state update from the BAL and processes it.
@@ -769,6 +771,11 @@ impl MultiProofTask {
     fn on_prefetch_proof(&mut self, mut targets: VersionedMultiProofTargets) -> u64 {
         // Remove already fetched proof targets to avoid redundant work.
         targets.retain_difference(&self.fetched_proof_targets);
+
+        if targets.is_empty() {
+            return 0;
+        }
+
         extend_multiproof_targets(&mut self.fetched_proof_targets, &targets);
 
         // For Legacy multiproofs, make sure all target accounts have an `AddedRemovedKeySet` in the
@@ -885,6 +892,10 @@ impl MultiProofTask {
                 state: fetched_state_update,
             });
             state_updates += 1;
+        }
+
+        if not_fetched_state_update.is_empty() {
+            return state_updates;
         }
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
@@ -1187,6 +1198,11 @@ impl MultiProofTask {
                     );
                     return true;
                 }
+                false
+            }
+            MultiProofMessage::HashedStateUpdate(hashed_state) => {
+                batch_metrics.state_update_proofs_requested +=
+                    self.on_hashed_state_update(Source::BlockAccessList, hashed_state);
                 false
             }
         }
@@ -1534,23 +1550,18 @@ mod tests {
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
         PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StorageChangeSetReader,
+        StorageSettingsCache,
     };
     use reth_trie::MultiProof;
     use reth_trie_db::ChangesetCache;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
     use std::sync::{Arc, OnceLock};
-    use tokio::runtime::{Handle, Runtime};
 
-    /// Get a handle to the test runtime, creating it if necessary
-    fn get_test_runtime_handle() -> Handle {
-        static TEST_RT: OnceLock<Runtime> = OnceLock::new();
-        TEST_RT
-            .get_or_init(|| {
-                tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()
-            })
-            .handle()
-            .clone()
+    /// Get a test runtime, creating it if necessary
+    fn get_test_runtime() -> &'static reth_tasks::Runtime {
+        static TEST_RT: OnceLock<reth_tasks::Runtime> = OnceLock::new();
+        TEST_RT.get_or_init(reth_tasks::Runtime::test)
     }
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
@@ -1561,16 +1572,17 @@ mod tests {
                               + PruneCheckpointReader
                               + ChangeSetReader
                               + StorageChangeSetReader
+                              + StorageSettingsCache
                               + BlockNumReader,
             > + Clone
             + Send
             + 'static,
     {
-        let rt_handle = get_test_runtime_handle();
+        let runtime = get_test_runtime();
         let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);
+        let proof_handle = ProofWorkerHandle::new(runtime, task_ctx, false, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -1580,7 +1592,10 @@ mod tests {
     fn create_cached_provider<F>(factory: F) -> CachedStateProvider<StateProviderBox>
     where
         F: DatabaseProviderFactory<
-                Provider: BlockReader + StageCheckpointReader + PruneCheckpointReader,
+                Provider: BlockReader
+                              + StageCheckpointReader
+                              + PruneCheckpointReader
+                              + reth_provider::StorageSettingsCache,
             > + Clone
             + Send
             + 'static,

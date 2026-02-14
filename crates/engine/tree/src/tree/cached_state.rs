@@ -75,8 +75,16 @@ impl CacheConfig for EpochCacheConfig {
 type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, EpochCacheConfig>;
 
 /// A wrapper of a state provider and a shared cache.
+///
+/// The const generic `PREWARM` controls whether every cache miss is populated. This is only
+/// relevant for pre-warm transaction execution with the intention to pre-populate the cache with
+/// data for regular block execution. During regular block execution the cache doesn't need to be
+/// populated because the actual EVM database [`State`](revm::database::State) also caches
+/// internally during block execution and the cache is then updated after the block with the entire
+/// [`BundleState`] output of that block which contains all accessed accounts, code, storage. See
+/// also [`ExecutionCache::insert_state`].
 #[derive(Debug)]
-pub struct CachedStateProvider<S> {
+pub struct CachedStateProvider<S, const PREWARM: bool = false> {
     /// The state provider
     state_provider: S,
 
@@ -85,15 +93,9 @@ pub struct CachedStateProvider<S> {
 
     /// Metrics for the cached state provider
     metrics: CachedStateMetrics,
-
-    /// If prewarm enabled we populate every cache miss
-    prewarm: bool,
 }
 
-impl<S> CachedStateProvider<S>
-where
-    S: StateProvider,
-{
+impl<S> CachedStateProvider<S> {
     /// Creates a new [`CachedStateProvider`] from an [`ExecutionCache`], state provider, and
     /// [`CachedStateMetrics`].
     pub const fn new(
@@ -101,27 +103,18 @@ where
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
     ) -> Self {
-        Self { state_provider, caches, metrics, prewarm: false }
+        Self { state_provider, caches, metrics }
     }
 }
 
-impl<S> CachedStateProvider<S> {
-    /// Enables pre-warm mode so that every cache miss is populated.
-    ///
-    /// This is only relevant for pre-warm transaction execution with the intention to pre-populate
-    /// the cache with data for regular block execution. During regular block execution the
-    /// cache doesn't need to be populated because the actual EVM database
-    /// [`State`](revm::database::State) also caches internally during block execution and the cache
-    /// is then updated after the block with the entire [`BundleState`] output of that block which
-    /// contains all accessed accounts,code,storage. See also [`ExecutionCache::insert_state`].
-    pub const fn prewarm(mut self) -> Self {
-        self.prewarm = true;
-        self
-    }
-
-    /// Returns whether this provider should pre-warm cache misses.
-    const fn is_prewarm(&self) -> bool {
-        self.prewarm
+impl<S> CachedStateProvider<S, true> {
+    /// Creates a new [`CachedStateProvider`] with prewarming enabled.
+    pub const fn new_prewarm(
+        state_provider: S,
+        caches: ExecutionCache,
+        metrics: CachedStateMetrics,
+    ) -> Self {
+        Self { state_provider, caches, metrics }
     }
 }
 
@@ -421,9 +414,9 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
     }
 }
 
-impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
+impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvider<S, PREWARM> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if self.is_prewarm() {
+        if PREWARM {
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
             })? {
@@ -456,13 +449,13 @@ pub enum CachedStatus<T> {
     Cached(T),
 }
 
-impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
+impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvider<S, PREWARM> {
     fn storage(
         &self,
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        if self.is_prewarm() {
+        if PREWARM {
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
             })? {
@@ -488,11 +481,19 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
             self.state_provider.storage(account, storage_key)
         }
     }
+
+    fn storage_by_hashed_key(
+        &self,
+        address: Address,
+        hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        self.state_provider.storage_by_hashed_key(address, hashed_storage_key)
+    }
 }
 
-impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
+impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvider<S, PREWARM> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        if self.is_prewarm() {
+        if PREWARM {
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
             })? {
@@ -516,7 +517,9 @@ impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     }
 }
 
-impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
+impl<S: StateRootProvider, const PREWARM: bool> StateRootProvider
+    for CachedStateProvider<S, PREWARM>
+{
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         self.state_provider.state_root(hashed_state)
     }
@@ -540,7 +543,9 @@ impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
     }
 }
 
-impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
+impl<S: StateProofProvider, const PREWARM: bool> StateProofProvider
+    for CachedStateProvider<S, PREWARM>
+{
     fn proof(
         &self,
         input: TrieInput,
@@ -567,7 +572,9 @@ impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
     }
 }
 
-impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
+impl<S: StorageRootProvider, const PREWARM: bool> StorageRootProvider
+    for CachedStateProvider<S, PREWARM>
+{
     fn storage_root(
         &self,
         address: Address,
@@ -595,7 +602,7 @@ impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
     }
 }
 
-impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
+impl<S: BlockHashReader, const PREWARM: bool> BlockHashReader for CachedStateProvider<S, PREWARM> {
     fn block_hash(&self, number: alloy_primitives::BlockNumber) -> ProviderResult<Option<B256>> {
         self.state_provider.block_hash(number)
     }
@@ -609,7 +616,9 @@ impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
     }
 }
 
-impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider<S> {
+impl<S: HashedPostStateProvider, const PREWARM: bool> HashedPostStateProvider
+    for CachedStateProvider<S, PREWARM>
+{
     fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
         self.state_provider.hashed_post_state(bundle_state)
     }

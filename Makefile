@@ -12,12 +12,7 @@ FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 CARGO_TARGET_DIR ?= target
 
 # List of features to use when building. Can be overridden via the environment.
-# No jemalloc on Windows
-ifeq ($(OS),Windows_NT)
-    FEATURES ?= asm-keccak min-debug-logs
-else
-    FEATURES ?= jemalloc asm-keccak min-debug-logs
-endif
+FEATURES ?=
 
 # Cargo profile for builds. Default is for local builds, CI uses an override.
 PROFILE ?= release
@@ -158,7 +153,7 @@ COV_FILE := lcov.info
 .PHONY: test-unit
 test-unit: ## Run unit tests.
 	cargo install cargo-nextest --locked
-	cargo nextest run $(UNIT_TEST_ARGS)
+	cargo nextest run --no-fail-fast $(UNIT_TEST_ARGS)
 
 
 .PHONY: cov-unit
@@ -191,7 +186,7 @@ $(EEST_TESTS_DIR):
 
 .PHONY: ef-tests
 ef-tests: $(EF_TESTS_DIR) $(EEST_TESTS_DIR) ## Runs Legacy and EEST tests.
-	cargo nextest run -p ef-tests --release --features ef-tests
+	cargo nextest run --no-fail-fast -p ef-tests --release --features ef-tests
 
 ##@ reth-bench
 
@@ -238,16 +233,15 @@ update-book-cli: build-debug ## Update book cli documentation.
 
 .PHONY: profiling
 profiling: ## Builds `reth` with optimisations, but also symbols.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features jemalloc,asm-keccak
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling
 
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc
-
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-debug-logs,otlp,otlp-logs,reth-revm/portable,js-tracer,keccak-cache-global,rocksdb
 
 fmt:
 	cargo +nightly fmt

@@ -20,7 +20,7 @@ use reth_node_types::{BlockTy, NodeTypes};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
-    ProviderFactory,
+    ProviderFactory, StorageSettingsCache,
 };
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
@@ -94,6 +94,7 @@ where
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
 
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
+        let use_hashed_state = provider.cached_storage_settings().use_hashed_state();
 
         let persistence_handle =
             PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
@@ -111,6 +112,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
+            use_hashed_state,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
@@ -201,6 +203,7 @@ mod tests {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
+            reth_tasks::Runtime::test(),
         );
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();

@@ -47,6 +47,7 @@ reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-tasks.workspace = true
 tokio = { workspace = true, features = ["sync", "rt-multi-thread"] }
 tokio-stream.workspace = true
 reth-testing-utils.workspace = true
@@ -61,4 +62,5 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-stages-types/test-utils",
+    "reth-tasks/test-utils",
 ]

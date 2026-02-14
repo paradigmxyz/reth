@@ -3,7 +3,7 @@
 use crate::{
     args::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RocksDbArgs, RpcServerArgs, StaticFilesArgs, StorageArgs, TxPoolArgs,
+        PruningArgs, RpcServerArgs, StaticFilesArgs, StorageArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
     utils::get_single_header,
@@ -152,10 +152,7 @@ pub struct NodeConfig<ChainSpec> {
     /// All static files related arguments
     pub static_files: StaticFilesArgs,
 
-    /// All `RocksDB` table routing arguments
-    pub rocksdb: RocksDbArgs,
-
-    /// Storage mode configuration (v2 vs v1/legacy)
+    /// All storage related arguments with --storage prefix
     pub storage: StorageArgs,
 }
 
@@ -188,7 +185,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             engine: EngineArgs::default(),
             era: EraArgs::default(),
             static_files: StaticFilesArgs::default(),
-            rocksdb: RocksDbArgs::default(),
             storage: StorageArgs::default(),
         }
     }
@@ -264,7 +260,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             engine,
             era,
             static_files,
-            rocksdb,
             storage,
             ..
         } = self;
@@ -285,7 +280,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             engine,
             era,
             static_files,
-            rocksdb,
             storage,
         }
     }
@@ -355,6 +349,12 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Set the storage args for the node
+    pub const fn with_storage(mut self, storage: StorageArgs) -> Self {
+        self.storage = storage;
+        self
+    }
+
     /// Returns pruning configuration.
     pub fn prune_config(&self) -> Option<PruneConfig>
     where
@@ -363,54 +363,17 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self.pruning.prune_config(&self.chain)
     }
 
-    /// Returns the effective storage settings derived from `--storage.v2`, static-file, and
-    /// `RocksDB` CLI args.
+    /// Returns the effective storage settings derived from `--storage.v2`.
     ///
     /// The base storage mode is determined by `--storage.v2`:
     /// - When `--storage.v2` is set: uses [`StorageSettings::v2()`] defaults
-    /// - Otherwise: uses [`StorageSettings::v1()`] defaults
-    ///
-    /// Individual `--static-files.*` and `--rocksdb.*` flags override the base when explicitly set.
+    /// - Otherwise: uses [`StorageSettings::base()`] defaults
     pub const fn storage_settings(&self) -> StorageSettings {
-        let mut s = if self.storage.v2 { StorageSettings::v2() } else { StorageSettings::base() };
-
-        // Apply static files overrides (only when explicitly set)
-        if let Some(v) = self.static_files.receipts {
-            s = s.with_receipts_in_static_files(v);
+        if self.storage.v2 {
+            StorageSettings::v2()
+        } else {
+            StorageSettings::base()
         }
-        if let Some(v) = self.static_files.transaction_senders {
-            s = s.with_transaction_senders_in_static_files(v);
-        }
-        if let Some(v) = self.static_files.account_changesets {
-            s = s.with_account_changesets_in_static_files(v);
-        }
-        if let Some(v) = self.static_files.storage_changesets {
-            s = s.with_storage_changesets_in_static_files(v);
-        }
-
-        // Apply rocksdb overrides
-        // --rocksdb.all sets all rocksdb flags to true
-        if self.rocksdb.all {
-            s = s
-                .with_transaction_hash_numbers_in_rocksdb(true)
-                .with_storages_history_in_rocksdb(true)
-                .with_account_history_in_rocksdb(true);
-        }
-
-        // Individual rocksdb flags override --rocksdb.all when explicitly set
-        if let Some(v) = self.rocksdb.tx_hash {
-            s = s.with_transaction_hash_numbers_in_rocksdb(v);
-        }
-        if let Some(v) = self.rocksdb.storages_history {
-            s = s.with_storages_history_in_rocksdb(v);
-        }
-        if let Some(v) = self.rocksdb.account_history {
-            s = s.with_account_history_in_rocksdb(v);
-        }
-
-        s = s.with_use_hashed_state(self.storage.use_hashed_state);
-
-        s
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if
@@ -607,7 +570,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             engine: self.engine,
             era: self.era,
             static_files: self.static_files,
-            rocksdb: self.rocksdb,
             storage: self.storage,
         }
     }
@@ -650,7 +612,6 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             engine: self.engine.clone(),
             era: self.era.clone(),
             static_files: self.static_files,
-            rocksdb: self.rocksdb,
             storage: self.storage,
         }
     }

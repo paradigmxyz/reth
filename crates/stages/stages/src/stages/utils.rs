@@ -208,7 +208,10 @@ where
 
     for (idx, changeset_result) in walker.enumerate() {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
-        cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
+        cache
+            .entry(AddressStorageKey((address, storage.key.as_b256())))
+            .or_default()
+            .push(block_number);
 
         if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");

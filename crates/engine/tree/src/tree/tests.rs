@@ -204,6 +204,7 @@ impl TestHarness {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
+            reth_tasks::Runtime::test(),
         );
 
         let tree = EngineApiTreeHandler::new(
@@ -221,6 +222,7 @@ impl TestHarness {
             EngineApiKind::Ethereum,
             evm_config,
             changeset_cache,
+            provider.cached_storage_settings().use_hashed_state(),
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
@@ -405,6 +407,7 @@ impl ValidatorTestHarness {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache,
+            reth_tasks::Runtime::test(),
         );
 
         Self { harness, validator, metrics: TestMetrics::default() }

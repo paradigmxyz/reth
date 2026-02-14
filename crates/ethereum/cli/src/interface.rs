@@ -92,7 +92,7 @@ impl<
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](node::NodeCommand).
     ///
-    /// This command will be run on the [default tokio runtime](reth_cli_runner::tokio_runtime).
+    /// This command will be run on the default tokio runtime.
     ///
     ///
     /// # Example
@@ -143,7 +143,7 @@ impl<
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](node::NodeCommand).
     ///
-    /// This command will be run on the [default tokio runtime](reth_cli_runner::tokio_runtime).
+    /// This command will be run on the default tokio runtime.
     pub fn run_with_components<N>(
         self,
         components: impl CliComponentsBuilder<N>,

@@ -381,7 +381,7 @@ cargo nextest run --workspace
 cargo bench --bench bench_name
 
 # Build optimized binary
-cargo build --release --features "jemalloc asm-keccak"
+cargo build --release
 
 # Check compilation for all features
 cargo check --workspace --all-features
