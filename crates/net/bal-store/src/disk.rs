@@ -89,6 +89,7 @@ impl DiskFileBalStore {
 }
 
 impl BalStore for DiskFileBalStore {
+    /// Delegates insertion to the shared inner implementation.
     fn insert(
         &self,
         block_hash: BlockHash,
@@ -98,6 +99,7 @@ impl BalStore for DiskFileBalStore {
         self.inner.insert(block_hash, block_number, bal)
     }
 
+    /// Delegates by-hash reads to the shared inner implementation.
     fn get_by_hashes(
         &self,
         block_hashes: &[BlockHash],
@@ -105,12 +107,17 @@ impl BalStore for DiskFileBalStore {
         self.inner.get_by_hashes(block_hashes)
     }
 
+    /// Delegates contiguous range reads to the shared inner implementation.
     fn get_by_range(&self, start: BlockNumber, count: u64) -> Result<Vec<Bytes>, BalStoreError> {
         self.inner.get_by_range(start, count)
     }
 }
 
 impl DiskFileBalStoreInner {
+    /// Rebuilds in-memory indexes from disk.
+    ///
+    /// Malformed index files or orphaned entries are skipped instead of failing startup, then
+    /// capacity eviction is re-applied to reestablish retention guarantees.
     fn rebuild_indexes(&self) -> Result<(), BalStoreError> {
         let mut indexed = Vec::new();
 
@@ -190,6 +197,10 @@ impl DiskFileBalStoreInner {
         Ok(())
     }
 
+    /// Persists a BAL payload and updates both in-memory and on-disk indexes.
+    ///
+    /// This also handles reorg/relocation semantics by removing stale index or payload files
+    /// that conflict with the new `(block_number, block_hash)` mapping.
     fn insert(
         &self,
         block_hash: BlockHash,
@@ -223,6 +234,9 @@ impl DiskFileBalStoreInner {
         self.evict_over_capacity(&mut state)
     }
 
+    /// Returns BAL bytes for each requested hash in request order.
+    ///
+    /// Missing files are mapped to `None`; other filesystem errors are surfaced.
     fn get_by_hashes(
         &self,
         block_hashes: &[BlockHash],
@@ -240,6 +254,10 @@ impl DiskFileBalStoreInner {
             .collect()
     }
 
+    /// Returns contiguous BAL bytes for `[start, start + count)`.
+    ///
+    /// The method first resolves the contiguous hash sequence from the in-memory block index,
+    /// then reads payload bytes from disk and stops at the first missing payload file.
     fn get_by_range(&self, start: BlockNumber, count: u64) -> Result<Vec<Bytes>, BalStoreError> {
         let hashes: Vec<BlockHash> = {
             let state = self.state.lock();
@@ -264,6 +282,9 @@ impl DiskFileBalStoreInner {
         Ok(result)
     }
 
+    /// Evicts oldest block-number entries until the configured capacity is satisfied.
+    ///
+    /// Eviction removes both entry payload files and index files to keep disk and memory in sync.
     fn evict_over_capacity(&self, state: &mut IndexState) -> Result<(), BalStoreError> {
         while state.block_to_hash.len() as u32 > self.max_entries {
             let Some((&oldest_number, &oldest_hash)) = state.block_to_hash.first_key_value() else {
@@ -279,6 +300,9 @@ impl DiskFileBalStoreInner {
         Ok(())
     }
 
+    /// Deletes a file if it exists.
+    ///
+    /// `NotFound` is treated as success to simplify idempotent cleanup paths.
     fn remove_if_exists(&self, path: PathBuf) -> Result<(), BalStoreError> {
         match fs::remove_file(path) {
             Ok(()) => Ok(()),
@@ -287,11 +311,13 @@ impl DiskFileBalStoreInner {
         }
     }
 
+    /// Returns the payload file path for a block hash.
     #[inline]
     fn entry_file(&self, block_hash: BlockHash) -> PathBuf {
         self.entries_dir.join(format!("{block_hash:x}"))
     }
 
+    /// Returns the index file path for a block number.
     #[inline]
     fn index_file(&self, block_number: BlockNumber) -> PathBuf {
         self.index_dir.join(block_number.to_string())
