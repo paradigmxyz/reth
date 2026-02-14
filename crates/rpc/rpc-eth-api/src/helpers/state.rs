@@ -94,31 +94,36 @@ pub trait EthState: LoadState + SpawnBlocking {
         requests: HashMap<Address, Vec<JsonStorageKey>>,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<HashMap<Address, Vec<B256>>, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(move |this| async move {
+        async move {
             let total_slots: usize = requests.values().map(|slots| slots.len()).sum();
             if total_slots > DEFAULT_MAX_STORAGE_VALUES_SLOTS {
-                return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
-                    "total slot count {total_slots} exceeds limit {DEFAULT_MAX_STORAGE_VALUES_SLOTS}",
-                ))));
+                return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(
+                    format!(
+                        "total slot count {total_slots} exceeds limit {DEFAULT_MAX_STORAGE_VALUES_SLOTS}",
+                    ),
+                )));
             }
 
-            let state = this.state_at_block_id_or_latest(block_id).await?;
+            self.spawn_blocking_io_fut(move |this| async move {
+                let state = this.state_at_block_id_or_latest(block_id).await?;
 
-            let mut result = HashMap::with_capacity(requests.len());
-            for (address, slots) in requests {
-                let mut values = Vec::with_capacity(slots.len());
-                for slot in &slots {
-                    let value = state
-                        .storage(address, slot.as_b256())
-                        .map_err(Self::Error::from_eth_err)?
-                        .unwrap_or_default();
-                    values.push(B256::new(value.to_be_bytes()));
+                let mut result = HashMap::with_capacity(requests.len());
+                for (address, slots) in requests {
+                    let mut values = Vec::with_capacity(slots.len());
+                    for slot in &slots {
+                        let value = state
+                            .storage(address, slot.as_b256())
+                            .map_err(Self::Error::from_eth_err)?
+                            .unwrap_or_default();
+                        values.push(B256::new(value.to_be_bytes()));
+                    }
+                    result.insert(address, values);
                 }
-                result.insert(address, values);
-            }
 
-            Ok(result)
-        })
+                Ok(result)
+            })
+            .await
+        }
     }
 
     /// Returns values stored of given account, with Merkle-proof, at given blocknumber.
