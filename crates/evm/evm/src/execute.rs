@@ -2,8 +2,8 @@
 
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::{BlockHeader, Header};
-use alloy_eips::eip2718::WithEncoded;
+use alloy_consensus::{proofs, BlockHeader, Eip2718EncodableReceipt, Header, TxReceipt};
+use alloy_eips::eip2718::{Encodable2718, WithEncoded};
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTxParts},
@@ -269,6 +269,38 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
     pub const fn with_cached_header_values(mut self, cached: CachedHeaderValues) -> Self {
         self.cached_header_values = cached;
         self
+    }
+
+    /// Returns the transactions root, using the cached value if available.
+    pub fn transactions_root(&self) -> B256
+    where
+        F::Transaction: Encodable2718,
+    {
+        self.cached_header_values
+            .transactions_root
+            .unwrap_or_else(|| proofs::calculate_transaction_root(&self.transactions))
+    }
+
+    /// Returns the receipts root, using the cached value if available.
+    pub fn receipts_root(&self) -> B256
+    where
+        F::Receipt: TxReceipt + Eip2718EncodableReceipt,
+    {
+        self.cached_header_values.receipts_root.unwrap_or_else(|| {
+            proofs::calculate_receipt_root(
+                &self.output.receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>(),
+            )
+        })
+    }
+
+    /// Returns the logs bloom, using the cached value if available.
+    pub fn logs_bloom(&self) -> Bloom
+    where
+        F::Receipt: TxReceipt<Log = alloy_primitives::Log>,
+    {
+        self.cached_header_values.logs_bloom.unwrap_or_else(|| {
+            alloy_primitives::logs_bloom(self.output.receipts.iter().flat_map(|r| r.logs()))
+        })
     }
 }
 

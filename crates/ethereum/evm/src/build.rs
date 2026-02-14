@@ -1,14 +1,11 @@
-use alloc::{sync::Arc, vec::Vec};
-use alloy_consensus::{
-    proofs::{self, calculate_receipt_root},
-    Block, BlockBody, BlockHeader, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH,
-};
+use alloc::sync::Arc;
+use alloy_consensus::{proofs, Block, BlockBody, BlockHeader, Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives_traits::{logs_bloom, Receipt, SignedTransaction};
+use reth_primitives_traits::{Receipt, SignedTransaction};
 use revm::context::Block as _;
 
 /// Block builder for Ethereum.
@@ -40,55 +37,21 @@ where
         &self,
         input: BlockAssemblerInput<'_, '_, F>,
     ) -> Result<Self::Block, BlockExecutionError> {
+        let transactions_root = input.transactions_root();
+        let receipts_root = input.receipts_root();
+        let logs_bloom = input.logs_bloom();
+
         let BlockAssemblerInput {
             evm_env,
             execution_ctx: ctx,
             parent,
             transactions,
-            output: BlockExecutionResult { receipts, requests, gas_used, blob_gas_used },
+            output: BlockExecutionResult { receipts: _, requests, gas_used, blob_gas_used },
             state_root,
-            cached_header_values,
             ..
         } = input;
 
         let timestamp = evm_env.block_env.timestamp().saturating_to();
-
-        let transactions_root = cached_header_values
-            .transactions_root
-            .unwrap_or_else(|| proofs::calculate_transaction_root(&transactions));
-        let receipts_root = cached_header_values.receipts_root.unwrap_or_else(|| {
-            calculate_receipt_root(&receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>())
-        });
-        let logs_bloom = cached_header_values
-            .logs_bloom
-            .unwrap_or_else(|| logs_bloom(receipts.iter().flat_map(|r| r.logs())));
-
-        #[cfg(debug_assertions)]
-        {
-            if cached_header_values.transactions_root.is_some() {
-                debug_assert_eq!(
-                    transactions_root,
-                    proofs::calculate_transaction_root(&transactions),
-                    "CachedHeaderValues transactions root mismatch"
-                );
-            }
-            if cached_header_values.receipts_root.is_some() {
-                debug_assert_eq!(
-                    receipts_root,
-                    calculate_receipt_root(
-                        &receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>()
-                    ),
-                    "CachedHeaderValues receipts root mismatch"
-                );
-            }
-            if cached_header_values.logs_bloom.is_some() {
-                debug_assert_eq!(
-                    logs_bloom,
-                    reth_primitives_traits::logs_bloom(receipts.iter().flat_map(|r| r.logs())),
-                    "CachedHeaderValues logs bloom mismatch"
-                );
-            }
-        }
 
         let withdrawals = self
             .chain_spec
