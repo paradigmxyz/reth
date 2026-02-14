@@ -563,8 +563,12 @@ pub struct BasicBlockExecutor<F, DB> {
 impl<F, DB: Database> BasicBlockExecutor<F, DB> {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
     pub fn new(strategy_factory: F, db: DB) -> Self {
-        let db =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+        let db = State::builder()
+            .with_database(db)
+            .with_bundle_update()
+            .without_state_clear()
+            .with_bal_builder_if(true)
+            .build();
         Self { strategy_factory, db }
     }
 }
