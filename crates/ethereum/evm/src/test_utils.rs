@@ -1,6 +1,6 @@
 use crate::EthEvmConfig;
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
-use alloy_consensus::Header;
+use alloy_consensus::{Header, TxType};
 use alloy_eips::eip7685::Requests;
 use alloy_evm::precompiles::PrecompilesMap;
 use alloy_primitives::Bytes;
@@ -11,14 +11,14 @@ use reth_evm::{
     block::{
         BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ExecutableTx,
     },
-    eth::{EthBlockExecutionCtx, EthEvmContext},
+    eth::{EthBlockExecutionCtx, EthEvmContext, EthTxResult},
     ConfigureEngineEvm, ConfigureEvm, Database, EthEvm, EthEvmFactory, Evm, EvmEnvFor, EvmFactory,
-    ExecutableTxIterator, ExecutionCtxFor,
+    ExecutableTxIterator, ExecutionCtxFor, RecoveredTx,
 };
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{BlockTy, SealedBlock, SealedHeader};
 use revm::{
-    context::result::{ExecutionResult, Output, ResultAndState, SuccessReason},
+    context::result::{ExecutionResult, HaltReason, Output, ResultAndState, SuccessReason},
     database::State,
     Inspector,
 };
@@ -90,6 +90,7 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
     type Evm = EthEvm<&'a mut State<DB>, I, PrecompilesMap>;
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
+    type Result = EthTxResult<HaltReason, TxType>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         Ok(())
@@ -101,25 +102,25 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
 
     fn execute_transaction_without_commit(
         &mut self,
-        _tx: impl ExecutableTx<Self>,
-    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
-        Ok(ResultAndState::new(
-            ExecutionResult::Success {
-                reason: SuccessReason::Return,
-                gas_used: 0,
-                gas_refunded: 0,
-                logs: vec![],
-                output: Output::Call(Bytes::from(vec![])),
-            },
-            Default::default(),
-        ))
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<Self::Result, BlockExecutionError> {
+        Ok(EthTxResult {
+            result: ResultAndState::new(
+                ExecutionResult::Success {
+                    reason: SuccessReason::Return,
+                    gas_used: 0,
+                    gas_refunded: 0,
+                    logs: vec![],
+                    output: Output::Call(Bytes::from(vec![])),
+                },
+                Default::default(),
+            ),
+            tx_type: tx.into_parts().1.tx().tx_type(),
+            blob_gas_used: 0,
+        })
     }
 
-    fn commit_transaction(
-        &mut self,
-        _output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
-        _tx: impl ExecutableTx<Self>,
-    ) -> Result<u64, BlockExecutionError> {
+    fn commit_transaction(&mut self, _output: Self::Result) -> Result<u64, BlockExecutionError> {
         Ok(0)
     }
 

@@ -29,13 +29,6 @@ pub struct ExecutorMetrics {
     /// The total amount of time it took to execute the latest block.
     pub execution_duration: Gauge,
 
-    /// The Histogram for number of accounts loaded when executing the latest block.
-    pub accounts_loaded_histogram: Histogram,
-    /// The Histogram for number of storage slots loaded when executing the latest block.
-    pub storage_slots_loaded_histogram: Histogram,
-    /// The Histogram for number of bytecodes loaded when executing the latest block.
-    pub bytecodes_loaded_histogram: Histogram,
-
     /// The Histogram for number of accounts updated when executing the latest block.
     pub accounts_updated_histogram: Histogram,
     /// The Histogram for number of storage slots updated when executing the latest block.

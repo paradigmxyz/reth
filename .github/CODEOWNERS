@@ -1,45 +1,51 @@
 *                           @gakonst
-crates/blockchain-tree-api/ @rakita @mattsse @Rjected
-crates/blockchain-tree/     @rakita @mattsse @Rjected
 crates/chain-state/         @fgimenez @mattsse
 crates/chainspec/           @Rjected @joshieDo @mattsse
 crates/cli/                 @mattsse
+crates/config/              @shekhirin @mattsse @Rjected 
 crates/consensus/           @mattsse @Rjected
 crates/e2e-test-utils/      @mattsse @Rjected @klkvr @fgimenez
-crates/engine/              @mattsse @Rjected @fgimenez @mediocregopher @yongkangc
-crates/era/                 @mattsse @RomanHodulak
+crates/engine/              @mattsse @Rjected @mediocregopher @yongkangc
+crates/era/                 @mattsse
+crates/era-downloader/      @mattsse
+crates/era-utils/           @mattsse
 crates/errors/              @mattsse
-crates/ethereum-forks/      @mattsse @Rjected
 crates/ethereum/            @mattsse @Rjected
 crates/etl/                 @joshieDo @shekhirin
-crates/evm/                 @rakita @mattsse @Rjected
+crates/evm/                 @mattsse @Rjected @klkvr
 crates/exex/                @shekhirin
+crates/fs-util/             @mattsse
+crates/metrics/             @mattsse @Rjected 
 crates/net/                 @mattsse @Rjected
 crates/net/downloaders/     @Rjected
 crates/node/                @mattsse @Rjected @klkvr
-crates/optimism/            @mattsse @Rjected @fgimenez
 crates/payload/             @mattsse @Rjected
-crates/primitives-traits/   @Rjected @RomanHodulak @mattsse @klkvr
+crates/primitives-traits/   @Rjected @mattsse @klkvr
 crates/primitives/          @Rjected @mattsse @klkvr
 crates/prune/               @shekhirin @joshieDo
-crates/ress                 @shekhirin @Rjected
-crates/revm/                @mattsse @rakita
-crates/rpc/                 @mattsse @Rjected @RomanHodulak
+crates/ress/                @shekhirin @Rjected
+crates/revm/                @mattsse
+crates/rpc/                 @mattsse @Rjected
 crates/stages/              @shekhirin @mediocregopher
 crates/static-file/         @joshieDo @shekhirin
+crates/stateless/           @mattsse
 crates/storage/codecs/      @joshieDo
-crates/storage/db-api/      @joshieDo @rakita
+crates/storage/db-api/      @joshieDo
 crates/storage/db-common/   @Rjected
-crates/storage/db/          @joshieDo @rakita
-crates/storage/errors/      @rakita
-crates/storage/libmdbx-rs/  @rakita @shekhirin
+crates/storage/db/          @joshieDo
+crates/storage/errors/      @joshieDo
+crates/storage/libmdbx-rs/  @shekhirin
 crates/storage/nippy-jar/   @joshieDo @shekhirin
-crates/storage/provider/    @rakita @joshieDo @shekhirin
+crates/storage/provider/    @joshieDo @shekhirin @yongkangc
 crates/storage/storage-api/ @joshieDo
-crates/tasks/               @mattsse
-crates/tokio-util/          @fgimenez
+crates/tasks/               @mattsse @DaniPopes
+crates/tokio-util/          @mattsse 
+crates/tracing/             @mattsse @shekhirin
+crates/tracing-otlp/        @mattsse @Rjected 
 crates/transaction-pool/    @mattsse @yongkangc
-crates/trie/                @Rjected @shekhirin @mediocregopher
+crates/trie/                @Rjected @shekhirin @mediocregopher @yongkangc
+bin/reth/                   @mattsse @shekhirin @Rjected 
+bin/reth-bench/             @mattsse @Rjected @shekhirin @yongkangc 
 bin/reth-bench-compare/     @mediocregopher @shekhirin @yongkangc
 etc/                        @Rjected @shekhirin
 .github/                    @gakonst @DaniPopes

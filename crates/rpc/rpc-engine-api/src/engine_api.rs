@@ -10,8 +10,9 @@ use alloy_eips::{
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
+    ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
     PraguePayloadFields,
 };
 use async_trait::async_trait;
@@ -531,7 +532,7 @@ where
         let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
 
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking_task(Box::pin(async move {
             if count > MAX_PAYLOAD_BODIES_LIMIT {
                 tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count })).ok();
                 return;
@@ -612,6 +613,34 @@ where
         res
     }
 
+    /// Returns the execution payload bodies by the range (V2).
+    ///
+    /// V2 includes the `block_access_list` field for EIP-7928 BAL support.
+    pub async fn get_payload_bodies_by_range_v2(
+        &self,
+        start: BlockNumber,
+        count: u64,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
+        self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV2 {
+            transactions: block.body().encoded_2718_transactions(),
+            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+            block_access_list: None,
+        })
+        .await
+    }
+
+    /// Metrics version of `get_payload_bodies_by_range_v2`
+    pub async fn get_payload_bodies_by_range_v2_metered(
+        &self,
+        start: BlockNumber,
+        count: u64,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
+        let start_time = Instant::now();
+        let res = Self::get_payload_bodies_by_range_v2(self, start, count).await;
+        self.inner.metrics.latency.get_payload_bodies_by_range_v2.record(start_time.elapsed());
+        res
+    }
+
     /// Called to retrieve execution payload bodies by hashes.
     pub async fn get_payload_bodies_by_hash_with<F, R>(
         &self,
@@ -630,7 +659,7 @@ where
         let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
 
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking_task(Box::pin(async move {
             let mut result = Vec::with_capacity(hashes.len());
             for hash in hashes {
                 let block_result = inner.provider.block(BlockHashOrNumber::Hash(hash));
@@ -670,6 +699,32 @@ where
         let start = Instant::now();
         let res = Self::get_payload_bodies_by_hash_v1(self, hashes).await;
         self.inner.metrics.latency.get_payload_bodies_by_hash_v1.record(start.elapsed());
+        res
+    }
+
+    /// Called to retrieve execution payload bodies by hashes (V2).
+    ///
+    /// V2 includes the `block_access_list` field for EIP-7928 BAL support.
+    pub async fn get_payload_bodies_by_hash_v2(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
+        self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV2 {
+            transactions: block.body().encoded_2718_transactions(),
+            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+            block_access_list: None,
+        })
+        .await
+    }
+
+    /// Metrics version of `get_payload_bodies_by_hash_v2`
+    pub async fn get_payload_bodies_by_hash_v2_metered(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
+        let start = Instant::now();
+        let res = Self::get_payload_bodies_by_hash_v2(self, hashes).await;
+        self.inner.metrics.latency.get_payload_bodies_by_hash_v2.record(start.elapsed());
         res
     }
 
@@ -963,6 +1018,24 @@ where
         Ok(self.new_payload_v4_metered(payload).await?)
     }
 
+    /// Handler for `engine_newPayloadV5`
+    ///
+    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
+    async fn new_payload_v5(
+        &self,
+        _payload: ExecutionPayloadV4,
+        _versioned_hashes: Vec<B256>,
+        _parent_beacon_block_root: B256,
+        _execution_requests: RequestsOrHash,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV5");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
+    }
+
     /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -1086,6 +1159,21 @@ where
         Ok(self.get_payload_v5_metered(payload_id).await?)
     }
 
+    /// Handler for `engine_getPayloadV6`
+    ///
+    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
+    async fn get_payload_v6(
+        &self,
+        _payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV6> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV6");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
+    }
+
     /// Handler for `engine_getPayloadBodiesByHashV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     async fn get_payload_bodies_by_hash_v1(
@@ -1094,6 +1182,19 @@ where
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
         Ok(self.get_payload_bodies_by_hash_v1_metered(block_hashes).await?)
+    }
+
+    /// Handler for `engine_getPayloadBodiesByHashV2`
+    ///
+    /// V2 includes the `block_access_list` field for EIP-7928 BAL support.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    async fn get_payload_bodies_by_hash_v2(
+        &self,
+        block_hashes: Vec<BlockHash>,
+    ) -> RpcResult<ExecutionPayloadBodiesV2> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV2");
+        Ok(self.get_payload_bodies_by_hash_v2_metered(block_hashes).await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByRangeV1`
@@ -1119,6 +1220,20 @@ where
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
         Ok(self.get_payload_bodies_by_range_v1_metered(start.to(), count.to()).await?)
+    }
+
+    /// Handler for `engine_getPayloadBodiesByRangeV2`
+    ///
+    /// V2 includes the `block_access_list` field for EIP-7928 BAL support.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    async fn get_payload_bodies_by_range_v2(
+        &self,
+        start: U64,
+        count: U64,
+    ) -> RpcResult<ExecutionPayloadBodiesV2> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV2");
+        Ok(self.get_payload_bodies_by_range_v2_metered(start.to(), count.to()).await?)
     }
 
     /// Handler for `engine_getClientVersionV1`
@@ -1165,33 +1280,6 @@ where
     ) -> RpcResult<Option<Vec<Option<BlobAndProofV2>>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV3");
         Ok(self.get_blobs_v3_metered(versioned_hashes)?)
-    }
-
-    /// Handler for `engine_getBALsByHashV1`
-    ///
-    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
-    async fn get_bals_by_hash_v1(
-        &self,
-        _block_hashes: Vec<BlockHash>,
-    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
-        trace!(target: "rpc::engine", "Serving engine_getBALsByHashV1");
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
-    }
-
-    /// Handler for `engine_getBALsByRangeV1`
-    ///
-    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
-    async fn get_bals_by_range_v1(
-        &self,
-        _start: U64,
-        _count: U64,
-    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
-        trace!(target: "rpc::engine", "Serving engine_getBALsByRangeV1");
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
     }
 }
 

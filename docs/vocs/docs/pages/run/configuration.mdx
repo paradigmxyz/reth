@@ -434,11 +434,6 @@ storage_history = { distance = 100_000 } # Prune all historical storage states b
 
 # Bodies History pruning configuration
 bodies_history = { distance = 100_000 } # Prune all historical block bodies before the block `head-100000`
-
-# Merkle Changesets pruning configuration
-# Controls pruning of AccountsTrieChangeSets and StoragesTrieChangeSets.
-# Default: { distance = 128 } - keeps the last 128 blocks of merkle changesets
-merkle_changesets = { distance = 128 }
 ```
 
 We can also prune receipts more granular, using the logs filtering:

@@ -4,10 +4,13 @@ use alloy_consensus::transaction::Either;
 use alloy_provider::network::AnyNetwork;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
-use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
+use reth_consensus_debug_client::{
+    BlockProvider, DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider,
+};
 use reth_engine_local::LocalMiner;
 use reth_node_api::{
-    BlockTy, FullNodeComponents, HeaderTy, PayloadAttrTy, PayloadAttributesBuilder, PayloadTypes,
+    BlockTy, FullNodeComponents, FullNodeTypes, HeaderTy, PayloadAttrTy, PayloadAttributesBuilder,
+    PayloadTypes,
 };
 use std::{
     future::{Future, IntoFuture},
@@ -109,9 +112,16 @@ impl<L> DebugNodeLauncher<L> {
     }
 }
 
+/// Type alias for the default debug block provider. We use etherscan provider to satisfy the
+/// bounds.
+pub type DefaultDebugBlockProvider<N> = EtherscanBlockProvider<
+    <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcBlock,
+    BlockTy<<N as FullNodeTypes>::Types>,
+>;
+
 /// Future for the [`DebugNodeLauncher`].
 #[expect(missing_debug_implementations, clippy::type_complexity)]
-pub struct DebugNodeLauncherFuture<L, Target, N>
+pub struct DebugNodeLauncherFuture<L, Target, N, B = DefaultDebugBlockProvider<N>>
 where
     N: FullNodeComponents<Types: DebugNode<N>>,
 {
@@ -121,14 +131,17 @@ where
         Option<Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>>,
     map_attributes:
         Option<Box<dyn Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync>>,
+    debug_block_provider: Option<B>,
 }
 
-impl<L, Target, N, AddOns> DebugNodeLauncherFuture<L, Target, N>
+impl<L, Target, N, AddOns, B> DebugNodeLauncherFuture<L, Target, N, B>
 where
     N: FullNodeComponents<Types: DebugNode<N>>,
     AddOns: RethRpcAddOns<N>,
     L: LaunchNode<Target, Node = NodeHandle<N, AddOns>>,
+    B: BlockProvider<Block = BlockTy<N::Types>> + Clone,
 {
+    /// Sets a custom payload attributes builder for local mining in dev mode.
     pub fn with_payload_attributes_builder(
         self,
         builder: impl PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>,
@@ -138,9 +151,11 @@ where
             target: self.target,
             local_payload_attributes_builder: Some(Box::new(builder)),
             map_attributes: None,
+            debug_block_provider: self.debug_block_provider,
         }
     }
 
+    /// Sets a function to map payload attributes before building.
     pub fn map_debug_payload_attributes(
         self,
         f: impl Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync + 'static,
@@ -150,16 +165,58 @@ where
             target: self.target,
             local_payload_attributes_builder: None,
             map_attributes: Some(Box::new(f)),
+            debug_block_provider: self.debug_block_provider,
+        }
+    }
+
+    /// Sets a custom block provider for the debug consensus client.
+    ///
+    /// When set, this provider will be used instead of creating an `EtherscanBlockProvider`
+    /// or `RpcBlockProvider` from CLI arguments.
+    pub fn with_debug_block_provider<B2>(
+        self,
+        provider: B2,
+    ) -> DebugNodeLauncherFuture<L, Target, N, B2>
+    where
+        B2: BlockProvider<Block = BlockTy<N::Types>> + Clone,
+    {
+        DebugNodeLauncherFuture {
+            inner: self.inner,
+            target: self.target,
+            local_payload_attributes_builder: self.local_payload_attributes_builder,
+            map_attributes: self.map_attributes,
+            debug_block_provider: Some(provider),
         }
     }
 
     async fn launch_node(self) -> eyre::Result<NodeHandle<N, AddOns>> {
-        let Self { inner, target, local_payload_attributes_builder, map_attributes } = self;
+        let Self {
+            inner,
+            target,
+            local_payload_attributes_builder,
+            map_attributes,
+            debug_block_provider,
+        } = self;
 
         let handle = inner.launch_node(target).await?;
 
         let config = &handle.node.config;
-        if let Some(url) = config.debug.rpc_consensus_url.clone() {
+
+        if let Some(provider) = debug_block_provider {
+            info!(target: "reth::cli", "Using custom debug block provider");
+
+            let rpc_consensus_client = DebugConsensusClient::new(
+                handle.node.add_ons_handle.beacon_engine_handle.clone(),
+                Arc::new(provider),
+            );
+
+            handle
+                .node
+                .task_executor
+                .spawn_critical_task("custom debug block provider consensus client", async move {
+                    rpc_consensus_client.run().await
+                });
+        } else if let Some(url) = config.debug.rpc_consensus_url.clone() {
             info!(target: "reth::cli", "Using RPC consensus client: {}", url);
 
             let block_provider =
@@ -177,17 +234,14 @@ where
                 Arc::new(block_provider),
             );
 
-            handle.node.task_executor.spawn_critical("rpc-ws consensus client", async move {
+            handle.node.task_executor.spawn_critical_task("rpc-ws consensus client", async move {
                 rpc_consensus_client.run().await
             });
-        }
-
-        if let Some(maybe_custom_etherscan_url) = config.debug.etherscan.clone() {
+        } else if let Some(maybe_custom_etherscan_url) = config.debug.etherscan.clone() {
             info!(target: "reth::cli", "Using etherscan as consensus client");
 
             let chain = config.chain.chain();
             let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
-                // If URL isn't provided, use default Etherscan URL for the chain if it is known
                 chain
                     .etherscan_urls()
                     .map(|urls| urls.0.to_string())
@@ -208,9 +262,12 @@ where
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),
                 Arc::new(block_provider),
             );
-            handle.node.task_executor.spawn_critical("etherscan consensus client", async move {
-                rpc_consensus_client.run().await
-            });
+            handle
+                .node
+                .task_executor
+                .spawn_critical_task("etherscan consensus client", async move {
+                    rpc_consensus_client.run().await
+                });
         }
 
         if config.dev.dev {
@@ -235,7 +292,7 @@ where
             };
 
             let dev_mining_mode = handle.node.config.dev_mining_mode(pool);
-            handle.node.task_executor.spawn_critical("local engine", async move {
+            handle.node.task_executor.spawn_critical_task("local engine", async move {
                 LocalMiner::new(
                     blockchain_db,
                     builder,
@@ -252,12 +309,13 @@ where
     }
 }
 
-impl<L, Target, N, AddOns> IntoFuture for DebugNodeLauncherFuture<L, Target, N>
+impl<L, Target, N, AddOns, B> IntoFuture for DebugNodeLauncherFuture<L, Target, N, B>
 where
     Target: Send + 'static,
     N: FullNodeComponents<Types: DebugNode<N>>,
     AddOns: RethRpcAddOns<N> + 'static,
     L: LaunchNode<Target, Node = NodeHandle<N, AddOns>> + 'static,
+    B: BlockProvider<Block = BlockTy<N::Types>> + Clone + 'static,
 {
     type Output = eyre::Result<NodeHandle<N, AddOns>>;
     type IntoFuture = Pin<Box<dyn Future<Output = eyre::Result<NodeHandle<N, AddOns>>> + Send>>;
@@ -273,6 +331,7 @@ where
     N: FullNodeComponents<Types: DebugNode<N>>,
     AddOns: RethRpcAddOns<N> + 'static,
     L: LaunchNode<Target, Node = NodeHandle<N, AddOns>> + 'static,
+    DefaultDebugBlockProvider<N>: BlockProvider<Block = BlockTy<N::Types>> + Clone,
 {
     type Node = NodeHandle<N, AddOns>;
     type Future = DebugNodeLauncherFuture<L, Target, N>;
@@ -283,6 +342,7 @@ where
             target,
             local_payload_attributes_builder: None,
             map_attributes: None,
+            debug_block_provider: None,
         }
     }
 }

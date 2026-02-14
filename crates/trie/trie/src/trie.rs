@@ -18,7 +18,7 @@ use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives_traits::Account;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument, trace, Span};
 
 /// The default updates after which root algorithms should return intermediate progress rather than
 /// finishing the computation.
@@ -611,7 +611,7 @@ where
     ///
     /// The storage root, number of walked entries and trie updates
     /// for a given address if requested.
-    #[instrument(skip_all, target = "trie::storage_root", name = "Storage trie", fields(hashed_address = ?self.hashed_address))]
+    #[instrument(skip_all, target = "trie::storage_root", name = "Storage trie", fields(hashed_address = ?self.hashed_address, storage_root = tracing::field::Empty))]
     pub fn calculate(self, retain_updates: bool) -> Result<StorageRootProgress, StorageRootError> {
         trace!(target: "trie::storage_root", "calculating storage root");
 
@@ -620,6 +620,7 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
+            Span::current().record("storage_root", format!("{EMPTY_ROOT_HASH:?}"));
             return Ok(StorageRootProgress::Complete(
                 EMPTY_ROOT_HASH,
                 0,
@@ -695,6 +696,7 @@ where
         }
 
         let root = hash_builder.root();
+        Span::current().record("storage_root", format!("{root:?}"));
 
         let removed_keys = storage_node_iter.walker.take_removed_keys();
         trie_updates.finalize(hash_builder, removed_keys);

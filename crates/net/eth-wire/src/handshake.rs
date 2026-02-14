@@ -119,117 +119,100 @@ where
         }
 
         let version = status.version();
-        let msg = match ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+        let their_status_message = match ProtocolMessage::<EthNetworkPrimitives>::decode_status(
             version,
             &mut their_msg.as_ref(),
         ) {
-            Ok(m) => m,
+            Ok(status) => status,
             Err(err) => {
                 debug!("decode error in eth handshake: msg={their_msg:x}");
                 unauth
-                    .disconnect(DisconnectReason::DisconnectRequested)
+                    .disconnect(DisconnectReason::ProtocolBreach)
                     .await
                     .map_err(EthStreamError::from)?;
                 return Err(EthStreamError::InvalidMessage(err));
             }
         };
 
-        // Validate peer response
-        match msg.message {
-            EthMessage::Status(their_status_message) => {
-                trace!("Validating incoming ETH status from peer");
+        trace!("Validating incoming ETH status from peer");
 
-                if status.genesis() != their_status_message.genesis() {
-                    unauth
-                        .disconnect(DisconnectReason::ProtocolBreach)
-                        .await
-                        .map_err(EthStreamError::from)?;
-                    return Err(EthHandshakeError::MismatchedGenesis(
-                        GotExpected {
-                            expected: status.genesis(),
-                            got: their_status_message.genesis(),
-                        }
-                        .into(),
-                    )
-                    .into());
-                }
+        if status.genesis() != their_status_message.genesis() {
+            unauth
+                .disconnect(DisconnectReason::ProtocolBreach)
+                .await
+                .map_err(EthStreamError::from)?;
+            return Err(EthHandshakeError::MismatchedGenesis(
+                GotExpected { expected: status.genesis(), got: their_status_message.genesis() }
+                    .into(),
+            )
+            .into());
+        }
 
-                if status.version() != their_status_message.version() {
-                    unauth
-                        .disconnect(DisconnectReason::ProtocolBreach)
-                        .await
-                        .map_err(EthStreamError::from)?;
-                    return Err(EthHandshakeError::MismatchedProtocolVersion(GotExpected {
-                        got: their_status_message.version(),
-                        expected: status.version(),
-                    })
-                    .into());
-                }
+        if status.version() != their_status_message.version() {
+            unauth
+                .disconnect(DisconnectReason::ProtocolBreach)
+                .await
+                .map_err(EthStreamError::from)?;
+            return Err(EthHandshakeError::MismatchedProtocolVersion(GotExpected {
+                got: their_status_message.version(),
+                expected: status.version(),
+            })
+            .into());
+        }
 
-                if *status.chain() != *their_status_message.chain() {
-                    unauth
-                        .disconnect(DisconnectReason::ProtocolBreach)
-                        .await
-                        .map_err(EthStreamError::from)?;
-                    return Err(EthHandshakeError::MismatchedChain(GotExpected {
-                        got: *their_status_message.chain(),
-                        expected: *status.chain(),
-                    })
-                    .into());
-                }
+        if *status.chain() != *their_status_message.chain() {
+            unauth
+                .disconnect(DisconnectReason::ProtocolBreach)
+                .await
+                .map_err(EthStreamError::from)?;
+            return Err(EthHandshakeError::MismatchedChain(GotExpected {
+                got: *their_status_message.chain(),
+                expected: *status.chain(),
+            })
+            .into());
+        }
 
-                // Ensure peer's total difficulty is reasonable
-                if let StatusMessage::Legacy(s) = their_status_message &&
-                    s.total_difficulty.bit_len() > 160
-                {
-                    unauth
-                        .disconnect(DisconnectReason::ProtocolBreach)
-                        .await
-                        .map_err(EthStreamError::from)?;
-                    return Err(EthHandshakeError::TotalDifficultyBitLenTooLarge {
-                        got: s.total_difficulty.bit_len(),
-                        maximum: 160,
-                    }
-                    .into());
-                }
-
-                // Fork validation
-                if let Err(err) = fork_filter
-                    .validate(their_status_message.forkid())
-                    .map_err(EthHandshakeError::InvalidFork)
-                {
-                    unauth
-                        .disconnect(DisconnectReason::ProtocolBreach)
-                        .await
-                        .map_err(EthStreamError::from)?;
-                    return Err(err.into());
-                }
-
-                if let StatusMessage::Eth69(s) = their_status_message {
-                    if s.earliest > s.latest {
-                        return Err(EthHandshakeError::EarliestBlockGreaterThanLatestBlock {
-                            got: s.earliest,
-                            latest: s.latest,
-                        }
-                        .into());
-                    }
-
-                    if s.blockhash.is_zero() {
-                        return Err(EthHandshakeError::BlockhashZero.into());
-                    }
-                }
-
-                Ok(UnifiedStatus::from_message(their_status_message))
+        // Ensure peer's total difficulty is reasonable
+        if let StatusMessage::Legacy(s) = &their_status_message &&
+            s.total_difficulty.bit_len() > 160
+        {
+            unauth
+                .disconnect(DisconnectReason::ProtocolBreach)
+                .await
+                .map_err(EthStreamError::from)?;
+            return Err(EthHandshakeError::TotalDifficultyBitLenTooLarge {
+                got: s.total_difficulty.bit_len(),
+                maximum: 160,
             }
-            _ => {
-                unauth
-                    .disconnect(DisconnectReason::ProtocolBreach)
-                    .await
-                    .map_err(EthStreamError::from)?;
-                Err(EthStreamError::EthHandshakeError(
-                    EthHandshakeError::NonStatusMessageInHandshake,
-                ))
+            .into());
+        }
+
+        // Fork validation
+        if let Err(err) = fork_filter
+            .validate(their_status_message.forkid())
+            .map_err(EthHandshakeError::InvalidFork)
+        {
+            unauth
+                .disconnect(DisconnectReason::ProtocolBreach)
+                .await
+                .map_err(EthStreamError::from)?;
+            return Err(err.into());
+        }
+
+        if let StatusMessage::Eth69(s) = &their_status_message {
+            if s.earliest > s.latest {
+                return Err(EthHandshakeError::EarliestBlockGreaterThanLatestBlock {
+                    got: s.earliest,
+                    latest: s.latest,
+                }
+                .into());
+            }
+
+            if s.blockhash.is_zero() {
+                return Err(EthHandshakeError::BlockhashZero.into());
             }
         }
+
+        Ok(UnifiedStatus::from_message(their_status_message))
     }
 }

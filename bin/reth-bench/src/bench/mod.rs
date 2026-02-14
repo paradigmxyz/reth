@@ -15,7 +15,9 @@ pub use generate_big_block::{
 mod new_payload_fcu;
 mod new_payload_only;
 mod output;
+mod persistence_waiter;
 mod replay_payloads;
+mod send_invalid_payload;
 mod send_payload;
 
 /// `reth bench` command
@@ -74,6 +76,18 @@ pub enum Subcommands {
     /// `reth-bench replay-payloads --payload-dir ./payloads --engine-rpc-url
     /// http://localhost:8551 --jwt-secret ~/.local/share/reth/mainnet/jwt.hex`
     ReplayPayloads(replay_payloads::Command),
+
+    /// Generate and send an invalid `engine_newPayload` request for testing.
+    ///
+    /// Takes a valid block and modifies fields to make it invalid, allowing you to test
+    /// Engine API rejection behavior. Block hash is recalculated after modifications
+    /// unless `--invalid-block-hash` or `--skip-hash-recalc` is used.
+    ///
+    /// Example:
+    ///
+    /// `cast block latest --full --json | reth-bench send-invalid-payload --rpc-url localhost:5000
+    /// --jwt-secret $(cat ~/.local/share/reth/mainnet/jwt.hex) --invalid-state-root`
+    SendInvalidPayload(Box<send_invalid_payload::Command>),
 }
 
 impl BenchmarkCommand {
@@ -89,6 +103,7 @@ impl BenchmarkCommand {
             Subcommands::SendPayload(command) => command.execute(ctx).await,
             Subcommands::GenerateBigBlock(command) => command.execute(ctx).await,
             Subcommands::ReplayPayloads(command) => command.execute(ctx).await,
+            Subcommands::SendInvalidPayload(command) => (*command).execute(ctx).await,
         }
     }
 
@@ -96,7 +111,18 @@ impl BenchmarkCommand {
     ///
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
+    ///
+    /// Always enables log target display (`RUST_LOG_TARGET=1`) so that the `reth-bench` target
+    /// is visible in output, making it easy to distinguish reth-bench logs from reth logs when
+    /// both are streamed to the same console or file.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+        // Always show the log target so "reth-bench" is visible in the output.
+        if std::env::var_os("RUST_LOG_TARGET").is_none() {
+            // SAFETY: This is called early during single-threaded initialization, before any
+            // threads are spawned and before the tracing subscriber is set up.
+            unsafe { std::env::set_var("RUST_LOG_TARGET", "1") };
+        }
+
         let guard = self.logs.init_tracing()?;
         Ok(guard)
     }

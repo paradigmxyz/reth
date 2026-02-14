@@ -12,8 +12,9 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
-    keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
-    TxHash, TxNumber, B256, U256,
+    keccak256,
+    map::{AddressMap, B256Map, HashMap},
+    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
@@ -21,7 +22,7 @@ use reth_chainspec::{ChainInfo, EthChainSpec};
 use reth_db::transaction::DbTx;
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
-    models::{AccountBeforeTx, StoredBlockBodyIndices},
+    models::{AccountBeforeTx, StorageSettings, StoredBlockBodyIndices},
 };
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
@@ -32,9 +33,9 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
+    BlockBodyIndicesProvider, BytecodeReader, ChangesetEntry, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageRootProvider,
+    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -54,13 +55,13 @@ use tokio::sync::broadcast;
 pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_chainspec::ChainSpec>
 {
     ///local block store
-    pub blocks: Arc<Mutex<HashMap<B256, T::Block>>>,
+    pub blocks: Arc<Mutex<B256Map<T::Block>>>,
     /// Local header store
-    pub headers: Arc<Mutex<HashMap<B256, <T::Block as Block>::Header>>>,
+    pub headers: Arc<Mutex<B256Map<<T::Block as Block>::Header>>>,
     /// Local receipt store indexed by block number
     pub receipts: Arc<Mutex<HashMap<BlockNumber, Vec<T::Receipt>>>>,
     /// Local account store
-    pub accounts: Arc<Mutex<HashMap<Address, ExtendedAccount>>>,
+    pub accounts: Arc<Mutex<AddressMap<ExtendedAccount>>>,
     /// Local chain spec
     pub chain_spec: Arc<ChainSpec>,
     /// Local state roots
@@ -187,6 +188,21 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
+    }
+
+    /// Adds the genesis block from the chain spec to the provider.
+    ///
+    /// This is useful for tests that require a valid latest block (e.g., transaction validation).
+    pub fn with_genesis_block(self) -> Self
+    where
+        ChainSpec: EthChainSpec<Header = <T::Block as Block>::Header>,
+        <T::Block as Block>::Body: Default,
+    {
+        let genesis_hash = self.chain_spec.genesis_hash();
+        let genesis_header = self.chain_spec.genesis_header().clone();
+        let genesis_block = T::Block::new(genesis_header, Default::default());
+        self.add_block(genesis_hash, genesis_block);
+        self
     }
 }
 
@@ -867,6 +883,14 @@ where
         let lock = self.accounts.lock();
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
     }
+
+    fn storage_by_hashed_key(
+        &self,
+        _address: Address,
+        _hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        Ok(None)
+    }
 }
 
 impl<T, ChainSpec> BytecodeReader for MockEthProvider<T, ChainSpec>
@@ -885,6 +909,16 @@ where
             }
         }))
     }
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageSettingsCache
+    for MockEthProvider<T, ChainSpec>
+{
+    fn cached_storage_settings(&self) -> StorageSettings {
+        StorageSettings::default()
+    }
+
+    fn set_storage_settings_cache(&self, _settings: StorageSettings) {}
 }
 
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory
@@ -985,6 +1019,37 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     }
 
     fn account_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
+    for MockEthProvider<T, ChainSpec>
+{
+    fn storage_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, ChangesetEntry)>> {
+        Ok(Vec::default())
+    }
+
+    fn get_storage_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+        _storage_key: B256,
+    ) -> ProviderResult<Option<ChangesetEntry>> {
+        Ok(None)
+    }
+
+    fn storage_changesets_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, ChangesetEntry)>> {
+        Ok(Vec::default())
+    }
+
+    fn storage_changeset_count(&self) -> ProviderResult<usize> {
         Ok(0)
     }
 }

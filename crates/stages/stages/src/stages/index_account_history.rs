@@ -1,6 +1,8 @@
 use super::collect_account_history_indices;
 use crate::stages::utils::{collect_history_indices, load_account_history};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_db_api::Tables;
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
 use reth_provider::{
     DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
@@ -101,7 +103,7 @@ where
 
         let mut range = input.next_block_range();
         let first_sync = input.checkpoint().block_number == 0;
-        let use_rocksdb = provider.cached_storage_settings().account_history_in_rocksdb;
+        let use_rocksdb = provider.cached_storage_settings().storage_v2;
 
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
@@ -111,7 +113,6 @@ where
                 // but this is safe for first_sync because if we crash before commit, the
                 // checkpoint stays at 0 and we'll just clear and rebuild again on restart. The
                 // source data (changesets) is intact.
-                #[cfg(all(unix, feature = "rocksdb"))]
                 provider.rocksdb_provider().clear::<tables::AccountsHistory>()?;
             } else {
                 provider.tx_ref().clear::<tables::AccountsHistory>()?;
@@ -121,7 +122,7 @@ where
 
         info!(target: "sync::stages::index_account_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
 
-        let collector = if provider.cached_storage_settings().account_changesets_in_static_files {
+        let collector = if provider.cached_storage_settings().storage_v2 {
             // Use the provider-based collection that can read from static files.
             collect_account_history_indices(provider, range.clone(), &self.etl_config)?
         } else {
@@ -136,12 +137,18 @@ where
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
 
-        provider.with_rocksdb_batch(|rocksdb_batch| {
+        provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
             let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
             load_account_history(collector, first_sync, &mut writer)
                 .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
+
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if use_rocksdb {
+            provider.commit_pending_rocksdb_batches()?;
+            provider.rocksdb_provider().flush(&[Tables::AccountsHistory.name()])?;
+        }
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
@@ -659,32 +666,43 @@ mod tests {
     #[cfg(all(unix, feature = "rocksdb"))]
     mod rocksdb_tests {
         use super::*;
-        use reth_provider::RocksDBProviderFactory;
+        use reth_provider::{
+            providers::StaticFileWriter, RocksDBProviderFactory, StaticFileProviderFactory,
+        };
+        use reth_static_file_types::StaticFileSegment;
         use reth_storage_api::StorageSettings;
+
+        /// Sets up v2 account test data: writes block body indices to MDBX and
+        /// account changesets to static files (matching realistic v2 layout).
+        fn setup_v2_account_data(db: &TestStageDB, block_range: std::ops::RangeInclusive<u64>) {
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
+
+            db.commit(|tx| {
+                for block in block_range.clone() {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+            let static_file_provider = db.factory.static_file_provider();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            for block in block_range {
+                writer.append_account_changeset(vec![acc()], block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
 
         /// Test that when `account_history_in_rocksdb` is enabled, the stage
         /// writes account history indices to `RocksDB` instead of MDBX.
         #[tokio::test]
         async fn execute_writes_to_rocksdb_when_enabled() {
-            // init
             let db = TestStageDB::default();
-
-            // Enable RocksDB for account history
-            db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_account_history_in_rocksdb(true),
-            );
-
-            db.commit(|tx| {
-                for block in 0..=10 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::AccountChangeSets>(block, acc())?;
-                }
-                Ok(())
-            })
-            .unwrap();
+            setup_v2_account_data(&db, 0..=10);
 
             let input = ExecInput { target: Some(10), ..Default::default() };
             let mut stage = IndexAccountHistoryStage::default();
@@ -714,22 +732,7 @@ mod tests {
         #[tokio::test]
         async fn unwind_works_when_rocksdb_enabled() {
             let db = TestStageDB::default();
-
-            db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_account_history_in_rocksdb(true),
-            );
-
-            db.commit(|tx| {
-                for block in 0..=10 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::AccountChangeSets>(block, acc())?;
-                }
-                Ok(())
-            })
-            .unwrap();
+            setup_v2_account_data(&db, 0..=10);
 
             let input = ExecInput { target: Some(10), ..Default::default() };
             let mut stage = IndexAccountHistoryStage::default();
@@ -765,22 +768,7 @@ mod tests {
         #[tokio::test]
         async fn execute_incremental_sync() {
             let db = TestStageDB::default();
-
-            db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_account_history_in_rocksdb(true),
-            );
-
-            db.commit(|tx| {
-                for block in 0..=5 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::AccountChangeSets>(block, acc())?;
-                }
-                Ok(())
-            })
-            .unwrap();
+            setup_v2_account_data(&db, 0..=10);
 
             let input = ExecInput { target: Some(5), ..Default::default() };
             let mut stage = IndexAccountHistoryStage::default();
@@ -794,18 +782,6 @@ mod tests {
             assert!(result.is_some());
             let blocks: Vec<u64> = result.unwrap().iter().collect();
             assert_eq!(blocks, (0..=5).collect::<Vec<_>>());
-
-            db.commit(|tx| {
-                for block in 6..=10 {
-                    tx.put::<tables::BlockBodyIndices>(
-                        block,
-                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-                    )?;
-                    tx.put::<tables::AccountChangeSets>(block, acc())?;
-                }
-                Ok(())
-            })
-            .unwrap();
 
             let input = ExecInput { target: Some(10), checkpoint: Some(StageCheckpoint::new(5)) };
             let provider = db.factory.database_provider_rw().unwrap();

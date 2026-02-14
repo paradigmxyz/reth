@@ -11,8 +11,8 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadFieldV2,
-    ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
+    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
+    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
 use reth_ethereum_primitives::EthPrimitives;
@@ -160,6 +160,13 @@ impl EthBuiltPayload {
             execution_requests: requests.unwrap_or_default(),
         })
     }
+
+    /// Try converting built payload into [`ExecutionPayloadEnvelopeV6`].
+    ///
+    /// Note: Amsterdam fork is not yet implemented, so this conversion is not yet supported.
+    pub fn try_into_v6(self) -> Result<ExecutionPayloadEnvelopeV6, BuiltPayloadConversionError> {
+        unimplemented!("ExecutionPayloadEnvelopeV6 not yet supported")
+    }
 }
 
 impl<N: NodePrimitives> BuiltPayload for EthBuiltPayload<N> {
@@ -224,6 +231,14 @@ impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV5 {
 
     fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
         value.try_into_v5()
+    }
+}
+
+impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV6 {
+    type Error = BuiltPayloadConversionError;
+
+    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+        value.try_into_v6()
     }
 }
 

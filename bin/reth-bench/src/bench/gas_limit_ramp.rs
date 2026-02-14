@@ -3,7 +3,7 @@
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
     bench::{
-        helpers::{build_payload, prepare_payload_request, rpc_block_to_header},
+        helpers::{build_payload, parse_gas_limit, prepare_payload_request, rpc_block_to_header},
         output::GasRampPayloadFile,
     },
     valid_payload::{call_forkchoice_updated, call_new_payload, payload_to_new_payload},
@@ -25,9 +25,16 @@ use tracing::info;
 /// `reth benchmark gas-limit-ramp` command.
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// Number of blocks to generate.
-    #[arg(long, value_name = "BLOCKS")]
-    blocks: u64,
+    /// Number of blocks to generate. Mutually exclusive with --target-gas-limit.
+    #[arg(long, value_name = "BLOCKS", conflicts_with = "target_gas_limit")]
+    blocks: Option<u64>,
+
+    /// Target gas limit to ramp up to. The benchmark will generate blocks until the gas limit
+    /// reaches or exceeds this value. Mutually exclusive with --blocks.
+    /// Accepts short notation: K for thousand, M for million, G for billion (e.g., 2G = 2
+    /// billion).
+    #[arg(long, value_name = "TARGET_GAS_LIMIT", conflicts_with = "blocks", value_parser = parse_gas_limit)]
+    target_gas_limit: Option<u64>,
 
     /// The Engine API RPC URL.
     #[arg(long = "engine-rpc-url", value_name = "ENGINE_RPC_URL")]
@@ -42,12 +49,37 @@ pub struct Command {
     output: PathBuf,
 }
 
+/// Mode for determining when to stop ramping.
+#[derive(Debug, Clone, Copy)]
+enum RampMode {
+    /// Ramp for a fixed number of blocks.
+    Blocks(u64),
+    /// Ramp until reaching or exceeding target gas limit.
+    TargetGasLimit(u64),
+}
+
 impl Command {
     /// Execute `benchmark gas-limit-ramp` command.
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        if self.blocks == 0 {
-            return Err(eyre::eyre!("--blocks must be greater than 0"));
-        }
+        let mode = match (self.blocks, self.target_gas_limit) {
+            (Some(blocks), None) => {
+                if blocks == 0 {
+                    return Err(eyre::eyre!("--blocks must be greater than 0"));
+                }
+                RampMode::Blocks(blocks)
+            }
+            (None, Some(target)) => {
+                if target == 0 {
+                    return Err(eyre::eyre!("--target-gas-limit must be greater than 0"));
+                }
+                RampMode::TargetGasLimit(target)
+            }
+            _ => {
+                return Err(eyre::eyre!(
+                    "Exactly one of --blocks or --target-gas-limit must be specified"
+                ));
+            }
+        };
 
         // Ensure output directory exists
         if self.output.is_file() {
@@ -55,7 +87,7 @@ impl Command {
         }
         if !self.output.exists() {
             std::fs::create_dir_all(&self.output)?;
-            info!("Created output directory: {:?}", self.output);
+            info!(target: "reth-bench", "Created output directory: {:?}", self.output);
         }
 
         // Set up authenticated provider (used for both Engine API and eth_ methods)
@@ -63,7 +95,7 @@ impl Command {
         let jwt = JwtSecret::from_hex(jwt)?;
         let auth_url = Url::parse(&self.engine_rpc_url)?;
 
-        info!("Connecting to Engine RPC at {}", auth_url);
+        info!(target: "reth-bench", "Connecting to Engine RPC at {}", auth_url);
         let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
         let client = ClientBuilder::default().connect_with(auth_transport).await?;
         let provider = RootProvider::<AnyNetwork>::new(client);
@@ -84,14 +116,33 @@ impl Command {
 
         let canonical_parent = parent_header.number;
         let start_block = canonical_parent + 1;
-        let end_block = start_block + self.blocks - 1;
 
-        info!(canonical_parent, start_block, end_block, "Starting gas limit ramp benchmark");
+        match mode {
+            RampMode::Blocks(blocks) => {
+                info!(
+                    target: "reth-bench",
+                    canonical_parent,
+                    start_block,
+                    end_block = start_block + blocks - 1,
+                    "Starting gas limit ramp benchmark (block count mode)"
+                );
+            }
+            RampMode::TargetGasLimit(target) => {
+                info!(
+                    target: "reth-bench",
+                    canonical_parent,
+                    start_block,
+                    current_gas_limit = parent_header.gas_limit,
+                    target_gas_limit = target,
+                    "Starting gas limit ramp benchmark (target gas limit mode)"
+                );
+            }
+        }
 
-        let mut next_block_number = start_block;
+        let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
 
-        while next_block_number <= end_block {
+        while !should_stop(mode, blocks_processed, parent_header.gas_limit) {
             let timestamp = parent_header.timestamp.saturating_add(1);
 
             let request = prepare_payload_request(&chain_spec, timestamp, parent_hash);
@@ -127,7 +178,7 @@ impl Command {
                 GasRampPayloadFile { version: version as u8, block_hash, params: params.clone() };
             let payload_json = serde_json::to_string_pretty(&file)?;
             std::fs::write(&payload_path, &payload_json)?;
-            info!(block_number = block.header.number, path = %payload_path.display(), "Saved payload");
+            info!(target: "reth-bench", block_number = block.header.number, path = %payload_path.display(), "Saved payload");
 
             call_new_payload(&provider, version, params).await?;
 
@@ -140,13 +191,23 @@ impl Command {
 
             parent_header = block.header;
             parent_hash = block_hash;
-            next_block_number += 1;
+            blocks_processed += 1;
+
+            let progress = match mode {
+                RampMode::Blocks(total) => format!("{blocks_processed}/{total}"),
+                RampMode::TargetGasLimit(target) => {
+                    let pct = (parent_header.gas_limit as f64 / target as f64 * 100.0).min(100.0);
+                    format!("{pct:.1}%")
+                }
+            };
+            info!(target: "reth-bench", progress, block_number = parent_header.number, gas_limit = parent_header.gas_limit, "Block processed");
         }
 
         let final_gas_limit = parent_header.gas_limit;
         info!(
+            target: "reth-bench",
             total_duration=?total_benchmark_duration.elapsed(),
-            blocks_processed = self.blocks,
+            blocks_processed,
             final_gas_limit,
             "Benchmark complete"
         );
@@ -157,4 +218,11 @@ impl Command {
 
 const fn max_gas_limit_increase(parent_gas_limit: u64) -> u64 {
     (parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR).saturating_sub(1)
+}
+
+const fn should_stop(mode: RampMode, blocks_processed: u64, current_gas_limit: u64) -> bool {
+    match mode {
+        RampMode::Blocks(target_blocks) => blocks_processed >= target_blocks,
+        RampMode::TargetGasLimit(target) => current_gas_limit >= target,
+    }
 }

@@ -5,4 +5,7 @@ mod metrics;
 mod provider;
 
 pub(crate) use provider::{PendingRocksDBBatches, RocksDBWriteCtx};
-pub use provider::{RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksDBRawIter, RocksTx};
+pub use provider::{
+    PruneShardOutcome, PrunedIndices, RocksDBBatch, RocksDBBuilder, RocksDBIter, RocksDBProvider,
+    RocksDBRawIter, RocksDBStats, RocksDBTableStats, RocksTx,
+};

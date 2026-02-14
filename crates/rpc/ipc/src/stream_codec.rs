@@ -117,10 +117,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
                         buf.advance(start_idx);
                     }
                     let bts = buf.split_to(idx + 1 - start_idx);
-                    return match String::from_utf8(bts.into()) {
-                        Ok(val) => Ok(Some(val)),
-                        Err(_) => Ok(None),
-                    }
+                    return Ok(String::from_utf8(bts.into()).ok())
                 }
             }
             Ok(None)

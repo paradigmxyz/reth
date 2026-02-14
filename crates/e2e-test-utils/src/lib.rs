@@ -11,7 +11,6 @@ use reth_node_builder::{
     PayloadTypes,
 };
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
-use reth_tasks::TaskManager;
 use std::sync::Arc;
 use wallet::Wallet;
 
@@ -50,7 +49,7 @@ pub async fn setup<N>(
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
     attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
-) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
+) -> eyre::Result<(Vec<NodeHelperType<N>>, Wallet)>
 where
     N: NodeBuilderHelper,
 {
@@ -69,7 +68,6 @@ pub async fn setup_engine<N>(
     attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-    TaskManager,
     Wallet,
 )>
 where
@@ -96,14 +94,16 @@ pub async fn setup_engine_with_connection<N>(
     connect_nodes: bool,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-    TaskManager,
     Wallet,
 )>
 where
     N: NodeBuilderHelper,
 {
     E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
-        .with_tree_config_modifier(move |_| tree_config.clone())
+        .with_tree_config_modifier(move |base| {
+            // Apply caller's tree_config but preserve the small cache size from base
+            tree_config.clone().with_cross_block_cache_size(base.cross_block_cache_size())
+        })
         .with_node_config_modifier(move |config| config.set_dev(is_dev))
         .with_connect_nodes(connect_nodes)
         .build()

@@ -79,6 +79,10 @@ pub fn append_matching_block_logs<P>(
 where
     P: BlockReader<Transaction: SignedTransaction>,
 {
+    if !filter.matches_block(&block_num_hash) {
+        return Ok(());
+    }
+
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;
 

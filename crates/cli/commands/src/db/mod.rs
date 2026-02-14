@@ -12,11 +12,13 @@ use std::{
 mod account_storage;
 mod checksum;
 mod clear;
+mod copy;
 mod diff;
 mod get;
 mod list;
 mod repair_trie;
 mod settings;
+mod state;
 mod static_file_header;
 mod stats;
 /// DB List TUI
@@ -41,6 +43,8 @@ pub enum Subcommands {
     List(list::Command),
     /// Calculates the content checksum of a table or static file segment
     Checksum(checksum::Command),
+    /// Copies the MDBX database to a new location (bundled mdbx_copy)
+    Copy(copy::Command),
     /// Create a diff between two database tables or two entire databases.
     Diff(diff::Command),
     /// Gets the content of a table for the given key
@@ -65,17 +69,8 @@ pub enum Subcommands {
     Settings(settings::Command),
     /// Gets storage size information for an account
     AccountStorage(account_storage::Command),
-}
-
-/// Initializes a provider factory with specified access rights, and then execute with the provided
-/// command
-macro_rules! db_exec {
-    ($env:expr, $tool:ident, $N:ident, $access_rights:expr, $command:block) => {
-        let Environment { provider_factory, .. } = $env.init::<$N>($access_rights)?;
-
-        let $tool = DbTool::new(provider_factory)?;
-        $command;
-    };
+    /// Gets account state and storage at a specific block
+    State(state::Command),
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
@@ -84,6 +79,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
+        /// Initializes a provider factory with specified access rights, and then executes the
+        /// provided command.
+        macro_rules! db_exec {
+            ($env:expr, $tool:ident, $N:ident, $access_rights:expr, $command:block) => {
+                let Environment { provider_factory, .. } = $env.init::<$N>($access_rights)?;
+
+                let $tool = DbTool::new(provider_factory)?;
+                $command;
+            };
+        }
+
         let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
         let db_path = data_dir.db();
         let static_files_path = data_dir.static_files();
@@ -119,6 +125,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             Subcommands::Checksum(command) => {
                 db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
+                });
+            }
+            Subcommands::Copy(command) => {
+                db_exec!(self.env, tool, N, AccessRights::RO, {
+                    command.execute(tool.provider_factory.db_ref())?;
                 });
             }
             Subcommands::Diff(command) => {
@@ -162,7 +173,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 let access_rights =
                     if command.dry_run { AccessRights::RO } else { AccessRights::RW };
                 db_exec!(self.env, tool, N, access_rights, {
-                    command.execute(&tool, ctx.task_executor.clone(), &data_dir)?;
+                    command.execute(&tool, ctx.task_executor, &data_dir)?;
                 });
             }
             Subcommands::StaticFileHeader(command) => {
@@ -194,6 +205,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 });
             }
             Subcommands::AccountStorage(command) => {
+                db_exec!(self.env, tool, N, AccessRights::RO, {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::State(command) => {
                 db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
                 });

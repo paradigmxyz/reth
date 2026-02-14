@@ -32,8 +32,7 @@
 //!  }
 //!  ```
 //!
-//!  This example sets up a tracer with JSON format logging for journald and terminal-friendly
-//! format  for file logging.
+//! This example sets up a tracer with JSON format logging to stdout.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",

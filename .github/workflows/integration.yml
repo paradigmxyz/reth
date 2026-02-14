@@ -22,38 +22,34 @@ concurrency:
 
 jobs:
   test:
-    name: test / ${{ matrix.network }}
+    name: test / ${{ matrix.network }} / ${{ matrix.storage }}
     if: github.event_name != 'schedule'
     runs-on: depot-ubuntu-latest-4
     env:
       RUST_BACKTRACE: 1
     strategy:
       matrix:
-        network: ["ethereum", "optimism"]
+        network: ["ethereum"]
+        storage: ["stable", "edge"]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Geth
-        run: .github/assets/install_geth.sh
+        run: .github/scripts/install_geth.sh
       - uses: taiki-e/install-action@nextest
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - if: matrix.network == 'ethereum'
-        name: Run tests
+      - name: Run tests
         run: |
           cargo nextest run \
-            --locked --features "asm-keccak ${{ matrix.network }}" \
+            --no-fail-fast \
+            --locked --features "asm-keccak ${{ matrix.network }} ${{ matrix.storage == 'edge' && 'edge' || '' }}" \
             --workspace --exclude ef-tests \
             -E "kind(test) and not binary(e2e_testsuite)"
-      - if: matrix.network == 'optimism'
-        name: Run tests
-        run: |
-          cargo nextest run \
-            --locked -p reth-optimism-node
 
   integration-success:
     name: integration success
@@ -69,7 +65,7 @@ jobs:
 
   era-files:
     name: era1 file integration tests once a day
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' && github.repository == 'paradigmxyz/reth'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -81,4 +77,4 @@ jobs:
         with:
           cache-on-failure: true
       - name: run era1 files integration tests
-        run: cargo nextest run --release --package reth-era --test it -- --ignored
+        run: cargo nextest run --no-fail-fast --release --package reth-era --test it -- --ignored

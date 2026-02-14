@@ -6,7 +6,7 @@ use reth_db::Tables;
 use reth_metrics::Metrics;
 use strum::{EnumIter, IntoEnumIterator};
 
-const ROCKSDB_TABLES: &[&str] = &[
+pub(super) const ROCKSDB_TABLES: &[&str] = &[
     Tables::TransactionHashNumbers.name(),
     Tables::StoragesHistory.name(),
     Tables::AccountsHistory.name(),

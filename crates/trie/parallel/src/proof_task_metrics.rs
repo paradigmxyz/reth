@@ -1,9 +1,11 @@
+use crate::value_encoder::ValueEncoderStats;
 use reth_metrics::{metrics::Histogram, Metrics};
 use reth_trie::{
     hashed_cursor::{HashedCursorMetrics, HashedCursorMetricsCache},
     trie_cursor::{TrieCursorMetrics, TrieCursorMetricsCache},
     TrieType,
 };
+use std::time::Duration;
 
 /// Metrics for the proof task.
 #[derive(Clone, Metrics)]
@@ -13,6 +15,19 @@ pub struct ProofTaskTrieMetrics {
     blinded_account_nodes: Histogram,
     /// A histogram for the number of blinded storage nodes fetched.
     blinded_storage_nodes: Histogram,
+    /// Histogram for storage worker idle time in seconds (waiting for proof jobs).
+    storage_worker_idle_time_seconds: Histogram,
+    /// Histogram for account worker idle time in seconds (waiting for proof jobs + storage
+    /// results).
+    account_worker_idle_time_seconds: Histogram,
+    /// Histogram for `Dispatched` deferred encoder variant count.
+    deferred_encoder_dispatched: Histogram,
+    /// Histogram for `FromCache` deferred encoder variant count.
+    deferred_encoder_from_cache: Histogram,
+    /// Histogram for `Sync` deferred encoder variant count.
+    deferred_encoder_sync: Histogram,
+    /// Histogram for dispatched storage proofs that fell back to sync due to missing root.
+    deferred_encoder_dispatched_missing_root: Histogram,
 }
 
 impl ProofTaskTrieMetrics {
@@ -24,6 +39,25 @@ impl ProofTaskTrieMetrics {
     /// Record storage nodes fetched.
     pub fn record_storage_nodes(&self, count: usize) {
         self.blinded_storage_nodes.record(count as f64);
+    }
+
+    /// Record storage worker idle time.
+    pub fn record_storage_worker_idle_time(&self, duration: Duration) {
+        self.storage_worker_idle_time_seconds.record(duration.as_secs_f64());
+    }
+
+    /// Record account worker idle time.
+    pub fn record_account_worker_idle_time(&self, duration: Duration) {
+        self.account_worker_idle_time_seconds.record(duration.as_secs_f64());
+    }
+
+    /// Record value encoder stats (deferred encoder variant counts).
+    pub(crate) fn record_value_encoder_stats(&self, stats: &ValueEncoderStats) {
+        self.deferred_encoder_dispatched.record(stats.dispatched_count as f64);
+        self.deferred_encoder_from_cache.record(stats.from_cache_count as f64);
+        self.deferred_encoder_sync.record(stats.sync_count as f64);
+        self.deferred_encoder_dispatched_missing_root
+            .record(stats.dispatched_missing_root_count as f64);
     }
 }
 

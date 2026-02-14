@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
-use alloy_primitives::{map::HashMap, BlockNumber, TxHash, B256};
+use alloy_primitives::{map::B256Map, BlockNumber, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
@@ -17,7 +17,10 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, TrieInputSorted};
+use reth_trie::{
+    updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData,
+    TrieInputSorted,
+};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -54,7 +57,7 @@ pub(crate) struct InMemoryStateMetrics {
 #[derive(Debug, Default)]
 pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
     /// All canonical blocks that are not on disk yet.
-    blocks: RwLock<HashMap<B256, Arc<BlockState<N>>>>,
+    blocks: RwLock<B256Map<Arc<BlockState<N>>>>,
     /// Mapping of block numbers to block hashes.
     numbers: RwLock<BTreeMap<u64, B256>>,
     /// The pending block that has not yet been made canonical.
@@ -65,7 +68,7 @@ pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
 
 impl<N: NodePrimitives> InMemoryState<N> {
     pub(crate) fn new(
-        blocks: HashMap<B256, Arc<BlockState<N>>>,
+        blocks: B256Map<Arc<BlockState<N>>>,
         numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState<N>>,
     ) -> Self {
@@ -181,7 +184,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Create a new in-memory state with the given blocks, numbers, pending state, and optional
     /// finalized header.
     pub fn new(
-        blocks: HashMap<B256, Arc<BlockState<N>>>,
+        blocks: B256Map<Arc<BlockState<N>>>,
         numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState<N>>,
         finalized: Option<SealedHeader<N::BlockHeader>>,
@@ -206,7 +209,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Create an empty state.
     pub fn empty() -> Self {
-        Self::new(HashMap::default(), BTreeMap::new(), None, None, None)
+        Self::new(B256Map::default(), BTreeMap::new(), None, None, None)
     }
 
     /// Create a new in memory state with the given local head and finalized header
@@ -948,22 +951,36 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
         match blocks {
             [] => Chain::default(),
             [first, rest @ ..] => {
+                let trie_data_handle = first.trie_data_handle();
                 let mut chain = Chain::from_block(
                     first.recovered_block().clone(),
                     ExecutionOutcome::from((
                         first.execution_outcome().clone(),
                         first.block_number(),
                     )),
-                    LazyTrieData::ready(first.hashed_state(), first.trie_updates()),
+                    LazyTrieData::deferred(move || {
+                        let trie_data = trie_data_handle.wait_cloned();
+                        SortedTrieData {
+                            hashed_state: trie_data.hashed_state,
+                            trie_updates: trie_data.trie_updates,
+                        }
+                    }),
                 );
                 for exec in rest {
+                    let trie_data_handle = exec.trie_data_handle();
                     chain.append_block(
                         exec.recovered_block().clone(),
                         ExecutionOutcome::from((
                             exec.execution_outcome().clone(),
                             exec.block_number(),
                         )),
-                        LazyTrieData::ready(exec.hashed_state(), exec.trie_updates()),
+                        LazyTrieData::deferred(move || {
+                            let trie_data = trie_data_handle.wait_cloned();
+                            SortedTrieData {
+                                hashed_state: trie_data.hashed_state,
+                                trie_updates: trie_data.trie_updates,
+                            }
+                        }),
                     );
                 }
                 chain
@@ -1041,6 +1058,14 @@ mod tests {
             &self,
             _address: Address,
             _storage_key: StorageKey,
+        ) -> ProviderResult<Option<StorageValue>> {
+            Ok(None)
+        }
+
+        fn storage_by_hashed_key(
+            &self,
+            _address: Address,
+            _hashed_storage_key: StorageKey,
         ) -> ProviderResult<Option<StorageValue>> {
             Ok(None)
         }
@@ -1159,7 +1184,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_state_by_hash() {
-        let mut state_by_hash = HashMap::default();
+        let mut state_by_hash = B256Map::default();
         let number = rand::rng().random::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let state = Arc::new(create_mock_state(&mut test_block_builder, number, B256::random()));
@@ -1173,7 +1198,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_state_by_number() {
-        let mut state_by_hash = HashMap::default();
+        let mut state_by_hash = B256Map::default();
         let mut hash_by_number = BTreeMap::new();
 
         let number = rand::rng().random::<u64>();
@@ -1192,7 +1217,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_head_state() {
-        let mut state_by_hash = HashMap::default();
+        let mut state_by_hash = B256Map::default();
         let mut hash_by_number = BTreeMap::new();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let state1 = Arc::new(create_mock_state(&mut test_block_builder, 1, B256::random()));
@@ -1220,7 +1245,7 @@ mod tests {
         let pending_hash = pending_state.hash();
 
         let in_memory_state =
-            InMemoryState::new(HashMap::default(), BTreeMap::new(), Some(pending_state));
+            InMemoryState::new(B256Map::default(), BTreeMap::new(), Some(pending_state));
 
         let result = in_memory_state.pending_state();
         assert!(result.is_some());
@@ -1232,7 +1257,7 @@ mod tests {
     #[test]
     fn test_in_memory_state_impl_no_pending_state() {
         let in_memory_state: InMemoryState =
-            InMemoryState::new(HashMap::default(), BTreeMap::new(), None);
+            InMemoryState::new(B256Map::default(), BTreeMap::new(), None);
 
         assert_eq!(in_memory_state.pending_state(), None);
     }
@@ -1363,7 +1388,7 @@ mod tests {
         let state2 = Arc::new(BlockState::with_parent(block2.clone(), Some(state1.clone())));
         let state3 = Arc::new(BlockState::with_parent(block3.clone(), Some(state2.clone())));
 
-        let mut blocks = HashMap::default();
+        let mut blocks = B256Map::default();
         blocks.insert(block1.recovered_block().hash(), state1);
         blocks.insert(block2.recovered_block().hash(), state2);
         blocks.insert(block3.recovered_block().hash(), state3);
@@ -1410,7 +1435,7 @@ mod tests {
     fn test_canonical_in_memory_state_canonical_chain_single_block() {
         let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::random());
         let hash = block.recovered_block().hash();
-        let mut blocks = HashMap::default();
+        let mut blocks = B256Map::default();
         blocks.insert(hash, Arc::new(BlockState::new(block)));
         let mut numbers = BTreeMap::new();
         numbers.insert(1, hash);

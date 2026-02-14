@@ -46,10 +46,40 @@ pub trait Decompress: Send + Sync + Sized + Debug {
     }
 }
 
+/// Trait for converting encoded types to `Vec<u8>`.
+///
+/// This is implemented for all `AsRef<[u8]>` types. For `Vec<u8>` this is a no-op,
+/// for other types like `ArrayVec` or fixed arrays it performs a copy.
+pub trait IntoVec: AsRef<[u8]> {
+    /// Convert to a `Vec<u8>`.
+    fn into_vec(self) -> Vec<u8>;
+}
+
+impl IntoVec for Vec<u8> {
+    #[inline]
+    fn into_vec(self) -> Vec<u8> {
+        self
+    }
+}
+
+impl<const N: usize> IntoVec for [u8; N] {
+    #[inline]
+    fn into_vec(self) -> Vec<u8> {
+        self.to_vec()
+    }
+}
+
+impl<const N: usize> IntoVec for arrayvec::ArrayVec<u8, N> {
+    #[inline]
+    fn into_vec(self) -> Vec<u8> {
+        self.to_vec()
+    }
+}
+
 /// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized + Debug {
     /// Encoded type.
-    type Encoded: AsRef<[u8]> + Into<Vec<u8>> + Send + Sync + Ord + Debug;
+    type Encoded: AsRef<[u8]> + IntoVec + Send + Sync + Ord + Debug;
 
     /// Encodes data going into the database.
     fn encode(self) -> Self::Encoded;

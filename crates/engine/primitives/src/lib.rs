@@ -23,7 +23,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
 #[cfg(feature = "std")]
-pub use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator, ExecutableTxTuple};
+pub use reth_evm::{ConfigureEngineEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple};
 pub use reth_payload_primitives::ExecutionPayload;
 
 mod error;
@@ -62,7 +62,8 @@ pub trait EngineTypes:
                           + TryInto<Self::ExecutionPayloadEnvelopeV2>
                           + TryInto<Self::ExecutionPayloadEnvelopeV3>
                           + TryInto<Self::ExecutionPayloadEnvelopeV4>
-                          + TryInto<Self::ExecutionPayloadEnvelopeV5>,
+                          + TryInto<Self::ExecutionPayloadEnvelopeV5>
+                          + TryInto<Self::ExecutionPayloadEnvelopeV6>,
     > + DeserializeOwned
     + Serialize
 {
@@ -100,6 +101,14 @@ pub trait EngineTypes:
         + 'static;
     /// Execution Payload V5 envelope type.
     type ExecutionPayloadEnvelopeV5: DeserializeOwned
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static;
+    /// Execution Payload V6 envelope type.
+    type ExecutionPayloadEnvelopeV6: DeserializeOwned
         + Serialize
         + Clone
         + Unpin

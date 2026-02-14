@@ -197,16 +197,22 @@
 //!
 //! ```
 //! use reth_chainspec::MAINNET;
-//! use reth_storage_api::StateProviderFactory;
+//! use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_chainspec::ChainSpecProvider;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
 //! use reth_chainspec::EthereumHardforks;
-//! async fn t<C>(client: C)  where C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static{
+//! use reth_evm::ConfigureEvm;
+//! use alloy_consensus::Header;
+//! async fn t<C, Evm>(client: C, evm_config: Evm)
+//! where
+//!     C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + BlockReaderIdExt<Header = Header> + Clone + 'static,
+//!     Evm: ConfigureEvm<Primitives: reth_primitives_traits::NodePrimitives<BlockHeader = Header>> + 'static,
+//! {
 //!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::eth(client, blob_store.clone(), TokioTaskExecutor::default()),
+//!         TransactionValidationTaskExecutor::eth(client, evm_config, blob_store.clone(), TokioTaskExecutor::default()),
 //!         blob_store,
 //!         Default::default(),
 //!     );
@@ -231,28 +237,30 @@
 //! use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_tasks::TaskSpawner;
-//! use reth_tasks::TaskManager;
+//! use reth_tasks::Runtime;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
 //! use reth_transaction_pool::maintain::{maintain_transaction_pool_future};
+//! use reth_evm::ConfigureEvm;
+//! use reth_ethereum_primitives::EthPrimitives;
 //! use alloy_consensus::Header;
 //!
-//!  async fn t<C, St>(client: C, stream: St)
+//!  async fn t<C, St, Evm>(client: C, stream: St, evm_config: Evm)
 //!    where C: StateProviderFactory + BlockReaderIdExt<Header = Header> + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + 'static,
-//!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+//!     St: Stream<Item = CanonStateNotification<EthPrimitives>> + Send + Unpin + 'static,
+//!     Evm: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 //!     {
 //!     let blob_store = InMemoryBlobStore::default();
 //!     let rt = tokio::runtime::Runtime::new().unwrap();
-//!     let manager = TaskManager::new(rt.handle().clone());
-//!     let executor = manager.executor();
+//!     let runtime = Runtime::with_existing_handle(rt.handle().clone()).unwrap();
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::eth(client.clone(), blob_store.clone(), executor.clone()),
+//!         TransactionValidationTaskExecutor::eth(client.clone(), evm_config, blob_store.clone(), runtime.clone()),
 //!         blob_store,
 //!         Default::default(),
 //!     );
 //!
 //!   // spawn a task that listens for new blocks and updates the pool's transactions, mined transactions etc..
-//!   tokio::task::spawn(maintain_transaction_pool_future(client, pool, stream, executor.clone(), Default::default()));
+//!   tokio::task::spawn(maintain_transaction_pool_future(client, pool, stream, runtime.clone(), Default::default()));
 //!
 //! # }
 //! ```
@@ -298,14 +306,16 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::{Address, TxHash, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
+use reth_evm::ConfigureEvm;
+use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::ChangedAccount;
-use reth_primitives_traits::{Block, Recovered};
-use reth_storage_api::StateProviderFactory;
-use std::{collections::HashSet, sync::Arc};
+use reth_primitives_traits::{HeaderTy, Recovered};
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
@@ -328,8 +338,8 @@ mod traits;
 pub mod test_utils;
 
 /// Type alias for default ethereum transaction pool
-pub type EthTransactionPool<Client, S, T = EthPooledTransaction> = Pool<
-    TransactionValidationTaskExecutor<EthTransactionValidator<Client, T>>,
+pub type EthTransactionPool<Client, S, Evm = EthEvmConfig, T = EthPooledTransaction> = Pool<
+    TransactionValidationTaskExecutor<EthTransactionValidator<Client, T, Evm>>,
     CoinbaseTipOrdering<T>,
     S,
 >;
@@ -378,17 +388,6 @@ where
         self.pool.validator().validate_transaction(origin, transaction).await
     }
 
-    /// Returns future that validates all transactions in the given iterator.
-    ///
-    /// This returns the validated transactions in the iterator's order.
-    async fn validate_all(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = V::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<V::Transaction>> {
-        self.pool.validator().validate_transactions_with_origin(origin, transactions).await
-    }
-
     /// Number of transactions in the entire pool
     pub fn len(&self) -> usize {
         self.pool.len()
@@ -410,11 +409,15 @@ where
     }
 }
 
-impl<Client, S> EthTransactionPool<Client, S>
+impl<Client, S, Evm> EthTransactionPool<Client, S, Evm>
 where
-    Client:
-        ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static,
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + StateProviderFactory
+        + Clone
+        + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>
+        + 'static,
     S: BlobStore,
+    Evm: ConfigureEvm + 'static,
 {
     /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when
     /// validating [`EthPooledTransaction`]s and ords via [`CoinbaseTipOrdering`]
@@ -423,18 +426,25 @@ where
     ///
     /// ```
     /// use reth_chainspec::MAINNET;
-    /// use reth_storage_api::StateProviderFactory;
+    /// use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_chainspec::ChainSpecProvider;
     /// use reth_transaction_pool::{
     ///     blobstore::InMemoryBlobStore, Pool, TransactionValidationTaskExecutor,
     /// };
     /// use reth_chainspec::EthereumHardforks;
-    /// # fn t<C>(client: C)  where C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static {
+    /// use reth_evm::ConfigureEvm;
+    /// use alloy_consensus::Header;
+    /// # fn t<C, Evm>(client: C, evm_config: Evm)
+    /// # where
+    /// #     C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + BlockReaderIdExt<Header = Header> + Clone + 'static,
+    /// #     Evm: ConfigureEvm<Primitives: reth_primitives_traits::NodePrimitives<BlockHeader = Header>> + 'static,
+    /// # {
     /// let blob_store = InMemoryBlobStore::default();
     /// let pool = Pool::eth_pool(
     ///     TransactionValidationTaskExecutor::eth(
     ///         client,
+    ///         evm_config,
     ///         blob_store.clone(),
     ///         TokioTaskExecutor::default(),
     ///     ),
@@ -445,7 +455,7 @@ where
     /// ```
     pub fn eth_pool(
         validator: TransactionValidationTaskExecutor<
-            EthTransactionValidator<Client, EthPooledTransaction>,
+            EthTransactionValidator<Client, EthPooledTransaction, Evm>,
         >,
         blob_store: S,
         config: PoolConfig,
@@ -499,9 +509,24 @@ where
         if transactions.is_empty() {
             return Vec::new()
         }
-        let validated = self.validate_all(origin, transactions).await;
+        let validated = self
+            .pool
+            .validator()
+            .validate_transactions(transactions.into_iter().map(|tx| (origin, tx)))
+            .await;
+        self.pool.add_transactions(origin, validated)
+    }
 
-        self.pool.add_transactions(origin, validated.into_iter())
+    async fn add_transactions_with_origins(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        if transactions.is_empty() {
+            return Vec::new()
+        }
+        let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
+        let validated = self.pool.validator().validate_transactions(transactions).await;
+        self.pool.add_transactions_with_origins(origins.into_iter().zip(validated))
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
@@ -588,6 +613,14 @@ where
         self.pool.pending_transactions()
     }
 
+    fn get_pending_transaction_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_pending_transaction_by_sender_and_nonce(sender, nonce)
+    }
+
     fn pending_transactions_max(
         &self,
         max: usize,
@@ -633,6 +666,13 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.remove_transactions_by_sender(sender)
+    }
+
+    fn prune_transactions(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.prune_transactions(hashes)
     }
 
     fn retain_unknown<A>(&self, announcement: &mut A)
@@ -722,7 +762,7 @@ where
         self.pool.get_pending_transactions_by_origin(origin)
     }
 
-    fn unique_senders(&self) -> HashSet<Address> {
+    fn unique_senders(&self) -> AddressSet {
         self.pool.unique_senders()
     }
 
@@ -776,16 +816,15 @@ where
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {
+    type Block = V::Block;
+
     #[instrument(skip(self), target = "txpool")]
     fn set_block_info(&self, info: BlockInfo) {
         trace!(target: "txpool", "updating pool block info");
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change<B>(&self, update: CanonicalStateUpdate<'_, B>)
-    where
-        B: Block,
-    {
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_, Self::Block>) {
         self.pool.on_canonical_state_change(update);
     }
 

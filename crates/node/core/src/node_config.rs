@@ -3,7 +3,7 @@
 use crate::{
     args::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RocksDbArgs, RpcServerArgs, StaticFilesArgs, TxPoolArgs,
+        PruningArgs, RpcServerArgs, StaticFilesArgs, StorageArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
     utils::get_single_header,
@@ -39,7 +39,7 @@ pub use reth_engine_primitives::{
 };
 
 /// Default size of cross-block cache in megabytes.
-pub const DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB: u64 = 4 * 1024;
+pub const DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB: usize = 4 * 1024;
 
 /// This includes all necessary configuration to launch the node.
 /// The individual configuration options can be overwritten before launching the node.
@@ -152,8 +152,8 @@ pub struct NodeConfig<ChainSpec> {
     /// All static files related arguments
     pub static_files: StaticFilesArgs,
 
-    /// All `RocksDB` table routing arguments
-    pub rocksdb: RocksDbArgs,
+    /// All storage related arguments with --storage prefix
+    pub storage: StorageArgs,
 }
 
 impl NodeConfig<ChainSpec> {
@@ -185,7 +185,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             engine: EngineArgs::default(),
             era: EraArgs::default(),
             static_files: StaticFilesArgs::default(),
-            rocksdb: RocksDbArgs::default(),
+            storage: StorageArgs::default(),
         }
     }
 
@@ -260,7 +260,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             engine,
             era,
             static_files,
-            rocksdb,
+            storage,
             ..
         } = self;
         NodeConfig {
@@ -280,7 +280,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             engine,
             era,
             static_files,
-            rocksdb,
+            storage,
         }
     }
 
@@ -349,6 +349,12 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Set the storage args for the node
+    pub const fn with_storage(mut self, storage: StorageArgs) -> Self {
+        self.storage = storage;
+        self
+    }
+
     /// Returns pruning configuration.
     pub fn prune_config(&self) -> Option<PruneConfig>
     where
@@ -357,19 +363,16 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self.pruning.prune_config(&self.chain)
     }
 
-    /// Returns the effective storage settings derived from static-file and `RocksDB` CLI args.
-    pub fn storage_settings(&self) -> StorageSettings {
-        let tx_hash = self.rocksdb.all || self.rocksdb.tx_hash.unwrap_or(false);
-        let storages_history = self.rocksdb.all || self.rocksdb.storages_history.unwrap_or(false);
-        let account_history = self.rocksdb.all || self.rocksdb.account_history.unwrap_or(false);
-
-        StorageSettings {
-            receipts_in_static_files: self.static_files.receipts,
-            transaction_senders_in_static_files: self.static_files.transaction_senders,
-            account_changesets_in_static_files: self.static_files.account_changesets,
-            transaction_hash_numbers_in_rocksdb: tx_hash,
-            storages_history_in_rocksdb: storages_history,
-            account_history_in_rocksdb: account_history,
+    /// Returns the effective storage settings derived from `--storage.v2`.
+    ///
+    /// The base storage mode is determined by `--storage.v2`:
+    /// - When `--storage.v2` is set: uses [`StorageSettings::v2()`] defaults
+    /// - Otherwise: uses [`StorageSettings::base()`] defaults
+    pub const fn storage_settings(&self) -> StorageSettings {
+        if self.storage.v2 {
+            StorageSettings::v2()
+        } else {
+            StorageSettings::base()
         }
     }
 
@@ -567,7 +570,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             engine: self.engine,
             era: self.era,
             static_files: self.static_files,
-            rocksdb: self.rocksdb,
+            storage: self.storage,
         }
     }
 
@@ -609,7 +612,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             engine: self.engine.clone(),
             era: self.era.clone(),
             static_files: self.static_files,
-            rocksdb: self.rocksdb,
+            storage: self.storage,
         }
     }
 }

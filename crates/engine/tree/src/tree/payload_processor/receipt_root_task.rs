@@ -64,14 +64,11 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     ///
     /// * `receipts_len` - The total number of receipts expected. This is needed to correctly order
     ///   the trie keys according to RLP encoding rules.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the number of receipts received doesn't match `receipts_len`.
     pub fn run(self, receipts_len: usize) {
         let mut builder = OrderedTrieRootEncodedBuilder::new(receipts_len);
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::new();
+        let mut received_count = 0usize;
 
         for indexed_receipt in self.receipt_rx {
             let receipt_with_bloom = indexed_receipt.receipt.with_bloom_ref();
@@ -80,10 +77,36 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             receipt_with_bloom.encode_2718(&mut encode_buf);
 
             aggregated_bloom |= *receipt_with_bloom.bloom_ref();
-            builder.push_unchecked(indexed_receipt.index, &encode_buf);
+            match builder.push(indexed_receipt.index, &encode_buf) {
+                Ok(()) => {
+                    received_count += 1;
+                }
+                Err(err) => {
+                    // If a duplicate or out-of-bounds index is streamed, skip it and
+                    // fall back to computing the receipt root from the full receipts
+                    // vector later.
+                    tracing::error!(
+                        target: "engine::tree::payload_processor",
+                        index = indexed_receipt.index,
+                        ?err,
+                        "Receipt root task received invalid receipt index, skipping"
+                    );
+                }
+            }
         }
 
-        let root = builder.finalize().expect("receipt root builder incomplete");
+        let Ok(root) = builder.finalize() else {
+            // Finalize fails if we didn't receive exactly `receipts_len` receipts. This can
+            // happen if execution was aborted early (e.g., invalid transaction encountered).
+            // We return without sending a result, allowing the caller to handle the abort.
+            tracing::error!(
+                target: "engine::tree::payload_processor",
+                expected = receipts_len,
+                received = received_count,
+                "Receipt root task received incomplete receipts, execution likely aborted"
+            );
+            return;
+        };
         let _ = self.result_tx.send((root, aggregated_bloom));
     }
 }

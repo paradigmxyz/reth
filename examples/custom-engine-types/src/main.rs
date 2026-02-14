@@ -23,8 +23,8 @@ use alloy_primitives::{Address, B256};
 use alloy_rpc_types::{
     engine::{
         ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-        ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadV1,
-        PayloadAttributes as EthPayloadAttributes, PayloadId,
+        ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
+        ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
     Withdrawal,
 };
@@ -54,7 +54,7 @@ use reth_ethereum::{
     primitives::{Block, SealedBlock},
     provider::{EthStorage, StateProviderFactory},
     rpc::types::engine::ExecutionPayload,
-    tasks::TaskManager,
+    tasks::Runtime,
     EthPrimitives, TransactionSigned,
 };
 use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
@@ -169,6 +169,7 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
     type ExecutionPayloadEnvelopeV5 = ExecutionPayloadEnvelopeV5;
+    type ExecutionPayloadEnvelopeV6 = ExecutionPayloadEnvelopeV6;
 }
 
 /// Custom engine validator
@@ -390,9 +391,9 @@ where
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
-    let tasks = TaskManager::current();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
 
-    // create optimism genesis with canyon at block 2
+    // create genesis with canyon at block 2
     let spec = ChainSpec::builder()
         .chain(Chain::mainnet())
         .genesis(Genesis::default())
@@ -406,7 +407,7 @@ async fn main() -> eyre::Result<()> {
         NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
 
     let handle = NodeBuilder::new(node_config)
-        .testing_node(tasks.executor())
+        .testing_node(runtime)
         .launch_node(MyCustomNode::default())
         .await
         .unwrap();

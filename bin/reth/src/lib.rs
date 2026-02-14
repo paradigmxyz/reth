@@ -25,8 +25,8 @@
 //! - `jemalloc-unprefixed`: Uses unprefixed jemalloc symbols.
 //! - `tracy-allocator`: Enables [Tracy](https://github.com/wolfpld/tracy) profiler allocator
 //!   integration for memory profiling.
-//! - `snmalloc`: Uses [snmalloc](https://github.com/snmalloc/snmalloc) as the global allocator. Use
-//!   `--no-default-features` when enabling this, as jemalloc takes precedence.
+//! - `snmalloc`: Uses [snmalloc](https://github.com/microsoft/snmalloc) as the global allocator.
+//!   Use `--no-default-features` when enabling this, as jemalloc takes precedence.
 //! - `snmalloc-native`: Uses snmalloc with native CPU optimizations. Use `--no-default-features`
 //!   when enabling this.
 //!
@@ -50,6 +50,9 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+
+// Used in feature flags only (`asm-keccak`, `keccak-cache-global`)
+use alloy_primitives as _;
 
 pub mod cli;
 
@@ -205,12 +208,9 @@ pub mod rpc {
     }
 }
 
-/// Ress subprotocol installation.
-pub mod ress;
-
 // re-export for convenience
 #[doc(inline)]
-pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
+pub use reth_cli_runner::{CliContext, CliRunner};
 
 // for rendering diagrams
 use aquamarine as _;
@@ -218,3 +218,4 @@ use aquamarine as _;
 // used in main
 use clap as _;
 use reth_cli_util as _;
+use tracing as _;

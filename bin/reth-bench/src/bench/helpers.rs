@@ -1,13 +1,82 @@
 //! Common helpers for reth-bench commands.
 
 use crate::valid_payload::call_forkchoice_updated;
+use eyre::Result;
+use std::{
+    io::{BufReader, Read},
+    time::Duration,
+};
+
+/// Read input from either a file path or stdin.
+pub(crate) fn read_input(path: Option<&str>) -> Result<String> {
+    Ok(match path {
+        Some(path) => reth_fs_util::read_to_string(path)?,
+        None => String::from_utf8(
+            BufReader::new(std::io::stdin()).bytes().collect::<Result<Vec<_>, _>>()?,
+        )?,
+    })
+}
+
+/// Load JWT secret from either a file or use the provided string directly.
+pub(crate) fn load_jwt_secret(jwt_secret: Option<&str>) -> Result<Option<String>> {
+    match jwt_secret {
+        Some(secret) => {
+            // Try to read as file first
+            match std::fs::read_to_string(secret) {
+                Ok(contents) => Ok(Some(contents.trim().to_string())),
+                // If file read fails, use the string directly
+                Err(_) => Ok(Some(secret.to_string())),
+            }
+        }
+        None => Ok(None),
+    }
+}
+
+/// Parses a gas limit value with optional suffix: K for thousand, M for million, G for billion.
+///
+/// Examples: "30000000", "30M", "1G", "2G"
+pub(crate) fn parse_gas_limit(s: &str) -> eyre::Result<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(eyre::eyre!("empty value"));
+    }
+
+    let (num_str, multiplier) = if let Some(prefix) = s.strip_suffix(['G', 'g']) {
+        (prefix, 1_000_000_000u64)
+    } else if let Some(prefix) = s.strip_suffix(['M', 'm']) {
+        (prefix, 1_000_000u64)
+    } else if let Some(prefix) = s.strip_suffix(['K', 'k']) {
+        (prefix, 1_000u64)
+    } else {
+        (s, 1u64)
+    };
+
+    let base: u64 = num_str.trim().parse()?;
+    base.checked_mul(multiplier).ok_or_else(|| eyre::eyre!("value overflow"))
+}
+
+/// Parses a duration string, treating bare integers as milliseconds.
+///
+/// Accepts either a `humantime` duration string (e.g. `"100ms"`, `"2s"`) or a plain
+/// integer which is interpreted as milliseconds (e.g. `"400"` → 400ms).
+pub(crate) fn parse_duration(s: &str) -> eyre::Result<Duration> {
+    match humantime::parse_duration(s) {
+        Ok(d) => Ok(d),
+        Err(_) => {
+            let millis: u64 =
+                s.trim().parse().map_err(|_| eyre::eyre!("invalid duration: {s:?}"))?;
+            Ok(Duration::from_millis(millis))
+        }
+    }
+}
+
 use alloy_consensus::Header;
 use alloy_eips::eip4844::kzg_to_versioned_hash;
 use alloy_primitives::{Address, B256};
 use alloy_provider::{ext::EngineApi, network::AnyNetwork, RootProvider};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState,
-    PayloadAttributes, PayloadId, PraguePayloadFields,
+    PayloadAttributes, PayloadId,
 };
 use eyre::OptionExt;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -130,7 +199,7 @@ pub(crate) async fn get_payload_with_sidecar(
     payload_id: PayloadId,
     parent_beacon_block_root: Option<B256>,
 ) -> eyre::Result<(ExecutionPayload, ExecutionPayloadSidecar)> {
-    debug!(get_payload_version = ?version, ?payload_id, "Sending getPayload");
+    debug!(target: "reth-bench", get_payload_version = ?version, ?payload_id, "Sending getPayload");
 
     match version {
         1 => {
@@ -161,36 +230,83 @@ pub(crate) async fn get_payload_with_sidecar(
         }
         4 => {
             let envelope = provider.get_payload_v4(payload_id).await?;
-            let versioned_hashes = versioned_hashes_from_commitments(
-                &envelope.envelope_inner.blobs_bundle.commitments,
-            );
-            let cancun_fields = CancunPayloadFields {
-                parent_beacon_block_root: parent_beacon_block_root
-                    .ok_or_eyre("parent_beacon_block_root required for V4")?,
-                versioned_hashes,
-            };
-            let prague_fields = PraguePayloadFields::new(envelope.execution_requests);
-            Ok((
-                ExecutionPayload::V3(envelope.envelope_inner.execution_payload),
-                ExecutionPayloadSidecar::v4(cancun_fields, prague_fields),
+            Ok(envelope.into_payload_and_sidecar(
+                parent_beacon_block_root.ok_or_eyre("parent_beacon_block_root required for V4")?,
             ))
         }
         5 => {
-            // V5 (Osaka) - use raw request since alloy doesn't have get_payload_v5 yet
             let envelope = provider.get_payload_v5(payload_id).await?;
-            let versioned_hashes =
-                versioned_hashes_from_commitments(&envelope.blobs_bundle.commitments);
-            let cancun_fields = CancunPayloadFields {
-                parent_beacon_block_root: parent_beacon_block_root
-                    .ok_or_eyre("parent_beacon_block_root required for V5")?,
-                versioned_hashes,
-            };
-            let prague_fields = PraguePayloadFields::new(envelope.execution_requests);
-            Ok((
-                ExecutionPayload::V3(envelope.execution_payload),
-                ExecutionPayloadSidecar::v4(cancun_fields, prague_fields),
+            Ok(envelope.into_payload_and_sidecar(
+                parent_beacon_block_root.ok_or_eyre("parent_beacon_block_root required for V5")?,
             ))
         }
         _ => panic!("This tool does not support getPayload versions past v5"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_gas_limit_plain_number() {
+        assert_eq!(parse_gas_limit("30000000").unwrap(), 30_000_000);
+        assert_eq!(parse_gas_limit("1").unwrap(), 1);
+        assert_eq!(parse_gas_limit("0").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_parse_gas_limit_k_suffix() {
+        assert_eq!(parse_gas_limit("1K").unwrap(), 1_000);
+        assert_eq!(parse_gas_limit("30k").unwrap(), 30_000);
+        assert_eq!(parse_gas_limit("100K").unwrap(), 100_000);
+    }
+
+    #[test]
+    fn test_parse_gas_limit_m_suffix() {
+        assert_eq!(parse_gas_limit("1M").unwrap(), 1_000_000);
+        assert_eq!(parse_gas_limit("30m").unwrap(), 30_000_000);
+        assert_eq!(parse_gas_limit("100M").unwrap(), 100_000_000);
+    }
+
+    #[test]
+    fn test_parse_gas_limit_g_suffix() {
+        assert_eq!(parse_gas_limit("1G").unwrap(), 1_000_000_000);
+        assert_eq!(parse_gas_limit("2g").unwrap(), 2_000_000_000);
+        assert_eq!(parse_gas_limit("10G").unwrap(), 10_000_000_000);
+    }
+
+    #[test]
+    fn test_parse_gas_limit_with_whitespace() {
+        assert_eq!(parse_gas_limit(" 1G ").unwrap(), 1_000_000_000);
+        assert_eq!(parse_gas_limit("2 M").unwrap(), 2_000_000);
+    }
+
+    #[test]
+    fn test_parse_gas_limit_errors() {
+        assert!(parse_gas_limit("").is_err());
+        assert!(parse_gas_limit("abc").is_err());
+        assert!(parse_gas_limit("G").is_err());
+        assert!(parse_gas_limit("-1G").is_err());
+    }
+
+    #[test]
+    fn test_parse_duration_with_unit() {
+        assert_eq!(parse_duration("100ms").unwrap(), Duration::from_millis(100));
+        assert_eq!(parse_duration("2s").unwrap(), Duration::from_secs(2));
+        assert_eq!(parse_duration("1m").unwrap(), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn test_parse_duration_bare_millis() {
+        assert_eq!(parse_duration("400").unwrap(), Duration::from_millis(400));
+        assert_eq!(parse_duration("0").unwrap(), Duration::from_millis(0));
+        assert_eq!(parse_duration("1000").unwrap(), Duration::from_millis(1000));
+    }
+
+    #[test]
+    fn test_parse_duration_errors() {
+        assert!(parse_duration("abc").is_err());
+        assert!(parse_duration("").is_err());
     }
 }

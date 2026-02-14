@@ -872,40 +872,8 @@ pub mod op {
     use super::*;
     use alloy_consensus::SignableTransaction;
     use alloy_signer::Signature;
-    use op_alloy_consensus::{
-        transaction::{OpDepositInfo, OpTransactionInfo},
-        OpTxEnvelope,
-    };
+    use op_alloy_consensus::{transaction::OpTransactionInfo, OpTxEnvelope};
     use op_alloy_rpc_types::OpTransactionRequest;
-    use reth_optimism_primitives::DepositReceipt;
-    use reth_primitives_traits::SignedTransaction;
-    use reth_storage_api::{errors::ProviderError, ReceiptProvider};
-
-    /// Creates [`OpTransactionInfo`] by adding [`OpDepositInfo`] to [`TransactionInfo`] if `tx` is
-    /// a deposit.
-    pub fn try_into_op_tx_info<Tx, T>(
-        provider: &T,
-        tx: &Tx,
-        tx_info: TransactionInfo,
-    ) -> Result<OpTransactionInfo, ProviderError>
-    where
-        Tx: op_alloy_consensus::OpTransaction + SignedTransaction,
-        T: ReceiptProvider<Receipt: DepositReceipt>,
-    {
-        let deposit_meta = if tx.is_deposit() {
-            provider.receipt_by_hash(*tx.tx_hash())?.and_then(|receipt| {
-                receipt.as_deposit_receipt().map(|receipt| OpDepositInfo {
-                    deposit_receipt_version: receipt.deposit_receipt_version,
-                    deposit_nonce: receipt.deposit_nonce,
-                })
-            })
-        } else {
-            None
-        }
-        .unwrap_or_default();
-
-        Ok(OpTransactionInfo::new(tx_info, deposit_meta))
-    }
 
     impl<T: op_alloy_consensus::OpTransaction + alloy_consensus::Transaction> FromConsensusTx<T>
         for op_alloy_rpc_types::Transaction<T>
@@ -964,9 +932,7 @@ impl TryFromTransactionResponse<alloy_network::Ethereum>
 }
 
 #[cfg(feature = "op")]
-impl TryFromTransactionResponse<op_alloy_network::Optimism>
-    for reth_optimism_primitives::OpTransactionSigned
-{
+impl TryFromTransactionResponse<op_alloy_network::Optimism> for op_alloy_consensus::OpTxEnvelope {
     type Error = Infallible;
 
     fn from_transaction_response(
@@ -1015,7 +981,6 @@ mod transaction_response_tests {
         fn test_optimism_transaction_conversion() {
             use op_alloy_consensus::OpTxEnvelope;
             use op_alloy_network::Optimism;
-            use reth_optimism_primitives::OpTransactionSigned;
 
             let signed_tx = Signed::new_unchecked(
                 TxLegacy::default(),
@@ -1038,7 +1003,10 @@ mod transaction_response_tests {
                 deposit_receipt_version: None,
             };
 
-            let result = <OpTransactionSigned as TryFromTransactionResponse<Optimism>>::from_transaction_response(tx_response);
+            let result =
+                <OpTxEnvelope as TryFromTransactionResponse<Optimism>>::from_transaction_response(
+                    tx_response,
+                );
 
             assert!(result.is_ok());
         }

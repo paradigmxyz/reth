@@ -1,5 +1,5 @@
 use crate::{
-    table::{Compress, Decode, Decompress, DupSort, Encode, Key, Table, Value},
+    table::{Compress, Decode, Decompress, DupSort, Encode, IntoVec, Key, Table, Value},
     DatabaseError,
 };
 use serde::{Deserialize, Serialize};
@@ -52,7 +52,7 @@ pub struct RawKey<K: Key> {
 impl<K: Key> RawKey<K> {
     /// Create new raw key.
     pub fn new(key: K) -> Self {
-        Self { key: K::encode(key).into(), _phantom: std::marker::PhantomData }
+        Self { key: K::encode(key).into_vec(), _phantom: std::marker::PhantomData }
     }
 
     /// Creates a raw key from an existing `Vec`. Useful when we already have the encoded

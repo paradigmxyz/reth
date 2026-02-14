@@ -87,3 +87,35 @@ This is particularly useful for applications that need to react immediately to c
 :::note
 This subscription is only available over WebSocket and IPC transports, as HTTP does not support server-initiated messages.
 :::
+
+## `reth_subscribePersistedBlock`, `reth_unsubscribePersistedBlock`
+
+Subscribe to persisted block notifications. This creates a subscription that emits a notification with the block number and hash when a new block is persisted to disk.
+
+Like other subscription methods, this returns the ID of the subscription, which is then used in all events subsequently.
+
+To unsubscribe from persisted block notifications, call `reth_unsubscribePersistedBlock` with the subscription ID.
+
+| Client | Method invocation                                                          |
+| ------ | -------------------------------------------------------------------------- |
+| RPC    | `{"method": "reth_subscribePersistedBlock", "params": []}`                 |
+| RPC    | `{"method": "reth_unsubscribePersistedBlock", "params": [subscription_id]}` |
+
+### Example
+
+```js
+// > {"jsonrpc":"2.0","id":1,"method":"reth_subscribePersistedBlock","params":[]}
+// responds with subscription ID
+{"jsonrpc":"2.0","id":1,"result":"0xab1c2d3e4f590364c09d0fa6a1210faf5"}
+
+// Example notification when a block is persisted
+{"jsonrpc":"2.0","method":"reth_subscription","params":{"subscription":"0xab1c2d3e4f590364c09d0fa6a1210faf5","result":{"number":"0x1a2b3c","hash":"0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}}}
+
+// Unsubscribe
+// > {"jsonrpc":"2.0","id":2,"method":"reth_unsubscribePersistedBlock","params":["0xab1c2d3e4f590364c09d0fa6a1210faf5"]}
+{"jsonrpc":"2.0","id":2,"result":true}
+```
+
+:::note
+This subscription is only available over WebSocket and IPC transports, as HTTP does not support server-initiated messages.
+:::

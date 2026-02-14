@@ -1,0 +1,90 @@
+# syntax=docker/dockerfile:1
+
+# Dockerfile for reth, optimized for Depot builds
+# Usage:
+#   reth: --build-arg BINARY=reth
+
+FROM rust:1 AS builder
+WORKDIR /app
+
+LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
+LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
+
+RUN apt-get update && apt-get install -y libclang-dev pkg-config
+
+# Install sccache for compilation caching
+RUN cargo install sccache --locked
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_DIR=/sccache
+ENV SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev
+
+# Binary to build
+ARG BINARY=reth
+
+# Manifest path for the binary
+ARG MANIFEST_PATH=bin/reth
+
+# Build profile, release by default
+ARG BUILD_PROFILE=release
+ENV BUILD_PROFILE=$BUILD_PROFILE
+
+# Extra Cargo flags (can be overridden, otherwise set per-platform below)
+ARG RUSTFLAGS=""
+
+# Extra Cargo features
+ARG FEATURES=""
+ENV FEATURES=$FEATURES
+
+# Git info for vergen (since .git is excluded from Docker context)
+ARG VERGEN_GIT_SHA=""
+ARG VERGEN_GIT_DESCRIBE=""
+ARG VERGEN_GIT_DIRTY="false"
+ENV VERGEN_GIT_SHA=$VERGEN_GIT_SHA
+ENV VERGEN_GIT_DESCRIBE=$VERGEN_GIT_DESCRIBE
+ENV VERGEN_GIT_DIRTY=$VERGEN_GIT_DIRTY
+
+# Build application
+# Platform-specific RUSTFLAGS: amd64 uses x86-64-v3 (Haswell+) with pclmulqdq for rocksdb
+ARG TARGETPLATFORM
+COPY --exclude=.git . .
+RUN --mount=type=secret,id=DEPOT_TOKEN,env=SCCACHE_WEBDAV_TOKEN \
+    --mount=type=cache,target=/usr/local/cargo/registry,sharing=shared \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=shared \
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=shared \
+    export RUSTC_WRAPPER=sccache SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev SCCACHE_DIR=/sccache && \
+    sccache --start-server && \
+    if [ -n "$RUSTFLAGS" ]; then \
+        export RUSTFLAGS="$RUSTFLAGS"; \
+    elif [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+        export RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq"; \
+    fi && \
+    cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml && \
+    sccache --show-stats
+
+# Copy binary to a known location (ARG not resolved in COPY)
+# Note: Custom profiles like maxperf/profiling output to target/<profile>/, not target/release/
+RUN cp /app/target/$BUILD_PROFILE/$BINARY /app/binary || \
+    cp /app/target/release/$BINARY /app/binary
+
+FROM ubuntu:24.04 AS runtime
+WORKDIR /app
+
+# Binary name for entrypoint
+ARG BINARY=reth
+
+# Install runtime dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy binary from build stage and create canonical symlink for entrypoint
+COPY --from=builder /app/binary /usr/local/bin/
+RUN mv /usr/local/bin/binary /usr/local/bin/$BINARY && \
+    ln -s /usr/local/bin/$BINARY /usr/local/bin/reth-binary && \
+    chmod +x /usr/local/bin/$BINARY
+
+# Copy licenses
+COPY LICENSE-* ./
+
+EXPOSE 30303 30303/udp 9001 8545 8546
+ENTRYPOINT ["/usr/local/bin/reth-binary"]

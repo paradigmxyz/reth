@@ -40,7 +40,7 @@ mod nibbles;
 pub use nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey};
 
 mod storage;
-pub use storage::{StorageTrieEntry, TrieChangeSetsEntry};
+pub use storage::StorageTrieEntry;
 
 mod subnode;
 pub use subnode::StoredSubNode;
@@ -85,4 +85,6 @@ pub mod serde_bincode_compat {
 }
 
 /// Re-export
-pub use alloy_trie::{nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH};
+pub use alloy_trie::{
+    nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, TrieMaskIter, EMPTY_ROOT_HASH,
+};

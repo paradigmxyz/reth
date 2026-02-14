@@ -15,10 +15,10 @@ mod witness;
 pub use hashed_cursor::{
     DatabaseHashedAccountCursor, DatabaseHashedCursorFactory, DatabaseHashedStorageCursor,
 };
-pub use prefix_set::{load_prefix_sets_with_provider, PrefixSetLoader};
+pub use prefix_set::load_prefix_sets_with_provider;
 pub use proof::{DatabaseProof, DatabaseStorageProof};
-pub use state::{DatabaseHashedPostState, DatabaseStateRoot};
-pub use storage::{DatabaseHashedStorage, DatabaseStorageRoot};
+pub use state::{from_reverts_auto, DatabaseHashedPostState, DatabaseStateRoot};
+pub use storage::{hashed_storage_from_reverts_with_provider, DatabaseStorageRoot};
 pub use trie_cursor::{
     DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
 };

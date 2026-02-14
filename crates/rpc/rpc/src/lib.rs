@@ -25,13 +25,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use http as _;
-use http_body as _;
-use hyper as _;
-use jsonwebtoken as _;
-use pin_project as _;
-use tower as _;
-
 mod admin;
 mod aliases;
 mod debug;

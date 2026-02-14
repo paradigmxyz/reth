@@ -5,6 +5,7 @@ import { basePath } from './redirects.config'
 
 export default defineConfig({
   title: 'Reth',
+  description: 'Reth is a secure, performant, and modular Ethereum execution client built in Rust.',
   logoUrl: '/logo.png',
   iconUrl: '/logo.png',
   ogImageUrl: '/reth-prod.png',
@@ -21,7 +22,7 @@ export default defineConfig({
     },
     { text: 'GitHub', link: 'https://github.com/paradigmxyz/reth' },
     {
-      text: 'v1.10.1',
+      text: 'v1.11.0',
       items: [
         {
           text: 'Releases',

@@ -32,7 +32,7 @@ alloy-eips.workspace = true
 alloy-json-rpc.workspace = true
 alloy-consensus.workspace = true
 alloy-network.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["rand"] }
 alloy-provider = { workspace = true, features = ["engine-api", "pubsub", "reqwest-rustls-tls"], default-features = false }
 alloy-pubsub.workspace = true
 alloy-rpc-client = { workspace = true, features = ["pubsub"] }
@@ -45,7 +45,7 @@ op-alloy-consensus = { workspace = true, features = ["alloy-compat"] }
 op-alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 
 # reqwest
-reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots"] }
+reqwest.workspace = true
 
 # tower
 tower.workspace = true
@@ -117,7 +117,7 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
-# no-op feature flag for switching between the `optimism` and default functionality in CI matrices
+# no-op feature flag for CI matrices
 ethereum = []
 
 [[bin]]

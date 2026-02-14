@@ -316,7 +316,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         let _locked_sf_producer = self.static_file_producer.lock();
 
         let mut provider_rw =
-            self.provider_factory.database_provider_rw()?.disable_long_read_transaction_safety();
+            self.provider_factory.unwind_provider_rw()?.disable_long_read_transaction_safety();
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
@@ -396,7 +396,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
                         stage.post_unwind_commit()?;
 
-                        provider_rw = self.provider_factory.database_provider_rw()?;
+                        provider_rw = self.provider_factory.unwind_provider_rw()?;
                     }
                     Err(err) => {
                         self.event_sender.notify(PipelineEvent::Error { stage_id });

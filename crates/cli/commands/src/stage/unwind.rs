@@ -158,7 +158,7 @@ enum Subcommands {
 
 impl Subcommands {
     /// Returns the block to unwind to. The returned block will stay in database.
-    fn unwind_target<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
+    fn unwind_target<N: ProviderNodeTypes<DB = DatabaseEnv>>(
         &self,
         factory: ProviderFactory<N>,
     ) -> eyre::Result<u64> {

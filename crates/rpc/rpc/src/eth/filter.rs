@@ -152,7 +152,7 @@ where
         let eth_filter = Self { inner: Arc::new(inner) };
 
         let this = eth_filter.clone();
-        eth_filter.inner.task_spawner.spawn_critical(
+        eth_filter.inner.task_spawner.spawn_critical_task(
             "eth-filters_stale-filters-clean",
             Box::pin(async move {
                 this.watch_and_clear_stale_filters().await;
@@ -483,6 +483,12 @@ where
                         .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?
                 };
 
+                // Check if the block has been pruned (EIP-4444)
+                let earliest_block = self.provider().earliest_block_number()?;
+                if header.number() < earliest_block {
+                    return Err(EthApiError::PrunedHistoryUnavailable.into());
+                }
+
                 let block_num_hash = BlockNumHash::new(header.number(), block_hash);
 
                 let mut all_logs = Vec::new();
@@ -565,6 +571,12 @@ where
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info)?;
 
+                // Check if the requested range overlaps with pruned history (EIP-4444)
+                let earliest_block = self.provider().earliest_block_number()?;
+                if from_block_number < earliest_block {
+                    return Err(EthApiError::PrunedHistoryUnavailable.into());
+                }
+
                 self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
                     .await
             }
@@ -622,7 +634,7 @@ where
 
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(Box::pin(async move {
             let res =
                 this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits).await;
             let _ = tx.send(res);

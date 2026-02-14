@@ -1,27 +1,25 @@
 use alloy_primitives::{BlockNumber, B256};
 use metrics::{Counter, Histogram};
-use parking_lot::RwLock;
 use reth_chain_state::LazyOverlay;
 use reth_db_api::DatabaseError;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
+use reth_primitives_traits::dashmap::{self, DashMap};
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
     DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
-    HashedPostStateSorted, KeccakKeyHasher,
+    HashedPostStateSorted,
 };
-use reth_trie_db::{
-    ChangesetCache, DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
-};
+use reth_trie_db::{ChangesetCache, DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{
-    collections::{hash_map::Entry, HashMap},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -101,7 +99,7 @@ pub struct OverlayStateProviderFactory<F> {
     metrics: OverlayStateProviderMetrics,
     /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
     /// then a new entry will get added to this, but in most cases only one entry is present.
-    overlay_cache: Arc<RwLock<HashMap<BlockNumber, Overlay>>>,
+    overlay_cache: Arc<DashMap<BlockNumber, Overlay>>,
 }
 
 impl<F> OverlayStateProviderFactory<F> {
@@ -129,6 +127,8 @@ impl<F> OverlayStateProviderFactory<F> {
     /// This overlay will be applied on top of any reverts applied via `with_block_hash`.
     pub fn with_overlay_source(mut self, source: Option<OverlaySource>) -> Self {
         self.overlay_source = source;
+        // Clear the overlay cache since we've updated the source.
+        self.overlay_cache = Default::default();
         self
     }
 
@@ -137,6 +137,8 @@ impl<F> OverlayStateProviderFactory<F> {
     /// Convenience method that wraps the lazy overlay in `OverlaySource::Lazy`.
     pub fn with_lazy_overlay(mut self, lazy_overlay: Option<LazyOverlay>) -> Self {
         self.overlay_source = lazy_overlay.map(OverlaySource::Lazy);
+        // Clear the overlay cache since we've updated the source.
+        self.overlay_cache = Default::default();
         self
     }
 
@@ -152,6 +154,8 @@ impl<F> OverlayStateProviderFactory<F> {
                 trie: Arc::new(TrieUpdatesSorted::default()),
                 state,
             });
+            // Clear the overlay cache since we've updated the source.
+            self.overlay_cache = Default::default();
         }
         self
     }
@@ -178,6 +182,8 @@ impl<F> OverlayStateProviderFactory<F> {
                 });
             }
         }
+        // Clear the overlay cache since we've updated the source.
+        self.overlay_cache = Default::default();
         self
     }
 }
@@ -188,8 +194,10 @@ where
     F::Provider: StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
+        + StorageChangeSetReader
         + DBProvider
-        + BlockNumReader,
+        + BlockNumReader
+        + StorageSettingsCache,
 {
     /// Resolves the effective overlay (trie updates, hashed state).
     ///
@@ -327,10 +335,7 @@ where
                 let _guard = debug_span!(target: "providers::state::overlay", "Retrieving hashed state reverts").entered();
 
                 let start = Instant::now();
-                let res = HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
-                    provider,
-                    from_block + 1..,
-                )?;
+                let res = reth_trie_db::from_reverts_auto(provider, from_block + 1..)?;
                 retrieve_hashed_state_reverts_duration = start.elapsed();
                 res
             };
@@ -409,17 +414,16 @@ where
         let db_tip_block = self.get_db_tip_block_number(provider)?;
 
         // If the overlay is present in the cache then return it directly.
-        if let Some(overlay) = self.overlay_cache.as_ref().read().get(&db_tip_block) {
-            return Ok(overlay.clone());
+        if let Some(entry) = self.overlay_cache.get(&db_tip_block) {
+            return Ok(entry.value().clone());
         }
 
-        // If the overlay is not present then we need to calculate a new one. We grab a write lock,
-        // and then check the cache again in case some other thread populated the cache since we
-        // checked with the read-lock. If still not present we calculate and populate.
+        // If the overlay is not present then we need to calculate a new one.
+        // DashMap's entry API handles the race condition internally.
         let mut cache_miss = false;
-        let overlay = match self.overlay_cache.as_ref().write().entry(db_tip_block) {
-            Entry::Occupied(entry) => entry.get().clone(),
-            Entry::Vacant(entry) => {
+        let overlay = match self.overlay_cache.entry(db_tip_block) {
+            dashmap::Entry::Occupied(entry) => entry.get().clone(),
+            dashmap::Entry::Vacant(entry) => {
                 cache_miss = true;
                 let overlay = self.calculate_overlay(provider, db_tip_block)?;
                 entry.insert(overlay.clone());
@@ -438,7 +442,12 @@ where
 impl<F> DatabaseProviderROFactory for OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: StageCheckpointReader + PruneCheckpointReader + BlockNumReader + ChangeSetReader,
+    F::Provider: StageCheckpointReader
+        + PruneCheckpointReader
+        + BlockNumReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StorageSettingsCache,
 {
     type Provider = OverlayStateProvider<F::Provider>;
 

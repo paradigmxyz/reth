@@ -431,7 +431,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
             // we prefer removing transactions with lower ordering
             let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
-            worst_transactions.sort();
+            worst_transactions.sort_unstable();
 
             // loop through the highest nonces set, removing transactions until we reach the limit
             for tx in worst_transactions {

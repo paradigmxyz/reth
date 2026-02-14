@@ -14,14 +14,13 @@ pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
     engine::EngineApiEvent,
 };
-use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::BlockClient;
 use reth_node_types::{BlockTy, NodeTypes};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
-    ProviderFactory,
+    ProviderFactory, StorageSettingsCache,
 };
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
@@ -95,13 +94,14 @@ where
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
 
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
+        let use_hashed_state = provider.cached_storage_settings().use_hashed_state();
 
         let persistence_handle =
-            PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx);
+            PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
-        let (to_tree_tx, from_tree) = EngineApiTreeHandler::<N::Primitives, _, _, _, _>::spawn_new(
+        let (to_tree_tx, from_tree) = EngineApiTreeHandler::spawn_new(
             blockchain_db,
             consensus,
             payload_validator,
@@ -112,6 +112,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
+            use_hashed_state,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
@@ -202,6 +203,7 @@ mod tests {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
+            reth_tasks::Runtime::test(),
         );
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();

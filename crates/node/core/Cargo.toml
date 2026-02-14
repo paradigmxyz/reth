@@ -19,7 +19,6 @@ reth-cli-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-storage-errors.workspace = true
 reth-storage-api = { workspace = true, features = ["std", "db-api"] }
-reth-provider.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
 reth-rpc-eth-types.workspace = true
@@ -91,8 +90,11 @@ min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
-# Marker feature for edge/unstable builds - captured by vergen in build.rs
-edge = ["reth-provider/edge"]
+# Route supported tables to RocksDB instead of MDBX
+rocksdb = ["reth-storage-api/rocksdb"]
+
+# Marker feature for edge/unstable builds - enables rocksdb and sets v2 defaults
+edge = ["rocksdb"]
 
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }

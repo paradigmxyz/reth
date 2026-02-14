@@ -57,20 +57,16 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
 /// For small slices, linear scan has better cache locality and lower overhead.
 const BINARY_SEARCH_THRESHOLD: usize = 64;
 
-impl<K, V> ForwardInMemoryCursor<'_, K, V>
-where
-    K: Ord + Clone,
-    V: Clone,
-{
+impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     /// Returns the first entry from the current cursor position that's greater or equal to the
     /// provided key. This method advances the cursor forward.
-    pub fn seek(&mut self, key: &K) -> Option<(K, V)> {
+    pub fn seek(&mut self, key: &K) -> Option<&(K, V)> {
         self.advance_while(|k| k < key)
     }
 
     /// Returns the first entry from the current cursor position that's greater than the provided
     /// key. This method advances the cursor forward.
-    pub fn first_after(&mut self, key: &K) -> Option<(K, V)> {
+    pub fn first_after(&mut self, key: &K) -> Option<&(K, V)> {
         self.advance_while(|k| k <= key)
     }
 
@@ -81,7 +77,7 @@ where
     ///
     /// Returns the first entry for which `predicate` returns `false` or `None`. The cursor will
     /// point to the returned entry.
-    fn advance_while(&mut self, predicate: impl Fn(&K) -> bool) -> Option<(K, V)> {
+    fn advance_while(&mut self, predicate: impl Fn(&K) -> bool) -> Option<&(K, V)> {
         let remaining = self.entries.len().saturating_sub(self.idx);
         if remaining >= BINARY_SEARCH_THRESHOLD {
             let slice = &self.entries[self.idx..];
@@ -92,7 +88,7 @@ where
                 self.next();
             }
         }
-        self.current().cloned()
+        self.current()
     }
 }
 
@@ -105,16 +101,16 @@ mod tests {
         let mut cursor = ForwardInMemoryCursor::new(&[(1, ()), (2, ()), (3, ()), (4, ()), (5, ())]);
         assert_eq!(cursor.current(), Some(&(1, ())));
 
-        assert_eq!(cursor.seek(&0), Some((1, ())));
+        assert_eq!(cursor.seek(&0), Some(&(1, ())));
         assert_eq!(cursor.current(), Some(&(1, ())));
 
-        assert_eq!(cursor.seek(&3), Some((3, ())));
+        assert_eq!(cursor.seek(&3), Some(&(3, ())));
         assert_eq!(cursor.current(), Some(&(3, ())));
 
-        assert_eq!(cursor.seek(&3), Some((3, ())));
+        assert_eq!(cursor.seek(&3), Some(&(3, ())));
         assert_eq!(cursor.current(), Some(&(3, ())));
 
-        assert_eq!(cursor.seek(&4), Some((4, ())));
+        assert_eq!(cursor.seek(&4), Some(&(4, ())));
         assert_eq!(cursor.current(), Some(&(4, ())));
 
         assert_eq!(cursor.seek(&6), None);
@@ -128,19 +124,19 @@ mod tests {
         let mut cursor = ForwardInMemoryCursor::new(&entries);
 
         // Seek to beginning
-        assert_eq!(cursor.seek(&0), Some((0, ())));
+        assert_eq!(cursor.seek(&0), Some(&(0, ())));
         assert_eq!(cursor.idx, 0);
 
         // Seek to middle (should use binary search)
-        assert_eq!(cursor.seek(&100), Some((100, ())));
+        assert_eq!(cursor.seek(&100), Some(&(100, ())));
         assert_eq!(cursor.idx, 50);
 
         // Seek to non-existent key (should find next greater)
-        assert_eq!(cursor.seek(&101), Some((102, ())));
+        assert_eq!(cursor.seek(&101), Some(&(102, ())));
         assert_eq!(cursor.idx, 51);
 
         // Seek to end
-        assert_eq!(cursor.seek(&398), Some((398, ())));
+        assert_eq!(cursor.seek(&398), Some(&(398, ())));
         assert_eq!(cursor.idx, 199);
 
         // Seek past end
@@ -153,16 +149,16 @@ mod tests {
         let mut cursor = ForwardInMemoryCursor::new(&entries);
 
         // first_after should find strictly greater
-        assert_eq!(cursor.first_after(&0), Some((2, ())));
+        assert_eq!(cursor.first_after(&0), Some(&(2, ())));
         assert_eq!(cursor.idx, 1);
 
         // Reset and test from beginning
         cursor.reset();
-        assert_eq!(cursor.first_after(&99), Some((100, ())));
+        assert_eq!(cursor.first_after(&99), Some(&(100, ())));
 
         // first_after on exact match
         cursor.reset();
-        assert_eq!(cursor.first_after(&100), Some((102, ())));
+        assert_eq!(cursor.first_after(&100), Some(&(102, ())));
     }
 
     #[test]
