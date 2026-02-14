@@ -1,7 +1,8 @@
 //! Engine orchestrator launch helper.
 //!
-//! Provides [`build_engine_orchestrator`] which wires together all engine components and returns a
-//! [`ChainOrchestrator`] ready to be polled as a `Stream`.
+//! Provides [`build_engine_orchestrator`](crate::launch::build_engine_orchestrator) which wires
+//! together all engine components and returns a
+//! [`ChainOrchestrator`](crate::chain::ChainOrchestrator) ready to be polled as a `Stream`.
 
 use crate::{
     backfill::PipelineSync,
@@ -43,8 +44,10 @@ use std::sync::Arc;
 ///   needs to catch up over large block ranges.
 ///
 /// The returned orchestrator implements [`Stream`] and yields
-/// [`ChainEvent`](crate::chain::ChainEvent)s.
-#[expect(clippy::too_many_arguments)]
+/// [`ChainEvent`]s.
+///
+/// [`ChainEvent`]: crate::chain::ChainEvent
+#[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn build_engine_orchestrator<N, Client, S, V, C>(
     engine_kind: EngineApiKind,
     consensus: Arc<dyn FullConsensus<N::Primitives>>,
