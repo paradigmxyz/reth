@@ -29,10 +29,10 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
-    BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TransactionVariant,
+    providers::ConsistentViewError, BlockExecutionOutput, BlockExecutionResult, BlockReader,
+    ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider, ProviderError,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -40,7 +40,12 @@ use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{fmt::Debug, ops, sync::Arc, time::Instant};
+use std::{
+    fmt::Debug,
+    ops,
+    sync::{Arc, OnceLock},
+    time::Instant,
+};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -93,6 +98,11 @@ pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
 /// A builder for creating state providers that can be used across threads.
+///
+/// The builder tracks the database tip at the time of the first [`Self::build`] call and rejects
+/// subsequent builds if persistence has advanced. This prevents prewarming workers from opening a
+/// newer MDBX snapshot than the execution thread, which would poison the shared
+/// [`ExecutionCache`] with stale data.
 #[derive(Clone, Debug)]
 pub struct StateProviderBuilder<N: NodePrimitives, P> {
     /// The provider factory used to create providers.
@@ -101,17 +111,21 @@ pub struct StateProviderBuilder<N: NodePrimitives, P> {
     historical: B256,
     /// The blocks that form the chain from historical to target and are in memory.
     overlay: Option<Vec<ExecutedBlock<N>>>,
+    /// Pinned tip `(hash, block_number)` from the first [`Self::build`] call. Shared across
+    /// clones via [`Arc`] so that prewarm workers detect if persistence committed between the
+    /// execution build and their own build, preventing cache poisoning from snapshot divergence.
+    tip: Arc<OnceLock<(B256, u64)>>,
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     /// Creates a new state provider from the provider factory, historical block hash and optional
     /// overlaid blocks.
-    pub const fn new(
+    pub fn new(
         provider_factory: P,
         historical: B256,
         overlay: Option<Vec<ExecutedBlock<N>>>,
     ) -> Self {
-        Self { provider_factory, historical, overlay }
+        Self { provider_factory, historical, overlay, tip: Arc::new(OnceLock::new()) }
     }
 }
 
@@ -120,7 +134,44 @@ where
     P: BlockReader + StateProviderFactory + StateReader + Clone,
 {
     /// Creates a new state provider from this builder.
+    ///
+    /// The first call pins the database tip (block number and hash from static files).
+    /// Subsequent calls verify that persistence has not advanced. If it has, a
+    /// [`ConsistentViewError::Reorged`] error is returned, causing prewarm workers to skip
+    /// and preventing cache poisoning.
+    ///
+    /// This follows the same detection pattern as [`ConsistentDbView`]: static files are
+    /// committed before the database, so a change in the static file tip is a conservative
+    /// indicator that the MDBX snapshot may have also advanced.
+    ///
+    /// [`ConsistentDbView`]: reth_provider::providers::ConsistentDbView
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
+        // Pin-and-check: detect if persistence committed between builds.
+        // Both `last_block_number` and `sealed_header` read from static files, which are
+        // committed before MDBX. If these haven't changed, MDBX hasn't advanced either.
+        let current_num = self.provider_factory.last_block_number()?;
+        let current_hash = match self.provider_factory.sealed_header(current_num)? {
+            Some(h) => h.hash(),
+            None if current_num == 0 => B256::ZERO,
+            None => {
+                return Err(ConsistentViewError::Reorged { block: self.historical }.into());
+            }
+        };
+
+        match self.tip.get() {
+            Some(&(pinned_hash, pinned_num))
+                if pinned_num != current_num || pinned_hash != current_hash =>
+            {
+                // Not necessarily a reorg — persistence may have simply advanced.
+                // Reusing `Reorged` because it triggers the correct retry/skip behavior.
+                return Err(ConsistentViewError::Reorged { block: self.historical }.into());
+            }
+            None => {
+                let _ = self.tip.set((current_hash, current_num));
+            }
+            _ => {}
+        }
+
         let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
         if let Some(overlay) = self.overlay.clone() {
             provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
