@@ -4,7 +4,9 @@ use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use std::io;
 
 pub mod disk;
+mod noop;
 pub use disk::{DiskFileBalStore, DiskFileBalStoreConfig, DEFAULT_MAX_BAL_STORE_ENTRIES};
+pub use noop::NoopBalStore;
 
 /// A store for EIP-7928 Block Access Lists (BALs).
 ///

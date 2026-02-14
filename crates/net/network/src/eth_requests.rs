@@ -9,6 +9,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::Bytes;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
+use reth_bal_store::{BalStore, NoopBalStore};
 use reth_eth_wire::{
     BlockAccessLists, BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockAccessLists,
     GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, GetReceipts70, HeadersDirection,
@@ -20,13 +21,16 @@ use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
 use reth_storage_api::{BlockReader, HeaderProvider};
 use std::{
+    fmt,
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 use tokio::sync::{mpsc::Receiver, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::debug;
 
 // Limits: <https://github.com/ethereum/go-ethereum/blob/b0d44338bbcefee044f1f635a84487cbbd8f0538/eth/protocols/eth/handler.go#L34-L56>
 
@@ -52,7 +56,6 @@ pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 /// Manages eth related requests on top of the p2p network.
 ///
 /// This can be spawned to another task and is supposed to be run as background service.
-#[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
 pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
@@ -63,18 +66,37 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
     incoming_requests: ReceiverStream<IncomingEthRequest<N>>,
+    /// Shared BAL store used to serve `GetBlockAccessLists` requests.
+    bal_store: Arc<dyn BalStore>,
     /// Metrics for the eth request handler.
     metrics: EthRequestHandlerMetrics,
 }
 
+impl<C, N: NetworkPrimitives> fmt::Debug for EthRequestHandler<C, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EthRequestHandler").finish_non_exhaustive()
+    }
+}
+
 // === impl EthRequestHandler ===
 impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
-    /// Create a new instance
+    /// Create a new instance with a no-op BAL store.
     pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
+        Self::with_bal_store(client, peers, incoming, Arc::new(NoopBalStore))
+    }
+
+    /// Create a new instance with an explicit BAL store.
+    pub fn with_bal_store(
+        client: C,
+        peers: PeersHandle,
+        incoming: Receiver<IncomingEthRequest<N>>,
+        bal_store: Arc<dyn BalStore>,
+    ) -> Self {
         Self {
             client,
             peers,
             incoming_requests: ReceiverStream::new(incoming),
+            bal_store,
             metrics: Default::default(),
         }
     }
@@ -291,7 +313,28 @@ where
         request: GetBlockAccessLists,
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     ) {
-        let access_lists = request.0.into_iter().map(|_| Bytes::new()).collect();
+        let block_hashes = request.0;
+        let requested_len = block_hashes.len();
+        let mut access_lists = match self.bal_store.get_by_hashes(&block_hashes) {
+            Ok(bals) => bals.into_iter().map(|bal| bal.unwrap_or_else(Bytes::new)).collect(),
+            Err(err) => {
+                debug!(
+                    target: "net::eth",
+                    %err,
+                    requested_len,
+                    "Failed to read BALs from store, returning empty BALs"
+                );
+                vec![Bytes::new(); requested_len]
+            }
+        };
+
+        // Enforce one response entry per requested hash.
+        if access_lists.len() < requested_len {
+            access_lists.resize(requested_len, Bytes::new());
+        } else if access_lists.len() > requested_len {
+            access_lists.truncate(requested_len);
+        }
+
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
 

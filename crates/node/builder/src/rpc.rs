@@ -13,7 +13,6 @@ use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use parking_lot::Mutex;
-use reth_bal_store::{DiskFileBalStore, DiskFileBalStoreConfig};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_node_api::{
@@ -981,7 +980,8 @@ where
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
         let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
-        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
+        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events, .. } =
+            ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -1398,11 +1398,6 @@ where
             commit: version_metadata().vergen_git_sha.to_string(),
         };
 
-        let bal_store = DiskFileBalStore::open(
-            ctx.config.datadir().balstore(),
-            DiskFileBalStoreConfig::default(),
-        )?;
-
         Ok(EngineApi::with_bal_store(
             ctx.node.provider().clone(),
             ctx.config.chain.clone(),
@@ -1415,7 +1410,7 @@ where
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
             ctx.node.network().clone(),
-            Arc::new(bal_store),
+            ctx.bal_store.clone(),
         ))
     }
 }

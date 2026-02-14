@@ -1,8 +1,8 @@
 //! Block Access List (BAL) cache for EIP-7928.
 //!
 //! This module provides an in-memory cache for storing Block Access Lists received via
-//! the Engine API. BALs are stored for valid payloads and can be retrieved via
-//! `engine_getBALsByHashV1` and `engine_getBALsByRangeV1`.
+//! the Engine API. BALs are stored for valid payloads and can be retrieved through
+//! Engine API BAL query paths that read from the cache/store provider.
 //!
 //! According to EIP-7928, the EL MUST retain BALs for at least the duration of the
 //! weak subjectivity period (~3533 epochs) to support synchronization with re-execution.

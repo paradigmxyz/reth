@@ -34,6 +34,7 @@ reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers = { workspace = true, features = ["net"] }
 reth-network-types.workspace = true
+reth-bal-store.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true

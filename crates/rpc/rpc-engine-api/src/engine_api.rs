@@ -51,10 +51,6 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 /// The upper limit for blobs in `engine_getBlobsVx`.
 const MAX_BLOB_LIMIT: usize = 128;
 
-/// The upper limit for BAL requests in `engine_getBALsByHashV1` and
-/// `engine_getBALsByRangeV1`.
-const MAX_BAL_REQUEST_LIMIT: u64 = 1024;
-
 #[derive(Clone)]
 struct BalProvider {
     store: Arc<dyn BalStore>,
@@ -1579,37 +1575,6 @@ where
         trace!(target: "rpc::engine", "Serving engine_getBlobsV3");
         Ok(self.get_blobs_v3_metered(versioned_hashes)?)
     }
-    /// Handler for `engine_getBALsByHashV1`
-    ///
-    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
-    async fn get_bals_by_hash_v1(
-        &self,
-        block_hashes: Vec<BlockHash>,
-    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
-        trace!(target: "rpc::engine", "Serving engine_getBALsByHashV1");
-        let len = block_hashes.len() as u64;
-        if len > MAX_BAL_REQUEST_LIMIT {
-            return Err(EngineApiError::PayloadRequestTooLarge { len }.into())
-        }
-        Ok(self.get_bals_by_hash(block_hashes))
-    }
-
-    /// Handler for `engine_getBALsByRangeV1`
-    ///
-    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
-    async fn get_bals_by_range_v1(
-        &self,
-        start: U64,
-        count: U64,
-    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
-        trace!(target: "rpc::engine", "Serving engine_getBALsByRangeV1");
-        let start = start.to();
-        let count = count.to();
-        if count > MAX_BAL_REQUEST_LIMIT {
-            return Err(EngineApiError::PayloadRequestTooLarge { len: count }.into())
-        }
-        Ok(self.get_bals_by_range(start, count))
-    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
@@ -2128,23 +2093,6 @@ mod tests {
                 let results = api.get_bals_by_range(1, 5);
                 assert_eq!(results, vec![bal1, bal2, bal3, bal4, bal5]);
                 assert_eq!(store.range_queries(), vec![(3, 3)]);
-            });
-        }
-
-        #[test]
-        fn bal_requests_too_large() {
-            run_with_tokio_runtime(async {
-                let (_, api) = setup_engine_api();
-
-                let hashes = vec![B256::ZERO; (MAX_BAL_REQUEST_LIMIT + 1) as usize];
-                let err = api.get_bals_by_hash_v1(hashes).await.unwrap_err();
-                assert_eq!(err.code(), crate::error::REQUEST_TOO_LARGE_CODE);
-
-                let err = api
-                    .get_bals_by_range_v1(U64::from(1_u64), U64::from(MAX_BAL_REQUEST_LIMIT + 1))
-                    .await
-                    .unwrap_err();
-                assert_eq!(err.code(), crate::error::REQUEST_TOO_LARGE_CODE);
             });
         }
     }

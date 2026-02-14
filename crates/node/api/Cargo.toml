@@ -17,6 +17,7 @@ reth-db-api.workspace = true
 reth-consensus.workspace = true
 reth-evm.workspace = true
 reth-provider.workspace = true
+reth-bal-store.workspace = true
 reth-engine-primitives.workspace = true
 reth-transaction-pool.workspace = true
 reth-payload-builder.workspace = true
