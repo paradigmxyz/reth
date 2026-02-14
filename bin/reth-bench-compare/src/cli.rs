@@ -1031,3 +1031,187 @@ async fn get_samply_path() -> Result<String> {
 
     Ok(samply_path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to construct an `Args` with the minimum required fields plus any extras.
+    fn parse_test_args(extra: &[&str]) -> Args {
+        let mut argv = vec![
+            "reth-bench-compare",
+            "--baseline-ref",
+            "main",
+            "--feature-ref",
+            "dev",
+            "--skip-git-validation",
+        ];
+        argv.extend_from_slice(extra);
+        Args::try_parse_from(argv).expect("failed to parse test args")
+    }
+
+    // ── DisableStartupSyncStateIdle ─────────────────────────────────────────
+
+    #[test]
+    fn parse_disable_sync_state_idle_valid() {
+        assert_eq!(
+            DisableStartupSyncStateIdle::from_str("baseline").unwrap(),
+            DisableStartupSyncStateIdle::Baseline
+        );
+        assert_eq!(
+            DisableStartupSyncStateIdle::from_str("feature").unwrap(),
+            DisableStartupSyncStateIdle::Feature
+        );
+        assert_eq!(
+            DisableStartupSyncStateIdle::from_str("all").unwrap(),
+            DisableStartupSyncStateIdle::All
+        );
+    }
+
+    #[test]
+    fn parse_disable_sync_state_idle_case_insensitive() {
+        assert_eq!(
+            DisableStartupSyncStateIdle::from_str("BASELINE").unwrap(),
+            DisableStartupSyncStateIdle::Baseline
+        );
+        assert_eq!(
+            DisableStartupSyncStateIdle::from_str("Feature").unwrap(),
+            DisableStartupSyncStateIdle::Feature
+        );
+        assert_eq!(
+            DisableStartupSyncStateIdle::from_str("ALL").unwrap(),
+            DisableStartupSyncStateIdle::All
+        );
+    }
+
+    #[test]
+    fn parse_disable_sync_state_idle_invalid() {
+        assert!(DisableStartupSyncStateIdle::from_str("invalid").is_err());
+        assert!(DisableStartupSyncStateIdle::from_str("").is_err());
+    }
+
+    #[test]
+    fn display_disable_sync_state_idle_roundtrip() {
+        for variant in [
+            DisableStartupSyncStateIdle::Baseline,
+            DisableStartupSyncStateIdle::Feature,
+            DisableStartupSyncStateIdle::All,
+        ] {
+            assert_eq!(
+                DisableStartupSyncStateIdle::from_str(&variant.to_string()).unwrap(),
+                variant
+            );
+        }
+    }
+
+    // ── parse_args_string ───────────────────────────────────────────────────
+
+    #[test]
+    fn parse_args_string_simple() {
+        assert_eq!(parse_args_string("--foo bar"), vec!["--foo", "bar"]);
+    }
+
+    #[test]
+    fn parse_args_string_quoted() {
+        assert_eq!(
+            parse_args_string(r#"--flag "value with spaces""#),
+            vec!["--flag", "value with spaces"]
+        );
+    }
+
+    #[test]
+    fn parse_args_string_empty() {
+        assert!(parse_args_string("").is_empty());
+    }
+
+    // ── build_additional_args ───────────────────────────────────────────────
+
+    #[test]
+    fn build_additional_args_default_adds_flag() {
+        let args = parse_test_args(&[]);
+        for ref_type in ["warmup", "baseline", "feature"] {
+            let result = args.build_additional_args(ref_type, None);
+            assert!(
+                result.contains(&"--debug.startup-sync-state-idle".to_string()),
+                "expected flag for ref_type={ref_type}, got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_additional_args_disable_all() {
+        let args = parse_test_args(&["--disable-startup-sync-state-idle", "all"]);
+        for ref_type in ["warmup", "baseline", "feature"] {
+            let result = args.build_additional_args(ref_type, None);
+            assert!(
+                !result.contains(&"--debug.startup-sync-state-idle".to_string()),
+                "unexpected flag for ref_type={ref_type}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_additional_args_disable_baseline() {
+        let args = parse_test_args(&["--disable-startup-sync-state-idle", "baseline"]);
+        // warmup and baseline should NOT have the flag
+        assert!(!args
+            .build_additional_args("warmup", None)
+            .contains(&"--debug.startup-sync-state-idle".to_string()));
+        assert!(!args
+            .build_additional_args("baseline", None)
+            .contains(&"--debug.startup-sync-state-idle".to_string()));
+        // feature SHOULD have the flag
+        assert!(args
+            .build_additional_args("feature", None)
+            .contains(&"--debug.startup-sync-state-idle".to_string()));
+    }
+
+    #[test]
+    fn build_additional_args_disable_feature() {
+        let args = parse_test_args(&["--disable-startup-sync-state-idle", "feature"]);
+        // warmup and baseline SHOULD have the flag
+        assert!(args
+            .build_additional_args("warmup", None)
+            .contains(&"--debug.startup-sync-state-idle".to_string()));
+        assert!(args
+            .build_additional_args("baseline", None)
+            .contains(&"--debug.startup-sync-state-idle".to_string()));
+        // feature should NOT have the flag
+        assert!(!args
+            .build_additional_args("feature", None)
+            .contains(&"--debug.startup-sync-state-idle".to_string()));
+    }
+
+    #[test]
+    fn build_additional_args_with_base_args() {
+        let args = parse_test_args(&[]);
+        let base = "--debug.tip 0xabc".to_string();
+        let result = args.build_additional_args("baseline", Some(&base));
+        assert_eq!(result[0], "--debug.tip");
+        assert_eq!(result[1], "0xabc");
+        assert!(result.contains(&"--debug.startup-sync-state-idle".to_string()));
+    }
+
+    // ── Args helpers ────────────────────────────────────────────────────────
+
+    #[test]
+    fn get_warmup_blocks_defaults_to_blocks() {
+        let args = parse_test_args(&["--blocks", "200"]);
+        assert_eq!(args.get_warmup_blocks(), 200);
+    }
+
+    #[test]
+    fn get_warmup_blocks_explicit_override() {
+        let args = parse_test_args(&["--blocks", "200", "--warmup-blocks", "50"]);
+        assert_eq!(args.get_warmup_blocks(), 50);
+    }
+
+    #[test]
+    fn output_dir_tilde_expansion() {
+        let args = parse_test_args(&["--output-dir", "~/my-results"]);
+        let path = args.output_dir_path();
+        // Should not contain tilde after expansion
+        assert!(!path.to_string_lossy().contains('~'));
+        assert!(path.to_string_lossy().contains("my-results"));
+    }
+}
