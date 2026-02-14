@@ -16,11 +16,13 @@ use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
     error::FromEvmError, EthApiError, PendingBlockEnv, RpcInvalidTransactionError,
 };
+use reth_rpc_server_types::constants::DEFAULT_MAX_STORAGE_VALUES_SLOTS;
 use reth_storage_api::{
     BlockIdReader, BlockNumReader, BlockReaderIdExt, StateProvider, StateProviderBox,
     StateProviderFactory,
 };
 use reth_transaction_pool::TransactionPool;
+use std::collections::HashMap;
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
@@ -80,6 +82,44 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .unwrap_or_default()
                     .to_be_bytes(),
             ))
+        })
+    }
+
+    /// Returns values from multiple storage positions across multiple addresses.
+    ///
+    /// Enforces a cap on total slot count (sum of all slot arrays) and returns an error if
+    /// exceeded.
+    fn storage_values(
+        &self,
+        requests: HashMap<Address, Vec<JsonStorageKey>>,
+        block_id: Option<BlockId>,
+    ) -> impl Future<Output = Result<HashMap<Address, Vec<B256>>, Self::Error>> + Send {
+        self.spawn_blocking_io_fut(move |this| async move {
+            let total_slots: usize = requests.values().map(|slots| slots.len()).sum();
+            if total_slots > DEFAULT_MAX_STORAGE_VALUES_SLOTS {
+                return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(
+                    format!(
+                        "total slot count {total_slots} exceeds limit {DEFAULT_MAX_STORAGE_VALUES_SLOTS}",
+                    ),
+                )));
+            }
+
+            let state = this.state_at_block_id_or_latest(block_id).await?;
+
+            let mut result = HashMap::with_capacity(requests.len());
+            for (address, slots) in requests {
+                let mut values = Vec::with_capacity(slots.len());
+                for slot in &slots {
+                    let value = state
+                        .storage(address, slot.as_b256())
+                        .map_err(Self::Error::from_eth_err)?
+                        .unwrap_or_default();
+                    values.push(B256::new(value.to_be_bytes()));
+                }
+                result.insert(address, values);
+            }
+
+            Ok(result)
         })
     }
 
