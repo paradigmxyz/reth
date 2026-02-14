@@ -162,7 +162,7 @@ impl BalStore for BalCache {
         block_number: BlockNumber,
         bal: Bytes,
     ) -> Result<(), BalStoreError> {
-        BalCache::insert(self, block_hash, block_number, bal);
+        Self::insert(self, block_hash, block_number, bal);
         Ok(())
     }
 
@@ -170,11 +170,11 @@ impl BalStore for BalCache {
         &self,
         block_hashes: &[BlockHash],
     ) -> Result<Vec<Option<Bytes>>, BalStoreError> {
-        Ok(BalCache::get_by_hashes(self, block_hashes))
+        Ok(Self::get_by_hashes(self, block_hashes))
     }
 
     fn get_by_range(&self, start: BlockNumber, count: u64) -> Result<Vec<Bytes>, BalStoreError> {
-        Ok(BalCache::get_by_range(self, start, count))
+        Ok(Self::get_by_range(self, start, count))
     }
 }
 

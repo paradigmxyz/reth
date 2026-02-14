@@ -62,7 +62,7 @@ impl BalProvider {
         Self { store, cache }
     }
 
-    fn cache(&self) -> &BalCache {
+    const fn cache(&self) -> &BalCache {
         &self.cache
     }
 
@@ -358,18 +358,16 @@ where
     /// Caches the BAL if the status is valid.
     fn maybe_cache_bal(&self, num_hash: BlockNumHash, bal: Option<Bytes>, status: &PayloadStatus) {
         if status.is_valid() &&
-            let Some(bal) = bal
+            let Some(bal) = bal &&
+            let Err(err) = self.inner.bal_provider.cache_bal(num_hash.hash, num_hash.number, bal)
         {
-            if let Err(err) = self.inner.bal_provider.cache_bal(num_hash.hash, num_hash.number, bal)
-            {
-                warn!(
-                    target: "rpc::engine",
-                    ?err,
-                    block_hash = ?num_hash.hash,
-                    block_number = num_hash.number,
-                    "Failed to persist BAL into BAL store"
-                );
-            }
+            warn!(
+                target: "rpc::engine",
+                ?err,
+                block_hash = ?num_hash.hash,
+                block_number = num_hash.number,
+                "Failed to persist BAL into BAL store"
+            );
         }
     }
 
