@@ -55,6 +55,7 @@ pub struct DefaultTxPoolValues {
     transactions_backup_path: Option<PathBuf>,
     disable_transactions_backup: bool,
     max_batch_size: usize,
+    monitor: bool,
 }
 
 impl DefaultTxPoolValues {
@@ -247,6 +248,12 @@ impl DefaultTxPoolValues {
         self.max_batch_size = v;
         self
     }
+
+    /// Set whether pool monitoring is enabled by default
+    pub const fn with_monitor(mut self, v: bool) -> Self {
+        self.monitor = v;
+        self
+    }
 }
 
 impl Default for DefaultTxPoolValues {
@@ -282,6 +289,7 @@ impl Default for DefaultTxPoolValues {
             transactions_backup_path: None,
             disable_transactions_backup: false,
             max_batch_size: 1,
+            monitor: false,
         }
     }
 }
@@ -411,6 +419,11 @@ pub struct TxPoolArgs {
     /// Max batch size for transaction pool insertions
     #[arg(long = "txpool.max-batch-size", default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
+
+    /// Enable transaction pool monitoring to track how many mined transactions were available in
+    /// the local pool.
+    #[arg(long = "txpool.monitor", default_value_t = DefaultTxPoolValues::get_global().monitor)]
+    pub monitor: bool,
 }
 
 impl TxPoolArgs {
@@ -464,6 +477,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
+            monitor,
         } = DefaultTxPoolValues::get_global().clone();
         Self {
             pending_max_count,
@@ -496,6 +510,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
+            monitor,
         }
     }
 }

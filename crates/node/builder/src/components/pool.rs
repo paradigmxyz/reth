@@ -308,7 +308,32 @@ where
     Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
 {
     spawn_local_backup_task(ctx, pool.clone())?;
-    spawn_pool_maintenance_task(ctx, pool, pool_config)?;
+    spawn_pool_maintenance_task(ctx, pool.clone(), pool_config)?;
+
+    if ctx.config().txpool.monitor {
+        spawn_pool_monitor_task(ctx, pool)?;
+    }
+
+    Ok(())
+}
+
+/// Spawn the pool monitoring task that tracks how many mined transactions were locally available.
+fn spawn_pool_monitor_task<Node, Pool>(ctx: &BuilderContext<Node>, pool: Pool) -> eyre::Result<()>
+where
+    Node: FullNodeTypes,
+    Pool: TransactionPool + Clone + 'static,
+{
+    let chain_events = ctx.provider().canonical_state_stream();
+
+    ctx.task_executor().spawn_critical_task(
+        "txpool monitor task",
+        reth_transaction_pool::monitor::monitor_pool_transactions_future(
+            pool,
+            chain_events,
+            Default::default(),
+        ),
+    );
+
     Ok(())
 }
 
