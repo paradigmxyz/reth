@@ -381,12 +381,13 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         let mut items = Vec::with_capacity((end - start + 1) as usize);
 
         if let Some(storage_range) = storage_range {
-            let mut db_items = fetch_db_range(db_provider, storage_range.clone(), &mut predicate)?;
+            let expected_storage_len = storage_range.end() - storage_range.start() + 1;
+            let mut db_items = fetch_db_range(db_provider, storage_range, &mut predicate)?;
             items.append(&mut db_items);
 
             // The predicate was not met, if the number of items differs from the expected. So, we
             // return what we have.
-            if items.len() as u64 != storage_range.end() - storage_range.start() + 1 {
+            if items.len() as u64 != expected_storage_len {
                 return Ok(items)
             }
         }
