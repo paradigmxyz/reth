@@ -47,16 +47,48 @@ where
             transactions,
             output: BlockExecutionResult { receipts, requests, gas_used, blob_gas_used },
             state_root,
+            cached_header_values,
             ..
         } = input;
 
         let timestamp = evm_env.block_env.timestamp().saturating_to();
 
-        let transactions_root = proofs::calculate_transaction_root(&transactions);
-        let receipts_root = calculate_receipt_root(
-            &receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>(),
-        );
-        let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| r.logs()));
+        let transactions_root = cached_header_values
+            .transactions_root
+            .unwrap_or_else(|| proofs::calculate_transaction_root(&transactions));
+        let receipts_root = cached_header_values.receipts_root.unwrap_or_else(|| {
+            calculate_receipt_root(&receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>())
+        });
+        let logs_bloom = cached_header_values
+            .logs_bloom
+            .unwrap_or_else(|| logs_bloom(receipts.iter().flat_map(|r| r.logs())));
+
+        #[cfg(debug_assertions)]
+        {
+            if cached_header_values.transactions_root.is_some() {
+                debug_assert_eq!(
+                    transactions_root,
+                    proofs::calculate_transaction_root(&transactions),
+                    "CachedHeaderValues transactions root mismatch"
+                );
+            }
+            if cached_header_values.receipts_root.is_some() {
+                debug_assert_eq!(
+                    receipts_root,
+                    calculate_receipt_root(
+                        &receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>()
+                    ),
+                    "CachedHeaderValues receipts root mismatch"
+                );
+            }
+            if cached_header_values.logs_bloom.is_some() {
+                debug_assert_eq!(
+                    logs_bloom,
+                    reth_primitives_traits::logs_bloom(receipts.iter().flat_map(|r| r.logs())),
+                    "CachedHeaderValues logs bloom mismatch"
+                );
+            }
+        }
 
         let withdrawals = self
             .chain_spec

@@ -9,7 +9,7 @@ use alloy_evm::{
     block::{CommitChanges, ExecutableTxParts},
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, Bloom, B256};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
@@ -181,6 +181,7 @@ pub trait Executor<DB: Database>: Sized {
 ///     bundle_state: &state_changes,
 ///     state_provider: &state,
 ///     state_root: calculated_root,
+///     cached_header_values: Default::default(),
 /// };
 ///
 /// let block = assembler.assemble_block(input)?;
@@ -208,6 +209,31 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     pub state_provider: &'b dyn StateProvider,
     /// State root for this block.
     pub state_root: B256,
+    /// Optional pre-computed block header values (e.g. tx root, receipt root, logs bloom).
+    ///
+    /// When provided, the assembler can skip re-computing these values. This enables callers to
+    /// compute them in parallel with the state root (the typical bottleneck) rather than
+    /// sequentially after it.
+    pub cached_header_values: CachedHeaderValues,
+}
+
+/// Pre-computed block header values that can be passed to the assembler to avoid redundant work.
+///
+/// During block sealing, the state root is typically the most expensive computation. While it is
+/// being computed, other header values (transaction root, receipt root, logs bloom) can be computed
+/// in parallel since they only depend on already-available execution results.
+///
+/// Any field set to `Some` will be used directly by the assembler; `None` fields will be computed
+/// as usual.
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub struct CachedHeaderValues {
+    /// Pre-computed transaction trie root.
+    pub transactions_root: Option<B256>,
+    /// Pre-computed receipt trie root.
+    pub receipts_root: Option<B256>,
+    /// Pre-computed aggregated logs bloom.
+    pub logs_bloom: Option<Bloom>,
 }
 
 impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
@@ -235,7 +261,14 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
             bundle_state,
             state_provider,
             state_root,
+            cached_header_values: CachedHeaderValues::default(),
         }
+    }
+
+    /// Sets the [`CachedHeaderValues`] on this input.
+    pub fn with_cached_header_values(mut self, cached: CachedHeaderValues) -> Self {
+        self.cached_header_values = cached;
+        self
     }
 }
 
@@ -262,7 +295,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
 /// // 2. Calculate state root from changes
 /// let state_root = state_provider.state_root(&bundle_state)?;
 ///
-/// // 3. Assemble the final block
+/// // 3. Assemble the final block (with optional pre-computed roots)
 /// let block = assembler.assemble_block(BlockAssemblerInput {
 ///     evm_env,           // Environment used during execution
 ///     execution_ctx,     // Context like withdrawals, ommers
@@ -272,6 +305,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
 ///     bundle_state,      // All state changes
 ///     state_provider,    // For additional lookups if needed
 ///     state_root,        // Computed state root
+///     cached_header_values: Default::default(),  // Optional pre-computed roots
 /// })?;
 /// ```
 ///
@@ -502,6 +536,7 @@ where
             bundle_state: &db.bundle_state,
             state_provider: &state,
             state_root,
+            cached_header_values: CachedHeaderValues::default(),
         })?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
