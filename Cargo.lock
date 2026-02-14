@@ -10647,6 +10647,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-transaction-pool",
  "serde",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

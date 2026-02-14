@@ -35,7 +35,9 @@ use reth_rpc_builder::{
     config::RethRpcServerConfig,
     RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TransportRpcModules,
 };
-use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
+use reth_rpc_engine_api::{
+    capabilities::EngineCapabilities, DiskFileBalStore, DiskFileBalStoreConfig, EngineApi,
+};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
@@ -1395,7 +1397,12 @@ where
             commit: version_metadata().vergen_git_sha.to_string(),
         };
 
-        Ok(EngineApi::new(
+        let bal_store = DiskFileBalStore::open(
+            ctx.config.datadir().balstore(),
+            DiskFileBalStoreConfig::default(),
+        )?;
+
+        Ok(EngineApi::with_bal_store(
             ctx.node.provider().clone(),
             ctx.config.chain.clone(),
             ctx.beacon_engine_handle.clone(),
@@ -1407,6 +1414,7 @@ where
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
             ctx.node.network().clone(),
+            Arc::new(bal_store),
         ))
     }
 }

@@ -8,6 +8,8 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) latency: EngineApiLatencyMetrics,
     /// Blob-related metrics
     pub(crate) blob_metrics: BlobMetrics,
+    /// BAL query metrics.
+    pub(crate) bal_metrics: BalQueryMetrics,
 }
 
 /// Beacon consensus engine latency metrics.
@@ -65,4 +67,25 @@ pub(crate) struct BlobMetrics {
     pub(crate) get_blobs_requests_success_total: Counter,
     /// Number of times getBlobsV2 responded with “miss”
     pub(crate) get_blobs_requests_failure_total: Counter,
+}
+
+#[derive(Metrics)]
+#[metrics(scope = "engine.rpc.bal")]
+pub(crate) struct BalQueryMetrics {
+    /// Number of by-hash queries that required store fallback.
+    pub(crate) store_hash_fallback_requests: Counter,
+    /// Number of BAL entries recovered from store during by-hash fallback.
+    pub(crate) store_hash_fallback_hits: Counter,
+    /// Number of BAL entries still missing after by-hash fallback.
+    pub(crate) store_hash_fallback_misses: Counter,
+    /// Number of store errors during by-hash fallback.
+    pub(crate) store_hash_fallback_errors: Counter,
+    /// Number of by-range queries that required store fallback.
+    pub(crate) store_range_fallback_requests: Counter,
+    /// Number of BAL entries recovered from store during by-range fallback.
+    pub(crate) store_range_fallback_hits: Counter,
+    /// Number of BAL entries still missing after by-range fallback.
+    pub(crate) store_range_fallback_misses: Counter,
+    /// Number of store errors during by-range fallback.
+    pub(crate) store_range_fallback_errors: Counter,
 }

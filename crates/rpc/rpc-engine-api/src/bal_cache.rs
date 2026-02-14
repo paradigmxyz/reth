@@ -8,6 +8,7 @@
 //! weak subjectivity period (~3533 epochs) to support synchronization with re-execution.
 //! This initial implementation uses a simple in-memory cache with configurable capacity.
 
+use crate::bal_store::{BalStore, BalStoreError};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_metrics::{
@@ -151,6 +152,29 @@ impl BalCache {
 impl Default for BalCache {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl BalStore for BalCache {
+    fn insert(
+        &self,
+        block_hash: BlockHash,
+        block_number: BlockNumber,
+        bal: Bytes,
+    ) -> Result<(), BalStoreError> {
+        BalCache::insert(self, block_hash, block_number, bal);
+        Ok(())
+    }
+
+    fn get_by_hashes(
+        &self,
+        block_hashes: &[BlockHash],
+    ) -> Result<Vec<Option<Bytes>>, BalStoreError> {
+        Ok(BalCache::get_by_hashes(self, block_hashes))
+    }
+
+    fn get_by_range(&self, start: BlockNumber, count: u64) -> Result<Vec<Bytes>, BalStoreError> {
+        Ok(BalCache::get_by_range(self, start, count))
     }
 }
 
