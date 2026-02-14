@@ -7678,6 +7678,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-bal-store"
+version = "1.10.2"
+dependencies = [
+ "alloy-primitives",
+ "parking_lot",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "reth-basic-payload-builder"
 version = "1.10.2"
 dependencies = [
@@ -9358,6 +9369,7 @@ dependencies = [
  "jsonrpsee",
  "parking_lot",
  "rayon",
+ "reth-bal-store",
  "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-chainspec",
@@ -10629,6 +10641,7 @@ dependencies = [
  "jsonrpsee-types",
  "metrics",
  "parking_lot",
+ "reth-bal-store",
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",

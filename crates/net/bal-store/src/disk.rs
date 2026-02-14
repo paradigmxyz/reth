@@ -1,6 +1,6 @@
 //! Disk-backed BAL store.
 
-use crate::bal_store::{BalStore, BalStoreError};
+use crate::{BalStore, BalStoreError};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::Mutex;
 use std::{
@@ -124,33 +124,33 @@ impl DiskFileBalStoreInner {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(err) => {
-                    debug!(target: "rpc::engine", %err, "Failed to read BAL index dir entry");
+                    debug!(target: "bal::store", %err, "Failed to read BAL index dir entry");
                     continue;
                 }
             };
 
             let path = entry.path();
             let Some(file_name) = path.file_name().and_then(|f| f.to_str()) else {
-                debug!(target: "rpc::engine", ?path, "Skipping BAL index entry with non-utf8 name");
+                debug!(target: "bal::store", ?path, "Skipping BAL index entry with non-utf8 name");
                 continue;
             };
 
             let Ok(block_number) = file_name.parse::<BlockNumber>() else {
-                debug!(target: "rpc::engine", ?path, "Skipping BAL index entry with invalid block number name");
+                debug!(target: "bal::store", ?path, "Skipping BAL index entry with invalid block number name");
                 continue;
             };
 
             let hash_bytes = match fs::read(&path) {
                 Ok(bytes) => bytes,
                 Err(err) => {
-                    debug!(target: "rpc::engine", ?path, %err, "Failed reading BAL index file");
+                    debug!(target: "bal::store", ?path, %err, "Failed reading BAL index file");
                     continue;
                 }
             };
 
             if hash_bytes.len() != 32 {
                 debug!(
-                    target: "rpc::engine",
+                    target: "bal::store",
                     ?path,
                     len = hash_bytes.len(),
                     "Skipping BAL index file with invalid hash length"
@@ -161,7 +161,7 @@ impl DiskFileBalStoreInner {
             let block_hash = BlockHash::from_slice(&hash_bytes);
             if !self.entry_file(block_hash).is_file() {
                 debug!(
-                    target: "rpc::engine",
+                    target: "bal::store",
                     block_number,
                     ?block_hash,
                     "Skipping BAL index entry pointing to missing BAL payload file"
