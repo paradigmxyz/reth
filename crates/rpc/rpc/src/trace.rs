@@ -353,6 +353,9 @@ where
             return Err(EthApiError::HeaderNotFound(start.into()).into());
         }
         let end = to_block.unwrap_or(latest_block);
+        if end > latest_block {
+            return Err(EthApiError::HeaderNotFound(end.into()).into());
+        }
 
         if start > end {
             return Err(EthApiError::InvalidParams(

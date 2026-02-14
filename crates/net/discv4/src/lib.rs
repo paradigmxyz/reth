@@ -1631,7 +1631,7 @@ impl Discv4Service {
             .filter(|entry| entry.node.value.is_expired())
             .map(|n| n.node.value)
             .collect::<Vec<_>>();
-        nodes.sort_by(|a, b| a.last_seen.cmp(&b.last_seen));
+        nodes.sort_by_key(|a| a.last_seen);
         let to_ping = nodes.into_iter().map(|n| n.record).take(MAX_NODES_PING).collect::<Vec<_>>();
         for node in to_ping {
             self.try_ping(node, PingReason::RePing)

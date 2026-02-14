@@ -9,14 +9,19 @@ use crate::StaticFileProviderFactory;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::BlockNumber;
 use rayon::prelude::*;
-use reth_db::cursor::DbCursorRO;
-use reth_db_api::{tables, transaction::DbTx};
+use reth_db_api::tables;
 use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    DBProvider, StageCheckpointReader, StorageSettingsCache, TransactionsProvider,
+    BlockBodyIndicesProvider, ChangeSetReader, DBProvider, StageCheckpointReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionsProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
+use std::collections::HashSet;
+
+/// Batch size for changeset iteration during history healing.
+/// Balances memory usage against iteration overhead.
+const HEAL_HISTORY_BATCH_SIZE: u64 = 10_000;
 
 impl RocksDBProvider {
     /// Checks consistency of `RocksDB` tables against MDBX stage checkpoints.
@@ -32,10 +37,8 @@ impl RocksDBProvider {
     /// - If `RocksDB` is ahead, excess entries are pruned (healed).
     /// - If `RocksDB` is behind, an unwind is required.
     ///
-    /// For `StoragesHistory`:
-    /// - The maximum block number in shards should not exceed the `IndexStorageHistory` stage
-    ///   checkpoint.
-    /// - Similar healing/unwind logic applies.
+    /// For `StoragesHistory` and `AccountsHistory`:
+    /// - Uses changesets to heal stale entries when static file tip > checkpoint.
     ///
     /// # Requirements
     ///
@@ -51,27 +54,30 @@ impl RocksDBProvider {
             + StageCheckpointReader
             + StorageSettingsCache
             + StaticFileProviderFactory
+            + BlockBodyIndicesProvider
+            + StorageChangeSetReader
+            + ChangeSetReader
             + TransactionsProvider<Transaction: Encodable2718>,
     {
         let mut unwind_target: Option<BlockNumber> = None;
 
-        // Check TransactionHashNumbers if stored in RocksDB
-        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
-            let Some(target) = self.check_transaction_hash_numbers(provider)?
+        // Heal TransactionHashNumbers if stored in RocksDB
+        if provider.cached_storage_settings().storage_v2 &&
+            let Some(target) = self.heal_transaction_hash_numbers(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
-        // Check StoragesHistory if stored in RocksDB
-        if provider.cached_storage_settings().storages_history_in_rocksdb &&
-            let Some(target) = self.check_storages_history(provider)?
+        // Heal StoragesHistory if stored in RocksDB
+        if provider.cached_storage_settings().storage_v2 &&
+            let Some(target) = self.heal_storages_history(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
-        // Check AccountsHistory if stored in RocksDB
-        if provider.cached_storage_settings().account_history_in_rocksdb &&
-            let Some(target) = self.check_accounts_history(provider)?
+        // Heal AccountsHistory if stored in RocksDB
+        if provider.cached_storage_settings().storage_v2 &&
+            let Some(target) = self.heal_accounts_history(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
@@ -79,19 +85,13 @@ impl RocksDBProvider {
         Ok(unwind_target)
     }
 
-    /// Checks invariants for the `TransactionHashNumbers` table.
+    /// Heals the `TransactionHashNumbers` table.
     ///
-    /// Returns a block number to unwind to if MDBX is behind the checkpoint.
-    /// If static files are ahead of MDBX, excess `RocksDB` entries are pruned (healed).
-    ///
-    /// # Approach
-    ///
-    /// Instead of iterating `RocksDB` entries (which is expensive and doesn't give us the
-    /// tx range we need), we use static files and MDBX to determine what needs pruning:
-    /// - Static files are committed before `RocksDB`, so they're at least at the same height
-    /// - MDBX `TransactionBlocks` tells us what's been fully committed
-    /// - If static files have more transactions than MDBX, prune the excess range
-    fn check_transaction_hash_numbers<Provider>(
+    /// - Fast path: if checkpoint == 0 AND `RocksDB` has data, clear everything
+    /// - If `sf_tip` < checkpoint, return unwind target (static files behind)
+    /// - If `sf_tip` == checkpoint, nothing to do
+    /// - If `sf_tip` > checkpoint, heal via transaction ranges in batches
+    fn heal_transaction_hash_numbers<Provider>(
         &self,
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
@@ -99,73 +99,99 @@ impl RocksDBProvider {
         Provider: DBProvider
             + StageCheckpointReader
             + StaticFileProviderFactory
+            + BlockBodyIndicesProvider
             + TransactionsProvider<Transaction: Encodable2718>,
     {
-        // Get the TransactionLookup stage checkpoint
         let checkpoint = provider
             .get_stage_checkpoint(StageId::TransactionLookup)?
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Get last tx_num from MDBX - this tells us what MDBX has fully committed
-        let mut cursor = provider.tx_ref().cursor_read::<tables::TransactionBlocks>()?;
-        let mdbx_last = cursor.last()?;
-
-        // Get highest tx_num from static files - this tells us what tx data is available
-        let highest_static_tx = provider
+        let sf_tip = provider
             .static_file_provider()
-            .get_highest_static_file_tx(StaticFileSegment::Transactions);
+            .get_highest_static_file_block(StaticFileSegment::Transactions)
+            .unwrap_or(0);
 
-        match (mdbx_last, highest_static_tx) {
-            (Some((mdbx_tx, mdbx_block)), Some(highest_tx)) if highest_tx > mdbx_tx => {
-                // Static files are ahead of MDBX - prune RocksDB entries for the excess range.
-                // This is the common case during recovery from a crash during unwinding.
-                tracing::info!(
-                    target: "reth::providers::rocksdb",
-                    mdbx_last_tx = mdbx_tx,
-                    mdbx_block,
-                    highest_static_tx = highest_tx,
-                    "Static files ahead of MDBX, pruning TransactionHashNumbers excess data"
-                );
-                self.prune_transaction_hash_numbers_in_range(provider, (mdbx_tx + 1)..=highest_tx)?;
+        // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
+        if checkpoint == 0 && self.first::<tables::TransactionHashNumbers>()?.is_some() {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                "TransactionHashNumbers has data but checkpoint is 0, clearing all"
+            );
+            self.clear::<tables::TransactionHashNumbers>()?;
+            return Ok(None);
+        }
 
-                // After pruning, check if MDBX is behind checkpoint
-                if checkpoint > mdbx_block {
-                    tracing::warn!(
-                        target: "reth::providers::rocksdb",
-                        mdbx_block,
-                        checkpoint,
-                        "MDBX behind checkpoint after pruning, unwind needed"
-                    );
-                    return Ok(Some(mdbx_block));
-                }
-            }
-            (Some((_mdbx_tx, mdbx_block)), _) => {
-                // MDBX and static files are in sync (or static files don't have more data).
-                // Check if MDBX is behind checkpoint.
-                if checkpoint > mdbx_block {
-                    tracing::warn!(
-                        target: "reth::providers::rocksdb",
-                        mdbx_block,
-                        checkpoint,
-                        "MDBX behind checkpoint, unwind needed"
-                    );
-                    return Ok(Some(mdbx_block));
-                }
-            }
-            (None, Some(highest_tx)) => {
-                // MDBX has no transactions but static files have data.
-                // This means RocksDB might have stale entries - prune them all.
-                tracing::info!(
-                    target: "reth::providers::rocksdb",
-                    highest_static_tx = highest_tx,
-                    "MDBX empty but static files have data, pruning all TransactionHashNumbers"
-                );
-                self.prune_transaction_hash_numbers_in_range(provider, 0..=highest_tx)?;
-            }
-            (None, None) => {
-                // Both MDBX and static files are empty, nothing to check.
-            }
+        if sf_tip < checkpoint {
+            // This should never happen in normal operation - static files are always committed
+            // before RocksDB. If we get here, something is seriously wrong. The unwind is a
+            // best-effort attempt but is probably futile.
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                sf_tip,
+                checkpoint,
+                "TransactionHashNumbers: static file tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(sf_tip));
+        }
+
+        // sf_tip == checkpoint - nothing to do
+        if sf_tip == checkpoint {
+            return Ok(None);
+        }
+
+        // Get end tx from static files (authoritative for sf_tip)
+        let sf_tip_end_tx = provider
+            .static_file_provider()
+            .get_highest_static_file_tx(StaticFileSegment::Transactions)
+            .unwrap_or(0);
+
+        // Get the first tx after the checkpoint block from MDBX (authoritative up to checkpoint)
+        let checkpoint_next_tx = provider
+            .block_body_indices(checkpoint)?
+            .map(|indices| indices.next_tx_num())
+            .unwrap_or(0);
+
+        if sf_tip_end_tx < checkpoint_next_tx {
+            // This should never happen in normal operation - static files should have all
+            // transactions up to sf_tip. If we get here, something is seriously wrong.
+            // The unwind is a best-effort attempt but is probably futile.
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                sf_tip_end_tx,
+                checkpoint_next_tx,
+                checkpoint,
+                sf_tip,
+                "TransactionHashNumbers: static file tx tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(sf_tip));
+        }
+
+        tracing::info!(
+            target: "reth::providers::rocksdb",
+            checkpoint,
+            sf_tip,
+            checkpoint_next_tx,
+            sf_tip_end_tx,
+            "TransactionHashNumbers: healing via transaction ranges"
+        );
+
+        const BATCH_SIZE: u64 = 10_000;
+        let mut batch_start = checkpoint_next_tx;
+
+        while batch_start <= sf_tip_end_tx {
+            let batch_end = batch_start.saturating_add(BATCH_SIZE - 1).min(sf_tip_end_tx);
+
+            tracing::debug!(
+                target: "reth::providers::rocksdb",
+                batch_start,
+                batch_end,
+                "Pruning TransactionHashNumbers batch"
+            );
+
+            self.prune_transaction_hash_numbers_in_range(provider, batch_start..=batch_end)?;
+
+            batch_start = batch_end.saturating_add(1);
         }
 
         Ok(None)
@@ -221,251 +247,195 @@ impl RocksDBProvider {
         Ok(())
     }
 
-    /// Checks invariants for the `StoragesHistory` table.
+    /// Heals the `StoragesHistory` table by removing stale entries.
     ///
-    /// Returns a block number to unwind to if `RocksDB` is behind the checkpoint.
-    /// If `RocksDB` is ahead of the checkpoint, excess entries are pruned (healed).
-    fn check_storages_history<Provider>(
+    /// Returns an unwind target if static file tip is behind checkpoint (cannot heal).
+    /// Otherwise iterates changesets in batches to identify and unwind affected keys.
+    fn heal_storages_history<Provider>(
         &self,
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + StageCheckpointReader,
+        Provider:
+            DBProvider + StageCheckpointReader + StaticFileProviderFactory + StorageChangeSetReader,
     {
-        // Get the IndexStorageHistory stage checkpoint
         let checkpoint = provider
             .get_stage_checkpoint(StageId::IndexStorageHistory)?
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Check if RocksDB has any data
-        let rocks_first = self.first::<tables::StoragesHistory>()?;
-
-        match rocks_first {
-            Some(_) => {
-                // If checkpoint is 0 but we have data, clear everything
-                if checkpoint == 0 {
-                    tracing::info!(
-                        target: "reth::providers::rocksdb",
-                        "StoragesHistory has data but checkpoint is 0, clearing all"
-                    );
-                    self.prune_storages_history_above(0)?;
-                    return Ok(None);
-                }
-
-                // Find the max highest_block_number (excluding u64::MAX sentinel) across all
-                // entries. Also track if we found any non-sentinel entries.
-                let mut max_highest_block = 0u64;
-                let mut found_non_sentinel = false;
-                for result in self.iter::<tables::StoragesHistory>()? {
-                    let (key, _) = result?;
-                    let highest = key.sharded_key.highest_block_number;
-                    if highest != u64::MAX {
-                        found_non_sentinel = true;
-                        if highest > max_highest_block {
-                            max_highest_block = highest;
-                        }
-                    }
-                }
-
-                // If all entries are sentinel entries (u64::MAX), treat as first-run scenario.
-                // This means no completed shards exist (only sentinel shards with
-                // highest_block_number=u64::MAX), so no actual history has been indexed.
-                if !found_non_sentinel {
-                    return Ok(None);
-                }
-
-                // If any entry has highest_block > checkpoint, prune excess
-                if max_highest_block > checkpoint {
-                    tracing::info!(
-                        target: "reth::providers::rocksdb",
-                        rocks_highest = max_highest_block,
-                        checkpoint,
-                        "StoragesHistory ahead of checkpoint, pruning excess data"
-                    );
-                    self.prune_storages_history_above(checkpoint)?;
-                } else if max_highest_block < checkpoint {
-                    // RocksDB is behind checkpoint, return highest block to signal unwind needed
-                    tracing::warn!(
-                        target: "reth::providers::rocksdb",
-                        rocks_highest = max_highest_block,
-                        checkpoint,
-                        "StoragesHistory behind checkpoint, unwind needed"
-                    );
-                    return Ok(Some(max_highest_block));
-                }
-
-                Ok(None)
-            }
-            None => {
-                // Empty RocksDB table, nothing to check.
-                Ok(None)
-            }
-        }
-    }
-
-    /// Prunes `StoragesHistory` entries where `highest_block_number` > `max_block`.
-    ///
-    /// For `StoragesHistory`, the key contains `highest_block_number`, so we can iterate
-    /// and delete entries where `key.sharded_key.highest_block_number > max_block`.
-    ///
-    /// TODO(<https://github.com/paradigmxyz/reth/issues/20417>): this iterates the whole table,
-    /// which is inefficient. Use changeset-based pruning instead.
-    fn prune_storages_history_above(&self, max_block: BlockNumber) -> ProviderResult<()> {
-        use reth_db_api::models::storage_sharded_key::StorageShardedKey;
-
-        let mut to_delete: Vec<StorageShardedKey> = Vec::new();
-        for result in self.iter::<tables::StoragesHistory>()? {
-            let (key, _) = result?;
-            let highest_block = key.sharded_key.highest_block_number;
-            if max_block == 0 || (highest_block != u64::MAX && highest_block > max_block) {
-                to_delete.push(key);
-            }
-        }
-
-        let deleted = to_delete.len();
-        if deleted > 0 {
+        // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
+        if checkpoint == 0 && self.first::<tables::StoragesHistory>()?.is_some() {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                deleted_count = deleted,
-                max_block,
-                "Pruning StoragesHistory entries"
+                "StoragesHistory has data but checkpoint is 0, clearing all"
             );
-
-            let mut batch = self.batch();
-            for key in to_delete {
-                batch.delete::<tables::StoragesHistory>(key)?;
-            }
-            batch.commit()?;
+            self.clear::<tables::StoragesHistory>()?;
+            return Ok(None);
         }
 
-        Ok(())
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
+            .unwrap_or(0);
+
+        if sf_tip < checkpoint {
+            // This should never happen in normal operation - static files are always
+            // committed before RocksDB. If we get here, something is seriously wrong.
+            // The unwind is a best-effort attempt but is probably futile.
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                sf_tip,
+                checkpoint,
+                "StoragesHistory: static file tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(sf_tip));
+        }
+
+        if sf_tip == checkpoint {
+            return Ok(None);
+        }
+
+        let total_blocks = sf_tip - checkpoint;
+        tracing::info!(
+            target: "reth::providers::rocksdb",
+            checkpoint,
+            sf_tip,
+            total_blocks,
+            "StoragesHistory: healing via changesets"
+        );
+
+        let mut batch_start = checkpoint + 1;
+        let mut batch_num = 0u64;
+        let total_batches = total_blocks.div_ceil(HEAL_HISTORY_BATCH_SIZE);
+
+        while batch_start <= sf_tip {
+            let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(sf_tip);
+            batch_num += 1;
+
+            let changesets = provider.storage_changesets_range(batch_start..=batch_end)?;
+
+            let unique_keys: HashSet<_> = changesets
+                .into_iter()
+                .map(|(block_addr, entry)| {
+                    // entry.key is a hashed storage key
+                    (block_addr.address(), entry.key.as_b256(), checkpoint + 1)
+                })
+                .collect();
+            let indices: Vec<_> = unique_keys.into_iter().collect();
+
+            if !indices.is_empty() {
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    batch_num,
+                    total_batches,
+                    batch_start,
+                    batch_end,
+                    indices_count = indices.len(),
+                    "StoragesHistory: unwinding batch"
+                );
+
+                let batch = self.unwind_storage_history_indices(&indices)?;
+                self.commit_batch(batch)?;
+            }
+
+            batch_start = batch_end + 1;
+        }
+
+        Ok(None)
     }
 
-    /// Checks invariants for the `AccountsHistory` table.
+    /// Heals the `AccountsHistory` table by removing stale entries.
     ///
-    /// Returns a block number to unwind to if `RocksDB` is behind the checkpoint.
-    /// If `RocksDB` is ahead of the checkpoint, excess entries are pruned (healed).
-    fn check_accounts_history<Provider>(
+    /// Returns an unwind target if static file tip is behind checkpoint (cannot heal).
+    /// Otherwise iterates changesets in batches to identify and unwind affected keys.
+    fn heal_accounts_history<Provider>(
         &self,
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + StageCheckpointReader,
+        Provider: DBProvider + StageCheckpointReader + StaticFileProviderFactory + ChangeSetReader,
     {
-        // Get the IndexAccountHistory stage checkpoint
         let checkpoint = provider
             .get_stage_checkpoint(StageId::IndexAccountHistory)?
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Check if RocksDB has any data
-        let rocks_first = self.first::<tables::AccountsHistory>()?;
-
-        match rocks_first {
-            Some(_) => {
-                // If checkpoint is 0 but we have data, clear everything
-                if checkpoint == 0 {
-                    tracing::info!(
-                        target: "reth::providers::rocksdb",
-                        "AccountsHistory has data but checkpoint is 0, clearing all"
-                    );
-                    self.prune_accounts_history_above(0)?;
-                    return Ok(None);
-                }
-
-                // Find the max highest_block_number (excluding u64::MAX sentinel) across all
-                // entries. Also track if we found any non-sentinel entries.
-                let mut max_highest_block = 0u64;
-                let mut found_non_sentinel = false;
-                for result in self.iter::<tables::AccountsHistory>()? {
-                    let (key, _) = result?;
-                    let highest = key.highest_block_number;
-                    if highest != u64::MAX {
-                        found_non_sentinel = true;
-                        if highest > max_highest_block {
-                            max_highest_block = highest;
-                        }
-                    }
-                }
-
-                // If all entries are sentinel entries (u64::MAX), treat as first-run scenario.
-                // This means no completed shards exist (only sentinel shards with
-                // highest_block_number=u64::MAX), so no actual history has been indexed.
-                if !found_non_sentinel {
-                    return Ok(None);
-                }
-
-                // If any entry has highest_block > checkpoint, prune excess
-                if max_highest_block > checkpoint {
-                    tracing::info!(
-                        target: "reth::providers::rocksdb",
-                        rocks_highest = max_highest_block,
-                        checkpoint,
-                        "AccountsHistory ahead of checkpoint, pruning excess data"
-                    );
-                    self.prune_accounts_history_above(checkpoint)?;
-                    return Ok(None);
-                }
-
-                // If RocksDB is behind the checkpoint, request an unwind to rebuild.
-                if max_highest_block < checkpoint {
-                    tracing::warn!(
-                        target: "reth::providers::rocksdb",
-                        rocks_highest = max_highest_block,
-                        checkpoint,
-                        "AccountsHistory behind checkpoint, unwind needed"
-                    );
-                    return Ok(Some(max_highest_block));
-                }
-
-                Ok(None)
-            }
-            None => {
-                // Empty RocksDB table, nothing to check.
-                Ok(None)
-            }
-        }
-    }
-
-    /// Prunes `AccountsHistory` entries where `highest_block_number` > `max_block`.
-    ///
-    /// For `AccountsHistory`, the key is `ShardedKey<Address>` which contains
-    /// `highest_block_number`, so we can iterate and delete entries where
-    /// `key.highest_block_number > max_block`.
-    ///
-    /// TODO(<https://github.com/paradigmxyz/reth/issues/20417>): this iterates the whole table,
-    /// which is inefficient. Use changeset-based pruning instead.
-    fn prune_accounts_history_above(&self, max_block: BlockNumber) -> ProviderResult<()> {
-        use alloy_primitives::Address;
-        use reth_db_api::models::ShardedKey;
-
-        let mut to_delete: Vec<ShardedKey<Address>> = Vec::new();
-        for result in self.iter::<tables::AccountsHistory>()? {
-            let (key, _) = result?;
-            let highest_block = key.highest_block_number;
-            if max_block == 0 || (highest_block != u64::MAX && highest_block > max_block) {
-                to_delete.push(key);
-            }
-        }
-
-        let deleted = to_delete.len();
-        if deleted > 0 {
+        // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
+        if checkpoint == 0 && self.first::<tables::AccountsHistory>()?.is_some() {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                deleted_count = deleted,
-                max_block,
-                "Pruning AccountsHistory entries"
+                "AccountsHistory has data but checkpoint is 0, clearing all"
             );
-
-            let mut batch = self.batch();
-            for key in to_delete {
-                batch.delete::<tables::AccountsHistory>(key)?;
-            }
-            batch.commit()?;
+            self.clear::<tables::AccountsHistory>()?;
+            return Ok(None);
         }
 
-        Ok(())
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
+            .unwrap_or(0);
+
+        if sf_tip < checkpoint {
+            // This should never happen in normal operation - static files are always
+            // committed before RocksDB. If we get here, something is seriously wrong.
+            // The unwind is a best-effort attempt but is probably futile.
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                sf_tip,
+                checkpoint,
+                "AccountsHistory: static file tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(sf_tip));
+        }
+
+        if sf_tip == checkpoint {
+            return Ok(None);
+        }
+
+        let total_blocks = sf_tip - checkpoint;
+        tracing::info!(
+            target: "reth::providers::rocksdb",
+            checkpoint,
+            sf_tip,
+            total_blocks,
+            "AccountsHistory: healing via changesets"
+        );
+
+        let mut batch_start = checkpoint + 1;
+        let mut batch_num = 0u64;
+        let total_batches = total_blocks.div_ceil(HEAL_HISTORY_BATCH_SIZE);
+
+        while batch_start <= sf_tip {
+            let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(sf_tip);
+            batch_num += 1;
+
+            let changesets = provider.account_changesets_range(batch_start..=batch_end)?;
+
+            let mut addresses = HashSet::with_capacity(changesets.len());
+            addresses.extend(changesets.iter().map(|(_, cs)| cs.address));
+            let unwind_from = checkpoint + 1;
+            let indices: Vec<_> = addresses.into_iter().map(|addr| (addr, unwind_from)).collect();
+
+            if !indices.is_empty() {
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    batch_num,
+                    total_batches,
+                    batch_start,
+                    batch_end,
+                    indices_count = indices.len(),
+                    "AccountsHistory: unwinding batch"
+                );
+
+                let batch = self.unwind_account_history_indices(&indices)?;
+                self.commit_batch(batch)?;
+            }
+
+            batch_start = batch_end + 1;
+        }
+
+        Ok(None)
     }
 }
 
@@ -473,11 +443,12 @@ impl RocksDBProvider {
 mod tests {
     use super::*;
     use crate::{
-        providers::rocksdb::RocksDBBuilder, test_utils::create_test_provider_factory, BlockWriter,
-        DatabaseProviderFactory, StageCheckpointWriter, TransactionsProvider,
+        providers::{rocksdb::RocksDBBuilder, static_file::StaticFileWriter},
+        test_utils::create_test_provider_factory,
+        BlockWriter, DatabaseProviderFactory, StageCheckpointWriter, TransactionsProvider,
     };
     use alloy_primitives::{Address, B256};
-    use reth_db::cursor::DbCursorRW;
+    use reth_db::cursor::{DbCursorRO, DbCursorRW};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, StorageSettings},
         tables::{self, BlockNumberList},
@@ -525,19 +496,11 @@ mod tests {
     #[test]
     fn test_check_consistency_empty_rocksdb_no_checkpoint_is_ok() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::TransactionHashNumbers>()
-            .with_table::<tables::StoragesHistory>()
-            .build()
-            .unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy()
-                .with_transaction_hash_numbers_in_rocksdb(true)
-                .with_storages_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let provider = factory.database_provider_ro().unwrap();
 
@@ -549,16 +512,11 @@ mod tests {
     #[test]
     fn test_check_consistency_empty_rocksdb_with_checkpoint_is_first_run() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::TransactionHashNumbers>()
-            .build()
-            .unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Set a checkpoint indicating we should have processed up to block 100
         {
@@ -572,23 +530,20 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
 
         // RocksDB is empty but checkpoint says block 100 was processed.
-        // This is treated as a first-run/migration scenario - no unwind needed.
+        // Since static file tip defaults to 0 when None, and 0 < 100, an unwind is triggered.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, None, "Empty data with checkpoint is treated as first run");
+        assert_eq!(result, Some(0), "Static file tip (0) behind checkpoint (100) triggers unwind");
     }
 
+    /// Tests that when checkpoint=0 and `RocksDB` has data, all entries are pruned.
+    /// This simulates a crash recovery scenario where the checkpoint was lost.
     #[test]
-    fn test_check_consistency_mdbx_empty_static_files_have_data_prunes_rocksdb() {
+    fn test_check_consistency_checkpoint_zero_with_rocksdb_data_prunes_all() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::TransactionHashNumbers>()
-            .build()
-            .unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Generate blocks with real transactions and insert them
         let mut rng = generators::rng();
@@ -616,22 +571,18 @@ mod tests {
             provider.commit().unwrap();
         }
 
-        // Simulate crash recovery: MDBX was reset but static files and RocksDB still have data.
-        // Clear TransactionBlocks to simulate empty MDBX state.
+        // Explicitly clear the checkpoints to simulate crash recovery
         {
             let provider = factory.database_provider_rw().unwrap();
-            let mut cursor = provider.tx_ref().cursor_write::<tables::TransactionBlocks>().unwrap();
-            let mut to_delete = Vec::new();
-            let mut walker = cursor.walk(Some(0)).unwrap();
-            while let Some((tx_num, _)) = walker.next().transpose().unwrap() {
-                to_delete.push(tx_num);
-            }
-            drop(walker);
-            for tx_num in to_delete {
-                cursor.seek_exact(tx_num).unwrap();
-                cursor.delete_current().unwrap();
-            }
-            // No checkpoint set (checkpoint = 0)
+            provider
+                .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(0))
+                .unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(0))
+                .unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(0))
+                .unwrap();
             provider.commit().unwrap();
         }
 
@@ -640,12 +591,12 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // MDBX TransactionBlocks is empty, but static files have transaction data.
-        // This means RocksDB has stale data that should be pruned (healed).
+        // checkpoint = 0 but RocksDB has data.
+        // This means RocksDB has stale data that should be cleared.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, None, "Should heal by pruning, no unwind needed");
+        assert_eq!(result, None, "Should heal by clearing, no unwind needed");
 
-        // Verify data was pruned
+        // Verify data was cleared
         for hash in &tx_hashes {
             assert!(
                 rocksdb.get::<tables::TransactionHashNumbers>(*hash).unwrap().is_none(),
@@ -657,16 +608,11 @@ mod tests {
     #[test]
     fn test_check_consistency_storages_history_empty_with_checkpoint_is_first_run() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::StoragesHistory>()
-            .build()
-            .unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Set a checkpoint indicating we should have processed up to block 100
         {
@@ -680,18 +626,16 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
 
         // RocksDB is empty but checkpoint says block 100 was processed.
-        // This is treated as a first-run/migration scenario - no unwind needed.
+        // Since sf_tip=0 < checkpoint=100, we return unwind target of 0.
+        // This should never happen in normal operation.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, None, "Empty RocksDB with checkpoint is treated as first run");
+        assert_eq!(result, Some(0), "sf_tip=0 < checkpoint=100 returns unwind target");
     }
 
     #[test]
     fn test_check_consistency_storages_history_has_data_no_checkpoint_prunes_data() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::StoragesHistory>()
-            .build()
-            .unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         // Insert data into RocksDB
         let key = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);
@@ -703,9 +647,7 @@ mod tests {
 
         // Create a test provider factory for MDBX with NO checkpoint
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let provider = factory.database_provider_ro().unwrap();
 
@@ -720,59 +662,13 @@ mod tests {
             "RocksDB should be empty after pruning"
         );
     }
-
-    #[test]
-    fn test_check_consistency_storages_history_behind_checkpoint_needs_unwind() {
-        let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::StoragesHistory>()
-            .build()
-            .unwrap();
-
-        // Insert data into RocksDB with max highest_block_number = 80
-        let key_block_50 = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);
-        let key_block_80 = StorageShardedKey::new(Address::ZERO, B256::from([1u8; 32]), 80);
-        let key_block_max = StorageShardedKey::new(Address::ZERO, B256::from([2u8; 32]), u64::MAX);
-
-        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
-        rocksdb.put::<tables::StoragesHistory>(key_block_50, &block_list).unwrap();
-        rocksdb.put::<tables::StoragesHistory>(key_block_80, &block_list).unwrap();
-        rocksdb.put::<tables::StoragesHistory>(key_block_max, &block_list).unwrap();
-
-        // Create a test provider factory for MDBX
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
-        );
-
-        // Set checkpoint to block 100
-        {
-            let provider = factory.database_provider_rw().unwrap();
-            provider
-                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(100))
-                .unwrap();
-            provider.commit().unwrap();
-        }
-
-        let provider = factory.database_provider_ro().unwrap();
-
-        // RocksDB max highest_block (80) is behind checkpoint (100)
-        let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, Some(80), "Should unwind to the highest block present in RocksDB");
-    }
-
     #[test]
     fn test_check_consistency_mdbx_behind_checkpoint_needs_unwind() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::TransactionHashNumbers>()
-            .build()
-            .unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Generate blocks with real transactions (blocks 0-2, 6 transactions total)
         let mut rng = generators::rng();
@@ -798,43 +694,39 @@ mod tests {
             provider.commit().unwrap();
         }
 
-        // Now simulate a scenario where checkpoint is ahead of MDBX.
-        // This happens when the checkpoint was saved but MDBX data was lost/corrupted.
         // Set checkpoint to block 10 (beyond our actual data at block 2)
+        // sf_tip is at block 2, checkpoint is at block 10
+        // Since sf_tip < checkpoint, we need to unwind to sf_tip
         {
             let provider = factory.database_provider_rw().unwrap();
             provider
                 .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(10))
+                .unwrap();
+            // Reset history checkpoints so they don't interfere
+            provider
+                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(0))
+                .unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(0))
                 .unwrap();
             provider.commit().unwrap();
         }
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // MDBX has data up to block 2, but checkpoint says block 10 was processed.
-        // The static files highest tx matches MDBX last tx (both at block 2).
-        // Checkpoint > mdbx_block means we need to unwind to rebuild.
+        // sf_tip (2) < checkpoint (10), so unwind to sf_tip is needed
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(
-            result,
-            Some(2),
-            "Should require unwind to block 2 (MDBX's last block) to rebuild from checkpoint"
-        );
+        assert_eq!(result, Some(2), "sf_tip < checkpoint requires unwind to sf_tip");
     }
 
     #[test]
     fn test_check_consistency_rocksdb_ahead_of_checkpoint_prunes_excess() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::TransactionHashNumbers>()
-            .build()
-            .unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Generate blocks with real transactions:
         // Blocks 0-5, each with 2 transactions = 12 total transactions (0-11)
@@ -892,6 +784,13 @@ mod tests {
             provider
                 .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(2))
                 .unwrap();
+            // Reset history checkpoints so they don't interfere
+            provider
+                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(0))
+                .unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(0))
+                .unwrap();
             provider.commit().unwrap();
         }
 
@@ -924,73 +823,9 @@ mod tests {
     }
 
     #[test]
-    fn test_check_consistency_storages_history_ahead_of_checkpoint_prunes_excess() {
-        let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::StoragesHistory>()
-            .build()
-            .unwrap();
-
-        // Insert data into RocksDB with different highest_block_numbers
-        let key_block_50 = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);
-        let key_block_100 = StorageShardedKey::new(Address::ZERO, B256::from([1u8; 32]), 100);
-        let key_block_150 = StorageShardedKey::new(Address::ZERO, B256::from([2u8; 32]), 150);
-        let key_block_max = StorageShardedKey::new(Address::ZERO, B256::from([3u8; 32]), u64::MAX);
-
-        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
-        rocksdb.put::<tables::StoragesHistory>(key_block_50.clone(), &block_list).unwrap();
-        rocksdb.put::<tables::StoragesHistory>(key_block_100.clone(), &block_list).unwrap();
-        rocksdb.put::<tables::StoragesHistory>(key_block_150.clone(), &block_list).unwrap();
-        rocksdb.put::<tables::StoragesHistory>(key_block_max.clone(), &block_list).unwrap();
-
-        // Create a test provider factory for MDBX
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
-        );
-
-        // Set checkpoint to block 100
-        {
-            let provider = factory.database_provider_rw().unwrap();
-            provider
-                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(100))
-                .unwrap();
-            provider.commit().unwrap();
-        }
-
-        let provider = factory.database_provider_ro().unwrap();
-
-        // RocksDB has entries with highest_block = 150 which exceeds checkpoint (100)
-        // Should prune entries where highest_block > 100 (but not u64::MAX sentinel)
-        let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, None, "Should heal by pruning, no unwind needed");
-
-        // Verify key_block_150 was pruned, but others remain
-        assert!(
-            rocksdb.get::<tables::StoragesHistory>(key_block_50).unwrap().is_some(),
-            "Entry with highest_block=50 should remain"
-        );
-        assert!(
-            rocksdb.get::<tables::StoragesHistory>(key_block_100).unwrap().is_some(),
-            "Entry with highest_block=100 should remain"
-        );
-        assert!(
-            rocksdb.get::<tables::StoragesHistory>(key_block_150).unwrap().is_none(),
-            "Entry with highest_block=150 should be pruned"
-        );
-        assert!(
-            rocksdb.get::<tables::StoragesHistory>(key_block_max).unwrap().is_some(),
-            "Entry with highest_block=u64::MAX (sentinel) should remain"
-        );
-    }
-
-    #[test]
     fn test_check_consistency_storages_history_sentinel_only_with_checkpoint_is_first_run() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::StoragesHistory>()
-            .build()
-            .unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         // Insert ONLY sentinel entries (highest_block_number = u64::MAX)
         // This simulates a scenario where history tracking started but no shards were completed
@@ -1005,9 +840,7 @@ mod tests {
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Set a checkpoint indicating we should have processed up to block 100
         {
@@ -1020,13 +853,11 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB has only sentinel entries (no completed shards) but checkpoint is set.
-        // This is treated as a first-run/migration scenario - no unwind needed.
+        // RocksDB has only sentinel entries but checkpoint is set.
+        // Since sf_tip=0 < checkpoint=100, we return unwind target of 0.
+        // This should never happen in normal operation.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(
-            result, None,
-            "Sentinel-only entries with checkpoint should be treated as first run"
-        );
+        assert_eq!(result, Some(0), "sf_tip=0 < checkpoint=100 returns unwind target");
     }
 
     #[test]
@@ -1034,10 +865,7 @@ mod tests {
         use reth_db_api::models::ShardedKey;
 
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::AccountsHistory>()
-            .build()
-            .unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         // Insert ONLY sentinel entries (highest_block_number = u64::MAX)
         let key_sentinel_1 = ShardedKey::new(Address::ZERO, u64::MAX);
@@ -1051,9 +879,7 @@ mod tests {
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_account_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Set a checkpoint indicating we should have processed up to block 100
         {
@@ -1066,53 +892,11 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB has only sentinel entries (no completed shards) but checkpoint is set.
-        // This is treated as a first-run/migration scenario - no unwind needed.
+        // RocksDB has only sentinel entries but checkpoint is set.
+        // Since sf_tip=0 < checkpoint=100, we return unwind target of 0.
+        // This should never happen in normal operation.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(
-            result, None,
-            "Sentinel-only entries with checkpoint should be treated as first run"
-        );
-    }
-
-    #[test]
-    fn test_check_consistency_storages_history_behind_checkpoint_single_entry() {
-        use reth_db_api::models::storage_sharded_key::StorageShardedKey;
-
-        let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::StoragesHistory>()
-            .build()
-            .unwrap();
-
-        // Insert data into RocksDB with highest_block_number below checkpoint
-        let key_block_50 = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);
-        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
-        rocksdb.put::<tables::StoragesHistory>(key_block_50, &block_list).unwrap();
-
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
-        );
-
-        // Set checkpoint to block 100
-        {
-            let provider = factory.database_provider_rw().unwrap();
-            provider
-                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(100))
-                .unwrap();
-            provider.commit().unwrap();
-        }
-
-        let provider = factory.database_provider_ro().unwrap();
-
-        // RocksDB only has data up to block 50, but checkpoint says block 100 was processed
-        let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(
-            result,
-            Some(50),
-            "Should require unwind to block 50 to rebuild StoragesHistory"
-        );
+        assert_eq!(result, Some(0), "sf_tip=0 < checkpoint=100 returns unwind target");
     }
 
     /// Test that pruning works by fetching transactions and computing their hashes,
@@ -1128,9 +912,7 @@ mod tests {
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Generate random blocks with unique transactions
         // Block 0 (genesis) has no transactions
@@ -1234,16 +1016,11 @@ mod tests {
     #[test]
     fn test_check_consistency_accounts_history_empty_with_checkpoint_is_first_run() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::AccountsHistory>()
-            .build()
-            .unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_account_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         // Set a checkpoint indicating we should have processed up to block 100
         {
@@ -1257,9 +1034,10 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
 
         // RocksDB is empty but checkpoint says block 100 was processed.
-        // This is treated as a first-run/migration scenario - no unwind needed.
+        // Since sf_tip=0 < checkpoint=100, we return unwind target of 0.
+        // This should never happen in normal operation.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, None, "Empty RocksDB with checkpoint is treated as first run");
+        assert_eq!(result, Some(0), "sf_tip=0 < checkpoint=100 returns unwind target");
     }
 
     #[test]
@@ -1267,10 +1045,7 @@ mod tests {
         use reth_db_api::models::ShardedKey;
 
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::AccountsHistory>()
-            .build()
-            .unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         // Insert data into RocksDB
         let key = ShardedKey::new(Address::ZERO, 50);
@@ -1282,9 +1057,7 @@ mod tests {
 
         // Create a test provider factory for MDBX with NO checkpoint
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_account_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let provider = factory.database_provider_ro().unwrap();
 
@@ -1301,34 +1074,49 @@ mod tests {
     }
 
     #[test]
-    fn test_check_consistency_accounts_history_ahead_of_checkpoint_prunes_excess() {
+    fn test_check_consistency_accounts_history_sf_tip_equals_checkpoint_no_action() {
+        use reth_db::models::AccountBeforeTx;
         use reth_db_api::models::ShardedKey;
+        use reth_static_file_types::StaticFileSegment;
 
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::AccountsHistory>()
-            .build()
-            .unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        // Insert data into RocksDB with different highest_block_numbers
-        let key_block_50 = ShardedKey::new(Address::ZERO, 50);
-        let key_block_100 = ShardedKey::new(Address::random(), 100);
-        let key_block_150 = ShardedKey::new(Address::random(), 150);
-        let key_block_max = ShardedKey::new(Address::random(), u64::MAX);
+        // Insert some AccountsHistory entries with various highest_block_numbers
+        let key1 = ShardedKey::new(Address::ZERO, 50);
+        let key2 = ShardedKey::new(Address::random(), 75);
+        let key3 = ShardedKey::new(Address::random(), u64::MAX); // sentinel
+        let block_list1 = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
+        let block_list2 = BlockNumberList::new_pre_sorted([40, 60, 75]);
+        let block_list3 = BlockNumberList::new_pre_sorted([80, 90, 100]);
+        rocksdb.put::<tables::AccountsHistory>(key1, &block_list1).unwrap();
+        rocksdb.put::<tables::AccountsHistory>(key2, &block_list2).unwrap();
+        rocksdb.put::<tables::AccountsHistory>(key3, &block_list3).unwrap();
 
-        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
-        rocksdb.put::<tables::AccountsHistory>(key_block_50.clone(), &block_list).unwrap();
-        rocksdb.put::<tables::AccountsHistory>(key_block_100.clone(), &block_list).unwrap();
-        rocksdb.put::<tables::AccountsHistory>(key_block_150.clone(), &block_list).unwrap();
-        rocksdb.put::<tables::AccountsHistory>(key_block_max.clone(), &block_list).unwrap();
+        // Capture RocksDB state before consistency check
+        let entries_before: Vec<_> =
+            rocksdb.iter::<tables::AccountsHistory>().unwrap().map(|r| r.unwrap()).collect();
+        assert_eq!(entries_before.len(), 3, "Should have 3 entries before check");
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_account_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
-        // Set checkpoint to block 100
+        // Write account changesets to static files for blocks 0-100
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            for block_num in 0..=100 {
+                let changeset = vec![AccountBeforeTx { address: Address::random(), info: None }];
+                writer.append_account_changeset(changeset, block_num).unwrap();
+            }
+
+            writer.commit().unwrap();
+        }
+
+        // Set IndexAccountHistory checkpoint to block 100 (same as sf_tip)
         {
             let provider = factory.database_provider_rw().unwrap();
             provider
@@ -1339,67 +1127,529 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB has entries with highest_block = 150 which exceeds checkpoint (100)
-        // Should prune entries where highest_block > 100 (but not u64::MAX sentinel)
-        let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, None, "Should heal by pruning, no unwind needed");
+        // Verify sf_tip equals checkpoint (both at 100)
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
+            .unwrap();
+        assert_eq!(sf_tip, 100, "Static file tip should be 100");
 
-        // Verify key_block_150 was pruned, but others remain
-        assert!(
-            rocksdb.get::<tables::AccountsHistory>(key_block_50).unwrap().is_some(),
-            "Entry with highest_block=50 should remain"
+        // Run check_consistency - should return None (no unwind needed)
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "sf_tip == checkpoint should not require unwind");
+
+        // Verify NO entries are deleted - RocksDB state unchanged
+        let entries_after: Vec<_> =
+            rocksdb.iter::<tables::AccountsHistory>().unwrap().map(|r| r.unwrap()).collect();
+
+        assert_eq!(
+            entries_after.len(),
+            entries_before.len(),
+            "RocksDB entry count should be unchanged when sf_tip == checkpoint"
         );
-        assert!(
-            rocksdb.get::<tables::AccountsHistory>(key_block_100).unwrap().is_some(),
-            "Entry with highest_block=100 should remain"
+
+        // Verify exact entries are preserved
+        for (before, after) in entries_before.iter().zip(entries_after.iter()) {
+            assert_eq!(before.0.key, after.0.key, "Entry key should be unchanged");
+            assert_eq!(
+                before.0.highest_block_number, after.0.highest_block_number,
+                "Entry highest_block_number should be unchanged"
+            );
+            assert_eq!(before.1, after.1, "Entry block list should be unchanged");
+        }
+    }
+
+    /// Tests `StoragesHistory` changeset-based healing with enough blocks to trigger batching.
+    ///
+    /// Scenario:
+    /// 1. Generate 15,000 blocks worth of storage changeset data (to exceed the 10k batch size)
+    /// 2. Each block has 1 storage change (address + slot + value)
+    /// 3. Write storage changesets to static files for all 15k blocks
+    /// 4. Set `IndexStorageHistory` checkpoint to block 5000
+    /// 5. Insert stale `StoragesHistory` entries in `RocksDB` for (address, slot) pairs that
+    ///    changed in blocks 5001-15000
+    /// 6. Run `check_consistency`
+    /// 7. Verify stale entries for blocks > 5000 are pruned and batching worked
+    #[test]
+    fn test_check_consistency_storages_history_heals_via_changesets_large_range() {
+        use alloy_primitives::U256;
+        use reth_db_api::models::StorageBeforeTx;
+
+        const TOTAL_BLOCKS: u64 = 15_000;
+        const CHECKPOINT_BLOCK: u64 = 5_000;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        // Helper to generate address from block number (reuses stack arrays)
+        #[inline]
+        fn make_address(block_num: u64) -> Address {
+            let mut addr_bytes = [0u8; 20];
+            addr_bytes[0..8].copy_from_slice(&block_num.to_le_bytes());
+            Address::from(addr_bytes)
+        }
+
+        // Helper to generate slot from block number (reuses stack arrays)
+        #[inline]
+        fn make_slot(block_num: u64) -> B256 {
+            let mut slot_bytes = [0u8; 32];
+            slot_bytes[0..8].copy_from_slice(&block_num.to_le_bytes());
+            B256::from(slot_bytes)
+        }
+
+        // Write storage changesets to static files for 15k blocks.
+        // Each block has 1 storage change with a unique (address, slot) pair.
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+
+            // Reuse changeset vec to avoid repeated allocations
+            let mut changeset = Vec::with_capacity(1);
+
+            for block_num in 0..TOTAL_BLOCKS {
+                changeset.clear();
+                changeset.push(StorageBeforeTx {
+                    address: make_address(block_num),
+                    key: make_slot(block_num),
+                    value: U256::from(block_num),
+                });
+
+                writer.append_storage_changeset(changeset.clone(), block_num).unwrap();
+            }
+
+            writer.commit().unwrap();
+        }
+
+        // Verify static files have data up to block 14999
+        {
+            let sf_provider = factory.static_file_provider();
+            let highest = sf_provider
+                .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
+                .unwrap();
+            assert_eq!(highest, TOTAL_BLOCKS - 1, "Static files should have blocks 0..14999");
+        }
+
+        // Set IndexStorageHistory checkpoint to block 5000
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(
+                    StageId::IndexStorageHistory,
+                    StageCheckpoint::new(CHECKPOINT_BLOCK),
+                )
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        // Insert stale StoragesHistory entries for blocks 5001-14999
+        // These are (address, slot) pairs that changed after the checkpoint
+        for block_num in (CHECKPOINT_BLOCK + 1)..TOTAL_BLOCKS {
+            let key =
+                StorageShardedKey::new(make_address(block_num), make_slot(block_num), block_num);
+            let block_list = BlockNumberList::new_pre_sorted([block_num]);
+            rocksdb.put::<tables::StoragesHistory>(key, &block_list).unwrap();
+        }
+
+        // Verify RocksDB has stale entries before healing
+        let count_before: usize = rocksdb.iter::<tables::StoragesHistory>().unwrap().count();
+        assert_eq!(
+            count_before,
+            (TOTAL_BLOCKS - CHECKPOINT_BLOCK - 1) as usize,
+            "Should have {} stale entries before healing",
+            TOTAL_BLOCKS - CHECKPOINT_BLOCK - 1
         );
-        assert!(
-            rocksdb.get::<tables::AccountsHistory>(key_block_150).unwrap().is_none(),
-            "Entry with highest_block=150 should be pruned"
-        );
-        assert!(
-            rocksdb.get::<tables::AccountsHistory>(key_block_max).unwrap().is_some(),
-            "Entry with highest_block=u64::MAX (sentinel) should remain"
+
+        // Run check_consistency - this should heal by pruning stale entries
+        let provider = factory.database_provider_ro().unwrap();
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should heal via changesets, no unwind needed");
+
+        // Verify all stale entries were pruned
+        // After healing, entries with highest_block_number > checkpoint should be gone
+        let mut remaining_stale = 0;
+        for result in rocksdb.iter::<tables::StoragesHistory>().unwrap() {
+            let (key, _) = result.unwrap();
+            if key.sharded_key.highest_block_number > CHECKPOINT_BLOCK {
+                remaining_stale += 1;
+            }
+        }
+        assert_eq!(
+            remaining_stale, 0,
+            "All stale entries (block > {}) should be pruned",
+            CHECKPOINT_BLOCK
         );
     }
 
+    /// Tests that healing preserves entries at exactly the checkpoint block.
+    ///
+    /// This catches off-by-one bugs where checkpoint block data is incorrectly deleted.
     #[test]
-    fn test_check_consistency_accounts_history_behind_checkpoint_needs_unwind() {
-        use reth_db_api::models::ShardedKey;
+    fn test_check_consistency_storages_history_preserves_checkpoint_block() {
+        use alloy_primitives::U256;
+        use reth_db_api::models::StorageBeforeTx;
+
+        const CHECKPOINT_BLOCK: u64 = 100;
+        const SF_TIP: u64 = 200;
 
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::AccountsHistory>()
-            .build()
-            .unwrap();
-
-        // Insert data into RocksDB with highest_block_number below checkpoint
-        let key_block_50 = ShardedKey::new(Address::ZERO, 50);
-        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
-        rocksdb.put::<tables::AccountsHistory>(key_block_50, &block_list).unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_account_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
-        // Set checkpoint to block 100
+        let checkpoint_addr = Address::repeat_byte(0xAA);
+        let checkpoint_slot = B256::repeat_byte(0xBB);
+        let stale_addr = Address::repeat_byte(0xCC);
+        let stale_slot = B256::repeat_byte(0xDD);
+
+        // Write storage changesets to static files
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+
+            for block_num in 0..=SF_TIP {
+                let changeset = if block_num == CHECKPOINT_BLOCK {
+                    vec![StorageBeforeTx {
+                        address: checkpoint_addr,
+                        key: checkpoint_slot,
+                        value: U256::from(block_num),
+                    }]
+                } else if block_num > CHECKPOINT_BLOCK {
+                    vec![StorageBeforeTx {
+                        address: stale_addr,
+                        key: stale_slot,
+                        value: U256::from(block_num),
+                    }]
+                } else {
+                    vec![StorageBeforeTx {
+                        address: Address::ZERO,
+                        key: B256::ZERO,
+                        value: U256::ZERO,
+                    }]
+                };
+                writer.append_storage_changeset(changeset, block_num).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        // Set checkpoint
         {
             let provider = factory.database_provider_rw().unwrap();
             provider
-                .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(100))
+                .save_stage_checkpoint(
+                    StageId::IndexStorageHistory,
+                    StageCheckpoint::new(CHECKPOINT_BLOCK),
+                )
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        // Insert entry AT the checkpoint block (should be preserved)
+        let checkpoint_key =
+            StorageShardedKey::new(checkpoint_addr, checkpoint_slot, CHECKPOINT_BLOCK);
+        let checkpoint_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK]);
+        rocksdb.put::<tables::StoragesHistory>(checkpoint_key.clone(), &checkpoint_list).unwrap();
+
+        // Insert stale entry AFTER the checkpoint (should be removed)
+        let stale_key = StorageShardedKey::new(stale_addr, stale_slot, SF_TIP);
+        let stale_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK + 1, SF_TIP]);
+        rocksdb.put::<tables::StoragesHistory>(stale_key.clone(), &stale_list).unwrap();
+
+        // Run healing
+        let provider = factory.database_provider_ro().unwrap();
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should heal without unwind");
+
+        // Verify checkpoint block entry is PRESERVED
+        let preserved = rocksdb.get::<tables::StoragesHistory>(checkpoint_key).unwrap();
+        assert!(preserved.is_some(), "Entry at checkpoint block should be preserved, not deleted");
+
+        // Verify stale entry is removed or unwound
+        let stale = rocksdb.get::<tables::StoragesHistory>(stale_key).unwrap();
+        assert!(stale.is_none(), "Stale entry after checkpoint should be removed");
+    }
+
+    /// Tests `AccountsHistory` changeset-based healing with enough blocks to trigger batching.
+    ///
+    /// Scenario:
+    /// 1. Generate 15,000 blocks worth of account changeset data (to exceed the 10k batch size)
+    /// 2. Each block has 1 account change (simple - just random addresses)
+    /// 3. Write account changesets to static files for all 15k blocks
+    /// 4. Set `IndexAccountHistory` checkpoint to block 5000
+    /// 5. Insert stale `AccountsHistory` entries in `RocksDB` for addresses that changed in blocks
+    ///    5001-15000
+    /// 6. Run `check_consistency`
+    /// 7. Verify:
+    ///    - Stale entries for blocks > 5000 are pruned
+    ///    - The batching worked (no OOM, completed successfully)
+    #[test]
+    fn test_check_consistency_accounts_history_heals_via_changesets_large_range() {
+        use reth_db::models::AccountBeforeTx;
+        use reth_db_api::models::ShardedKey;
+        use reth_static_file_types::StaticFileSegment;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        // Create test provider factory
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        const TOTAL_BLOCKS: u64 = 15_000;
+        const CHECKPOINT_BLOCK: u64 = 5_000;
+
+        // Helper to generate address from block number (avoids pre-allocating 15k addresses)
+        #[inline]
+        fn make_address(block_num: u64) -> Address {
+            let mut addr = Address::ZERO;
+            addr.0[0..8].copy_from_slice(&block_num.to_le_bytes());
+            addr
+        }
+
+        // Write account changesets to static files for all 15k blocks
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            // Reuse changeset vec to avoid repeated allocations
+            let mut changeset = Vec::with_capacity(1);
+
+            for block_num in 0..TOTAL_BLOCKS {
+                changeset.clear();
+                changeset.push(AccountBeforeTx { address: make_address(block_num), info: None });
+                writer.append_account_changeset(changeset.clone(), block_num).unwrap();
+            }
+
+            writer.commit().unwrap();
+        }
+
+        // Insert stale AccountsHistory entries in RocksDB for addresses that changed
+        // in blocks 5001-15000 (i.e., blocks after the checkpoint)
+        // These should be pruned by check_consistency
+        for block_num in (CHECKPOINT_BLOCK + 1)..TOTAL_BLOCKS {
+            let key = ShardedKey::new(make_address(block_num), block_num);
+            let block_list = BlockNumberList::new_pre_sorted([block_num]);
+            rocksdb.put::<tables::AccountsHistory>(key, &block_list).unwrap();
+        }
+
+        // Also insert some valid entries for blocks <= 5000 that should NOT be pruned
+        for block_num in [100u64, 500, 1000, 2500, 5000] {
+            let key = ShardedKey::new(make_address(block_num), block_num);
+            let block_list = BlockNumberList::new_pre_sorted([block_num]);
+            rocksdb.put::<tables::AccountsHistory>(key, &block_list).unwrap();
+        }
+
+        // Verify we have entries before healing
+        let entries_before: usize = rocksdb.iter::<tables::AccountsHistory>().unwrap().count();
+        let stale_count = (TOTAL_BLOCKS - CHECKPOINT_BLOCK - 1) as usize;
+        let valid_count = 5usize;
+        assert_eq!(
+            entries_before,
+            stale_count + valid_count,
+            "Should have {} stale + {} valid entries before healing",
+            stale_count,
+            valid_count
+        );
+
+        // Set IndexAccountHistory checkpoint to block 5000
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(
+                    StageId::IndexAccountHistory,
+                    StageCheckpoint::new(CHECKPOINT_BLOCK),
+                )
                 .unwrap();
             provider.commit().unwrap();
         }
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB only has data up to block 50, but checkpoint says block 100 was processed
+        // Verify sf_tip > checkpoint
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
+            .unwrap();
+        assert_eq!(sf_tip, TOTAL_BLOCKS - 1, "Static file tip should be 14999");
+        assert!(sf_tip > CHECKPOINT_BLOCK, "sf_tip should be > checkpoint to trigger healing");
+
+        // Run check_consistency - this should trigger batched changeset-based healing
         let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Healing should succeed without requiring unwind");
+
+        // Verify: all stale entries for blocks > 5000 should be pruned
+        // Count remaining entries with highest_block_number > checkpoint
+        let mut remaining_stale = 0;
+        for result in rocksdb.iter::<tables::AccountsHistory>().unwrap() {
+            let (key, _) = result.unwrap();
+            if key.highest_block_number > CHECKPOINT_BLOCK && key.highest_block_number != u64::MAX {
+                remaining_stale += 1;
+            }
+        }
         assert_eq!(
-            result,
-            Some(50),
-            "Should require unwind to block 50 to rebuild AccountsHistory"
+            remaining_stale, 0,
+            "All stale entries (block > {}) should be pruned",
+            CHECKPOINT_BLOCK
         );
+    }
+
+    /// Tests that accounts history healing preserves entries at exactly the checkpoint block.
+    #[test]
+    fn test_check_consistency_accounts_history_preserves_checkpoint_block() {
+        use reth_db::models::AccountBeforeTx;
+        use reth_db_api::models::ShardedKey;
+
+        const CHECKPOINT_BLOCK: u64 = 100;
+        const SF_TIP: u64 = 200;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let checkpoint_addr = Address::repeat_byte(0xAA);
+        let stale_addr = Address::repeat_byte(0xCC);
+
+        // Write account changesets to static files
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            for block_num in 0..=SF_TIP {
+                let changeset = if block_num == CHECKPOINT_BLOCK {
+                    vec![AccountBeforeTx { address: checkpoint_addr, info: None }]
+                } else if block_num > CHECKPOINT_BLOCK {
+                    vec![AccountBeforeTx { address: stale_addr, info: None }]
+                } else {
+                    vec![AccountBeforeTx { address: Address::ZERO, info: None }]
+                };
+                writer.append_account_changeset(changeset, block_num).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        // Set checkpoint
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(
+                    StageId::IndexAccountHistory,
+                    StageCheckpoint::new(CHECKPOINT_BLOCK),
+                )
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        // Insert entry AT the checkpoint block (should be preserved)
+        let checkpoint_key = ShardedKey::new(checkpoint_addr, CHECKPOINT_BLOCK);
+        let checkpoint_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK]);
+        rocksdb.put::<tables::AccountsHistory>(checkpoint_key.clone(), &checkpoint_list).unwrap();
+
+        // Insert stale entry AFTER the checkpoint (should be removed)
+        let stale_key = ShardedKey::new(stale_addr, SF_TIP);
+        let stale_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK + 1, SF_TIP]);
+        rocksdb.put::<tables::AccountsHistory>(stale_key.clone(), &stale_list).unwrap();
+
+        // Run healing
+        let provider = factory.database_provider_ro().unwrap();
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should heal without unwind");
+
+        // Verify checkpoint block entry is PRESERVED
+        let preserved = rocksdb.get::<tables::AccountsHistory>(checkpoint_key).unwrap();
+        assert!(preserved.is_some(), "Entry at checkpoint block should be preserved, not deleted");
+
+        // Verify stale entry is removed or unwound
+        let stale = rocksdb.get::<tables::AccountsHistory>(stale_key).unwrap();
+        assert!(stale.is_none(), "Stale entry after checkpoint should be removed");
+    }
+
+    #[test]
+    fn test_check_consistency_storages_history_sf_tip_equals_checkpoint_no_action() {
+        use alloy_primitives::U256;
+        use reth_db::models::StorageBeforeTx;
+        use reth_static_file_types::StaticFileSegment;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        // Insert StoragesHistory entries into RocksDB
+        let key1 = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);
+        let key2 = StorageShardedKey::new(Address::random(), B256::random(), 80);
+        let block_list1 = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
+        let block_list2 = BlockNumberList::new_pre_sorted([40, 60, 80]);
+        rocksdb.put::<tables::StoragesHistory>(key1, &block_list1).unwrap();
+        rocksdb.put::<tables::StoragesHistory>(key2, &block_list2).unwrap();
+
+        // Capture entries before consistency check
+        let entries_before: Vec<_> =
+            rocksdb.iter::<tables::StoragesHistory>().unwrap().map(|r| r.unwrap()).collect();
+
+        // Create a test provider factory
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        // Write storage changesets to static files for blocks 0-100
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+
+            for block_num in 0..=100u64 {
+                let changeset = vec![StorageBeforeTx {
+                    address: Address::ZERO,
+                    key: B256::with_last_byte(block_num as u8),
+                    value: U256::from(block_num),
+                }];
+                writer.append_storage_changeset(changeset, block_num).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        // Set IndexStorageHistory checkpoint to block 100 (same as sf_tip)
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        // Verify sf_tip equals checkpoint (both at 100)
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
+            .unwrap();
+        assert_eq!(sf_tip, 100, "Static file tip should be 100");
+
+        // Run check_consistency - should return None (no unwind needed)
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "sf_tip == checkpoint should not require unwind");
+
+        // Verify NO entries are deleted - RocksDB state unchanged
+        let entries_after: Vec<_> =
+            rocksdb.iter::<tables::StoragesHistory>().unwrap().map(|r| r.unwrap()).collect();
+
+        assert_eq!(
+            entries_after.len(),
+            entries_before.len(),
+            "RocksDB entry count should be unchanged when sf_tip == checkpoint"
+        );
+
+        // Verify exact entries are preserved
+        for (before, after) in entries_before.iter().zip(entries_after.iter()) {
+            assert_eq!(before.0, after.0, "Entry key should be unchanged");
+            assert_eq!(before.1, after.1, "Entry block list should be unchanged");
+        }
     }
 }

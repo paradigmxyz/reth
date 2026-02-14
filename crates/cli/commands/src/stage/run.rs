@@ -248,9 +248,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     (Box::new(stage), None)
                 }
                 StageEnum::Senders => (
-                    Box::new(SenderRecoveryStage::new(SenderRecoveryConfig {
-                        commit_threshold: batch_size,
-                    })),
+                    Box::new(SenderRecoveryStage::new(
+                        SenderRecoveryConfig { commit_threshold: batch_size },
+                        None,
+                    )),
                     None,
                 ),
                 StageEnum::Execution => (

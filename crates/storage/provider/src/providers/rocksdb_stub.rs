@@ -32,6 +32,15 @@ pub struct RocksDBTableStats {
     pub pending_compaction_bytes: u64,
 }
 
+/// Database-level statistics for `RocksDB` - stub.
+#[derive(Debug, Clone)]
+pub struct RocksDBStats {
+    /// Statistics for each table (column family).
+    pub tables: Vec<RocksDBTableStats>,
+    /// Total size of WAL (Write-Ahead Log) files in bytes.
+    pub wal_size_bytes: u64,
+}
+
 /// Context for `RocksDB` block writes (stub).
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -87,6 +96,35 @@ impl RocksDBProvider {
     /// This is a no-op since there is no `RocksDB` when the feature is disabled.
     pub const fn clear<T>(&self) -> ProviderResult<()> {
         Ok(())
+    }
+
+    /// Returns the total size of WAL (Write-Ahead Log) files in bytes (stub implementation).
+    ///
+    /// Returns 0 since there is no `RocksDB` when the feature is disabled.
+    pub const fn wal_size_bytes(&self) -> u64 {
+        0
+    }
+
+    /// Returns database-level statistics including per-table stats and WAL size (stub
+    /// implementation).
+    ///
+    /// Returns empty stats since there is no `RocksDB` when the feature is disabled.
+    pub const fn db_stats(&self) -> RocksDBStats {
+        RocksDBStats { tables: Vec::new(), wal_size_bytes: 0 }
+    }
+
+    /// Flushes all pending writes to disk (stub implementation).
+    ///
+    /// This is a no-op since there is no `RocksDB` when the feature is disabled.
+    pub const fn flush(&self, _tables: &[&'static str]) -> ProviderResult<()> {
+        Ok(())
+    }
+
+    /// Creates an iterator over all entries in the specified table (stub implementation).
+    ///
+    /// Returns an empty iterator since there is no `RocksDB` when the feature is disabled.
+    pub const fn iter<T: reth_db_api::table::Table>(&self) -> ProviderResult<RocksDBIter<T>> {
+        Ok(RocksDBIter(std::marker::PhantomData))
     }
 }
 
@@ -158,3 +196,37 @@ pub struct RocksTx;
 /// A stub raw iterator for `RocksDB`.
 #[derive(Debug)]
 pub struct RocksDBRawIter;
+
+/// A stub typed iterator for `RocksDB`.
+#[derive(Debug)]
+pub struct RocksDBIter<T: reth_db_api::table::Table>(std::marker::PhantomData<T>);
+
+impl<T: reth_db_api::table::Table> Iterator for RocksDBIter<T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        None
+    }
+}
+
+/// Outcome of pruning a history shard in `RocksDB` (stub).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneShardOutcome {
+    /// Shard was deleted entirely.
+    Deleted,
+    /// Shard was updated with filtered block numbers.
+    Updated,
+    /// Shard was unchanged (no blocks <= `to_block`).
+    Unchanged,
+}
+
+/// Tracks pruning outcomes for batch operations (stub).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PrunedIndices {
+    /// Number of shards completely deleted.
+    pub deleted: usize,
+    /// Number of shards that were updated (filtered but still have entries).
+    pub updated: usize,
+    /// Number of shards that were unchanged.
+    pub unchanged: usize,
+}

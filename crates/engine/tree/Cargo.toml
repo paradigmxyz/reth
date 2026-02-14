@@ -23,16 +23,15 @@ reth-evm = { workspace = true, features = ["metrics"] }
 reth-network-p2p.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
-reth-primitives-traits.workspace = true
+reth-primitives-traits = { workspace = true, features = ["rayon", "dashmap"] }
 reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
-reth-revm.workspace = true
+reth-revm = { workspace = true, features = ["optional-balance-check"] }
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
-reth-trie-sparse-parallel = { workspace = true, features = ["std"] }
 reth-trie.workspace = true
 reth-trie-common.workspace = true
 reth-trie-db.workspace = true
@@ -53,7 +52,7 @@ revm-primitives.workspace = true
 futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
-mini-moka = { workspace = true, features = ["sync"] }
+fixed-cache.workspace = true
 moka = { workspace = true, features = ["sync"] }
 smallvec.workspace = true
 
@@ -62,7 +61,6 @@ metrics.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
-dashmap.workspace = true
 schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true
@@ -143,7 +141,15 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-node-ethereum/test-utils",
     "reth-evm-ethereum/test-utils",
+    "reth-tasks/test-utils",
 ]
+rocksdb = [
+    "reth-provider/rocksdb",
+    "reth-prune/rocksdb",
+    "reth-stages?/rocksdb",
+    "reth-e2e-test-utils/rocksdb",
+]
+edge = ["rocksdb"]
 
 [[test]]
 name = "e2e_testsuite"

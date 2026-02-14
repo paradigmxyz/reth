@@ -213,7 +213,7 @@ where
             handle
                 .node
                 .task_executor
-                .spawn_critical("custom debug block provider consensus client", async move {
+                .spawn_critical_task("custom debug block provider consensus client", async move {
                     rpc_consensus_client.run().await
                 });
         } else if let Some(url) = config.debug.rpc_consensus_url.clone() {
@@ -234,7 +234,7 @@ where
                 Arc::new(block_provider),
             );
 
-            handle.node.task_executor.spawn_critical("rpc-ws consensus client", async move {
+            handle.node.task_executor.spawn_critical_task("rpc-ws consensus client", async move {
                 rpc_consensus_client.run().await
             });
         } else if let Some(maybe_custom_etherscan_url) = config.debug.etherscan.clone() {
@@ -262,9 +262,12 @@ where
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),
                 Arc::new(block_provider),
             );
-            handle.node.task_executor.spawn_critical("etherscan consensus client", async move {
-                rpc_consensus_client.run().await
-            });
+            handle
+                .node
+                .task_executor
+                .spawn_critical_task("etherscan consensus client", async move {
+                    rpc_consensus_client.run().await
+                });
         }
 
         if config.dev.dev {
@@ -289,7 +292,7 @@ where
             };
 
             let dev_mining_mode = handle.node.config.dev_mining_mode(pool);
-            handle.node.task_executor.spawn_critical("local engine", async move {
+            handle.node.task_executor.spawn_critical_task("local engine", async move {
                 LocalMiner::new(
                     blockchain_db,
                     builder,

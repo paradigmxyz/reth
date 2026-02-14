@@ -16,11 +16,14 @@
 
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::eip2718::Decodable2718;
-use alloy_evm::Evm;
+use alloy_evm::{Evm, RecoveredTx};
 use alloy_primitives::{map::HashSet, Address, U256};
+use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV5;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_errors::RethError;
 use reth_ethereum_engine_primitives::EthBuiltPayload;
 use reth_ethereum_primitives::EthPrimitives;
@@ -65,7 +68,9 @@ impl<Eth, Evm> TestingApi<Eth, Evm> {
 
 impl<Eth, Evm> TestingApi<Eth, Evm>
 where
-    Eth: Call<Provider: BlockReader<Header = Header>>,
+    Eth: Call<
+        Provider: BlockReader<Header = Header> + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    >,
     Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes, Primitives = EthPrimitives>
         + 'static,
 {
@@ -89,13 +94,20 @@ where
                     EthApiError::HeaderNotFound(request.parent_block_hash.into())
                 })?;
 
+                let chain_spec = eth_api.provider().chain_spec();
+                let is_osaka =
+                    chain_spec.is_osaka_active_at_timestamp(request.payload_attributes.timestamp);
+
+                let withdrawals = request.payload_attributes.withdrawals.clone();
+                let withdrawals_rlp_length = withdrawals.as_ref().map(|w| w.length()).unwrap_or(0);
+
                 let env_attrs = NextBlockEnvAttributes {
                     timestamp: request.payload_attributes.timestamp,
                     suggested_fee_recipient: request.payload_attributes.suggested_fee_recipient,
                     prev_randao: request.payload_attributes.prev_randao,
                     gas_limit: parent.gas_limit(),
                     parent_beacon_block_root: request.payload_attributes.parent_beacon_block_root,
-                    withdrawals: request.payload_attributes.withdrawals.map(Into::into),
+                    withdrawals: withdrawals.map(Into::into),
                     extra_data: request.extra_data.unwrap_or_default(),
                 };
 
@@ -109,6 +121,7 @@ where
                 let base_fee = builder.evm_mut().block().basefee();
 
                 let mut invalid_senders: HashSet<Address, DefaultHashBuilder> = HashSet::default();
+                let mut block_transactions_rlp_length = 0usize;
 
                 // Decode and recover all transactions in parallel
                 let recovered_txs = try_recover_signers(&request.transactions, |tx| {
@@ -121,6 +134,36 @@ where
                     let signer = tx.signer();
                     if skip_invalid_transactions && invalid_senders.contains(&signer) {
                         continue;
+                    }
+
+                    // EIP-7934: Check estimated block size before adding transaction
+                    let tx_rlp_len = tx.tx().length();
+                    if is_osaka {
+                        // 1KB overhead for block header
+                        let estimated_block_size = block_transactions_rlp_length +
+                            tx_rlp_len +
+                            withdrawals_rlp_length +
+                            1024;
+                        if estimated_block_size > MAX_RLP_BLOCK_SIZE {
+                            if skip_invalid_transactions {
+                                debug!(
+                                    target: "rpc::testing",
+                                    tx_idx = idx,
+                                    ?signer,
+                                    estimated_block_size,
+                                    max_size = MAX_RLP_BLOCK_SIZE,
+                                    "Skipping transaction: would exceed block size limit"
+                                );
+                                invalid_senders.insert(signer);
+                                continue;
+                            }
+                            return Err(Eth::Error::from_eth_err(EthApiError::InvalidParams(
+                                format!(
+                                    "transaction at index {} would exceed max block size: {} > {}",
+                                    idx, estimated_block_size, MAX_RLP_BLOCK_SIZE
+                                ),
+                            )));
+                        }
                     }
 
                     let tip = tx.effective_tip_per_gas(base_fee).unwrap_or_default();
@@ -149,19 +192,19 @@ where
                         }
                     };
 
+                    block_transactions_rlp_length += tx_rlp_len;
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
                 let outcome = builder.finish(&state).map_err(Eth::Error::from_eth_err)?;
 
-                let requests = outcome
-                    .block
-                    .requests_hash()
-                    .is_some()
-                    .then_some(outcome.execution_result.requests);
+                let has_requests = outcome.block.requests_hash().is_some();
+                let sealed_block = Arc::new(outcome.block.into_sealed_block());
+
+                let requests = has_requests.then_some(outcome.execution_result.requests);
 
                 EthBuiltPayload::new(
                     alloy_rpc_types_engine::PayloadId::default(),
-                    Arc::new(outcome.block.into_sealed_block()),
+                    sealed_block,
                     total_fees,
                     requests,
                 )
@@ -176,7 +219,9 @@ where
 #[async_trait]
 impl<Eth, Evm> TestingApiServer for TestingApi<Eth, Evm>
 where
-    Eth: Call<Provider: BlockReader<Header = Header>>,
+    Eth: Call<
+        Provider: BlockReader<Header = Header> + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    >,
     Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes, Primitives = EthPrimitives>
         + 'static,
 {

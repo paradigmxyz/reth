@@ -5,7 +5,9 @@ use alloy_primitives::{Address, BlockNumber};
 use clap::{builder::RangedU64ValueParser, Args};
 use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
-use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
+use reth_prune_types::{
+    PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE,
+};
 use std::{collections::BTreeMap, ops::Not, sync::OnceLock};
 
 /// Global static pruning defaults
@@ -68,9 +70,9 @@ impl Default for DefaultPruningValues {
             full_prune_modes: PruneModes {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: None,
-                receipts: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                receipts: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
+                account_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
+                storage_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
                 // This field is ignored when full_bodies_history_use_pre_merge is true
                 bodies_history: None,
                 receipts_log_filter: Default::default(),
@@ -79,10 +81,10 @@ impl Default for DefaultPruningValues {
             minimal_prune_modes: PruneModes {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: Some(PruneMode::Full),
-                receipts: Some(PruneMode::Full),
-                account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                bodies_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                receipts: Some(PruneMode::Distance(MINIMUM_DISTANCE)),
+                account_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
+                storage_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
+                bodies_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
                 receipts_log_filter: Default::default(),
             },
         }
@@ -93,7 +95,8 @@ impl Default for DefaultPruningValues {
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 #[command(next_help_heading = "Pruning")]
 pub struct PruningArgs {
-    /// Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored.
+    /// Run full node. Only the most recent [`MINIMUM_UNWIND_SAFE_DISTANCE`] block states are
+    /// stored.
     #[arg(long, default_value_t = false, conflicts_with = "minimal")]
     pub full: bool,
 

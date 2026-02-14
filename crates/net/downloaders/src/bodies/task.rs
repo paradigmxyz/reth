@@ -86,7 +86,7 @@ impl<B: Block + 'static> TaskDownloader<B> {
             downloader,
         };
 
-        spawner.spawn(downloader.boxed());
+        spawner.spawn_task(downloader.boxed());
 
         Self { from_downloader: ReceiverStream::new(bodies_rx), to_downloader }
     }

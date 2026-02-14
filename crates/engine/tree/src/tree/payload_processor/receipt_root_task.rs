@@ -77,8 +77,22 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             receipt_with_bloom.encode_2718(&mut encode_buf);
 
             aggregated_bloom |= *receipt_with_bloom.bloom_ref();
-            builder.push_unchecked(indexed_receipt.index, &encode_buf);
-            received_count += 1;
+            match builder.push(indexed_receipt.index, &encode_buf) {
+                Ok(()) => {
+                    received_count += 1;
+                }
+                Err(err) => {
+                    // If a duplicate or out-of-bounds index is streamed, skip it and
+                    // fall back to computing the receipt root from the full receipts
+                    // vector later.
+                    tracing::error!(
+                        target: "engine::tree::payload_processor",
+                        index = indexed_receipt.index,
+                        ?err,
+                        "Receipt root task received invalid receipt index, skipping"
+                    );
+                }
+            }
         }
 
         let Ok(root) = builder.finalize() else {

@@ -6,9 +6,11 @@ use crate::{
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
+use alloy_evm::precompiles::PrecompilesMap;
 use alloy_network::TransactionBuilder;
 use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
+    state::StateOverride,
     BlockTransactionsKind,
 };
 use jsonrpsee_types::ErrorObject;
@@ -27,6 +29,16 @@ use revm::{
     Database,
 };
 
+/// Error code for execution reverted in `eth_simulateV1`.
+///
+/// <https://github.com/ethereum/execution-apis>
+pub const SIMULATE_REVERT_CODE: i32 = -32000;
+
+/// Error code for VM execution errors (e.g., out of gas) in `eth_simulateV1`.
+///
+/// <https://github.com/ethereum/execution-apis>
+pub const SIMULATE_VM_ERROR_CODE: i32 = -32015;
+
 /// Errors which may occur during `eth_simulateV1` execution.
 #[derive(Debug, thiserror::Error)]
 pub enum EthSimulateError {
@@ -37,11 +49,21 @@ pub enum EthSimulateError {
     #[error("Client adjustable limit reached")]
     GasLimitReached,
     /// Block number in sequence did not increase.
-    #[error("Block number in sequence did not increase")]
-    BlockNumberInvalid,
-    /// Block timestamp in sequence did not increase or stay the same.
-    #[error("Block timestamp in sequence did not increase")]
-    BlockTimestampInvalid,
+    #[error("block numbers must be in order: {got} <= {parent}")]
+    BlockNumberInvalid {
+        /// The block number that was provided.
+        got: u64,
+        /// The parent block number.
+        parent: u64,
+    },
+    /// Block timestamp in sequence did not increase.
+    #[error("block timestamps must be in order: {got} <= {parent}")]
+    BlockTimestampInvalid {
+        /// The block timestamp that was provided.
+        got: u64,
+        /// The parent block timestamp.
+        parent: u64,
+    },
     /// Transaction nonce is too low.
     #[error("nonce too low: next nonce {state}, tx nonce {tx}")]
     NonceTooLow {
@@ -79,6 +101,9 @@ pub enum EthSimulateError {
     /// Multiple `MovePrecompileToAddress` referencing the same address.
     #[error("Multiple MovePrecompileToAddress referencing the same address")]
     PrecompileDuplicateAddress,
+    /// Attempted to move a non-precompile address.
+    #[error("account {0} is not a precompile")]
+    NotAPrecompile(Address),
 }
 
 impl EthSimulateError {
@@ -91,13 +116,14 @@ impl EthSimulateError {
             Self::IntrinsicGasTooLow => -38013,
             Self::InsufficientFunds { .. } => -38014,
             Self::BlockGasLimitExceeded => -38015,
-            Self::BlockNumberInvalid => -38020,
-            Self::BlockTimestampInvalid => -38021,
+            Self::BlockNumberInvalid { .. } => -38020,
+            Self::BlockTimestampInvalid { .. } => -38021,
             Self::PrecompileSelfReference => -38022,
             Self::PrecompileDuplicateAddress => -38023,
             Self::SenderNotEOA => -38024,
             Self::MaxInitCodeSizeExceeded => -38025,
             Self::GasLimitReached => -38026,
+            Self::NotAPrecompile(_) => -32000,
         }
     }
 }
@@ -106,6 +132,76 @@ impl ToRpcError for EthSimulateError {
     fn to_rpc_error(&self) -> ErrorObject<'static> {
         rpc_err(self.error_code(), self.to_string(), None)
     }
+}
+
+/// Applies precompile move overrides from state overrides to the EVM's precompiles map.
+///
+/// This function processes `movePrecompileToAddress` entries from the state overrides and
+/// moves precompiles from their original addresses to new addresses. The original address
+/// is cleared (precompile removed) and the precompile is installed at the destination address.
+///
+/// # Validation
+///
+/// - The source address must be a precompile (exists in the precompiles map)
+/// - Moving multiple precompiles to the same destination is allowed
+/// - Self-references (moving to the same address) are not explicitly forbidden here since that
+///   would be a no-op
+///
+/// # Arguments
+///
+/// * `state_overrides` - The state overrides containing potential `movePrecompileToAddress` entries
+/// * `precompiles` - Mutable reference to the EVM's precompiles map
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an `EthSimulateError::NotAPrecompile` if a source address
+/// is not a precompile.
+pub fn apply_precompile_overrides(
+    state_overrides: &StateOverride,
+    precompiles: &mut PrecompilesMap,
+) -> Result<(), EthSimulateError> {
+    use alloy_evm::precompiles::DynPrecompile;
+
+    let moves: Vec<_> = state_overrides
+        .iter()
+        .filter_map(|(source, account_override)| {
+            account_override.move_precompile_to.map(|dest| (*source, dest))
+        })
+        .collect();
+
+    if moves.is_empty() {
+        return Ok(());
+    }
+
+    for (source, _) in &moves {
+        if precompiles.get(source).is_none() {
+            return Err(EthSimulateError::NotAPrecompile(*source));
+        }
+    }
+
+    let mut extracted: Vec<(Address, Address, DynPrecompile)> = Vec::with_capacity(moves.len());
+
+    for (source, dest) in moves {
+        if source == dest {
+            continue;
+        }
+
+        let mut found_precompile: Option<DynPrecompile> = None;
+        precompiles.apply_precompile(&source, |existing| {
+            found_precompile = existing;
+            None
+        });
+
+        if let Some(precompile) = found_precompile {
+            extracted.push((source, dest, precompile));
+        }
+    }
+
+    for (_, dest, precompile) in extracted {
+        precompiles.apply_precompile(&dest, |_| Some(precompile));
+    }
+
+    Ok(())
 }
 
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
@@ -263,7 +359,7 @@ where
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
                         message: error.to_string(),
-                        code: error.into().code(),
+                        code: SIMULATE_VM_ERROR_CODE,
                         ..SimulateError::invalid_params()
                     }),
                     gas_used,
@@ -278,7 +374,7 @@ where
                     return_data: output,
                     error: Some(SimulateError {
                         message: error.to_string(),
-                        code: error.into().code(),
+                        code: SIMULATE_REVERT_CODE,
                         ..SimulateError::invalid_params()
                     }),
                     gas_used,
@@ -299,6 +395,7 @@ where
                             log_index: Some(log_index - 1),
                             transaction_index: Some(index as u64),
                             transaction_hash: Some(*tx.tx_hash()),
+                            block_hash: Some(block.hash()),
                             block_number: Some(block.header().number()),
                             block_timestamp: Some(block.header().timestamp()),
                             ..Default::default()

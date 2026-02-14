@@ -10,7 +10,7 @@ use crate::{
 };
 
 #[cfg(feature = "db-api")]
-use crate::{DBProvider, DatabaseProviderFactory, StorageChangeSetReader};
+use crate::{DBProvider, DatabaseProviderFactory, StorageChangeSetReader, StorageSettingsCache};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -28,9 +28,7 @@ use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::{
-    Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader, StorageEntry,
-};
+use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -415,7 +413,7 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
     fn storage_changeset(
         &self,
         _block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, crate::ChangesetEntry)>> {
         Ok(Vec::default())
     }
 
@@ -424,14 +422,14 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
         _block_number: BlockNumber,
         _address: Address,
         _storage_key: B256,
-    ) -> ProviderResult<Option<StorageEntry>> {
+    ) -> ProviderResult<Option<crate::ChangesetEntry>> {
         Ok(None)
     }
 
     fn storage_changesets_range(
         &self,
-        _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+        _range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, crate::ChangesetEntry)>> {
         Ok(Vec::default())
     }
 
@@ -539,6 +537,14 @@ impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {
         _storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         Ok(None)
+    }
+
+    fn storage_by_hashed_key(
+        &self,
+        _account: Address,
+        _hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -692,4 +698,13 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DatabaseProviderFactory
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
         Ok(self.clone())
     }
+}
+
+#[cfg(feature = "db-api")]
+impl<ChainSpec: Send + Sync, N: Send + Sync> StorageSettingsCache for NoopProvider<ChainSpec, N> {
+    fn cached_storage_settings(&self) -> reth_db_api::models::StorageSettings {
+        reth_db_api::models::StorageSettings::default()
+    }
+
+    fn set_storage_settings_cache(&self, _settings: reth_db_api::models::StorageSettings) {}
 }

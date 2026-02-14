@@ -14,7 +14,7 @@ use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_server_types::RpcModuleSelection;
-use reth_tasks::TaskManager;
+use reth_tasks::Runtime;
 use std::sync::Arc;
 use tracing::{span, Instrument, Level};
 
@@ -96,27 +96,36 @@ where
         self
     }
 
+    /// Enables v2 storage defaults (`--storage.v2`), routing tx hashes, history
+    /// indices, etc. to `RocksDB` and changesets/senders to static files.
+    pub fn with_storage_v2(self) -> Self {
+        self.with_node_config_modifier(|mut config| {
+            config.storage.v2 = true;
+            config
+        })
+    }
+
     /// Builds and launches the test nodes.
     pub async fn build(
         self,
     ) -> eyre::Result<(
         Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-        TaskManager,
         Wallet,
     )> {
-        let tasks = TaskManager::current();
-        let exec = tasks.executor();
+        let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
 
         let network_config = NetworkArgs {
             discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
             ..NetworkArgs::default()
         };
 
-        // Apply tree config modifier if present
+        // Apply tree config modifier if present, with test-appropriate defaults
+        let base_tree_config =
+            reth_node_api::TreeConfig::default().with_cross_block_cache_size(1024 * 1024);
         let tree_config = if let Some(modifier) = self.tree_config_modifier {
-            modifier(reth_node_api::TreeConfig::default())
+            modifier(base_tree_config)
         } else {
-            reth_node_api::TreeConfig::default()
+            base_tree_config
         };
 
         let mut nodes = (0..self.num_nodes)
@@ -142,7 +151,7 @@ where
                 let span = span!(Level::INFO, "node", idx);
                 let node = N::default();
                 let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-                    .testing_node(exec.clone())
+                    .testing_node(runtime.clone())
                     .with_types_and_provider::<N, BlockchainProvider<_>>()
                     .with_components(node.components_builder())
                     .with_add_ons(node.add_ons())
@@ -186,7 +195,7 @@ where
             }
         }
 
-        Ok((nodes, tasks, Wallet::default().with_chain_id(self.chain_spec.chain().into())))
+        Ok((nodes, Wallet::default().with_chain_id(self.chain_spec.chain().into())))
     }
 }
 

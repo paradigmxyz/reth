@@ -8,20 +8,32 @@ use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
+use reth_primitives_traits::constants::gas_units::MEGAGAS;
 use reth_trie::updates::TrieUpdates;
 use std::time::{Duration, Instant};
 
+/// Upper bounds for each gas bucket. The last bucket is a catch-all for
+/// everything above the final threshold: <5M, 5-10M, 10-20M, 20-30M, 30-40M, >40M.
+const GAS_BUCKET_THRESHOLDS: [u64; 5] =
+    [5 * MEGAGAS, 10 * MEGAGAS, 20 * MEGAGAS, 30 * MEGAGAS, 40 * MEGAGAS];
+
+/// Total number of gas buckets (thresholds + 1 catch-all).
+const NUM_GAS_BUCKETS: usize = GAS_BUCKET_THRESHOLDS.len() + 1;
+
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
-pub(crate) struct EngineApiMetrics {
+pub struct EngineApiMetrics {
     /// Engine API-specific metrics.
-    pub(crate) engine: EngineMetrics,
+    pub engine: EngineMetrics,
     /// Block executor metrics.
-    pub(crate) executor: ExecutorMetrics,
+    pub executor: ExecutorMetrics,
     /// Metrics for block validation
-    pub(crate) block_validation: BlockValidationMetrics,
+    pub block_validation: BlockValidationMetrics,
     /// Canonical chain and reorg related metrics
     pub tree: TreeMetrics,
+    /// Metrics for EIP-7928 Block-Level Access Lists (BAL).
+    #[allow(dead_code)]
+    pub(crate) bal: BalMetrics,
 }
 
 impl EngineApiMetrics {
@@ -29,7 +41,7 @@ impl EngineApiMetrics {
     ///
     /// This method updates metrics for execution time, gas usage, and the number
     /// of accounts, storage slots and bytecodes updated.
-    pub(crate) fn record_block_execution<R>(
+    pub fn record_block_execution<R>(
         &self,
         output: &BlockExecutionOutput<R>,
         execution_duration: Duration,
@@ -44,7 +56,7 @@ impl EngineApiMetrics {
         self.executor.execution_histogram.record(execution_secs);
         self.executor.execution_duration.set(execution_secs);
 
-        // Update the metrics for the number of accounts, storage slots and bytecodes updated
+        // Update the metrics for the number of accounts, storage slots and bytecodes
         let accounts = output.state.state.len();
         let storage_slots =
             output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
@@ -56,27 +68,27 @@ impl EngineApiMetrics {
     }
 
     /// Returns a reference to the executor metrics for use in state hooks.
-    pub(crate) const fn executor_metrics(&self) -> &ExecutorMetrics {
+    pub const fn executor_metrics(&self) -> &ExecutorMetrics {
         &self.executor
     }
 
     /// Records the duration of block pre-execution changes (e.g., beacon root update).
-    pub(crate) fn record_pre_execution(&self, elapsed: Duration) {
+    pub fn record_pre_execution(&self, elapsed: Duration) {
         self.executor.pre_execution_histogram.record(elapsed);
     }
 
     /// Records the duration of block post-execution changes (e.g., finalization).
-    pub(crate) fn record_post_execution(&self, elapsed: Duration) {
+    pub fn record_post_execution(&self, elapsed: Duration) {
         self.executor.post_execution_histogram.record(elapsed);
     }
 
     /// Records the time spent waiting for the next transaction from the iterator.
-    pub(crate) fn record_transaction_wait(&self, elapsed: Duration) {
+    pub fn record_transaction_wait(&self, elapsed: Duration) {
         self.executor.transaction_wait_histogram.record(elapsed);
     }
 
     /// Records the duration of a single transaction execution.
-    pub(crate) fn record_transaction_execution(&self, elapsed: Duration) {
+    pub fn record_transaction_execution(&self, elapsed: Duration) {
         self.executor.transaction_execution_histogram.record(elapsed);
     }
 }
@@ -84,11 +96,12 @@ impl EngineApiMetrics {
 /// Metrics for the entire blockchain tree
 #[derive(Metrics)]
 #[metrics(scope = "blockchain_tree")]
-pub(crate) struct TreeMetrics {
+pub struct TreeMetrics {
     /// The highest block number in the canonical chain
     pub canonical_chain_height: Gauge,
-    /// The number of reorgs
-    pub reorgs: Counter,
+    /// Metrics for reorgs.
+    #[metric(skip)]
+    pub reorgs: ReorgMetrics,
     /// The latest reorg depth
     pub latest_reorg_depth: Gauge,
     /// The current safe block height (this is required by optimism)
@@ -97,10 +110,31 @@ pub(crate) struct TreeMetrics {
     pub finalized_block_height: Gauge,
 }
 
+/// Metrics for reorgs.
+#[derive(Debug)]
+pub struct ReorgMetrics {
+    /// The number of head block reorgs
+    pub head: Counter,
+    /// The number of safe block reorgs
+    pub safe: Counter,
+    /// The number of finalized block reorgs
+    pub finalized: Counter,
+}
+
+impl Default for ReorgMetrics {
+    fn default() -> Self {
+        Self {
+            head: metrics::counter!("blockchain_tree_reorgs", "commitment" => "head"),
+            safe: metrics::counter!("blockchain_tree_reorgs", "commitment" => "safe"),
+            finalized: metrics::counter!("blockchain_tree_reorgs", "commitment" => "finalized"),
+        }
+    }
+}
+
 /// Metrics for the `EngineApi`.
 #[derive(Metrics)]
 #[metrics(scope = "consensus.engine.beacon")]
-pub(crate) struct EngineMetrics {
+pub struct EngineMetrics {
     /// Engine API forkchoiceUpdated response type metrics
     #[metric(skip)]
     pub(crate) forkchoice_updated: ForkchoiceUpdatedMetrics,
@@ -210,6 +244,65 @@ impl ForkchoiceUpdatedMetrics {
     }
 }
 
+/// Per-gas-bucket newPayload metrics, initialized once via [`Self::new_with_labels`].
+#[derive(Clone, Metrics)]
+#[metrics(scope = "consensus.engine.beacon")]
+pub(crate) struct NewPayloadGasBucketMetrics {
+    /// Latency for new payload calls in this gas bucket.
+    pub(crate) new_payload_gas_bucket_latency: Histogram,
+    /// Gas per second for new payload calls in this gas bucket.
+    pub(crate) new_payload_gas_bucket_gas_per_second: Histogram,
+}
+
+/// Holds pre-initialized [`NewPayloadGasBucketMetrics`] instances, one per gas bucket.
+#[derive(Debug)]
+pub(crate) struct GasBucketMetrics {
+    buckets: [NewPayloadGasBucketMetrics; NUM_GAS_BUCKETS],
+}
+
+impl Default for GasBucketMetrics {
+    fn default() -> Self {
+        Self {
+            buckets: std::array::from_fn(|i| {
+                let label = Self::bucket_label(i);
+                NewPayloadGasBucketMetrics::new_with_labels(&[("gas_bucket", label)])
+            }),
+        }
+    }
+}
+
+impl GasBucketMetrics {
+    fn record(&self, gas_used: u64, elapsed: Duration) {
+        let idx = Self::bucket_index(gas_used);
+        self.buckets[idx].new_payload_gas_bucket_latency.record(elapsed);
+        self.buckets[idx]
+            .new_payload_gas_bucket_gas_per_second
+            .record(gas_used as f64 / elapsed.as_secs_f64());
+    }
+
+    fn bucket_index(gas_used: u64) -> usize {
+        GAS_BUCKET_THRESHOLDS
+            .iter()
+            .position(|&threshold| gas_used < threshold)
+            .unwrap_or(GAS_BUCKET_THRESHOLDS.len())
+    }
+
+    /// Returns a human-readable label like `<5M`, `5-10M`, … `>40M`.
+    fn bucket_label(index: usize) -> String {
+        if index == 0 {
+            let hi = GAS_BUCKET_THRESHOLDS[0] / MEGAGAS;
+            format!("<{hi}M")
+        } else if index < GAS_BUCKET_THRESHOLDS.len() {
+            let lo = GAS_BUCKET_THRESHOLDS[index - 1] / MEGAGAS;
+            let hi = GAS_BUCKET_THRESHOLDS[index] / MEGAGAS;
+            format!("{lo}-{hi}M")
+        } else {
+            let lo = GAS_BUCKET_THRESHOLDS[GAS_BUCKET_THRESHOLDS.len() - 1] / MEGAGAS;
+            format!(">{lo}M")
+        }
+    }
+}
+
 /// Metrics for engine newPayload responses.
 #[derive(Metrics)]
 #[metrics(scope = "consensus.engine.beacon")]
@@ -220,6 +313,9 @@ pub(crate) struct NewPayloadStatusMetrics {
     /// Start time of the latest new payload call.
     #[metric(skip)]
     pub(crate) latest_start_at: Option<Instant>,
+    /// Gas-bucket-labeled latency and gas/s histograms.
+    #[metric(skip)]
+    pub(crate) gas_bucket: GasBucketMetrics,
     /// The total count of new payload messages received.
     pub(crate) new_payload_messages: Counter,
     /// The total count of new payload messages that we responded to with
@@ -239,6 +335,8 @@ pub(crate) struct NewPayloadStatusMetrics {
     pub(crate) new_payload_error: Counter,
     /// The total gas of valid new payload messages received.
     pub(crate) new_payload_total_gas: Histogram,
+    /// The gas used for the last valid new payload.
+    pub(crate) new_payload_total_gas_last: Gauge,
     /// The gas per second of valid new payload messages received.
     pub(crate) new_payload_gas_per_second: Histogram,
     /// The gas per second for the last new payload call.
@@ -251,6 +349,8 @@ pub(crate) struct NewPayloadStatusMetrics {
     pub(crate) time_between_new_payloads: Histogram,
     /// Time from previous payload start to current payload start (total interval).
     pub(crate) new_payload_interval: Histogram,
+    /// Time diff between forkchoice updated call response and the next new payload call request.
+    pub(crate) forkchoice_updated_new_payload_time_diff: Histogram,
 }
 
 impl NewPayloadStatusMetrics {
@@ -258,6 +358,7 @@ impl NewPayloadStatusMetrics {
     pub(crate) fn update_response_metrics(
         &mut self,
         start: Instant,
+        latest_forkchoice_updated_at: &mut Option<Instant>,
         result: &Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError>,
         gas_used: u64,
     ) {
@@ -277,6 +378,7 @@ impl NewPayloadStatusMetrics {
                 PayloadStatusEnum::Valid => {
                     self.new_payload_valid.increment(1);
                     self.new_payload_total_gas.record(gas_used as f64);
+                    self.new_payload_total_gas_last.set(gas_used as f64);
                     let gas_per_second = gas_used as f64 / elapsed.as_secs_f64();
                     self.new_payload_gas_per_second.record(gas_per_second);
                     self.new_payload_gas_per_second_last.set(gas_per_second);
@@ -290,46 +392,82 @@ impl NewPayloadStatusMetrics {
         self.new_payload_messages.increment(1);
         self.new_payload_latency.record(elapsed);
         self.new_payload_last.set(elapsed);
+        self.gas_bucket.record(gas_used, elapsed);
+        if let Some(latest_forkchoice_updated_at) = latest_forkchoice_updated_at.take() {
+            self.forkchoice_updated_new_payload_time_diff
+                .record(start - latest_forkchoice_updated_at);
+        }
     }
+}
+
+/// Metrics for EIP-7928 Block-Level Access Lists (BAL).
+///
+/// See also <https://github.com/ethereum/execution-metrics/issues/5>
+#[allow(dead_code)]
+#[derive(Metrics, Clone)]
+#[metrics(scope = "execution.block_access_list")]
+pub(crate) struct BalMetrics {
+    /// Size of the BAL in bytes for the current block.
+    pub(crate) size_bytes: Gauge,
+    /// Total number of blocks with valid BALs.
+    pub(crate) valid_total: Counter,
+    /// Total number of blocks with invalid BALs.
+    pub(crate) invalid_total: Counter,
+    /// Time taken to validate the BAL against actual execution.
+    pub(crate) validation_time_seconds: Histogram,
+    /// Number of account changes in the BAL.
+    pub(crate) account_changes: Gauge,
+    /// Number of storage changes in the BAL.
+    pub(crate) storage_changes: Gauge,
+    /// Number of balance changes in the BAL.
+    pub(crate) balance_changes: Gauge,
+    /// Number of nonce changes in the BAL.
+    pub(crate) nonce_changes: Gauge,
+    /// Number of code changes in the BAL.
+    pub(crate) code_changes: Gauge,
 }
 
 /// Metrics for non-execution related block validation.
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.block_validation")]
-pub(crate) struct BlockValidationMetrics {
+pub struct BlockValidationMetrics {
     /// Total number of storage tries updated in the state root calculation
-    pub(crate) state_root_storage_tries_updated_total: Counter,
+    pub state_root_storage_tries_updated_total: Counter,
     /// Total number of times the parallel state root computation fell back to regular.
-    pub(crate) state_root_parallel_fallback_total: Counter,
+    pub state_root_parallel_fallback_total: Counter,
+    /// Total number of times the state root task failed but the fallback succeeded.
+    pub state_root_task_fallback_success_total: Counter,
+    /// Total number of times the state root task timed out and a sequential fallback was spawned.
+    pub state_root_task_timeout_total: Counter,
     /// Latest state root duration, ie the time spent blocked waiting for the state root.
-    pub(crate) state_root_duration: Gauge,
+    pub state_root_duration: Gauge,
     /// Histogram for state root duration ie the time spent blocked waiting for the state root
-    pub(crate) state_root_histogram: Histogram,
+    pub state_root_histogram: Histogram,
     /// Histogram of deferred trie computation duration.
-    pub(crate) deferred_trie_compute_duration: Histogram,
+    pub deferred_trie_compute_duration: Histogram,
     /// Payload conversion and validation latency
-    pub(crate) payload_validation_duration: Gauge,
+    pub payload_validation_duration: Gauge,
     /// Histogram of payload validation latency
-    pub(crate) payload_validation_histogram: Histogram,
+    pub payload_validation_histogram: Histogram,
     /// Payload processor spawning duration
-    pub(crate) spawn_payload_processor: Histogram,
+    pub spawn_payload_processor: Histogram,
     /// Post-execution validation duration
-    pub(crate) post_execution_validation_duration: Histogram,
+    pub post_execution_validation_duration: Histogram,
     /// Total duration of the new payload call
-    pub(crate) total_duration: Histogram,
+    pub total_duration: Histogram,
     /// Size of `HashedPostStateSorted` (`total_len`)
-    pub(crate) hashed_post_state_size: Histogram,
+    pub hashed_post_state_size: Histogram,
     /// Size of `TrieUpdatesSorted` (`total_len`)
-    pub(crate) trie_updates_sorted_size: Histogram,
+    pub trie_updates_sorted_size: Histogram,
     /// Size of `AnchoredTrieInput` overlay `TrieUpdatesSorted` (`total_len`)
-    pub(crate) anchored_overlay_trie_updates_size: Histogram,
+    pub anchored_overlay_trie_updates_size: Histogram,
     /// Size of `AnchoredTrieInput` overlay `HashedPostStateSorted` (`total_len`)
-    pub(crate) anchored_overlay_hashed_state_size: Histogram,
+    pub anchored_overlay_hashed_state_size: Histogram,
 }
 
 impl BlockValidationMetrics {
     /// Records a new state root time, updating both the histogram and state root gauge
-    pub(crate) fn record_state_root(&self, trie_output: &TrieUpdates, elapsed_as_secs: f64) {
+    pub fn record_state_root(&self, trie_output: &TrieUpdates, elapsed_as_secs: f64) {
         self.state_root_storage_tries_updated_total
             .increment(trie_output.storage_tries_ref().len() as u64);
         self.state_root_duration.set(elapsed_as_secs);
@@ -338,7 +476,7 @@ impl BlockValidationMetrics {
 
     /// Records a new payload validation time, updating both the histogram and the payload
     /// validation gauge
-    pub(crate) fn record_payload_validation(&self, elapsed_as_secs: f64) {
+    pub fn record_payload_validation(&self, elapsed_as_secs: f64) {
         self.payload_validation_duration.set(elapsed_as_secs);
         self.payload_validation_histogram.record(elapsed_as_secs);
     }

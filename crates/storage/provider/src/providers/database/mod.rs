@@ -25,7 +25,7 @@ use reth_node_types::{
 };
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
-use reth_stages_types::{StageCheckpoint, StageId};
+use reth_stages_types::{PipelineTarget, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
@@ -40,8 +40,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
-
-use tracing::trace;
+use tracing::{instrument, trace};
 
 mod provider;
 pub use provider::{
@@ -79,9 +78,11 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     rocksdb_provider: RocksDBProvider,
     /// Changeset cache for trie unwinding
     changeset_cache: ChangesetCache,
+    /// Task runtime for spawning parallel I/O work.
+    runtime: reth_tasks::Runtime,
 }
 
-impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
+impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>> {
     /// Instantiates the builder for this type
     pub fn builder() -> ProviderFactoryBuilder<N> {
         ProviderFactoryBuilder::default()
@@ -90,17 +91,24 @@ impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<Data
 
 impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Create new database provider factory.
+    ///
+    /// The storage backends used by the produced factory MAY be inconsistent.
+    /// It is recommended to call [`Self::check_consistency`] after
+    /// creation to ensure consistency between the database and static files.
+    /// If the function returns unwind targets, the caller MUST unwind the
+    /// inner database to the minimum of the two targets to ensure consistency.
     pub fn new(
         db: N::DB,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
         // Load storage settings from database at init time. Creates a temporary provider
         // to read persisted settings, falling back to legacy defaults if none exist.
         //
         // Both factory and all providers it creates should share these cached settings.
-        let legacy_settings = StorageSettings::legacy();
+        let legacy_settings = StorageSettings::v1();
         let storage_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),
@@ -110,6 +118,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Arc::new(RwLock::new(legacy_settings)),
             rocksdb_provider.clone(),
             ChangesetCache::new(),
+            runtime.clone(),
         )
         .storage_settings()?
         .unwrap_or(legacy_settings);
@@ -123,7 +132,25 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             storage_settings: Arc::new(RwLock::new(storage_settings)),
             rocksdb_provider,
             changeset_cache: ChangesetCache::new(),
+            runtime,
         })
+    }
+
+    /// Create new database provider factory and perform consistency checks.
+    ///
+    /// This will call [`Self::check_consistency`] internally and return
+    /// [`ProviderError::MustUnwind`] if inconsistencies are found. It may also
+    /// return any [`ProviderError`] that [`Self::new`] may return, or that are
+    /// encountered during consistency checks.
+    pub fn new_checked(
+        db: N::DB,
+        chain_spec: Arc<N::ChainSpec>,
+        static_file_provider: StaticFileProvider<N::Primitives>,
+        rocksdb_provider: RocksDBProvider,
+        runtime: reth_tasks::Runtime,
+    ) -> ProviderResult<Self> {
+        Self::new(db, chain_spec, static_file_provider, rocksdb_provider, runtime)
+            .and_then(Self::assert_consistent)
     }
 }
 
@@ -171,9 +198,14 @@ impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
     fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {
         unimplemented!("ProviderFactory is a factory, not a provider - use DatabaseProvider::set_pending_rocksdb_batch instead")
     }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
+        unimplemented!("ProviderFactory is a factory, not a provider - use DatabaseProvider::commit_pending_rocksdb_batches instead")
+    }
 }
 
-impl<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
+impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
     pub fn new_with_database_path<P: AsRef<Path>>(
@@ -182,12 +214,14 @@ impl<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        runtime: reth_tasks::Runtime,
     ) -> RethResult<Self> {
         Self::new(
-            Arc::new(init_db(path, args).map_err(RethError::msg)?),
+            init_db(path, args).map_err(RethError::msg)?,
             chain_spec,
             static_file_provider,
             rocksdb_provider,
+            runtime,
         )
         .map_err(RethError::Provider)
     }
@@ -211,6 +245,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
+            self.runtime.clone(),
         ))
     }
 
@@ -229,6 +264,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
+            self.runtime.clone(),
         )))
     }
 
@@ -248,6 +284,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
+            self.runtime.clone(),
         ))
     }
 
@@ -279,6 +316,54 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         let state_provider = provider.try_into_history_at_block(block_number)?;
         trace!(target: "providers::db", ?block_number, %block_hash, "Returning historical state provider for block hash");
         Ok(state_provider)
+    }
+
+    /// Asserts that the static files and database are consistent. If not,
+    /// returns [`ProviderError::MustUnwind`] with the appropriate unwind
+    /// target. May also return any [`ProviderError`] that
+    /// [`Self::check_consistency`] may return.
+    pub fn assert_consistent(self) -> ProviderResult<Self> {
+        let (rocksdb_unwind, static_file_unwind) = self.check_consistency()?;
+
+        let source = match (rocksdb_unwind, static_file_unwind) {
+            (None, None) => return Ok(self),
+            (Some(_), Some(_)) => "RocksDB and Static Files",
+            (Some(_), None) => "RocksDB",
+            (None, Some(_)) => "Static Files",
+        };
+
+        Err(ProviderError::MustUnwind {
+            data_source: source,
+            unwind_to: rocksdb_unwind
+                .into_iter()
+                .chain(static_file_unwind)
+                .min()
+                .expect("at least one unwind target must be Some"),
+        })
+    }
+
+    /// Checks the consistency between the static files and the database. This
+    /// may result in static files being pruned or otherwise healed to ensure
+    /// consistency. I.e. this MAY result in writes to the static files.
+    #[instrument(err, skip(self))]
+    pub fn check_consistency(&self) -> ProviderResult<(Option<u64>, Option<u64>)> {
+        let provider_ro = self.database_provider_ro()?;
+
+        // Step 1: heal file-level inconsistencies (no pruning)
+        self.static_file_provider().check_file_consistency(&provider_ro)?;
+
+        // Step 2: RocksDB consistency check (needs static files tx data)
+        let rocksdb_unwind = self.rocksdb_provider().check_consistency(&provider_ro)?;
+
+        // Step 3: Static file checkpoint consistency (may prune)
+        let static_file_unwind = self.static_file_provider().check_consistency(&provider_ro)?.map(
+            |target| match target {
+                PipelineTarget::Unwind(block) => block,
+                PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
+            },
+        );
+
+        Ok((rocksdb_unwind, static_file_unwind))
     }
 }
 
@@ -658,6 +743,7 @@ where
             storage_settings,
             rocksdb_provider,
             changeset_cache,
+            runtime,
         } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
@@ -668,6 +754,7 @@ where
             .field("storage_settings", &*storage_settings.read())
             .field("rocksdb_provider", &rocksdb_provider)
             .field("changeset_cache", &changeset_cache)
+            .field("runtime", &runtime)
             .finish()
     }
 }
@@ -683,6 +770,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             storage_settings: self.storage_settings.clone(),
             rocksdb_provider: self.rocksdb_provider.clone(),
             changeset_cache: self.changeset_cache.clone(),
+            runtime: self.runtime.clone(),
         }
     }
 }
@@ -740,13 +828,15 @@ mod tests {
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let (_, rocksdb_path) = create_test_rocksdb_dir();
+        let (_rocksdb_dir, rocksdb_path) = create_test_rocksdb_dir();
+        let _db_tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
         let factory = ProviderFactory::<MockNodeTypesWithDB<DatabaseEnv>>::new_with_database_path(
-            tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep(),
+            _db_tempdir.path(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
             RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
+            reth_tasks::Runtime::test(),
         )
         .unwrap();
         let provider = factory.provider().unwrap();
@@ -780,8 +870,9 @@ mod tests {
                 transaction_lookup: Some(PruneMode::Full),
                 ..PruneModes::default()
             };
-            let factory = create_test_provider_factory();
-            let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
+            // Keep factory alive until provider is dropped to prevent TempDatabase cleanup
+            let factory = create_test_provider_factory().with_prune_modes(prune_modes);
+            let provider = factory.provider_rw().unwrap();
             assert_matches!(provider.insert_block(&block.clone().try_recover().unwrap()), Ok(_));
             assert_matches!(provider.transaction_sender(0), Ok(None));
             assert_matches!(

@@ -35,7 +35,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::{context::TxEnv, database::State};
+use revm::{context::TxEnv, database::State, primitives::hardfork::SpecId};
 
 pub mod either;
 /// EVM environment configuration.
@@ -47,7 +47,7 @@ pub use aliases::*;
 #[cfg(feature = "std")]
 mod engine;
 #[cfg(feature = "std")]
-pub use engine::{ConfigureEngineEvm, ExecutableTxIterator, ExecutableTxTuple};
+pub use engine::{ConfigureEngineEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple};
 
 #[cfg(feature = "metrics")]
 pub mod metrics;
@@ -203,6 +203,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
                     + FromRecoveredTx<TxTy<Self::Primitives>>
                     + FromTxWithEncoded<TxTy<Self::Primitives>>,
             Precompiles = PrecompilesMap,
+            Spec: Into<SpecId>,
         >,
     >;
 

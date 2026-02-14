@@ -20,9 +20,9 @@ pub type DupCursorMutTy<TX, T> = <TX as DbTxMut>::DupCursorMut<T>;
 /// Read only transaction
 pub trait DbTx: Debug + Send {
     /// Cursor type for this read-only transaction
-    type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
+    type Cursor<T: Table>: DbCursorRO<T> + Send;
     /// `DupCursor` type for this read-only transaction
-    type DupCursor<T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T> + Send + Sync;
+    type DupCursor<T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T> + Send;
 
     /// Get value by an owned key
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError>;
@@ -51,14 +51,13 @@ pub trait DbTx: Debug + Send {
 /// Read write transaction that allows writing to database
 pub trait DbTxMut: Send {
     /// Read-Write Cursor type
-    type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send + Sync;
+    type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send;
     /// Read-Write `DupCursor` type
     type DupCursorMut<T: DupSort>: DbDupCursorRW<T>
         + DbCursorRW<T>
         + DbDupCursorRO<T>
         + DbCursorRO<T>
-        + Send
-        + Sync;
+        + Send;
 
     /// Put value to database
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;

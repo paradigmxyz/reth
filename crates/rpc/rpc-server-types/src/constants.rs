@@ -47,19 +47,9 @@ pub fn default_max_tracing_requests() -> usize {
 pub const DEFAULT_PROOF_PERMITS: usize = 25;
 
 /// The default IPC endpoint
-#[cfg(windows)]
-pub const DEFAULT_IPC_ENDPOINT: &str = r"\\.\pipe\reth.ipc";
-
-/// The default IPC endpoint
-#[cfg(not(windows))]
 pub const DEFAULT_IPC_ENDPOINT: &str = "/tmp/reth.ipc";
 
-/// The engine_api IPC endpoint
-#[cfg(windows)]
-pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = r"\\.\pipe\reth_engine_api.ipc";
-
 /// The `engine_api` IPC endpoint
-#[cfg(not(windows))]
 pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
 
 /// The default limit for blocks count in `eth_simulateV1`.
@@ -132,4 +122,7 @@ pub mod cache {
 
     /// Default number of concurrent database requests.
     pub const DEFAULT_CONCURRENT_DB_REQUESTS: usize = 512;
+
+    /// Default maximum number of transaction hashes to cache for lookups.
+    pub const DEFAULT_MAX_CACHED_TX_HASHES: u32 = 30_000;
 }
