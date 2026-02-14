@@ -20,14 +20,26 @@ use reth_metrics::{
     Metrics,
 };
 use reth_primitives_traits::NodePrimitives;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::time::Sleep;
-use tracing::{debug, info};
+use tracing::{debug, info, trace};
 
 /// Default offset into the slot at which the mid-slot snapshot is taken.
 ///
 /// 4 seconds matches the Ethereum block building window even though the slot time is 12s.
 pub const DEFAULT_MONITOR_SLOT_OFFSET: Duration = Duration::from_secs(4);
+
+/// Maximum age of a mid-slot snapshot before it is considered stale and discarded.
+///
+/// Slightly above a full slot (12s) + the snapshot offset (4s) to account for minor delays. If a
+/// snapshot is older than this when a new block arrives, we were likely doing backfill sync or
+/// missed a slot.
+const MAX_SNAPSHOT_AGE: Duration = Duration::from_secs(13);
+
+/// Maximum allowed difference between a block's timestamp and the wall clock. Blocks older than
+/// this are assumed to come from backfill sync rather than live following, so metrics are skipped
+/// to avoid polluting results.
+const MAX_BLOCK_AGE: Duration = Duration::from_secs(60);
 
 /// Metrics for the transaction pool monitor.
 #[derive(Metrics)]
@@ -64,6 +76,8 @@ struct PoolSnapshot {
     /// The block number after which this snapshot was taken (i.e. the last canonical block
     /// number).
     after_block: BlockNumber,
+    /// When this snapshot was taken (monotonic clock).
+    taken_at: Instant,
     /// Transaction hashes of all pending (executable) transactions at snapshot time.
     pending_hashes: HashSet<TxHash>,
 }
@@ -143,6 +157,7 @@ where
 
                     mid_slot_snapshot = Some(PoolSnapshot {
                         after_block: block_num,
+                        taken_at: Instant::now(),
                         pending_hashes,
                     });
                 }
@@ -157,6 +172,28 @@ where
                 let (blocks, _state) = new.inner();
                 let tip = blocks.tip();
                 let tip_number = tip.number();
+
+                // Skip blocks that are not recent — during backfill sync the pool state
+                // doesn't reflect live mempool conditions.
+                let now_unix = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let block_age_secs = now_unix.saturating_sub(tip.timestamp());
+                if block_age_secs > MAX_BLOCK_AGE.as_secs() {
+                    trace!(
+                        target: "txpool::orderflow",
+                        block = %tip_number,
+                        block_age_secs,
+                        "skipping stale block during sync"
+                    );
+                    // Discard any snapshot since it's from a different context.
+                    mid_slot_snapshot = None;
+                    timer_armed = false;
+                    last_block_number = Some(tip_number);
+                    continue;
+                }
+
                 let mined_hashes: HashSet<TxHash> = blocks.transaction_hashes().collect();
 
                 if mined_hashes.is_empty() {
@@ -171,7 +208,22 @@ where
 
                 // --- Mid-slot comparison ---
                 // Compare the mid-slot snapshot (taken 4s after the previous block) against
-                // this block's transactions.
+                // this block's transactions. Discard if the snapshot is too old, which
+                // indicates we skipped slots or were catching up.
+                if let Some(ref snapshot) = mid_slot_snapshot {
+                    let snapshot_age = snapshot.taken_at.elapsed();
+                    if snapshot_age > MAX_SNAPSHOT_AGE {
+                        debug!(
+                            target: "txpool::orderflow",
+                            block = %tip_number,
+                            ?snapshot_age,
+                            snapshot_after_block = %snapshot.after_block,
+                            "discarding stale mid-slot snapshot"
+                        );
+                        mid_slot_snapshot = None;
+                    }
+                }
+
                 if let Some(ref snapshot) = mid_slot_snapshot {
                     let matched = mined_hashes
                         .iter()
