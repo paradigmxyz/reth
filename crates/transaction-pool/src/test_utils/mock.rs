@@ -34,7 +34,7 @@ use reth_primitives_traits::{
 use alloy_consensus::error::ValueError;
 use alloy_eips::eip4844::env_settings::KzgSettings;
 use rand::distr::weighted::WeightedIndex;
-use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
+use std::{borrow::Cow, ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
 ///
@@ -704,8 +704,10 @@ impl PoolTransaction for MockTransaction {
 
     type Pooled = PooledTransactionVariant;
 
-    fn consensus_ref(&self) -> Recovered<&Self::Consensus> {
-        unimplemented!("mock transaction does not wrap a consensus transaction")
+    fn consensus_ref(&self) -> Recovered<Cow<'_, Self::Consensus>> {
+        let recovered = self.clone().into_consensus();
+        let (tx, signer) = recovered.into_parts();
+        Recovered::new_unchecked(Cow::Owned(tx), signer)
     }
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {

@@ -78,6 +78,7 @@ use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
 use serde::{Deserialize, Serialize};
 use std::{
+    borrow::Cow,
     collections::HashMap,
     fmt,
     fmt::Debug,
@@ -1258,7 +1259,7 @@ pub trait PoolTransaction:
     }
 
     /// Returns a reference to the consensus transaction with the recovered sender.
-    fn consensus_ref(&self) -> Recovered<&Self::Consensus>;
+    fn consensus_ref(&self) -> Recovered<Cow<'_, Self::Consensus>>;
 
     /// Define a method to convert from the `Self` type to `Consensus`
     fn into_consensus(self) -> Recovered<Self::Consensus>;
@@ -1450,8 +1451,8 @@ impl PoolTransaction for EthPooledTransaction {
         self.transaction().clone()
     }
 
-    fn consensus_ref(&self) -> Recovered<&Self::Consensus> {
-        Recovered::new_unchecked(&*self.transaction, self.transaction.signer())
+    fn consensus_ref(&self) -> Recovered<Cow<'_, Self::Consensus>> {
+        Recovered::new_unchecked(Cow::Borrowed(&*self.transaction), self.transaction.signer())
     }
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {
