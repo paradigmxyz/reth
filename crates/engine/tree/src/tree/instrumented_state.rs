@@ -9,8 +9,8 @@ use reth_provider::{
     StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
     sync::atomic::{AtomicU64, Ordering},
@@ -235,6 +235,13 @@ impl<S: StateRootProvider> StateRootProvider for InstrumentedStateProvider<S> {
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.state_provider.state_root_with_updates(hashed_state)
+    }
+
+    fn state_root_with_updates_sorted(
+        &self,
+        hashed_state: &HashedPostStateSorted,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.state_provider.state_root_with_updates_sorted(hashed_state)
     }
 
     fn state_root_from_nodes_with_updates(
