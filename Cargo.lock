@@ -8808,15 +8808,10 @@ dependencies = [
  "reth-evm",
  "reth-execution-types",
  "reth-primitives-traits",
- "reth-revm",
  "reth-storage-errors",
  "reth-testing-utils",
  "revm",
- "revm-bytecode",
- "revm-database",
- "revm-primitives",
  "secp256k1 0.30.0",
- "tracing-subscriber 0.3.22",
 ]
 
 [[package]]

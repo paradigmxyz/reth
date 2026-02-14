@@ -2,7 +2,7 @@ use crate::{
     backfill::{BackfillAction, BackfillSyncState},
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
-    persistence::{PersistenceHandle, SaveBlocksResult},
+    persistence::PersistenceHandle,
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
@@ -22,7 +22,7 @@ use reth_engine_primitives::{
     ForkchoiceStateTracker, OnForkChoiceUpdated, SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::{block::StateChangeSource, ConfigureEvm, OnStateHook};
+use reth_evm::ConfigureEvm;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
@@ -34,7 +34,7 @@ use reth_provider::{
     StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache, TransactionVariant,
 };
-use reth_revm::{database::StateProviderDatabase, state::EvmState};
+use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
@@ -76,8 +76,8 @@ pub use invalid_headers::InvalidHeaderCache;
 pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
-use persistence_state::PersistenceRx;
 pub use persistence_state::PersistenceState;
+use persistence_state::{PersistenceResult, PersistenceRx};
 pub use reth_engine_primitives::TreeConfig;
 
 pub mod state;
@@ -228,27 +228,6 @@ pub enum TreeAction {
     },
 }
 
-/// Wrapper struct that combines metrics and state hook
-struct MeteredStateHook {
-    metrics: reth_evm::metrics::ExecutorMetrics,
-    inner_hook: Box<dyn OnStateHook>,
-}
-
-impl OnStateHook for MeteredStateHook {
-    fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
-        // Update the metrics for the number of accounts, storage slots and bytecodes loaded
-        let accounts = state.keys().len();
-        let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = state.values().filter(|account| !account.info.is_empty_code_hash()).count();
-
-        self.metrics.accounts_updated_histogram.record(accounts as f64);
-        self.metrics.storage_slots_updated_histogram.record(storage_slots as f64);
-        self.metrics.bytecodes_updated_histogram.record(bytecodes as f64);
-
-        // Call the original state hook
-        self.inner_hook.on_state(source, state);
-    }
-}
 /// The engine API tree handler implementation.
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
@@ -478,18 +457,12 @@ where
                         }
                     }
                 }
-                LoopEvent::PersistenceSaveComplete { result, start_time } => {
-                    let last_block = result.as_ref().map(|r| r.last_block);
-                    let commit_duration = result.as_ref().map(|r| r.commit_duration);
-                    if let Err(err) =
-                        self.on_persistence_complete(last_block, start_time, commit_duration)
-                    {
-                        error!(target: "engine::tree", %err, "Persistence complete handling failed");
-                        return
-                    }
-                }
-                LoopEvent::PersistenceRemoveComplete { result, start_time } => {
-                    if let Err(err) = self.on_persistence_complete(result, start_time, None) {
+                LoopEvent::PersistenceComplete { result, start_time } => {
+                    if let Err(err) = self.on_persistence_complete(
+                        result.last_block,
+                        start_time,
+                        result.commit_duration,
+                    ) {
                         error!(target: "engine::tree", %err, "Persistence complete handling failed");
                         return
                     }
@@ -525,8 +498,11 @@ where
                     crossbeam_channel::select_biased! {
                         recv(rx) -> result => {
                             match result {
-                                Ok(value) => LoopEvent::PersistenceSaveComplete {
-                                    result: value,
+                                Ok(value) => LoopEvent::PersistenceComplete {
+                                    result: PersistenceResult {
+                                        last_block: value.as_ref().map(|r| r.last_block),
+                                        commit_duration: value.as_ref().map(|r| r.commit_duration),
+                                    },
                                     start_time,
                                 },
                                 Err(_) => LoopEvent::Disconnected,
@@ -545,8 +521,11 @@ where
                     crossbeam_channel::select_biased! {
                         recv(rx) -> result => {
                             match result {
-                                Ok(value) => LoopEvent::PersistenceRemoveComplete {
-                                    result: value,
+                                Ok(value) => LoopEvent::PersistenceComplete {
+                                    result: PersistenceResult {
+                                        last_block: value,
+                                        commit_duration: None,
+                                    },
                                     start_time,
                                 },
                                 Err(_) => LoopEvent::Disconnected,
@@ -1380,20 +1359,12 @@ where
         loop {
             // Wait for any in-progress persistence to complete (blocking)
             if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
-                match rx {
-                    PersistenceRx::SaveBlocks(rx) => {
-                        let result =
-                            rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
-                        let last_block = result.as_ref().map(|r| r.last_block);
-                        let commit_duration = result.as_ref().map(|r| r.commit_duration);
-                        self.on_persistence_complete(last_block, start_time, commit_duration)?;
-                    }
-                    PersistenceRx::RemoveBlocks(rx) => {
-                        let result =
-                            rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
-                        self.on_persistence_complete(result, start_time, None)?;
-                    }
-                }
+                let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
+                self.on_persistence_complete(
+                    result.last_block,
+                    start_time,
+                    result.commit_duration,
+                )?;
             }
 
             let blocks_to_persist = self.get_canonical_blocks_to_persist(PersistTarget::Head)?;
@@ -1417,37 +1388,22 @@ where
             return Ok(false);
         };
 
-        match rx {
-            PersistenceRx::SaveBlocks(inner_rx) => match inner_rx.try_recv() {
-                Ok(result) => {
-                    let last_block = result.as_ref().map(|r| r.last_block);
-                    let commit_duration = result.as_ref().map(|r| r.commit_duration);
-                    self.on_persistence_complete(last_block, start_time, commit_duration)?;
-                    Ok(true)
-                }
-                Err(crossbeam_channel::TryRecvError::Empty) => {
-                    self.persistence_state.rx =
-                        Some((PersistenceRx::SaveBlocks(inner_rx), start_time, action));
-                    Ok(false)
-                }
-                Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                    Err(AdvancePersistenceError::ChannelClosed)
-                }
-            },
-            PersistenceRx::RemoveBlocks(inner_rx) => match inner_rx.try_recv() {
-                Ok(result) => {
-                    self.on_persistence_complete(result, start_time, None)?;
-                    Ok(true)
-                }
-                Err(crossbeam_channel::TryRecvError::Empty) => {
-                    self.persistence_state.rx =
-                        Some((PersistenceRx::RemoveBlocks(inner_rx), start_time, action));
-                    Ok(false)
-                }
-                Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                    Err(AdvancePersistenceError::ChannelClosed)
-                }
-            },
+        match rx.try_recv() {
+            Ok(result) => {
+                self.on_persistence_complete(
+                    result.last_block,
+                    start_time,
+                    result.commit_duration,
+                )?;
+                Ok(true)
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {
+                self.persistence_state.rx = Some((rx, start_time, action));
+                Ok(false)
+            }
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                Err(AdvancePersistenceError::ChannelClosed)
+            }
         }
     }
 
@@ -1509,35 +1465,7 @@ where
             });
         }
 
-        // Clean up timing stats for persisted blocks and check for slow blocks
-        if let Some(commit_dur) = commit_duration {
-            let mut persisted_stats = Vec::new();
-            self.execution_timing_stats.retain(|_, stats| {
-                if stats.block_number <= last_persisted_block_number {
-                    persisted_stats.push(stats.clone());
-                    false
-                } else {
-                    true
-                }
-            });
-
-            if let Some(threshold) = self.config.slow_block_threshold() {
-                for stats in persisted_stats {
-                    let total_duration = stats.execution_duration +
-                        stats.state_read_duration +
-                        stats.state_hash_duration +
-                        commit_dur;
-
-                    if total_duration > threshold {
-                        self.emit_event(ConsensusEngineEvent::SlowBlock(SlowBlockInfo {
-                            stats,
-                            commit_duration: commit_dur,
-                            total_duration,
-                        }));
-                    }
-                }
-            }
-        }
+        self.purge_timing_stats(last_persisted_block_number, commit_duration);
 
         Ok(())
     }
@@ -1756,7 +1684,7 @@ where
 
         // remove all buffered blocks below the backfill height
         self.state.buffer.remove_old_blocks(backfill_height);
-        self.execution_timing_stats.retain(|_, stats| stats.block_number > backfill_height);
+        self.purge_timing_stats(backfill_height, None);
         // we remove all entries because now we're synced to the backfill target and consider this
         // the canonical chain
         self.canonical_in_memory_state.clear_state();
@@ -1890,6 +1818,41 @@ where
         Ok(())
     }
 
+    /// Removes timing stats for blocks at or below the given block number.
+    /// If `commit_duration` is provided, checks for slow blocks and emits events before removing.
+    fn purge_timing_stats(&mut self, below_number: u64, commit_duration: Option<Duration>) {
+        let mut persisted_stats = Vec::new();
+        self.execution_timing_stats.retain(|_, stats| {
+            if stats.block_number <= below_number {
+                if commit_duration.is_some() {
+                    persisted_stats.push(stats.clone());
+                }
+                false
+            } else {
+                true
+            }
+        });
+
+        if let Some(commit_dur) = commit_duration &&
+            let Some(threshold) = self.config.slow_block_threshold()
+        {
+            for stats in persisted_stats {
+                let total_duration = stats.execution_duration +
+                    stats.state_read_duration +
+                    stats.state_hash_duration +
+                    commit_dur;
+
+                if total_duration > threshold {
+                    self.emit_event(ConsensusEngineEvent::SlowBlock(SlowBlockInfo {
+                        stats,
+                        commit_duration: commit_dur,
+                        total_duration,
+                    }));
+                }
+            }
+        }
+    }
+
     /// Emits an outgoing event to the engine.
     fn emit_event(&mut self, event: impl Into<EngineApiEvent<N>>) {
         let event = event.into();
@@ -1997,9 +1960,7 @@ where
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
         self.remove_before(self.persistence_state.last_persisted_block, finalized)?;
-        self.execution_timing_stats.retain(|_, stats| {
-            stats.block_number > self.persistence_state.last_persisted_block.number
-        });
+        self.purge_timing_stats(self.persistence_state.last_persisted_block.number, None);
         self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
@@ -3133,17 +3094,10 @@ where
 {
     /// An engine API message was received.
     EngineMessage(FromEngine<EngineApiRequest<T, N>, N::Block>),
-    /// A save-blocks persistence task completed.
-    PersistenceSaveComplete {
-        /// The result of the save-blocks operation.
-        result: Option<SaveBlocksResult>,
-        /// When the persistence operation started.
-        start_time: Instant,
-    },
-    /// A remove-blocks persistence task completed.
-    PersistenceRemoveComplete {
-        /// The result of the remove-blocks operation.
-        result: Option<BlockNumHash>,
+    /// A persistence task completed.
+    PersistenceComplete {
+        /// The unified result of the persistence operation.
+        result: PersistenceResult,
         /// When the persistence operation started.
         start_time: Instant,
     },

@@ -24,8 +24,17 @@ use crate::persistence::SaveBlocksResult;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::trace;
+
+/// Unified result of any persistence operation.
+#[derive(Debug)]
+pub(crate) struct PersistenceResult {
+    /// The last block that was persisted, if any.
+    pub(crate) last_block: Option<BlockNumHash>,
+    /// The commit duration, only available for save-blocks operations.
+    pub(crate) commit_duration: Option<Duration>,
+}
 
 /// Receiver for the result of a persistence operation.
 ///
@@ -37,6 +46,45 @@ pub(crate) enum PersistenceRx {
     SaveBlocks(CrossbeamReceiver<Option<SaveBlocksResult>>),
     /// Receiver for the result of a remove-blocks operation.
     RemoveBlocks(CrossbeamReceiver<Option<BlockNumHash>>),
+}
+
+impl PersistenceRx {
+    /// Blocking receive, converting the variant-specific result into a unified
+    /// [`PersistenceResult`].
+    pub(crate) fn recv(self) -> Result<PersistenceResult, crossbeam_channel::RecvError> {
+        match self {
+            Self::SaveBlocks(rx) => {
+                let result = rx.recv()?;
+                Ok(PersistenceResult {
+                    last_block: result.as_ref().map(|r| r.last_block),
+                    commit_duration: result.as_ref().map(|r| r.commit_duration),
+                })
+            }
+            Self::RemoveBlocks(rx) => {
+                let result = rx.recv()?;
+                Ok(PersistenceResult { last_block: result, commit_duration: None })
+            }
+        }
+    }
+
+    /// Non-blocking try receive, converting the variant-specific result into a
+    /// unified [`PersistenceResult`].
+    #[cfg(test)]
+    pub(crate) fn try_recv(&self) -> Result<PersistenceResult, crossbeam_channel::TryRecvError> {
+        match self {
+            Self::SaveBlocks(rx) => {
+                let result = rx.try_recv()?;
+                Ok(PersistenceResult {
+                    last_block: result.as_ref().map(|r| r.last_block),
+                    commit_duration: result.as_ref().map(|r| r.commit_duration),
+                })
+            }
+            Self::RemoveBlocks(rx) => {
+                let result = rx.try_recv()?;
+                Ok(PersistenceResult { last_block: result, commit_duration: None })
+            }
+        }
+    }
 }
 
 /// The state of the persistence task.

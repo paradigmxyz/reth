@@ -42,7 +42,7 @@ use reth_provider::{
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::{states::bundle_state::BundleRetention, State};
+use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
@@ -1518,7 +1518,6 @@ where
             output.state.state.values().filter(|acc| acc.was_destroyed()).count();
         let storage_slots_changed =
             output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
-        // Storage slots deleted = slots where present_value is zero and previous was non-zero
         let storage_slots_deleted = output
             .state
             .state
@@ -1528,48 +1527,28 @@ where
                 slot.present_value.is_zero() && !slot.previous_or_original_value.is_zero()
             })
             .count();
-        // Count only NEW contract deployments (bytecode that will be persisted to DB).
-        // A contract is newly deployed when an account now has non-empty code_hash but
-        // previously had no code. This filters out bytecode that was merely loaded
-        // from the cache during execution (e.g., EXTCODESIZE on existing contracts).
-        let bytecodes_changed = output
-            .state
-            .state
-            .values()
-            .filter(|acc| {
-                // Account now has code (non-empty code_hash)
-                let has_code_now =
-                    acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
-                // Account previously had no code (either didn't exist or had KECCAK_EMPTY)
-                let had_no_code_before = acc
-                    .original_info
-                    .as_ref()
-                    .map(|info| info.code_hash == KECCAK_EMPTY)
-                    .unwrap_or(true); // None means account was created = had no code
-                has_code_now && had_no_code_before
-            })
-            .count();
-        // Sum bytecode sizes for UNIQUE newly deployed bytecodes only.
-        // This counts actual bytes persisted to the DB's code table, not duplicates.
-        // Example: Factory deploying 3 identical contracts = code_bytes of 1 unique bytecode.
+
+        // Helper: check if account represents a new contract deployment
+        let is_new_deployment = |acc: &BundleAccount| -> bool {
+            let has_code_now = acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
+            let had_no_code_before = acc
+                .original_info
+                .as_ref()
+                .map(|info| info.code_hash == KECCAK_EMPTY)
+                .unwrap_or(true);
+            has_code_now && had_no_code_before
+        };
+
+        let bytecodes_changed =
+            output.state.state.values().filter(|acc| is_new_deployment(acc)).count();
+
+        // Unique new code hashes to count actual bytes persisted (deduplicated)
         let unique_new_code_hashes: B256Set = output
             .state
             .state
             .values()
-            .filter_map(|acc| {
-                let has_code_now =
-                    acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
-                let had_no_code_before = acc
-                    .original_info
-                    .as_ref()
-                    .map(|info| info.code_hash == KECCAK_EMPTY)
-                    .unwrap_or(true);
-                if has_code_now && had_no_code_before {
-                    acc.info.as_ref().map(|info| info.code_hash)
-                } else {
-                    None
-                }
-            })
+            .filter(|acc| is_new_deployment(acc))
+            .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash))
             .collect();
         let code_bytes_written: usize = unique_new_code_hashes
             .iter()
