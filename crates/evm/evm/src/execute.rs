@@ -266,7 +266,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
     }
 
     /// Sets the [`CachedHeaderValues`] on this input.
-    pub fn with_cached_header_values(mut self, cached: CachedHeaderValues) -> Self {
+    pub const fn with_cached_header_values(mut self, cached: CachedHeaderValues) -> Self {
         self.cached_header_values = cached;
         self
     }
