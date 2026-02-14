@@ -2,8 +2,9 @@
 
 use crate::{BuilderContext, FullNodeTypes};
 use alloy_primitives::map::AddressSet;
+use futures::FutureExt;
 use reth_chain_state::CanonStateSubscriptions;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_node_api::{BlockTy, NodeTypes, TxTy};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, BlobStore, CoinbaseTipOrdering, PoolConfig, PoolTransaction,
@@ -310,7 +311,9 @@ where
     spawn_local_backup_task(ctx, pool.clone())?;
     spawn_pool_maintenance_task(ctx, pool.clone(), pool_config)?;
 
-    if ctx.config().txpool.monitor_orderflow {
+    // Auto-enable on Ethereum mainnet for convenience, or when explicitly enabled via CLI.
+    let is_mainnet = ctx.chain_spec().chain().is_ethereum();
+    if ctx.config().txpool.monitor_orderflow || is_mainnet {
         spawn_pool_orderflow_monitor_task(ctx, pool)?;
     }
 
@@ -329,13 +332,9 @@ where
 {
     let chain_events = ctx.provider().canonical_state_stream();
 
-    ctx.task_executor().spawn_critical_task(
-        "txpool orderflow monitor task",
-        reth_transaction_pool::orderflow::monitor_orderflow_future(
-            pool,
-            chain_events,
-            Default::default(),
-        ),
+    ctx.task_executor().spawn_task(
+        reth_transaction_pool::orderflow::monitor_orderflow(pool, chain_events, Default::default())
+            .boxed(),
     );
 
     Ok(())

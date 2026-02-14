@@ -13,7 +13,7 @@
 use crate::traits::TransactionPool;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{map::HashSet, BlockNumber, TxHash};
-use futures_util::{FutureExt, Stream, StreamExt};
+use futures_util::{Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
@@ -21,7 +21,6 @@ use reth_metrics::{
 };
 use reth_primitives_traits::NodePrimitives;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::time::Sleep;
 use tracing::{debug, info, trace};
 
 /// Default offset into the slot at which the mid-slot snapshot is taken.
@@ -41,7 +40,7 @@ const MAX_SNAPSHOT_AGE: Duration = Duration::from_secs(13);
 /// to avoid polluting results.
 const MAX_BLOCK_AGE: Duration = Duration::from_secs(60);
 
-/// Metrics for the transaction pool monitor.
+/// Metrics for the transaction pool orderflow monitor.
 #[derive(Metrics)]
 #[metrics(scope = "transaction_pool.orderflow")]
 pub struct OrderflowMonitorMetrics {
@@ -73,8 +72,7 @@ pub struct OrderflowMonitorMetrics {
 /// A snapshot of transaction hashes currently in the pool.
 #[derive(Debug)]
 struct PoolSnapshot {
-    /// The block number after which this snapshot was taken (i.e. the last canonical block
-    /// number).
+    /// The block number after which this snapshot was taken.
     after_block: BlockNumber,
     /// When this snapshot was taken (monotonic clock).
     taken_at: Instant,
@@ -82,7 +80,7 @@ struct PoolSnapshot {
     pending_hashes: HashSet<TxHash>,
 }
 
-/// Configuration for the pool monitor.
+/// Configuration for the orderflow monitor.
 #[derive(Debug, Clone)]
 pub struct OrderflowMonitorConfig {
     /// Offset into the slot at which the mid-slot snapshot is taken.
@@ -95,28 +93,11 @@ impl Default for OrderflowMonitorConfig {
     }
 }
 
-/// Returns a spawnable future that monitors pool availability of mined transactions.
-pub fn monitor_orderflow_future<N, P, St>(
-    pool: P,
-    events: St,
-    config: OrderflowMonitorConfig,
-) -> futures_util::future::BoxFuture<'static, ()>
-where
-    N: NodePrimitives,
-    P: TransactionPool + 'static,
-    St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
-{
-    async move {
-        monitor_orderflow(pool, events, config).await;
-    }
-    .boxed()
-}
-
 /// Monitors pool availability of mined transactions.
 ///
 /// For each canonical block, this compares the block's transactions against snapshots of the
 /// local pool to determine how many mined transactions were locally available.
-async fn monitor_orderflow<N, P, St>(pool: P, mut events: St, config: OrderflowMonitorConfig)
+pub async fn monitor_orderflow<N, P, St>(pool: P, mut events: St, config: OrderflowMonitorConfig)
 where
     N: NodePrimitives,
     P: TransactionPool + 'static,
@@ -124,29 +105,19 @@ where
 {
     let metrics = OrderflowMonitorMetrics::default();
 
-    // The mid-slot snapshot taken `slot_offset` after the last block.
     let mut mid_slot_snapshot: Option<PoolSnapshot> = None;
 
-    // Timer that fires `slot_offset` after each new canonical block to trigger the mid-slot
-    // snapshot.
-    let mut snapshot_timer: std::pin::Pin<Box<Sleep>> =
-        Box::pin(tokio::time::sleep(config.slot_offset));
-    let mut timer_armed = false;
+    // Block number the timer is armed for; `None` means the timer is disarmed.
+    let mut mid_slot_target: Option<BlockNumber> = None;
 
-    // The block number we expect the mid-slot snapshot to correspond to (last seen block).
-    let mut last_block_number: Option<BlockNumber> = None;
+    let sleep = tokio::time::sleep(Duration::MAX);
+    tokio::pin!(sleep);
 
     loop {
         tokio::select! {
-            // Mid-slot snapshot timer fires
-            _ = &mut snapshot_timer, if timer_armed => {
-                timer_armed = false;
-                if let Some(block_num) = last_block_number {
-                    let pending = pool.pending_transactions();
-                    let pending_hashes: HashSet<TxHash> = pending
-                        .iter()
-                        .map(|tx| *tx.hash())
-                        .collect();
+            _ = &mut sleep, if mid_slot_target.is_some() => {
+                if let Some(block_num) = mid_slot_target.take() {
+                    let pending_hashes = collect_pending_hashes(&pool);
 
                     debug!(
                         target: "txpool::orderflow",
@@ -187,36 +158,43 @@ where
                         block_age_secs,
                         "skipping stale block during sync"
                     );
-                    // Discard any snapshot since it's from a different context.
                     mid_slot_snapshot = None;
-                    timer_armed = false;
-                    last_block_number = Some(tip_number);
+                    mid_slot_target = None;
                     continue;
                 }
 
-                let mined_hashes: HashSet<TxHash> = blocks.transaction_hashes().collect();
+                // Skip multi-block notifications (catch-up) — the snapshots wouldn't match.
+                let first_number = blocks.first().number();
+                if first_number != tip_number {
+                    debug!(
+                        target: "txpool::orderflow",
+                        first_block = %first_number,
+                        tip_block = %tip_number,
+                        "skipping multi-block notification"
+                    );
+                    mid_slot_snapshot = None;
+                    mid_slot_target = Some(tip_number);
+                    sleep.as_mut().reset(tokio::time::Instant::now() + config.slot_offset);
+                    continue;
+                }
 
-                if mined_hashes.is_empty() {
-                    // empty block, still reset timer
-                    last_block_number = Some(tip_number);
-                    snapshot_timer
-                        .as_mut()
-                        .reset(tokio::time::Instant::now() + config.slot_offset);
-                    timer_armed = true;
+                let mined: Vec<TxHash> = blocks.transaction_hashes().collect();
+
+                if mined.is_empty() {
+                    mid_slot_snapshot = None;
+                    mid_slot_target = Some(tip_number);
+                    sleep.as_mut().reset(tokio::time::Instant::now() + config.slot_offset);
                     continue;
                 }
 
                 // --- Mid-slot comparison ---
-                // Compare the mid-slot snapshot (taken 4s after the previous block) against
-                // this block's transactions. Discard if the snapshot is too old, which
-                // indicates we skipped slots or were catching up.
+                // Discard snapshot if too old (missed slots or catching up).
                 if let Some(ref snapshot) = mid_slot_snapshot {
-                    let snapshot_age = snapshot.taken_at.elapsed();
-                    if snapshot_age > MAX_SNAPSHOT_AGE {
+                    if snapshot.taken_at.elapsed() > MAX_SNAPSHOT_AGE {
                         debug!(
                             target: "txpool::orderflow",
                             block = %tip_number,
-                            ?snapshot_age,
+                            snapshot_age = ?snapshot.taken_at.elapsed(),
                             snapshot_after_block = %snapshot.after_block,
                             "discarding stale mid-slot snapshot"
                         );
@@ -225,56 +203,45 @@ where
                 }
 
                 if let Some(ref snapshot) = mid_slot_snapshot {
-                    let matched = mined_hashes
-                        .iter()
-                        .filter(|h| snapshot.pending_hashes.contains(*h))
-                        .count();
+                    let matched = count_matches(&mined, &snapshot.pending_hashes);
+                    let ratio = matched as f64 / mined.len() as f64;
+                    let ratio_bps = (ratio * 10000.0).round() as u64;
 
-                    let ratio = matched as f64 / mined_hashes.len() as f64;
-
-                    metrics.mid_slot_mined_transactions.set(mined_hashes.len() as f64);
+                    metrics.mid_slot_mined_transactions.set(mined.len() as f64);
                     metrics.mid_slot_matched_transactions.set(matched as f64);
-                    metrics.mid_slot_match_ratio_bps.set((ratio * 10000.0).round());
+                    metrics.mid_slot_match_ratio_bps.set(ratio_bps as f64);
                     metrics.mid_slot_match_ratio.record(ratio);
 
                     info!(
                         target: "txpool::orderflow",
                         block = %tip_number,
-                        mined = %mined_hashes.len(),
-                        matched = %matched,
-                        ratio = %format!("{:.2}%", ratio * 100.0),
+                        mined = %mined.len(),
+                        matched,
+                        ratio_bps,
                         snapshot_after_block = %snapshot.after_block,
                         "mid-slot pool coverage"
                     );
                 }
 
                 // --- On-block comparison ---
-                // Snapshot of the pool right now (before the pool processes this block).
-                let pending = pool.pending_transactions();
-                let on_block_hashes: HashSet<TxHash> = pending
-                    .iter()
-                    .map(|tx| *tx.hash())
-                    .collect();
+                let on_block_hashes = collect_pending_hashes(&pool);
 
-                let matched = mined_hashes
-                    .iter()
-                    .filter(|h| on_block_hashes.contains(*h))
-                    .count();
+                let matched = count_matches(&mined, &on_block_hashes);
+                let ratio = matched as f64 / mined.len() as f64;
+                let ratio_bps = (ratio * 10000.0).round() as u64;
 
-                let ratio = matched as f64 / mined_hashes.len() as f64;
-
-                metrics.on_block_mined_transactions.set(mined_hashes.len() as f64);
+                metrics.on_block_mined_transactions.set(mined.len() as f64);
                 metrics.on_block_matched_transactions.set(matched as f64);
-                metrics.on_block_match_ratio_bps.set((ratio * 10000.0).round());
+                metrics.on_block_match_ratio_bps.set(ratio_bps as f64);
                 metrics.on_block_match_ratio.record(ratio);
                 metrics.blocks_monitored.increment(1);
 
                 info!(
                     target: "txpool::orderflow",
                     block = %tip_number,
-                    mined = %mined_hashes.len(),
-                    matched = %matched,
-                    ratio = %format!("{:.2}%", ratio * 100.0),
+                    mined = %mined.len(),
+                    matched,
+                    ratio_bps,
                     pool_pending = %on_block_hashes.len(),
                     "on-block pool coverage"
                 );
@@ -283,12 +250,20 @@ where
                 mid_slot_snapshot = None;
 
                 // Arm the timer for the next mid-slot snapshot.
-                last_block_number = Some(tip_number);
-                snapshot_timer
-                    .as_mut()
-                    .reset(tokio::time::Instant::now() + config.slot_offset);
-                timer_armed = true;
+                mid_slot_target = Some(tip_number);
+                sleep.as_mut().reset(tokio::time::Instant::now() + config.slot_offset);
             }
         }
     }
+}
+
+/// Collects pending transaction hashes from the pool into a [`HashSet`].
+fn collect_pending_hashes<P: TransactionPool>(pool: &P) -> HashSet<TxHash> {
+    let pending = pool.pending_transactions();
+    pending.iter().map(|tx| *tx.hash()).collect()
+}
+
+/// Counts how many hashes from `mined` are present in `pool_hashes`.
+fn count_matches(mined: &[TxHash], pool_hashes: &HashSet<TxHash>) -> usize {
+    mined.iter().filter(|h| pool_hashes.contains(*h)).count()
 }
