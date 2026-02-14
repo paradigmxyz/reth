@@ -1,4 +1,7 @@
 //! Engine orchestrator launch helper.
+//!
+//! Provides [`build_engine_orchestrator`] which wires together all engine components and returns a
+//! [`ChainOrchestrator`] ready to be polled as a `Stream`.
 
 use crate::{
     backfill::PipelineSync,
@@ -25,10 +28,22 @@ use reth_tasks::TaskSpawner;
 use reth_trie_db::ChangesetCache;
 use std::sync::Arc;
 
-/// Builds the engine orchestrator that drives the chain forward.
+/// Builds the engine [`ChainOrchestrator`] that drives the chain forward.
 ///
-/// This wires together the block downloader, persistence layer, engine API tree handler,
-/// and pipeline sync into a [`ChainOrchestrator`].
+/// This spawns and wires together the following components:
+///
+/// - **[`BasicBlockDownloader`]** — downloads blocks on demand from the network during live sync.
+/// - **[`PersistenceHandle`]** — spawns the persistence service on a background thread for writing
+///   blocks and performing pruning outside the critical consensus path.
+/// - **[`EngineApiTreeHandler`]** — spawns the tree handler that processes engine API requests
+///   (`newPayload`, `forkchoiceUpdated`) and maintains the in-memory chain state.
+/// - **[`EngineApiRequestHandler`]** + **[`EngineHandler`]** — glue that routes incoming CL
+///   messages to the tree handler and manages download requests.
+/// - **[`PipelineSync`]** — wraps the staged sync [`Pipeline`] for backfill sync when the node
+///   needs to catch up over large block ranges.
+///
+/// The returned orchestrator implements [`Stream`] and yields
+/// [`ChainEvent`](crate::chain::ChainEvent)s.
 #[expect(clippy::too_many_arguments)]
 pub fn build_engine_orchestrator<N, Client, S, V, C>(
     engine_kind: EngineApiKind,
