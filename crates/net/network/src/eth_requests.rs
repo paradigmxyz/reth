@@ -306,7 +306,10 @@ where
 
     /// Handles [`GetBlockAccessLists`] queries.
     ///
-    /// For now this returns one empty BAL per requested hash.
+    /// Returns one BAL entry per requested hash in request order.
+    ///
+    /// BAL data is loaded from the configured store; missing entries (or store failures) are
+    /// returned as empty bytes to preserve response cardinality.
     fn on_block_access_lists_request(
         &self,
         _peer_id: PeerId,
