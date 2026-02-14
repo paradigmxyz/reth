@@ -35,7 +35,7 @@ impl From<ChangesetEntry> for StorageEntry {
 }
 
 /// Storage reader
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageReader: Send {
     /// Get plainstate storages for addresses and storage keys.
     fn plain_state_storages(
@@ -61,7 +61,7 @@ pub trait StorageReader: Send {
 
 /// Storage `ChangeSet` reader
 #[cfg(feature = "db-api")]
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageChangeSetReader: Send {
     /// Iterate over storage changesets and return the storage state from before this block.
     ///
