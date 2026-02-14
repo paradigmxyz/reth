@@ -3,7 +3,7 @@
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_trie_sparse::SparseStateTrie;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tracing::debug;
 
 /// Type alias for the sparse trie type used in preservation.
@@ -27,6 +27,27 @@ impl SharedPreservedSparseTrie {
     /// waits for the trie to be stored.
     pub(super) fn lock(&self) -> PreservedTrieGuard<'_> {
         PreservedTrieGuard(self.0.lock())
+    }
+
+    /// Waits until the sparse trie lock becomes available.
+    ///
+    /// This acquires and immediately releases the lock, ensuring that any
+    /// ongoing operations complete before returning. Useful for synchronization
+    /// before starting payload processing.
+    ///
+    /// Returns the time spent waiting for the lock.
+    pub(super) fn wait_for_availability(&self) -> std::time::Duration {
+        let start = Instant::now();
+        let _guard = self.0.lock();
+        let elapsed = start.elapsed();
+        if elapsed.as_millis() > 5 {
+            debug!(
+                target: "engine::tree::payload_processor",
+                blocked_for=?elapsed,
+                "Waited for preserved sparse trie to become available"
+            );
+        }
+        elapsed
     }
 }
 
