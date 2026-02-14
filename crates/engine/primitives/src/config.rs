@@ -68,12 +68,12 @@ pub const DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES: usize = 100;
 /// Default timeout for the state root task before spawning a sequential fallback.
 pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// Default transaction count threshold below which blocks skip the `StateRootTask` machinery.
+/// Default gas used threshold below which blocks skip the `StateRootTask` machinery.
 ///
-/// For blocks with fewer transactions than this threshold, the coordination overhead of the sparse
+/// For blocks with less gas used than this threshold, the coordination overhead of the sparse
 /// trie task (~5-6ms for channel setup, proof workers, multiproof gathering) exceeds the benefit.
 /// These blocks fall back to synchronous (serial) state root computation instead.
-pub const DEFAULT_SMALL_BLOCK_TX_THRESHOLD: usize = 30;
+pub const DEFAULT_SMALL_BLOCK_GAS_THRESHOLD: u64 = 10_000_000;
 
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
@@ -193,9 +193,9 @@ pub struct TreeConfig {
     /// computation is spawned in parallel and whichever finishes first is used.
     /// If `None`, the timeout fallback is disabled.
     state_root_task_timeout: Option<Duration>,
-    /// Transaction count threshold below which blocks skip the `StateRootTask` in favor of
+    /// Gas used threshold below which blocks skip the `StateRootTask` in favor of
     /// synchronous (serial) state root computation. Set to 0 to disable.
-    small_block_tx_threshold: usize,
+    small_block_gas_threshold: u64,
 }
 
 impl Default for TreeConfig {
@@ -230,7 +230,7 @@ impl Default for TreeConfig {
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
-            small_block_tx_threshold: DEFAULT_SMALL_BLOCK_TX_THRESHOLD,
+            small_block_gas_threshold: DEFAULT_SMALL_BLOCK_GAS_THRESHOLD,
         }
     }
 }
@@ -297,7 +297,7 @@ impl TreeConfig {
             sparse_trie_max_storage_tries,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
-            small_block_tx_threshold: DEFAULT_SMALL_BLOCK_TX_THRESHOLD,
+            small_block_gas_threshold: DEFAULT_SMALL_BLOCK_GAS_THRESHOLD,
         }
     }
 
@@ -669,14 +669,14 @@ impl TreeConfig {
         self
     }
 
-    /// Returns the transaction count threshold for small block optimization.
-    pub const fn small_block_tx_threshold(&self) -> usize {
-        self.small_block_tx_threshold
+    /// Returns the gas used threshold for small block optimization.
+    pub const fn small_block_gas_threshold(&self) -> u64 {
+        self.small_block_gas_threshold
     }
 
-    /// Setter for transaction count threshold below which blocks skip `StateRootTask`.
-    pub const fn with_small_block_tx_threshold(mut self, threshold: usize) -> Self {
-        self.small_block_tx_threshold = threshold;
+    /// Setter for gas used threshold below which blocks skip `StateRootTask`.
+    pub const fn with_small_block_gas_threshold(mut self, threshold: u64) -> Self {
+        self.small_block_gas_threshold = threshold;
         self
     }
 }

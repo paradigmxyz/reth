@@ -436,7 +436,7 @@ pub struct BlockValidationMetrics {
     pub state_root_task_fallback_success_total: Counter,
     /// Total number of times the state root task timed out and a sequential fallback was spawned.
     pub state_root_task_timeout_total: Counter,
-    /// Total number of times the state root task was skipped for small blocks.
+    /// Total number of times the state root task was skipped for small blocks (low gas used).
     pub state_root_task_small_block_skip_total: Counter,
     /// Latest state root duration, ie the time spent blocked waiting for the state root.
     pub state_root_duration: Gauge,

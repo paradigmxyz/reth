@@ -400,7 +400,7 @@ where
         };
 
         // Plan the strategy used for state root computation.
-        let strategy = self.plan_state_root_computation(input.transaction_count());
+        let strategy = self.plan_state_root_computation(input.gas_used());
 
         debug!(
             target: "engine::tree::payload_validator",
@@ -1234,26 +1234,26 @@ where
 
     /// Determines the state root computation strategy based on configuration and block size.
     ///
-    /// For small blocks (below the configured transaction count threshold), the sparse trie task's
+    /// For small blocks (below the configured gas used threshold), the sparse trie task's
     /// coordination overhead (~5-6ms for channel setup, proof workers, multiproof gathering) is
     /// disproportionate to the actual execution cost. These blocks fall back to synchronous
     /// (serial) state root computation.
     ///
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
-    fn plan_state_root_computation(&self, transaction_count: usize) -> StateRootStrategy {
+    fn plan_state_root_computation(&self, gas_used: u64) -> StateRootStrategy {
         if self.config.state_root_fallback() {
             return StateRootStrategy::Synchronous;
         }
 
         if self.config.use_state_root_task() {
-            let threshold = self.config.small_block_tx_threshold();
-            if threshold > 0 && transaction_count < threshold {
+            let threshold = self.config.small_block_gas_threshold();
+            if threshold > 0 && gas_used < threshold {
                 debug!(
                     target: "engine::tree::payload_validator",
-                    transaction_count,
+                    gas_used,
                     threshold,
-                    "Skipping StateRootTask for small block, using serial state root"
+                    "Skipping StateRootTask for small block (low gas), using serial state root"
                 );
                 self.metrics.block_validation.state_root_task_small_block_skip_total.increment(1);
                 return StateRootStrategy::Synchronous;
@@ -1662,6 +1662,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.transaction_count(),
             Self::Block(block) => block.transaction_count(),
+        }
+    }
+
+    /// Returns the gas used by the payload or block.
+    pub fn gas_used(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.gas_used(),
+            Self::Block(block) => block.header().gas_used(),
         }
     }
 
