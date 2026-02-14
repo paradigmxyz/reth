@@ -471,11 +471,11 @@ where
                     this.pending_notifications.push_back(notification);
                     continue;
                 }
-                if let Some(committed) = notification.committed_chain() {
-                    if committed.tip().number() <= this.initial_local_head.number {
-                        // Covered by backfill range, safe to discard
-                        continue;
-                    }
+                if let Some(committed) = notification.committed_chain() &&
+                    committed.tip().number() <= this.initial_local_head.number
+                {
+                    // Covered by backfill range, safe to discard
+                    continue;
                 }
                 // Beyond the backfill range — buffer for delivery after backfill
                 this.pending_notifications.push_back(notification);
