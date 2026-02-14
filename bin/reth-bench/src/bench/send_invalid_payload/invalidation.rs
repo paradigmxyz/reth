@@ -217,3 +217,147 @@ impl InvalidationConfig {
         changes
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Creates a minimal V1 payload for testing.
+    fn test_payload_v1() -> ExecutionPayloadV1 {
+        ExecutionPayloadV1 {
+            parent_hash: B256::with_last_byte(1),
+            fee_recipient: Address::with_last_byte(2),
+            state_root: B256::with_last_byte(3),
+            receipts_root: B256::with_last_byte(4),
+            logs_bloom: Bloom::ZERO,
+            prev_randao: B256::with_last_byte(5),
+            block_number: 100,
+            gas_limit: 30_000_000,
+            gas_used: 21_000,
+            timestamp: 1_700_000_000,
+            extra_data: Bytes::new(),
+            base_fee_per_gas: U256::from(1000),
+            block_hash: B256::with_last_byte(6),
+            transactions: vec![],
+        }
+    }
+
+    #[test]
+    fn default_config_no_changes() {
+        let config = InvalidationConfig::default();
+        let mut payload = test_payload_v1();
+        let original = payload.clone();
+        let changes = config.apply_to_payload_v1(&mut payload);
+        assert!(changes.is_empty());
+        assert_eq!(payload, original);
+    }
+
+    #[test]
+    fn explicit_override_state_root() {
+        let new_root = B256::with_last_byte(0xff);
+        let config = InvalidationConfig { state_root: Some(new_root), ..Default::default() };
+        let mut payload = test_payload_v1();
+        let changes = config.apply_to_payload_v1(&mut payload);
+        assert_eq!(payload.state_root, new_root);
+        assert_eq!(changes.len(), 1);
+        assert!(changes[0].contains("state_root"));
+    }
+
+    #[test]
+    fn auto_invalidate_gas_used_exceeds_limit() {
+        let config = InvalidationConfig { invalidate_gas_used: true, ..Default::default() };
+        let mut payload = test_payload_v1();
+        let gas_limit = payload.gas_limit;
+        let changes = config.apply_to_payload_v1(&mut payload);
+        assert_eq!(payload.gas_used, gas_limit + 1);
+        assert!(changes.iter().any(|c| c.contains("exceeds gas_limit")));
+    }
+
+    #[test]
+    fn auto_invalidate_timestamp_set_to_zero() {
+        let config = InvalidationConfig { invalidate_timestamp: true, ..Default::default() };
+        let mut payload = test_payload_v1();
+        config.apply_to_payload_v1(&mut payload);
+        assert_eq!(payload.timestamp, 0);
+    }
+
+    #[test]
+    fn auto_invalidate_transactions_prepends_invalid_rlp() {
+        let config = InvalidationConfig { invalidate_transactions: true, ..Default::default() };
+        let mut payload = test_payload_v1();
+        assert!(payload.transactions.is_empty());
+        config.apply_to_payload_v1(&mut payload);
+        assert_eq!(payload.transactions.len(), 1);
+        assert_eq!(&payload.transactions[0][..], &[0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn v2_invalidate_withdrawals() {
+        let config = InvalidationConfig { invalidate_withdrawals: true, ..Default::default() };
+        let mut payload =
+            ExecutionPayloadV2 { payload_inner: test_payload_v1(), withdrawals: vec![] };
+        let changes = config.apply_to_payload_v2(&mut payload);
+        assert_eq!(payload.withdrawals.len(), 1);
+        assert_eq!(payload.withdrawals[0].index, u64::MAX);
+        assert!(changes.iter().any(|c| c.contains("withdrawals")));
+    }
+
+    #[test]
+    fn v3_explicit_blob_gas_override() {
+        let config = InvalidationConfig {
+            blob_gas_used: Some(42),
+            excess_blob_gas: Some(99),
+            ..Default::default()
+        };
+        let mut payload = ExecutionPayloadV3 {
+            payload_inner: ExecutionPayloadV2 {
+                payload_inner: test_payload_v1(),
+                withdrawals: vec![],
+            },
+            blob_gas_used: 0,
+            excess_blob_gas: 0,
+        };
+        let changes = config.apply_to_payload_v3(&mut payload);
+        assert_eq!(payload.blob_gas_used, 42);
+        assert_eq!(payload.excess_blob_gas, 99);
+        assert_eq!(changes.len(), 2);
+    }
+
+    #[test]
+    fn v3_auto_invalidate_blob_gas() {
+        let config = InvalidationConfig {
+            invalidate_blob_gas_used: true,
+            invalidate_excess_blob_gas: true,
+            ..Default::default()
+        };
+        let mut payload = ExecutionPayloadV3 {
+            payload_inner: ExecutionPayloadV2 {
+                payload_inner: test_payload_v1(),
+                withdrawals: vec![],
+            },
+            blob_gas_used: 0,
+            excess_blob_gas: 0,
+        };
+        config.apply_to_payload_v3(&mut payload);
+        assert_eq!(payload.blob_gas_used, u64::MAX);
+        assert_eq!(payload.excess_blob_gas, u64::MAX);
+    }
+
+    #[test]
+    fn should_skip_hash_recalc_explicit_hash() {
+        let config = InvalidationConfig { block_hash: Some(B256::ZERO), ..Default::default() };
+        assert!(config.should_skip_hash_recalc());
+    }
+
+    #[test]
+    fn should_skip_hash_recalc_auto_invalidate() {
+        let config = InvalidationConfig { invalidate_block_hash: true, ..Default::default() };
+        assert!(config.should_skip_hash_recalc());
+    }
+
+    #[test]
+    fn should_not_skip_hash_recalc_default() {
+        let config = InvalidationConfig::default();
+        assert!(!config.should_skip_hash_recalc());
+    }
+}
