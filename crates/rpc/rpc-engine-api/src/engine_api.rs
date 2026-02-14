@@ -69,6 +69,10 @@ impl BalProvider {
         &self.cache
     }
 
+    // Persist first: store is the source of truth. We only populate the in-memory cache if
+    // durability succeeds, so cache visibility cannot outlive failed persistence.
+    // `Bytes` is consumed by each insert call, so we clone once for store and move the original
+    // into cache.
     fn cache_bal(
         &self,
         block_hash: BlockHash,
@@ -80,6 +84,9 @@ impl BalProvider {
         Ok(())
     }
 
+    // Intent: serve BAL hash queries with cache-first latency while preserving
+    // request-order semantics and filling only missing entries from durable storage.
+    // Cache-first lookup: keep request order and fill only cache misses from durable storage.
     fn get_by_hashes(
         &self,
         block_hashes: &[BlockHash],
@@ -87,6 +94,7 @@ impl BalProvider {
     ) -> Vec<Option<Bytes>> {
         let mut results = self.cache.get_by_hashes(block_hashes);
 
+        // Collect missing positions so store fallback can patch holes in-place.
         let mut missing_hashes = Vec::new();
         let mut missing_indices = Vec::new();
         for (idx, result) in results.iter().enumerate() {
@@ -133,6 +141,9 @@ impl BalProvider {
         results
     }
 
+    // Intent: serve contiguous BAL range queries with cache-first latency and
+    // append-only fallback from store, so the returned slice remains ordered and gap-safe.
+    // Cache range reads are contiguous and stop at the first gap.
     fn get_by_range(
         &self,
         start: BlockNumber,
@@ -144,6 +155,7 @@ impl BalProvider {
             return cache_results;
         }
 
+        // Only the missing suffix can be queried from store, which avoids re-reading cached prefix.
         let cached_len = cache_results.len() as u64;
         let missing_start = start.saturating_add(cached_len);
         let missing_count = count - cached_len;
