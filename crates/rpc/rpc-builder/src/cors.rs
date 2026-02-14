@@ -27,7 +27,7 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
             .allow_origin(Any)
             .allow_headers(Any),
         _ => {
-            let iter = http_cors_domains.split(',');
+            let iter = http_cors_domains.split(',').map(str::trim);
             if iter.clone().any(|o| o == "*") {
                 return Err(CorsDomainError::WildCardNotAllowed {
                     input: http_cors_domains.to_string(),
@@ -50,4 +50,16 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
         }
     };
     Ok(cors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_wildcard_with_spaces_rejected() {
+        // Wildcard with leading space should still be rejected
+        let result = create_cors_layer("http://example.com, *");
+        assert!(matches!(result, Err(CorsDomainError::WildCardNotAllowed { .. })));
+    }
 }
