@@ -181,7 +181,7 @@ pub trait Executor<DB: Database>: Sized {
 ///     bundle_state: &state_changes,
 ///     state_provider: &state,
 ///     state_root: calculated_root,
-///     cached_header_values: Default::default(),
+///     precomputed_header_values: Default::default(),
 /// };
 ///
 /// let block = assembler.assemble_block(input)?;
@@ -214,7 +214,7 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     /// When provided, the assembler can skip re-computing these values. This enables callers to
     /// compute them in parallel with the state root (the typical bottleneck) rather than
     /// sequentially after it.
-    pub cached_header_values: CachedHeaderValues,
+    pub precomputed_header_values: PrecomputedHeaderValues,
 }
 
 /// Pre-computed block header values that can be passed to the assembler to avoid redundant work.
@@ -227,7 +227,7 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
 /// as usual.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
-pub struct CachedHeaderValues {
+pub struct PrecomputedHeaderValues {
     /// Pre-computed transaction trie root.
     pub transactions_root: Option<B256>,
     /// Pre-computed receipt trie root.
@@ -261,13 +261,13 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
             bundle_state,
             state_provider,
             state_root,
-            cached_header_values: CachedHeaderValues::default(),
+            precomputed_header_values: PrecomputedHeaderValues::default(),
         }
     }
 
-    /// Sets the [`CachedHeaderValues`] on this input.
-    pub const fn with_cached_header_values(mut self, cached: CachedHeaderValues) -> Self {
-        self.cached_header_values = cached;
+    /// Sets the [`PrecomputedHeaderValues`] on this input.
+    pub const fn with_precomputed_header_values(mut self, cached: PrecomputedHeaderValues) -> Self {
+        self.precomputed_header_values = cached;
         self
     }
 
@@ -276,7 +276,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
     where
         F::Transaction: Encodable2718,
     {
-        self.cached_header_values
+        self.precomputed_header_values
             .transactions_root
             .unwrap_or_else(|| proofs::calculate_transaction_root(&self.transactions))
     }
@@ -286,7 +286,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
     where
         F::Receipt: TxReceipt + Eip2718EncodableReceipt,
     {
-        self.cached_header_values.receipts_root.unwrap_or_else(|| {
+        self.precomputed_header_values.receipts_root.unwrap_or_else(|| {
             proofs::calculate_receipt_root(
                 &self.output.receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>(),
             )
@@ -298,7 +298,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
     where
         F::Receipt: TxReceipt<Log = alloy_primitives::Log>,
     {
-        self.cached_header_values.logs_bloom.unwrap_or_else(|| {
+        self.precomputed_header_values.logs_bloom.unwrap_or_else(|| {
             alloy_primitives::logs_bloom(self.output.receipts.iter().flat_map(|r| r.logs()))
         })
     }
@@ -337,7 +337,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
 ///     bundle_state,      // All state changes
 ///     state_provider,    // For additional lookups if needed
 ///     state_root,        // Computed state root
-///     cached_header_values: Default::default(),  // Optional pre-computed roots
+///     precomputed_header_values: Default::default(),  // Optional pre-computed roots
 /// })?;
 /// ```
 ///
@@ -568,7 +568,7 @@ where
             bundle_state: &db.bundle_state,
             state_provider: &state,
             state_root,
-            cached_header_values: CachedHeaderValues::default(),
+            precomputed_header_values: PrecomputedHeaderValues::default(),
         })?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
