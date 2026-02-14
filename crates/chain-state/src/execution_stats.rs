@@ -13,7 +13,7 @@ use alloy_primitives::B256;
 /// These statistics are populated during block validation and carried through to
 /// persistence, where they are used to emit a single unified log entry that includes
 /// complete timing information (including commit time).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ExecutionTimingStats {
     /// Block number
     pub block_number: u64,

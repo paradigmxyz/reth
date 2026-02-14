@@ -1514,7 +1514,7 @@ where
             let mut persisted_stats = Vec::new();
             self.execution_timing_stats.retain(|_, stats| {
                 if stats.block_number <= last_persisted_block_number {
-                    persisted_stats.push(*stats);
+                    persisted_stats.push(stats.clone());
                     false
                 } else {
                     true
