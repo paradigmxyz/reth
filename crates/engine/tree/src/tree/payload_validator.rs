@@ -743,7 +743,6 @@ where
             transaction_count,
             handle.iter_transactions(),
             &receipt_tx,
-            has_bal,
         )?;
         drop(receipt_tx);
 
@@ -807,7 +806,6 @@ where
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
-        has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
