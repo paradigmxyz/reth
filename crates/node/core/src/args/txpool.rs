@@ -55,7 +55,7 @@ pub struct DefaultTxPoolValues {
     transactions_backup_path: Option<PathBuf>,
     disable_transactions_backup: bool,
     max_batch_size: usize,
-    monitor: bool,
+    monitor_orderflow: bool,
 }
 
 impl DefaultTxPoolValues {
@@ -249,9 +249,9 @@ impl DefaultTxPoolValues {
         self
     }
 
-    /// Set whether pool monitoring is enabled by default
-    pub const fn with_monitor(mut self, v: bool) -> Self {
-        self.monitor = v;
+    /// Set whether pool orderflow monitoring is enabled by default
+    pub const fn with_monitor_orderflow(mut self, v: bool) -> Self {
+        self.monitor_orderflow = v;
         self
     }
 }
@@ -289,7 +289,7 @@ impl Default for DefaultTxPoolValues {
             transactions_backup_path: None,
             disable_transactions_backup: false,
             max_batch_size: 1,
-            monitor: false,
+            monitor_orderflow: false,
         }
     }
 }
@@ -420,10 +420,10 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.max-batch-size", default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
 
-    /// Enable transaction pool monitoring to track how many mined transactions were available in
-    /// the local pool.
-    #[arg(long = "txpool.monitor", default_value_t = DefaultTxPoolValues::get_global().monitor)]
-    pub monitor: bool,
+    /// Enable orderflow monitoring to track how many mined transactions were available in the
+    /// local pool.
+    #[arg(long = "txpool.monitor-orderflow", default_value_t = DefaultTxPoolValues::get_global().monitor_orderflow)]
+    pub monitor_orderflow: bool,
 }
 
 impl TxPoolArgs {
@@ -477,7 +477,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
-            monitor,
+            monitor_orderflow,
         } = DefaultTxPoolValues::get_global().clone();
         Self {
             pending_max_count,
@@ -510,7 +510,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
-            monitor,
+            monitor_orderflow,
         }
     }
 }
@@ -640,6 +640,7 @@ mod tests {
             transactions_backup_path: Some(PathBuf::from("/tmp/txpool-backup")),
             disable_transactions_backup: false,
             max_batch_size: 10,
+            monitor_orderflow: false,
         };
 
         let parsed_args = CommandParser::<TxPoolArgs>::parse_from([

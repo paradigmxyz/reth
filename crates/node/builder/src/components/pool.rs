@@ -310,15 +310,19 @@ where
     spawn_local_backup_task(ctx, pool.clone())?;
     spawn_pool_maintenance_task(ctx, pool.clone(), pool_config)?;
 
-    if ctx.config().txpool.monitor {
-        spawn_pool_monitor_task(ctx, pool)?;
+    if ctx.config().txpool.monitor_orderflow {
+        spawn_pool_orderflow_monitor_task(ctx, pool)?;
     }
 
     Ok(())
 }
 
-/// Spawn the pool monitoring task that tracks how many mined transactions were locally available.
-fn spawn_pool_monitor_task<Node, Pool>(ctx: &BuilderContext<Node>, pool: Pool) -> eyre::Result<()>
+/// Spawn the pool orderflow monitoring task that tracks how many mined transactions were locally
+/// available.
+fn spawn_pool_orderflow_monitor_task<Node, Pool>(
+    ctx: &BuilderContext<Node>,
+    pool: Pool,
+) -> eyre::Result<()>
 where
     Node: FullNodeTypes,
     Pool: TransactionPool + Clone + 'static,
@@ -326,8 +330,8 @@ where
     let chain_events = ctx.provider().canonical_state_stream();
 
     ctx.task_executor().spawn_critical_task(
-        "txpool monitor task",
-        reth_transaction_pool::monitor::monitor_pool_transactions_future(
+        "txpool orderflow monitor task",
+        reth_transaction_pool::orderflow::monitor_orderflow_future(
             pool,
             chain_events,
             Default::default(),

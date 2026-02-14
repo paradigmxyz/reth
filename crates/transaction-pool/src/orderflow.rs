@@ -1,7 +1,8 @@
-//! Transaction pool monitoring.
+//! Transaction pool orderflow monitoring.
 //!
-//! Monitors how many transactions in each mined block were available in the local transaction pool.
-//! This is useful for assessing mempool health and understanding how well-connected the node is.
+//! Monitors the share of public orderflow (transactions) that the node had locally available in
+//! the pool when a block was mined. This is useful for assessing mempool health and understanding
+//! how well-connected the node is.
 //!
 //! Two snapshots are taken per slot:
 //! - A mid-slot snapshot taken at a configurable offset (default: 4s) after the last canonical
@@ -30,8 +31,8 @@ pub const DEFAULT_MONITOR_SLOT_OFFSET: Duration = Duration::from_secs(4);
 
 /// Metrics for the transaction pool monitor.
 #[derive(Metrics)]
-#[metrics(scope = "transaction_pool.monitor")]
-pub struct MonitorMetrics {
+#[metrics(scope = "transaction_pool.orderflow")]
+pub struct OrderflowMonitorMetrics {
     /// Total number of transactions in the mined block (mid-slot observation).
     pub mid_slot_mined_transactions: Gauge,
     /// Number of mined transactions that were present in the local pool at the mid-slot snapshot.
@@ -69,22 +70,22 @@ struct PoolSnapshot {
 
 /// Configuration for the pool monitor.
 #[derive(Debug, Clone)]
-pub struct MonitorConfig {
+pub struct OrderflowMonitorConfig {
     /// Offset into the slot at which the mid-slot snapshot is taken.
     pub slot_offset: Duration,
 }
 
-impl Default for MonitorConfig {
+impl Default for OrderflowMonitorConfig {
     fn default() -> Self {
         Self { slot_offset: DEFAULT_MONITOR_SLOT_OFFSET }
     }
 }
 
 /// Returns a spawnable future that monitors pool availability of mined transactions.
-pub fn monitor_pool_transactions_future<N, P, St>(
+pub fn monitor_orderflow_future<N, P, St>(
     pool: P,
     events: St,
-    config: MonitorConfig,
+    config: OrderflowMonitorConfig,
 ) -> futures_util::future::BoxFuture<'static, ()>
 where
     N: NodePrimitives,
@@ -92,7 +93,7 @@ where
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
 {
     async move {
-        monitor_pool_transactions(pool, events, config).await;
+        monitor_orderflow(pool, events, config).await;
     }
     .boxed()
 }
@@ -101,13 +102,13 @@ where
 ///
 /// For each canonical block, this compares the block's transactions against snapshots of the
 /// local pool to determine how many mined transactions were locally available.
-async fn monitor_pool_transactions<N, P, St>(pool: P, mut events: St, config: MonitorConfig)
+async fn monitor_orderflow<N, P, St>(pool: P, mut events: St, config: OrderflowMonitorConfig)
 where
     N: NodePrimitives,
     P: TransactionPool + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
 {
-    let metrics = MonitorMetrics::default();
+    let metrics = OrderflowMonitorMetrics::default();
 
     // The mid-slot snapshot taken `slot_offset` after the last block.
     let mut mid_slot_snapshot: Option<PoolSnapshot> = None;
@@ -134,7 +135,7 @@ where
                         .collect();
 
                     debug!(
-                        target: "txpool::monitor",
+                        target: "txpool::orderflow",
                         block = %block_num,
                         pending_count = %pending_hashes.len(),
                         "mid-slot pool snapshot taken"
@@ -185,7 +186,7 @@ where
                     metrics.mid_slot_match_ratio.record(ratio);
 
                     info!(
-                        target: "txpool::monitor",
+                        target: "txpool::orderflow",
                         block = %tip_number,
                         mined = %mined_hashes.len(),
                         matched = %matched,
@@ -217,7 +218,7 @@ where
                 metrics.blocks_monitored.increment(1);
 
                 info!(
-                    target: "txpool::monitor",
+                    target: "txpool::orderflow",
                     block = %tip_number,
                     mined = %mined_hashes.len(),
                     matched = %matched,
