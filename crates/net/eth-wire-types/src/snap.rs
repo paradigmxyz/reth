@@ -225,6 +225,17 @@ impl SnapProtocolMessage {
         }
     }
 
+    /// Returns true if this snap message is a response.
+    pub const fn is_response(&self) -> bool {
+        matches!(
+            self,
+            Self::AccountRange(_) |
+                Self::StorageRanges(_) |
+                Self::ByteCodes(_) |
+                Self::TrieNodes(_)
+        )
+    }
+
     /// Encode the message to bytes
     pub fn encode(&self) -> Bytes {
         let mut buf = Vec::new();

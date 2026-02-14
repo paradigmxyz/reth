@@ -5,7 +5,8 @@
 
 use super::message::MAX_MESSAGE_SIZE;
 use crate::{
-    message::{EthBroadcastMessage, ProtocolBroadcastMessage},
+    errors::{EthHandshakeError, EthStreamError, P2PStreamError},
+    message::{EthBroadcastMessage, MessageError, ProtocolBroadcastMessage},
     EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
     RawCapabilityMessage, SnapMessageId, SnapProtocolMessage,
 };
@@ -14,6 +15,7 @@ use core::fmt::Debug;
 use futures::{Sink, SinkExt};
 use pin_project::pin_project;
 use std::{
+    io,
     marker::PhantomData,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -38,6 +40,10 @@ pub enum EthSnapStreamError {
     /// RLP decoding error
     #[error("rlp error: {0}")]
     Rlp(#[from] alloy_rlp::Error),
+
+    /// Underlying p2p stream error
+    #[error(transparent)]
+    P2P(#[from] P2PStreamError),
 
     /// Status message received outside handshake
     #[error("status message received outside handshake")]
@@ -283,6 +289,31 @@ where
         adjusted.extend_from_slice(&encoded[1..]);
 
         Bytes::from(adjusted)
+    }
+}
+
+impl From<io::Error> for EthSnapStreamError {
+    fn from(err: io::Error) -> Self {
+        P2PStreamError::from(err).into()
+    }
+}
+
+impl From<EthSnapStreamError> for EthStreamError {
+    fn from(err: EthSnapStreamError) -> Self {
+        match err {
+            EthSnapStreamError::InvalidMessage(version, msg) => {
+                Self::InvalidMessage(MessageError::Other(format!("{msg} (version {version:?})")))
+            }
+            EthSnapStreamError::UnknownMessageId(message_id) => {
+                Self::UnsupportedMessage { message_id }
+            }
+            EthSnapStreamError::MessageTooLarge(len, _) => Self::MessageTooBig(len),
+            EthSnapStreamError::Rlp(err) => Self::InvalidMessage(MessageError::RlpError(err)),
+            EthSnapStreamError::P2P(err) => Self::P2PStreamError(err),
+            EthSnapStreamError::StatusNotInHandshake => {
+                Self::EthHandshakeError(EthHandshakeError::StatusNotInHandshake)
+            }
+        }
     }
 }
 
