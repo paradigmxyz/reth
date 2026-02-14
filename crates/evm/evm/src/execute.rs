@@ -236,6 +236,26 @@ pub struct PrecomputedHeaderValues {
     pub logs_bloom: Option<Bloom>,
 }
 
+impl PrecomputedHeaderValues {
+    /// Sets the pre-computed transactions root.
+    pub const fn with_transactions_root(mut self, root: B256) -> Self {
+        self.transactions_root = Some(root);
+        self
+    }
+
+    /// Sets the pre-computed receipts root.
+    pub const fn with_receipts_root(mut self, root: B256) -> Self {
+        self.receipts_root = Some(root);
+        self
+    }
+
+    /// Sets the pre-computed logs bloom.
+    pub const fn with_logs_bloom(mut self, bloom: Bloom) -> Self {
+        self.logs_bloom = Some(bloom);
+        self
+    }
+}
+
 impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
     /// Creates a new [`BlockAssemblerInput`].
     #[expect(clippy::too_many_arguments)]
