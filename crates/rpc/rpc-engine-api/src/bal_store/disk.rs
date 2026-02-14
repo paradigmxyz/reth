@@ -47,6 +47,12 @@ pub struct DiskFileBalStore {
     inner: Arc<DiskFileBalStoreInner>,
 }
 
+#[derive(Debug, Default)]
+struct IndexState {
+    block_to_hash: BTreeMap<BlockNumber, BlockHash>,
+    hash_to_block: HashMap<BlockHash, BlockNumber>,
+}
+
 #[derive(Debug)]
 struct DiskFileBalStoreInner {
     root_dir: PathBuf,
@@ -54,12 +60,6 @@ struct DiskFileBalStoreInner {
     index_dir: PathBuf,
     max_entries: u32,
     state: Mutex<IndexState>,
-}
-
-#[derive(Debug, Default)]
-struct IndexState {
-    block_to_hash: BTreeMap<BlockNumber, BlockHash>,
-    hash_to_block: HashMap<BlockHash, BlockNumber>,
 }
 
 impl DiskFileBalStore {
