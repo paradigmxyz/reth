@@ -445,24 +445,38 @@ impl SparseTrie for ParallelSparseTrie {
         );
 
         // Check if the value already exists - if so, just update it (no structural changes needed)
-        if let Some(leaf) = self.upper_subtrie.inner.values.get_mut(&full_path) {
-            self.prefix_set.insert(full_path);
-            leaf.value = value;
-            leaf.state = SparseNodeState::Dirty;
-            return Ok(());
+        // But first verify the leaf is structurally tracked to avoid updating orphaned values
+        if self.upper_subtrie.inner.values.contains_key(&full_path) {
+            if self.is_leaf_tracked_in_upper_subtrie(&full_path) {
+                let leaf = self.upper_subtrie.inner.values.get_mut(&full_path).unwrap();
+                self.prefix_set.insert(full_path);
+                leaf.value = value;
+                leaf.state = SparseNodeState::Dirty;
+                return Ok(());
+            } else {
+                // Orphaned value - remove it and fall through to full insertion
+                self.upper_subtrie.inner.values.remove(&full_path);
+            }
         }
         // Also check lower subtries for existing value.
         // We use index-based access to avoid revealing subtries with the full_path.
         // lower_subtrie_for_path_mut would reveal with full_path, corrupting the subtrie's path.
         if let SparseSubtrieType::Lower(idx) = SparseSubtrieType::from_path(&full_path) &&
-            let Some(subtrie) = self.lower_subtries[idx].as_revealed_mut() &&
-            let Some(leaf) = subtrie.inner.values.get_mut(&full_path)
+            let Some(subtrie) = self.lower_subtries[idx].as_revealed_mut()
         {
-            leaf.value = value;
-            leaf.state = SparseNodeState::Dirty;
-            self.prefix_set.insert(full_path);
-            self.subtrie_heat.mark_modified(idx);
-            return Ok(());
+            if subtrie.inner.values.contains_key(&full_path) {
+                if subtrie.is_leaf_tracked(&full_path) {
+                    let leaf = subtrie.inner.values.get_mut(&full_path).unwrap();
+                    leaf.value = value;
+                    leaf.state = SparseNodeState::Dirty;
+                    self.prefix_set.insert(full_path);
+                    self.subtrie_heat.mark_modified(idx);
+                    return Ok(());
+                } else {
+                    // Orphaned value - remove it and fall through to full insertion
+                    subtrie.inner.values.remove(&full_path);
+                }
+            }
         }
 
         let retain_updates = self.updates_enabled();
@@ -532,10 +546,16 @@ impl SparseTrie for ParallelSparseTrie {
                         let parent_path = leaf_path.slice(..leaf_path.len() - 1);
                         let child_nibble = leaf_path.get_unchecked(leaf_path.len() - 1);
                         let subtrie = self.subtrie_for_path_mut(&parent_path);
-                        if let Some(SparseNode::Branch { leaf_mask, .. }) =
-                            subtrie.nodes.get_mut(&parent_path)
+                        if let Some(SparseNode::Branch {
+                            leaf_mask, leaf_short_keys, state, ..
+                        }) = subtrie.nodes.get_mut(&parent_path)
                         {
-                            leaf_mask.unset_bit(child_nibble);
+                            if leaf_mask.is_bit_set(child_nibble) {
+                                let rank = SparseNode::leaf_rank(*leaf_mask, child_nibble);
+                                leaf_short_keys.remove(rank);
+                                leaf_mask.unset_bit(child_nibble);
+                                *state = SparseNodeState::Dirty;
+                            }
                         }
                     }
 
@@ -803,10 +823,16 @@ impl SparseTrie for ParallelSparseTrie {
                         let parent_path = leaf_path.slice(..leaf_path.len() - 1);
                         let child_nibble = leaf_path.get_unchecked(leaf_path.len() - 1);
                         let parent_subtrie = self.subtrie_for_path_mut(&parent_path);
-                        if let Some(SparseNode::Branch { leaf_mask, .. }) =
-                            parent_subtrie.nodes.get_mut(&parent_path)
+                        if let Some(SparseNode::Branch {
+                            leaf_mask, leaf_short_keys, state, ..
+                        }) = parent_subtrie.nodes.get_mut(&parent_path)
                         {
-                            leaf_mask.unset_bit(child_nibble);
+                            if leaf_mask.is_bit_set(child_nibble) {
+                                let rank = SparseNode::leaf_rank(*leaf_mask, child_nibble);
+                                leaf_short_keys.remove(rank);
+                                leaf_mask.unset_bit(child_nibble);
+                                *state = SparseNodeState::Dirty;
+                            }
                         }
                     }
                 }
@@ -1963,6 +1989,64 @@ impl ParallelSparseTrie {
         let target_key =
             if full_path.starts_with(path) { full_key } else { Self::nibbles_to_padded_b256(path) };
         (target_key, min_len)
+    }
+
+    /// Checks if a leaf in the upper subtrie is structurally tracked.
+    ///
+    /// A leaf is tracked if either:
+    /// 1. It's a RootLeaf at the root that points to this full_path
+    /// 2. A branch has the leaf in its leaf_mask with a matching short_key
+    ///
+    /// Returns `false` for orphaned values that exist in `values` but aren't properly
+    /// tracked by the trie structure.
+    fn is_leaf_tracked_in_upper_subtrie(&self, full_path: &Nibbles) -> bool {
+        // Check if it's a RootLeaf at the empty path
+        if let Some(SparseNode::RootLeaf { key, .. }) =
+            self.upper_subtrie.nodes.get(&Nibbles::default())
+        {
+            if *key == *full_path {
+                return true;
+            }
+        }
+
+        // Traverse from root to find if any branch tracks this leaf
+        let mut current = Nibbles::default();
+        while current.len() < full_path.len() && SparseSubtrieType::path_len_is_upper(current.len())
+        {
+            match self.upper_subtrie.nodes.get(&current) {
+                Some(SparseNode::Branch { leaf_mask, leaf_short_keys, state_mask, .. }) => {
+                    let child_nibble = full_path.get_unchecked(current.len());
+                    // Check if this branch tracks the leaf directly
+                    if leaf_mask.is_bit_set(child_nibble) {
+                        let rank = SparseNode::leaf_rank(*leaf_mask, child_nibble);
+                        if let Some(short_key) = leaf_short_keys.get(rank) {
+                            let mut computed_path = current;
+                            computed_path.push_unchecked(child_nibble);
+                            computed_path.extend(short_key);
+                            if computed_path == *full_path {
+                                return true;
+                            }
+                        }
+                    }
+                    // Continue to child if it exists in state_mask but not leaf_mask
+                    if state_mask.is_bit_set(child_nibble) && !leaf_mask.is_bit_set(child_nibble) {
+                        current.push_unchecked(child_nibble);
+                    } else {
+                        return false;
+                    }
+                }
+                Some(SparseNode::Extension { key, .. }) => {
+                    let remaining = full_path.slice(current.len()..);
+                    if remaining.starts_with(key) {
+                        current.extend(key);
+                    } else {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+        }
+        false
     }
 
     /// Rolls back a partial update by removing the value, removing any inserted nodes,
@@ -3164,6 +3248,66 @@ impl SparseSubtrie {
         }
     }
 
+    /// Checks if a leaf is structurally tracked in this subtrie.
+    ///
+    /// A leaf is tracked if either:
+    /// 1. It's a RootLeaf at the subtrie's root path that points to this full_path
+    /// 2. Its parent branch has the leaf in its leaf_mask with a matching short_key
+    ///
+    /// Returns `false` for orphaned values that exist in `values` but aren't properly
+    /// tracked by the trie structure.
+    fn is_leaf_tracked(&self, full_path: &Nibbles) -> bool {
+        // Check if it should be the root leaf of this subtrie
+        if let Some(SparseNode::RootLeaf { key, .. }) = self.nodes.get(&self.path) {
+            // For a RootLeaf, verify that it points to this exact full_path
+            // The full path for a RootLeaf is: subtrie.path + key
+            let mut computed_path = self.path;
+            computed_path.extend(key);
+            if computed_path == *full_path {
+                return true;
+            }
+        }
+
+        // Check all branches to see if any tracks this leaf
+        // We traverse from the subtrie root towards the full_path
+        let mut current = self.path;
+        while current.len() < full_path.len() {
+            match self.nodes.get(&current) {
+                Some(SparseNode::Branch { leaf_mask, leaf_short_keys, state_mask, .. }) => {
+                    let child_nibble = full_path.get_unchecked(current.len());
+                    // Check if this branch tracks the leaf directly
+                    if leaf_mask.is_bit_set(child_nibble) {
+                        let rank = SparseNode::leaf_rank(*leaf_mask, child_nibble);
+                        if let Some(short_key) = leaf_short_keys.get(rank) {
+                            let mut computed_path = current;
+                            computed_path.push_unchecked(child_nibble);
+                            computed_path.extend(short_key);
+                            if computed_path == *full_path {
+                                return true;
+                            }
+                        }
+                    }
+                    // Continue to child if it exists in state_mask but not leaf_mask
+                    if state_mask.is_bit_set(child_nibble) && !leaf_mask.is_bit_set(child_nibble) {
+                        current.push_unchecked(child_nibble);
+                    } else {
+                        return false;
+                    }
+                }
+                Some(SparseNode::Extension { key, .. }) => {
+                    let remaining = full_path.slice(current.len()..);
+                    if remaining.starts_with(key) {
+                        current.extend(key);
+                    } else {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+
     /// Updates or inserts a leaf node at the specified key path with the provided RLP-encoded
     /// value.
     ///
@@ -3195,10 +3339,17 @@ impl SparseSubtrie {
         debug_assert!(full_path.starts_with(&self.path));
 
         // Check if value already exists - if so, just update it (no structural changes needed)
-        if let Some(leaf) = self.inner.values.get_mut(&full_path) {
-            leaf.value = value;
-            leaf.state = SparseNodeState::Dirty;
-            return Ok((None, None))
+        // But first verify the leaf is structurally tracked to avoid updating orphaned values
+        if self.inner.values.contains_key(&full_path) {
+            if self.is_leaf_tracked(&full_path) {
+                let leaf = self.inner.values.get_mut(&full_path).unwrap();
+                leaf.value = value;
+                leaf.state = SparseNodeState::Dirty;
+                return Ok((None, None))
+            } else {
+                // Orphaned value - remove it and fall through to full insertion
+                self.inner.values.remove(&full_path);
+            }
         }
 
         // Here we are starting at the root of the subtrie, and traversing from there.
@@ -3250,10 +3401,16 @@ impl SparseSubtrie {
                     {
                         let parent_path = leaf_path.slice(..leaf_path.len() - 1);
                         let child_nibble = leaf_path.get_unchecked(leaf_path.len() - 1);
-                        if let Some(SparseNode::Branch { leaf_mask, .. }) =
-                            self.nodes.get_mut(&parent_path)
+                        if let Some(SparseNode::Branch {
+                            leaf_mask, leaf_short_keys, state, ..
+                        }) = self.nodes.get_mut(&parent_path)
                         {
-                            leaf_mask.unset_bit(child_nibble);
+                            if leaf_mask.is_bit_set(child_nibble) {
+                                let rank = SparseNode::leaf_rank(*leaf_mask, child_nibble);
+                                leaf_short_keys.remove(rank);
+                                leaf_mask.unset_bit(child_nibble);
+                                *state = SparseNodeState::Dirty;
+                            }
                         } else {
                             // Parent branch is not in this subtrie; return path for caller
                             // to handle cross-subtrie update
@@ -7377,8 +7534,37 @@ mod tests {
                     provider_rw.write_trie_updates(hash_builder_updates).unwrap();
                     provider_rw.commit().unwrap();
 
-                    // Assert that the sparse trie root matches the hash builder root
-                    assert_eq!(sparse_root, hash_builder_root);
+                    // Assert that the sparse trie root matches the hash builder root (AFTER
+                    // INSERTS)
+                    if sparse_root != hash_builder_root {
+                        eprintln!("=== ROOT MISMATCH (AFTER INSERTS) ===");
+                        eprintln!("Keys in state: {:?}", state.keys().collect::<Vec<_>>());
+                        eprintln!("sparse_root: {sparse_root:?}");
+                        eprintln!("hash_builder_root: {hash_builder_root:?}");
+                        eprintln!("Upper subtrie nodes:");
+                        for (path, node) in updated_sparse.upper_subtrie.nodes.iter() {
+                            eprintln!("  {path:?}: {node:?}");
+                        }
+                        eprintln!("Upper subtrie values:");
+                        for (path, val) in updated_sparse.upper_subtrie.inner.values.iter() {
+                            eprintln!("  {path:?}: key_len={}, state={:?}", val.key_len, val.state);
+                        }
+                        // Check lower subtries
+                        for (idx, lower) in updated_sparse.lower_subtries.iter().enumerate() {
+                            if let LowerSparseSubtrie::Revealed(subtrie) = lower {
+                                if !subtrie.nodes.is_empty() || !subtrie.inner.values.is_empty() {
+                                    eprintln!("Lower subtrie {idx} (path={:?}):", subtrie.path);
+                                    for (path, node) in subtrie.nodes.iter() {
+                                        eprintln!("  node {path:?}: {node:?}");
+                                    }
+                                    for (path, val) in subtrie.inner.values.iter() {
+                                        eprintln!("  value {path:?}: key_len={}", val.key_len);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    assert_eq!(sparse_root, hash_builder_root, "AFTER INSERTS");
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
                         BTreeMap::from_iter(sparse_updates.updated_nodes),
@@ -7425,8 +7611,9 @@ mod tests {
                     provider_rw.write_trie_updates(hash_builder_updates).unwrap();
                     provider_rw.commit().unwrap();
 
-                    // Assert that the sparse trie root matches the hash builder root
-                    assert_eq!(sparse_root, hash_builder_root);
+                    // Assert that the sparse trie root matches the hash builder root (AFTER
+                    // DELETES)
+                    assert_eq!(sparse_root, hash_builder_root, "AFTER DELETES");
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
                         BTreeMap::from_iter(sparse_updates.updated_nodes),
@@ -10783,5 +10970,91 @@ mod tests {
             sparse_root_after_removes, hash_builder_root_after_removes,
             "roots should match after removals"
         );
+    }
+
+    #[test]
+    fn sparse_trie_fuzz_repro_3() {
+        // Simple test: insert three keys, two sharing a prefix
+        // This tests that leaf_mask is properly maintained when splitting
+        let key_01 = pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x0, 0x1, 0xd]));
+        let key_02 = pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x0, 0x2, 0xb])); // Same first nibble as key_01
+        let key_c1 = pad_nibbles_right(Nibbles::from_nibbles_unchecked([0xc, 0xd, 0xf]));
+
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = ParallelSparseTrie::default().with_updates(true);
+
+        // Insert first key
+        sparse.update_leaf(key_01, value_encoded(), &provider).unwrap();
+
+        // Debug: check trie structure after first insert
+        eprintln!("After first insert (0x01d...):");
+        eprintln!("  Upper subtrie nodes:");
+        for (path, node) in &sparse.upper_subtrie.nodes {
+            eprintln!("    {path:?}: {node:?}");
+        }
+        eprintln!("  Upper subtrie values:");
+        for (path, val) in &sparse.upper_subtrie.inner.values {
+            eprintln!("    {path:?}: key_len={}", val.key_len);
+        }
+
+        // Insert second key (shares first nibble with key_01)
+        sparse.update_leaf(key_02, value_encoded(), &provider).unwrap();
+
+        // Debug: check trie structure after second insert
+        eprintln!("After second insert (0x02b...):");
+        eprintln!("  Upper subtrie nodes:");
+        for (path, node) in &sparse.upper_subtrie.nodes {
+            eprintln!("    {path:?}: {node:?}");
+        }
+        eprintln!("  Upper subtrie values:");
+        for (path, val) in &sparse.upper_subtrie.inner.values {
+            eprintln!("    {path:?}: key_len={}", val.key_len);
+        }
+
+        // Insert third key
+        sparse.update_leaf(key_c1, value_encoded(), &provider).unwrap();
+
+        // Debug: check trie structure after third insert
+        eprintln!("After third insert (0xcdf...):");
+        eprintln!("  Upper subtrie nodes:");
+        for (path, node) in &sparse.upper_subtrie.nodes {
+            eprintln!("    {path:?}: {node:?}");
+        }
+        eprintln!("  Upper subtrie values:");
+        for (path, val) in &sparse.upper_subtrie.inner.values {
+            eprintln!("    {path:?}: key_len={}", val.key_len);
+        }
+        eprintln!("  Lower subtries with values:");
+        for (idx, lower) in sparse.lower_subtries.iter().enumerate() {
+            if let LowerSparseSubtrie::Revealed(subtrie) = lower {
+                if !subtrie.inner.values.is_empty() {
+                    eprintln!("    Lower subtrie {idx}:");
+                    for (path, val) in &subtrie.inner.values {
+                        eprintln!("      {path:?}: key_len={}", val.key_len);
+                    }
+                }
+            }
+        }
+
+        // Compute sparse root
+        let sparse_root = sparse.root();
+
+        // Build expected state using hash builder
+        let state = BTreeMap::from([(key_01, value()), (key_02, value()), (key_c1, value())]);
+        let (hash_builder_root, _, _, _, _) = run_hash_builder(
+            state.clone(),
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            state.keys().copied(),
+        );
+
+        assert_eq!(sparse_root, hash_builder_root, "roots should match");
     }
 }
