@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=bal-valid#710015e8c70ec70344528e57ff3f3be89e2d4045"
+source = "git+https://github.com/Soubhik-10/evm?branch=bal-valid#1025c6ebb6b106d0478fd17bb051132acc7f9039"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -415,7 +415,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.27.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=bal-valid#710015e8c70ec70344528e57ff3f3be89e2d4045"
+source = "git+https://github.com/Soubhik-10/evm?branch=bal-valid#1025c6ebb6b106d0478fd17bb051132acc7f9039"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
