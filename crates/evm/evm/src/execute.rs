@@ -463,6 +463,10 @@ where
     type Executor = Executor;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        tracing::debug!(
+            "Applying pre-execution changes index from reth:{:?}",
+            self.executor.evm().db().bal_state.bal_index()
+        );
         self.executor.apply_pre_execution_changes()?;
         // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
         self.executor.evm_mut().db_mut().bump_bal_index();
@@ -477,6 +481,10 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
+        tracing::debug!(
+            "Applying execution changes index from reth:{:?}",
+            self.executor.evm().db().bal_state.bal_index()
+        );
         let (tx_env, tx) = tx.into_parts();
         if let Some(gas_used) =
             self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
@@ -494,6 +502,10 @@ where
         self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
+        tracing::debug!(
+            "Applying post-execution changes index from reth:{:?}",
+            self.executor.evm().db().bal_state.bal_index()
+        );
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
 
