@@ -786,7 +786,6 @@ impl StorageTrieUpdatesSorted {
 
         // Extend storage nodes
         extend_sorted_vec(&mut self.storage_nodes, &other.storage_nodes);
-        self.is_deleted = self.is_deleted || other.is_deleted;
     }
 
     /// Batch-merge sorted storage trie updates. Iterator yields **newest to oldest**.
