@@ -22,22 +22,28 @@ impl AtomicBitmap {
         (index >> 6, 1u64 << (index & 63))
     }
 
+    /// # Safety
+    /// `index` must be less than `len`.
     #[inline]
-    pub(super) fn set(&self, index: usize, ordering: Ordering) {
+    pub(super) unsafe fn set_unchecked(&self, index: usize, ordering: Ordering) {
         let (w, mask) = Self::word_and_mask(index);
-        self.words[w].fetch_or(mask, ordering);
+        unsafe { self.words.get_unchecked(w) }.fetch_or(mask, ordering);
     }
 
+    /// # Safety
+    /// `index` must be less than `len`.
     #[inline]
-    pub(super) fn is_set(&self, index: usize, ordering: Ordering) -> bool {
+    pub(super) unsafe fn is_set_unchecked(&self, index: usize, ordering: Ordering) -> bool {
         let (w, mask) = Self::word_and_mask(index);
-        self.words[w].load(ordering) & mask != 0
+        unsafe { self.words.get_unchecked(w) }.load(ordering) & mask != 0
     }
 
+    /// # Safety
+    /// `index` must be less than `len`.
     #[inline]
-    pub(super) fn clear(&self, index: usize, ordering: Ordering) {
+    pub(super) unsafe fn clear_unchecked(&self, index: usize, ordering: Ordering) {
         let (w, mask) = Self::word_and_mask(index);
-        self.words[w].fetch_and(!mask, ordering);
+        unsafe { self.words.get_unchecked(w) }.fetch_and(!mask, ordering);
     }
 
     /// Iterate over all set bit indices. Only valid when there are no concurrent writers
