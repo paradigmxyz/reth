@@ -172,7 +172,7 @@ pub trait EstimateCall: Call {
         };
 
         let gas_refund = match res.result {
-            ExecutionResult::Success { gas_refunded, .. } => gas_refunded,
+            ExecutionResult::Success { gas, .. } => gas.inner_refunded(),
             ExecutionResult::Halt { reason, .. } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
