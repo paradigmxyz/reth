@@ -20,10 +20,10 @@ use reth_primitives_traits::{
 /// If `receipt_root_bloom` is provided, the pre-computed receipt root and logs bloom are used
 /// instead of computing them from the receipts.
 ///
-/// `gas_spent` is the gas_used value from the block execution result. When EIP-7778
-/// (Amsterdam) is active, block header gas_used tracks gas before refunds while receipt
-/// cumulative_gas_used tracks gas after refunds. In that case, the header must be validated
-/// against the execution result's gas_used rather than the receipt value.
+/// `gas_spent` is the `gas_used` value from the block execution result. When EIP-7778
+/// (Amsterdam) is active, block header `gas_used` tracks gas before refunds while receipt
+/// `cumulative_gas_used` tracks gas after refunds. In that case, the header must be validated
+/// against the execution result's `gas_used` rather than the receipt value.
 pub fn validate_block_post_execution<B, R, ChainSpec>(
     block: &RecoveredBlock<B>,
     chain_spec: &ChainSpec,
