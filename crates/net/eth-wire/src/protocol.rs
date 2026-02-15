@@ -45,6 +45,13 @@ impl Protocol {
         Self::eth(EthVersion::Eth68)
     }
 
+    /// Returns the `snap/1` capability.
+    ///
+    /// The snap protocol defines 8 message types (0x00..0x07).
+    pub const fn snap_1() -> Self {
+        Self::new(Capability::new_static("snap", 1), 8)
+    }
+
     /// Consumes the type and returns a tuple of the [Capability] and number of messages.
     #[inline]
     pub(crate) fn split(self) -> (Capability, u8) {

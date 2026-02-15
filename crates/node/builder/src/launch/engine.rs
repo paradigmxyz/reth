@@ -32,7 +32,7 @@ use reth_node_core::{
 use reth_node_events::node;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    BlockNumReader, StorageSettingsCache,
+    BlockNumReader, HeaderProvider, StorageSettingsCache,
 };
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -162,6 +162,77 @@ impl EngineNodeLauncher {
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
         pipeline.move_to_static_files()?;
+
+        // Run snap sync if enabled
+        if node_config.debug.snap_sync {
+            info!(target: "reth::cli", "Snap sync mode enabled");
+
+            let (pivot_hash, pivot_header) = if let Some(tip) = node_config.debug.tip {
+                info!(target: "reth::cli", %tip, "Using explicit pivot from --debug.tip");
+                let header = ctx
+                    .blockchain_db()
+                    .header(tip)
+                    .map_err(|e| eyre::eyre!("failed to get pivot header: {e}"))?
+                    .ok_or_else(|| {
+                        eyre::eyre!(
+                            "pivot block header {tip} not found in DB - run header sync first"
+                        )
+                    })?;
+                (tip, header)
+            } else {
+                info!(target: "reth::cli", "Selecting snap sync pivot from best synced block");
+                let best_number = ctx
+                    .blockchain_db()
+                    .best_block_number()
+                    .map_err(|e| eyre::eyre!("failed to get best block number: {e}"))?;
+
+                if best_number == 0 {
+                    return Err(eyre::eyre!(
+                        "No blocks synced yet. Snap sync needs headers synced first. \
+                         Either run header sync first or provide --debug.tip explicitly."
+                    ));
+                }
+
+                let sealed = ctx
+                    .blockchain_db()
+                    .sealed_header(best_number)
+                    .map_err(|e| eyre::eyre!("failed to get sealed header: {e}"))?
+                    .ok_or_else(|| eyre::eyre!("header at block {best_number} not found"))?;
+
+                let hash = sealed.hash();
+                info!(target: "reth::cli", best_number, %hash, "Using best synced block as snap sync pivot");
+                (hash, sealed.into_header())
+            };
+
+            let pivot_number = pivot_header.number();
+            let state_root = pivot_header.state_root();
+
+            info!(
+                target: "reth::cli",
+                %pivot_hash,
+                pivot_number,
+                %state_root,
+                "Starting snap sync to pivot block"
+            );
+
+            let snap_result = reth_snap_sync::run_snap_sync(
+                network_client.clone(),
+                ctx.provider_factory().clone(),
+                pivot_hash,
+                pivot_number,
+                state_root,
+            )
+            .await;
+
+            match snap_result {
+                Ok(block_number) => {
+                    info!(target: "reth::cli", block_number, "Snap sync completed successfully");
+                }
+                Err(e) => {
+                    return Err(eyre::eyre!("Snap sync failed: {e}"));
+                }
+            }
+        }
 
         let pipeline_events = pipeline.events();
 

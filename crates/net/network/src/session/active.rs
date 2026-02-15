@@ -316,8 +316,101 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
                 OnIncomingMessageOutcome::Ok
             }
-            EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
+            EthMessage::Other(raw) => {
+                if let Some(outcome) = self.try_handle_snap_response(&raw) {
+                    outcome
+                } else {
+                    self.try_emit_broadcast(PeerMessage::Other(raw)).into()
+                }
+            }
         }
+    }
+
+    /// Attempts to decode a raw capability message as a snap protocol response and resolve the
+    /// matching inflight request.
+    ///
+    /// Returns `Some` if the message ID falls in the snap range (even if decoding or matching
+    /// fails), `None` if the message is not a snap message.
+    fn try_handle_snap_response(
+        &mut self,
+        raw: &RawCapabilityMessage,
+    ) -> Option<OnIncomingMessageOutcome<N>> {
+        use reth_eth_wire_types::{snap::SnapProtocolMessage, EthMessageID};
+        use reth_network_p2p::snap::client::SnapResponse;
+
+        let eth_offset = EthMessageID::message_count(self.conn.version()) as usize;
+        let snap_count = 8; // snap/1 has 8 message types (0x00..0x07)
+
+        // Check if the raw message ID falls in the snap range
+        if raw.id < eth_offset || raw.id >= eth_offset + snap_count {
+            return None;
+        }
+
+        let snap_id = (raw.id - eth_offset) as u8;
+
+        // Only handle response messages (odd IDs: AccountRange=1, StorageRanges=3, ByteCodes=5,
+        // TrieNodes=7)
+        if snap_id.is_multiple_of(2) {
+            // This is a snap *request* from the remote peer, not a response.
+            // For now, we don't handle incoming snap requests — let it pass through.
+            return None;
+        }
+
+        let mut buf = raw.payload.as_ref();
+        let snap_msg = match SnapProtocolMessage::decode(snap_id, &mut buf) {
+            Ok(msg) => msg,
+            Err(err) => {
+                debug!(target: "net::session", %err, ?snap_id, remote_peer_id=?self.remote_peer_id, "failed to decode snap response");
+                self.on_bad_message();
+                return Some(OnIncomingMessageOutcome::Ok);
+            }
+        };
+
+        // Extract request_id and build the SnapResponse
+        let (request_id, expected_variant, snap_response) = match snap_msg {
+            SnapProtocolMessage::AccountRange(msg) => {
+                (msg.request_id, "GetAccountRange", SnapResponse::AccountRange(msg))
+            }
+            SnapProtocolMessage::StorageRanges(msg) => {
+                (msg.request_id, "GetStorageRanges", SnapResponse::StorageRanges(msg))
+            }
+            SnapProtocolMessage::ByteCodes(msg) => {
+                (msg.request_id, "GetByteCodes", SnapResponse::ByteCodes(msg))
+            }
+            SnapProtocolMessage::TrieNodes(msg) => {
+                (msg.request_id, "GetTrieNodes", SnapResponse::TrieNodes(msg))
+            }
+            _ => {
+                // Not a response message — shouldn't happen given the odd-ID check above
+                return None;
+            }
+        };
+
+        if let Some(req) = self.inflight_requests.remove(&request_id) {
+            match req.request {
+                RequestState::Waiting(
+                    PeerRequest::GetAccountRange { response, .. } |
+                    PeerRequest::GetStorageRanges { response, .. } |
+                    PeerRequest::GetByteCodes { response, .. } |
+                    PeerRequest::GetTrieNodes { response, .. },
+                ) => {
+                    trace!(peer_id=?self.remote_peer_id, ?request_id, %expected_variant, "received snap response from peer");
+                    let _ = response.send(Ok(snap_response));
+                    self.update_request_timeout(req.timestamp, Instant::now());
+                }
+                RequestState::Waiting(request) => {
+                    request.send_bad_response();
+                }
+                RequestState::TimedOut => {
+                    self.update_request_timeout(req.timestamp, Instant::now());
+                }
+            }
+        } else {
+            trace!(peer_id=?self.remote_peer_id, ?request_id, "received snap response to unknown request");
+            self.on_bad_message();
+        }
+
+        Some(OnIncomingMessageOutcome::Ok)
     }
 
     /// Handle an internal peer request that will be sent to the remote.
@@ -337,15 +430,67 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
         let request_id = self.next_id();
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
-        let msg = request.create_request_message(request_id).map_versioned(version);
 
-        self.queued_outgoing.push_back(msg.into());
-        let req = InflightRequest {
-            request: RequestState::Waiting(request),
-            timestamp: Instant::now(),
-            deadline,
+        if request.is_snap_request() {
+            // Snap requests are encoded as raw capability messages with adjusted message IDs.
+            // The snap message ID is offset by the eth message count for multiplexing.
+            if let Some(raw_msg) = self.encode_snap_request(&request, request_id) {
+                self.queued_outgoing.push_back(OutgoingMessage::Raw(raw_msg));
+                let req = InflightRequest {
+                    request: RequestState::Waiting(request),
+                    timestamp: Instant::now(),
+                    deadline,
+                };
+                self.inflight_requests.insert(request_id, req);
+            } else {
+                request.send_err_response(RequestError::UnsupportedCapability);
+            }
+        } else {
+            let msg = request.create_request_message(request_id).map_versioned(version);
+            self.queued_outgoing.push_back(msg.into());
+            let req = InflightRequest {
+                request: RequestState::Waiting(request),
+                timestamp: Instant::now(),
+                deadline,
+            };
+            self.inflight_requests.insert(request_id, req);
+        }
+    }
+
+    /// Encodes a snap protocol request as a [`RawCapabilityMessage`].
+    fn encode_snap_request(
+        &self,
+        request: &PeerRequest<N>,
+        _request_id: u64,
+    ) -> Option<RawCapabilityMessage> {
+        use reth_eth_wire_types::{snap::SnapProtocolMessage, EthMessageID};
+
+        let snap_msg = match request {
+            PeerRequest::GetAccountRange { request, .. } => {
+                SnapProtocolMessage::GetAccountRange(request.clone())
+            }
+            PeerRequest::GetStorageRanges { request, .. } => {
+                SnapProtocolMessage::GetStorageRanges(request.clone())
+            }
+            PeerRequest::GetByteCodes { request, .. } => {
+                SnapProtocolMessage::GetByteCodes(request.clone())
+            }
+            PeerRequest::GetTrieNodes { request, .. } => {
+                SnapProtocolMessage::GetTrieNodes(request.clone())
+            }
+            _ => return None,
         };
-        self.inflight_requests.insert(request_id, req);
+
+        let encoded = snap_msg.encode();
+        // The first byte is the snap message ID, which needs to be offset
+        // by the eth protocol message count for proper multiplexing.
+        let snap_id = encoded[0];
+        let adjusted_id = snap_id + EthMessageID::message_count(self.conn.version());
+
+        let mut payload = Vec::with_capacity(encoded.len() - 1);
+        payload.extend_from_slice(&encoded[1..]);
+
+        Some(RawCapabilityMessage::new(adjusted_id as usize, payload.into()))
     }
 
     #[inline]

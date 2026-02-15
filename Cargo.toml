@@ -55,6 +55,7 @@ members = [
     "crates/net/discv5/",
     "crates/net/dns/",
     "crates/net/downloaders/",
+    "crates/net/snap-sync/",
     "crates/net/ecies/",
     "crates/net/eth-wire-types",
     "crates/net/eth-wire/",
@@ -343,6 +344,7 @@ reth-discv4 = { path = "crates/net/discv4" }
 reth-discv5 = { path = "crates/net/discv5" }
 reth-dns-discovery = { path = "crates/net/dns" }
 reth-downloaders = { path = "crates/net/downloaders" }
+reth-snap-sync = { path = "crates/net/snap-sync" }
 reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-engine-local = { path = "crates/engine/local" }

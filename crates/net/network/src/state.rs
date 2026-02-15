@@ -403,6 +403,16 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         }
     }
 
+    /// Sends a snap request directly to the peer's session.
+    ///
+    /// Unlike block requests, snap requests don't need response tracking here because
+    /// the [`StateFetcher`] bridges the response back to the caller internally.
+    fn handle_snap_request(&mut self, peer: PeerId, request: PeerRequest<N>) {
+        if let Some(ref mut peer) = self.active_peers.get_mut(&peer) {
+            let _ = peer.request_tx.to_session_tx.try_send(request);
+        }
+    }
+
     /// Handle the outcome of processed response, for example directly queue another request.
     fn on_block_response_outcome(&mut self, outcome: BlockResponseOutcome) {
         match outcome {
@@ -452,6 +462,9 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 match action {
                     FetchAction::BlockRequest { peer_id, request } => {
                         self.handle_block_request(peer_id, request)
+                    }
+                    FetchAction::SnapRequest { peer_id, request } => {
+                        self.handle_snap_request(peer_id, request)
                     }
                 }
             }

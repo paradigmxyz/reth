@@ -1,0 +1,56 @@
+[package]
+name = "reth-snap-sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Snap sync protocol implementation for reth"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-eth-wire-types.workspace = true
+reth-network-p2p.workspace = true
+reth-network-peers.workspace = true
+reth-primitives-traits.workspace = true
+reth-storage-api.workspace = true
+reth-storage-errors.workspace = true
+reth-db-api.workspace = true
+reth-provider.workspace = true
+reth-tasks.workspace = true
+reth-tracing.workspace = true
+reth-metrics.workspace = true
+reth-trie.workspace = true
+reth-trie-db.workspace = true
+reth-execution-errors.workspace = true
+
+# misc (non-workspace)
+rand = "0.9"
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+alloy-consensus.workspace = true
+alloy-trie.workspace = true
+
+# async
+futures.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "macros"] }
+tokio-stream.workspace = true
+
+# misc
+tracing.workspace = true
+thiserror.workspace = true
+metrics.workspace = true
+derive_more.workspace = true
+
+[dev-dependencies]
+reth-provider = { workspace = true, features = ["test-utils"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[features]
+default = []

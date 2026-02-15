@@ -205,7 +205,10 @@ impl HelloMessageBuilder {
             protocol_version: protocol_version.unwrap_or_default(),
             client_version: client_version.unwrap_or_else(|| RETH_CLIENT_VERSION.to_string()),
             protocols: protocols.unwrap_or_else(|| {
-                EthVersion::ALL_VERSIONS.iter().copied().map(Into::into).collect()
+                let mut protos: Vec<Protocol> =
+                    EthVersion::ALL_VERSIONS.iter().copied().map(Into::into).collect();
+                protos.push(Protocol::snap_1());
+                protos
             }),
             port: port.unwrap_or(DEFAULT_TCP_PORT),
             id,
