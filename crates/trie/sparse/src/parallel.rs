@@ -38,6 +38,10 @@ pub struct ParallelismThresholds {
     /// for hash updates. When updating subtrie hashes with fewer changed keys than this threshold,
     /// the updates will be processed serially.
     pub min_updated_nodes: usize,
+    /// Minimum number of touched leaves before parallel processing is enabled for
+    /// `update_leaves`. Touched leaves only perform read-only `find_leaf` lookups, so they
+    /// can be safely parallelized.
+    pub min_touched_leaves: usize,
 }
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
@@ -1320,60 +1324,95 @@ impl SparseTrie for ParallelSparseTrie {
     ) -> SparseTrieResult<()> {
         use crate::{provider::NoRevealProvider, LeafUpdate};
 
-        // Collect keys upfront since we mutate `updates` during iteration.
-        // On success, entries are removed; on blinded node failure, they're re-inserted.
-        let keys: Vec<B256> = updates.keys().copied().collect();
-
-        for key in keys {
-            let full_path = Nibbles::unpack(key);
-            // Remove upfront - we'll re-insert if the operation fails due to blinded node.
-            let update = updates.remove(&key).unwrap();
-
+        // Partition keys into Changed and Touched upfront. Changed updates mutate the trie
+        // and must run sequentially; Touched updates are read-only and can be parallelized.
+        let mut changed_keys = Vec::new();
+        let mut touched_keys = Vec::new();
+        for (&key, update) in updates.iter() {
             match update {
-                LeafUpdate::Changed(value) => {
-                    if value.is_empty() {
-                        // Removal: remove_leaf with NoRevealProvider is atomic - returns a
-                        // retriable error before any mutations (via pre_validate_reveal_chain).
-                        match self.remove_leaf(&full_path, NoRevealProvider) {
-                            Ok(()) => {}
-                            Err(e) => {
-                                if let Some(path) = Self::get_retriable_path(&e) {
-                                    let (target_key, min_len) =
-                                        Self::proof_target_for_path(key, &full_path, &path);
-                                    proof_required_fn(target_key, min_len);
-                                    updates.insert(key, LeafUpdate::Changed(value));
-                                } else {
-                                    return Err(e);
-                                }
-                            }
-                        }
-                    } else {
-                        // Update/insert: update_leaf is atomic - cleans up on error.
-                        if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider)
-                        {
-                            if let Some(path) = Self::get_retriable_path(&e) {
-                                let (target_key, min_len) =
-                                    Self::proof_target_for_path(key, &full_path, &path);
-                                proof_required_fn(target_key, min_len);
-                                updates.insert(key, LeafUpdate::Changed(value));
-                            } else {
-                                return Err(e);
-                            }
-                        }
-                    }
-                }
-                LeafUpdate::Touched => {
-                    // Touched is read-only: check if path is accessible, request proof if blinded.
-                    match self.find_leaf(&full_path, None) {
-                        Err(LeafLookupError::BlindedNode { path, .. }) => {
+                LeafUpdate::Changed(_) => changed_keys.push(key),
+                LeafUpdate::Touched => touched_keys.push(key),
+            }
+        }
+
+        // --- Phase 1: Process Changed leaves sequentially (requires &mut self) ---
+        for key in changed_keys {
+            let full_path = Nibbles::unpack(key);
+            let value = match updates.remove(&key).unwrap() {
+                LeafUpdate::Changed(v) => v,
+                LeafUpdate::Touched => unreachable!(),
+            };
+
+            if value.is_empty() {
+                match self.remove_leaf(&full_path, NoRevealProvider) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        if let Some(path) = Self::get_retriable_path(&e) {
                             let (target_key, min_len) =
                                 Self::proof_target_for_path(key, &full_path, &path);
                             proof_required_fn(target_key, min_len);
-                            updates.insert(key, LeafUpdate::Touched);
+                            updates.insert(key, LeafUpdate::Changed(value));
+                        } else {
+                            return Err(e);
                         }
-                        // Path is fully revealed (exists or proven non-existent), no action needed.
-                        Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {}
                     }
+                }
+            } else if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider) {
+                if let Some(path) = Self::get_retriable_path(&e) {
+                    let (target_key, min_len) = Self::proof_target_for_path(key, &full_path, &path);
+                    proof_required_fn(target_key, min_len);
+                    updates.insert(key, LeafUpdate::Changed(value));
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+
+        // --- Phase 2: Process Touched leaves (read-only find_leaf) ---
+        // Remove all touched keys from updates; they'll be re-inserted only on blinded node.
+        for &key in &touched_keys {
+            updates.remove(&key);
+        }
+
+        if self.is_touched_parallelism_enabled(touched_keys.len()) {
+            #[cfg(not(feature = "std"))]
+            unreachable!("nostd is checked by is_touched_parallelism_enabled");
+
+            #[cfg(feature = "std")]
+            {
+                use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
+                let blinded: Vec<(B256, B256, u8)> = touched_keys
+                    .par_iter()
+                    .filter_map(|&key| {
+                        let full_path = Nibbles::unpack(key);
+                        match self.find_leaf(&full_path, None) {
+                            Err(LeafLookupError::BlindedNode { path, .. }) => {
+                                let (target_key, min_len) =
+                                    Self::proof_target_for_path(key, &full_path, &path);
+                                Some((key, target_key, min_len))
+                            }
+                            Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
+                        }
+                    })
+                    .collect();
+
+                for (original_key, target_key, min_len) in blinded {
+                    proof_required_fn(target_key, min_len);
+                    updates.insert(original_key, LeafUpdate::Touched);
+                }
+            }
+        } else {
+            for key in touched_keys {
+                let full_path = Nibbles::unpack(key);
+                match self.find_leaf(&full_path, None) {
+                    Err(LeafLookupError::BlindedNode { path, .. }) => {
+                        let (target_key, min_len) =
+                            Self::proof_target_for_path(key, &full_path, &path);
+                        proof_required_fn(target_key, min_len);
+                        updates.insert(key, LeafUpdate::Touched);
+                    }
+                    Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {}
                 }
             }
         }
@@ -1421,6 +1460,21 @@ impl ParallelSparseTrie {
         #[cfg(feature = "std")]
         {
             num_changed_keys >= self.parallelism_thresholds.min_updated_nodes
+        }
+    }
+
+    /// Returns true if parallelism should be enabled for processing touched leaves.
+    /// Will always return false in nostd builds.
+    const fn is_touched_parallelism_enabled(&self, num_touched: usize) -> bool {
+        #[cfg(not(feature = "std"))]
+        {
+            let _ = num_touched;
+            return false;
+        }
+
+        #[cfg(feature = "std")]
+        {
+            num_touched >= self.parallelism_thresholds.min_touched_leaves
         }
     }
 
