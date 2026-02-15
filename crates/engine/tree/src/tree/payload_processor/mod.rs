@@ -422,7 +422,7 @@ where
             });
         } else {
             // Parallel path — spawn on rayon for parallel signature recovery.
-            rayon_core::spawn(move || {
+            rayon::spawn(move || {
                 let (transactions, convert) = transactions.into_parts();
                 transactions.into_par_iter().enumerate().for_each_with(
                     ooo_tx,

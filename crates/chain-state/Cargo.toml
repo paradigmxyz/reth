@@ -41,7 +41,7 @@ derive_more.workspace = true
 metrics.workspace = true
 parking_lot.workspace = true
 pin-project.workspace = true
-rayon-core = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 # optional deps for test-utils
@@ -85,7 +85,7 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]
-rayon = ["dep:rayon-core"]
+rayon = ["dep:rayon"]
 
 [[bench]]
 name = "canonical_hashes_range"

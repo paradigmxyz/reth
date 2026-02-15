@@ -2148,6 +2148,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
+name = "chili"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d001a06f3969c49af3bdf308e9aaa1a477e77d2460357ce9e1248c6a9dcc4c0"
+
+[[package]]
 name = "chrono"
 version = "0.4.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3315,7 +3321,6 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
- "par-iter",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
@@ -3327,6 +3332,7 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-rayon",
  "reth-revm",
  "reth-tracing",
  "reth-trie",
@@ -6585,6 +6591,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e96cbd21255b7fb29a5d51ef38a779b517a91abd59e2756c039583f43ef4c90f"
 dependencies = [
+ "chili",
  "once_cell",
 ]
 
@@ -7709,13 +7716,13 @@ dependencies = [
  "parking_lot",
  "pin-project",
  "rand 0.9.2",
- "rayon-core",
  "reth-chainspec",
  "reth-errors",
  "reth-ethereum-primitives",
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives-traits",
+ "reth-rayon",
  "reth-storage-api",
  "reth-testing-utils",
  "reth-trie",
@@ -8186,7 +8193,6 @@ dependencies = [
  "futures-util",
  "itertools 0.14.0",
  "metrics",
- "par-iter",
  "pin-project",
  "rand 0.9.2",
  "reth-chainspec",
@@ -8198,6 +8204,7 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-rayon",
  "reth-storage-api",
  "reth-tasks",
  "reth-testing-utils",
@@ -8362,12 +8369,10 @@ dependencies = [
  "metrics",
  "metrics-util",
  "moka",
- "par-iter",
  "parking_lot",
  "proptest",
  "rand 0.8.5",
  "rand 0.9.2",
- "rayon-core",
  "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
@@ -8392,6 +8397,7 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
+ "reth-rayon",
  "reth-revm",
  "reth-stages",
  "reth-stages-api",
@@ -8751,8 +8757,8 @@ name = "reth-etl"
 version = "1.11.0"
 dependencies = [
  "alloy-primitives",
- "par-iter",
  "reth-db-api",
+ "reth-rayon",
  "tempfile",
 ]
 
@@ -8768,12 +8774,12 @@ dependencies = [
  "derive_more",
  "futures-util",
  "metrics",
- "par-iter",
  "reth-ethereum-primitives",
  "reth-execution-errors",
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives-traits",
+ "reth-rayon",
  "reth-storage-api",
  "reth-storage-errors",
  "reth-trie-common",
@@ -9070,7 +9076,6 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "metrics",
- "par-iter",
  "parking_lot",
  "pin-project",
  "rand 0.8.5",
@@ -9096,6 +9101,7 @@ dependencies = [
  "reth-network-types",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-rayon",
  "reth-storage-api",
  "reth-tasks",
  "reth-tokio-util",
@@ -9247,7 +9253,6 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "parking_lot",
- "rayon-core",
  "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-chainspec",
@@ -9281,6 +9286,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
+ "reth-rayon",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
@@ -9619,13 +9625,13 @@ dependencies = [
  "modular-bitfield",
  "once_cell",
  "op-alloy-consensus",
- "par-iter",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "rand 0.9.2",
  "reth-chainspec",
  "reth-codecs",
+ "reth-rayon",
  "revm-bytecode",
  "revm-primitives",
  "revm-state",
@@ -9649,10 +9655,8 @@ dependencies = [
  "itertools 0.14.0",
  "metrics",
  "notify",
- "par-iter",
  "parking_lot",
  "rand 0.9.2",
- "rayon-core",
  "reth-chain-state",
  "reth-chainspec",
  "reth-codecs",
@@ -9668,6 +9672,7 @@ dependencies = [
  "reth-node-types",
  "reth-primitives-traits",
  "reth-prune-types",
+ "reth-rayon",
  "reth-stages-types",
  "reth-static-file-types",
  "reth-storage-api",
@@ -9697,7 +9702,6 @@ dependencies = [
  "assert_matches",
  "itertools 0.14.0",
  "metrics",
- "par-iter",
  "reth-config",
  "reth-db",
  "reth-db-api",
@@ -9707,6 +9711,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
+ "reth-rayon",
  "reth-stages",
  "reth-stages-types",
  "reth-static-file-types",
@@ -9742,6 +9747,15 @@ dependencies = [
  "thiserror 2.0.18",
  "toml",
  "tracing",
+]
+
+[[package]]
+name = "reth-rayon"
+version = "1.11.0"
+dependencies = [
+ "par-core",
+ "par-iter",
+ "rayon-core",
 ]
 
 [[package]]
@@ -10164,7 +10178,6 @@ dependencies = [
  "num-traits",
  "paste",
  "rand 0.9.2",
- "rayon-core",
  "reqwest",
  "reth-chainspec",
  "reth-codecs",
@@ -10191,6 +10204,7 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
+ "reth-rayon",
  "reth-revm",
  "reth-stages-api",
  "reth-static-file",
@@ -10263,13 +10277,13 @@ version = "1.11.0"
 dependencies = [
  "alloy-primitives",
  "assert_matches",
- "par-iter",
  "parking_lot",
  "reth-codecs",
  "reth-db-api",
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
+ "reth-rayon",
  "reth-stages",
  "reth-stages-types",
  "reth-static-file-types",
@@ -10375,8 +10389,8 @@ dependencies = [
  "futures-util",
  "metrics",
  "pin-project",
- "rayon-core",
  "reth-metrics",
+ "reth-rayon",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -10548,12 +10562,12 @@ dependencies = [
  "hash-db",
  "itertools 0.14.0",
  "nybbles",
- "par-iter",
  "plain_hasher",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-codecs",
  "reth-primitives-traits",
+ "reth-rayon",
  "revm-database",
  "revm-state",
  "serde",
@@ -10603,7 +10617,6 @@ dependencies = [
  "derive_more",
  "itertools 0.14.0",
  "metrics",
- "par-iter",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.2",
@@ -10611,6 +10624,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-rayon",
  "reth-storage-errors",
  "reth-tasks",
  "reth-trie",
@@ -10634,17 +10648,16 @@ dependencies = [
  "auto_impl",
  "itertools 0.14.0",
  "metrics",
- "par-iter",
  "pretty_assertions",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "rand 0.9.2",
- "rayon-core",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-rayon",
  "reth-storage-api",
  "reth-tracing",
  "reth-trie",

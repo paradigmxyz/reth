@@ -79,7 +79,7 @@ eyre.workspace = true
 parking_lot.workspace = true
 jsonrpsee.workspace = true
 fdlimit.workspace = true
-rayon-core.workspace = true
+rayon.workspace = true
 serde_json.workspace = true
 
 # tracing

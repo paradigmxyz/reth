@@ -26,7 +26,7 @@ alloy-rlp.workspace = true
 # misc
 auto_impl.workspace = true
 rayon = { workspace = true, optional = true }
-rayon-core = { workspace = true, optional = true }
+
 smallvec.workspace = true
 
 # metrics
@@ -55,7 +55,6 @@ rand_08.workspace = true
 default = ["std", "metrics"]
 std = [
     "dep:rayon",
-    "dep:rayon-core",
     "alloy-primitives/std",
     "alloy-rlp/std",
     "alloy-trie/std",

@@ -63,7 +63,6 @@ reth-metrics = { workspace = true, features = ["common"] }
 # misc
 schnellru.workspace = true
 rayon.workspace = true
-rayon-core.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
 parking_lot.workspace = true

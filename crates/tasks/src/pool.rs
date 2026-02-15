@@ -53,18 +53,18 @@ impl BlockingTaskGuard {
 /// [tokio-docs]: https://docs.rs/tokio/latest/tokio/index.html#cpu-bound-tasks-and-blocking-code
 #[derive(Clone, Debug)]
 pub struct BlockingTaskPool {
-    pool: Arc<rayon_core::ThreadPool>,
+    pool: Arc<rayon::ThreadPool>,
 }
 
 impl BlockingTaskPool {
     /// Create a new `BlockingTaskPool` with the given threadpool.
-    pub fn new(pool: rayon_core::ThreadPool) -> Self {
+    pub fn new(pool: rayon::ThreadPool) -> Self {
         Self { pool: Arc::new(pool) }
     }
 
     /// Convenience function to start building a new threadpool.
-    pub fn builder() -> rayon_core::ThreadPoolBuilder {
-        rayon_core::ThreadPoolBuilder::new()
+    pub fn builder() -> rayon::ThreadPoolBuilder {
+        rayon::ThreadPoolBuilder::new()
     }
 
     /// Convenience function to build a new threadpool with the default configuration.
@@ -72,7 +72,7 @@ impl BlockingTaskPool {
     /// Uses [`rayon::ThreadPoolBuilder::build`](rayon::ThreadPoolBuilder::build) defaults.
     /// If a different stack size or other parameters are needed, they can be configured via
     /// [`rayon::ThreadPoolBuilder`] returned by [`Self::builder`].
-    pub fn build() -> Result<Self, rayon_core::ThreadPoolBuildError> {
+    pub fn build() -> Result<Self, rayon::ThreadPoolBuildError> {
         Self::builder().build().map(Self::new)
     }
 
