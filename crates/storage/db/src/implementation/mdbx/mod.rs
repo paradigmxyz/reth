@@ -516,6 +516,46 @@ impl DatabaseEnv {
         Ok(env)
     }
 
+    /// Spawns a background thread that force-loads the entire database into the OS page cache.
+    ///
+    /// Uses `mdbx_env_warmup` with `FORCE | OOM_SAFE` to sequentially peek all allocated pages,
+    /// loading them into memory without risking an OOM kill.
+    pub fn start_warmup(&self) -> std::thread::JoinHandle<()> {
+        let env = self.inner.clone();
+        std::thread::Builder::new()
+            .name("mdbx-warmup".to_string())
+            .spawn(move || {
+                let flags = reth_libmdbx::WarmupFlags::FORCE | reth_libmdbx::WarmupFlags::OOM_SAFE;
+
+                reth_tracing::tracing::info!(
+                    target: "storage::db::mdbx",
+                    "Starting database warmup"
+                );
+                match env.warmup(flags, None) {
+                    Ok(false) => {
+                        reth_tracing::tracing::info!(
+                            target: "storage::db::mdbx",
+                            "Database warmup complete"
+                        );
+                    }
+                    Ok(true) => {
+                        reth_tracing::tracing::warn!(
+                            target: "storage::db::mdbx",
+                            "Database warmup timed out"
+                        );
+                    }
+                    Err(err) => {
+                        reth_tracing::tracing::warn!(
+                            target: "storage::db::mdbx",
+                            %err,
+                            "Database warmup failed"
+                        );
+                    }
+                }
+            })
+            .expect("failed to spawn mdbx-warmup thread")
+    }
+
     /// Enables metrics on the database.
     pub fn with_metrics(mut self) -> Self {
         self.metrics = Some(DatabaseEnvMetrics::new().into());

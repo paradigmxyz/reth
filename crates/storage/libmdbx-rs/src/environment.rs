@@ -149,6 +149,23 @@ impl Environment {
         f(self.env_ptr())
     }
 
+    /// Warms up the database by loading pages into memory.
+    ///
+    /// `flags` controls the warmup behavior (force-load, mlock, OOM-safe, etc.).
+    ///
+    /// `timeout` is only meaningful when [`WarmupFlags::FORCE`](crate::WarmupFlags::FORCE) is set.
+    /// It limits how long the force-load will run. `None` means no timeout.
+    ///
+    /// Returns `Ok(false)` on success, `Ok(true)` if the timeout was reached before all pages
+    /// were loaded.
+    pub fn warmup(&self, flags: crate::WarmupFlags, timeout: Option<Duration>) -> Result<bool> {
+        let timeout_16dot16 =
+            timeout.map(|d| (d.as_secs_f64() * 65536.0) as std::ffi::c_uint).unwrap_or(0);
+        mdbx_result(unsafe {
+            ffi::mdbx_env_warmup(self.env_ptr(), ptr::null(), flags.bits(), timeout_16dot16)
+        })
+    }
+
     /// Flush the environment data buffers to disk.
     pub fn sync(&self, force: bool) -> Result<bool> {
         mdbx_result(unsafe { ffi::mdbx_env_sync_ex(self.env_ptr(), force, false) })
