@@ -14,7 +14,7 @@ use reth_db_api::{
 use reth_db_models::StoredBlockWithdrawals;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{
-    Block, BlockBody, FullBlockHeader, NodePrimitives, SignedTransaction,
+    Block, BlockBody, BlockHeader, FullBlockHeader, NodePrimitives, SignedTransaction,
 };
 use reth_storage_errors::provider::ProviderResult;
 
@@ -208,7 +208,7 @@ impl<Provider, T, H> BlockBodyWriter<Provider, alloy_consensus::BlockBody<T, H>>
     for EmptyBodyStorage<T, H>
 where
     T: SignedTransaction,
-    H: FullBlockHeader,
+    H: BlockHeader,
 {
     fn write_block_bodies(
         &self,
@@ -233,7 +233,7 @@ impl<Provider, T, H> BlockBodyReader<Provider> for EmptyBodyStorage<T, H>
 where
     Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     T: SignedTransaction,
-    H: FullBlockHeader,
+    H: BlockHeader,
 {
     type Block = alloy_consensus::Block<T, H>;
 
