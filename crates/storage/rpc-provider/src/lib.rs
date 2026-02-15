@@ -57,7 +57,10 @@ use reth_storage_api::{
     BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
     ReceiptProviderIdExt, StatsReader,
 };
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput};
+use reth_trie::{
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, MultiProof,
+    TrieInput,
+};
 use std::{
     collections::BTreeMap,
     future::{Future, IntoFuture},
@@ -1188,6 +1191,16 @@ where
                 .await
                 .map_err(ProviderError::other)
         })
+    }
+
+    fn state_root_with_updates_sorted(
+        &self,
+        _hashed_state: &HashedPostStateSorted,
+    ) -> Result<(B256, TrieUpdates), ProviderError> {
+        if !self.compute_state_root {
+            return Ok((B256::ZERO, TrieUpdates::default()));
+        }
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_root_from_nodes_with_updates(

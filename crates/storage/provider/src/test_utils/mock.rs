@@ -39,8 +39,8 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
     collections::BTreeMap,
@@ -789,6 +789,14 @@ where
     fn state_root_with_updates(
         &self,
         _state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let state_root = self.state_roots.lock().pop().unwrap_or_default();
+        Ok((state_root, Default::default()))
+    }
+
+    fn state_root_with_updates_sorted(
+        &self,
+        _hashed_state: &HashedPostStateSorted,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let state_root = self.state_roots.lock().pop().unwrap_or_default();
         Ok((state_root, Default::default()))
