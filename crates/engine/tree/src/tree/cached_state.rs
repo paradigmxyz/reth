@@ -649,17 +649,12 @@ impl ExecutionCache {
     /// Inserts the post-execution state changes into the cache.
     ///
     /// This method is called after transaction execution to update the cache with
-    /// the touched and modified state. The insertion order is critical:
+    /// the touched and modified state.
     ///
-    /// 1. Bytecodes: Insert contract code first
-    /// 2. Storage slots: Update storage values for each account
-    /// 3. Accounts: Update account info (nonce, balance, code hash)
-    ///
-    /// ## Why This Order Matters
-    ///
-    /// Account information references bytecode via code hash. If we update accounts
-    /// before bytecode, we might create cache entries pointing to non-existent code.
-    /// The current order ensures cache consistency.
+    /// Bytecodes are inserted first to ensure concurrent readers never observe an account
+    /// entry whose code hash points to a missing bytecode. Account and storage cache updates
+    /// are then performed in parallel via [`rayon::join`] since they operate on independent
+    /// caches that only require `&self`.
     ///
     /// ## Error Handling
     ///
@@ -667,36 +662,13 @@ impl ExecutionCache {
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
     #[expect(clippy::result_unit_err)]
     pub fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
-        let _enter =
-            debug_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())
-                .entered();
-        // Insert bytecodes
-        for (code_hash, bytecode) in &state_updates.contracts {
-            self.insert_code(*code_hash, Some(Bytecode(bytecode.clone())));
-        }
-        drop(_enter);
-
-        let _enter = debug_span!(
-            target: "engine::tree",
-            "accounts",
-            accounts = state_updates.state.len(),
-            storages =
-                state_updates.state.values().map(|account| account.storage.len()).sum::<usize>()
-        )
-        .entered();
+        // Pre-validate all accounts before mutating any cache. This avoids partial side-effects
+        // (e.g. removing a destroyed EOA) when a later entry triggers an error return.
         for (addr, account) in &state_updates.state {
-            // If the account was not modified, as in not changed and not destroyed, then we have
-            // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
                 continue
             }
 
-            // If the original account had code (was a contract), we must clear the entire cache
-            // because we can't efficiently invalidate all storage slots for a single address.
-            // This should only happen on pre-Dencun networks.
-            //
-            // If the original account had no code (was an EOA or a not yet deployed contract), we
-            // just remove the account from cache - no storage exists for it.
             if account.was_destroyed() {
                 let had_code =
                     account.original_info.as_ref().is_some_and(|info| !info.is_empty_code_hash());
@@ -713,28 +685,64 @@ impl ExecutionCache {
                     self.clear();
                     return Ok(())
                 }
-
-                self.0.account_cache.remove(addr);
                 continue
             }
 
-            // If we have an account that was modified, but it has a `None` account info, some wild
-            // error has occurred because this state should be unrepresentable. An account with
-            // `None` current info, should be destroyed.
-            let Some(ref account_info) = account.info else {
+            if account.info.is_none() {
                 trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
                 return Err(())
-            };
-
-            // Now we iterate over all storage and make updates to the cached storage values
-            for (key, slot) in &account.storage {
-                self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
             }
-
-            // Insert will update if present, so we just use the new account info as the new value
-            // for the account cache
-            self.insert_account(*addr, Some(Account::from(account_info)));
         }
+
+        // Apply destroyed-EOA removals only after validation succeeds.
+        for (addr, account) in &state_updates.state {
+            if !account.status.is_not_modified() && account.was_destroyed() {
+                self.0.account_cache.remove(addr);
+            }
+        }
+
+        // Insert bytecodes first so concurrent readers never see an account whose code hash
+        // points to a missing bytecode entry.
+        let _enter =
+            debug_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())
+                .entered();
+        for (code_hash, bytecode) in &state_updates.contracts {
+            self.insert_code(*code_hash, Some(Bytecode(bytecode.clone())));
+        }
+        drop(_enter);
+
+        // Accounts and storage operate on independent caches, update them in parallel.
+        let _enter = debug_span!(
+            target: "engine::tree",
+            "accounts",
+            accounts = state_updates.state.len(),
+            storages =
+                state_updates.state.values().map(|account| account.storage.len()).sum::<usize>()
+        )
+        .entered();
+
+        rayon::join(
+            || {
+                for (addr, account) in &state_updates.state {
+                    if account.status.is_not_modified() || account.was_destroyed() {
+                        continue
+                    }
+                    // Validated in pre-scan above
+                    let account_info = account.info.as_ref().expect("validated");
+                    self.insert_account(*addr, Some(Account::from(account_info)));
+                }
+            },
+            || {
+                for (addr, account) in &state_updates.state {
+                    if account.status.is_not_modified() || account.was_destroyed() {
+                        continue
+                    }
+                    for (key, slot) in &account.storage {
+                        self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                    }
+                }
+            },
+        );
 
         Ok(())
     }
