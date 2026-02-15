@@ -506,6 +506,10 @@ impl DatabaseEnv {
             inner_env.set_max_read_transaction_duration(max_read_transaction_duration);
         }
 
+        // Disable prefault writes: avoids mincore() syscall overhead since pages are likely
+        // already warm from Engine Task reads in WRITEMAP mode.
+        inner_env.set_prefault_write(false);
+
         let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             dbis: Arc::default(),
