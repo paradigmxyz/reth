@@ -915,4 +915,118 @@ mod tests {
         let final_changesets = db.table::<tables::AccountChangeSets>().unwrap();
         assert!(final_changesets.is_empty(), "All changesets up to block 10 should be pruned");
     }
+
+    /// Tests that when rocksdb feature is enabled but `account_history_in_rocksdb = false`,
+    /// the pruner uses MDBX path instead of `RocksDB` path.
+    ///
+    /// This ensures storage settings are respected even when rocksdb feature is available.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    #[test]
+    fn prune_respects_storage_settings_mdbx_path() {
+        use reth_db_api::models::ShardedKey;
+        use reth_provider::RocksDBProviderFactory;
+
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            0..=100,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
+
+        let (changesets, _) = random_changeset_range(
+            &mut rng,
+            blocks.iter(),
+            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            0..0,
+            0..0,
+        );
+
+        // Insert changesets and history into MDBX (not static files, not RocksDB)
+        db.insert_changesets(changesets.clone(), None).expect("insert changesets");
+        db.insert_history(changesets.clone(), None).expect("insert history");
+
+        // Also insert some data into RocksDB to verify it's NOT touched
+        let mut account_blocks: BTreeMap<_, Vec<u64>> = BTreeMap::new();
+        for (block, changeset) in changesets.iter().enumerate() {
+            for (address, _, _) in changeset {
+                account_blocks.entry(*address).or_default().push(block as u64);
+            }
+        }
+
+        let rocksdb = db.factory.rocksdb_provider();
+        let mut batch = rocksdb.batch();
+        for (address, block_numbers) in &account_blocks {
+            let shard = BlockNumberList::new_pre_sorted(block_numbers.iter().copied());
+            batch
+                .put::<tables::AccountsHistory>(ShardedKey::new(*address, u64::MAX), &shard)
+                .unwrap();
+        }
+        batch.commit().unwrap();
+
+        // Record RocksDB state before pruning
+        let rocksdb_shards_before: Vec<_> = account_blocks
+            .keys()
+            .map(|addr| (*addr, rocksdb.account_history_shards(*addr).unwrap()))
+            .collect();
+
+        // Record MDBX state before pruning
+        let mdbx_history_before = db.table::<tables::AccountsHistory>().unwrap();
+        assert!(!mdbx_history_before.is_empty(), "MDBX should have history data");
+
+        let to_block: BlockNumber = 50;
+        let prune_mode = PruneMode::Before(to_block);
+        let input =
+            PruneInput { previous_checkpoint: None, to_block, limiter: PruneLimiter::default() };
+        let segment = AccountHistory::new(prune_mode);
+
+        // Key: Set account_history_in_rocksdb = false (use MDBX path)
+        db.factory.set_storage_settings_cache(
+            StorageSettings::default()
+                .with_account_changesets_in_static_files(false)
+                .with_account_history_in_rocksdb(false),
+        );
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input).unwrap();
+        provider.commit().expect("commit");
+
+        assert_matches!(
+            result,
+            SegmentOutput { progress: PruneProgress::Finished, pruned, checkpoint: Some(_) }
+                if pruned > 0
+        );
+
+        // Verify MDBX history was pruned (shards should be reduced or modified)
+        let mdbx_history_after = db.table::<tables::AccountsHistory>().unwrap();
+        assert!(
+            mdbx_history_after.len() <= mdbx_history_before.len(),
+            "MDBX history should be pruned or reduced"
+        );
+
+        // Verify RocksDB data was NOT touched
+        let rocksdb = db.factory.rocksdb_provider();
+        for (addr, shards_before) in &rocksdb_shards_before {
+            let shards_after = rocksdb.account_history_shards(*addr).unwrap();
+            assert_eq!(
+                shards_before.len(),
+                shards_after.len(),
+                "RocksDB shards for {addr:?} should NOT be modified when account_history_in_rocksdb=false"
+            );
+            for ((key_before, blocks_before), (key_after, blocks_after)) in
+                shards_before.iter().zip(shards_after.iter())
+            {
+                assert_eq!(key_before, key_after, "RocksDB shard key should be unchanged");
+                assert_eq!(
+                    blocks_before.iter().collect::<Vec<_>>(),
+                    blocks_after.iter().collect::<Vec<_>>(),
+                    "RocksDB shard blocks should be unchanged"
+                );
+            }
+        }
+    }
 }
