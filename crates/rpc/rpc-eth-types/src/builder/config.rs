@@ -13,6 +13,7 @@ use reth_rpc_server_types::constants::{
     DEFAULT_MAX_TRACE_FILTER_BLOCKS, DEFAULT_PROOF_PERMITS,
     RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
 };
+use reth_transaction_pool::BatchConfig;
 use serde::{Deserialize, Serialize};
 
 /// Default value for stale filter ttl
@@ -97,8 +98,8 @@ pub struct EthConfig {
     pub fee_history_cache: FeeHistoryCacheConfig,
     /// The maximum number of getproof calls that can be executed concurrently.
     pub proof_permits: usize,
-    /// Maximum batch size for transaction pool insertions.
-    pub max_batch_size: usize,
+    /// Configuration for transaction pool batching
+    pub batch_config: BatchConfig,
     /// Controls how pending blocks are built when requested via RPC methods
     pub pending_block_kind: PendingBlockKind,
     /// The raw transaction forwarder.
@@ -140,7 +141,7 @@ impl Default for EthConfig {
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
-            max_batch_size: 1,
+            batch_config: BatchConfig::default(),
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
@@ -219,7 +220,21 @@ impl EthConfig {
 
     /// Configures the maximum batch size for transaction pool insertions
     pub const fn max_batch_size(mut self, max_batch_size: usize) -> Self {
-        self.max_batch_size = max_batch_size;
+        self.batch_config.max_batch_size = max_batch_size;
+        self
+    }
+
+    /// Configures the batch timeout for transaction pool insertions.
+    /// Use `Duration::ZERO` for immediate processing (zero-cost path).
+    pub const fn batch_timeout(mut self, batch_timeout: Duration) -> Self {
+        self.batch_config.batch_timeout =
+            if batch_timeout.is_zero() { None } else { Some(batch_timeout) };
+        self
+    }
+
+    /// Configures the batch config for transaction pool insertions.
+    pub const fn batch_config(mut self, batch_config: BatchConfig) -> Self {
+        self.batch_config = batch_config;
         self
     }
 

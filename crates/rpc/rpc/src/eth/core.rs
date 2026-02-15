@@ -31,7 +31,7 @@ use reth_tasks::{
 };
 use reth_transaction_pool::{
     blobstore::BlobSidecarConverter, noop::NoopTransactionPool, AddedTransactionOutcome,
-    BatchTxProcessor, BatchTxRequest, TransactionPool,
+    BatchConfig, BatchTxProcessor, BatchTxRequest, TransactionPool,
 };
 use tokio::sync::{broadcast, mpsc, Mutex, Semaphore};
 
@@ -151,7 +151,7 @@ where
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         proof_permits: usize,
         rpc_converter: Rpc,
-        max_batch_size: usize,
+        batch_config: BatchConfig,
         max_blocking_io_requests: usize,
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: ForwardConfig,
@@ -172,7 +172,7 @@ where
             proof_permits,
             rpc_converter,
             (),
-            max_batch_size,
+            batch_config,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder.forwarder_client(),
@@ -360,7 +360,7 @@ where
         proof_permits: usize,
         converter: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
-        max_batch_size: usize,
+        batch_config: BatchConfig,
         max_blocking_io_requests: usize,
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: Option<RpcClient>,
@@ -384,7 +384,7 @@ where
 
         // Create tx pool insertion batcher
         let (processor, tx_batch_sender) =
-            BatchTxProcessor::new(components.pool().clone(), max_batch_size);
+            BatchTxProcessor::new(components.pool().clone(), batch_config);
         task_spawner.spawn_critical_task("tx-batcher", Box::pin(processor));
 
         Self {
