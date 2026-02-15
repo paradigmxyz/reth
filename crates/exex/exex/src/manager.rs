@@ -32,6 +32,8 @@ use tokio::sync::{
 };
 use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 
+type NotificationPayload<N> = (ExExNotificationSource, ExExNotification<N>);
+
 /// Default max size of the internal state notifications buffer.
 ///
 /// 1024 notifications in the buffer is 3.5 hours of mainnet blocks,
@@ -59,6 +61,13 @@ pub enum ExExNotificationSource {
     BlockchainTree,
 }
 
+impl ExExNotificationSource {
+    /// Returns true if the notification source is `Pipeline`.
+    pub const fn is_pipeline(&self) -> bool {
+        matches!(self, Self::Pipeline)
+    }
+}
+
 /// Metrics for an `ExEx`.
 #[derive(Metrics)]
 #[metrics(scope = "exex")]
@@ -81,7 +90,7 @@ pub struct ExExHandle<N: NodePrimitives = EthPrimitives> {
     /// Metrics for an `ExEx`.
     metrics: ExExMetrics,
     /// Channel to send [`ExExNotification`]s to the `ExEx`.
-    sender: PollSender<ExExNotification<N>>,
+    sender: PollSender<NotificationPayload<N>>,
     /// Channel to receive [`ExExEvent`]s from the `ExEx`.
     receiver: UnboundedReceiver<ExExEvent>,
     /// The ID of the next notification to send to this `ExEx`.
@@ -97,7 +106,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
     /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
-    pub fn new<P, E: ConfigureEvm<Primitives = N>>(
+    pub fn new<P: Clone, E: ConfigureEvm<Primitives = N>>(
         id: String,
         node_head: BlockNumHash,
         provider: P,
@@ -108,7 +117,6 @@ impl<N: NodePrimitives> ExExHandle<N> {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let notifications =
             ExExNotifications::new(node_head, provider, evm_config, notification_rx, wal_handle);
-
         (
             Self {
                 id: id.clone(),
@@ -130,8 +138,12 @@ impl<N: NodePrimitives> ExExHandle<N> {
     fn send(
         &mut self,
         cx: &mut Context<'_>,
-        (notification_id, notification): &(usize, ExExNotification<N>),
-    ) -> Poll<Result<(), PollSendError<ExExNotification<N>>>> {
+        (notification_id, source, notification): &(
+            usize,
+            ExExNotificationSource,
+            ExExNotification<N>,
+        ),
+    ) -> Poll<Result<(), PollSendError<NotificationPayload<N>>>> {
         if let Some(finished_height) = self.finished_height {
             match notification {
                 ExExNotification::ChainCommitted { new } => {
@@ -177,7 +189,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
             %notification_id,
             "Sending notification"
         );
-        match self.sender.send_item(notification.clone()) {
+        match self.sender.send_item((*source, notification.clone())) {
             Ok(()) => {
                 self.next_notification_id = notification_id + 1;
                 self.metrics.notifications_sent_total.increment(1);
@@ -222,7 +234,7 @@ pub struct ExExManager<P, N: NodePrimitives> {
     exex_handles: Vec<ExExHandle<N>>,
 
     /// [`ExExNotification`] channel from the [`ExExManagerHandle`]s.
-    handle_rx: UnboundedReceiver<(ExExNotificationSource, ExExNotification<N>)>,
+    handle_rx: UnboundedReceiver<NotificationPayload<N>>,
 
     /// The minimum notification ID currently present in the buffer.
     min_id: usize,
@@ -232,7 +244,7 @@ pub struct ExExManager<P, N: NodePrimitives> {
     ///
     /// The first element of the tuple is a monotonically increasing ID unique to the notification
     /// (the second element of the tuple).
-    buffer: VecDeque<(usize, ExExNotification<N>)>,
+    buffer: VecDeque<(usize, ExExNotificationSource, ExExNotification<N>)>,
     /// Max size of the internal state notifications buffer.
     max_capacity: usize,
     /// Current state notifications buffer capacity.
@@ -355,9 +367,13 @@ where
 
     /// Pushes a new notification into the managers internal buffer, assigning the notification a
     /// unique ID.
-    fn push_notification(&mut self, notification: ExExNotification<N>) {
+    fn push_notification(
+        &mut self,
+        source: ExExNotificationSource,
+        notification: ExExNotification<N>,
+    ) {
         let next_id = self.next_id;
-        self.buffer.push_back((next_id, notification));
+        self.buffer.push_back((next_id, source, notification));
         self.next_id += 1;
     }
 }
@@ -498,7 +514,7 @@ where
                     }
                 }
 
-                this.push_notification(notification);
+                this.push_notification(source, notification);
                 continue
             }
             break
@@ -531,7 +547,7 @@ where
 
         // Remove processed buffered notifications
         debug!(target: "exex::manager", %min_id, "Updating lowest notification id in buffer");
-        this.buffer.retain(|&(id, _)| id >= min_id);
+        this.buffer.retain(|&(id, _, _)| id >= min_id);
         this.min_id = min_id;
 
         // Update capacity
@@ -559,7 +575,7 @@ where
 #[derive(Debug)]
 pub struct ExExManagerHandle<N: NodePrimitives = EthPrimitives> {
     /// Channel to send notifications to the `ExEx` manager.
-    exex_tx: UnboundedSender<(ExExNotificationSource, ExExNotification<N>)>,
+    exex_tx: UnboundedSender<NotificationPayload<N>>,
     /// The number of `ExEx`'s running on the node.
     num_exexs: usize,
     /// A watch channel denoting whether the manager is ready for new notifications or not.
@@ -605,7 +621,7 @@ impl<N: NodePrimitives> ExExManagerHandle<N> {
         &self,
         source: ExExNotificationSource,
         notification: ExExNotification<N>,
-    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification<N>)>> {
+    ) -> Result<(), SendError<NotificationPayload<N>>> {
         self.exex_tx.send((source, notification))
     }
 
@@ -617,7 +633,7 @@ impl<N: NodePrimitives> ExExManagerHandle<N> {
         &mut self,
         source: ExExNotificationSource,
         notification: ExExNotification<N>,
-    ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification<N>)>> {
+    ) -> Result<(), SendError<NotificationPayload<N>>> {
         self.ready().await;
         self.exex_tx.send((source, notification))
     }
@@ -799,12 +815,14 @@ mod tests {
         };
 
         // Push the first notification
-        exex_manager.push_notification(notification1.clone());
+        exex_manager
+            .push_notification(ExExNotificationSource::BlockchainTree, notification1.clone());
 
         // Verify the buffer contains the notification with the correct ID
         assert_eq!(exex_manager.buffer.len(), 1);
         assert_eq!(exex_manager.buffer.front().unwrap().0, 0);
-        assert_eq!(exex_manager.buffer.front().unwrap().1, notification1);
+        assert_eq!(exex_manager.buffer.front().unwrap().1, ExExNotificationSource::BlockchainTree);
+        assert_eq!(exex_manager.buffer.front().unwrap().2, notification1);
         assert_eq!(exex_manager.next_id, 1);
 
         // Push another notification
@@ -816,14 +834,17 @@ mod tests {
             new: Arc::new(Chain::new(vec![block2.clone()], Default::default(), Default::default())),
         };
 
-        exex_manager.push_notification(notification2.clone());
+        exex_manager
+            .push_notification(ExExNotificationSource::BlockchainTree, notification2.clone());
 
         // Verify the buffer contains both notifications with correct IDs
         assert_eq!(exex_manager.buffer.len(), 2);
         assert_eq!(exex_manager.buffer.front().unwrap().0, 0);
-        assert_eq!(exex_manager.buffer.front().unwrap().1, notification1);
+        assert_eq!(exex_manager.buffer.front().unwrap().1, ExExNotificationSource::BlockchainTree);
+        assert_eq!(exex_manager.buffer.front().unwrap().2, notification1);
         assert_eq!(exex_manager.buffer.get(1).unwrap().0, 1);
-        assert_eq!(exex_manager.buffer.get(1).unwrap().1, notification2);
+        assert_eq!(exex_manager.buffer.get(1).unwrap().1, ExExNotificationSource::BlockchainTree);
+        assert_eq!(exex_manager.buffer.get(1).unwrap().2, notification2);
         assert_eq!(exex_manager.next_id, 2);
     }
 
@@ -859,8 +880,9 @@ mod tests {
             new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
         };
 
-        exex_manager.push_notification(notification1.clone());
-        exex_manager.push_notification(notification1);
+        exex_manager
+            .push_notification(ExExNotificationSource::BlockchainTree, notification1.clone());
+        exex_manager.push_notification(ExExNotificationSource::BlockchainTree, notification1);
 
         // Update capacity
         exex_manager.update_capacity();
@@ -1160,7 +1182,9 @@ mod tests {
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
         // Send a notification and ensure it's received correctly
-        match exex_handle.send(&mut cx, &(22, notification.clone())) {
+        match exex_handle
+            .send(&mut cx, &(22, ExExNotificationSource::BlockchainTree, notification.clone()))
+        {
             Poll::Ready(Ok(())) => {
                 let received_notification = notifications.next().await.unwrap().unwrap();
                 assert_eq!(received_notification, notification);
@@ -1204,7 +1228,8 @@ mod tests {
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
         // Send the notification
-        match exex_handle.send(&mut cx, &(22, notification)) {
+        match exex_handle.send(&mut cx, &(22, ExExNotificationSource::BlockchainTree, notification))
+        {
             Poll::Ready(Ok(())) => {
                 poll_fn(|cx| {
                     // The notification should be skipped, so nothing should be sent.
@@ -1252,7 +1277,9 @@ mod tests {
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
         // Send the notification
-        match exex_handle.send(&mut cx, &(22, notification.clone())) {
+        match exex_handle
+            .send(&mut cx, &(22, ExExNotificationSource::BlockchainTree, notification.clone()))
+        {
             Poll::Ready(Ok(())) => {
                 let received_notification = notifications.next().await.unwrap().unwrap();
                 assert_eq!(received_notification, notification);
@@ -1292,7 +1319,9 @@ mod tests {
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
         // Send the notification
-        match exex_handle.send(&mut cx, &(22, notification.clone())) {
+        match exex_handle
+            .send(&mut cx, &(22, ExExNotificationSource::BlockchainTree, notification.clone()))
+        {
             Poll::Ready(Ok(())) => {
                 let received_notification = notifications.next().await.unwrap().unwrap();
                 assert_eq!(received_notification, notification);

@@ -174,7 +174,7 @@ pub struct TestExExHandle {
     /// Channel for receiving events from the Execution Extension
     pub events_rx: UnboundedReceiver<ExExEvent>,
     /// Channel for sending notifications to the Execution Extension
-    pub notifications_tx: Sender<ExExNotification>,
+    pub notifications_tx: Sender<(reth_exex::ExExNotificationSource, ExExNotification)>,
     /// Node task runtime
     pub runtime: Runtime,
     /// WAL temp directory handle
@@ -185,7 +185,10 @@ impl TestExExHandle {
     /// Send a notification to the Execution Extension that the chain has been committed
     pub async fn send_notification_chain_committed(&self, chain: Chain) -> eyre::Result<()> {
         self.notifications_tx
-            .send(ExExNotification::ChainCommitted { new: Arc::new(chain) })
+            .send((
+                reth_exex::ExExNotificationSource::BlockchainTree,
+                ExExNotification::ChainCommitted { new: Arc::new(chain) },
+            ))
             .await?;
         Ok(())
     }
@@ -197,7 +200,10 @@ impl TestExExHandle {
         new: Chain,
     ) -> eyre::Result<()> {
         self.notifications_tx
-            .send(ExExNotification::ChainReorged { old: Arc::new(old), new: Arc::new(new) })
+            .send((
+                reth_exex::ExExNotificationSource::BlockchainTree,
+                ExExNotification::ChainReorged { old: Arc::new(old), new: Arc::new(new) },
+            ))
             .await?;
         Ok(())
     }
@@ -205,7 +211,10 @@ impl TestExExHandle {
     /// Send a notification to the Execution Extension that the chain has been reverted
     pub async fn send_notification_chain_reverted(&self, chain: Chain) -> eyre::Result<()> {
         self.notifications_tx
-            .send(ExExNotification::ChainReverted { old: Arc::new(chain) })
+            .send((
+                reth_exex::ExExNotificationSource::BlockchainTree,
+                ExExNotification::ChainReverted { old: Arc::new(chain) },
+            ))
             .await?;
         Ok(())
     }
