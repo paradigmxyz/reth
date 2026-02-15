@@ -40,7 +40,7 @@ pub trait StateRootProvider {
 }
 
 /// A type that can compute the storage root for a given account.
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Box, Arc)]
 pub trait StorageRootProvider {
     /// Returns the storage root of the `HashedStorage` for target address on top of the current
     /// state.
@@ -66,7 +66,7 @@ pub trait StorageRootProvider {
 }
 
 /// A type that can generate state proof on top of a given post state.
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Box, Arc)]
 pub trait StateProofProvider {
     /// Get account and storage proofs of target keys in the `HashedPostState`
     /// on top of the current state.
@@ -90,7 +90,7 @@ pub trait StateProofProvider {
 }
 
 /// Trie Writer
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait TrieWriter: Send {
     /// Writes trie updates to the database.
     ///
@@ -106,7 +106,7 @@ pub trait TrieWriter: Send {
 }
 
 /// Storage Trie Writer
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageTrieWriter: Send {
     /// Writes storage trie updates from the given storage trie map with already sorted updates.
     ///
