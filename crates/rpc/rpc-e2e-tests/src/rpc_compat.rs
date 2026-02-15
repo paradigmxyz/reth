@@ -142,7 +142,12 @@ impl RunRpcCompatTests {
                 // Direct value comparison
                 (a, b) => {
                     if a != b {
-                        return Err(eyre!("Value mismatch at {}: {:?} != {:?}", current_path, a, b));
+                        return Err(eyre!(
+                            "Value mismatch at {}: {:?} != {:?}",
+                            current_path,
+                            a,
+                            b
+                        ));
                     }
                 }
             }
@@ -200,13 +205,20 @@ impl RunRpcCompatTests {
                 })
             }
             Err(err) => {
-                // RPC error - build error response
+                // Try to extract JSON-RPC error details
+                let (code, message) = match err {
+                    jsonrpsee::core::client::Error::Call(err_obj) => {
+                        (err_obj.code(), err_obj.message().to_string())
+                    }
+                    other => (-32000, other.to_string()),
+                };
+
                 serde_json::json!({
                     "jsonrpc": "2.0",
                     "id": test_case.request.get("id").cloned().unwrap_or(Value::Null),
                     "error": {
-                        "code": -32000, // Generic error code
-                        "message": err.to_string()
+                        "code": code,
+                        "message": message
                     }
                 })
             }
@@ -226,7 +238,9 @@ impl RunRpcCompatTests {
                 } else if let Some(error) = actual_error {
                     return Err(eyre!("Expected success response but got error: {}", error));
                 } else {
-                    return Err(eyre!("Expected success response but got neither result nor error"));
+                    return Err(eyre!(
+                        "Expected success response but got neither result nor error"
+                    ));
                 }
             }
             (None, Some(_)) => {
