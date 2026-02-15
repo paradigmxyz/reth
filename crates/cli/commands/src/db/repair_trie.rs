@@ -27,7 +27,7 @@ use reth_trie::{
     Nibbles,
 };
 use reth_trie_common::{StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, LegacyKeyAdapter};
 use std::{
     net::SocketAddr,
     time::{Duration, Instant},
@@ -118,7 +118,7 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
 
     // Create the verifier
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(&tx);
     let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
 
     let metrics = RepairTrieMetrics::new();
@@ -219,7 +219,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     // to be AsRef.
     let tx = provider_rw.tx_ref();
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx);
 
     // Create the verifier
     let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;

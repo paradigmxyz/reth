@@ -7,7 +7,7 @@
 //! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
 //! - **Memory efficiency**: Automatic eviction ensures bounded memory usage
 
-use crate::{DatabaseStateRoot, DatabaseTrieCursorFactory};
+use crate::{DatabaseStateRoot, DatabaseTrieCursorFactory, LegacyKeyAdapter};
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
 use reth_storage_api::{
@@ -122,7 +122,8 @@ where
 
     // Step 4: Compute changesets using cumulative trie updates for block-1 as overlay
     // Create an overlay cursor factory that has the trie state from after block-1
-    let db_cursor_factory = DatabaseTrieCursorFactory::new(provider.tx_ref());
+    let db_cursor_factory =
+        DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(provider.tx_ref());
     let overlay_factory =
         InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
 
@@ -210,7 +211,7 @@ where
 
     // Step 4: Create an InMemoryTrieCursorFactory with the reverts
     // This gives us the trie state as it was after the target block was processed
-    let db_cursor_factory = DatabaseTrieCursorFactory::new(tx);
+    let db_cursor_factory = DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx);
     let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
 
     // Step 5: Collect all account trie nodes that changed in the target block

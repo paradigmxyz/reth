@@ -1,4 +1,4 @@
-use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, LegacyKeyAdapter};
 use alloy_primitives::{keccak256, map::B256Map, BlockNumber, B256};
 use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress},
@@ -157,7 +157,10 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     for StateRoot<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
-        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
+        Self::new(
+            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
+            DatabaseHashedCursorFactory::new(tx),
+        )
     }
 
     fn incremental_root_calculator(
@@ -211,7 +214,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     ) -> Result<B256, StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         StateRoot::new(
-            DatabaseTrieCursorFactory::new(tx),
+            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), post_state),
         )
         .with_prefix_sets(prefix_sets)
@@ -224,7 +227,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         StateRoot::new(
-            DatabaseTrieCursorFactory::new(tx),
+            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), post_state),
         )
         .with_prefix_sets(prefix_sets)
@@ -234,7 +237,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     fn overlay_root_from_nodes(tx: &'a TX, input: TrieInputSorted) -> Result<B256, StateRootError> {
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::new(tx),
+                DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
                 input.nodes.as_ref(),
             ),
             HashedPostStateCursorFactory::new(
@@ -252,7 +255,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::new(tx),
+                DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
                 input.nodes.as_ref(),
             ),
             HashedPostStateCursorFactory::new(

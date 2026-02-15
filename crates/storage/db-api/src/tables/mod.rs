@@ -32,10 +32,7 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
-use reth_trie_common::{
-    BranchNodeCompact, PackedStorageTrieEntry, PackedStoredNibbles, PackedStoredNibblesSubKey,
-    StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
-};
+use reth_trie_common::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -491,19 +488,6 @@ tables! {
         type Key = B256;
         type Value = StorageTrieEntry;
         type SubKey = StoredNibblesSubKey;
-    }
-
-    /// Stores the current state's Merkle Patricia Tree (storage v2, packed nibble encoding).
-    table AccountsTrieV2 {
-        type Key = PackedStoredNibbles;
-        type Value = BranchNodeCompact;
-    }
-
-    /// From `HashedAddress` => packed `NibblesSubKey` => Intermediate value (storage v2).
-    table StoragesTrieV2 {
-        type Key = B256;
-        type Value = PackedStorageTrieEntry;
-        type SubKey = PackedStoredNibblesSubKey;
     }
 
     /// Stores the transaction sender for each canonical transaction.
