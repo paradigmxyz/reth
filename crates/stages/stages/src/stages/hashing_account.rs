@@ -159,7 +159,7 @@ where
 
         // If using hashed state as canonical, execution already writes to `HashedAccounts`,
         // so this stage becomes a no-op.
-        if provider.cached_storage_settings().use_hashed_state {
+        if provider.cached_storage_settings().use_hashed_state() {
             return Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())));
         }
 

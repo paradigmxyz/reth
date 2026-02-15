@@ -20,6 +20,7 @@ use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_types::FillTransaction;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
+use std::collections::HashMap;
 use tracing::trace;
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
@@ -200,6 +201,14 @@ pub trait EthApi<
         index: JsonStorageKey,
         block_number: Option<BlockId>,
     ) -> RpcResult<B256>;
+
+    /// Returns values from multiple storage positions across multiple addresses.
+    #[method(name = "getStorageValues")]
+    async fn storage_values(
+        &self,
+        requests: HashMap<Address, Vec<JsonStorageKey>>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<HashMap<Address, Vec<B256>>>;
 
     /// Returns the number of transactions sent from an address at given block number.
     #[method(name = "getTransactionCount")]
@@ -649,6 +658,16 @@ where
     ) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
         Ok(EthState::storage_at(self, address, index, block_number).await?)
+    }
+
+    /// Handler for: `eth_getStorageValues`
+    async fn storage_values(
+        &self,
+        requests: HashMap<Address, Vec<JsonStorageKey>>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<HashMap<Address, Vec<B256>>> {
+        trace!(target: "rpc::eth", ?block_number, "Serving eth_getStorageValues");
+        Ok(EthState::storage_values(self, requests, block_number).await?)
     }
 
     /// Handler for: `eth_getTransactionCount`

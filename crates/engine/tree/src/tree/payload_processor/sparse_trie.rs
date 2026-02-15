@@ -593,17 +593,23 @@ where
         self.process_leaf_updates(true)?;
 
         for (address, mut new) in self.new_storage_updates.drain() {
-            let updates = self.storage_updates.entry(address).or_default();
-            for (slot, new) in new.drain() {
-                match updates.entry(slot) {
-                    Entry::Occupied(mut entry) => {
-                        // Only overwrite existing entries with new values
-                        if new.is_changed() {
-                            entry.insert(new);
+            match self.storage_updates.entry(address) {
+                Entry::Vacant(entry) => {
+                    entry.insert(new); // insert the whole map at once, no per-slot loop
+                }
+                Entry::Occupied(mut entry) => {
+                    let updates = entry.get_mut();
+                    for (slot, new) in new.drain() {
+                        match updates.entry(slot) {
+                            Entry::Occupied(mut slot_entry) => {
+                                if new.is_changed() {
+                                    slot_entry.insert(new);
+                                }
+                            }
+                            Entry::Vacant(slot_entry) => {
+                                slot_entry.insert(new);
+                            }
                         }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(new);
                     }
                 }
             }

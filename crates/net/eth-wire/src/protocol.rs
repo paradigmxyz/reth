@@ -84,5 +84,7 @@ mod tests {
         assert_eq!(Protocol::eth(EthVersion::Eth67).messages(), 17);
         assert_eq!(Protocol::eth(EthVersion::Eth68).messages(), 17);
         assert_eq!(Protocol::eth(EthVersion::Eth69).messages(), 18);
+        assert_eq!(Protocol::eth(EthVersion::Eth70).messages(), 18);
+        assert_eq!(Protocol::eth(EthVersion::Eth71).messages(), 20);
     }
 }

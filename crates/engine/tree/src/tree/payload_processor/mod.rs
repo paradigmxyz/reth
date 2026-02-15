@@ -96,6 +96,7 @@ pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
+
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
@@ -250,8 +251,9 @@ where
         // Extract V2 proofs flag early so we can pass it to prewarm
         let v2_proofs_enabled = !config.disable_proof_v2();
 
-        // Capture parent_state_root before env is moved into spawn_caching_with
+        // Capture fields before env is moved into spawn_caching_with
         let parent_state_root = env.parent_state_root;
+        let transaction_count = env.transaction_count;
 
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
@@ -280,9 +282,11 @@ where
             )
         };
 
-        // Create and spawn the storage proof task
+        // Create and spawn the storage proof task.
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, v2_proofs_enabled);
+        let halve_workers = transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
+        let proof_handle =
+            ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers, v2_proofs_enabled);
 
         if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(
@@ -361,6 +365,10 @@ where
             _span: Span::current(),
         }
     }
+
+    /// Transaction count threshold below which proof workers are halved, since fewer transactions
+    /// produce fewer state changes and most workers would be idle overhead.
+    const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
 
     /// Transaction count threshold below which sequential signature recovery is used.
     ///

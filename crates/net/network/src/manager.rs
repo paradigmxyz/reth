@@ -25,7 +25,7 @@ use crate::{
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage},
     metrics::{
-        BackedOffPeersMetrics, ClosedSessionsMetrics, DisconnectMetrics, NetworkMetrics,
+        BackedOffPeersMetrics, ClosedSessionsMetrics, DirectionalDisconnectMetrics, NetworkMetrics,
         PendingSessionFailureMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE,
     },
     network::{NetworkHandle, NetworkHandleMessage},
@@ -140,8 +140,8 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     num_active_peers: Arc<AtomicUsize>,
     /// Metrics for the Network
     metrics: NetworkMetrics,
-    /// Disconnect metrics for the Network
-    disconnect_metrics: DisconnectMetrics,
+    /// Disconnect metrics for the Network, split by connection direction.
+    disconnect_metrics: DirectionalDisconnectMetrics,
     /// Closed sessions metrics, split by direction.
     closed_sessions_metrics: ClosedSessionsMetrics,
     /// Pending session failure metrics, split by direction.
@@ -551,6 +551,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     response,
                 })
             }
+            PeerRequest::GetBlockAccessLists { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetBlockAccessLists {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
             PeerRequest::GetPooledTransactions { request, response } => {
                 self.notify_tx_manager(NetworkTransactionEvent::GetPooledTransactions {
                     peer_id,
@@ -864,6 +871,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     "Session disconnected"
                 );
 
+                // Capture direction before state is reset to Idle
+                let is_inbound = self.swarm.state().peers().is_inbound_peer(&peer_id);
+
                 let reason = if let Some(ref err) = error {
                     // If the connection was closed due to an error, we report
                     // the peer
@@ -887,7 +897,11 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 self.update_active_connection_metrics();
 
                 if let Some(reason) = reason {
-                    self.disconnect_metrics.increment(reason);
+                    if is_inbound {
+                        self.disconnect_metrics.increment_inbound(reason);
+                    } else {
+                        self.disconnect_metrics.increment_outbound(reason);
+                    }
                 }
                 self.metrics
                     .backed_off_peers
@@ -910,7 +924,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         .on_incoming_pending_session_dropped(remote_addr, err);
                     self.pending_session_failure_metrics.inbound.increment(1);
                     if let Some(reason) = err.as_disconnected() {
-                        self.disconnect_metrics.increment(reason);
+                        self.disconnect_metrics.increment_inbound(reason);
                     }
                 } else {
                     self.swarm
@@ -943,7 +957,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         BackoffReason::from_disconnect(err.as_disconnected()),
                     );
                     if let Some(reason) = err.as_disconnected() {
-                        self.disconnect_metrics.increment(reason);
+                        self.disconnect_metrics.increment_outbound(reason);
                     }
                 } else {
                     self.swarm
