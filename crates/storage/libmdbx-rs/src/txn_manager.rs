@@ -65,7 +65,6 @@ impl TxnManager {
     /// - [`TxnManagerMessage::Commit`] commits a transaction with [`ffi::mdbx_txn_commit_ex`]
     fn start_message_listener(&self, env: EnvPtr, rx: Receiver<TxnManagerMessage>) {
         let task = move || {
-            let env = env;
             loop {
                 let msg = rx.recv();
                 tracing::debug!(target: "libmdbx::txn", ?msg, "txn-mngr received");
@@ -86,25 +85,23 @@ impl TxnManager {
                                 )
                             })
                             .map(|_| TxnPtr(txn));
-                            sender.send(res).unwrap();
+                            let _ = sender.send(res);
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
                             let _span =
                                 tracing::debug_span!(target: "libmdbx::txn", "abort").entered();
-                            sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
+                            let _ = sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) }));
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
                             let _span =
                                 tracing::debug_span!(target: "libmdbx::txn", "commit").entered();
-                            sender
-                                .send({
-                                    let mut latency = CommitLatency::new();
-                                    mdbx_result(unsafe {
-                                        ffi::mdbx_txn_commit_ex(tx.0, latency.mdb_commit_latency())
-                                    })
-                                    .map(|v| (v, latency))
+                            let _ = sender.send({
+                                let mut latency = CommitLatency::new();
+                                mdbx_result(unsafe {
+                                    ffi::mdbx_txn_commit_ex(tx.0, latency.mdb_commit_latency())
                                 })
-                                .unwrap();
+                                .map(|v| (v, latency))
+                            });
                         }
                     },
                     Err(_) => return,
