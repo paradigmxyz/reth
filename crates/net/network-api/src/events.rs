@@ -2,12 +2,13 @@
 
 use reth_eth_wire_types::{
     message::RequestPair,
-    snap::{GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, GetTrieNodesMessage},
-    BlockAccessLists, BlockBodies, BlockHeaders, Capabilities,
-    DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, GetBlockAccessLists,
-    GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
-    GetReceipts70, NetworkPrimitives, NodeData, PooledTransactions, Receipts, Receipts69,
-    Receipts70, UnifiedStatus,
+    snap::{
+        GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, GetTrieNodesMessage,
+    },
+    BlockAccessLists, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
+    EthNetworkPrimitives, EthVersion, GetBlockAccessLists, GetBlockBodies, GetBlockHeaders,
+    GetNodeData, GetPooledTransactions, GetReceipts, GetReceipts70, NetworkPrimitives, NodeData,
+    PooledTransactions, Receipts, Receipts69, Receipts70, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::{

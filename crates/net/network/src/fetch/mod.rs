@@ -327,11 +327,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// response can be forwarded back (with the peer id) once the session replies.
     ///
     /// Caution: this assumes the peer exists and is idle
-    fn prepare_snap_request(
-        &mut self,
-        peer_id: PeerId,
-        req: DownloadRequest<N>,
-    ) -> PeerRequest<N> {
+    fn prepare_snap_request(&mut self, peer_id: PeerId, req: DownloadRequest<N>) -> PeerRequest<N> {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.state = req.peer_state();
         }
