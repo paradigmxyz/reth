@@ -305,7 +305,20 @@ where
             self.executor.spawn_blocking(move || {
                 let _enter = parent_span.entered();
                 // Build a state provider for the multiproof task
-                let provider = provider_builder.build().expect("failed to build provider");
+                let provider = match provider_builder.build() {
+                    Ok(provider) => provider,
+                    Err(err) => {
+                        // Returning here closes the multiproof channels, causing
+                        // SparseTrieTask to fall back to sequential trie computation.
+                        // The downstream error will surface as a "state root mismatch".
+                        warn!(
+                            target: "engine::tree::payload_processor",
+                            %err,
+                            "Failed to build state provider for multiproof task"
+                        );
+                        return;
+                    }
+                };
                 let provider = if let Some(saved_cache) = saved_cache {
                     let (cache, metrics, _disable_metrics) = saved_cache.split();
                     Box::new(CachedStateProvider::new(provider, cache, metrics))
