@@ -1428,6 +1428,10 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
 
             let chain = head_block.chain().collect::<Vec<_>>();
             for state in chain {
+                if !range.contains(&state.number()) {
+                    continue;
+                }
+
                 let block_changesets = state
                     .block_ref()
                     .execution_output
@@ -1612,6 +1616,10 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
 
             let chain = head_block.chain().collect::<Vec<_>>();
             for state in chain {
+                if !range.contains(&state.number()) {
+                    continue;
+                }
+
                 // found block in memory, collect its changesets
                 let block_changesets = state
                     .block_ref()
