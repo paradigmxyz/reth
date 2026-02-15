@@ -566,6 +566,22 @@ where
         Self { builder: self.builder.map_add_ons(f), task_executor: self.task_executor }
     }
 
+    /// Sets the threshold for the number of blocks in the WAL before emitting a warning.
+    ///
+    /// For L2 chains with faster block times, this value should be increased proportionally
+    /// to avoid excessive warnings. For example, a chain with 2-second block times might use
+    /// a value 6x higher than the default (768 instead of 128).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// builder.with_wal_blocks_warning(768)  // For 2-second block times (6x Ethereum mainnet)
+    /// ```
+    pub const fn with_wal_blocks_warning(mut self, threshold: usize) -> Self {
+        self.builder.add_ons.config.wal_blocks_warning = Some(threshold);
+        self
+    }
+
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(self, hook: F) -> Self
     where

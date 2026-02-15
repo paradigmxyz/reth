@@ -82,7 +82,7 @@ impl EngineNodeLauncher {
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             components_builder,
-            add_ons: AddOns { hooks, exexs: installed_exex, add_ons },
+            add_ons: AddOns { hooks, exexs: installed_exex, add_ons, config: add_ons_config },
             config,
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
@@ -125,7 +125,11 @@ impl EngineNodeLauncher {
             .with_components(components_builder, on_component_initialized).await?;
 
         // spawn exexs if any
-        let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
+        let maybe_exex_manager_handle = ctx
+            .exex_launcher(installed_exex)
+            .with_wal_blocks_warning(add_ons_config.wal_blocks_warning)
+            .launch()
+            .await?;
 
         // create pipeline
         let network_handle = ctx.components().network().clone();
