@@ -10,11 +10,15 @@
 //!
 //! After snap sync completes, normal execution resumes from the pivot block onward.
 
+pub mod config;
 pub mod downloader;
 pub mod error;
 pub mod metrics;
 pub mod progress;
+pub mod task;
 
+pub use config::SnapSyncConfig;
 pub use downloader::SnapSyncDownloader;
 pub use error::SnapSyncError;
 pub use progress::{SnapPhase, SnapProgress};
+pub use task::run_snap_sync;
