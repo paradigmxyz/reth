@@ -102,6 +102,11 @@ pub struct DebugArgs {
     #[arg(long = "ethstats", help_heading = "Debug")]
     pub ethstats: Option<String>,
 
+    /// Enable snap sync mode. Downloads state from peers via snap protocol
+    /// instead of executing all historical blocks.
+    #[arg(long = "debug.snap-sync", help_heading = "Debug")]
+    pub snap_sync: bool,
+
     /// Set the node to idle state when the backfill is not running.
     ///
     /// This makes the `eth_syncing` RPC return "Idle" when the node has just started or finished
@@ -126,6 +131,7 @@ impl Default for DebugArgs {
             invalid_block_hook: Some(InvalidBlockSelection::default()),
             healthy_node_rpc_url: None,
             ethstats: None,
+            snap_sync: false,
             startup_sync_state_idle: false,
         }
     }

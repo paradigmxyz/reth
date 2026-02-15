@@ -21,6 +21,7 @@ use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
+use reth_network_p2p::snap::client::SnapClient;
 use reth_node_api::{
     BuiltPayload, ConsensusEngineHandle, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
 };
@@ -32,7 +33,7 @@ use reth_node_core::{
 use reth_node_events::node;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    BlockNumReader, StorageSettingsCache,
+    BlockNumReader, HeaderProvider, StorageSettingsCache,
 };
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -77,6 +78,8 @@ impl EngineNodeLauncher {
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+        <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client:
+            SnapClient,
     {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
@@ -162,6 +165,54 @@ impl EngineNodeLauncher {
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
         pipeline.move_to_static_files()?;
+
+        // Run snap sync if enabled
+        if node_config.debug.snap_sync {
+            info!(target: "reth::cli", "Snap sync mode enabled");
+
+            let pivot_hash = node_config.debug.tip.ok_or_else(|| {
+                eyre::eyre!("--debug.snap-sync requires --debug.tip to set the pivot block hash")
+            })?;
+
+            let pivot_header = ctx
+                .blockchain_db()
+                .header(pivot_hash)
+                .map_err(|e| eyre::eyre!("failed to get pivot header: {e}"))?
+                .ok_or_else(|| {
+                    eyre::eyre!(
+                        "pivot block header {pivot_hash} not found in DB - run header sync first"
+                    )
+                })?;
+
+            let pivot_number = pivot_header.number();
+            let state_root = pivot_header.state_root();
+
+            info!(
+                target: "reth::cli",
+                %pivot_hash,
+                pivot_number,
+                %state_root,
+                "Starting snap sync to pivot block"
+            );
+
+            let snap_result = reth_snap_sync::run_snap_sync(
+                network_client.clone(),
+                ctx.provider_factory().clone(),
+                pivot_hash,
+                pivot_number,
+                state_root,
+            )
+            .await;
+
+            match snap_result {
+                Ok(block_number) => {
+                    info!(target: "reth::cli", block_number, "Snap sync completed successfully");
+                }
+                Err(e) => {
+                    return Err(eyre::eyre!("Snap sync failed: {e}"));
+                }
+            }
+        }
 
         let pipeline_events = pipeline.events();
 
@@ -425,6 +476,7 @@ where
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
         + 'static,
+    <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client: SnapClient,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
     type Future = Pin<Box<dyn Future<Output = eyre::Result<Self::Node>> + Send>>;

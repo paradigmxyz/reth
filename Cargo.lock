@@ -9267,6 +9267,7 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-rpc-eth-types",
  "reth-rpc-layer",
+ "reth-snap-sync",
  "reth-stages",
  "reth-static-file",
  "reth-tasks",
