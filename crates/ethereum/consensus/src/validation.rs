@@ -1,6 +1,10 @@
 use alloc::vec::Vec;
 use alloy_consensus::{proofs::calculate_receipt_root, BlockHeader, TxReceipt};
-use alloy_eips::{eip7685::Requests, Encodable2718};
+use alloy_eips::{
+    eip7685::Requests,
+    eip7928::{compute_block_access_list_hash, BlockAccessList},
+    Encodable2718,
+};
 use alloy_primitives::{Bloom, Bytes, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
@@ -16,16 +20,17 @@ use reth_primitives_traits::{
 /// If `receipt_root_bloom` is provided, the pre-computed receipt root and logs bloom are used
 /// instead of computing them from the receipts.
 ///
-/// `gas_spent` is the gas_used value from the block execution result. When EIP-7778
-/// (Amsterdam) is active, block header gas_used tracks gas before refunds while receipt
-/// cumulative_gas_used tracks gas after refunds. In that case, the header must be validated
-/// against the execution result's gas_used rather than the receipt value.
+/// `gas_spent` is the `gas_used` value from the block execution result. When EIP-7778
+/// (Amsterdam) is active, block header `gas_used` tracks gas before refunds while receipt
+/// `cumulative_gas_used` tracks gas after refunds. In that case, the header must be validated
+/// against the execution result's `gas_used` rather than the receipt value.
 pub fn validate_block_post_execution<B, R, ChainSpec>(
     block: &RecoveredBlock<B>,
     chain_spec: &ChainSpec,
     receipts: &[R],
     requests: &Requests,
     receipt_root_bloom: Option<(B256, Bloom)>,
+    block_access_list: &Option<BlockAccessList>,
     gas_spent: Option<u64>,
 ) -> Result<(), ConsensusError>
 where
@@ -47,6 +52,18 @@ where
             gas: GotExpected { got: cumulative_gas_used, expected: block.header().gas_used() },
             gas_spent_by_tx: gas_spent_by_transactions(receipts),
         })
+    }
+    // Validate that the block access list hash matches the calculated block access list hash
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+        let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
+        let block_access_list_hash = compute_block_access_list_hash(
+            &block_access_list.as_ref().unwrap_or(&BlockAccessList::default()),
+        );
+        if block_access_list_hash != block_bal_hash {
+            return Err(ConsensusError::BlockAccessListHashMismatch(
+                (block_access_list_hash, block_bal_hash).into(),
+            ))
+        }
     }
 
     // Before Byzantium, receipts contained state root that would mean that expensive

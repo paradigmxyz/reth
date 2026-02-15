@@ -14,7 +14,7 @@ echo "Building images"
 # TODO: test code has been moved from https://github.com/ethereum/execution-spec-tests to https://github.com/ethereum/execution-specs  we need to pin eels branch with `--sim.buildarg branch=<release-branch-name>` once we have the fusaka release tagged on the new repo
 ./hive -client reth --sim "ethereum/eels" \
     --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal@v5.1.0/fixtures_bal.tar.gz \
-    --sim.buildarg branch=devnets/bal/2 \
+    --sim.buildarg branch=reth-err-mapping \
     --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
 ./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
