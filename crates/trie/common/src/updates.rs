@@ -247,7 +247,7 @@ pub struct StorageTrieUpdates {
 impl StorageTrieUpdates {
     /// Creates a new storage trie updates that are not marked as deleted.
     pub fn new(updates: impl IntoIterator<Item = (Nibbles, BranchNodeCompact)>) -> Self {
-        Self { storage_nodes: exclude_empty_from_pair(updates).collect(), ..Default::default() }
+        Self { storage_nodes: updates.into_iter().collect(), ..Default::default() }
     }
 }
 
@@ -294,8 +294,8 @@ impl StorageTrieUpdates {
     /// Extends storage trie updates.
     pub fn extend(&mut self, other: Self) {
         self.extend_common(&other);
-        self.storage_nodes.extend(exclude_empty_from_pair(other.storage_nodes));
-        self.removed_nodes.extend(exclude_empty(other.removed_nodes));
+        self.storage_nodes.extend(other.storage_nodes);
+        self.removed_nodes.extend(other.removed_nodes);
     }
 
     /// Extends storage trie updates.
@@ -303,10 +303,8 @@ impl StorageTrieUpdates {
     /// Slightly less efficient than [`Self::extend`], but preferred to `extend(other.clone())`.
     pub fn extend_ref(&mut self, other: &Self) {
         self.extend_common(other);
-        self.storage_nodes.extend(exclude_empty_from_pair(
-            other.storage_nodes.iter().map(|(k, v)| (*k, v.clone())),
-        ));
-        self.removed_nodes.extend(exclude_empty(other.removed_nodes.iter().copied()));
+        self.storage_nodes.extend(other.storage_nodes.iter().map(|(k, v)| (*k, v.clone())));
+        self.removed_nodes.extend(other.removed_nodes.iter().copied());
     }
 
     fn extend_common(&mut self, other: &Self) {
@@ -337,9 +335,6 @@ impl StorageTrieUpdates {
 
         // Remove nodes marked as removed and insert new nodes
         for (nibbles, maybe_node) in &sorted.storage_nodes {
-            if nibbles.is_empty() {
-                continue;
-            }
             if let Some(node) = maybe_node {
                 self.removed_nodes.remove(nibbles);
                 self.storage_nodes.insert(*nibbles, node.clone());
@@ -351,13 +346,23 @@ impl StorageTrieUpdates {
     }
 
     /// Finalize storage trie updates for by taking updates from walker and hash builder.
-    pub fn finalize(&mut self, hash_builder: HashBuilder, removed_keys: HashSet<Nibbles>) {
+    pub fn finalize(
+        &mut self,
+        hash_builder: HashBuilder,
+        removed_keys: HashSet<Nibbles>,
+        storage_root: B256,
+    ) {
         // Retrieve updated nodes from hash builder.
         let (_, updated_nodes) = hash_builder.split();
-        self.storage_nodes.extend(exclude_empty_from_pair(updated_nodes));
+        self.storage_nodes.extend(updated_nodes);
+
+        // Set `root_hash` on the root node so the walker can skip unchanged storage tries.
+        if let Some(root_node) = self.storage_nodes.get_mut(&Nibbles::default()) {
+            root_node.root_hash = Some(storage_root);
+        }
 
         // Add deleted node paths.
-        self.removed_nodes.extend(exclude_empty(removed_keys));
+        self.removed_nodes.extend(removed_keys);
     }
 
     /// Convert storage trie updates into [`StorageTrieUpdatesSorted`].

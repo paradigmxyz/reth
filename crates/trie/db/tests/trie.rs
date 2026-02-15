@@ -691,6 +691,139 @@ fn storage_trie_around_extension_node() {
     assert_trie_updates(updates.storage_nodes_ref());
 }
 
+#[test]
+fn storage_trie_root_node_persisted() {
+    let factory = create_test_provider_factory();
+    let tx = factory.provider_rw().unwrap();
+
+    let hashed_address = B256::random();
+    let value = U256::from(1);
+
+    // Use keys that start with different first nibbles to ensure the root branch node
+    // is produced by the HashBuilder (requires hash_masks[0] or tree_masks[0] to be non-empty).
+    let mut hashed_storage = tx.tx_ref().cursor_write::<tables::HashedStorages>().unwrap();
+    for key in [
+        hex!("1000000000000000000000000000000000000000000000000000000000000000"),
+        hex!("1100000000000000000000000000000000000000000000000000000000000000"),
+        hex!("1200000000000000000000000000000000000000000000000000000000000000"),
+        hex!("2000000000000000000000000000000000000000000000000000000000000000"),
+        hex!("2100000000000000000000000000000000000000000000000000000000000000"),
+        hex!("3000000000000000000000000000000000000000000000000000000000000000"),
+        hex!("4000000000000000000000000000000000000000000000000000000000000000"),
+    ] {
+        hashed_storage
+            .upsert(hashed_address, &StorageEntry { key: B256::new(key), value })
+            .unwrap();
+    }
+    drop(hashed_storage);
+
+    let (root, _, trie_updates) =
+        StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
+    assert_ne!(root, EMPTY_ROOT_HASH);
+
+    // The root node should be included in the updates with root_hash set.
+    let root_node = trie_updates.storage_nodes_ref().get(&Nibbles::default()).unwrap();
+    assert_eq!(root_node.root_hash, Some(root));
+
+    // Write trie updates to DB.
+    tx.write_storage_trie_updates_sorted(core::iter::once((
+        &hashed_address,
+        &trie_updates.into_sorted(),
+    )))
+    .unwrap();
+
+    // Read the root node back from DB and walk it.
+    let trie_cursor = tx.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap();
+    let entry = reth_trie_db::DatabaseStorageTrieCursor::new(trie_cursor, hashed_address);
+
+    // Walk the trie with no changes — the walker should be able to skip the root node.
+    let mut walker = reth_trie::walker::TrieWalker::<_>::state_trie(entry, Default::default());
+    assert_eq!(walker.key().copied(), Some(Nibbles::default()));
+    assert!(walker.can_skip_current_node);
+
+    // Advancing should skip the entire trie since nothing changed.
+    walker.advance().unwrap();
+    assert_eq!(walker.key().copied(), None);
+}
+
+#[test]
+fn storage_trie_root_node_incremental_update() {
+    let factory = create_test_provider_factory();
+    let tx = factory.provider_rw().unwrap();
+
+    let hashed_address = B256::random();
+    let value = U256::from(1);
+
+    // Use keys with different first nibbles to produce a root branch node.
+    let mut hashed_storage = tx.tx_ref().cursor_write::<tables::HashedStorages>().unwrap();
+    let keys = [
+        hex!("1000000000000000000000000000000000000000000000000000000000000000"),
+        hex!("1100000000000000000000000000000000000000000000000000000000000000"),
+        hex!("1200000000000000000000000000000000000000000000000000000000000000"),
+        hex!("2000000000000000000000000000000000000000000000000000000000000000"),
+        hex!("2100000000000000000000000000000000000000000000000000000000000000"),
+        hex!("3000000000000000000000000000000000000000000000000000000000000000"),
+        hex!("4000000000000000000000000000000000000000000000000000000000000000"),
+    ];
+    for key in &keys {
+        hashed_storage
+            .upsert(hashed_address, &StorageEntry { key: B256::new(*key), value })
+            .unwrap();
+    }
+    drop(hashed_storage);
+
+    // Compute initial storage root with updates.
+    let (root1, _, trie_updates) =
+        StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
+
+    // Root node should have root_hash matching computed root.
+    let root_node = trie_updates.storage_nodes_ref().get(&Nibbles::default()).unwrap();
+    assert_eq!(root_node.root_hash, Some(root1));
+
+    // Persist the updates.
+    tx.write_storage_trie_updates_sorted(core::iter::once((
+        &hashed_address,
+        &trie_updates.into_sorted(),
+    )))
+    .unwrap();
+
+    // Modify one storage slot.
+    let modified_key = B256::new(keys[0]);
+    let new_value = U256::from(42);
+    let mut hashed_storage = tx.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+    if hashed_storage.seek_by_key_subkey(hashed_address, modified_key).unwrap().is_some() {
+        hashed_storage.delete_current().unwrap();
+    }
+    hashed_storage
+        .upsert(hashed_address, &StorageEntry { key: modified_key, value: new_value })
+        .unwrap();
+    drop(hashed_storage);
+
+    // Compute expected full root from scratch using reference implementation.
+    let mut expected_storage = BTreeMap::new();
+    for key in &keys {
+        expected_storage.insert(B256::new(*key), value);
+    }
+    expected_storage.insert(modified_key, new_value);
+    let full_root = storage_root_prehashed(expected_storage);
+
+    // Compute incremental root using cached trie nodes.
+    let mut prefix_set = PrefixSetMut::default();
+    prefix_set.insert(Nibbles::unpack(modified_key));
+    let (incremental_root, _, incremental_updates) =
+        StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address)
+            .with_prefix_set(prefix_set.freeze())
+            .root_with_updates()
+            .unwrap();
+
+    assert_eq!(full_root, incremental_root);
+
+    // The updated root node should have the new root hash.
+    let updated_root_node =
+        incremental_updates.storage_nodes_ref().get(&Nibbles::default()).unwrap();
+    assert_eq!(updated_root_node.root_hash, Some(incremental_root));
+}
+
 fn extension_node_storage_trie<N: ProviderNodeTypes>(
     tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>, N>,
     hashed_address: B256,
