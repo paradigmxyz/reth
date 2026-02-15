@@ -1,14 +1,19 @@
 //! API related to listening for network events.
 
 use reth_eth_wire_types::{
-    message::RequestPair, BlockAccessLists, BlockBodies, BlockHeaders, Capabilities,
+    message::RequestPair,
+    snap::{GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, GetTrieNodesMessage},
+    BlockAccessLists, BlockBodies, BlockHeaders, Capabilities,
     DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, GetBlockAccessLists,
     GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
     GetReceipts70, NetworkPrimitives, NodeData, PooledTransactions, Receipts, Receipts69,
     Receipts70, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
-use reth_network_p2p::error::{RequestError, RequestResult};
+use reth_network_p2p::{
+    error::{RequestError, RequestResult},
+    snap::client::SnapResponse,
+};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind};
 use reth_tokio_util::EventStream;
@@ -262,6 +267,42 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The channel to send the response for block access lists.
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     },
+    /// Requests an account range from the peer (snap protocol).
+    ///
+    /// The response should be sent through the channel.
+    GetAccountRange {
+        /// The request for an account range.
+        request: GetAccountRangeMessage,
+        /// The channel to send the response for the account range.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    },
+    /// Requests storage ranges from the peer (snap protocol).
+    ///
+    /// The response should be sent through the channel.
+    GetStorageRanges {
+        /// The request for storage ranges.
+        request: GetStorageRangesMessage,
+        /// The channel to send the response for storage ranges.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    },
+    /// Requests bytecodes from the peer (snap protocol).
+    ///
+    /// The response should be sent through the channel.
+    GetByteCodes {
+        /// The request for bytecodes.
+        request: GetByteCodesMessage,
+        /// The channel to send the response for bytecodes.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    },
+    /// Requests trie nodes from the peer (snap protocol).
+    ///
+    /// The response should be sent through the channel.
+    GetTrieNodes {
+        /// The request for trie nodes.
+        request: GetTrieNodesMessage,
+        /// The channel to send the response for trie nodes.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    },
 }
 
 // === impl PeerRequest ===
@@ -283,6 +324,10 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetReceipts69 { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts70 { response, .. } => response.send(Err(err)).ok(),
             Self::GetBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
+            Self::GetAccountRange { response, .. } => response.send(Err(err)).ok(),
+            Self::GetStorageRanges { response, .. } => response.send(Err(err)).ok(),
+            Self::GetByteCodes { response, .. } => response.send(Err(err)).ok(),
+            Self::GetTrieNodes { response, .. } => response.send(Err(err)).ok(),
         };
     }
 
@@ -295,7 +340,24 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
         }
     }
 
-    /// Returns the [`EthMessage`] for this type
+    /// Returns `true` if this is a snap protocol request.
+    pub fn is_snap_request(&self) -> bool {
+        matches!(
+            self,
+            Self::GetAccountRange { .. } |
+                Self::GetStorageRanges { .. } |
+                Self::GetByteCodes { .. } |
+                Self::GetTrieNodes { .. }
+        )
+    }
+
+    /// Returns the [`EthMessage`] for this type.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called on a snap protocol request variant. Use [`Self::is_snap_request`] to
+    /// check before calling this method. Snap requests are handled separately in the session
+    /// layer.
     pub fn create_request_message(&self, request_id: u64) -> EthMessage<N> {
         match self {
             Self::GetBlockHeaders { request, .. } => {
@@ -324,6 +386,12 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
                     request_id,
                     message: request.clone(),
                 })
+            }
+            Self::GetAccountRange { .. } |
+            Self::GetStorageRanges { .. } |
+            Self::GetByteCodes { .. } |
+            Self::GetTrieNodes { .. } => {
+                panic!("snap protocol requests cannot be converted to EthMessage, handle them separately via is_snap_request()")
             }
         }
     }

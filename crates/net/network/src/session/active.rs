@@ -337,15 +337,71 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
         let request_id = self.next_id();
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
-        let msg = request.create_request_message(request_id).map_versioned(version);
 
-        self.queued_outgoing.push_back(msg.into());
-        let req = InflightRequest {
-            request: RequestState::Waiting(request),
-            timestamp: Instant::now(),
-            deadline,
+        if request.is_snap_request() {
+            // Snap requests are encoded as raw capability messages with adjusted message IDs.
+            // The snap message ID is offset by the eth message count for multiplexing.
+            if let Some(raw_msg) = self.encode_snap_request(&request, request_id) {
+                self.queued_outgoing.push_back(OutgoingMessage::Raw(raw_msg));
+                let req = InflightRequest {
+                    request: RequestState::Waiting(request),
+                    timestamp: Instant::now(),
+                    deadline,
+                };
+                self.inflight_requests.insert(request_id, req);
+            } else {
+                request.send_err_response(RequestError::UnsupportedCapability);
+            }
+        } else {
+            let msg = request.create_request_message(request_id).map_versioned(version);
+            self.queued_outgoing.push_back(msg.into());
+            let req = InflightRequest {
+                request: RequestState::Waiting(request),
+                timestamp: Instant::now(),
+                deadline,
+            };
+            self.inflight_requests.insert(request_id, req);
+        }
+    }
+
+    /// Encodes a snap protocol request as a [`RawCapabilityMessage`].
+    fn encode_snap_request(
+        &self,
+        request: &PeerRequest<N>,
+        _request_id: u64,
+    ) -> Option<RawCapabilityMessage> {
+        use reth_eth_wire_types::{snap::SnapProtocolMessage, EthMessageID};
+
+        let snap_msg = match request {
+            PeerRequest::GetAccountRange { request, .. } => {
+                SnapProtocolMessage::GetAccountRange(request.clone())
+            }
+            PeerRequest::GetStorageRanges { request, .. } => {
+                SnapProtocolMessage::GetStorageRanges(request.clone())
+            }
+            PeerRequest::GetByteCodes { request, .. } => {
+                SnapProtocolMessage::GetByteCodes(request.clone())
+            }
+            PeerRequest::GetTrieNodes { request, .. } => {
+                SnapProtocolMessage::GetTrieNodes(request.clone())
+            }
+            _ => return None,
         };
-        self.inflight_requests.insert(request_id, req);
+
+        let encoded = snap_msg.encode();
+        // The first byte is the snap message ID, which needs to be offset
+        // by the eth protocol message count for proper multiplexing.
+        let snap_id = encoded[0];
+        let adjusted_id =
+            snap_id + EthMessageID::message_count(self.conn.version());
+
+        let mut payload = Vec::with_capacity(encoded.len() - 1);
+        payload.extend_from_slice(&encoded[1..]);
+
+        Some(RawCapabilityMessage::new(
+            adjusted_id as usize,
+            payload.into(),
+        ))
     }
 
     #[inline]
