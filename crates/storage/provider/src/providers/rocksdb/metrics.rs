@@ -62,6 +62,16 @@ impl RocksDBMetrics {
         metrics.calls_total.increment(1);
         metrics.duration_seconds.record(duration.as_secs_f64());
     }
+
+    /// Records bytes written for a batch commit operation.
+    pub(crate) fn record_commit_bytes_written(&self, bytes_written: usize) {
+        let metrics = self
+            .operations
+            .get(&("Batch", RocksDBOperation::BatchWrite))
+            .expect("batch operation metrics should exist");
+
+        metrics.commit_bytes_written.record(bytes_written as f64);
+    }
 }
 
 /// `RocksDB` operations that are tracked
@@ -92,4 +102,6 @@ pub(crate) struct RocksDBOperationMetrics {
     calls_total: Counter,
     /// Duration of operations
     duration_seconds: Histogram,
+    /// Bytes written per commit (only recorded for `BatchWrite` operations)
+    commit_bytes_written: Histogram,
 }
