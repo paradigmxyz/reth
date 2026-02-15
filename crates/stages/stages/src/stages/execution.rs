@@ -12,8 +12,9 @@ use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateProviderFactory,
+    StateWriteConfig, StateWriter, StaticFileProviderFactory, StatsReader, StorageSettingsCache,
+    TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -26,6 +27,7 @@ use reth_trie::KeccakKeyHasher;
 use std::{
     cmp::{max, Ordering},
     collections::BTreeMap,
+    marker::PhantomData,
     ops::RangeInclusive,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -33,7 +35,64 @@ use std::{
 };
 use tracing::*;
 
-use super::missing_static_data_error;
+use super::{
+    execution_cache::{CachedStateMetrics, ExecutionCache, ExecutionCacheBuilder},
+    execution_prewarm::PrewarmController,
+    missing_static_data_error,
+};
+
+/// Trait for types that can optionally be used as provider factories for prewarming.
+///
+/// This trait is sealed and implemented for `NoPrewarm` (no-op) and `PrewarmFactory<T>`.
+/// It allows the `ExecutionStage` to work with or without prewarming support.
+pub trait MaybePrewarmFactory: Clone + Send + Sync + 'static {
+    /// Spawns a prewarm task for the given block if supported.
+    fn spawn_prewarm<E, B>(
+        controller: &mut PrewarmController<E>,
+        block: &reth_primitives_traits::RecoveredBlock<B>,
+        factory: &Self,
+    ) where
+        E: ConfigureEvm + Clone + Send + Sync + 'static,
+        B: reth_primitives_traits::Block<Body: BlockBody<Transaction: Clone + Send + 'static>>;
+}
+
+/// Marker type indicating no prewarming is configured.
+/// This is the default for `ExecutionStage` when no provider factory is set.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoPrewarm;
+
+impl MaybePrewarmFactory for NoPrewarm {
+    fn spawn_prewarm<E, B>(
+        _controller: &mut PrewarmController<E>,
+        _block: &reth_primitives_traits::RecoveredBlock<B>,
+        _factory: &Self,
+    ) where
+        E: ConfigureEvm + Clone + Send + Sync + 'static,
+        B: reth_primitives_traits::Block<Body: BlockBody<Transaction: Clone + Send + 'static>>,
+    {
+        // No-op: prewarming not configured
+    }
+}
+
+/// Wrapper type for provider factories that enables prewarming.
+#[derive(Debug, Clone)]
+pub struct PrewarmFactory<T>(pub T);
+
+impl<T> MaybePrewarmFactory for PrewarmFactory<T>
+where
+    T: StateProviderFactory + Clone + Send + Sync + 'static,
+{
+    fn spawn_prewarm<E, B>(
+        controller: &mut PrewarmController<E>,
+        block: &reth_primitives_traits::RecoveredBlock<B>,
+        factory: &Self,
+    ) where
+        E: ConfigureEvm + Clone + Send + Sync + 'static,
+        B: reth_primitives_traits::Block<Body: BlockBody<Transaction: Clone + Send + 'static>>,
+    {
+        controller.spawn_for(block, factory.0.clone());
+    }
+}
 
 /// The execution stage executes all transactions and
 /// update history indexes.
@@ -64,7 +123,7 @@ use super::missing_static_data_error;
 ///   values to [`tables::PlainStorageState`]
 // false positive, we cannot derive it if !DB: Debug.
 #[derive(Debug)]
-pub struct ExecutionStage<E>
+pub struct ExecutionStage<E, F = NoPrewarm>
 where
     E: ConfigureEvm,
 {
@@ -91,9 +150,27 @@ where
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
+    /// Shared execution cache used by both main executor and prewarm threads.
+    /// When Some, enables cache warming during execution.
+    ///
+    /// NOTE: Currently unused in this POC - will be used when CachedStateProvider
+    /// integration is complete.
+    #[allow(dead_code)]
+    execution_cache: Option<Arc<ExecutionCache>>,
+    /// Metrics for the cached state provider.
+    ///
+    /// NOTE: Currently unused in this POC - will be used when CachedStateProvider
+    /// integration is complete.
+    #[allow(dead_code)]
+    cache_metrics: CachedStateMetrics,
+    /// Provider factory for creating state providers in prewarm threads.
+    /// When Some with execution_cache, enables actual prewarming.
+    provider_factory: Option<F>,
+    /// Phantom data for the generic parameter F when it's not used
+    _phantom: PhantomData<F>,
 }
 
-impl<E> ExecutionStage<E>
+impl<E> ExecutionStage<E, NoPrewarm>
 where
     E: ConfigureEvm,
 {
@@ -114,6 +191,52 @@ where
             post_unwind_commit_input: None,
             exex_manager_handle,
             metrics: ExecutorMetrics::default(),
+            execution_cache: None,
+            cache_metrics: CachedStateMetrics::default(),
+            provider_factory: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Create new execution stage with prewarming enabled.
+    ///
+    /// This creates an execution stage that will spawn background threads to
+    /// speculatively execute future blocks, warming the cache for faster execution.
+    ///
+    /// # Arguments
+    /// * `evm_config` - EVM configuration
+    /// * `consensus` - Consensus implementation
+    /// * `thresholds` - Execution stage thresholds
+    /// * `external_clean_threshold` - Threshold for changeset pruning
+    /// * `exex_manager_handle` - ExEx manager handle
+    /// * `provider_factory` - Provider factory for creating state providers in prewarm threads
+    /// * `cache_size_bytes` - Size of the execution cache in bytes (e.g., 8GB = 8_000_000_000)
+    pub fn new_with_prewarm<F>(
+        evm_config: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
+        thresholds: ExecutionStageThresholds,
+        external_clean_threshold: u64,
+        exex_manager_handle: ExExManagerHandle<E::Primitives>,
+        provider_factory: F,
+        cache_size_bytes: u64,
+    ) -> ExecutionStage<E, PrewarmFactory<F>>
+    where
+        F: StateProviderFactory + Clone + Send + Sync + 'static,
+    {
+        let cache = Arc::new(ExecutionCacheBuilder::default().build_caches(cache_size_bytes));
+        ExecutionStage {
+            external_clean_threshold,
+            evm_config,
+            consensus,
+            thresholds,
+            post_execute_commit_input: None,
+            post_unwind_commit_input: None,
+            exex_manager_handle,
+            metrics: ExecutorMetrics::default(),
+            execution_cache: Some(cache),
+            cache_metrics: CachedStateMetrics::default(),
+            provider_factory: Some(PrewarmFactory(provider_factory)),
+            _phantom: PhantomData,
         }
     }
 
@@ -147,6 +270,46 @@ where
             external_clean_threshold,
             ExExManagerHandle::empty(),
         )
+    }
+}
+
+impl<E, F> ExecutionStage<E, F>
+where
+    E: ConfigureEvm,
+{
+    /// Enable prewarming with the specified cache size in bytes.
+    ///
+    /// When enabled, the execution stage will spawn background threads to
+    /// speculatively execute future blocks, warming the cache for faster
+    /// main execution.
+    pub fn with_prewarm(mut self, cache_size_bytes: u64) -> Self {
+        let cache = Arc::new(ExecutionCacheBuilder::default().build_caches(cache_size_bytes));
+        self.execution_cache = Some(cache);
+        self
+    }
+
+    /// Sets the provider factory for prewarming.
+    ///
+    /// This enables actual transaction execution in prewarm threads.
+    /// The provider factory must implement `StateProviderFactory + Clone + Send + Sync + 'static`.
+    pub fn with_provider_factory<F2>(self, factory: F2) -> ExecutionStage<E, PrewarmFactory<F2>>
+    where
+        F2: StateProviderFactory + Clone + Send + Sync + 'static,
+    {
+        ExecutionStage {
+            evm_config: self.evm_config,
+            consensus: self.consensus,
+            thresholds: self.thresholds,
+            external_clean_threshold: self.external_clean_threshold,
+            post_execute_commit_input: self.post_execute_commit_input,
+            post_unwind_commit_input: self.post_unwind_commit_input,
+            exex_manager_handle: self.exex_manager_handle,
+            metrics: self.metrics,
+            execution_cache: self.execution_cache,
+            cache_metrics: self.cache_metrics,
+            provider_factory: Some(PrewarmFactory(factory)),
+            _phantom: PhantomData,
+        }
     }
 
     /// Returns whether we can perform pruning of [`tables::AccountChangeSets`] and
@@ -256,9 +419,10 @@ where
     }
 }
 
-impl<E, Provider> Stage<Provider> for ExecutionStage<E>
+impl<E, F, Provider> Stage<Provider> for ExecutionStage<E, F>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm + Clone + Send + Sync + 'static,
+    F: MaybePrewarmFactory,
     Provider: DBProvider
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,
@@ -326,6 +490,15 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
+
+        // Create prewarm controller if we have both cache and provider factory
+        let mut prewarm_controller = match (&self.execution_cache, &self.provider_factory) {
+            (Some(cache), Some(_factory)) => {
+                Some(PrewarmController::new(Arc::clone(cache), self.evm_config.clone()))
+            }
+            _ => None,
+        };
+
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -336,6 +509,20 @@ where
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
             fetch_block_duration += fetch_block_start.elapsed();
+
+            // Spawn prewarm for next block while we execute this one
+            if let (Some(prewarm), Some(factory)) =
+                (&mut prewarm_controller, &self.provider_factory)
+            {
+                // Try to fetch the next block for prewarming
+                if block_number < max_block {
+                    if let Ok(Some(next_block)) = provider
+                        .recovered_block((block_number + 1).into(), TransactionVariant::NoHash)
+                    {
+                        F::spawn_prewarm(prewarm, &next_block, factory);
+                    }
+                }
+            }
 
             cumulative_gas += block.header().gas_used();
 
@@ -481,6 +668,11 @@ where
             write = ?db_write_duration,
             "Execution time"
         );
+
+        // Cancel any running prewarm task before returning
+        if let Some(ref mut prewarm) = prewarm_controller {
+            prewarm.cancel();
+        }
 
         let done = stage_progress == max_block;
         Ok(ExecOutput {
