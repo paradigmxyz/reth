@@ -140,7 +140,7 @@ where
     }
 
     /// Returns the current progress.
-    pub fn progress(&self) -> &SnapProgress {
+    pub const fn progress(&self) -> &SnapProgress {
         &self.progress
     }
 
@@ -156,7 +156,7 @@ where
     /// Downloads all accounts from the state trie via `GetAccountRange` requests.
     ///
     /// Returns a list of `(address_hash, storage_root)` for accounts that have
-    /// non-empty storage (storage_root != EMPTY_TRIE_HASH).
+    /// non-empty storage (`storage_root` != `EMPTY_TRIE_HASH`).
     async fn download_accounts(&mut self) -> Result<Vec<(B256, B256)>, SnapSyncError> {
         let state_root = self.progress.state_root;
         let mut cursor = self.progress.account_cursor;
@@ -263,10 +263,8 @@ where
         // For snap sync, we write to HashedAccounts table since snap returns hashed keys.
         // The pipeline's hashing stage normally computes this from PlainAccountState,
         // but for snap we go directly to the hashed form.
-        let provider = self
-            .provider_factory
-            .database_provider_rw()
-            .map_err(|e| SnapSyncError::Provider(e.into()))?;
+        let provider =
+            self.provider_factory.database_provider_rw().map_err(SnapSyncError::Provider)?;
 
         let tx = provider.tx_ref();
         for (hash, account, _storage_root) in batch {
@@ -366,10 +364,8 @@ where
 
     /// Writes a batch of storage slots to the database.
     fn write_storage_slots(&self, batch: &[(B256, B256, U256)]) -> Result<(), SnapSyncError> {
-        let provider = self
-            .provider_factory
-            .database_provider_rw()
-            .map_err(|e| SnapSyncError::Provider(e.into()))?;
+        let provider =
+            self.provider_factory.database_provider_rw().map_err(SnapSyncError::Provider)?;
 
         let tx = provider.tx_ref();
         for (account_hash, slot_hash, value) in batch {
@@ -443,10 +439,8 @@ where
 
     /// Collects code hashes from accounts already written to DB.
     fn collect_code_hashes(&self) -> Result<Vec<B256>, SnapSyncError> {
-        let provider = self
-            .provider_factory
-            .database_provider_rw()
-            .map_err(|e| SnapSyncError::Provider(e.into()))?;
+        let provider =
+            self.provider_factory.database_provider_rw().map_err(SnapSyncError::Provider)?;
 
         let tx = provider.tx_ref();
         let mut cursor = tx.cursor_read::<tables::HashedAccounts>()?;
@@ -454,10 +448,10 @@ where
 
         let mut entry = cursor.first()?;
         while let Some((_, account)) = entry {
-            if let Some(hash) = account.bytecode_hash {
-                if hash != KECCAK_EMPTY {
-                    code_hashes.push(hash);
-                }
+            if let Some(hash) = account.bytecode_hash &&
+                hash != KECCAK_EMPTY
+            {
+                code_hashes.push(hash);
             }
             entry = cursor.next()?;
         }
@@ -471,10 +465,8 @@ where
         expected_hashes: &[B256],
         codes: &[Bytes],
     ) -> Result<(), SnapSyncError> {
-        let provider = self
-            .provider_factory
-            .database_provider_rw()
-            .map_err(|e| SnapSyncError::Provider(e.into()))?;
+        let provider =
+            self.provider_factory.database_provider_rw().map_err(SnapSyncError::Provider)?;
 
         let tx = provider.tx_ref();
         for (i, code) in codes.iter().enumerate() {
@@ -500,8 +492,8 @@ where
 
 /// Decodes a "slim" account body from the snap protocol into a `TrieAccount`.
 ///
-/// Slim format is RLP([nonce, balance, storage_root, code_hash]) but with
-/// empty storage_root and code_hash omitted.
+/// Slim format is `RLP([nonce, balance, storage_root, code_hash])` but with
+/// empty `storage_root` and `code_hash` omitted.
 fn decode_slim_account(data: &Bytes) -> Result<TrieAccount, SnapSyncError> {
     // The snap protocol uses "slim" encoding where empty values are omitted.
     // We need to decode the RLP and fill in defaults for missing fields.
@@ -509,7 +501,7 @@ fn decode_slim_account(data: &Bytes) -> Result<TrieAccount, SnapSyncError> {
     Ok(account)
 }
 
-/// Increments a hash by 1. Returns B256::ZERO on overflow (wraps around).
+/// Increments a hash by 1. Returns `B256::ZERO` on overflow (wraps around).
 fn increment_hash(hash: B256) -> B256 {
     let mut bytes = hash.0;
     for i in (0..32).rev() {
@@ -530,6 +522,7 @@ fn rand_request_id() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rlp::Encodable;
 
     #[test]
     fn test_increment_hash() {
@@ -546,5 +539,39 @@ mod tests {
         let next = increment_hash(mid);
         assert_eq!(next.0[30], 1);
         assert_eq!(next.0[31], 0);
+    }
+
+    #[test]
+    fn test_decode_slim_account() {
+        let trie_account = TrieAccount {
+            nonce: 42,
+            balance: U256::from(1000),
+            storage_root: alloy_trie::EMPTY_ROOT_HASH,
+            code_hash: KECCAK_EMPTY,
+        };
+        let mut buf = Vec::new();
+        trie_account.encode(&mut buf);
+        let decoded = decode_slim_account(&Bytes::from(buf)).unwrap();
+        assert_eq!(decoded.nonce, 42);
+        assert_eq!(decoded.balance, U256::from(1000));
+        assert_eq!(decoded.storage_root, alloy_trie::EMPTY_ROOT_HASH);
+        assert_eq!(decoded.code_hash, KECCAK_EMPTY);
+    }
+
+    #[test]
+    fn test_decode_slim_account_empty() {
+        let trie_account = TrieAccount {
+            nonce: 0,
+            balance: U256::ZERO,
+            storage_root: alloy_trie::EMPTY_ROOT_HASH,
+            code_hash: KECCAK_EMPTY,
+        };
+        let mut buf = Vec::new();
+        trie_account.encode(&mut buf);
+        let decoded = decode_slim_account(&Bytes::from(buf)).unwrap();
+        assert_eq!(decoded.nonce, 0);
+        assert_eq!(decoded.balance, U256::ZERO);
+        assert_eq!(decoded.storage_root, alloy_trie::EMPTY_ROOT_HASH);
+        assert_eq!(decoded.code_hash, KECCAK_EMPTY);
     }
 }

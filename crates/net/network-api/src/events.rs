@@ -325,9 +325,9 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetReceipts69 { response, .. } => response.send(Err(err)).ok(),
             Self::GetReceipts70 { response, .. } => response.send(Err(err)).ok(),
             Self::GetBlockAccessLists { response, .. } => response.send(Err(err)).ok(),
-            Self::GetAccountRange { response, .. } => response.send(Err(err)).ok(),
-            Self::GetStorageRanges { response, .. } => response.send(Err(err)).ok(),
-            Self::GetByteCodes { response, .. } => response.send(Err(err)).ok(),
+            Self::GetAccountRange { response, .. } |
+            Self::GetStorageRanges { response, .. } |
+            Self::GetByteCodes { response, .. } |
             Self::GetTrieNodes { response, .. } => response.send(Err(err)).ok(),
         };
     }
@@ -342,7 +342,7 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
     }
 
     /// Returns `true` if this is a snap protocol request.
-    pub fn is_snap_request(&self) -> bool {
+    pub const fn is_snap_request(&self) -> bool {
         matches!(
             self,
             Self::GetAccountRange { .. } |

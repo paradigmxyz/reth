@@ -46,6 +46,7 @@ metrics.workspace = true
 derive_more.workspace = true
 
 [dev-dependencies]
+reth-provider = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [features]

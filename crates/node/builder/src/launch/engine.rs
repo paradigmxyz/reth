@@ -21,7 +21,6 @@ use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
-use reth_network_p2p::snap::client::SnapClient;
 use reth_node_api::{
     BuiltPayload, ConsensusEngineHandle, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
 };
@@ -78,8 +77,6 @@ impl EngineNodeLauncher {
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
-        <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client:
-            SnapClient,
     {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
@@ -476,7 +473,6 @@ where
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
         + 'static,
-    <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client: SnapClient,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
     type Future = Pin<Box<dyn Future<Output = eyre::Result<Self::Node>> + Send>>;

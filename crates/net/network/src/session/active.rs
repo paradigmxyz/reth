@@ -350,7 +350,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
         // Only handle response messages (odd IDs: AccountRange=1, StorageRanges=3, ByteCodes=5,
         // TrieNodes=7)
-        if snap_id % 2 == 0 {
+        if snap_id.is_multiple_of(2) {
             // This is a snap *request* from the remote peer, not a response.
             // For now, we don't handle incoming snap requests — let it pass through.
             return None;
