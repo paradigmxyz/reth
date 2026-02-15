@@ -5,13 +5,20 @@ use crate::{
     error::PeerRequestResult,
     headers::client::{HeadersClient, SingleHeaderRequest},
     priority::Priority,
+    snap::client::{SnapClient, SnapResponse},
     BlockClient,
 };
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Sealable, B256};
 use core::marker::PhantomData;
 use reth_consensus::Consensus;
-use reth_eth_wire_types::{EthNetworkPrimitives, HeadersDirection, NetworkPrimitives};
+use reth_eth_wire_types::{
+    snap::{
+        AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage, GetByteCodesMessage,
+        GetStorageRangesMessage, GetTrieNodesMessage, StorageRangesMessage, TrieNodesMessage,
+    },
+    EthNetworkPrimitives, HeadersDirection, NetworkPrimitives,
+};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use std::{
@@ -738,6 +745,83 @@ where
     Net: NetworkPrimitives,
 {
     type Block = Net::Block;
+}
+
+impl<Net> SnapClient for NoopFullBlockClient<Net>
+where
+    Net: NetworkPrimitives,
+{
+    type Output = futures::future::Ready<PeerRequestResult<SnapResponse>>;
+
+    fn get_account_range_with_priority(
+        &self,
+        request: GetAccountRangeMessage,
+        _priority: Priority,
+    ) -> Self::Output {
+        futures::future::ready(Ok(WithPeerId::new(
+            PeerId::random(),
+            SnapResponse::AccountRange(AccountRangeMessage {
+                request_id: request.request_id,
+                accounts: vec![],
+                proof: vec![],
+            }),
+        )))
+    }
+
+    fn get_storage_ranges(&self, request: GetStorageRangesMessage) -> Self::Output {
+        self.get_storage_ranges_with_priority(request, Priority::Normal)
+    }
+
+    fn get_storage_ranges_with_priority(
+        &self,
+        request: GetStorageRangesMessage,
+        _priority: Priority,
+    ) -> Self::Output {
+        futures::future::ready(Ok(WithPeerId::new(
+            PeerId::random(),
+            SnapResponse::StorageRanges(StorageRangesMessage {
+                request_id: request.request_id,
+                slots: vec![],
+                proof: vec![],
+            }),
+        )))
+    }
+
+    fn get_byte_codes(&self, request: GetByteCodesMessage) -> Self::Output {
+        self.get_byte_codes_with_priority(request, Priority::Normal)
+    }
+
+    fn get_byte_codes_with_priority(
+        &self,
+        request: GetByteCodesMessage,
+        _priority: Priority,
+    ) -> Self::Output {
+        futures::future::ready(Ok(WithPeerId::new(
+            PeerId::random(),
+            SnapResponse::ByteCodes(ByteCodesMessage {
+                request_id: request.request_id,
+                codes: vec![],
+            }),
+        )))
+    }
+
+    fn get_trie_nodes(&self, request: GetTrieNodesMessage) -> Self::Output {
+        self.get_trie_nodes_with_priority(request, Priority::Normal)
+    }
+
+    fn get_trie_nodes_with_priority(
+        &self,
+        request: GetTrieNodesMessage,
+        _priority: Priority,
+    ) -> Self::Output {
+        futures::future::ready(Ok(WithPeerId::new(
+            PeerId::random(),
+            SnapResponse::TrieNodes(TrieNodesMessage {
+                request_id: request.request_id,
+                nodes: vec![],
+            }),
+        )))
+    }
 }
 
 impl<Net> Default for NoopFullBlockClient<Net> {

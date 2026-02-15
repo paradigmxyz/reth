@@ -350,3 +350,131 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{keccak256, B256, U256};
+    use alloy_rlp::Decodable;
+    use reth_db_api::transaction::DbTxMut;
+    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_storage_api::{DBProvider, DatabaseProviderFactory};
+    use tokio::sync::mpsc;
+
+    #[test]
+    fn test_encode_account_roundtrip() {
+        let account = Account {
+            nonce: 10,
+            balance: U256::from(500),
+            bytecode_hash: Some(B256::repeat_byte(0xAB)),
+        };
+        let encoded = encode_account(&account);
+        assert!(!encoded.is_empty());
+
+        let decoded = alloy_trie::TrieAccount::decode(&mut encoded.as_ref()).unwrap();
+        assert_eq!(decoded.nonce, 10);
+        assert_eq!(decoded.balance, U256::from(500));
+        assert_eq!(decoded.code_hash, B256::repeat_byte(0xAB));
+    }
+
+    #[tokio::test]
+    async fn test_account_range_empty_db() {
+        let factory = create_test_provider_factory();
+        let (tx, rx) = mpsc::channel(10);
+        let handler = SnapRequestHandler::new(factory, rx);
+
+        let handle = tokio::spawn(handler);
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        tx.send(IncomingSnapRequest::GetAccountRange {
+            peer_id: PeerId::random(),
+            request: GetAccountRangeMessage {
+                request_id: 1,
+                root_hash: B256::ZERO,
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0xFF),
+                response_bytes: 512 * 1024,
+            },
+            response: resp_tx,
+        })
+        .await
+        .unwrap();
+
+        let result = resp_rx.await.unwrap().unwrap();
+        assert!(result.accounts.is_empty());
+
+        drop(tx);
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_byte_codes_request() {
+        let factory = create_test_provider_factory();
+
+        // Write bytecodes into the DB
+        let code = Bytes::from(vec![0x60, 0x00, 0x60, 0x00, 0xFD]); // PUSH0 PUSH0 REVERT
+        let code_hash = keccak256(&code);
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            let bytecode = reth_primitives_traits::Bytecode::new_raw(code.clone());
+            provider.tx_ref().put::<tables::Bytecodes>(code_hash, bytecode).unwrap();
+            provider.commit().unwrap();
+        }
+
+        let (tx, rx) = mpsc::channel(10);
+        let handler = SnapRequestHandler::new(factory, rx);
+        let handle = tokio::spawn(handler);
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        tx.send(IncomingSnapRequest::GetByteCodes {
+            peer_id: PeerId::random(),
+            request: GetByteCodesMessage {
+                request_id: 2,
+                hashes: vec![code_hash],
+                response_bytes: 512 * 1024,
+            },
+            response: resp_tx,
+        })
+        .await
+        .unwrap();
+
+        let result = resp_rx.await.unwrap().unwrap();
+        assert_eq!(result.codes.len(), 1);
+        assert_eq!(result.codes[0], code);
+
+        drop(tx);
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_storage_ranges_empty() {
+        let factory = create_test_provider_factory();
+        let (tx, rx) = mpsc::channel(10);
+        let handler = SnapRequestHandler::new(factory, rx);
+        let handle = tokio::spawn(handler);
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        tx.send(IncomingSnapRequest::GetStorageRanges {
+            peer_id: PeerId::random(),
+            request: GetStorageRangesMessage {
+                request_id: 3,
+                root_hash: B256::ZERO,
+                account_hashes: vec![B256::repeat_byte(0x01)],
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0xFF),
+                response_bytes: 512 * 1024,
+            },
+            response: resp_tx,
+        })
+        .await
+        .unwrap();
+
+        let result = resp_rx.await.unwrap().unwrap();
+        // One entry per requested account, but the inner vec is empty since no storage exists
+        assert_eq!(result.slots.len(), 1);
+        assert!(result.slots[0].is_empty());
+
+        drop(tx);
+        handle.await.unwrap();
+    }
+}

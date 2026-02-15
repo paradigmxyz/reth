@@ -61,3 +61,27 @@ impl SnapProgress {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_progress_new() {
+        let hash = B256::repeat_byte(0x01);
+        let state_root = B256::repeat_byte(0x02);
+        let progress = SnapProgress::new(hash, 100, state_root);
+        assert_eq!(progress.pivot_hash, hash);
+        assert_eq!(progress.pivot_number, 100);
+        assert_eq!(progress.state_root, state_root);
+        assert_eq!(progress.phase, SnapPhase::Accounts);
+        assert_eq!(progress.accounts_downloaded, 0);
+        assert_eq!(progress.storage_slots_downloaded, 0);
+        assert_eq!(progress.bytecodes_downloaded, 0);
+    }
+
+    #[test]
+    fn test_phase_default() {
+        assert_eq!(SnapPhase::default(), SnapPhase::Idle);
+    }
+}

@@ -600,6 +600,7 @@ struct Request<Req, Resp> {
 
 /// Requests that can be sent to the Syncer from a [`FetchClient`]
 #[derive(Debug)]
+#[allow(clippy::enum_variant_names)]
 pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
     /// Download the requested headers and send response through channel
     GetBlockHeaders {
@@ -686,7 +687,11 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
     /// Returns the best peer requirements for this request.
     fn best_peer_requirements(&self) -> BestPeerRequirements {
         match self {
-            Self::GetBlockHeaders { .. } => BestPeerRequirements::None,
+            Self::GetBlockHeaders { .. } |
+            Self::GetAccountRange { .. } |
+            Self::GetStorageRanges { .. } |
+            Self::GetByteCodes { .. } |
+            Self::GetTrieNodes { .. } => BestPeerRequirements::None,
             Self::GetBlockBodies { range_hint, .. } => {
                 if let Some(range) = range_hint {
                     BestPeerRequirements::FullBlockRange(range.clone())
@@ -694,10 +699,6 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
                     BestPeerRequirements::FullBlock
                 }
             }
-            Self::GetAccountRange { .. } |
-            Self::GetStorageRanges { .. } |
-            Self::GetByteCodes { .. } |
-            Self::GetTrieNodes { .. } => BestPeerRequirements::None,
         }
     }
 }
