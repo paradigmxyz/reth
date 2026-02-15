@@ -120,7 +120,12 @@ where
         + DbDupCursorRO<tables::StoragesTrie>
         + DbDupCursorRW<tables::StoragesTrie>,
 {
-    /// Writes storage updates that are already sorted
+    /// Writes storage updates that are already sorted.
+    ///
+    /// Uses a single linear cursor scan to delete old entries rather than seeking
+    /// from scratch for each update. Since both the existing `DupSort` entries and the
+    /// updates are sorted by nibbles, we merge-scan them in `O(existing + updates)` cursor
+    /// moves instead of `O(updates × tree_depth)` seeks.
     pub fn write_storage_trie_updates_sorted(
         &mut self,
         updates: &StorageTrieUpdatesSorted,
@@ -130,26 +135,57 @@ where
             self.cursor.delete_current_duplicates()?;
         }
 
-        let mut num_entries = 0;
-        for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
-        {
-            num_entries += 1;
-            let nibbles = StoredNibblesSubKey(*nibbles);
-            // Delete the old entry if it exists.
-            if self
-                .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .filter(|e| e.nibbles == nibbles)
-                .is_some()
-            {
-                self.cursor.delete_current()?;
+        let non_empty_updates: Vec<_> =
+            updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty()).collect();
+
+        if non_empty_updates.is_empty() {
+            return Ok(0);
+        }
+
+        // Phase 1: Linear merge-scan to delete existing entries that will be
+        // updated or removed. We seek once to the first update's nibbles, then
+        // advance via next_dup — avoiding a full B-tree seek per update.
+        let first_target = StoredNibblesSubKey(non_empty_updates[0].0);
+        let mut db_entry = self.cursor.seek_by_key_subkey(self.hashed_address, first_target)?;
+
+        for &(nibbles, _) in &non_empty_updates {
+            let target = StoredNibblesSubKey(*nibbles);
+
+            // Advance cursor past existing entries that sort before this update
+            loop {
+                match &db_entry {
+                    Some(entry) if entry.nibbles < target => {
+                        db_entry = self.cursor.next_dup()?.map(|(_, v)| v);
+                    }
+                    _ => break,
+                }
             }
 
-            // There is an updated version of this node, insert new entry.
+            if db_entry.as_ref().is_some_and(|e| e.nibbles == target) {
+                self.cursor.delete_current()?;
+                // MDBX positions the cursor at the successor after delete.
+                // Use current() to read it without advancing further. Verify
+                // the key still matches our hashed_address since the cursor
+                // may have moved to the next primary key.
+                db_entry = self
+                    .cursor
+                    .current()?
+                    .filter(|(k, _)| *k == self.hashed_address)
+                    .map(|(_, v)| v);
+            }
+        }
+
+        // Phase 2: Insert updated entries.
+        let mut num_entries = 0;
+        for &(nibbles, maybe_updated) in &non_empty_updates {
+            num_entries += 1;
             if let Some(node) = maybe_updated {
                 self.cursor.upsert(
                     self.hashed_address,
-                    &StorageTrieEntry { nibbles, node: node.clone() },
+                    &StorageTrieEntry {
+                        nibbles: StoredNibblesSubKey(*nibbles),
+                        node: node.clone(),
+                    },
                 )?;
             }
         }
@@ -273,5 +309,167 @@ mod tests {
 
         let mut cursor = DatabaseStorageTrieCursor::new(cursor, hashed_address);
         assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
+    }
+
+    #[test]
+    fn test_write_storage_trie_updates_sorted_batch() {
+        use reth_trie::updates::StorageTrieUpdatesSorted;
+
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let hashed_address = B256::random();
+
+        // Insert some existing entries
+        let nibbles_a = Nibbles::from_nibbles_unchecked(vec![0x01, 0x02]);
+        let nibbles_b = Nibbles::from_nibbles_unchecked(vec![0x03, 0x04]);
+        let nibbles_c = Nibbles::from_nibbles_unchecked(vec![0x05, 0x06]);
+        let nibbles_d = Nibbles::from_nibbles_unchecked(vec![0x07, 0x08]);
+
+        let node_v1 = BranchNodeCompact::new(0b0001, 0b0001, 0, Vec::new(), None);
+        let node_v2 = BranchNodeCompact::new(0b0010, 0b0010, 0, Vec::new(), None);
+
+        {
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            for nibbles in [&nibbles_a, &nibbles_b, &nibbles_c, &nibbles_d] {
+                cursor
+                    .upsert(
+                        hashed_address,
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(nibbles.clone()),
+                            node: node_v1.clone(),
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+
+        // Create sorted updates:
+        // - nibbles_a: update to node_v2
+        // - nibbles_b: delete (None)
+        // - nibbles_c: unchanged (not in updates)
+        // - nibbles_d: update to node_v2
+        // - nibbles_e: new entry
+        let nibbles_e = Nibbles::from_nibbles_unchecked(vec![0x09, 0x0a]);
+        let updates = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![
+                (nibbles_a.clone(), Some(node_v2.clone())),
+                (nibbles_b.clone(), None),
+                (nibbles_d.clone(), Some(node_v2.clone())),
+                (nibbles_e.clone(), Some(node_v2.clone())),
+            ],
+        };
+
+        {
+            let cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            let mut trie_cursor = DatabaseStorageTrieCursor::new(cursor, hashed_address);
+            let num = trie_cursor.write_storage_trie_updates_sorted(&updates).unwrap();
+            assert_eq!(num, 4);
+        }
+
+        // Verify final state
+        let mut cursor = provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap();
+
+        // nibbles_a: updated to node_v2
+        let entry = cursor
+            .seek_by_key_subkey(hashed_address, StoredNibblesSubKey(nibbles_a.clone()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.nibbles, StoredNibblesSubKey(nibbles_a));
+        assert_eq!(entry.node, node_v2);
+
+        // nibbles_b: deleted
+        let entry = cursor
+            .seek_by_key_subkey(hashed_address, StoredNibblesSubKey(nibbles_b.clone()))
+            .unwrap();
+        assert!(entry.is_none() || entry.unwrap().nibbles != StoredNibblesSubKey(nibbles_b));
+
+        // nibbles_c: unchanged (still node_v1)
+        let entry = cursor
+            .seek_by_key_subkey(hashed_address, StoredNibblesSubKey(nibbles_c.clone()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.nibbles, StoredNibblesSubKey(nibbles_c));
+        assert_eq!(entry.node, node_v1);
+
+        // nibbles_d: updated to node_v2
+        let entry = cursor
+            .seek_by_key_subkey(hashed_address, StoredNibblesSubKey(nibbles_d.clone()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.nibbles, StoredNibblesSubKey(nibbles_d));
+        assert_eq!(entry.node, node_v2);
+
+        // nibbles_e: new entry with node_v2
+        let entry = cursor
+            .seek_by_key_subkey(hashed_address, StoredNibblesSubKey(nibbles_e.clone()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.nibbles, StoredNibblesSubKey(nibbles_e));
+        assert_eq!(entry.node, node_v2);
+    }
+
+    #[test]
+    fn test_write_storage_trie_updates_consecutive_deletes() {
+        use reth_trie::updates::StorageTrieUpdatesSorted;
+
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let hashed_address = B256::random();
+
+        let node = BranchNodeCompact::new(0b0001, 0b0001, 0, Vec::new(), None);
+
+        let nibbles: Vec<_> =
+            (0..6u8).map(|i| Nibbles::from_nibbles_unchecked(vec![i, i + 1])).collect();
+
+        {
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            for n in &nibbles {
+                cursor
+                    .upsert(
+                        hashed_address,
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(n.clone()),
+                            node: node.clone(),
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+
+        // Delete consecutive entries [1], [2], [3] while keeping [0], [4], [5]
+        let updates = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![
+                (nibbles[1].clone(), None),
+                (nibbles[2].clone(), None),
+                (nibbles[3].clone(), None),
+            ],
+        };
+
+        {
+            let cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            let mut trie_cursor = DatabaseStorageTrieCursor::new(cursor, hashed_address);
+            trie_cursor.write_storage_trie_updates_sorted(&updates).unwrap();
+        }
+
+        // Verify: [0], [4], [5] remain; [1], [2], [3] are gone
+        let mut cursor = provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap();
+
+        let entry = cursor
+            .seek_by_key_subkey(hashed_address, StoredNibblesSubKey(nibbles[0].clone()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.nibbles, StoredNibblesSubKey(nibbles[0].clone()));
+
+        // After [0], next dup should be [4] (not [1], [2], or [3])
+        let entry = cursor.next_dup().unwrap().unwrap();
+        assert_eq!(entry.1.nibbles, StoredNibblesSubKey(nibbles[4].clone()));
+
+        let entry = cursor.next_dup().unwrap().unwrap();
+        assert_eq!(entry.1.nibbles, StoredNibblesSubKey(nibbles[5].clone()));
+
+        // No more dups
+        assert!(cursor.next_dup().unwrap().is_none());
     }
 }
