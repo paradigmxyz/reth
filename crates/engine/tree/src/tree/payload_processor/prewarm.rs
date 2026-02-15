@@ -268,24 +268,27 @@ where
                 let new_cache = SavedCache::new(hash, caches, cache_metrics)
                     .with_disable_cache_metrics(disable_cache_metrics);
 
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
-                    // Clear the cache on error to prevent having a polluted cache
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
-                }
-
-                new_cache.update_metrics();
-
+                // Wait for block validation before inserting state into the cache.
+                //
+                // This ordering is critical: `insert_state` must happen AFTER the block is
+                // validated (and thus after the multiproof/state-root task has finished reading
+                // from the shared FixedCache). The FixedCache uses non-blocking inserts that
+                // silently drop writes when a bucket is locked by a concurrent reader. If
+                // `insert_state` runs while the multiproof task is still reading from the same
+                // cache, account updates (e.g. nonce increments) can be silently lost, causing
+                // the next block to execute against stale state.
                 if valid_block_rx.recv().is_ok() {
-                    // Replace the shared cache with the new one; the previous cache (if any) is
-                    // dropped.
+                    if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                        *cached = None;
+                        debug!(target: "engine::caching", "cleared execution cache on update error");
+                        return;
+                    }
+
+                    new_cache.update_metrics();
+
                     *cached = Some(new_cache);
                 } else {
-                    // Block was invalid; caches were already mutated by insert_state above,
-                    // so we must clear to prevent using polluted state
+                    // Block was invalid; discard the cache without mutating it
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on invalid block");
                 }
