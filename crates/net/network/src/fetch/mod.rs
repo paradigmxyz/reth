@@ -10,17 +10,22 @@ use futures::StreamExt;
 use reth_eth_wire::{
     Capabilities, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives,
 };
-use reth_network_api::test_utils::PeersHandle;
+use reth_eth_wire_types::snap::{
+    GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage, GetTrieNodesMessage,
+};
+use reth_network_api::{test_utils::PeersHandle, PeerRequest};
 use reth_network_p2p::{
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
     priority::Priority,
+    snap::client::SnapResponse,
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
 use std::{
     collections::{HashMap, VecDeque},
     ops::RangeInclusive,
+    pin::Pin,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -32,6 +37,17 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H>>>;
 type InflightBodiesRequest<B> = Request<(), PeerRequestResult<Vec<B>>>;
+
+/// Tracks an inflight snap request, bridging the session's response back to the download caller.
+#[derive(Debug)]
+struct InflightSnapRequest {
+    /// The peer that's handling this request
+    peer_id: PeerId,
+    /// The channel to send the final response (with peer id) to the download caller
+    response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
+    /// The receiver for the session's response
+    rx: oneshot::Receiver<RequestResult<SnapResponse>>,
+}
 
 /// Manages data fetching operations.
 ///
@@ -45,6 +61,8 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     inflight_headers_requests: HashMap<PeerId, InflightHeadersRequest<N::BlockHeader>>,
     /// Currently active [`GetBlockBodies`] requests
     inflight_bodies_requests: HashMap<PeerId, InflightBodiesRequest<N::BlockBody>>,
+    /// Currently active snap protocol requests
+    inflight_snap_requests: Vec<InflightSnapRequest>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
@@ -67,6 +85,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         Self {
             inflight_headers_requests: Default::default(),
             inflight_bodies_requests: Default::default(),
+            inflight_snap_requests: Vec::new(),
             peers: Default::default(),
             peers_handle,
             num_active_peers,
@@ -113,6 +132,16 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         }
         if let Some(req) = self.inflight_bodies_requests.remove(peer) {
             let _ = req.response.send(Err(RequestError::ConnectionDropped));
+        }
+        // Cancel inflight snap requests for this peer
+        let mut i = 0;
+        while i < self.inflight_snap_requests.len() {
+            if &self.inflight_snap_requests[i].peer_id == peer {
+                let req = self.inflight_snap_requests.swap_remove(i);
+                let _ = req.response.send(Err(RequestError::ConnectionDropped));
+            } else {
+                i += 1;
+            }
         }
     }
 
@@ -171,7 +200,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     }
 
     /// Returns the next action to return
-    fn poll_action(&mut self) -> PollAction {
+    fn poll_action(&mut self) -> PollAction<N> {
         // we only check and not pop here since we don't know yet whether a peer is available.
         if self.queued_requests.is_empty() {
             return PollAction::NoRequests
@@ -184,13 +213,39 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             return PollAction::NoPeersAvailable
         };
 
+        // Snap requests bypass the block request path and are dispatched directly
+        if request.is_snap_request() {
+            let snap_request = self.prepare_snap_request(peer_id, request);
+            return PollAction::Ready(FetchAction::SnapRequest { peer_id, request: snap_request })
+        }
+
         let request = self.prepare_block_request(peer_id, request);
 
         PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
     }
 
     /// Advance the state the syncer
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchAction> {
+    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchAction<N>> {
+        // Poll inflight snap requests and forward responses
+        let mut i = 0;
+        while i < self.inflight_snap_requests.len() {
+            match Pin::new(&mut self.inflight_snap_requests[i].rx).poll(cx) {
+                Poll::Ready(result) => {
+                    let req = self.inflight_snap_requests.swap_remove(i);
+                    let resp = match result {
+                        Ok(Ok(snap_resp)) => Ok((req.peer_id, snap_resp).into()),
+                        Ok(Err(err)) => Err(err),
+                        Err(_) => Err(RequestError::ChannelClosed),
+                    };
+                    let _ = req.response.send(resp);
+                    self.on_snap_response(req.peer_id);
+                }
+                Poll::Pending => {
+                    i += 1;
+                }
+            }
+        }
+
         // drain buffered actions first
         loop {
             let no_peers_available = match self.poll_action() {
@@ -256,6 +311,62 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 self.inflight_bodies_requests.insert(peer_id, inflight);
                 BlockRequest::GetBlockBodies(GetBlockBodies(request))
             }
+            DownloadRequest::GetAccountRange { .. } |
+            DownloadRequest::GetStorageRanges { .. } |
+            DownloadRequest::GetByteCodes { .. } |
+            DownloadRequest::GetTrieNodes { .. } => {
+                unreachable!("snap requests are handled via prepare_snap_request")
+            }
+        }
+    }
+
+    /// Handles a new snap request to a peer.
+    ///
+    /// Converts the download request into a [`PeerRequest`] for dispatch to the peer session.
+    /// The `DownloadRequest`'s response channel is stored as an inflight snap request so the
+    /// response can be forwarded back (with the peer id) once the session replies.
+    ///
+    /// Caution: this assumes the peer exists and is idle
+    fn prepare_snap_request(
+        &mut self,
+        peer_id: PeerId,
+        req: DownloadRequest<N>,
+    ) -> PeerRequest<N> {
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.state = req.peer_state();
+        }
+
+        match req {
+            DownloadRequest::GetAccountRange { request, response, .. } => {
+                let (tx, rx) = oneshot::channel();
+                self.inflight_snap_requests.push(InflightSnapRequest { peer_id, response, rx });
+                PeerRequest::GetAccountRange { request, response: tx }
+            }
+            DownloadRequest::GetStorageRanges { request, response, .. } => {
+                let (tx, rx) = oneshot::channel();
+                self.inflight_snap_requests.push(InflightSnapRequest { peer_id, response, rx });
+                PeerRequest::GetStorageRanges { request, response: tx }
+            }
+            DownloadRequest::GetByteCodes { request, response, .. } => {
+                let (tx, rx) = oneshot::channel();
+                self.inflight_snap_requests.push(InflightSnapRequest { peer_id, response, rx });
+                PeerRequest::GetByteCodes { request, response: tx }
+            }
+            DownloadRequest::GetTrieNodes { request, response, .. } => {
+                let (tx, rx) = oneshot::channel();
+                self.inflight_snap_requests.push(InflightSnapRequest { peer_id, response, rx });
+                PeerRequest::GetTrieNodes { request, response: tx }
+            }
+            _ => unreachable!("only snap requests should be passed to prepare_snap_request"),
+        }
+    }
+
+    /// Called when a snap response is received.
+    ///
+    /// Marks the peer as idle so it can accept new requests.
+    fn on_snap_response(&mut self, peer_id: PeerId) {
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.state.on_request_finished();
         }
     }
 
@@ -341,8 +452,8 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 }
 
 /// The outcome of [`StateFetcher::poll_action`]
-enum PollAction {
-    Ready(FetchAction),
+enum PollAction<N: NetworkPrimitives = EthNetworkPrimitives> {
+    Ready(FetchAction<N>),
     NoRequests,
     NoPeersAvailable,
 }
@@ -453,6 +564,8 @@ enum PeerState {
     GetBlockHeaders,
     /// Peer is handling a `GetBlockBodies` request.
     GetBlockBodies,
+    /// Peer is handling a snap protocol request.
+    SnapRequest,
     /// Peer session is about to close
     Closing,
 }
@@ -505,6 +618,30 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
         priority: Priority,
         range_hint: Option<RangeInclusive<u64>>,
     },
+    /// Request an account range via snap protocol
+    GetAccountRange {
+        request: GetAccountRangeMessage,
+        response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
+        priority: Priority,
+    },
+    /// Request storage ranges via snap protocol
+    GetStorageRanges {
+        request: GetStorageRangesMessage,
+        response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
+        priority: Priority,
+    },
+    /// Request bytecodes via snap protocol
+    GetByteCodes {
+        request: GetByteCodesMessage,
+        response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
+        priority: Priority,
+    },
+    /// Request trie nodes via snap protocol
+    GetTrieNodes {
+        request: GetTrieNodesMessage,
+        response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
+        priority: Priority,
+    },
 }
 
 // === impl DownloadRequest ===
@@ -515,21 +652,39 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
         match self {
             Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
             Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
+            Self::GetAccountRange { .. } |
+            Self::GetStorageRanges { .. } |
+            Self::GetByteCodes { .. } |
+            Self::GetTrieNodes { .. } => PeerState::SnapRequest,
         }
     }
 
     /// Returns the requested priority of this request
     const fn get_priority(&self) -> &Priority {
         match self {
-            Self::GetBlockHeaders { priority, .. } | Self::GetBlockBodies { priority, .. } => {
-                priority
-            }
+            Self::GetBlockHeaders { priority, .. } |
+            Self::GetBlockBodies { priority, .. } |
+            Self::GetAccountRange { priority, .. } |
+            Self::GetStorageRanges { priority, .. } |
+            Self::GetByteCodes { priority, .. } |
+            Self::GetTrieNodes { priority, .. } => priority,
         }
     }
 
     /// Returns `true` if this request is normal priority.
     const fn is_normal_priority(&self) -> bool {
         self.get_priority().is_normal()
+    }
+
+    /// Returns `true` if this is a snap protocol request.
+    const fn is_snap_request(&self) -> bool {
+        matches!(
+            self,
+            Self::GetAccountRange { .. } |
+                Self::GetStorageRanges { .. } |
+                Self::GetByteCodes { .. } |
+                Self::GetTrieNodes { .. }
+        )
     }
 
     /// Returns the best peer requirements for this request.
@@ -543,18 +698,29 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
                     BestPeerRequirements::FullBlock
                 }
             }
+            Self::GetAccountRange { .. } |
+            Self::GetStorageRanges { .. } |
+            Self::GetByteCodes { .. } |
+            Self::GetTrieNodes { .. } => BestPeerRequirements::None,
         }
     }
 }
 
 /// An action the syncer can emit.
-pub(crate) enum FetchAction {
+pub(crate) enum FetchAction<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Dispatch an eth request to the given peer.
     BlockRequest {
         /// The targeted recipient for the request
         peer_id: PeerId,
         /// The request to send
         request: BlockRequest,
+    },
+    /// Dispatch a snap protocol request to the given peer.
+    SnapRequest {
+        /// The targeted recipient for the request
+        peer_id: PeerId,
+        /// The snap request to send
+        request: PeerRequest<N>,
     },
 }
 
