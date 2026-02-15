@@ -1,4 +1,4 @@
-use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, LegacyKeyAdapter};
 use alloy_primitives::{keccak256, map::HashMap, Address, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
@@ -40,7 +40,10 @@ impl<'a, TX: DbTx> DatabaseProof<'a>
     type Tx = TX;
 
     fn from_tx(tx: &'a Self::Tx) -> Self {
-        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
+        Self::new(
+            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
+            DatabaseHashedCursorFactory::new(tx),
+        )
     }
     fn overlay_account_proof(
         &self,
@@ -104,7 +107,11 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
     >
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
-        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx), address)
+        Self::new(
+            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
+            DatabaseHashedCursorFactory::new(tx),
+            address,
+        )
     }
 
     fn overlay_storage_proof(
@@ -120,7 +127,7 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
         StorageProof::new(
-            DatabaseTrieCursorFactory::new(tx),
+            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
             address,
         )
@@ -142,7 +149,7 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
         StorageProof::new(
-            DatabaseTrieCursorFactory::new(tx),
+            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
             address,
         )

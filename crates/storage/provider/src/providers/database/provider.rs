@@ -69,7 +69,7 @@ use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, StoredNibbles,
 };
-use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor};
+use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, LegacyKeyAdapter};
 use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
@@ -3094,7 +3094,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
         let mut cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
         for (hashed_address, storage_trie_updates) in storage_tries {
-            let mut db_storage_trie_cursor =
+            let mut db_storage_trie_cursor: DatabaseStorageTrieCursor<_, LegacyKeyAdapter> =
                 DatabaseStorageTrieCursor::new(cursor, *hashed_address);
             num_entries +=
                 db_storage_trie_cursor.write_storage_trie_updates_sorted(storage_trie_updates)?;
