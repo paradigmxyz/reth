@@ -2,14 +2,14 @@
 
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::{BlockHeader, Header};
-use alloy_eips::eip2718::WithEncoded;
+use alloy_consensus::{proofs, BlockHeader, Eip2718EncodableReceipt, Header, TxReceipt};
+use alloy_eips::eip2718::{Encodable2718, WithEncoded};
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTxParts},
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, Bloom, B256};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
@@ -181,6 +181,7 @@ pub trait Executor<DB: Database>: Sized {
 ///     bundle_state: &state_changes,
 ///     state_provider: &state,
 ///     state_root: calculated_root,
+///     precomputed_header_values: Default::default(),
 /// };
 ///
 /// let block = assembler.assemble_block(input)?;
@@ -208,6 +209,51 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     pub state_provider: &'b dyn StateProvider,
     /// State root for this block.
     pub state_root: B256,
+    /// Optional pre-computed block header values (e.g. tx root, receipt root, logs bloom).
+    ///
+    /// When provided, the assembler can skip re-computing these values. This enables callers to
+    /// compute them in parallel with the state root (the typical bottleneck) rather than
+    /// sequentially after it.
+    pub precomputed_header_values: PrecomputedHeaderValues,
+}
+
+/// Pre-computed block header values that can be passed to the assembler to avoid redundant work.
+///
+/// During block sealing, the state root is typically the most expensive computation. While it is
+/// being computed, other header values (transaction root, receipt root, logs bloom) can be computed
+/// in parallel since they only depend on already-available execution results.
+///
+/// Any field set to `Some` will be used directly by the assembler; `None` fields will be computed
+/// as usual.
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub struct PrecomputedHeaderValues {
+    /// Pre-computed transaction trie root.
+    pub transactions_root: Option<B256>,
+    /// Pre-computed receipt trie root.
+    pub receipts_root: Option<B256>,
+    /// Pre-computed aggregated logs bloom.
+    pub logs_bloom: Option<Bloom>,
+}
+
+impl PrecomputedHeaderValues {
+    /// Sets the pre-computed transactions root.
+    pub const fn with_transactions_root(mut self, root: B256) -> Self {
+        self.transactions_root = Some(root);
+        self
+    }
+
+    /// Sets the pre-computed receipts root.
+    pub const fn with_receipts_root(mut self, root: B256) -> Self {
+        self.receipts_root = Some(root);
+        self
+    }
+
+    /// Sets the pre-computed logs bloom.
+    pub const fn with_logs_bloom(mut self, bloom: Bloom) -> Self {
+        self.logs_bloom = Some(bloom);
+        self
+    }
 }
 
 impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
@@ -235,7 +281,46 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
             bundle_state,
             state_provider,
             state_root,
+            precomputed_header_values: PrecomputedHeaderValues::default(),
         }
+    }
+
+    /// Sets the [`PrecomputedHeaderValues`] on this input.
+    pub const fn with_precomputed_header_values(mut self, cached: PrecomputedHeaderValues) -> Self {
+        self.precomputed_header_values = cached;
+        self
+    }
+
+    /// Returns the transactions root, using the cached value if available.
+    pub fn transactions_root(&self) -> B256
+    where
+        F::Transaction: Encodable2718,
+    {
+        self.precomputed_header_values
+            .transactions_root
+            .unwrap_or_else(|| proofs::calculate_transaction_root(&self.transactions))
+    }
+
+    /// Returns the receipts root, using the cached value if available.
+    pub fn receipts_root(&self) -> B256
+    where
+        F::Receipt: TxReceipt + Eip2718EncodableReceipt,
+    {
+        self.precomputed_header_values.receipts_root.unwrap_or_else(|| {
+            proofs::calculate_receipt_root(
+                &self.output.receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>(),
+            )
+        })
+    }
+
+    /// Returns the logs bloom, using the cached value if available.
+    pub fn logs_bloom(&self) -> Bloom
+    where
+        F::Receipt: TxReceipt<Log = alloy_primitives::Log>,
+    {
+        self.precomputed_header_values.logs_bloom.unwrap_or_else(|| {
+            alloy_primitives::logs_bloom(self.output.receipts.iter().flat_map(|r| r.logs()))
+        })
     }
 }
 
@@ -262,7 +347,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
 /// // 2. Calculate state root from changes
 /// let state_root = state_provider.state_root(&bundle_state)?;
 ///
-/// // 3. Assemble the final block
+/// // 3. Assemble the final block (with optional pre-computed roots)
 /// let block = assembler.assemble_block(BlockAssemblerInput {
 ///     evm_env,           // Environment used during execution
 ///     execution_ctx,     // Context like withdrawals, ommers
@@ -272,6 +357,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
 ///     bundle_state,      // All state changes
 ///     state_provider,    // For additional lookups if needed
 ///     state_root,        // Computed state root
+///     precomputed_header_values: Default::default(),  // Optional pre-computed roots
 /// })?;
 /// ```
 ///
@@ -502,6 +588,7 @@ where
             bundle_state: &db.bundle_state,
             state_provider: &state,
             state_root,
+            precomputed_header_values: PrecomputedHeaderValues::default(),
         })?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
