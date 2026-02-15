@@ -20,11 +20,72 @@
 //! The [`PersistenceState`] tracks ongoing persistence operations and coordinates
 //! between the main execution thread and background persistence workers.
 
+use crate::persistence::SaveBlocksResult;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::trace;
+
+/// Unified result of any persistence operation.
+#[derive(Debug)]
+pub(crate) struct PersistenceResult {
+    /// The last block that was persisted, if any.
+    pub(crate) last_block: Option<BlockNumHash>,
+    /// The commit duration, only available for save-blocks operations.
+    pub(crate) commit_duration: Option<Duration>,
+}
+
+/// Receiver for the result of a persistence operation.
+///
+/// Different persistence actions produce different result types, so the receiver
+/// is an enum that captures both channel types.
+#[derive(Debug)]
+pub(crate) enum PersistenceRx {
+    /// Receiver for the result of a save-blocks operation.
+    SaveBlocks(CrossbeamReceiver<Option<SaveBlocksResult>>),
+    /// Receiver for the result of a remove-blocks operation.
+    RemoveBlocks(CrossbeamReceiver<Option<BlockNumHash>>),
+}
+
+impl PersistenceRx {
+    /// Blocking receive, converting the variant-specific result into a unified
+    /// [`PersistenceResult`].
+    pub(crate) fn recv(self) -> Result<PersistenceResult, crossbeam_channel::RecvError> {
+        match self {
+            Self::SaveBlocks(rx) => {
+                let result = rx.recv()?;
+                Ok(PersistenceResult {
+                    last_block: result.as_ref().map(|r| r.last_block),
+                    commit_duration: result.as_ref().map(|r| r.commit_duration),
+                })
+            }
+            Self::RemoveBlocks(rx) => {
+                let result = rx.recv()?;
+                Ok(PersistenceResult { last_block: result, commit_duration: None })
+            }
+        }
+    }
+
+    /// Non-blocking try receive, converting the variant-specific result into a
+    /// unified [`PersistenceResult`].
+    #[cfg(test)]
+    pub(crate) fn try_recv(&self) -> Result<PersistenceResult, crossbeam_channel::TryRecvError> {
+        match self {
+            Self::SaveBlocks(rx) => {
+                let result = rx.try_recv()?;
+                Ok(PersistenceResult {
+                    last_block: result.as_ref().map(|r| r.last_block),
+                    commit_duration: result.as_ref().map(|r| r.commit_duration),
+                })
+            }
+            Self::RemoveBlocks(rx) => {
+                let result = rx.try_recv()?;
+                Ok(PersistenceResult { last_block: result, commit_duration: None })
+            }
+        }
+    }
+}
 
 /// The state of the persistence task.
 #[derive(Debug)]
@@ -35,8 +96,7 @@ pub struct PersistenceState {
     pub(crate) last_persisted_block: BlockNumHash,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
-    pub(crate) rx:
-        Option<(CrossbeamReceiver<Option<BlockNumHash>>, Instant, CurrentPersistenceAction)>,
+    pub(crate) rx: Option<(PersistenceRx, Instant, CurrentPersistenceAction)>,
 }
 
 impl PersistenceState {
@@ -52,17 +112,24 @@ impl PersistenceState {
         new_tip_num: u64,
         rx: CrossbeamReceiver<Option<BlockNumHash>>,
     ) {
-        self.rx =
-            Some((rx, Instant::now(), CurrentPersistenceAction::RemovingBlocks { new_tip_num }));
+        self.rx = Some((
+            PersistenceRx::RemoveBlocks(rx),
+            Instant::now(),
+            CurrentPersistenceAction::RemovingBlocks { new_tip_num },
+        ));
     }
 
     /// Sets the state for a block save operation.
     pub(crate) fn start_save(
         &mut self,
         highest: BlockNumHash,
-        rx: CrossbeamReceiver<Option<BlockNumHash>>,
+        rx: CrossbeamReceiver<Option<SaveBlocksResult>>,
     ) {
-        self.rx = Some((rx, Instant::now(), CurrentPersistenceAction::SavingBlocks { highest }));
+        self.rx = Some((
+            PersistenceRx::SaveBlocks(rx),
+            Instant::now(),
+            CurrentPersistenceAction::SavingBlocks { highest },
+        ));
     }
 
     /// Returns the current persistence action. If there is no persistence task in progress, then

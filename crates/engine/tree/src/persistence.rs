@@ -18,10 +18,19 @@ use std::{
         Arc,
     },
     thread::JoinHandle,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use thiserror::Error;
 use tracing::{debug, error, instrument};
+
+/// Result of a persistence save-blocks operation, returned to the engine tree.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SaveBlocksResult {
+    /// The last block that was persisted.
+    pub last_block: BlockNumHash,
+    /// Total duration of the database commit for this batch of blocks.
+    pub commit_duration: Duration,
+}
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -96,13 +105,9 @@ where
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
-                    let result_number = result.map(|r| r.number);
-
-                    // we ignore the error because the caller may or may not care about the result
+                    let result_number = result.as_ref().map(|r| r.last_block.number);
                     let _ = sender.send(result);
-
                     if let Some(block_number) = result_number {
-                        // send new sync metrics based on saved blocks
                         let _ = self
                             .sync_metrics_tx
                             .send(MetricEvent::SyncHeight { height: block_number });
@@ -141,9 +146,13 @@ where
     fn on_save_blocks(
         &mut self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
-    ) -> Result<Option<BlockNumHash>, PersistenceError> {
-        let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
-        let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
+    ) -> Result<Option<SaveBlocksResult>, PersistenceError> {
+        let Some(first_block) = blocks.first().map(|b| b.recovered_block.num_hash()) else {
+            return Ok(None)
+        };
+        let Some(last_block) = blocks.last().map(|b| b.recovered_block.num_hash()) else {
+            return Ok(None)
+        };
         let block_count = blocks.len();
 
         let pending_finalized = self.pending_finalized_block.take();
@@ -151,9 +160,8 @@ where
 
         debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
 
-        let start_time = Instant::now();
-
-        if let Some(last) = last_block {
+        let total_commit_duration = {
+            let start = Instant::now();
             let provider_rw = self.provider.database_provider_rw()?;
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
@@ -164,22 +172,23 @@ where
                 provider_rw.save_safe_block_number(safe)?;
             }
 
-            if self.pruner.is_pruning_needed(last.number) {
-                debug!(target: "engine::persistence", block_num=?last.number, "Running pruner");
+            if self.pruner.is_pruning_needed(last_block.number) {
+                debug!(target: "engine::persistence", block_num=?last_block.number, "Running pruner");
                 let prune_start = Instant::now();
-                let _ = self.pruner.run_with_provider(&provider_rw, last.number)?;
+                let _ = self.pruner.run_with_provider(&provider_rw, last_block.number)?;
                 self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
             }
 
             provider_rw.commit()?;
-        }
+            start.elapsed()
+        };
 
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         self.metrics.save_blocks_batch_size.record(block_count as f64);
-        self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
+        self.metrics.save_blocks_duration_seconds.record(total_commit_duration);
 
-        Ok(last_block)
+        Ok(Some(SaveBlocksResult { last_block, commit_duration: total_commit_duration }))
     }
 }
 
@@ -203,7 +212,7 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<Option<BlockNumHash>>),
+    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<Option<SaveBlocksResult>>),
 
     /// Removes block data above the given block number from the database.
     ///
@@ -288,7 +297,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_blocks(
         &self,
         blocks: Vec<ExecutedBlock<T>>,
-        tx: CrossbeamSender<Option<BlockNumHash>>,
+        tx: CrossbeamSender<Option<SaveBlocksResult>>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
     }
@@ -402,12 +411,12 @@ mod tests {
 
         handle.save_blocks(blocks, tx).unwrap();
 
-        let BlockNumHash { hash: actual_hash, number: _ } = rx
+        let result = rx
             .recv_timeout(std::time::Duration::from_secs(10))
             .expect("test timed out")
-            .expect("no hash returned");
+            .expect("no result returned");
 
-        assert_eq!(block_hash, actual_hash);
+        assert_eq!(block_hash, result.last_block.hash);
     }
 
     #[test]
@@ -421,8 +430,8 @@ mod tests {
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
-        let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
-        assert_eq!(last_hash, actual_hash);
+        let result = rx.recv().unwrap().unwrap();
+        assert_eq!(last_hash, result.last_block.hash);
     }
 
     #[test]
@@ -439,8 +448,8 @@ mod tests {
 
             handle.save_blocks(blocks, tx).unwrap();
 
-            let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
-            assert_eq!(last_hash, actual_hash);
+            let result = rx.recv().unwrap().unwrap();
+            assert_eq!(last_hash, result.last_block.hash);
         }
     }
 }

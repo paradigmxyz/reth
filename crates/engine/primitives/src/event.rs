@@ -9,13 +9,24 @@ use core::{
     fmt::{Display, Formatter, Result},
     time::Duration,
 };
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 
 /// Type alias for backwards compat
 #[deprecated(note = "Use ConsensusEngineEvent instead")]
 pub type BeaconConsensusEngineEvent<N> = ConsensusEngineEvent<N>;
+
+/// Information about a slow block detected after persistence.
+#[derive(Clone, Debug)]
+pub struct SlowBlockInfo {
+    /// The timing statistics for the slow block.
+    pub stats: ExecutionTimingStats,
+    /// The commit duration for the batch containing this block.
+    pub commit_duration: Duration,
+    /// The total duration (execution + state_read + state_hash + commit).
+    pub total_duration: Duration,
+}
 
 /// Events emitted by the consensus engine.
 #[derive(Clone, Debug)]
@@ -32,6 +43,8 @@ pub enum ConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     CanonicalChainCommitted(Box<SealedHeader<N::BlockHeader>>, Duration),
     /// The consensus engine processed an invalid block.
     InvalidBlock(Box<SealedBlock<N::Block>>),
+    /// A slow block was detected after persistence, with its timing statistics.
+    SlowBlock(SlowBlockInfo),
 }
 
 impl<N: NodePrimitives> ConsensusEngineEvent<N> {
@@ -40,6 +53,7 @@ impl<N: NodePrimitives> ConsensusEngineEvent<N> {
     pub const fn canonical_header(&self) -> Option<&SealedHeader<N::BlockHeader>> {
         match self {
             Self::CanonicalChainCommitted(header, _) => Some(header),
+            Self::SlowBlock(_) => None,
             _ => None,
         }
     }
@@ -72,6 +86,13 @@ where
             }
             Self::BlockReceived(num_hash) => {
                 write!(f, "BlockReceived({num_hash:?})")
+            }
+            Self::SlowBlock(info) => {
+                write!(
+                    f,
+                    "SlowBlock(block={}, total={:?})",
+                    info.stats.block_number, info.total_duration
+                )
             }
         }
     }

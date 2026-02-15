@@ -1,11 +1,14 @@
 //! Support for handling events emitted by node components.
 
 use crate::cl::ConsensusLayerHealthEvent;
-use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader};
+use alloy_consensus::{
+    constants::{GWEI_TO_WEI, MGAS_TO_GAS},
+    BlockHeader,
+};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
-use reth_engine_primitives::{ConsensusEngineEvent, ForkchoiceStatus};
+use reth_engine_primitives::{ConsensusEngineEvent, ForkchoiceStatus, SlowBlockInfo};
 use reth_network_api::PeersInfo;
 use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
 use reth_prune_types::PrunerEvent;
@@ -267,7 +270,61 @@ impl NodeState {
             ConsensusEngineEvent::BlockReceived(num_hash) => {
                 info!(number=num_hash.number, hash=?num_hash.hash, "Received new payload from consensus engine");
             }
+            ConsensusEngineEvent::SlowBlock(info) => {
+                Self::log_slow_block(&info);
+            }
         }
+    }
+
+    fn log_slow_block(info: &SlowBlockInfo) {
+        fn hit_rate(hits: usize, misses: usize) -> f64 {
+            let total = hits + misses;
+            if total > 0 {
+                (hits as f64 / total as f64) * 100.0
+            } else {
+                0.0
+            }
+        }
+
+        let stats = &info.stats;
+        let mgas_per_sec = (stats.gas_used as f64 / MGAS_TO_GAS as f64) /
+            (stats.execution_duration.as_secs_f64() + stats.state_hash_duration.as_secs_f64());
+
+        warn!(
+            target: "reth::slow_block",
+            message = "Slow block",
+            block.number = stats.block_number,
+            block.hash = ?stats.block_hash,
+            block.gas_used = stats.gas_used,
+            block.tx_count = stats.tx_count,
+            timing.execution_ms = stats.execution_duration.as_millis(),
+            timing.state_read_ms = stats.state_read_duration.as_millis(),
+            timing.state_hash_ms = stats.state_hash_duration.as_millis(),
+            timing.commit_ms = info.commit_duration.as_millis(),
+            timing.total_ms = info.total_duration.as_millis(),
+            throughput.mgas_per_sec = format!("{:.2}", mgas_per_sec),
+            state_reads.accounts = stats.accounts_read,
+            state_reads.storage_slots = stats.storage_read,
+            state_reads.code = stats.code_read,
+            state_reads.code_bytes = stats.code_bytes_read,
+            state_writes.accounts = stats.accounts_changed,
+            state_writes.accounts_deleted = stats.accounts_deleted,
+            state_writes.storage_slots = stats.storage_slots_changed,
+            state_writes.storage_slots_deleted = stats.storage_slots_deleted,
+            state_writes.code = stats.bytecodes_changed,
+            state_writes.code_bytes = stats.code_bytes_written,
+            state_writes.eip7702_delegations_set = stats.eip7702_delegations_set,
+            state_writes.eip7702_delegations_cleared = stats.eip7702_delegations_cleared,
+            cache.account.hits = stats.account_cache_hits,
+            cache.account.misses = stats.account_cache_misses,
+            cache.account.hit_rate = format!("{:.2}", hit_rate(stats.account_cache_hits, stats.account_cache_misses)),
+            cache.storage.hits = stats.storage_cache_hits,
+            cache.storage.misses = stats.storage_cache_misses,
+            cache.storage.hit_rate = format!("{:.2}", hit_rate(stats.storage_cache_hits, stats.storage_cache_misses)),
+            cache.code.hits = stats.code_cache_hits,
+            cache.code.misses = stats.code_cache_misses,
+            cache.code.hit_rate = format!("{:.2}", hit_rate(stats.code_cache_hits, stats.code_cache_misses)),
+        );
     }
 
     fn handle_consensus_layer_health_event(&self, event: ConsensusLayerHealthEvent) {

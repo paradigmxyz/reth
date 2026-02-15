@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    persistence::PersistenceAction,
+    persistence::{PersistenceAction, SaveBlocksResult},
     tree::{
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
         persistence_state::CurrentPersistenceAction,
@@ -36,6 +36,7 @@ use std::{
         mpsc::{Receiver, Sender},
         Arc,
     },
+    time::Duration,
 };
 use tokio::sync::oneshot;
 
@@ -414,14 +415,13 @@ impl ValidatorTestHarness {
 
     /// Configure `PersistenceState` for specific persistence scenarios
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
-        // Create a dummy receiver for testing - it will never receive a value
-        let (_tx, rx) = crossbeam_channel::bounded(1);
-
         match action {
             CurrentPersistenceAction::SavingBlocks { highest } => {
+                let (_tx, rx) = crossbeam_channel::bounded(1);
                 self.harness.tree.persistence_state.start_save(highest, rx);
             }
             CurrentPersistenceAction::RemovingBlocks { new_tip_num } => {
+                let (_tx, rx) = crossbeam_channel::bounded(1);
                 self.harness.tree.persistence_state.start_remove(new_tip_num, rx);
             }
         }
@@ -758,7 +758,12 @@ async fn test_tree_state_on_new_head_reorg() {
     assert_eq!(saved_blocks, vec![blocks[0].clone(), blocks[1].clone()]);
 
     // send the response so we can advance again
-    sender.send(Some(blocks[1].recovered_block().num_hash())).unwrap();
+    sender
+        .send(Some(SaveBlocksResult {
+            last_block: blocks[1].recovered_block().num_hash(),
+            commit_duration: Duration::ZERO,
+        }))
+        .unwrap();
 
     // we should be persisting blocks[1] because we threw out the prev action
     let current_action = test_harness.tree.persistence_state.current_action().cloned();
@@ -2033,7 +2038,12 @@ mod forkchoice_updated_tests {
                 if let Some(last) = saved_blocks.last() {
                     last_persisted_number = last.recovered_block().number;
                 }
-                sender.send(saved_blocks.last().map(|b| b.recovered_block().num_hash())).unwrap();
+                sender
+                    .send(saved_blocks.last().map(|b| SaveBlocksResult {
+                        last_block: b.recovered_block().num_hash(),
+                        commit_duration: Duration::ZERO,
+                    }))
+                    .unwrap();
             }
         }
 

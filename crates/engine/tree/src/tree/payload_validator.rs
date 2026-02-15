@@ -1,9 +1,9 @@
 //! Types and traits for validating blocks and payloads.
 
 use crate::tree::{
-    cached_state::CachedStateProvider,
+    cached_state::{CachedStateMetrics, CachedStateProvider},
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-    instrumented_state::InstrumentedStateProvider,
+    instrumented_state::{InstrumentedStateProvider, InstrumentedStateProviderHandle},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
@@ -14,10 +14,12 @@ use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Set, B256};
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
-use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
+use reth_chain_state::{
+    CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats, LazyOverlay,
+};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -40,16 +42,16 @@ use reth_provider::{
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::{states::bundle_state::BundleRetention, State};
+use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::Address;
+use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
     sync::{mpsc::RecvTimeoutError, Arc},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
@@ -81,7 +83,9 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     ) -> Self {
         Self { state, canonical_in_memory_state }
     }
+}
 
+impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     /// Returns a reference to the engine tree state
     pub const fn state(&self) -> &EngineApiTreeState<N> {
         &*self.state
@@ -95,6 +99,28 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     /// Returns a reference to the canonical in-memory state
     pub const fn canonical_in_memory_state(&self) -> &'a CanonicalInMemoryState<N> {
         self.canonical_in_memory_state
+    }
+}
+
+/// Trie context needed for [`BasicEngineValidator::spawn_deferred_trie_task`]
+#[derive(Debug)]
+struct TrieCtx<P> {
+    hashed_state: Arc<HashedPostState>,
+    trie_output: Arc<TrieUpdates>,
+    overlay_factory: OverlayStateProviderFactory<P>,
+}
+
+impl<P> TrieCtx<P> {
+    fn new(
+        hashed_state: HashedPostState,
+        trie_output: TrieUpdates,
+        overlay_factory: OverlayStateProviderFactory<P>,
+    ) -> Self {
+        Self {
+            hashed_state: Arc::new(hashed_state),
+            trie_output: Arc::new(trie_output),
+            overlay_factory,
+        }
     }
 }
 
@@ -272,7 +298,7 @@ where
         input: BlockOrPayload<T>,
         execution_err: InsertBlockErrorKind,
         parent_block: &SealedHeader<N::BlockHeader>,
-    ) -> Result<ExecutedBlock<N>, InsertPayloadError<N::Block>>
+    ) -> Result<(ExecutedBlock<N>, Option<ExecutionTimingStats>), InsertPayloadError<N::Block>>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
@@ -325,7 +351,7 @@ where
         &mut self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
-    ) -> ValidationOutcome<N, InsertPayloadError<N::Block>>
+    ) -> Result<(ExecutedBlock<N>, Option<ExecutionTimingStats>), InsertPayloadError<N::Block>>
     where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
@@ -444,22 +470,38 @@ where
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
         if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
+            // Reset cache stats for the new block
+            cache_metrics.reset_stats();
             state_provider =
                 Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics));
         };
 
-        if self.config.state_provider_metrics() {
-            state_provider = Box::new(InstrumentedStateProvider::new(state_provider, "engine"));
-        }
+        let instrumented_state_provider_handle = if self.config.slow_block_threshold().is_some() ||
+            self.config.state_provider_metrics()
+        {
+            let instrumented_state_provider =
+                InstrumentedStateProvider::new(state_provider, "engine");
+            let handle = self
+                .config
+                .slow_block_threshold()
+                .is_some()
+                .then(|| instrumented_state_provider.handle());
+            state_provider = Box::new(instrumented_state_provider);
+            handle
+        } else {
+            None
+        };
 
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
+        let execute_block_start = Instant::now();
         let (output, senders, receipt_root_rx) =
             match self.execute_block(state_provider, env, &input, &mut handle) {
                 Ok(output) => output,
                 Err(err) => return self.handle_execution_error(input, err, &parent_block),
             };
+        let execution_duration = execute_block_start.elapsed();
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
@@ -620,18 +662,28 @@ where
             .into())
         }
 
+        let timing_stats = instrumented_state_provider_handle.map(|instrumented_handle| {
+            self.calculate_timing_stats(
+                &block,
+                instrumented_handle,
+                handle.cache_metrics(),
+                &output,
+                execution_duration,
+                root_elapsed,
+            )
+        });
+
         if let Some(valid_block_tx) = valid_block_tx {
             let _ = valid_block_tx.send(());
         }
 
-        Ok(self.spawn_deferred_trie_task(
+        let executed_block = self.spawn_deferred_trie_task(
             block,
             output,
             &ctx,
-            hashed_state,
-            trie_output,
-            overlay_factory,
-        ))
+            TrieCtx::new(hashed_state, trie_output, overlay_factory),
+        );
+        Ok((executed_block, timing_stats))
     }
 
     /// Return sealed block header from database or in-memory state by hash.
@@ -763,10 +815,11 @@ where
 
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
-        let execution_duration = execution_start.elapsed();
-        self.metrics.record_block_execution(&output, execution_duration);
+        let execution_finish = Instant::now();
+        let execution_time = execution_finish.duration_since(execution_start);
+        self.metrics.record_block_execution(&output, execution_time);
+        debug!(target: "engine::tree::payload_validator", elapsed = ?execution_time, "Executed block");
 
-        debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
         Ok((output, senders, result_rx))
     }
 
@@ -1330,9 +1383,7 @@ where
         block: RecoveredBlock<N::Block>,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
-        hashed_state: HashedPostState,
-        trie_output: TrieUpdates,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        trie_ctx: TrieCtx<P>,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
         let (anchor_hash, overlay_blocks) = ctx
@@ -1348,8 +1399,8 @@ where
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
         let deferred_trie_data = DeferredTrieData::pending(
-            Arc::new(hashed_state),
-            Arc::new(trie_output),
+            trie_ctx.hashed_state,
+            trie_ctx.trie_output,
             anchor_hash,
             ancestors,
         );
@@ -1399,7 +1450,7 @@ where
 
                 // Get a provider from the overlay factory for trie cursor access
                 let changeset_result =
-                    overlay_factory.database_provider_ro().and_then(|provider| {
+                    trie_ctx.overlay_factory.database_provider_ro().and_then(|provider| {
                         reth_trie::changesets::compute_trie_changesets(
                             &provider,
                             &computed.trie_updates,
@@ -1446,10 +1497,156 @@ where
             deferred_trie_data,
         )
     }
+
+    fn calculate_timing_stats(
+        &self,
+        block: &RecoveredBlock<N::Block>,
+        instrumented_handle: InstrumentedStateProviderHandle,
+        cache_metrics: Option<CachedStateMetrics>,
+        output: &BlockExecutionOutput<N::Receipt>,
+        execution_duration: Duration,
+        state_hash_duration: Duration,
+    ) -> ExecutionTimingStats {
+        let accounts_read = instrumented_handle.total_account_fetches();
+        let storage_read = instrumented_handle.total_storage_fetches();
+        let code_read = instrumented_handle.total_code_fetches();
+        let code_bytes_read = instrumented_handle.total_code_fetched_bytes();
+
+        // Write stats from BundleState (final state changes)
+        let accounts_changed = output.state.state.len();
+        let accounts_deleted =
+            output.state.state.values().filter(|acc| acc.was_destroyed()).count();
+        let storage_slots_changed =
+            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
+        let storage_slots_deleted = output
+            .state
+            .state
+            .values()
+            .flat_map(|account| account.storage.values())
+            .filter(|slot| {
+                slot.present_value.is_zero() && !slot.previous_or_original_value.is_zero()
+            })
+            .count();
+
+        // Helper: check if account represents a new contract deployment
+        let is_new_deployment = |acc: &BundleAccount| -> bool {
+            let has_code_now = acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
+            let had_no_code_before = acc
+                .original_info
+                .as_ref()
+                .map(|info| info.code_hash == KECCAK_EMPTY)
+                .unwrap_or(true);
+            has_code_now && had_no_code_before
+        };
+
+        let bytecodes_changed =
+            output.state.state.values().filter(|acc| is_new_deployment(acc)).count();
+
+        // Unique new code hashes to count actual bytes persisted (deduplicated)
+        let unique_new_code_hashes: B256Set = output
+            .state
+            .state
+            .values()
+            .filter(|acc| is_new_deployment(acc))
+            .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash))
+            .collect();
+        let code_bytes_written: usize = unique_new_code_hashes
+            .iter()
+            .filter_map(|hash| {
+                output.state.contracts.get(hash).map(|bytecode| bytecode.original_bytes().len())
+            })
+            .sum();
+
+        // Capture state_read_ms from TimingStatsHandle (time spent fetching state during
+        // execution)
+        let state_read_duration = instrumented_handle.total_account_fetch_latency() +
+            instrumented_handle.total_storage_fetch_latency() +
+            instrumented_handle.total_code_fetch_latency();
+
+        // EIP-7702 delegation tracking from bytecode changes
+        // Count new EIP-7702 bytecodes as delegations set
+        let eip7702_delegations_set =
+            output.state.contracts.values().filter(|bytecode| bytecode.is_eip7702()).count();
+        // Delegations cleared: accounts where bytecode changed FROM EIP-7702 TO empty
+        // This detects when an EIP-7702 delegation is removed by setting code to empty
+        // Note: Clearing a delegation does NOT destroy the account - it just empties the
+        // bytecode
+        let eip7702_delegations_cleared = output
+            .state
+            .state
+            .values()
+            .filter(|acc| {
+                // Check if original bytecode was EIP-7702
+                let original_was_eip7702 = acc
+                    .original_info
+                    .as_ref()
+                    .and_then(|info| info.code.as_ref())
+                    .map(|bytecode| bytecode.is_eip7702())
+                    .unwrap_or(false);
+
+                // Check if current code is empty (delegation cleared)
+                let code_now_empty =
+                    acc.info.as_ref().map(|info| info.code_hash == KECCAK_EMPTY).unwrap_or(false);
+
+                original_was_eip7702 && code_now_empty
+            })
+            .count();
+
+        // Get cache statistics for slow block logging
+        let (
+            account_cache_hits,
+            account_cache_misses,
+            storage_cache_hits,
+            storage_cache_misses,
+            code_cache_hits,
+            code_cache_misses,
+        ) = cache_metrics
+            .map(|metrics| {
+                (
+                    metrics.stats.account_hits(),
+                    metrics.stats.account_misses(),
+                    metrics.stats.storage_hits(),
+                    metrics.stats.storage_misses(),
+                    metrics.stats.code_hits(),
+                    metrics.stats.code_misses(),
+                )
+            })
+            .unwrap_or((0, 0, 0, 0, 0, 0));
+
+        // Build execution timing stats for slow block logging
+        ExecutionTimingStats {
+            block_number: block.number(),
+            block_hash: block.hash(),
+            gas_used: output.result.gas_used,
+            tx_count: block.transaction_count(),
+            execution_duration,
+            state_read_duration,
+            state_hash_duration,
+            accounts_read,
+            storage_read,
+            code_read,
+            code_bytes_read,
+            accounts_changed,
+            accounts_deleted,
+            storage_slots_changed,
+            storage_slots_deleted,
+            bytecodes_changed,
+            code_bytes_written,
+            eip7702_delegations_set,
+            eip7702_delegations_cleared,
+            account_cache_hits,
+            account_cache_misses,
+            storage_cache_hits,
+            storage_cache_misses,
+            code_cache_hits,
+            code_cache_misses,
+        }
+    }
 }
 
 /// Output of block or payload validation.
-pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> = Result<ExecutedBlock<N>, E>;
+pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
+    Result<(ExecutedBlock<N>, Option<ExecutionTimingStats>), E>;
 
 /// Strategy describing how to compute the state root.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

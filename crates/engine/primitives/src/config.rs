@@ -179,6 +179,8 @@ pub struct TreeConfig {
     sparse_trie_prune_depth: usize,
     /// Maximum number of storage tries to retain after pruning.
     sparse_trie_max_storage_tries: usize,
+    /// Threshold for logging slow blocks during persistence.
+    slow_block_threshold: Option<Duration>,
     /// Whether to fully disable sparse trie cache pruning between blocks.
     disable_sparse_trie_cache_pruning: bool,
     /// Timeout for the state root task before spawning a sequential fallback computation.
@@ -218,6 +220,7 @@ impl Default for TreeConfig {
             disable_trie_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
         }
@@ -254,6 +257,7 @@ impl TreeConfig {
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
         sparse_trie_max_storage_tries: usize,
+        slow_block_threshold: Option<Duration>,
         state_root_task_timeout: Option<Duration>,
     ) -> Self {
         Self {
@@ -284,6 +288,7 @@ impl TreeConfig {
             disable_trie_cache: false,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            slow_block_threshold,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
         }
@@ -632,6 +637,20 @@ impl TreeConfig {
     /// Setter for maximum storage tries to retain.
     pub const fn with_sparse_trie_max_storage_tries(mut self, max_tries: usize) -> Self {
         self.sparse_trie_max_storage_tries = max_tries;
+        self
+    }
+
+    /// Returns the slow block threshold.
+    pub const fn slow_block_threshold(&self) -> Option<Duration> {
+        self.slow_block_threshold
+    }
+
+    /// Setter for slow block threshold.
+    pub const fn with_slow_block_threshold(
+        mut self,
+        slow_block_threshold: Option<Duration>,
+    ) -> Self {
+        self.slow_block_threshold = slow_block_threshold;
         self
     }
 

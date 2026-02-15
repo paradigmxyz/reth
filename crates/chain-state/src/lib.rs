@@ -8,6 +8,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod execution_stats;
+pub use execution_stats::ExecutionTimingStats;
+
 mod in_memory;
 pub use in_memory::*;
 

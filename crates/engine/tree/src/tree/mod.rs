@@ -13,13 +13,13 @@ use alloy_rpc_types_engine::{
 };
 use error::{InsertBlockError, InsertBlockFatalError};
 use reth_chain_state::{
-    CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, MemoryOverlayStateProvider,
-    NewCanonicalChain,
+    CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, ExecutionTimingStats,
+    MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
-    ForkchoiceStateTracker, OnForkChoiceUpdated,
+    ForkchoiceStateTracker, OnForkChoiceUpdated, SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
@@ -40,7 +40,13 @@ use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{fmt::Debug, ops, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    ops,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -71,6 +77,7 @@ pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
+use persistence_state::{PersistenceResult, PersistenceRx};
 pub use reth_engine_primitives::TreeConfig;
 
 pub mod state;
@@ -271,6 +278,10 @@ where
     evm_config: C,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Timing statistics for executed blocks, keyed by block hash.
+    /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
+    /// type. Entries are removed when blocks are persisted or invalidated.
+    execution_timing_stats: HashMap<B256, ExecutionTimingStats>,
     /// Whether the node uses hashed state as canonical storage (v2 mode).
     /// Cached at construction to avoid threading `StorageSettingsCache` bounds everywhere.
     use_hashed_state: bool,
@@ -299,6 +310,7 @@ where
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
+            .field("execution_timing_stats", &self.execution_timing_stats.len())
             .field("use_hashed_state", &self.use_hashed_state)
             .finish()
     }
@@ -361,6 +373,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
+            execution_timing_stats: HashMap::new(),
             use_hashed_state,
         }
     }
@@ -445,7 +458,11 @@ where
                     }
                 }
                 LoopEvent::PersistenceComplete { result, start_time } => {
-                    if let Err(err) = self.on_persistence_complete(result, start_time) {
+                    if let Err(err) = self.on_persistence_complete(
+                        result.last_block,
+                        start_time,
+                        result.commit_duration,
+                    ) {
                         error!(target: "engine::tree", %err, "Persistence complete handling failed");
                         return
                     }
@@ -473,34 +490,58 @@ where
     /// Uses biased selection to prioritize persistence completion to update in-memory state and
     /// unblock further writes.
     fn wait_for_event(&mut self) -> LoopEvent<T, N> {
-        // Take ownership of persistence rx if present
         let maybe_persistence = self.persistence_state.rx.take();
 
         if let Some((persistence_rx, start_time, action)) = maybe_persistence {
-            // Biased select prioritizes persistence completion to update in memory state and
-            // unblock further writes
-            crossbeam_channel::select_biased! {
-                recv(persistence_rx) -> result => {
-                    // Don't put it back - consumed (oneshot-like behavior)
-                    match result {
-                        Ok(value) => LoopEvent::PersistenceComplete {
-                            result: value,
-                            start_time,
+            match persistence_rx {
+                PersistenceRx::SaveBlocks(rx) => {
+                    crossbeam_channel::select_biased! {
+                        recv(rx) -> result => {
+                            match result {
+                                Ok(value) => LoopEvent::PersistenceComplete {
+                                    result: PersistenceResult {
+                                        last_block: value.as_ref().map(|r| r.last_block),
+                                        commit_duration: value.as_ref().map(|r| r.commit_duration),
+                                    },
+                                    start_time,
+                                },
+                                Err(_) => LoopEvent::Disconnected,
+                            }
                         },
-                        Err(_) => LoopEvent::Disconnected,
+                        recv(self.incoming) -> msg => {
+                            self.persistence_state.rx = Some((PersistenceRx::SaveBlocks(rx), start_time, action));
+                            match msg {
+                                Ok(m) => LoopEvent::EngineMessage(m),
+                                Err(_) => LoopEvent::Disconnected,
+                            }
+                        },
                     }
-                },
-                recv(self.incoming) -> msg => {
-                    // Put the persistence rx back - we didn't consume it
-                    self.persistence_state.rx = Some((persistence_rx, start_time, action));
-                    match msg {
-                        Ok(m) => LoopEvent::EngineMessage(m),
-                        Err(_) => LoopEvent::Disconnected,
+                }
+                PersistenceRx::RemoveBlocks(rx) => {
+                    crossbeam_channel::select_biased! {
+                        recv(rx) -> result => {
+                            match result {
+                                Ok(value) => LoopEvent::PersistenceComplete {
+                                    result: PersistenceResult {
+                                        last_block: value,
+                                        commit_duration: None,
+                                    },
+                                    start_time,
+                                },
+                                Err(_) => LoopEvent::Disconnected,
+                            }
+                        },
+                        recv(self.incoming) -> msg => {
+                            self.persistence_state.rx = Some((PersistenceRx::RemoveBlocks(rx), start_time, action));
+                            match msg {
+                                Ok(m) => LoopEvent::EngineMessage(m),
+                                Err(_) => LoopEvent::Disconnected,
+                            }
+                        },
                     }
-                },
+                }
             }
         } else {
-            // No persistence in progress - just wait on incoming
             match self.incoming.recv() {
                 Ok(m) => LoopEvent::EngineMessage(m),
                 Err(_) => LoopEvent::Disconnected,
@@ -1319,7 +1360,11 @@ where
             // Wait for any in-progress persistence to complete (blocking)
             if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
                 let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
-                self.on_persistence_complete(result, start_time)?;
+                self.on_persistence_complete(
+                    result.last_block,
+                    start_time,
+                    result.commit_duration,
+                )?;
             }
 
             let blocks_to_persist = self.get_canonical_blocks_to_persist(PersistTarget::Head)?;
@@ -1345,11 +1390,14 @@ where
 
         match rx.try_recv() {
             Ok(result) => {
-                self.on_persistence_complete(result, start_time)?;
+                self.on_persistence_complete(
+                    result.last_block,
+                    start_time,
+                    result.commit_duration,
+                )?;
                 Ok(true)
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {
-                // Not ready yet, put it back
                 self.persistence_state.rx = Some((rx, start_time, action));
                 Ok(false)
             }
@@ -1364,6 +1412,7 @@ where
         &mut self,
         last_persisted_hash_num: Option<BlockNumHash>,
         start_time: Instant,
+        commit_duration: Option<Duration>,
     ) -> Result<(), AdvancePersistenceError> {
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
@@ -1415,6 +1464,8 @@ where
                 let _ = overlay.get();
             });
         }
+
+        self.purge_timing_stats(last_persisted_block_number, commit_duration);
 
         Ok(())
     }
@@ -1633,6 +1684,7 @@ where
 
         // remove all buffered blocks below the backfill height
         self.state.buffer.remove_old_blocks(backfill_height);
+        self.purge_timing_stats(backfill_height, None);
         // we remove all entries because now we're synced to the backfill target and consider this
         // the canonical chain
         self.canonical_in_memory_state.clear_state();
@@ -1766,6 +1818,41 @@ where
         Ok(())
     }
 
+    /// Removes timing stats for blocks at or below the given block number.
+    /// If `commit_duration` is provided, checks for slow blocks and emits events before removing.
+    fn purge_timing_stats(&mut self, below_number: u64, commit_duration: Option<Duration>) {
+        let mut persisted_stats = Vec::new();
+        self.execution_timing_stats.retain(|_, stats| {
+            if stats.block_number <= below_number {
+                if commit_duration.is_some() {
+                    persisted_stats.push(stats.clone());
+                }
+                false
+            } else {
+                true
+            }
+        });
+
+        if let Some(commit_dur) = commit_duration &&
+            let Some(threshold) = self.config.slow_block_threshold()
+        {
+            for stats in persisted_stats {
+                let total_duration = stats.execution_duration +
+                    stats.state_read_duration +
+                    stats.state_hash_duration +
+                    commit_dur;
+
+                if total_duration > threshold {
+                    self.emit_event(ConsensusEngineEvent::SlowBlock(SlowBlockInfo {
+                        stats,
+                        commit_duration: commit_dur,
+                        total_duration,
+                    }));
+                }
+            }
+        }
+    }
+
     /// Emits an outgoing event to the engine.
     fn emit_event(&mut self, event: impl Into<EngineApiEvent<N>>) {
         let event = event.into();
@@ -1873,6 +1960,7 @@ where
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
         self.remove_before(self.persistence_state.last_persisted_block, finalized)?;
+        self.purge_timing_stats(self.persistence_state.last_persisted_block.number, None);
         self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
@@ -2607,7 +2695,11 @@ where
         &mut self,
         block_id: BlockWithParent,
         input: Input,
-        execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ExecutedBlock<N>, Err>,
+        execute: impl FnOnce(
+            &mut V,
+            Input,
+            TreeCtx<'_, N>,
+        ) -> Result<(ExecutedBlock<N>, Option<ExecutionTimingStats>), Err>,
         convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
@@ -2677,7 +2769,12 @@ where
 
         let start = Instant::now();
 
-        let executed = execute(&mut self.payload_validator, input, ctx)?;
+        let (executed, timing_stats) = execute(&mut self.payload_validator, input, ctx)?;
+
+        // Store timing stats for slow block logging after persistence
+        if let Some(stats) = timing_stats {
+            self.execution_timing_stats.insert(executed.recovered_block().hash(), stats);
+        }
 
         // if the parent is the canonical head, we can insert the block as the pending block
         if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()
@@ -2999,8 +3096,8 @@ where
     EngineMessage(FromEngine<EngineApiRequest<T, N>, N::Block>),
     /// A persistence task completed.
     PersistenceComplete {
-        /// The result of the persistence operation.
-        result: Option<BlockNumHash>,
+        /// The unified result of the persistence operation.
+        result: PersistenceResult,
         /// When the persistence operation started.
         start_time: Instant,
     },
