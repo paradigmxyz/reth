@@ -18,8 +18,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect:
+    name: detect affected crates
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    env:
+      RUSTC_WRAPPER: ""
+    outputs:
+      cargo-args: ${{ steps.rail.outputs.cargo-args }}
+      count: ${{ steps.rail.outputs.count }}
+      rebuild-all: ${{ steps.rail.outputs.rebuild-all }}
+      docs-only: ${{ steps.rail.outputs.docs-only }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: loadingalias/cargo-rail-action@v2
+        id: rail
+
   test:
     name: test / ${{ matrix.type }} / ${{ matrix.storage }}
+    needs: [detect]
+    if: |
+      always() &&
+      (needs.detect.result == 'skipped' ||
+       (needs.detect.result == 'success' &&
+        (needs.detect.outputs.rebuild-all == 'true' ||
+         (needs.detect.outputs.count != '0' && needs.detect.outputs.docs-only != 'true'))))
     runs-on: depot-ubuntu-latest-4
     env:
       RUST_BACKTRACE: 1
@@ -48,10 +73,14 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run tests
         run: |
+          SCOPE="${{ needs.detect.outputs.cargo-args }}"
+          if [ -z "$SCOPE" ] || [ "${{ needs.detect.outputs.rebuild-all }}" == "true" ]; then
+            SCOPE="--workspace"
+          fi
           cargo nextest run \
             --no-fail-fast \
             --features "${{ matrix.features }} $EDGE_FEATURES" --locked \
-            ${{ matrix.exclude_args }} --workspace \
+            ${{ matrix.exclude_args }} $SCOPE \
             --exclude ef-tests --no-tests=warn \
             -E "!kind(test) and not binary(e2e_testsuite)"
 
@@ -111,10 +140,11 @@ jobs:
     name: unit success
     runs-on: ubuntu-latest
     if: always()
-    needs: [test, state, doc]
+    needs: [detect, test, state, doc]
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1
         with:
+          allowed-skips: detect, test
           jobs: ${{ toJSON(needs) }}
