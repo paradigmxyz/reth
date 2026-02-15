@@ -15,10 +15,12 @@ pub mod downloader;
 pub mod error;
 pub mod metrics;
 pub mod progress;
+pub mod server;
 pub mod task;
 
 pub use config::SnapSyncConfig;
 pub use downloader::SnapSyncDownloader;
 pub use error::SnapSyncError;
 pub use progress::{SnapPhase, SnapProgress};
+pub use server::{IncomingSnapRequest, SnapRequestHandler};
 pub use task::run_snap_sync;
