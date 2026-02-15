@@ -291,6 +291,14 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_gas_limit_overflow() {
+        // u64::MAX * 1G overflows
+        assert!(parse_gas_limit("18446744073709551615G").is_err());
+        // Just above u64::MAX / 1_000_000_000
+        assert!(parse_gas_limit("18446744074G").is_err());
+    }
+
+    #[test]
     fn test_parse_duration_with_unit() {
         assert_eq!(parse_duration("100ms").unwrap(), Duration::from_millis(100));
         assert_eq!(parse_duration("2s").unwrap(), Duration::from_secs(2));
