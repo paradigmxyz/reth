@@ -7,23 +7,11 @@ use reth_provider::{
     MetadataWriter, StorageSettings,
 };
 
-use crate::common::AccessRights;
-
 /// `reth db settings` subcommand
 #[derive(Debug, Parser)]
 pub struct Command {
     #[command(subcommand)]
     command: Subcommands,
-}
-
-impl Command {
-    /// Returns database access rights required for the command.
-    pub fn access_rights(&self) -> AccessRights {
-        match self.command {
-            Subcommands::Get => AccessRights::RO,
-            Subcommands::Set(_) => AccessRights::RW,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Subcommand)]

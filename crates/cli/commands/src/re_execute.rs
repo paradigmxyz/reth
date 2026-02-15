@@ -1,8 +1,7 @@
 //! Re-execute blocks from database in parallel.
 
 use crate::common::{
-    AccessRights, CliComponentsBuilder, CliNodeComponents, CliNodeTypes, Environment,
-    EnvironmentArgs,
+    CliComponentsBuilder, CliNodeComponents, CliNodeTypes, Environment, EnvironmentArgs,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use clap::Parser;
@@ -64,7 +63,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>()?;
 
         let components = components(provider_factory.chain_spec());
 

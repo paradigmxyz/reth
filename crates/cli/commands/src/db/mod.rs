@@ -1,4 +1,4 @@
-use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
+use crate::common::{CliNodeTypes, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -79,11 +79,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
-        /// Initializes a provider factory with specified access rights, and then executes the
-        /// provided command.
+        /// Initializes a provider factory and then executes the provided command.
         macro_rules! db_exec {
-            ($env:expr, $tool:ident, $N:ident, $access_rights:expr, $command:block) => {
-                let Environment { provider_factory, .. } = $env.init::<$N>($access_rights)?;
+            ($env:expr, $tool:ident, $N:ident, $command:block) => {
+                let Environment { provider_factory, .. } = $env.init::<$N>()?;
 
                 let $tool = DbTool::new(provider_factory)?;
                 $command;
@@ -108,22 +107,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats(command) => {
-                let access_rights = if command.skip_consistency_checks {
-                    AccessRights::RoInconsistent
-                } else {
-                    AccessRights::RO
-                };
-                db_exec!(self.env, tool, N, access_rights, {
+                db_exec!(self.env, tool, N, {
                     command.execute(data_dir, &tool)?;
                 });
             }
             Subcommands::List(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
+                db_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Checksum(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
+                db_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }
@@ -133,12 +127,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 });
             }
             Subcommands::Diff(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
+                db_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Get(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
+                db_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }
@@ -160,24 +154,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     }
                 }
 
-                db_exec!(self.env, tool, N, AccessRights::RW, {
+                db_exec!(self.env, tool, N, {
                     tool.drop(db_path, static_files_path, exex_wal_path)?;
                 });
             }
             Subcommands::Clear(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RW, {
+                db_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::RepairTrie(command) => {
-                let access_rights =
-                    if command.dry_run { AccessRights::RO } else { AccessRights::RW };
-                db_exec!(self.env, tool, N, access_rights, {
+                db_exec!(self.env, tool, N, {
                     command.execute(&tool, ctx.task_executor, &data_dir)?;
                 });
             }
             Subcommands::StaticFileHeader(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RoInconsistent, {
+                db_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }
@@ -200,17 +192,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 println!("{}", db_path.display());
             }
             Subcommands::Settings(command) => {
-                db_exec!(self.env, tool, N, command.access_rights(), {
+                db_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::AccountStorage(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
+                db_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::State(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
+                db_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }

@@ -1,6 +1,6 @@
 //! Command exporting block data to convert them to ERA1 files.
 
-use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
+use crate::common::{CliNodeTypes, Environment, EnvironmentArgs};
 use clap::{Args, Parser};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -48,7 +48,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>()?;
 
         // Either specified path or default to `<data-dir>/<chain>/era1-export/`
         let data_dir = match &self.export.path {

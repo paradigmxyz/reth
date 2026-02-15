@@ -2,7 +2,7 @@
 //!
 //! Stage debugging tool
 
-use crate::common::{AccessRights, CliNodeComponents, CliNodeTypes, Environment, EnvironmentArgs};
+use crate::common::{CliNodeComponents, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::Sealable;
 use clap::Parser;
@@ -119,8 +119,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         // Does not do anything on windows.
         let _ = fdlimit::raise_fd_limit();
 
-        let Environment { provider_factory, config, data_dir } =
-            self.env.init::<N>(AccessRights::RW)?;
+        let Environment { provider_factory, config, data_dir } = self.env.init::<N>()?;
 
         let mut provider_rw = provider_factory.database_provider_rw()?;
         let components = components(provider_factory.chain_spec());

@@ -1,6 +1,6 @@
 //! Command that initializes the node from a genesis file.
 
-use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
+use crate::common::{CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_consensus::BlockHeader;
 use clap::Parser;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -21,7 +21,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitComman
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth init starting");
 
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>()?;
 
         let genesis_block_number = provider_factory.chain_spec().genesis_header().number();
         let hash = provider_factory

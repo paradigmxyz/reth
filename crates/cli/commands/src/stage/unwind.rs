@@ -1,7 +1,7 @@
 //! Unwinding a certain block range
 
 use crate::{
-    common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs},
+    common::{CliNodeTypes, Environment, EnvironmentArgs},
     stage::CliNodeComponents,
 };
 use alloy_eips::BlockHashOrNumber;
@@ -51,7 +51,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         Comp: CliNodeComponents<N>,
         F: FnOnce(Arc<C::ChainSpec>) -> Comp,
     {
-        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } = self.env.init::<N>()?;
 
         let target = self.command.unwind_target(provider_factory.clone())?;
 

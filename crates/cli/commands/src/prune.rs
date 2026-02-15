@@ -1,5 +1,5 @@
 //! Command that runs pruning.
-use crate::common::{AccessRights, CliNodeTypes, EnvironmentArgs};
+use crate::common::{CliNodeTypes, EnvironmentArgs};
 use clap::Parser;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -36,7 +36,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
-        let env = self.env.init::<N>(AccessRights::RW)?;
+        let env = self.env.init::<N>()?;
         let provider_factory = env.provider_factory;
         let config = env.config.prune;
         let data_dir = env.data_dir;
