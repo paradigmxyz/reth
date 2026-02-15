@@ -2856,7 +2856,7 @@ impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> Tra
             // Spawn the task onto the global rayon pool
             // This task will send the results through the channel after it has calculated
             // the hash.
-            rayon::spawn(move || {
+            rayon_core::spawn(move || {
                 let mut rlp_buf = Vec::with_capacity(128);
                 let _ = manager.fetch_range_with_predicate(
                     StaticFileSegment::Transactions,

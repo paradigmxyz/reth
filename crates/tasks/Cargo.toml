@@ -28,12 +28,12 @@ thiserror.workspace = true
 dyn-clone.workspace = true
 
 # feature `rayon`
-rayon = { workspace = true, optional = true }
+rayon-core = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
 
 [features]
-rayon = ["dep:rayon", "pin-project"]
+rayon = ["dep:rayon-core", "pin-project"]
 test-utils = []

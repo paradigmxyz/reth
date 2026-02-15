@@ -370,7 +370,7 @@ where
                 // Spawn the task onto the global rayon pool
                 // This task will send the results through the channel after it has read the
                 // transaction and calculated the sender.
-                rayon::spawn(move || {
+                rayon_core::spawn(move || {
                     let mut rlp_buf = Vec::with_capacity(128);
                     for (number, tx) in chunk {
                         let res = tx

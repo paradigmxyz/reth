@@ -3315,7 +3315,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
- "rayon",
+ "par-iter",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
@@ -6580,6 +6580,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "par-core"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e96cbd21255b7fb29a5d51ef38a779b517a91abd59e2756c039583f43ef4c90f"
+dependencies = [
+ "once_cell",
+]
+
+[[package]]
+name = "par-iter"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3eae0176a010bb94b9a67f0eb9da0fd31410817d58850649c54f485124c9a71a"
+dependencies = [
+ "either",
+ "par-core",
+]
+
+[[package]]
 name = "parity-scale-codec"
 version = "3.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7690,7 +7709,7 @@ dependencies = [
  "parking_lot",
  "pin-project",
  "rand 0.9.2",
- "rayon",
+ "rayon-core",
  "reth-chainspec",
  "reth-errors",
  "reth-ethereum-primitives",
@@ -8167,9 +8186,9 @@ dependencies = [
  "futures-util",
  "itertools 0.14.0",
  "metrics",
+ "par-iter",
  "pin-project",
  "rand 0.9.2",
- "rayon",
  "reth-chainspec",
  "reth-config",
  "reth-consensus",
@@ -8343,11 +8362,12 @@ dependencies = [
  "metrics",
  "metrics-util",
  "moka",
+ "par-iter",
  "parking_lot",
  "proptest",
  "rand 0.8.5",
  "rand 0.9.2",
- "rayon",
+ "rayon-core",
  "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
@@ -8731,7 +8751,7 @@ name = "reth-etl"
 version = "1.11.0"
 dependencies = [
  "alloy-primitives",
- "rayon",
+ "par-iter",
  "reth-db-api",
  "tempfile",
 ]
@@ -8748,7 +8768,7 @@ dependencies = [
  "derive_more",
  "futures-util",
  "metrics",
- "rayon",
+ "par-iter",
  "reth-ethereum-primitives",
  "reth-execution-errors",
  "reth-execution-types",
@@ -9050,11 +9070,11 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "metrics",
+ "par-iter",
  "parking_lot",
  "pin-project",
  "rand 0.8.5",
  "rand 0.9.2",
- "rayon",
  "reth-chainspec",
  "reth-consensus",
  "reth-discv4",
@@ -9227,7 +9247,7 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "parking_lot",
- "rayon",
+ "rayon-core",
  "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-chainspec",
@@ -9599,11 +9619,11 @@ dependencies = [
  "modular-bitfield",
  "once_cell",
  "op-alloy-consensus",
+ "par-iter",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "rand 0.9.2",
- "rayon",
  "reth-chainspec",
  "reth-codecs",
  "revm-bytecode",
@@ -9629,9 +9649,10 @@ dependencies = [
  "itertools 0.14.0",
  "metrics",
  "notify",
+ "par-iter",
  "parking_lot",
  "rand 0.9.2",
- "rayon",
+ "rayon-core",
  "reth-chain-state",
  "reth-chainspec",
  "reth-codecs",
@@ -9676,7 +9697,7 @@ dependencies = [
  "assert_matches",
  "itertools 0.14.0",
  "metrics",
- "rayon",
+ "par-iter",
  "reth-config",
  "reth-db",
  "reth-db-api",
@@ -10143,7 +10164,7 @@ dependencies = [
  "num-traits",
  "paste",
  "rand 0.9.2",
- "rayon",
+ "rayon-core",
  "reqwest",
  "reth-chainspec",
  "reth-codecs",
@@ -10242,8 +10263,8 @@ version = "1.11.0"
 dependencies = [
  "alloy-primitives",
  "assert_matches",
+ "par-iter",
  "parking_lot",
- "rayon",
  "reth-codecs",
  "reth-db-api",
  "reth-primitives-traits",
@@ -10354,7 +10375,7 @@ dependencies = [
  "futures-util",
  "metrics",
  "pin-project",
- "rayon",
+ "rayon-core",
  "reth-metrics",
  "thiserror 2.0.18",
  "tokio",
@@ -10527,10 +10548,10 @@ dependencies = [
  "hash-db",
  "itertools 0.14.0",
  "nybbles",
+ "par-iter",
  "plain_hasher",
  "proptest",
  "proptest-arbitrary-interop",
- "rayon",
  "reth-codecs",
  "reth-primitives-traits",
  "revm-database",
@@ -10582,10 +10603,10 @@ dependencies = [
  "derive_more",
  "itertools 0.14.0",
  "metrics",
+ "par-iter",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.2",
- "rayon",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",
@@ -10613,12 +10634,13 @@ dependencies = [
  "auto_impl",
  "itertools 0.14.0",
  "metrics",
+ "par-iter",
  "pretty_assertions",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "rand 0.9.2",
- "rayon",
+ "rayon-core",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",

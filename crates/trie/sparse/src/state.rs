@@ -1163,7 +1163,7 @@ where
     )]
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
         // Prune state and storage tries in parallel
-        rayon::join(
+        rayon_core::join(
             || {
                 if let Some(trie) = self.state.as_revealed_mut() {
                     trie.prune(max_depth);

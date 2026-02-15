@@ -224,7 +224,7 @@ pub enum RuntimeBuildError {
     /// Failed to build a rayon thread pool.
     #[cfg(feature = "rayon")]
     #[error("Failed to build rayon thread pool: {0}")]
-    RayonBuild(#[from] rayon::ThreadPoolBuildError),
+    RayonBuild(#[from] rayon_core::ThreadPoolBuildError),
 }
 
 // ── RuntimeInner ──────────────────────────────────────────────────────
@@ -244,22 +244,22 @@ struct RuntimeInner {
     graceful_tasks: Arc<AtomicUsize>,
     /// General-purpose rayon CPU pool.
     #[cfg(feature = "rayon")]
-    cpu_pool: rayon::ThreadPool,
+    cpu_pool: rayon_core::ThreadPool,
     /// RPC blocking pool.
     #[cfg(feature = "rayon")]
     rpc_pool: BlockingTaskPool,
     /// Storage I/O pool.
     #[cfg(feature = "rayon")]
-    storage_pool: rayon::ThreadPool,
+    storage_pool: rayon_core::ThreadPool,
     /// Rate limiter for expensive RPC operations.
     #[cfg(feature = "rayon")]
     blocking_guard: BlockingTaskGuard,
     /// Proof storage worker pool (trie storage proof computation).
     #[cfg(feature = "rayon")]
-    proof_storage_worker_pool: rayon::ThreadPool,
+    proof_storage_worker_pool: rayon_core::ThreadPool,
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
-    proof_account_worker_pool: rayon::ThreadPool,
+    proof_account_worker_pool: rayon_core::ThreadPool,
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
@@ -322,7 +322,7 @@ impl Runtime {
 
     /// Get the general-purpose rayon CPU thread pool.
     #[cfg(feature = "rayon")]
-    pub fn cpu_pool(&self) -> &rayon::ThreadPool {
+    pub fn cpu_pool(&self) -> &rayon_core::ThreadPool {
         &self.0.cpu_pool
     }
 
@@ -334,7 +334,7 @@ impl Runtime {
 
     /// Get the storage I/O pool.
     #[cfg(feature = "rayon")]
-    pub fn storage_pool(&self) -> &rayon::ThreadPool {
+    pub fn storage_pool(&self) -> &rayon_core::ThreadPool {
         &self.0.storage_pool
     }
 
@@ -346,13 +346,13 @@ impl Runtime {
 
     /// Get the proof storage worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_storage_worker_pool(&self) -> &rayon::ThreadPool {
+    pub fn proof_storage_worker_pool(&self) -> &rayon_core::ThreadPool {
         &self.0.proof_storage_worker_pool
     }
 
     /// Get the proof account worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_account_worker_pool(&self) -> &rayon::ThreadPool {
+    pub fn proof_account_worker_pool(&self) -> &rayon_core::ThreadPool {
         &self.0.proof_account_worker_pool
     }
 }
@@ -828,12 +828,12 @@ impl RuntimeBuilder {
             let default_threads = config.rayon.default_thread_count();
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
 
-            let cpu_pool = rayon::ThreadPoolBuilder::new()
+            let cpu_pool = rayon_core::ThreadPoolBuilder::new()
                 .num_threads(default_threads)
                 .thread_name(|i| format!("cpu-{i:02}"))
                 .build()?;
 
-            let rpc_raw = rayon::ThreadPoolBuilder::new()
+            let rpc_raw = rayon_core::ThreadPoolBuilder::new()
                 .num_threads(rpc_threads)
                 .thread_name(|i| format!("rpc-{i:02}"))
                 .build()?;
@@ -841,7 +841,7 @@ impl RuntimeBuilder {
 
             let storage_threads =
                 config.rayon.storage_threads.unwrap_or(DEFAULT_STORAGE_POOL_THREADS);
-            let storage_pool = rayon::ThreadPoolBuilder::new()
+            let storage_pool = rayon_core::ThreadPoolBuilder::new()
                 .num_threads(storage_threads)
                 .thread_name(|i| format!("storage-{i:02}"))
                 .build()?;
@@ -850,14 +850,14 @@ impl RuntimeBuilder {
 
             let proof_storage_worker_threads =
                 config.rayon.proof_storage_worker_threads.unwrap_or(default_threads);
-            let proof_storage_worker_pool = rayon::ThreadPoolBuilder::new()
+            let proof_storage_worker_pool = rayon_core::ThreadPoolBuilder::new()
                 .num_threads(proof_storage_worker_threads)
                 .thread_name(|i| format!("proof-strg-{i:02}"))
                 .build()?;
 
             let proof_account_worker_threads =
                 config.rayon.proof_account_worker_threads.unwrap_or(default_threads);
-            let proof_account_worker_pool = rayon::ThreadPoolBuilder::new()
+            let proof_account_worker_pool = rayon_core::ThreadPoolBuilder::new()
                 .num_threads(proof_account_worker_threads)
                 .thread_name(|i| format!("proof-acct-{i:02}"))
                 .build()?;

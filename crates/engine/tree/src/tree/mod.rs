@@ -1411,7 +1411,7 @@ where
         // Spawn a background task to trigger computation so it's ready when the next payload
         // arrives.
         if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
-            rayon::spawn(move || {
+            rayon_core::spawn(move || {
                 let _ = overlay.get();
             });
         }

@@ -188,7 +188,7 @@ where
 
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
                 // Spawn the hashing task onto the global rayon pool
-                rayon::spawn(move || {
+                rayon_core::spawn(move || {
                     for (address, account) in chunk {
                         let address = address.key().unwrap();
                         let _ = tx.send((RawKey::new(keccak256(address)), account));

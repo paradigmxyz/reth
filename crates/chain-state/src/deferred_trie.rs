@@ -164,7 +164,7 @@ impl DeferredTrieData {
         ancestors: &[Self],
     ) -> ComputedTrieData {
         #[cfg(feature = "rayon")]
-        let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
+        let (sorted_hashed_state, sorted_trie_updates) = rayon_core::join(
             || match Arc::try_unwrap(hashed_state) {
                 Ok(state) => state.into_sorted(),
                 Err(arc) => arc.clone_into_sorted(),
@@ -208,7 +208,7 @@ impl DeferredTrieData {
                     // Only trigger COW clone if there's actually data to add.
                     #[cfg(feature = "rayon")]
                     {
-                        rayon::join(
+                        rayon_core::join(
                             || {
                                 if !sorted_hashed_state.is_empty() {
                                     Arc::make_mut(&mut overlay.state)
@@ -285,7 +285,7 @@ impl DeferredTrieData {
 
         // Extend with current block's sorted data last (takes precedence)
         #[cfg(feature = "rayon")]
-        rayon::join(
+        rayon_core::join(
             || state_mut.extend_ref_and_sort(sorted_hashed_state),
             || nodes_mut.extend_ref_and_sort(sorted_trie_updates),
         );
