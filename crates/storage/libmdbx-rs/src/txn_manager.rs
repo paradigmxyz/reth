@@ -1,7 +1,7 @@
 use crate::{
     environment::EnvPtr,
     error::{mdbx_result, Result},
-    CommitLatency,
+    CommitLatency, TxnInfo,
 };
 use std::{
     fmt, ptr,
@@ -98,11 +98,26 @@ impl TxnManager {
                                 tracing::debug_span!(target: "libmdbx::txn", "commit").entered();
                             sender
                                 .send({
+                                    // Capture dirty page size before commit
+                                    let mut txn_info = TxnInfo::new();
+                                    let space_dirty = if mdbx_result(unsafe {
+                                        ffi::mdbx_txn_info(tx.0, txn_info.mdb_txn_info(), false)
+                                    })
+                                    .is_ok()
+                                    {
+                                        txn_info.space_dirty()
+                                    } else {
+                                        0
+                                    };
+
                                     let mut latency = CommitLatency::new();
                                     mdbx_result(unsafe {
                                         ffi::mdbx_txn_commit_ex(tx.0, latency.mdb_commit_latency())
                                     })
-                                    .map(|v| (v, latency))
+                                    .map(|v| {
+                                        latency.set_space_dirty(space_dirty);
+                                        (v, latency)
+                                    })
                                 })
                                 .unwrap();
                         }
