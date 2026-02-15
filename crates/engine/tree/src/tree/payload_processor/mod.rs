@@ -392,15 +392,15 @@ where
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
     ) {
-        let (ooo_tx, ooo_rx) = mpsc::channel();
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
         } else if transaction_count < Self::SMALL_BLOCK_TX_THRESHOLD {
-            // Sequential path for small blocks — avoids rayon work-stealing setup and
-            // channel-based reorder overhead when it costs more than the ECDSA recovery itself.
+            // Sequential path for small blocks — sends directly to the execution channel,
+            // bypassing the out-of-order reorder task entirely since transactions are already
+            // produced in order.
             debug!(
                 target: "engine::tree::payload_processor",
                 transaction_count,
@@ -408,7 +408,7 @@ where
             );
             self.executor.spawn_blocking(move || {
                 let (transactions, convert) = transactions.into_parts();
-                for (idx, tx) in transactions.into_iter().enumerate() {
+                for tx in transactions {
                     let tx = convert.convert(tx);
                     let tx = tx.map(|tx| {
                         let (tx_env, tx) = tx.into_parts();
@@ -417,11 +417,12 @@ where
                     if let Ok(tx) = &tx {
                         let _ = prewarm_tx.send(tx.clone());
                     }
-                    let _ = ooo_tx.send((idx, tx));
+                    let _ = execute_tx.send(tx);
                 }
             });
         } else {
             // Parallel path — spawn on rayon for parallel signature recovery.
+            let (ooo_tx, ooo_rx) = mpsc::channel();
             rayon::spawn(move || {
                 let (transactions, convert) = transactions.into_parts();
                 transactions.into_par_iter().enumerate().for_each_with(
@@ -432,7 +433,7 @@ where
                             let (tx_env, tx) = tx.into_parts();
                             WithTxEnv { tx_env, tx: Arc::new(tx) }
                         });
-                        // Only send Ok(_) variants to prewarming task.
+                        // Only send Ok(_) variants to the prewarming task.
                         if let Ok(tx) = &tx {
                             let _ = prewarm_tx.send(tx.clone());
                         }
@@ -440,29 +441,29 @@ where
                     },
                 );
             });
-        }
 
-        // Spawn a task that processes out-of-order transactions from the task above and sends them
-        // to the execution task in order.
-        self.executor.spawn_blocking(move || {
-            let mut next_for_execution = 0;
-            let mut queue = BTreeMap::new();
-            while let Ok((idx, tx)) = ooo_rx.recv() {
-                if next_for_execution == idx {
-                    let _ = execute_tx.send(tx);
-                    next_for_execution += 1;
-
-                    while let Some(entry) = queue.first_entry() &&
-                        *entry.key() == next_for_execution
-                    {
-                        let _ = execute_tx.send(entry.remove());
+            // Spawn a task that processes out-of-order transactions from the parallel task above
+            // and sends them to the execution task in order.
+            self.executor.spawn_blocking(move || {
+                let mut next_for_execution = 0;
+                let mut queue = BTreeMap::new();
+                while let Ok((idx, tx)) = ooo_rx.recv() {
+                    if next_for_execution == idx {
+                        let _ = execute_tx.send(tx);
                         next_for_execution += 1;
+
+                        while let Some(entry) = queue.first_entry() &&
+                            *entry.key() == next_for_execution
+                        {
+                            let _ = execute_tx.send(entry.remove());
+                            next_for_execution += 1;
+                        }
+                    } else {
+                        queue.insert(idx, tx);
                     }
-                } else {
-                    queue.insert(idx, tx);
                 }
-            }
-        });
+            });
+        }
 
         (prewarm_rx, execute_rx)
     }
@@ -989,16 +990,10 @@ impl PayloadExecutionCache {
     /// Updates the cache with a closure that has exclusive access to the guard.
     /// This ensures that all cache operations happen atomically.
     ///
-    /// ## CRITICAL SAFETY REQUIREMENT
-    ///
-    /// **Before calling this method, you MUST ensure there are no other active cache users.**
-    /// This includes:
-    /// - No running [`PrewarmCacheTask`] instances that could write to the cache
-    /// - No concurrent transactions that might access the cached state
-    /// - All prewarming operations must be completed or cancelled
-    ///
-    /// Violating this requirement can result in cache corruption, incorrect state data,
-    /// and potential consensus failures.
+    /// Callers must not mutate the *underlying* [`ExecutionCache`] data (e.g. via
+    /// [`SavedCache::clear`]) while other tasks may hold clones of the same
+    /// `SavedCache`. Swapping the slot value (`*cached = Some(..)` / `*cached = None`)
+    /// is always safe because existing clones retain their own `Arc` references.
     pub fn update_with_guard<F>(&self, update_fn: F)
     where
         F: FnOnce(&mut Option<SavedCache>),
