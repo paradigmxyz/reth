@@ -26,6 +26,8 @@ use reth_eth_wire_types::snap::{
 use reth_network_p2p::snap::client::{SnapClient, SnapResponse};
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_storage_api::{DBProvider, DatabaseProviderFactory};
+use reth_trie::StateRoot;
+use reth_trie_db::DatabaseStateRoot;
 use std::collections::HashSet;
 use tokio::sync::watch;
 use tracing::{debug, info, trace, warn};
@@ -131,7 +133,8 @@ where
         // Phase 4: Verification (hashing + merkle root)
         self.progress.phase = SnapPhase::Verification;
         self.metrics.phase.set(4.0);
-        info!(target: "snap_sync", "snap sync download phases complete, ready for verification");
+        info!(target: "snap_sync", "verifying state root against pivot block");
+        self.verify_state_root()?;
 
         self.progress.phase = SnapPhase::Done;
         self.metrics.phase.set(5.0);
@@ -147,6 +150,33 @@ where
     /// Checks if cancellation was requested.
     fn is_cancelled(&self) -> bool {
         *self.cancel_rx.borrow()
+    }
+
+    // ========================================================================
+    // Phase 4: Verification
+    // ========================================================================
+
+    /// Computes the state root from the downloaded state and verifies it against
+    /// the pivot block's expected state root.
+    fn verify_state_root(&self) -> Result<(), SnapSyncError> {
+        info!(target: "snap_sync", "computing state root from downloaded state");
+
+        let provider =
+            self.provider_factory.database_provider_rw().map_err(SnapSyncError::Provider)?;
+
+        let computed_root = StateRoot::from_tx(provider.tx_ref())
+            .root()
+            .map_err(|e| SnapSyncError::StateRootVerification(e.to_string()))?;
+
+        if computed_root != self.progress.state_root {
+            return Err(SnapSyncError::StateRootMismatch {
+                expected: self.progress.state_root,
+                got: computed_root,
+            });
+        }
+
+        info!(target: "snap_sync", %computed_root, "state root verified successfully");
+        Ok(())
     }
 
     // ========================================================================

@@ -43,6 +43,9 @@ pub enum SnapSyncError {
     /// Database error.
     #[error("database error: {0}")]
     Database(#[from] DatabaseError),
+    /// State root verification failed.
+    #[error("state root verification error: {0}")]
+    StateRootVerification(String),
     /// Snap sync was cancelled.
     #[error("snap sync cancelled")]
     Cancelled,

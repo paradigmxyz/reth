@@ -24,6 +24,9 @@ reth-provider.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
 reth-metrics.workspace = true
+reth-trie.workspace = true
+reth-trie-db.workspace = true
+reth-execution-errors.workspace = true
 
 # misc (non-workspace)
 rand = "0.9"
