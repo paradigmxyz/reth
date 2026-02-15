@@ -610,11 +610,19 @@ where
                                 let _ = this.primary.to_primary.send(msg);
                             } else {
                                 // delegate to installed satellite if any
+                                let mut handled = false;
                                 for proto in &this.inner.protocols {
                                     if proto.shared_cap == *cap {
-                                        proto.send_raw(msg);
+                                        proto.send_raw(msg.clone());
+                                        handled = true;
                                         break
                                     }
+                                }
+                                if !handled {
+                                    // No satellite handler for this capability (e.g. snap/1
+                                    // handled inline). Route to primary so the session can
+                                    // handle it via RawCapabilityMessage.
+                                    let _ = this.primary.to_primary.send(msg);
                                 }
                             }
                         } else {
