@@ -1,7 +1,7 @@
 //! Estimate gas needed implementation
 
 use super::{Call, LoadPendingBlock};
-use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
+use crate::{FromEthApiError, IntoEthApiError};
 use alloy_evm::overrides::apply_state_overrides;
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
@@ -9,7 +9,10 @@ use alloy_rpc_types_eth::{state::StateOverride, BlockId};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
-use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
+use reth_evm::{
+    ConfigureEvm, Database, Evm, EvmEnvFor, EvmError, EvmFor, InvalidTxError, TransactionEnv,
+    TxEnvFor,
+};
 use reth_revm::{
     database::{EvmStateProvider, StateProviderDatabase},
     db::{bal::EvmDatabaseError, State},
@@ -146,18 +149,20 @@ pub trait EstimateCall: Call {
         trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = tx_env.gas_limit(), is_basic_transfer, "Starting gas estimation");
 
         // Execute the transaction with the highest possible gas limit.
-        let mut res = match evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err) {
+        let mut res = match evm.transact(tx_env.clone()) {
             // Handle the exceptional case where the transaction initialization uses too much
             // gas. If the gas price or gas limit was specified in the request,
             // retry the transaction with the block's gas limit to determine if
             // the failure was due to insufficient gas.
             Err(err)
-                if err.is_gas_too_high() &&
+                if err.as_invalid_tx_err().is_some_and(|tx_err| tx_err.is_gas_limit_too_high()) &&
                     (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
                 return Self::map_out_of_gas_err(&mut evm, tx_env, max_gas_limit);
             }
-            Err(err) if err.is_gas_too_low() => {
+            Err(err)
+                if err.as_invalid_tx_err().is_some_and(|tx_err| tx_err.is_gas_limit_too_low()) =>
+            {
                 // This failed because the configured gas cost of the tx was lower than what
                 // actually consumed by the tx This can happen if the
                 // request provided fee values manually and the resulting gas cost exceeds the
@@ -168,7 +173,7 @@ pub trait EstimateCall: Call {
                 .into_eth_err());
             }
             // Propagate other results (successful or other errors).
-            ethres => ethres?,
+            result => result.map_err(Self::Error::from_evm_err)?,
         };
 
         let gas_refund = match res.result {
@@ -253,19 +258,27 @@ pub trait EstimateCall: Call {
             mid_tx_env.set_gas_limit(mid_gas_limit);
 
             // Execute transaction and handle potential gas errors, adjusting limits accordingly.
-            match evm.transact(mid_tx_env).map_err(Self::Error::from_evm_err) {
-                Err(err) if err.is_gas_too_high() => {
+            match evm.transact(mid_tx_env) {
+                Err(err)
+                    if err
+                        .as_invalid_tx_err()
+                        .is_some_and(|tx_err| tx_err.is_gas_limit_too_high()) =>
+                {
                     // Decrease the highest gas limit if gas is too high
                     highest_gas_limit = mid_gas_limit;
                 }
-                Err(err) if err.is_gas_too_low() => {
+                Err(err)
+                    if err
+                        .as_invalid_tx_err()
+                        .is_some_and(|tx_err| tx_err.is_gas_limit_too_low()) =>
+                {
                     // Increase the lowest gas limit if gas is too low
                     lowest_gas_limit = mid_gas_limit;
                 }
                 // Handle other cases, including successful transactions.
-                ethres => {
+                result => {
                     // Unpack the result and environment if the transaction was successful.
-                    res = ethres?;
+                    res = result.map_err(Self::Error::from_evm_err)?;
                     // Update the estimated gas range based on the transaction result.
                     update_estimated_gas_range(
                         res.result,
