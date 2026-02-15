@@ -463,13 +463,7 @@ where
     type Executor = Executor;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        tracing::debug!(
-            "Applying pre-execution changes index from reth:{:?}",
-            self.executor.evm().db().bal_state.bal_index()
-        );
         self.executor.apply_pre_execution_changes()?;
-        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
-        // self.executor.evm_mut().db_mut().bump_bal_index();
 
         Ok(())
     }
@@ -481,17 +475,12 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        tracing::debug!(
-            "Applying execution changes index from reth:{:?}",
-            self.executor.evm().db().bal_state.bal_index()
-        );
         let (tx_env, tx) = tx.into_parts();
         if let Some(gas_used) =
             self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.transactions.push(tx);
-            // Bump BAL index after each committed transaction (EIP-7928)
-            // self.executor.evm_mut().db_mut().bump_bal_index();
+
             Ok(Some(gas_used))
         } else {
             Ok(None)
@@ -502,10 +491,6 @@ where
         self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        tracing::debug!(
-            "Applying post-execution changes index from reth:{:?}",
-            self.executor.evm().db().bal_state.bal_index()
-        );
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
 
@@ -513,8 +498,7 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         // extract the built block access list (EIP-7928, Amsterdam) and compute its hash
-        let block_access_list = result.clone().block_access_list;
-        tracing::debug!("Bal in reth {:?}", block_access_list);
+        let block_access_list = db.take_built_alloy_bal();
         let block_access_list_hash =
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal));
 

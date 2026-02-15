@@ -90,10 +90,7 @@ where
             };
         }
 
-        let mut bal_hash = None;
-        if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
-            bal_hash = block_access_list_hash;
-        }
+        let  bal_hash = if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) { block_access_list_hash } else { None };
 
         let header = Header {
             parent_hash: ctx.parent_hash,

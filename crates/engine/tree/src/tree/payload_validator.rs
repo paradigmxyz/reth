@@ -822,11 +822,6 @@ where
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
-        // // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
-        // if has_bal {
-        //     executor.evm_mut().db_mut().bump_bal_index();
-        // }
-
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
         let mut transactions = transactions.into_iter();
@@ -861,11 +856,6 @@ where
                 let tx_index = executor.receipts().len() - 1;
                 let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
             }
-
-            // // Bump BAL index after each transaction (EIP-7928)
-            // if has_bal {
-            //     executor.evm_mut().db_mut().bump_bal_index();
-            // }
 
             enter.record("gas_used", gas_used);
         }
