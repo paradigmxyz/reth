@@ -216,6 +216,12 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         }
     }
 
+    /// Configure the task executor to use for additional tasks.
+    pub fn with_executor(self, executor: Runtime) -> Self {
+        let Self { pool, network, provider, evm_config, consensus, _primitives, .. } = self;
+        Self { provider, network, pool, executor, evm_config, consensus, _primitives }
+    }
+
     /// Configure the evm configuration type
     pub fn with_evm_config<E>(
         self,
