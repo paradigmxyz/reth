@@ -214,13 +214,13 @@ where
     // not the genesis block number. This would cause increment_block(N) to fail.
     let static_file_provider = provider_rw.static_file_provider();
     if genesis_block_number > 0 {
-        if genesis_storage_settings.account_changesets_in_static_files {
+        if genesis_storage_settings.storage_v2 {
             static_file_provider
                 .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
                 .user_header_mut()
                 .set_expected_block_start(genesis_block_number);
         }
-        if genesis_storage_settings.storage_changesets_in_static_files {
+        if genesis_storage_settings.storage_v2 {
             static_file_provider
                 .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
                 .user_header_mut()
@@ -259,7 +259,7 @@ where
         .user_header_mut()
         .set_block_range(genesis_block_number, genesis_block_number);
 
-    if genesis_storage_settings.transaction_senders_in_static_files {
+    if genesis_storage_settings.storage_v2 {
         static_file_provider
             .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
             .user_header_mut()
@@ -1052,7 +1052,7 @@ mod tests {
                 )
             };
 
-            let (accounts, storages) = if settings.account_history_in_rocksdb {
+            let (accounts, storages) = if settings.storage_v2 {
                 collect_rocksdb(&rocksdb)
             } else {
                 collect_from_mdbx(&factory)
@@ -1075,10 +1075,7 @@ mod tests {
         init_genesis_with_settings(&factory, StorageSettings::v1()).unwrap();
 
         // Request different settings - should warn but succeed
-        let result = init_genesis_with_settings(
-            &factory,
-            StorageSettings::v1().with_receipts_in_static_files(true),
-        );
+        let result = init_genesis_with_settings(&factory, StorageSettings::v2());
 
         // Should succeed (warning is logged, not an error)
         assert!(result.is_ok());
@@ -1087,7 +1084,7 @@ mod tests {
     #[test]
     fn allow_same_storage_settings() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        let settings = StorageSettings::v1().with_receipts_in_static_files(true);
+        let settings = StorageSettings::v2();
         init_genesis_with_settings(&factory, settings).unwrap();
 
         let result = init_genesis_with_settings(&factory, settings);

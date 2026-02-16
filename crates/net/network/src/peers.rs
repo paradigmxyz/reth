@@ -92,6 +92,9 @@ pub struct PeersManager {
     incoming_ip_throttle_duration: Duration,
     /// IP address filter for restricting network connections to specific IP ranges.
     ip_filter: reth_net_banlist::IpFilter,
+    /// If true, discovered peers without a confirmed ENR fork ID will not be added until their
+    /// fork ID is verified via EIP-868.
+    enforce_enr_fork_id: bool,
 }
 
 impl PeersManager {
@@ -111,6 +114,7 @@ impl PeersManager {
             max_backoff_count,
             incoming_ip_throttle_duration,
             ip_filter,
+            enforce_enr_fork_id,
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
         let now = Instant::now();
@@ -167,12 +171,18 @@ impl PeersManager {
             net_connection_state: NetworkConnectionState::default(),
             incoming_ip_throttle_duration,
             ip_filter,
+            enforce_enr_fork_id,
         }
     }
 
     /// Returns a new [`PeersHandle`] that can send commands to this type.
     pub(crate) fn handle(&self) -> PeersHandle {
         PeersHandle::new(self.manager_tx.clone())
+    }
+
+    /// Returns `true` if discovered peers must have a confirmed ENR fork ID before being added.
+    pub(crate) const fn enforce_enr_fork_id(&self) -> bool {
+        self.enforce_enr_fork_id
     }
 
     /// Returns the number of peers in the peer set
@@ -205,6 +215,13 @@ impl PeersManager {
                 ),
                 v.kind,
             )
+        })
+    }
+
+    /// Returns `true` if the given peer is connected via an inbound session.
+    pub(crate) fn is_inbound_peer(&self, peer_id: &PeerId) -> bool {
+        self.peers.get(peer_id).is_some_and(|p| {
+            matches!(p.state, PeerConnectionState::In | PeerConnectionState::DisconnectingIn)
         })
     }
 
@@ -735,17 +752,6 @@ impl PeersManager {
                 // cleanup is handled when the incoming active session is activated in
                 // `on_incoming_session_established`
             }
-        }
-    }
-
-    /// Called as follow-up for a discovered peer.
-    ///
-    /// The [`ForkId`] is retrieved from an ENR record that the peer announces over the discovery
-    /// protocol
-    pub(crate) fn set_discovered_fork_id(&mut self, peer_id: PeerId, fork_id: ForkId) {
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            trace!(target: "net::peers", ?peer_id, ?fork_id, "set discovered fork id");
-            peer.fork_id = Some(Box::new(fork_id));
         }
     }
 

@@ -15,6 +15,7 @@ use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     StorageHashingCheckpoint, UnwindInput, UnwindOutput,
 };
+use reth_storage_api::StorageSettingsCache;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     fmt::Debug,
@@ -68,7 +69,11 @@ impl Default for StorageHashingStage {
 
 impl<Provider> Stage<Provider> for StorageHashingStage
 where
-    Provider: DBProvider<Tx: DbTxMut> + StorageReader + HashingWriter + StatsReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + StorageReader
+        + HashingWriter
+        + StatsReader
+        + StorageSettingsCache,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -80,6 +85,12 @@ where
         let tx = provider.tx_ref();
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
+        // If use_hashed_state is enabled, execution writes directly to `HashedStorages`,
+        // so this stage becomes a no-op.
+        if provider.cached_storage_settings().use_hashed_state() {
+            return Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())));
         }
 
         let (from_block, to_block) = input.next_block_range().into_inner();
@@ -176,6 +187,11 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        // NOTE: this runs in both v1 and v2 mode. In v2 mode, execution writes
+        // directly to `HashedStorages`, but the unwind must still revert those
+        // entries here because `MerkleUnwind` runs after this stage (in unwind
+        // order) and needs `HashedStorages` to reflect the target block state
+        // before it can verify the state root.
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 

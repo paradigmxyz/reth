@@ -282,6 +282,12 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::Receipts70(resp) => {
                 on_response!(resp, GetReceipts70)
             }
+            EthMessage::GetBlockAccessLists(req) => {
+                on_request!(req, BlockAccessLists, GetBlockAccessLists)
+            }
+            EthMessage::BlockAccessLists(resp) => {
+                on_response!(resp, GetBlockAccessLists)
+            }
             EthMessage::BlockRangeUpdate(msg) => {
                 // Validate that earliest <= latest according to the spec
                 if msg.earliest > msg.latest {
@@ -316,9 +322,22 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
     /// Handle an internal peer request that will be sent to the remote.
     fn on_internal_peer_request(&mut self, request: PeerRequest<N>, deadline: Instant) {
+        let version = self.conn.version();
+        if !Self::is_request_supported_for_version(&request, version) {
+            debug!(
+                target: "net",
+                ?request,
+                peer_id=?self.remote_peer_id,
+                ?version,
+                "Request not supported for negotiated eth version",
+            );
+            request.send_err_response(RequestError::UnsupportedCapability);
+            return;
+        }
+
         let request_id = self.next_id();
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
-        let msg = request.create_request_message(request_id).map_versioned(self.conn.version());
+        let msg = request.create_request_message(request_id).map_versioned(version);
 
         self.queued_outgoing.push_back(msg.into());
         let req = InflightRequest {
@@ -327,6 +346,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             deadline,
         };
         self.inflight_requests.insert(request_id, req);
+    }
+
+    #[inline]
+    fn is_request_supported_for_version(request: &PeerRequest<N>, version: EthVersion) -> bool {
+        request.is_supported_by_eth_version(version)
     }
 
     /// Handle a message received from the internal network
@@ -938,9 +962,9 @@ mod tests {
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
-        handshake::EthHandshake, EthNetworkPrimitives, EthStream, GetBlockBodies,
-        HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
-        UnifiedStatus,
+        handshake::EthHandshake, EthNetworkPrimitives, EthStream, GetBlockAccessLists,
+        GetBlockBodies, HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream,
+        UnauthedP2PStream, UnifiedStatus,
     };
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_peers::pk2id;
@@ -1238,6 +1262,22 @@ mod tests {
             ActiveSessionMessage::ProtocolBreach { .. } => {}
             ev => unreachable!("{ev:?}"),
         }
+    }
+
+    #[test]
+    fn test_reject_bal_request_for_eth70() {
+        let (tx, _rx) = oneshot::channel();
+        let request: PeerRequest<EthNetworkPrimitives> =
+            PeerRequest::GetBlockAccessLists { request: GetBlockAccessLists(vec![]), response: tx };
+
+        assert!(!ActiveSession::<EthNetworkPrimitives>::is_request_supported_for_version(
+            &request,
+            EthVersion::Eth70
+        ));
+        assert!(ActiveSession::<EthNetworkPrimitives>::is_request_supported_for_version(
+            &request,
+            EthVersion::Eth71
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -14,7 +14,7 @@ use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StateReader: Send {
     /// Receipt type in [`ExecutionOutcome`].
     type Receipt: Send + Sync;
@@ -30,7 +30,7 @@ pub trait StateReader: Send {
 pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
 
 /// An abstraction for a type that provides state data.
-#[auto_impl(&, Box)]
+#[auto_impl(&, Arc, Box)]
 pub trait StateProvider:
     BlockHashReader
     + AccountReader
@@ -41,10 +41,25 @@ pub trait StateProvider:
     + HashedPostStateProvider
 {
     /// Get storage of given account.
+    ///
+    /// When `use_hashed_state` is enabled, the `account` and `storage_key` are hashed internally
+    /// before lookup. Callers must pass **unhashed** (plain) values.
     fn storage(
         &self,
         account: Address,
         storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>>;
+
+    /// Get storage using a pre-hashed storage key.
+    ///
+    /// Unlike [`Self::storage`], `hashed_storage_key` must already be keccak256-hashed.
+    /// The `address` remains unhashed (plain) since history indices are keyed by plain address.
+    /// This is used when changeset keys are pre-hashed (e.g., `use_hashed_state` mode)
+    /// to avoid double-hashing.
+    fn storage_by_hashed_key(
+        &self,
+        address: Address,
+        hashed_storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
 
     /// Get account code by its address.
@@ -95,14 +110,14 @@ pub trait AccountInfoReader: AccountReader + BytecodeReader {}
 impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 
 /// Trait that provides the hashed state from various sources.
-#[auto_impl(&, Box)]
+#[auto_impl(&, Arc, Box)]
 pub trait HashedPostStateProvider {
     /// Returns the `HashedPostState` of the provided [`BundleState`].
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
 }
 
 /// Trait for reading bytecode associated with a given code hash.
-#[auto_impl(&, Box)]
+#[auto_impl(&, Arc, Box)]
 pub trait BytecodeReader {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>>;
