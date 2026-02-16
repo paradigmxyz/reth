@@ -124,7 +124,7 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.88" # MSRV
+          toolchain: "1.93" # MSRV
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:

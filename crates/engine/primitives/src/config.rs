@@ -42,18 +42,6 @@ pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2: usize = DEFAULT_MULTIPROOF_TASK
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 
-/// Returns the default maximum concurrency for prewarm task based on available parallelism.
-fn default_prewarm_max_concurrency() -> usize {
-    #[cfg(feature = "std")]
-    {
-        std::thread::available_parallelism().map_or(16, |n| n.get())
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        16
-    }
-}
-
 /// Default depth for sparse trie pruning.
 ///
 /// Nodes at this depth and below are converted to hash stubs to reduce memory.
@@ -161,8 +149,6 @@ pub struct TreeConfig {
     /// where immediate payload regeneration is desired despite the head not changing or moving to
     /// an ancestor.
     always_process_payload_attributes_on_canonical_head: bool,
-    /// Maximum concurrency for the prewarm task.
-    prewarm_max_concurrency: usize,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
     /// Number of storage proof worker threads.
@@ -179,6 +165,8 @@ pub struct TreeConfig {
     sparse_trie_prune_depth: usize,
     /// Maximum number of storage tries to retain after pruning.
     sparse_trie_max_storage_tries: usize,
+    /// Whether to fully disable sparse trie cache pruning between blocks.
+    disable_sparse_trie_cache_pruning: bool,
     /// Timeout for the state root task before spawning a sequential fallback computation.
     /// If `Some`, after waiting this duration for the state root task, a sequential state root
     /// computation is spawned in parallel and whichever finishes first is used.
@@ -207,7 +195,6 @@ impl Default for TreeConfig {
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
-            prewarm_max_concurrency: default_prewarm_max_concurrency(),
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
@@ -216,6 +203,7 @@ impl Default for TreeConfig {
             disable_trie_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
         }
     }
@@ -243,7 +231,6 @@ impl TreeConfig {
         precompile_cache_disabled: bool,
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
-        prewarm_max_concurrency: usize,
         allow_unwind_canonical_header: bool,
         storage_worker_count: usize,
         account_worker_count: usize,
@@ -272,7 +259,6 @@ impl TreeConfig {
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
-            prewarm_max_concurrency,
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
@@ -281,6 +267,7 @@ impl TreeConfig {
             disable_trie_cache: false,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
         }
     }
@@ -529,17 +516,6 @@ impl TreeConfig {
         self.has_enough_parallelism && !self.legacy_state_root
     }
 
-    /// Setter for prewarm max concurrency.
-    pub const fn with_prewarm_max_concurrency(mut self, prewarm_max_concurrency: usize) -> Self {
-        self.prewarm_max_concurrency = prewarm_max_concurrency;
-        self
-    }
-
-    /// Return the prewarm max concurrency.
-    pub const fn prewarm_max_concurrency(&self) -> usize {
-        self.prewarm_max_concurrency
-    }
-
     /// Return the number of storage proof worker threads.
     pub const fn storage_worker_count(&self) -> usize {
         self.storage_worker_count
@@ -628,6 +604,17 @@ impl TreeConfig {
     /// Setter for maximum storage tries to retain.
     pub const fn with_sparse_trie_max_storage_tries(mut self, max_tries: usize) -> Self {
         self.sparse_trie_max_storage_tries = max_tries;
+        self
+    }
+
+    /// Returns whether sparse trie cache pruning is disabled.
+    pub const fn disable_sparse_trie_cache_pruning(&self) -> bool {
+        self.disable_sparse_trie_cache_pruning
+    }
+
+    /// Setter for whether to disable sparse trie cache pruning.
+    pub const fn with_disable_sparse_trie_cache_pruning(mut self, value: bool) -> Self {
+        self.disable_sparse_trie_cache_pruning = value;
         self
     }
 

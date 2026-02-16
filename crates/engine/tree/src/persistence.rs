@@ -119,7 +119,7 @@ where
         Ok(())
     }
 
-    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(new_tip_num))]
+    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(%new_tip_num))]
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,

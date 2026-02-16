@@ -1,3 +1,4 @@
+use crate::ChangesetEntry;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloy_primitives::{map::B256Map, Address, BlockNumber, B256};
 use auto_impl::auto_impl;
@@ -8,7 +9,7 @@ use reth_primitives_traits::{Account, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Hashing Writer
-#[auto_impl(&, Box)]
+#[auto_impl(&, Arc, Box)]
 pub trait HashingWriter: Send {
     /// Unwind and clear account hashing.
     ///
@@ -47,7 +48,7 @@ pub trait HashingWriter: Send {
     /// Mapping of hashed keys of updated accounts to their respective updated hashed slots.
     fn unwind_storage_hashing(
         &self,
-        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, ChangesetEntry)>,
     ) -> ProviderResult<B256Map<BTreeSet<B256>>>;
 
     /// Unwind and clear storage hashing in a given block range.
