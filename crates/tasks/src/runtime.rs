@@ -110,6 +110,9 @@ pub struct RayonConfig {
     /// Number of threads for the proof account worker pool (trie account proof workers).
     /// If `None`, derived from available parallelism.
     pub proof_account_worker_threads: Option<usize>,
+    /// Number of threads for the prewarming pool (execution prewarming workers).
+    /// If `None`, derived from available parallelism.
+    pub prewarming_threads: Option<usize>,
 }
 
 #[cfg(feature = "rayon")]
@@ -123,6 +126,7 @@ impl Default for RayonConfig {
             max_blocking_tasks: DEFAULT_MAX_BLOCKING_TASKS,
             proof_storage_worker_threads: None,
             proof_account_worker_threads: None,
+            prewarming_threads: None,
         }
     }
 }
@@ -168,6 +172,12 @@ impl RayonConfig {
         proof_account_worker_threads: usize,
     ) -> Self {
         self.proof_account_worker_threads = Some(proof_account_worker_threads);
+        self
+    }
+
+    /// Set the number of threads for the prewarming pool.
+    pub const fn with_prewarming_threads(mut self, prewarming_threads: usize) -> Self {
+        self.prewarming_threads = Some(prewarming_threads);
         self
     }
 
@@ -260,6 +270,9 @@ struct RuntimeInner {
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
     proof_account_worker_pool: rayon::ThreadPool,
+    /// Prewarming pool (execution prewarming workers).
+    #[cfg(feature = "rayon")]
+    prewarming_pool: rayon::ThreadPool,
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
@@ -355,6 +368,12 @@ impl Runtime {
     pub fn proof_account_worker_pool(&self) -> &rayon::ThreadPool {
         &self.0.proof_account_worker_pool
     }
+
+    /// Get the prewarming pool.
+    #[cfg(feature = "rayon")]
+    pub fn prewarming_pool(&self) -> &rayon::ThreadPool {
+        &self.0.prewarming_pool
+    }
 }
 
 // ── Test helpers ──────────────────────────────────────────────────────
@@ -394,6 +413,7 @@ impl Runtime {
                 max_blocking_tasks: 16,
                 proof_storage_worker_threads: Some(2),
                 proof_account_worker_threads: Some(2),
+                prewarming_threads: Some(2),
             },
         }
     }
@@ -824,6 +844,7 @@ impl RuntimeBuilder {
             blocking_guard,
             proof_storage_worker_pool,
             proof_account_worker_pool,
+            prewarming_pool,
         ) = {
             let default_threads = config.rayon.default_thread_count();
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
@@ -862,12 +883,19 @@ impl RuntimeBuilder {
                 .thread_name(|i| format!("proof-acct-{i:02}"))
                 .build()?;
 
+            let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
+            let prewarming_pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(prewarming_threads)
+                .thread_name(|i| format!("prewarm-{i:02}"))
+                .build()?;
+
             debug!(
                 default_threads,
                 rpc_threads,
                 storage_threads,
                 proof_storage_worker_threads,
                 proof_account_worker_threads,
+                prewarming_threads,
                 max_blocking_tasks = config.rayon.max_blocking_tasks,
                 "Initialized rayon thread pools"
             );
@@ -879,6 +907,7 @@ impl RuntimeBuilder {
                 blocking_guard,
                 proof_storage_worker_pool,
                 proof_account_worker_pool,
+                prewarming_pool,
             )
         };
 
@@ -909,6 +938,8 @@ impl RuntimeBuilder {
             proof_storage_worker_pool,
             #[cfg(feature = "rayon")]
             proof_account_worker_pool,
+            #[cfg(feature = "rayon")]
+            prewarming_pool,
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
         };
 

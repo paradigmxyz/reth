@@ -29,7 +29,7 @@ reth-provider.workspace = true
 reth-prune.workspace = true
 reth-revm = { workspace = true, features = ["optional-balance-check"] }
 reth-stages-api.workspace = true
-reth-tasks.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
 reth-trie.workspace = true

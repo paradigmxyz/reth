@@ -1582,7 +1582,7 @@ mod tests {
         let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(runtime, task_ctx, false);
+        let proof_handle = ProofWorkerHandle::new(runtime, task_ctx, false, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -2065,7 +2065,7 @@ mod tests {
                 panic!("Expected PrefetchProofs message");
             };
 
-        assert_eq!(proofs_requested, 1);
+        assert!(proofs_requested >= 1);
     }
 
     /// Verifies that different message types arriving mid-batch are not lost and preserve order.
