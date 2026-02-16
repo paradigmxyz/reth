@@ -1228,23 +1228,37 @@ impl<S: SparseTrieTrait> StorageTries<S> {
             trie_info.iter().map(|(address, size, _)| (*address, *size)).collect();
         stats.tries_to_keep = tries_to_keep.len();
 
-        // Collect keys to evict
-        let tries_to_clear: Vec<B256> =
-            self.tries.keys().filter(|addr| !tries_to_keep.contains_key(*addr)).copied().collect();
-        stats.tries_to_evict = tries_to_clear.len();
-
-        // Evict storage tries that exceeded limit, saving cleared allocations for reuse
-        for address in &tries_to_clear {
-            if let Some(mut trie) = self.tries.remove(address) {
+        // Evict storage tries that exceeded limit, saving cleared allocations for reuse.
+        let mut tries_to_evict = 0;
+        self.tries.retain(|address, trie| {
+            if tries_to_keep.contains_key(address) {
+                true
+            } else {
                 trie.clear();
-                self.cleared_tries.push(trie);
+                self.cleared_tries.push(core::mem::take(trie));
+                tries_to_evict += 1;
+                false
             }
-            if let Some(mut paths) = self.revealed_paths.remove(address) {
+        });
+        stats.tries_to_evict = tries_to_evict;
+
+        self.revealed_paths.retain(|address, paths| {
+            if tries_to_keep.contains_key(address) {
                 paths.clear();
-                self.cleared_revealed_paths.push(paths);
+                true
+            } else {
+                paths.clear();
+                self.cleared_revealed_paths.push(core::mem::take(paths));
+                false
             }
-            self.modifications.remove(address);
-        }
+        });
+
+        self.modifications
+            .state
+            .retain(|address, _| tries_to_keep.contains_key(address));
+        self.modifications
+            .accessed_this_cycle
+            .retain(|address| tries_to_keep.contains_key(address));
 
         // Prune storage tries that are kept, but only if:
         // - They haven't been pruned since last access
@@ -1271,13 +1285,6 @@ impl<S: SparseTrieTrait> StorageTries<S> {
             }
         }
         stats.prune_elapsed = prune_start.elapsed();
-
-        // Clear revealed_paths for kept tries
-        for hash in tries_to_keep.keys() {
-            if let Some(paths) = self.revealed_paths.get_mut(hash) {
-                paths.clear();
-            }
-        }
 
         stats.total_tries_after = self.tries.len();
         stats.total_elapsed = fn_start.elapsed();
