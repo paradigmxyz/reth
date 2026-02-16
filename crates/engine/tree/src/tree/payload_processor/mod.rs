@@ -248,39 +248,17 @@ where
         let (to_sparse_trie, sparse_trie_rx) = channel();
         let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
 
-        // Extract V2 proofs flag early so we can pass it to prewarm
         let v2_proofs_enabled = !config.disable_proof_v2();
-
-        // Capture fields before env is moved into spawn_caching_with
         let parent_state_root = env.parent_state_root;
         let transaction_count = env.transaction_count;
-
-        // Handle BAL-based optimization if available
-        let prewarm_handle = if let Some(bal) = bal {
-            // When BAL is present, use BAL prewarming and send BAL to multiproof
-            debug!(target: "engine::tree::payload_processor", "BAL present, using BAL prewarming");
-
-            // The prewarm task converts the BAL to HashedPostState and sends it on
-            // to_multi_proof after slot prefetching completes.
-            self.spawn_caching_with(
-                env,
-                prewarm_rx,
-                provider_builder.clone(),
-                Some(to_multi_proof.clone()),
-                Some(bal),
-                v2_proofs_enabled,
-            )
-        } else {
-            // Normal path: spawn with transaction prewarming
-            self.spawn_caching_with(
-                env,
-                prewarm_rx,
-                provider_builder.clone(),
-                Some(to_multi_proof.clone()),
-                None,
-                v2_proofs_enabled,
-            )
-        };
+        let prewarm_handle = self.spawn_caching_with(
+            env,
+            prewarm_rx,
+            provider_builder.clone(),
+            Some(to_multi_proof.clone()),
+            bal,
+            v2_proofs_enabled,
+        );
 
         // Create and spawn the storage proof task.
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
@@ -385,6 +363,7 @@ where
     /// iteration with [`ForEachOrdered`] to recover signatures in parallel while streaming
     /// results to execution in the original transaction order.
     #[expect(clippy::type_complexity)]
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
@@ -447,6 +426,12 @@ where
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor",
+        skip_all,
+        fields(bal=%bal.is_some(), %v2_proofs_enabled)
+    )]
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
@@ -485,7 +470,6 @@ where
             self.prewarm_max_concurrency,
         );
 
-        // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking(move || {
