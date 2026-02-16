@@ -190,7 +190,7 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
-trie-debug = ["reth-node-builder/trie-debug"]
+trie-debug = ["reth-node-builder/trie-debug", "reth-node-core/trie-debug"]
 rocksdb = ["reth-ethereum-cli/rocksdb", "reth-node-core/rocksdb"]
 edge = ["rocksdb"]
 
