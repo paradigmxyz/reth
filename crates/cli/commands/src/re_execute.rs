@@ -203,6 +203,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             }
                         }
 
+                        if skip_invalid_blocks {
+                            executor = evm_config.batch_executor(db_at(block.number()));
+                            let _ = info_tx.send((block, err));
+                            continue 'blocks;
+                        }
                         return Err(err);
                     }
                     let _ = stats_tx.send(block.gas_used());
