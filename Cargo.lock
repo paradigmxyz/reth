@@ -10350,6 +10350,7 @@ name = "reth-tasks"
 version = "1.11.0"
 dependencies = [
  "auto_impl",
+ "crossbeam-utils",
  "dyn-clone",
  "futures-util",
  "metrics",
