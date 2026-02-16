@@ -200,18 +200,17 @@ where
                 return Err(SnapSyncError::Cancelled);
             }
 
-            let request = GetAccountRangeMessage {
-                request_id: rand_request_id(),
-                root_hash: state_root,
-                starting_hash: cursor,
-                limit_hash: HASH_MAX,
-                response_bytes: MAX_RESPONSE_BYTES,
-            };
-
-            let response = self.client.get_account_range(request).await.map_err(|err| {
-                self.metrics.request_failures.increment(1);
-                SnapSyncError::Request(err)
-            })?;
+            let response = retry_snap_request(|| {
+                let req = GetAccountRangeMessage {
+                    request_id: rand_request_id(),
+                    root_hash: state_root,
+                    starting_hash: cursor,
+                    limit_hash: HASH_MAX,
+                    response_bytes: MAX_RESPONSE_BYTES,
+                };
+                self.client.get_account_range(req)
+            }, &self.metrics, &self.cancel_rx)
+            .await?;
 
             let msg = match response.into_data() {
                 SnapResponse::AccountRange(msg) => msg,
@@ -330,19 +329,19 @@ where
             let mut slot_cursor = B256::ZERO;
 
             loop {
-                let request = GetStorageRangesMessage {
-                    request_id: rand_request_id(),
-                    root_hash: state_root,
-                    account_hashes: vec![*account_hash],
-                    starting_hash: slot_cursor,
-                    limit_hash: HASH_MAX,
-                    response_bytes: MAX_RESPONSE_BYTES,
-                };
-
-                let response = self.client.get_storage_ranges(request).await.map_err(|err| {
-                    self.metrics.request_failures.increment(1);
-                    SnapSyncError::Request(err)
-                })?;
+                let account_hash_val = *account_hash;
+                let response = retry_snap_request(|| {
+                    let req = GetStorageRangesMessage {
+                        request_id: rand_request_id(),
+                        root_hash: state_root,
+                        account_hashes: vec![account_hash_val],
+                        starting_hash: slot_cursor,
+                        limit_hash: HASH_MAX,
+                        response_bytes: MAX_RESPONSE_BYTES,
+                    };
+                    self.client.get_storage_ranges(req)
+                }, &self.metrics, &self.cancel_rx)
+                .await?;
 
                 let msg = match response.into_data() {
                     SnapResponse::StorageRanges(msg) => msg,
@@ -441,16 +440,16 @@ where
                 return Err(SnapSyncError::Cancelled);
             }
 
-            let request = GetByteCodesMessage {
-                request_id: rand_request_id(),
-                hashes: chunk.to_vec(),
-                response_bytes: MAX_RESPONSE_BYTES,
-            };
-
-            let response = self.client.get_byte_codes(request).await.map_err(|err| {
-                self.metrics.request_failures.increment(1);
-                SnapSyncError::Request(err)
-            })?;
+            let hashes = chunk.to_vec();
+            let response = retry_snap_request(|| {
+                let req = GetByteCodesMessage {
+                    request_id: rand_request_id(),
+                    hashes: hashes.clone(),
+                    response_bytes: MAX_RESPONSE_BYTES,
+                };
+                self.client.get_byte_codes(req)
+            }, &self.metrics, &self.cancel_rx)
+            .await?;
 
             let msg = match response.into_data() {
                 SnapResponse::ByteCodes(msg) => msg,
@@ -547,6 +546,47 @@ fn increment_hash(hash: B256) -> B256 {
 /// Generates a random request ID.
 fn rand_request_id() -> u64 {
     rand::random()
+}
+
+/// Maximum number of retries for a snap request before giving up.
+const MAX_SNAP_RETRIES: u32 = 10;
+
+/// Retries a snap request with exponential backoff on failure.
+async fn retry_snap_request<F, Fut, T>(
+    mut make_request: F,
+    metrics: &SnapSyncMetrics,
+    cancel_rx: &watch::Receiver<bool>,
+) -> Result<T, SnapSyncError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, reth_network_p2p::error::RequestError>>,
+{
+    let mut attempts = 0u32;
+    loop {
+        if *cancel_rx.borrow() {
+            return Err(SnapSyncError::Cancelled);
+        }
+
+        match make_request().await {
+            Ok(resp) => return Ok(resp),
+            Err(err) => {
+                attempts += 1;
+                metrics.request_failures.increment(1);
+                if attempts >= MAX_SNAP_RETRIES {
+                    return Err(SnapSyncError::Request(err));
+                }
+                let delay = std::time::Duration::from_secs(1 << attempts.min(5));
+                warn!(
+                    target: "snap_sync",
+                    %err,
+                    attempts,
+                    "snap request failed, retrying in {:?}",
+                    delay
+                );
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
