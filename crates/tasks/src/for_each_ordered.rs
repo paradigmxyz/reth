@@ -1,10 +1,7 @@
 use crossbeam_utils::CachePadded;
+use parking_lot::{Condvar, Mutex};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use std::{
-    cell::UnsafeCell,
-    mem::MaybeUninit,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Extension trait for [`IndexedParallelIterator`]
 /// that streams results to a sequential consumer in index order.
@@ -33,16 +30,17 @@ impl<I: IndexedParallelIterator> ForEachOrdered for I {
     }
 }
 
-/// A cache-line-padded slot with an atomic ready flag.
+/// A slot holding an optional value and a condvar for notification.
 struct Slot<T> {
-    value: UnsafeCell<MaybeUninit<T>>,
-    ready: AtomicBool,
+    value: Mutex<Option<T>>,
+    notify: Condvar,
 }
 
-// SAFETY: Each slot is written by exactly one producer and read by exactly one consumer.
-// The AtomicBool synchronizes access (Release on write, Acquire on read).
-unsafe impl<T: Send> Send for Slot<T> {}
-unsafe impl<T: Send> Sync for Slot<T> {}
+impl<T> Slot<T> {
+    fn new() -> Self {
+        Self { value: Mutex::new(None), notify: Condvar::new() }
+    }
+}
 
 struct Shared<T> {
     slots: Box<[CachePadded<Slot<T>>]>,
@@ -51,60 +49,40 @@ struct Shared<T> {
 
 impl<T> Shared<T> {
     fn new(n: usize) -> Self {
-        Self {
-            // SAFETY: Zero is a valid bit pattern for Slot.
-            // Needs to be zero for `ready` to be false.
-            slots: unsafe {
-                Box::<[_]>::assume_init(Box::<[CachePadded<Slot<T>>]>::new_zeroed_slice(n))
-            },
-            panicked: AtomicBool::new(false),
-        }
+        let slots =
+            (0..n).map(|_| CachePadded::new(Slot::new())).collect::<Vec<_>>().into_boxed_slice();
+        Self { slots, panicked: AtomicBool::new(false) }
     }
 
-    /// # Safety
-    /// Index `i` must be in bounds and must only be written once.
+    /// Writes a value into slot `i`. Must only be called once per index.
     #[inline]
-    unsafe fn write(&self, i: usize, val: T) {
-        let slot = unsafe { self.slots.get_unchecked(i) };
-        unsafe { (*slot.value.get()).write(val) };
-        slot.ready.store(true, Ordering::Release);
+    fn write(&self, i: usize, val: T) {
+        let slot = &self.slots[i];
+        *slot.value.lock() = Some(val);
+        slot.notify.notify_one();
     }
 
-    /// # Safety
-    /// Index `i` must be in bounds. Must only be called after `ready` is observed `true`.
-    #[inline]
-    unsafe fn take(&self, i: usize) -> T {
-        let slot = unsafe { self.slots.get_unchecked(i) };
-        let v = unsafe { (*slot.value.get()).assume_init_read() };
-        // Clear ready so Drop doesn't double-free this slot.
-        slot.ready.store(false, Ordering::Relaxed);
-        v
-    }
-
-    #[inline]
-    fn is_ready(&self, i: usize) -> bool {
-        // SAFETY: caller ensures `i < n`.
-        unsafe { self.slots.get_unchecked(i) }.ready.load(Ordering::Acquire)
-    }
-}
-
-impl<T> Drop for Shared<T> {
-    fn drop(&mut self) {
-        for slot in &mut *self.slots {
-            if *slot.ready.get_mut() {
-                unsafe { (*slot.value.get()).assume_init_drop() };
+    /// Blocks until slot `i` is ready and takes the value.
+    /// Returns `None` if the producer panicked.
+    fn take(&self, i: usize) -> Option<T> {
+        let slot = &self.slots[i];
+        let mut guard = slot.value.lock();
+        loop {
+            if let Some(val) = guard.take() {
+                return Some(val);
             }
+            if self.panicked.load(Ordering::Acquire) {
+                return None;
+            }
+            slot.notify.wait(&mut guard);
         }
     }
 }
 
 /// Executes a parallel iterator and delivers results to a sequential callback in index order.
 ///
-/// This works by pre-allocating one cache-line-padded slot per item. Each slot holds an
-/// `UnsafeCell<MaybeUninit<T>>` and an `AtomicBool` ready flag. A rayon task computes all
-/// items in parallel, writing each result into its slot and setting the flag (`Release`).
-/// The calling thread walks slots 0, 1, 2, … in order, spinning on the flag (`Acquire`),
-/// then reading the value and passing it to `f`.
+/// Each slot has its own [`Condvar`], so the consumer blocks precisely on the slot it needs
+/// with zero spurious wakeups.
 fn ordered_impl<I, F>(iter: I, mut f: F)
 where
     I: IndexedParallelIterator,
@@ -125,49 +103,24 @@ where
         s.spawn(|_| {
             let res = catch_unwind(AssertUnwindSafe(|| {
                 iter.enumerate().for_each(|(i, item)| {
-                    // SAFETY: `enumerate()` on an IndexedParallelIterator yields each
-                    // index exactly once.
-                    unsafe { shared.write(i, item) };
+                    shared.write(i, item);
                 });
             }));
             if let Err(payload) = res {
                 shared.panicked.store(true, Ordering::Release);
+                // Wake all slots so the consumer doesn't hang.
+                for slot in &*shared.slots {
+                    slot.notify.notify_one();
+                }
                 std::panic::resume_unwind(payload);
             }
         });
 
         // Consumer: sequential, ordered, on the calling thread.
-        // Exponential backoff: 1, 2, 4, …, 64 pause instructions, then OS yields.
-        const SPIN_SHIFT_LIMIT: u32 = 6;
         for i in 0..n {
-            let mut backoff = 0u32;
-            'wait: loop {
-                if shared.is_ready(i) {
-                    break 'wait;
-                }
-
-                if shared.panicked.load(Ordering::Relaxed) {
-                    return;
-                }
-
-                // Yield to rayon's work-stealing so the producer can make progress,
-                // especially important when the thread pool is small.
-                if rayon::yield_now() == Some(rayon::Yield::Executed) {
-                    continue 'wait;
-                }
-
-                if backoff < SPIN_SHIFT_LIMIT {
-                    for _ in 0..(1u32 << backoff) {
-                        std::hint::spin_loop();
-                    }
-                    backoff += 1;
-                } else {
-                    // Producer is genuinely slow; fall back to OS-level yield.
-                    std::thread::yield_now();
-                }
-            }
-            // SAFETY: `i < n` and we just observed the ready flag with Acquire ordering.
-            let value = unsafe { shared.take(i) };
+            let Some(value) = shared.take(i) else {
+                return;
+            };
             f(value);
         }
     });
@@ -208,8 +161,6 @@ mod tests {
 
     #[test]
     fn slow_early_items_still_delivered_in_order() {
-        // Item 0 is deliberately delayed; all other items complete quickly.
-        // The consumer must still deliver items in order 0, 1, 2, … regardless.
         let barrier = Barrier::new(2);
         let n = 64usize;
         let input: Vec<usize> = (0..n).collect();
@@ -219,10 +170,8 @@ mod tests {
             .par_iter()
             .map(|&i| {
                 if i == 0 {
-                    // Wait until at least one other item has been produced.
                     barrier.wait();
                 } else if i == n - 1 {
-                    // Signal that other items are ready.
                     barrier.wait();
                 }
                 i
@@ -258,15 +207,12 @@ mod tests {
         });
 
         assert!(result.is_err());
-        // All produced Tracked values must have been dropped (either consumed or cleaned up).
-        // We can't assert an exact count since the panic may cut production short.
         let drops = DROP_COUNT.load(Ordering::Relaxed);
         assert!(drops > 0, "some items should have been dropped");
     }
 
     #[test]
     fn no_double_drop() {
-        // Verify that consumed items are dropped exactly once (not double-freed by Drop).
         static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
 
         struct Counted(#[allow(dead_code)] u64);
@@ -286,7 +232,6 @@ mod tests {
 
     #[test]
     fn callback_is_not_send() {
-        // Verify that the callback does not need to be Send.
         use std::rc::Rc;
         let counter = Rc::new(std::cell::Cell::new(0u64));
         let input: Vec<u64> = (0..100).collect();
