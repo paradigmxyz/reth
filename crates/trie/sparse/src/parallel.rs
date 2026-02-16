@@ -1320,10 +1320,9 @@ impl SparseTrie for ParallelSparseTrie {
     ) -> SparseTrieResult<()> {
         use crate::{provider::NoRevealProvider, LeafUpdate};
 
-        // Drain updates so we avoid cloning keys while mutating the map.
+        // Drain updates to avoid cloning keys while preserving the map's allocation.
         // On success, entries remain removed; on blinded node failure, they're re-inserted.
-        let drained = std::mem::take(updates);
-        updates.reserve(drained.len());
+        let drained: Vec<_> = updates.drain().collect();
 
         for (key, update) in drained {
             let full_path = Nibbles::unpack(key);
