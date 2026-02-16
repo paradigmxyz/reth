@@ -12,6 +12,8 @@ use alloy_rlp::{Decodable, Encodable};
 use alloy_trie::proof::DecodedProofNodes;
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
+#[cfg(feature = "std")]
+use reth_primitives_traits::FastInstant as Instant;
 use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
@@ -262,14 +264,7 @@ where
 
     /// Reveal unknown trie paths from decoded multiproof.
     /// NOTE: This method does not extensively validate the proof.
-    #[instrument(
-        target = "trie::sparse",
-        skip_all,
-        fields(
-            account_nodes = multiproof.account_subtree.len(),
-            storages = multiproof.storages.len()
-        )
-    )]
+    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
     pub fn reveal_decoded_multiproof(
         &mut self,
         multiproof: DecodedMultiProof,
@@ -357,13 +352,7 @@ where
     ///
     /// V2 multiproofs use a simpler format where proof nodes are stored as vectors rather than
     /// hashmaps, with masks already included in the `ProofTrieNode` structure.
-    #[instrument(
-        skip_all,
-        fields(
-            account_nodes = multiproof.account_proofs.len(),
-            storages = multiproof.storage_proofs.len()
-        )
-    )]
+    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
     pub fn reveal_decoded_multiproof_v2(
         &mut self,
         multiproof: reth_trie_common::DecodedMultiProofV2,
@@ -832,7 +821,7 @@ where
     /// Calculates the hashes of subtries.
     ///
     /// If the trie has not been revealed, this function does nothing.
-    #[instrument(target = "trie::sparse", skip_all)]
+    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
     pub fn calculate_subtries(&mut self) {
         if let RevealableSparseTrie::Revealed(trie) = &mut self.state {
             trie.update_subtrie_hashes();
@@ -884,7 +873,7 @@ where
     }
 
     /// Returns sparse trie root and trie updates if the trie has been revealed.
-    #[instrument(target = "trie::sparse", skip_all)]
+    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
     pub fn root_with_updates(
         &mut self,
         provider_factory: impl TrieNodeProviderFactory,
@@ -1023,7 +1012,7 @@ where
     ///
     /// Returns false if the new storage root is empty, and the account info was already empty,
     /// indicating the account leaf should be removed.
-    #[instrument(target = "trie::sparse", skip_all)]
+    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
     pub fn update_account_storage_root(
         &mut self,
         address: B256,
@@ -1071,7 +1060,7 @@ where
     }
 
     /// Remove the account leaf node.
-    #[instrument(target = "trie::sparse", skip_all)]
+    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
     pub fn remove_account_leaf(
         &mut self,
         path: &Nibbles,
@@ -1156,6 +1145,7 @@ where
     /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
     #[cfg(feature = "std")]
     #[instrument(
+        level = "debug",
         name = "SparseStateTrie::prune",
         target = "trie::sparse",
         skip_all,
@@ -1203,7 +1193,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
     /// Keeps the top `max_storage_tries` by a score combining size and heat.
     /// Evicts lower-scored tries entirely, prunes kept tries to `max_depth`.
     fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        let fn_start = std::time::Instant::now();
+        let fn_start = Instant::now();
         let mut stats =
             StorageTriesPruneStats { total_tries_before: self.tries.len(), ..Default::default() };
 
@@ -1260,7 +1250,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
         // - They haven't been pruned since last access
         // - They're large enough to be worth pruning
         const MIN_SIZE_TO_PRUNE: usize = 1000;
-        let prune_start = std::time::Instant::now();
+        let prune_start = Instant::now();
         for (address, size) in &tries_to_keep {
             if *size < MIN_SIZE_TO_PRUNE {
                 stats.skipped_small += 1;

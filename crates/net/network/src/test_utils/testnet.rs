@@ -10,7 +10,7 @@ use crate::{
         policy::NetworkPolicies,
         TransactionsHandle, TransactionsManager, TransactionsManagerConfig,
     },
-    NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
+    NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager, PeersConfig,
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
@@ -718,6 +718,7 @@ where
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .disable_dns_discovery()
             .disable_discv4_discovery()
+            .peer_config(PeersConfig::test())
     }
 }
 
