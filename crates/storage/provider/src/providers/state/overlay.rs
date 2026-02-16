@@ -282,7 +282,7 @@ where
         level = "debug",
         target = "providers::state::overlay",
         skip_all,
-        fields(db_tip_block)
+        fields(%db_tip_block)
     )]
     fn calculate_overlay(
         &self,
