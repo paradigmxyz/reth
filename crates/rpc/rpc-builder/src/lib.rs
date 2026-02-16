@@ -22,6 +22,7 @@
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 use alloy_network::{Ethereum, IntoWallet};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
+use alloy_rpc_types_engine::ExecutionData;
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
 use http::{header::AUTHORIZATION, HeaderMap};
@@ -38,7 +39,7 @@ use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
-    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
+    OtterscanApi, RPCApi, RethApi, RethNewPayloadHandler, TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -65,6 +66,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tower_http::cors::CorsLayer;
@@ -500,6 +502,8 @@ pub struct RpcRegistryInner<Provider, Pool, Network, EthApi: EthApiTypes, EvmCon
     /// Notification channel for engine API events
     engine_events:
         EventSender<ConsensusEngineEvent<<EthApi::RpcConvert as RpcConvert>::Primitives>>,
+    /// Handler for `reth_newPayload` requests, passed to [`RethApi`].
+    new_payload_handler: Option<Arc<dyn RethNewPayloadHandler<ExecutionData>>>,
 }
 
 // === impl RpcRegistryInner ===
@@ -553,6 +557,7 @@ where
             eth_config: config.eth,
             evm_config,
             engine_events,
+            new_payload_handler: None,
         }
     }
 }
@@ -590,6 +595,14 @@ where
     /// Returns a reference to the evm config
     pub const fn evm_config(&self) -> &Evm {
         &self.evm_config
+    }
+
+    /// Sets the handler for `reth_newPayload` requests.
+    pub fn set_new_payload_handler(
+        &mut self,
+        handler: Box<dyn RethNewPayloadHandler<ExecutionData>>,
+    ) {
+        self.new_payload_handler = Some(Arc::from(handler));
     }
 
     /// Returns all installed methods
@@ -839,7 +852,7 @@ where
 
     /// Instantiates `RethApi`
     pub fn reth_api(&self) -> RethApi<Provider> {
-        RethApi::new(self.provider.clone(), self.executor.clone())
+        RethApi::new(self.provider.clone(), self.executor.clone(), self.new_payload_handler.clone())
     }
 }
 
@@ -992,11 +1005,13 @@ where
                         .into_rpc()
                         .into(),
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
-                        RethRpcModule::Reth => {
-                            RethApi::new(self.provider.clone(), self.executor.clone())
-                                .into_rpc()
-                                .into()
-                        }
+                        RethRpcModule::Reth => RethApi::new(
+                            self.provider.clone(),
+                            self.executor.clone(),
+                            self.new_payload_handler.clone(),
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                         RethRpcModule::Mev => {
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
@@ -1039,6 +1054,7 @@ where
             modules: self.modules.clone(),
             eth_config: self.eth_config.clone(),
             engine_events: self.engine_events.clone(),
+            new_payload_handler: self.new_payload_handler.clone(),
         }
     }
 }

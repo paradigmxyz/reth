@@ -53,6 +53,7 @@ tokio-util = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 alloy-provider = { workspace = true, features = ["ws", "ipc"] }
 alloy-network.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
@@ -71,7 +72,6 @@ alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-trace.workspace = true
 alloy-eips.workspace = true
-alloy-rpc-types-engine.workspace = true
 
 serde_json.workspace = true
 clap = { workspace = true, features = ["derive"] }

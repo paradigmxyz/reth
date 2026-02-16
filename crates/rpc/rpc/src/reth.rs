@@ -1,8 +1,9 @@
-use std::{future::Future, sync::Arc};
+use std::{future::Future, marker::PhantomData, sync::Arc};
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256};
+use alloy_rpc_types_engine::PayloadStatus;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
@@ -10,40 +11,74 @@ use reth_chain_state::{
     CanonStateNotification, CanonStateSubscriptions, ForkChoiceSubscriptions,
     PersistedBlockSubscriptions,
 };
+use reth_engine_primitives::{
+    BeaconOnNewPayloadError, ConsensusEngineHandle, ExecutionPayload, NewPayloadTimings,
+};
 use reth_errors::RethResult;
+use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
-use reth_rpc_api::RethApiServer;
+use reth_rpc_api::{RethApiServer, RethPayloadStatus};
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
+/// Trait for handling `reth_newPayload` requests, allowing type-erased engine handle.
+#[async_trait]
+pub trait RethNewPayloadHandler<Payload>: Send + Sync + std::fmt::Debug {
+    /// Sends a new payload to the engine and returns status with timing breakdown.
+    async fn reth_new_payload(
+        &self,
+        payload: Payload,
+    ) -> Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError>;
+}
+
+#[async_trait]
+impl<T: PayloadTypes> RethNewPayloadHandler<T::ExecutionData> for ConsensusEngineHandle<T> {
+    async fn reth_new_payload(
+        &self,
+        payload: T::ExecutionData,
+    ) -> Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError> {
+        Self::reth_new_payload(self, payload).await
+    }
+}
+
 /// `reth` API implementation.
 ///
 /// This type provides the functionality for handling `reth` prototype RPC requests.
-pub struct RethApi<Provider> {
-    inner: Arc<RethApiInner<Provider>>,
+pub struct RethApi<Provider, Payload: ExecutionPayload = alloy_rpc_types_engine::ExecutionData> {
+    inner: Arc<RethApiInner<Provider, Payload>>,
 }
 
 // === impl RethApi ===
 
-impl<Provider> RethApi<Provider> {
+impl<Provider, Payload: ExecutionPayload> RethApi<Provider, Payload> {
     /// The provider that can interact with the chain.
     pub fn provider(&self) -> &Provider {
         &self.inner.provider
     }
 
     /// Create a new instance of the [`RethApi`]
-    pub fn new(provider: Provider, task_spawner: Box<dyn TaskSpawner>) -> Self {
-        let inner = Arc::new(RethApiInner { provider, task_spawner });
+    pub fn new(
+        provider: Provider,
+        task_spawner: Box<dyn TaskSpawner>,
+        new_payload_handler: Option<Arc<dyn RethNewPayloadHandler<Payload>>>,
+    ) -> Self {
+        let inner = Arc::new(RethApiInner {
+            provider,
+            task_spawner,
+            new_payload_handler,
+            _payload: PhantomData,
+        });
         Self { inner }
     }
 }
 
-impl<Provider> RethApi<Provider>
+impl<Provider, Payload> RethApi<Provider, Payload>
 where
     Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory + 'static,
+    Payload: ExecutionPayload,
 {
     /// Executes the future on a new blocking task.
     async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
@@ -91,7 +126,7 @@ where
 }
 
 #[async_trait]
-impl<Provider> RethApiServer for RethApi<Provider>
+impl<Provider, Payload> RethApiServer<Payload> for RethApi<Provider, Payload>
 where
     Provider: BlockReaderIdExt
         + ChangeSetReader
@@ -100,7 +135,36 @@ where
         + ForkChoiceSubscriptions<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
         + PersistedBlockSubscriptions
         + 'static,
+    Payload: ExecutionPayload,
 {
+    /// Handler for `reth_newPayload`
+    async fn reth_new_payload(&self, payload: Payload) -> RpcResult<RethPayloadStatus> {
+        let handler = self.inner.new_payload_handler.as_ref().ok_or_else(|| {
+            jsonrpsee::types::ErrorObject::owned(
+                jsonrpsee::types::error::INTERNAL_ERROR_CODE,
+                "reth_newPayload is not available",
+                None::<()>,
+            )
+        })?;
+        let start = std::time::Instant::now();
+        let (status, timings) = handler.reth_new_payload(payload).await.map_err(|e| {
+            jsonrpsee::types::ErrorObject::owned(
+                jsonrpsee::types::error::INTERNAL_ERROR_CODE,
+                e.to_string(),
+                None::<()>,
+            )
+        })?;
+        let elapsed = start.elapsed();
+        tracing::trace!(target: "rpc::reth", ?elapsed, "Served reth_newPayload");
+        Ok(RethPayloadStatus {
+            status,
+            latency_us: timings.latency.as_micros() as u64,
+            persistence_wait_us: timings.persistence_wait.map(|d| d.as_micros() as u64),
+            execution_cache_wait_us: timings.execution_cache_wait.as_micros() as u64,
+            sparse_trie_wait_us: timings.sparse_trie_wait.as_micros() as u64,
+        })
+    }
+
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(
         &self,
@@ -246,21 +310,25 @@ async fn finalized_chain_notifications<N>(
     }
 }
 
-impl<Provider> std::fmt::Debug for RethApi<Provider> {
+impl<Provider, Payload: ExecutionPayload> std::fmt::Debug for RethApi<Provider, Payload> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RethApi").finish_non_exhaustive()
     }
 }
 
-impl<Provider> Clone for RethApi<Provider> {
+impl<Provider, Payload: ExecutionPayload> Clone for RethApi<Provider, Payload> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct RethApiInner<Provider> {
+struct RethApiInner<Provider, Payload> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Box<dyn TaskSpawner>,
+    /// Optional handler for `reth_newPayload` requests.
+    new_payload_handler: Option<Arc<dyn RethNewPayloadHandler<Payload>>>,
+    /// Marker for the payload type.
+    _payload: PhantomData<Payload>,
 }

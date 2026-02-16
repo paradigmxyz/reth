@@ -28,7 +28,7 @@ use reth_node_core::{
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
-    AdminApi,
+    AdminApi, RethNewPayloadHandler,
 };
 use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
@@ -980,6 +980,7 @@ where
     {
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
+        let new_payload_handler = engine_api_builder.new_payload_handler(&ctx);
         let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
         let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
 
@@ -1013,14 +1014,25 @@ where
         let module_config = config.rpc.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
-        let (mut modules, mut auth_module, registry) = RpcModuleBuilder::default()
+        let mut registry = RpcModuleBuilder::default()
             .with_provider(node.provider().clone())
             .with_pool(node.pool().clone())
             .with_network(node.network().clone())
             .with_executor(Box::new(node.task_executor().clone()))
             .with_evm_config(node.evm_config().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(module_config, engine_api, eth_api, engine_events.clone());
+            .into_registry(
+                module_config.config().cloned().unwrap_or_default(),
+                eth_api,
+                engine_events.clone(),
+            );
+
+        if let Some(handler) = new_payload_handler {
+            registry.set_new_payload_handler(handler);
+        }
+
+        let mut modules = registry.create_transport_rpc_modules(module_config);
+        let mut auth_module = registry.create_auth_module(engine_api);
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
@@ -1253,6 +1265,18 @@ pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
         self,
         ctx: &AddOnsContext<'_, Node>,
     ) -> impl Future<Output = eyre::Result<Self::EngineApi>> + Send;
+
+    /// Returns a handler for `reth_newPayload` requests, if supported.
+    ///
+    /// The default returns `None`. Implementations that use [`ExecutionData`] as their
+    /// payload execution data type should return a handler backed by the consensus engine
+    /// handle.
+    fn new_payload_handler(
+        &self,
+        _ctx: &AddOnsContext<'_, Node>,
+    ) -> Option<Box<dyn RethNewPayloadHandler<ExecutionData>>> {
+        None
+    }
 }
 
 /// Builder trait for creating payload validators specifically for the Engine API.
@@ -1409,6 +1433,13 @@ where
             ctx.config.engine.accept_execution_requests_hash,
             ctx.node.network().clone(),
         ))
+    }
+
+    fn new_payload_handler(
+        &self,
+        ctx: &AddOnsContext<'_, N>,
+    ) -> Option<Box<dyn RethNewPayloadHandler<ExecutionData>>> {
+        Some(Box::new(ctx.beacon_engine_handle.clone()))
     }
 }
 
