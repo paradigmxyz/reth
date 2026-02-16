@@ -306,6 +306,15 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// The number of nodes converted to hash stubs.
     fn prune(&mut self, max_depth: usize) -> usize;
 
+    /// Takes the debug recorder out of this trie, replacing it with an empty one.
+    ///
+    /// Returns the recorder containing all recorded mutations since the last reset.
+    /// The default implementation returns an empty recorder.
+    #[cfg(feature = "trie-debug")]
+    fn take_debug_recorder(&mut self) -> crate::debug_recorder::TrieDebugRecorder {
+        crate::debug_recorder::TrieDebugRecorder::default()
+    }
+
     /// Applies leaf updates to the sparse trie.
     ///
     /// When a [`LeafUpdate::Changed`] is successfully applied, it is removed from the

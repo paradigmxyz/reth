@@ -26,6 +26,8 @@ alloy-rlp.workspace = true
 # misc
 auto_impl.workspace = true
 rayon = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
 smallvec.workspace = true
 
 # metrics
@@ -65,6 +67,7 @@ std = [
     "tracing/std",
 ]
 metrics = ["dep:reth-metrics", "dep:metrics", "std"]
+trie-debug = ["std", "dep:serde", "dep:serde_json", "alloy-primitives/serde", "alloy-trie/serde"]
 test-utils = [
     "std",
     "reth-primitives-traits/test-utils",

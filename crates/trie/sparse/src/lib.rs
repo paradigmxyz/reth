@@ -24,6 +24,9 @@ pub mod provider;
 #[cfg(feature = "metrics")]
 mod metrics;
 
+#[cfg(feature = "trie-debug")]
+pub mod debug_recorder;
+
 /// Re-export sparse trie error types.
 pub mod errors {
     pub use reth_execution_errors::{
