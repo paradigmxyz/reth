@@ -1159,7 +1159,7 @@ where
         name = "SparseStateTrie::prune",
         target = "trie::sparse",
         skip_all,
-        fields(max_depth, max_storage_tries)
+        fields(%max_depth, %max_storage_tries)
     )]
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
         // Prune state and storage tries in parallel
