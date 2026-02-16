@@ -1012,14 +1012,14 @@ where
         let module_config = config.rpc.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
-        let (mut modules, mut auth_module, registry) =
-            RpcModuleBuilder::with_runtime(node.task_executor().clone())
-                .with_provider(node.provider().clone())
-                .with_pool(node.pool().clone())
-                .with_network(node.network().clone())
-                .with_evm_config(node.evm_config().clone())
-                .with_consensus(node.consensus().clone())
-                .build_with_auth_server(module_config, engine_api, eth_api, engine_events.clone());
+        let (mut modules, mut auth_module, registry) = RpcModuleBuilder::default()
+            .with_provider(node.provider().clone())
+            .with_pool(node.pool().clone())
+            .with_network(node.network().clone())
+            .with_executor(node.task_executor().clone())
+            .with_evm_config(node.evm_config().clone())
+            .with_consensus(node.consensus().clone())
+            .build_with_auth_server(module_config, engine_api, eth_api, engine_events.clone());
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {

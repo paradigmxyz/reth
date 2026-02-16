@@ -123,7 +123,7 @@ pub struct RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus> {
     /// The Network type to when creating all rpc handlers
     network: Network,
     /// How additional tasks are spawned, for example in the eth pubsub namespace
-    executor: Runtime,
+    executor: Option<Runtime>,
     /// Defines how the EVM should be configured before execution.
     evm_config: EvmConfig,
     /// The consensus implementation.
@@ -146,7 +146,15 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         evm_config: EvmConfig,
         consensus: Consensus,
     ) -> Self {
-        Self { provider, pool, network, executor, evm_config, consensus, _primitives: PhantomData }
+        Self {
+            provider,
+            pool,
+            network,
+            executor: Some(executor),
+            evm_config,
+            consensus,
+            _primitives: PhantomData,
+        }
     }
 
     /// Configure the provider instance.
@@ -219,7 +227,15 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     /// Configure the task executor to use for additional tasks.
     pub fn with_executor(self, executor: Runtime) -> Self {
         let Self { pool, network, provider, evm_config, consensus, _primitives, .. } = self;
-        Self { provider, network, pool, executor, evm_config, consensus, _primitives }
+        Self {
+            provider,
+            network,
+            pool,
+            executor: Some(executor),
+            evm_config,
+            consensus,
+            _primitives,
+        }
     }
 
     /// Configure the evm configuration type
@@ -348,6 +364,8 @@ where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
         let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
+        let executor =
+            executor.expect("RpcModuleBuilder requires a Runtime to be set via `with_executor`");
         RpcRegistryInner::new(
             provider,
             pool,
@@ -389,10 +407,17 @@ where
     }
 }
 
-impl<N: NodePrimitives> RpcModuleBuilder<N, (), (), (), (), ()> {
-    /// Create a new instance of the builder with the given [`Runtime`].
-    pub const fn with_runtime(executor: Runtime) -> Self {
-        Self::new((), (), (), executor, (), ())
+impl<N: NodePrimitives> Default for RpcModuleBuilder<N, (), (), (), (), ()> {
+    fn default() -> Self {
+        Self {
+            provider: (),
+            pool: (),
+            network: (),
+            executor: None,
+            evm_config: (),
+            consensus: (),
+            _primitives: PhantomData,
+        }
     }
 }
 

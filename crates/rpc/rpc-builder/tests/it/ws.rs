@@ -156,10 +156,11 @@ async fn test_eth_subscribe_pending_transactions_receives_tx() {
     let pool: TestPool = TestPoolBuilder::default().into();
     let pool_clone = pool.clone();
 
-    let builder = RpcModuleBuilder::with_runtime(Runtime::test())
+    let builder = RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
         .with_pool(pool)
         .with_network(NoopNetwork::default())
+        .with_executor(Runtime::test())
         .with_evm_config(EthEvmConfig::mainnet())
         .with_consensus(NoopConsensus::default());
 
