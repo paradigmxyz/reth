@@ -329,10 +329,11 @@ where
     PruneSenderRecoveryStage: Stage<Provider>,
     HashingStages: StageSet<Provider>,
     HistoryIndexingStages: StageSet<Provider>,
+    TransactionLookupStage: Stage<Provider>,
     PruneStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
-        ExecutionStages::new(
+        let mut builder = ExecutionStages::new(
             self.evm_config,
             self.consensus,
             self.stages_config.clone(),
@@ -343,14 +344,25 @@ where
         .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
             PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
         }))
-        .add_set(HashingStages { stages_config: self.stages_config.clone() })
-        .add_set(HistoryIndexingStages {
-            stages_config: self.stages_config.clone(),
-            prune_modes: self.prune_modes.clone(),
-        })
+        .add_set(HashingStages { stages_config: self.stages_config.clone() });
+
+        if self.stages_config.deferred_history_indexing {
+            // Only add transaction lookup — history indices will be built separately
+            builder = builder.add_stage(TransactionLookupStage::new(
+                self.stages_config.transaction_lookup,
+                self.stages_config.etl.clone(),
+                self.prune_modes.transaction_lookup,
+            ));
+        } else {
+            builder = builder.add_set(HistoryIndexingStages {
+                stages_config: self.stages_config.clone(),
+                prune_modes: self.prune_modes.clone(),
+            });
+        }
+
         // Prune stage should be added after all hashing stages, because otherwise it will
         // delete
-        .add_stage(PruneStage::new(
+        builder.add_stage(PruneStage::new(
             self.prune_modes.clone(),
             self.stages_config.prune.commit_threshold,
         ))

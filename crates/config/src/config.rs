@@ -128,6 +128,10 @@ pub struct StageConfig {
     pub index_account_history: IndexHistoryConfig,
     /// Index Storage History stage configuration.
     pub index_storage_history: IndexHistoryConfig,
+    /// When true, history indexing stages (IndexAccountHistory, IndexStorageHistory) are excluded
+    /// from the pipeline, allowing the node to start syncing without waiting for index generation.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub deferred_history_indexing: bool,
     /// Common ETL related configuration.
     pub etl: EtlConfig,
 }
