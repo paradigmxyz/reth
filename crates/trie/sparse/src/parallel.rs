@@ -1346,9 +1346,10 @@ impl SparseTrie for ParallelSparseTrie {
         use crate::{provider::NoRevealProvider, LeafUpdate};
 
         #[cfg(feature = "trie-debug")]
-        self.debug_recorder.record(RecordedOp::UpdateLeaves {
-            updates: updates.iter().map(|(k, v)| (*k, LeafUpdateRecord::from(v))).collect(),
-        });
+        let recorded_updates: Vec<_> =
+            updates.iter().map(|(k, v)| (*k, LeafUpdateRecord::from(v))).collect();
+        #[cfg(feature = "trie-debug")]
+        let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
         // Drain updates to avoid cloning keys while preserving the map's allocation.
         // On success, entries remain removed; on blinded node failure, they're re-inserted.
@@ -1369,6 +1370,8 @@ impl SparseTrie for ParallelSparseTrie {
                                     let (target_key, min_len) =
                                         Self::proof_target_for_path(key, &full_path, &path);
                                     proof_required_fn(target_key, min_len);
+                                    #[cfg(feature = "trie-debug")]
+                                    recorded_proof_targets.push((target_key, min_len));
                                     updates.insert(key, LeafUpdate::Changed(value));
                                 } else {
                                     return Err(e);
@@ -1383,6 +1386,8 @@ impl SparseTrie for ParallelSparseTrie {
                                 let (target_key, min_len) =
                                     Self::proof_target_for_path(key, &full_path, &path);
                                 proof_required_fn(target_key, min_len);
+                                #[cfg(feature = "trie-debug")]
+                                recorded_proof_targets.push((target_key, min_len));
                                 updates.insert(key, LeafUpdate::Changed(value));
                             } else {
                                 return Err(e);
@@ -1397,6 +1402,8 @@ impl SparseTrie for ParallelSparseTrie {
                             let (target_key, min_len) =
                                 Self::proof_target_for_path(key, &full_path, &path);
                             proof_required_fn(target_key, min_len);
+                            #[cfg(feature = "trie-debug")]
+                            recorded_proof_targets.push((target_key, min_len));
                             updates.insert(key, LeafUpdate::Touched);
                         }
                         // Path is fully revealed (exists or proven non-existent), no action needed.
@@ -1405,6 +1412,13 @@ impl SparseTrie for ParallelSparseTrie {
                 }
             }
         }
+
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.record(RecordedOp::UpdateLeaves {
+            updates: recorded_updates,
+            remaining_keys: updates.keys().copied().collect(),
+            proof_targets: recorded_proof_targets,
+        });
 
         Ok(())
     }

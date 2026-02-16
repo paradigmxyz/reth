@@ -59,6 +59,11 @@ pub enum RecordedOp {
     UpdateLeaves {
         /// The leaf updates that were applied.
         updates: Vec<(B256, LeafUpdateRecord)>,
+        /// Keys remaining in the updates map after the call (i.e. those that could not be applied
+        /// due to blinded nodes).
+        remaining_keys: Vec<B256>,
+        /// Proof targets returned via the callback as `(key, min_len)` pairs.
+        proof_targets: Vec<(B256, u8)>,
     },
     /// Records an `update_subtrie_hashes` call.
     UpdateSubtrieHashes,
