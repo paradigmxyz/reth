@@ -75,7 +75,10 @@ impl<T> Shared<T> {
     #[inline]
     unsafe fn take(&self, i: usize) -> T {
         let slot = unsafe { self.slots.get_unchecked(i) };
-        unsafe { (*slot.value.get()).assume_init_read() }
+        let v = unsafe { (*slot.value.get()).assume_init_read() };
+        // Clear ready so Drop doesn't double-free this slot.
+        slot.ready.store(false, Ordering::Relaxed);
+        v
     }
 
     #[inline]
@@ -259,6 +262,26 @@ mod tests {
         // We can't assert an exact count since the panic may cut production short.
         let drops = DROP_COUNT.load(Ordering::Relaxed);
         assert!(drops > 0, "some items should have been dropped");
+    }
+
+    #[test]
+    fn no_double_drop() {
+        // Verify that consumed items are dropped exactly once (not double-freed by Drop).
+        static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+        struct Counted(#[allow(dead_code)] u64);
+        impl Drop for Counted {
+            fn drop(&mut self) {
+                DROP_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        DROP_COUNT.store(0, Ordering::Relaxed);
+        let n = 200u64;
+        let input: Vec<u64> = (0..n).collect();
+        input.par_iter().map(|&i| Counted(i)).for_each_ordered(|_item| {});
+
+        assert_eq!(DROP_COUNT.load(Ordering::Relaxed), n as usize);
     }
 
     #[test]
