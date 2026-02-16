@@ -56,6 +56,7 @@ use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 /// Blocks with at most this many transactions compute the receipt root inline to avoid
 /// background task overhead.
 const SMALL_BLOCK_RECEIPT_ROOT_TX_THRESHOLD: usize = 50;
+const SMALL_BLOCK_STATE_ROOT_TX_THRESHOLD: usize = 50;
 
 enum ReceiptRootResult {
     Precomputed(ReceiptRootBloom),
@@ -410,7 +411,7 @@ where
         };
 
         // Plan the strategy used for state root computation.
-        let strategy = self.plan_state_root_computation();
+        let strategy = self.plan_state_root_computation(input.transaction_count());
 
         debug!(
             target: "engine::tree::payload_validator",
@@ -1273,7 +1274,12 @@ where
     ///
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
-    const fn plan_state_root_computation(&self) -> StateRootStrategy {
+    fn plan_state_root_computation(&self, transaction_count: usize) -> StateRootStrategy {
+        // Small blocks are faster without spawning parallel state root tasks.
+        if transaction_count > 0 && transaction_count <= SMALL_BLOCK_STATE_ROOT_TX_THRESHOLD {
+            return StateRootStrategy::Synchronous;
+        }
+
         if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
         } else if self.config.use_state_root_task() {
