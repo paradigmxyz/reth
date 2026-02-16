@@ -10,7 +10,11 @@ use crate::tree::{
     EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
     StateProviderDatabase, TreeConfig,
 };
-use alloy_consensus::{proofs::calculate_receipt_root, transaction::Either, TxHashRef, TxReceipt};
+use alloy_consensus::{
+    proofs::calculate_receipt_root,
+    transaction::{Either, TxHashRef},
+    TxReceipt,
+};
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
@@ -58,7 +62,7 @@ use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 const SMALL_BLOCK_RECEIPT_ROOT_TX_THRESHOLD: usize = 50;
 
 enum ReceiptRootResult {
-    Precomputed(ReceiptRootBloom),
+    Precomputed(Box<ReceiptRootBloom>),
     Pending(tokio::sync::oneshot::Receiver<ReceiptRootBloom>),
 }
 
@@ -486,7 +490,7 @@ where
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = match receipt_root_result {
-            ReceiptRootResult::Precomputed(receipt_root_bloom) => Some(receipt_root_bloom),
+            ReceiptRootResult::Precomputed(receipt_root_bloom) => Some(*receipt_root_bloom),
             ReceiptRootResult::Pending(receipt_root_rx) => receipt_root_rx
                 .blocking_recv()
                 .inspect_err(|_| {
@@ -780,9 +784,9 @@ where
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let receipt_root_result = if compute_receipt_root_inline {
-            ReceiptRootResult::Precomputed(Self::compute_receipt_root_bloom(
+            ReceiptRootResult::Precomputed(Box::new(Self::compute_receipt_root_bloom(
                 &output.result.receipts,
-            ))
+            )))
         } else {
             ReceiptRootResult::Pending(
                 result_rx.expect("receipt root receiver missing when task spawned"),
@@ -862,7 +866,8 @@ where
                 let current_len = executor.receipts().len();
                 if current_len > last_sent_len {
                     last_sent_len = current_len;
-                    // Send the latest receipt to the background task for incremental root computation.
+                    // Send the latest receipt to the background task for incremental root
+                    // computation.
                     if let Some(receipt) = executor.receipts().last() {
                         let tx_index = current_len - 1;
                         let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
