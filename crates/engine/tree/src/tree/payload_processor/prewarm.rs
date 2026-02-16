@@ -151,7 +151,14 @@ where
 
             let (done_tx, done_rx) = mpsc::channel();
 
-            let workers_needed = executor.prewarming_pool().current_num_threads();
+            let pool_threads = executor.prewarming_pool().current_num_threads();
+            // Don't spawn more workers than transactions. When transaction_count is 0
+            // (unknown), use all pool threads.
+            let workers_needed = if ctx.env.transaction_count > 0 {
+                ctx.env.transaction_count.min(pool_threads)
+            } else {
+                pool_threads
+            };
 
             // Spawn workers
             let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor,  to_multi_proof.clone(), done_tx.clone());
