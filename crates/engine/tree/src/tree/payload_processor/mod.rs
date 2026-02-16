@@ -27,7 +27,7 @@ use reth_evm::{
     SpecFor, TxEnvFor,
 };
 use reth_metrics::Metrics;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProvider,
     StateProviderFactory, StateReader,
@@ -49,7 +49,6 @@ use std::{
         mpsc::{self, channel},
         Arc,
     },
-    time::Instant,
 };
 use tracing::{debug, debug_span, instrument, warn, Span};
 
@@ -611,7 +610,7 @@ where
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let deferred = if let Some(state_root) = computed_state_root {
-                let start = std::time::Instant::now();
+                let start = Instant::now();
                 let (trie, deferred) = task.into_trie_for_reuse(
                     prune_depth,
                     max_storage_tries,

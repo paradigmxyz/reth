@@ -11,7 +11,7 @@ use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::ParallelIterator;
-use reth_primitives_traits::{Account, ParallelBridgeBuffered};
+use reth_primitives_traits::{Account, FastInstant as Instant, ParallelBridgeBuffered};
 use reth_tasks::Runtime;
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, Nibbles,
@@ -32,10 +32,7 @@ use reth_trie_sparse::{
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
-use std::{
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use std::{sync::mpsc, time::Duration};
 use tracing::{debug, debug_span, error, instrument, trace};
 
 #[expect(clippy::large_enum_variant)]

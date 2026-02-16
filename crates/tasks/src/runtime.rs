@@ -25,7 +25,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
 use tracing::{debug, error};
@@ -277,6 +277,10 @@ struct RuntimeInner {
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
     task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
+    /// Handle to the quanta upkeep thread that periodically refreshes the cached
+    /// high-resolution timestamp used by [`quanta::Instant::recent()`].
+    /// Dropped when the runtime is dropped, stopping the upkeep thread.
+    _quanta_upkeep: Option<quanta::Handle>,
 }
 
 // ── Runtime ───────────────────────────────────────────────────────────
@@ -720,9 +724,9 @@ impl Runtime {
 
     fn do_graceful_shutdown(&self, timeout: Option<Duration>) -> bool {
         let _ = self.0.task_events_tx.send(TaskEvent::GracefulShutdown);
-        let deadline = timeout.map(|t| std::time::Instant::now() + t);
+        let deadline = timeout.map(|t| Instant::now() + t);
         while self.0.graceful_tasks.load(Ordering::SeqCst) > 0 {
-            if deadline.is_some_and(|d| std::time::Instant::now() > d) {
+            if deadline.is_some_and(|d| Instant::now() > d) {
                 debug!("graceful shutdown timed out");
                 return false;
             }
@@ -919,6 +923,8 @@ impl RuntimeBuilder {
             result
         });
 
+        let quanta_upkeep = quanta::Upkeep::new(Duration::from_millis(1)).start().ok();
+
         let inner = RuntimeInner {
             _tokio_runtime: owned_runtime,
             handle,
@@ -941,6 +947,7 @@ impl RuntimeBuilder {
             #[cfg(feature = "rayon")]
             prewarming_pool,
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
+            _quanta_upkeep: quanta_upkeep,
         };
 
         Ok(Runtime(Arc::new(inner)))
