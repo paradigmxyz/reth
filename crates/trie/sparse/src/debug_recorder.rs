@@ -6,6 +6,7 @@
 
 use alloc::vec::Vec;
 use alloy_primitives::{Bytes, B256};
+use alloy_trie::nodes::TrieNode;
 use reth_trie_common::Nibbles;
 use serde::{Deserialize, Serialize};
 
@@ -72,16 +73,12 @@ pub enum RecordedOp {
 }
 
 /// A serializable record of a proof trie node.
-///
-/// This is a simplified version of [`reth_trie_common::ProofTrieNode`] that stores
-/// the RLP-encoded node bytes rather than the full [`alloy_trie::nodes::TrieNode`]
-/// (which does not implement `Serialize`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProofTrieNodeRecord {
     /// The nibble path of the node.
     pub path: Nibbles,
-    /// The RLP-encoded trie node.
-    pub node_rlp: Bytes,
+    /// The trie node.
+    pub node: TrieNode,
     /// The branch node masks `(hash_mask, tree_mask)` stored as raw `u16` values, if present.
     pub masks: Option<(u16, u16)>,
 }
@@ -89,12 +86,9 @@ pub struct ProofTrieNodeRecord {
 impl ProofTrieNodeRecord {
     /// Creates a record from a [`reth_trie_common::ProofTrieNode`].
     pub fn from_proof_trie_node(node: &reth_trie_common::ProofTrieNode) -> Self {
-        use alloy_rlp::Encodable;
-        let mut node_rlp = Vec::new();
-        node.node.encode(&mut node_rlp);
         Self {
             path: node.path,
-            node_rlp: node_rlp.into(),
+            node: node.node.clone(),
             masks: node.masks.map(|masks| (masks.hash_mask.get(), masks.tree_mask.get())),
         }
     }
