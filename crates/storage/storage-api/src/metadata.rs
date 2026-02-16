@@ -11,7 +11,7 @@ pub mod keys {
 }
 
 /// Client trait for reading node metadata from the database.
-#[auto_impl::auto_impl(&)]
+#[auto_impl::auto_impl(&, Arc)]
 pub trait MetadataProvider: Send {
     /// Get a metadata value by key
     fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>>;
@@ -55,4 +55,11 @@ pub trait StorageSettingsCache: Send {
     /// IMPORTANT: It does not save settings in storage, that should be done by
     /// [`MetadataWriter::write_storage_settings`]
     fn set_storage_settings_cache(&self, settings: StorageSettings);
+}
+
+/// Trait for accessing the database directory path.
+#[cfg(feature = "std")]
+pub trait StoragePath: Send {
+    /// Returns the path to the database directory (e.g. `<datadir>/db`).
+    fn storage_path(&self) -> std::path::PathBuf;
 }

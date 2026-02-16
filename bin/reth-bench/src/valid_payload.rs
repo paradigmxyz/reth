@@ -3,15 +3,18 @@
 //! before sending additional calls.
 
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_provider::{ext::EngineApi, network::AnyRpcBlock, Network, Provider};
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ForkchoiceState,
-    ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    ExecutionData, ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadSidecar,
+    ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
 };
 use alloy_transport::TransportResult;
 use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
 use reth_node_api::EngineApiMessageVersion;
+use reth_rpc_api::RethNewPayloadInput;
+use serde::Deserialize;
+use std::time::Duration;
 use tracing::{debug, error};
 
 /// An extension trait for providers that implement the engine API, to wait for a VALID response.
@@ -161,10 +164,26 @@ where
     }
 }
 
+/// Converts an RPC block into versioned engine API params and an [`ExecutionData`].
+///
+/// Returns `(version, versioned_params, execution_data)`.
+///
+/// When `no_wait` is `true` and using `reth_newPayload`, passes `wait: false` to skip
+/// persistence and cache waiting.
 pub(crate) fn block_to_new_payload(
     block: AnyRpcBlock,
     is_optimism: bool,
-) -> eyre::Result<(EngineApiMessageVersion, serde_json::Value)> {
+    rlp: Option<Bytes>,
+    reth_new_payload: bool,
+    no_wait: bool,
+) -> eyre::Result<(Option<EngineApiMessageVersion>, serde_json::Value)> {
+    if let Some(rlp) = rlp {
+        let wait = reth_new_payload_wait(no_wait);
+        return Ok((
+            None,
+            serde_json::to_value((RethNewPayloadInput::<ExecutionData>::BlockRlp(rlp), wait))?,
+        ));
+    }
     let block = block
         .into_inner()
         .map_header(|header| header.map(|h| h.into_header_with_defaults()))
@@ -176,16 +195,41 @@ pub(crate) fn block_to_new_payload(
 
     // Convert to execution payload
     let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
-    payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)
+    let (version, params, execution_data) =
+        payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)?;
+
+    if reth_new_payload {
+        let wait = reth_new_payload_wait(no_wait);
+        Ok((
+            None,
+            serde_json::to_value((RethNewPayloadInput::ExecutionData(execution_data), wait))?,
+        ))
+    } else {
+        Ok((Some(version), params))
+    }
 }
 
+/// Returns the `wait` parameter value for `reth_newPayload`.
+///
+/// When `no_wait` is `true`, returns `Some(false)` to skip waiting.
+/// When `no_wait` is `false`, returns `None` to use the server default (wait).
+pub(crate) fn reth_new_payload_wait(no_wait: bool) -> Option<bool> {
+    no_wait.then_some(false)
+}
+
+/// Converts an execution payload and sidecar into versioned engine API params and an
+/// [`ExecutionData`].
+///
+/// Returns `(version, versioned_params, execution_data)`.
 pub(crate) fn payload_to_new_payload(
     payload: ExecutionPayload,
     sidecar: ExecutionPayloadSidecar,
     is_optimism: bool,
     withdrawals_root: Option<B256>,
     target_version: Option<EngineApiMessageVersion>,
-) -> eyre::Result<(EngineApiMessageVersion, serde_json::Value)> {
+) -> eyre::Result<(EngineApiMessageVersion, serde_json::Value, ExecutionData)> {
+    let execution_data = ExecutionData { payload: payload.clone(), sidecar: sidecar.clone() };
+
     let (version, params) = match payload {
         ExecutionPayload::V3(payload) => {
             let cancun = sidecar.cancun().unwrap();
@@ -244,7 +288,7 @@ pub(crate) fn payload_to_new_payload(
         }
     };
 
-    Ok((version, params))
+    Ok((version, params, execution_data))
 }
 
 /// Calls the correct `engine_newPayload` method depending on the given [`ExecutionPayload`] and its
@@ -252,32 +296,85 @@ pub(crate) fn payload_to_new_payload(
 ///
 /// # Panics
 /// If the given payload is a V3 payload, but a parent beacon block root is provided as `None`.
+#[allow(dead_code)]
 pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
     provider: P,
-    version: EngineApiMessageVersion,
+    version: Option<EngineApiMessageVersion>,
     params: serde_json::Value,
-) -> TransportResult<()> {
-    let method = version.method_name();
+) -> eyre::Result<Option<NewPayloadTimingBreakdown>> {
+    call_new_payload_with_reth(provider, version, params).await
+}
+
+/// Response from `reth_newPayload` endpoint, which includes server-measured latency.
+#[derive(Debug, Deserialize)]
+struct RethPayloadStatus {
+    latency_us: u64,
+    #[serde(default)]
+    persistence_wait_us: Option<u64>,
+    #[serde(default)]
+    execution_cache_wait_us: u64,
+    #[serde(default)]
+    sparse_trie_wait_us: u64,
+}
+
+/// Server-side timing breakdown from `reth_newPayload` endpoint.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct NewPayloadTimingBreakdown {
+    /// Server-side execution latency.
+    pub(crate) latency: Duration,
+    /// Time spent waiting for persistence. `None` when no persistence was in-flight.
+    pub(crate) persistence_wait: Option<Duration>,
+    /// Time spent waiting for execution cache lock.
+    pub(crate) execution_cache_wait: Duration,
+    /// Time spent waiting for sparse trie lock.
+    pub(crate) sparse_trie_wait: Duration,
+}
+
+/// Calls either `engine_newPayload*` or `reth_newPayload` depending on whether
+/// `version` is provided.
+///
+/// When `version` is `None`, uses `reth_newPayload` endpoint with provided params.
+///
+/// Returns the server-reported timing breakdown when using the reth namespace, or `None` for
+/// the standard engine namespace.
+pub(crate) async fn call_new_payload_with_reth<N: Network, P: Provider<N>>(
+    provider: P,
+    version: Option<EngineApiMessageVersion>,
+    params: serde_json::Value,
+) -> eyre::Result<Option<NewPayloadTimingBreakdown>> {
+    let method = version.map(|v| v.method_name()).unwrap_or("reth_newPayload");
 
     debug!(target: "reth-bench", method, "Sending newPayload");
 
-    let mut status: PayloadStatus = provider.client().request(method, &params).await?;
+    let resp = loop {
+        let resp: serde_json::Value = provider.client().request(method, &params).await?;
+        let status = PayloadStatus::deserialize(&resp)?;
 
-    while !status.is_valid() {
+        if status.is_valid() {
+            break resp;
+        }
         if status.is_invalid() {
-            error!(target: "reth-bench", ?status, ?params, "Invalid {method}",);
-            return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(std::io::Error::other(
-                format!("Invalid {method}: {status:?}"),
-            ))))
+            return Err(eyre::eyre!("Invalid {method}: {status:?}"));
         }
         if status.is_syncing() {
-            return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
-                "invalid range: no canonical state found for parent of requested block",
-            ))
+            return Err(eyre::eyre!(
+                "invalid range: no canonical state found for parent of requested block"
+            ));
         }
-        status = provider.client().request(method, &params).await?;
+    };
+
+    if version.is_some() {
+        return Ok(None);
     }
-    Ok(())
+
+    let resp: RethPayloadStatus = serde_json::from_value(resp)?;
+
+    Ok(Some(NewPayloadTimingBreakdown {
+        latency: Duration::from_micros(resp.latency_us),
+        persistence_wait: resp.persistence_wait_us.map(Duration::from_micros),
+        execution_cache_wait: Duration::from_micros(resp.execution_cache_wait_us),
+        sparse_trie_wait: Duration::from_micros(resp.sparse_trie_wait_us),
+    }))
 }
 
 /// Calls the correct `engine_forkchoiceUpdated` method depending on the given
@@ -301,6 +398,50 @@ pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
         }
         EngineApiMessageVersion::V1 => {
             provider.fork_choice_updated_v1_wait(forkchoice_state, payload_attributes).await
+        }
+    }
+}
+
+/// Calls either `reth_forkchoiceUpdated` or the standard `engine_forkchoiceUpdated*` depending
+/// on `use_reth`.
+///
+/// When `use_reth` is true, uses the `reth_forkchoiceUpdated` endpoint which sends a regular FCU
+/// with no payload attributes.
+pub(crate) async fn call_forkchoice_updated_with_reth<
+    N: Network,
+    P: Provider<N> + EngineApiValidWaitExt<N>,
+>(
+    provider: P,
+    message_version: Option<EngineApiMessageVersion>,
+    forkchoice_state: ForkchoiceState,
+) -> TransportResult<ForkchoiceUpdated> {
+    if let Some(message_version) = message_version {
+        call_forkchoice_updated(provider, message_version, forkchoice_state, None).await
+    } else {
+        let method = "reth_forkchoiceUpdated";
+        let reth_params = serde_json::to_value((forkchoice_state,))
+            .expect("ForkchoiceState serialization cannot fail");
+
+        debug!(target: "reth-bench", method, "Sending forkchoiceUpdated");
+
+        loop {
+            let resp: ForkchoiceUpdated = provider.client().request(method, &reth_params).await?;
+
+            if resp.is_valid() {
+                break Ok(resp)
+            }
+
+            if resp.is_invalid() {
+                error!(target: "reth-bench", ?resp, "Invalid {method}");
+                return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(
+                    std::io::Error::other(format!("Invalid {method}: {resp:?}")),
+                )))
+            }
+            if resp.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
+            }
         }
     }
 }

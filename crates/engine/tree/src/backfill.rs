@@ -10,7 +10,7 @@
 use futures::FutureExt;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
 use tracing::trace;
@@ -80,7 +80,7 @@ pub enum BackfillEvent {
 #[derive(Debug)]
 pub struct PipelineSync<N: ProviderNodeTypes> {
     /// The type that can spawn the pipeline task.
-    pipeline_task_spawner: Box<dyn TaskSpawner>,
+    pipeline_task_spawner: Runtime,
     /// The current state of the pipeline.
     /// The pipeline is used for large ranges.
     pipeline_state: PipelineState<N>,
@@ -90,7 +90,7 @@ pub struct PipelineSync<N: ProviderNodeTypes> {
 
 impl<N: ProviderNodeTypes> PipelineSync<N> {
     /// Create a new instance.
-    pub fn new(pipeline: Pipeline<N>, pipeline_task_spawner: Box<dyn TaskSpawner>) -> Self {
+    pub fn new(pipeline: Pipeline<N>, pipeline_task_spawner: Runtime) -> Self {
         Self {
             pipeline_task_spawner,
             pipeline_state: PipelineState::Idle(Some(Box::new(pipeline))),
@@ -140,10 +140,10 @@ impl<N: ProviderNodeTypes> PipelineSync<N> {
                 let pipeline = pipeline.take().expect("exists");
                 self.pipeline_task_spawner.spawn_critical_blocking_task(
                     "pipeline task",
-                    Box::pin(async move {
+                    async move {
                         let result = pipeline.run_as_fut(Some(target)).await;
                         let _ = tx.send(result);
-                    }),
+                    },
                 );
                 self.pipeline_state = PipelineState::Running(rx);
 
@@ -241,7 +241,7 @@ mod tests {
     use reth_provider::test_utils::MockNodeTypesWithDB;
     use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;
-    use reth_tasks::TokioTaskExecutor;
+    use reth_tasks::Runtime;
     use std::{collections::VecDeque, future::poll_fn, sync::Arc};
 
     struct TestHarness {
@@ -267,7 +267,7 @@ mod tests {
                 })]))
                 .build(chain_spec);
 
-            let pipeline_sync = PipelineSync::new(pipeline, Box::<TokioTaskExecutor>::default());
+            let pipeline_sync = PipelineSync::new(pipeline, Runtime::test());
             let client = TestFullBlockClient::default();
             let header = Header {
                 base_fee_per_gas: Some(7),

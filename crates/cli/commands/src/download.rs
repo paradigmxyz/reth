@@ -384,15 +384,19 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
     let mut total_size: Option<u64> = None;
     let mut last_error: Option<eyre::Error> = None;
 
+    let finalize_download = |size: u64| -> Result<(PathBuf, u64)> {
+        fs::rename(&part_path, &final_path)?;
+        info!(target: "reth::cli", "Download complete: {}", final_path.display());
+        Ok((final_path.clone(), size))
+    };
+
     for attempt in 1..=MAX_DOWNLOAD_RETRIES {
         let existing_size = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
 
         if let Some(total) = total_size &&
             existing_size >= total
         {
-            fs::rename(&part_path, &final_path)?;
-            info!(target: "reth::cli", "Download complete: {}", final_path.display());
-            return Ok((final_path, total));
+            return finalize_download(total);
         }
 
         if attempt > 1 {
@@ -476,9 +480,7 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
             continue;
         }
 
-        fs::rename(&part_path, &final_path)?;
-        info!(target: "reth::cli", "Download complete: {}", final_path.display());
-        return Ok((final_path, current_total));
+        return finalize_download(current_total);
     }
 
     Err(last_error

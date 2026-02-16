@@ -74,13 +74,14 @@ impl EvmFactory for MyEvmFactory {
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
         let new_cache = self.precompile_cache.clone();
+        let spec = input.cfg_env.spec;
 
         let evm = Context::mainnet()
             .with_db(db)
             .with_cfg(input.cfg_env)
             .with_block(input.block_env)
             .build_mainnet_with_inspector(NoOpInspector {})
-            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::default().precompiles));
+            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::new(spec).precompiles));
 
         let mut evm = EthEvm::new(evm, false);
 
@@ -187,7 +188,7 @@ where
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
-    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
+    let runtime = Runtime::test();
 
     // create a custom chain spec
     let spec = ChainSpec::builder()

@@ -145,9 +145,10 @@ impl<T: RlpBincode + 'static> SerdeBincodeCompat for T {
 mod block_bincode {
     use crate::serde_bincode_compat::SerdeBincodeCompat;
     use alloc::{borrow::Cow, vec::Vec};
-    use alloy_consensus::TxEip4844;
+    use alloy_consensus::TxTy;
     use alloy_eips::eip4895::Withdrawals;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use core::fmt::Debug;
+    use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
     /// Bincode-compatible [`alloy_consensus::Block`] serde implementation.
@@ -319,9 +320,11 @@ mod block_bincode {
         }
     }
 
-    impl super::SerdeBincodeCompat for alloy_consensus::EthereumTxEnvelope<TxEip4844> {
+    impl<T: Clone + Serialize + DeserializeOwned + Debug + 'static> super::SerdeBincodeCompat
+        for alloy_consensus::EthereumTxEnvelope<T>
+    {
         type BincodeRepr<'a> =
-            alloy_consensus::serde_bincode_compat::transaction::EthereumTxEnvelope<'a>;
+            alloy_consensus::serde_bincode_compat::transaction::EthereumTxEnvelope<'a, T>;
 
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
             self.into()
@@ -336,6 +339,20 @@ mod block_bincode {
     impl super::SerdeBincodeCompat for op_alloy_consensus::OpTxEnvelope {
         type BincodeRepr<'a> =
             op_alloy_consensus::serde_bincode_compat::transaction::OpTxEnvelope<'a>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
+        }
+    }
+
+    impl<T: TxTy + Serialize + DeserializeOwned> super::SerdeBincodeCompat
+        for alloy_consensus::EthereumReceipt<T>
+    {
+        type BincodeRepr<'a> = alloy_consensus::serde_bincode_compat::EthereumReceipt<'a, T>;
 
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
             self.into()

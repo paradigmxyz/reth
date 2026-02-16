@@ -23,7 +23,7 @@ use reth_rpc_eth_types::{
     PendingBlockEnv, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{
-    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx, ReceiptProvider,
+    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx,
     StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::{
@@ -62,11 +62,8 @@ pub trait LoadPendingBlock:
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv<Self::Evm>, Self::Error> {
-        if let Some(block) = self.provider().pending_block().map_err(Self::Error::from_eth_err)? &&
-            let Some(receipts) = self
-                .provider()
-                .receipts_by_block(block.hash().into())
-                .map_err(Self::Error::from_eth_err)?
+        if let Some((block, receipts)) =
+            self.provider().pending_block_and_receipts().map_err(Self::Error::from_eth_err)?
         {
             // Note: for the PENDING block we assume it is past the known merge block and
             // thus this will not fail when looking up the total

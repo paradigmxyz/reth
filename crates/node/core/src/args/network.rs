@@ -39,6 +39,7 @@ use reth_network::{
     HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives,
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
+use reth_tasks::Runtime;
 use secp256k1::SecretKey;
 use std::str::FromStr;
 use tracing::error;
@@ -326,6 +327,7 @@ impl NetworkArgs {
         chain_spec: impl EthChainSpec,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
+        executor: Runtime,
     ) -> NetworkConfigBuilder<N> {
         let addr = self.resolved_addr();
         let chain_bootnodes = self
@@ -345,7 +347,7 @@ impl NetworkArgs {
             .with_enforce_enr_fork_id(self.enforce_enr_fork_id);
 
         // Configure basic network stack
-        NetworkConfigBuilder::<N>::new(secret_key)
+        NetworkConfigBuilder::<N>::new(secret_key, executor)
             .external_ip_resolver(self.nat.clone())
             .sessions_config(
                 config.sessions.clone().with_upscaled_event_buffer(peers_config.max_peers()),
@@ -555,7 +557,7 @@ pub struct DiscoveryArgs {
     /// The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
     /// IPv6, or `--discovery.addr.ipv6` is set.
     #[arg(id = "discovery.v5.port.ipv6", long = "discovery.v5.port.ipv6", value_name = "DISCOVERY_V5_PORT_IPV6",
-    default_value = None, default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
+    default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
     pub discv5_port_ipv6: u16,
 
     /// The interval in seconds at which to carry out periodic lookup queries, for the whole
@@ -1097,13 +1099,14 @@ mod tests {
             MAINNET.clone(),
             secret_key,
             peers_file.clone(),
+            Runtime::test(),
         );
 
         let net_cfg = builder.build_with_noop_provider(MAINNET.clone());
 
-        // Assert basic_nodes contains our node
+        // Assert persisted_peers contains our node (legacy format is auto-converted)
         let node: NodeRecord = enode.parse().unwrap();
-        assert!(net_cfg.peers_config.basic_nodes.contains(&node));
+        assert!(net_cfg.peers_config.persisted_peers.iter().any(|p| p.record == node));
 
         // Cleanup
         let _ = fs::remove_file(&peers_file);

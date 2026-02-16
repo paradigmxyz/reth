@@ -5,7 +5,7 @@ use futures::Future;
 use reth_rpc_eth_types::EthApiError;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskSpawner,
+    Runtime,
 };
 use std::sync::Arc;
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
@@ -27,7 +27,7 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
     /// Returns a handle for spawning IO heavy blocking tasks.
     ///
     /// Runtime access in default trait method implementations.
-    fn io_task_spawner(&self) -> impl TaskSpawner;
+    fn io_task_spawner(&self) -> &Runtime;
 
     /// Returns a handle for spawning __CPU heavy__ blocking tasks, such as tracing requests.
     ///
@@ -163,10 +163,10 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
     {
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
-        self.io_task_spawner().spawn_blocking_task(Box::pin(async move {
+        self.io_task_spawner().spawn_blocking_task(async move {
             let res = f(this);
             let _ = tx.send(res);
-        }));
+        });
 
         async move { rx.await.map_err(|_| EthApiError::InternalEthError)? }
     }
@@ -186,10 +186,10 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
     {
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
-        self.io_task_spawner().spawn_blocking_task(Box::pin(async move {
+        self.io_task_spawner().spawn_blocking_task(async move {
             let res = f(this).await;
             let _ = tx.send(res);
-        }));
+        });
 
         async move { rx.await.map_err(|_| EthApiError::InternalEthError)? }
     }

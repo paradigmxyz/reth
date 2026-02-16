@@ -1,4 +1,4 @@
-//! Implements Ethereum wire protocol for versions 66 through 70.
+//! Implements Ethereum wire protocol for versions 66 through 71.
 //! Defines structs/enums for messages, request-response pairs, and broadcasts.
 //! Handles compatibility with [`EthVersion`].
 //!
@@ -7,10 +7,10 @@
 //! Reference: [Ethereum Wire Protocol](https://github.com/ethereum/devp2p/blob/master/caps/eth.md).
 
 use super::{
-    broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
-    GetNodeData, GetPooledTransactions, GetReceipts, GetReceipts70, NewPooledTransactionHashes66,
-    NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, StatusEth69,
-    Transactions,
+    broadcast::NewBlockHashes, BlockAccessLists, BlockBodies, BlockHeaders, GetBlockAccessLists,
+    GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
+    GetReceipts70, NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData,
+    PooledTransactions, Receipts, Status, StatusEth69, Transactions,
 };
 use crate::{
     status::StatusMessage, BlockRangeUpdate, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
@@ -133,7 +133,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::NodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
+                    return Err(MessageError::Invalid(version, EthMessageID::NodeData))
                 }
                 EthMessage::NodeData(RequestPair::decode(buf)?)
             }
@@ -167,6 +167,18 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                     return Err(MessageError::Invalid(version, EthMessageID::BlockRangeUpdate))
                 }
                 EthMessage::BlockRangeUpdate(BlockRangeUpdate::decode(buf)?)
+            }
+            EthMessageID::GetBlockAccessLists => {
+                if version < EthVersion::Eth71 {
+                    return Err(MessageError::Invalid(version, EthMessageID::GetBlockAccessLists))
+                }
+                EthMessage::GetBlockAccessLists(RequestPair::decode(buf)?)
+            }
+            EthMessageID::BlockAccessLists => {
+                if version < EthVersion::Eth71 {
+                    return Err(MessageError::Invalid(version, EthMessageID::BlockAccessLists))
+                }
+                EthMessage::BlockAccessLists(RequestPair::decode(buf)?)
             }
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
@@ -250,6 +262,8 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 ///
 /// The `eth/70` (EIP-7975) keeps the eth/69 status format and introduces partial receipts.
 /// requests/responses.
+///
+/// The `eth/71` draft extends eth/70 with block access list request/response messages.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -310,6 +324,8 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// `GetReceipts` in EIP-7975 inlines the request id. The type still wraps
     /// a [`RequestPair`], but with a custom inline encoding.
     GetReceipts70(RequestPair<GetReceipts70>),
+    /// Represents a `GetBlockAccessLists` request-response pair for eth/71.
+    GetBlockAccessLists(RequestPair<GetBlockAccessLists>),
     /// Represents a Receipts request-response pair.
     #[cfg_attr(
         feature = "serde",
@@ -332,6 +348,8 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// request id. The type still wraps a [`RequestPair`], but with a custom
     /// inline encoding.
     Receipts70(RequestPair<Receipts70<N::Receipt>>),
+    /// Represents a `BlockAccessLists` request-response pair for eth/71.
+    BlockAccessLists(RequestPair<BlockAccessLists>),
     /// Represents a `BlockRangeUpdate` message broadcast to the network.
     #[cfg_attr(
         feature = "serde",
@@ -364,6 +382,8 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::GetReceipts(_) | Self::GetReceipts70(_) => EthMessageID::GetReceipts,
             Self::Receipts(_) | Self::Receipts69(_) | Self::Receipts70(_) => EthMessageID::Receipts,
             Self::BlockRangeUpdate(_) => EthMessageID::BlockRangeUpdate,
+            Self::GetBlockAccessLists(_) => EthMessageID::GetBlockAccessLists,
+            Self::BlockAccessLists(_) => EthMessageID::BlockAccessLists,
             Self::Other(msg) => EthMessageID::Other(msg.id as u8),
         }
     }
@@ -376,6 +396,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
                 Self::GetBlockHeaders(_) |
                 Self::GetReceipts(_) |
                 Self::GetReceipts70(_) |
+                Self::GetBlockAccessLists(_) |
                 Self::GetPooledTransactions(_) |
                 Self::GetNodeData(_)
         )
@@ -389,6 +410,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
                 Self::Receipts(_) |
                 Self::Receipts69(_) |
                 Self::Receipts70(_) |
+                Self::BlockAccessLists(_) |
                 Self::BlockHeaders(_) |
                 Self::BlockBodies(_) |
                 Self::NodeData(_)
@@ -443,9 +465,11 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
             Self::GetReceipts70(request) => request.encode(out),
+            Self::GetBlockAccessLists(request) => request.encode(out),
             Self::Receipts(receipts) => receipts.encode(out),
             Self::Receipts69(receipt69) => receipt69.encode(out),
             Self::Receipts70(receipt70) => receipt70.encode(out),
+            Self::BlockAccessLists(block_access_lists) => block_access_lists.encode(out),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.encode(out),
             Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
@@ -468,9 +492,11 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
             Self::GetReceipts70(request) => request.length(),
+            Self::GetBlockAccessLists(request) => request.length(),
             Self::Receipts(receipts) => receipts.length(),
             Self::Receipts69(receipt69) => receipt69.length(),
             Self::Receipts70(receipt70) => receipt70.length(),
+            Self::BlockAccessLists(block_access_lists) => block_access_lists.length(),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.length(),
             Self::Other(unknown) => unknown.length(),
         }
@@ -559,6 +585,14 @@ pub enum EthMessageID {
     ///
     /// Introduced in Eth69
     BlockRangeUpdate = 0x11,
+    /// Requests block access lists.
+    ///
+    /// Introduced in Eth71
+    GetBlockAccessLists = 0x12,
+    /// Represents block access lists.
+    ///
+    /// Introduced in Eth71
+    BlockAccessLists = 0x13,
     /// Represents unknown message types.
     Other(u8),
 }
@@ -583,13 +617,17 @@ impl EthMessageID {
             Self::GetReceipts => 0x0f,
             Self::Receipts => 0x10,
             Self::BlockRangeUpdate => 0x11,
+            Self::GetBlockAccessLists => 0x12,
+            Self::BlockAccessLists => 0x13,
             Self::Other(value) => *value, // Return the stored `u8`
         }
     }
 
     /// Returns the max value for the given version.
     pub const fn max(version: EthVersion) -> u8 {
-        if version as u8 >= EthVersion::Eth69 as u8 {
+        if version.is_eth71() {
+            Self::BlockAccessLists.to_u8()
+        } else if version.is_eth69_or_newer() {
             Self::BlockRangeUpdate.to_u8()
         } else {
             Self::Receipts.to_u8()
@@ -634,6 +672,8 @@ impl Decodable for EthMessageID {
             0x0f => Self::GetReceipts,
             0x10 => Self::Receipts,
             0x11 => Self::BlockRangeUpdate,
+            0x12 => Self::GetBlockAccessLists,
+            0x13 => Self::BlockAccessLists,
             unknown => Self::Other(*unknown),
         };
         buf.advance(1);
@@ -662,6 +702,8 @@ impl TryFrom<usize> for EthMessageID {
             0x0f => Ok(Self::GetReceipts),
             0x10 => Ok(Self::Receipts),
             0x11 => Ok(Self::BlockRangeUpdate),
+            0x12 => Ok(Self::GetBlockAccessLists),
+            0x13 => Ok(Self::BlockAccessLists),
             _ => Err("Invalid message ID"),
         }
     }
@@ -742,8 +784,9 @@ where
 mod tests {
     use super::MessageError;
     use crate::{
-        message::RequestPair, EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion,
-        GetNodeData, NodeData, ProtocolMessage, RawCapabilityMessage,
+        message::RequestPair, BlockAccessLists, EthMessage, EthMessageID, EthNetworkPrimitives,
+        EthVersion, GetBlockAccessLists, GetNodeData, NodeData, ProtocolMessage,
+        RawCapabilityMessage,
     };
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable, Error};
@@ -782,6 +825,60 @@ mod tests {
             &mut &buf[..],
         );
         assert!(matches!(msg, Err(MessageError::Invalid(..))));
+    }
+
+    #[test]
+    fn test_bal_message_version_gating() {
+        let get_block_access_lists =
+            EthMessage::<EthNetworkPrimitives>::GetBlockAccessLists(RequestPair {
+                request_id: 1337,
+                message: GetBlockAccessLists(vec![]),
+            });
+        let buf = encode(ProtocolMessage {
+            message_type: EthMessageID::GetBlockAccessLists,
+            message: get_block_access_lists,
+        });
+        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth70,
+            &mut &buf[..],
+        );
+        assert!(matches!(
+            msg,
+            Err(MessageError::Invalid(EthVersion::Eth70, EthMessageID::GetBlockAccessLists))
+        ));
+
+        let block_access_lists =
+            EthMessage::<EthNetworkPrimitives>::BlockAccessLists(RequestPair {
+                request_id: 1337,
+                message: BlockAccessLists(vec![]),
+            });
+        let buf = encode(ProtocolMessage {
+            message_type: EthMessageID::BlockAccessLists,
+            message: block_access_lists,
+        });
+        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth70,
+            &mut &buf[..],
+        );
+        assert!(matches!(
+            msg,
+            Err(MessageError::Invalid(EthVersion::Eth70, EthMessageID::BlockAccessLists))
+        ));
+    }
+
+    #[test]
+    fn test_bal_message_eth71_roundtrip() {
+        let msg = ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::GetBlockAccessLists(
+            RequestPair { request_id: 42, message: GetBlockAccessLists(vec![]) },
+        ));
+        let encoded = encode(msg.clone());
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth71,
+            &mut &encoded[..],
+        )
+        .unwrap();
+
+        assert_eq!(decoded, msg);
     }
 
     #[test]

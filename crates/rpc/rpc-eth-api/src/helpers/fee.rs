@@ -73,6 +73,17 @@ pub trait EthFees:
                 return Err(EthApiError::InvalidRewardPercentiles.into())
             }
 
+            // If reward percentiles were specified, we
+            // need to validate that they are monotonically
+            // increasing and 0 <= p <= 100
+            // Note: The types used ensure that the percentiles are never < 0
+            if let Some(percentiles) = &reward_percentiles &&
+                (percentiles.iter().any(|p| *p < 0.0 || *p > 100.0) ||
+                    percentiles.windows(2).any(|w| w[0] > w[1]))
+            {
+                return Err(EthApiError::InvalidRewardPercentiles.into())
+            }
+
             // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
             let max_fee_history = if reward_percentiles.is_none() {
                 self.gas_oracle().config().max_header_history
@@ -116,17 +127,6 @@ pub trait EthFees:
             // Ensure that we would not be querying outside of genesis
             if end_block_plus < block_count {
                 block_count = end_block_plus;
-            }
-
-            // If reward percentiles were specified, we
-            // need to validate that they are monotonically
-            // increasing and 0 <= p <= 100
-            // Note: The types used ensure that the percentiles are never < 0
-            if let Some(percentiles) = &reward_percentiles &&
-                (percentiles.iter().any(|p| *p < 0.0 || *p > 100.0) ||
-                    percentiles.windows(2).any(|w| w[0] > w[1]))
-            {
-                return Err(EthApiError::InvalidRewardPercentiles.into())
             }
 
             // Fetch the headers and ensure we got all of them

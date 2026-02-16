@@ -15,7 +15,7 @@ use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
-use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInfo};
+use alloy_rpc_types_eth::TransactionInfo;
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_primitives_traits::{
@@ -343,9 +343,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 return Ok(None);
             }
 
-            let Ok(high) = self.provider().best_block_number() else {
-                return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into());
-            };
+            let high = self.provider().best_block_number().map_err(Self::Error::from_eth_err)?;
 
             // Perform a binary search over the block range to find the block in which the sender's
             // nonce reached the requested nonce.
@@ -629,15 +627,9 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         async move {
             // First, try the RPC cache
             if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
-                let Some(tx) = cached.recovered_transaction()
+                let Some(source) = cached.to_transaction_source()
             {
-                return Ok(Some(TransactionSource::Block {
-                    transaction: tx.cloned(),
-                    index: cached.tx_index as u64,
-                    block_hash: cached.block.hash(),
-                    block_number: cached.block.number(),
-                    base_fee: cached.block.base_fee_per_gas(),
-                }));
+                return Ok(Some(source));
             }
 
             // Cache miss - try to find the transaction on disk

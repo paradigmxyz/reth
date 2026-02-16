@@ -8,9 +8,9 @@ use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
-use reth_primitives_traits::constants::gas_units::MEGAGAS;
+use reth_primitives_traits::{constants::gas_units::MEGAGAS, FastInstant as Instant};
 use reth_trie::updates::TrieUpdates;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Upper bounds for each gas bucket. The last bucket is a catch-all for
 /// everything above the final threshold: <5M, 5-10M, 10-20M, 20-30M, 30-40M, >40M.
@@ -34,6 +34,10 @@ pub struct EngineApiMetrics {
     /// Metrics for EIP-7928 Block-Level Access Lists (BAL).
     #[allow(dead_code)]
     pub(crate) bal: BalMetrics,
+    /// Gas-bucketed execution sub-phase metrics.
+    pub(crate) execution_gas_buckets: ExecutionGasBucketMetrics,
+    /// Gas-bucketed block validation sub-phase metrics.
+    pub(crate) block_validation_gas_buckets: BlockValidationGasBucketMetrics,
 }
 
 impl EngineApiMetrics {
@@ -80,6 +84,22 @@ impl EngineApiMetrics {
     /// Records the duration of block post-execution changes (e.g., finalization).
     pub fn record_post_execution(&self, elapsed: Duration) {
         self.executor.post_execution_histogram.record(elapsed);
+    }
+
+    /// Records execution duration into the gas-bucketed execution histogram.
+    pub fn record_block_execution_gas_bucket(&self, gas_used: u64, elapsed: Duration) {
+        let idx = GasBucketMetrics::bucket_index(gas_used);
+        self.execution_gas_buckets.buckets[idx]
+            .execution_gas_bucket_histogram
+            .record(elapsed.as_secs_f64());
+    }
+
+    /// Records state root duration into the gas-bucketed block validation histogram.
+    pub fn record_state_root_gas_bucket(&self, gas_used: u64, elapsed_secs: f64) {
+        let idx = GasBucketMetrics::bucket_index(gas_used);
+        self.block_validation_gas_buckets.buckets[idx]
+            .state_root_gas_bucket_histogram
+            .record(elapsed_secs);
     }
 
     /// Records the time spent waiting for the next transaction from the iterator.
@@ -161,6 +181,10 @@ pub struct EngineMetrics {
     pub(crate) failed_forkchoice_updated_response_deliveries: Counter,
     /// block insert duration
     pub(crate) block_insert_total_duration: Histogram,
+    /// The number of times newPayload processing was delayed due to persistence backpressure.
+    pub(crate) persistence_backpressure_count: Counter,
+    /// Duration of persistence backpressure waits.
+    pub(crate) persistence_backpressure_duration: Histogram,
 }
 
 /// Metrics for engine forkchoiceUpdated responses.
@@ -280,7 +304,8 @@ impl GasBucketMetrics {
             .record(gas_used as f64 / elapsed.as_secs_f64());
     }
 
-    fn bucket_index(gas_used: u64) -> usize {
+    /// Returns the bucket index for a given gas value.
+    pub(crate) fn bucket_index(gas_used: u64) -> usize {
         GAS_BUCKET_THRESHOLDS
             .iter()
             .position(|&threshold| gas_used < threshold)
@@ -288,7 +313,7 @@ impl GasBucketMetrics {
     }
 
     /// Returns a human-readable label like `<5M`, `5-10M`, … `>40M`.
-    fn bucket_label(index: usize) -> String {
+    pub(crate) fn bucket_label(index: usize) -> String {
         if index == 0 {
             let hi = GAS_BUCKET_THRESHOLDS[0] / MEGAGAS;
             format!("<{hi}M")
@@ -299,6 +324,56 @@ impl GasBucketMetrics {
         } else {
             let lo = GAS_BUCKET_THRESHOLDS[GAS_BUCKET_THRESHOLDS.len() - 1] / MEGAGAS;
             format!(">{lo}M")
+        }
+    }
+}
+
+/// Per-gas-bucket execution duration metric.
+#[derive(Clone, Metrics)]
+#[metrics(scope = "sync.execution")]
+pub(crate) struct ExecutionGasBucketSeries {
+    /// Gas-bucketed EVM execution duration.
+    pub(crate) execution_gas_bucket_histogram: Histogram,
+}
+
+/// Holds pre-initialized [`ExecutionGasBucketSeries`] instances, one per gas bucket.
+#[derive(Debug)]
+pub(crate) struct ExecutionGasBucketMetrics {
+    buckets: [ExecutionGasBucketSeries; NUM_GAS_BUCKETS],
+}
+
+impl Default for ExecutionGasBucketMetrics {
+    fn default() -> Self {
+        Self {
+            buckets: std::array::from_fn(|i| {
+                let label = GasBucketMetrics::bucket_label(i);
+                ExecutionGasBucketSeries::new_with_labels(&[("gas_bucket", label)])
+            }),
+        }
+    }
+}
+
+/// Per-gas-bucket block validation metrics (state root).
+#[derive(Clone, Metrics)]
+#[metrics(scope = "sync.block_validation")]
+pub(crate) struct BlockValidationGasBucketSeries {
+    /// Gas-bucketed state root computation duration.
+    pub(crate) state_root_gas_bucket_histogram: Histogram,
+}
+
+/// Holds pre-initialized [`BlockValidationGasBucketSeries`] instances, one per gas bucket.
+#[derive(Debug)]
+pub(crate) struct BlockValidationGasBucketMetrics {
+    buckets: [BlockValidationGasBucketSeries; NUM_GAS_BUCKETS],
+}
+
+impl Default for BlockValidationGasBucketMetrics {
+    fn default() -> Self {
+        Self {
+            buckets: std::array::from_fn(|i| {
+                let label = GasBucketMetrics::bucket_label(i);
+                BlockValidationGasBucketSeries::new_with_labels(&[("gas_bucket", label)])
+            }),
         }
     }
 }

@@ -29,6 +29,13 @@ pub(crate) struct BenchContext {
     pub(crate) next_block: u64,
     /// Whether the chain is an OP rollup.
     pub(crate) is_optimism: bool,
+    /// Whether to use `reth_newPayload` endpoint instead of `engine_newPayload*`.
+    pub(crate) use_reth_namespace: bool,
+    /// Whether to fetch and replay RLP-encoded blocks.
+    pub(crate) rlp_blocks: bool,
+    /// Whether to skip waiting for persistence and cache locks (pass `wait: false` to
+    /// `reth_newPayload`).
+    pub(crate) no_wait: bool,
 }
 
 impl BenchContext {
@@ -140,6 +147,18 @@ impl BenchContext {
         };
 
         let next_block = first_block.header.number + 1;
-        Ok(Self { auth_provider, block_provider, benchmark_mode, next_block, is_optimism })
+        let rlp_blocks = bench_args.rlp_blocks;
+        let use_reth_namespace = bench_args.reth_new_payload || rlp_blocks;
+        let no_wait = bench_args.no_wait;
+        Ok(Self {
+            auth_provider,
+            block_provider,
+            benchmark_mode,
+            next_block,
+            is_optimism,
+            use_reth_namespace,
+            rlp_blocks,
+            no_wait,
+        })
     }
 }

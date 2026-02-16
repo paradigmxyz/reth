@@ -24,7 +24,7 @@ jobs:
   test:
     name: test / ${{ matrix.network }} / ${{ matrix.storage }}
     if: github.event_name != 'schedule'
-    runs-on: depot-ubuntu-latest-4
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     env:
       RUST_BACKTRACE: 1
     strategy:

@@ -20,8 +20,8 @@ use alloy_rpc_types_eth::{
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor,
-    InspectorFor, TransactionEnv, TxEnvFor,
+    block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
+    EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnv, TxEnvFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -332,12 +332,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     .into();
             }
 
-            let ((evm_env, _), block) = futures::try_join!(
-                self.evm_env_at(target_block),
-                self.recovered_block(target_block)
-            )?;
-
-            let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
+            let block = self
+                .recovered_block(target_block)
+                .await?
+                .ok_or(EthApiError::HeaderNotFound(target_block))?;
+            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             // we're essentially replaying the transactions in the block here, hence we need the
             // state that points to the beginning of the block, which is the state at
@@ -359,13 +358,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut all_results = Vec::with_capacity(bundles.len());
 
                 if replay_block_txs {
-                    // only need to replay the transactions in the block if not all transactions are
-                    // to be replayed
-                    let block_transactions = block.transactions_recovered().take(num_txs);
-                    for tx in block_transactions {
-                        let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
-                        let res = this.transact(&mut db, evm_env.clone(), tx_env)?;
-                        db.commit(res.state);
+                    let mut executor = RpcNodeCore::evm_config(&this)
+                        .executor_for_block(&mut db, block.sealed_block())
+                        .map_err(RethError::other)
+                        .map_err(Self::Error::from_eth_err)?;
+                    executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+                    for tx in block.transactions_recovered().take(num_txs) {
+                        executor.execute_transaction(tx).map_err(Self::Error::from_eth_err)?;
                     }
                 }
 
@@ -448,7 +447,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let block_id = block_number.unwrap_or_default();
             let (evm_env, at) = self.evm_env_at(block_id).await?;
 
-            self.spawn_blocking_io_fut(move |this| async move {
+            self.spawn_blocking_io_fut(async move |this| {
                 this.create_access_list_with(evm_env, at, request, state_override).await
             })
             .await
@@ -467,7 +466,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     where
         Self: Trace,
     {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             let state = this.state_at_block_id(at).await?;
             let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
 
@@ -564,7 +563,7 @@ pub trait Call:
         R: Send + 'static,
         F: FnOnce(Self, StateProviderBox) -> Result<R, Self::Error> + Send + 'static,
     {
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             let state = this.state_at_block_id(at).await?;
             f(this, state)
         })
@@ -651,7 +650,7 @@ pub trait Call:
         R: Send + 'static,
     {
         let at = at.into();
-        self.spawn_blocking_io_fut(move |this| async move {
+        self.spawn_blocking_io_fut(async move |this| {
             let state = this.state_at_block_id(at).await?;
             let db = State::builder()
                 .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
@@ -737,8 +736,6 @@ pub trait Call:
             };
             let (tx, tx_info) = transaction.split();
 
-            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             let parent_block = block.parent_hash();
@@ -746,12 +743,24 @@ pub trait Call:
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
 
+                let mut executor = RpcNodeCore::evm_config(&this)
+                    .executor_for_block(&mut db, block.sealed_block())
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?;
+                executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+
                 // replay all transactions prior to the targeted transaction
-                this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
+                for block_tx in block_txs {
+                    if block_tx.tx_hash() == tx.tx_hash() {
+                        break;
+                    }
+                    executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
+                }
 
                 let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
 
-                let res = this.transact(&mut db, evm_env, tx_env)?;
+                let res = executor.evm_mut().transact(tx_env).map_err(Self::Error::from_evm_err)?;
+                drop(executor);
                 f(tx_info, res, db)
             })
             .await

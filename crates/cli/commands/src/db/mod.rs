@@ -16,8 +16,10 @@ mod copy;
 mod diff;
 mod get;
 mod list;
+mod prune_checkpoints;
 mod repair_trie;
 mod settings;
+mod stage_checkpoints;
 mod state;
 mod static_file_header;
 mod stats;
@@ -67,6 +69,10 @@ pub enum Subcommands {
     Path,
     /// Manage storage settings
     Settings(settings::Command),
+    /// View or set prune checkpoints
+    PruneCheckpoints(prune_checkpoints::Command),
+    // View or set stage checkpoints
+    StageCheckpoints(stage_checkpoints::Command),
     /// Gets storage size information for an account
     AccountStorage(account_storage::Command),
     /// Gets account state and storage at a specific block
@@ -83,7 +89,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         /// provided command.
         macro_rules! db_exec {
             ($env:expr, $tool:ident, $N:ident, $access_rights:expr, $command:block) => {
-                let Environment { provider_factory, .. } = $env.init::<$N>($access_rights)?;
+                let Environment { provider_factory, .. } =
+                    $env.init::<$N>($access_rights, ctx.task_executor.clone())?;
 
                 let $tool = DbTool::new(provider_factory)?;
                 $command;
@@ -200,6 +207,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 println!("{}", db_path.display());
             }
             Subcommands::Settings(command) => {
+                db_exec!(self.env, tool, N, command.access_rights(), {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::PruneCheckpoints(command) => {
+                db_exec!(self.env, tool, N, command.access_rights(), {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::StageCheckpoints(command) => {
                 db_exec!(self.env, tool, N, command.access_rights(), {
                     command.execute(&tool)?;
                 });
