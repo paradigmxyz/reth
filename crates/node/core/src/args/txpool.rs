@@ -10,10 +10,11 @@ use reth_transaction_pool::{
     maintain::MAX_QUEUED_TRANSACTION_LIFETIME,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     validate::DEFAULT_MAX_TX_INPUT_BYTES,
-    LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
-    DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, MAX_NEW_PENDING_TXS_NOTIFICATIONS,
-    REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
-    TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+    BatchConfig, LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit,
+    DEFAULT_PRICE_BUMP, DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS,
+    MAX_NEW_PENDING_TXS_NOTIFICATIONS, REPLACE_BLOB_PRICE_BUMP,
+    TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+    TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
 use std::{path::PathBuf, sync::OnceLock, time::Duration};
 
@@ -55,6 +56,8 @@ pub struct DefaultTxPoolValues {
     transactions_backup_path: Option<PathBuf>,
     disable_transactions_backup: bool,
     max_batch_size: usize,
+    /// Batch timeout for collecting transactions before flushing
+    batch_timeout: Duration,
 }
 
 impl DefaultTxPoolValues {
@@ -247,6 +250,12 @@ impl DefaultTxPoolValues {
         self.max_batch_size = v;
         self
     }
+
+    /// Set the default batch timeout
+    pub const fn with_batch_timeout(mut self, v: Duration) -> Self {
+        self.batch_timeout = v;
+        self
+    }
 }
 
 impl Default for DefaultTxPoolValues {
@@ -282,6 +291,7 @@ impl Default for DefaultTxPoolValues {
             transactions_backup_path: None,
             disable_transactions_backup: false,
             max_batch_size: 1,
+            batch_timeout: Duration::ZERO,
         }
     }
 }
@@ -411,6 +421,12 @@ pub struct TxPoolArgs {
     /// Max batch size for transaction pool insertions
     #[arg(long = "txpool.max-batch-size", default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
+
+    /// Batch timeout for transaction pool insertions (e.g. "50ms" or "0" for immediate).
+    /// When non-zero, transactions are batched until either max-batch-size is reached OR timeout
+    /// expires. Use "0" for immediate processing.
+    #[arg(long = "txpool.batch-timeout", value_parser = parse_duration_from_secs_or_ms, value_name = "DURATION", default_value = format_duration_as_secs_or_ms(DefaultTxPoolValues::get_global().batch_timeout))]
+    pub batch_timeout: Duration,
 }
 
 impl TxPoolArgs {
@@ -464,6 +480,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
+            batch_timeout,
         } = DefaultTxPoolValues::get_global().clone();
         Self {
             pending_max_count,
@@ -496,6 +513,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
+            batch_timeout,
         }
     }
 }
@@ -543,9 +561,16 @@ impl RethTransactionPoolConfig for TxPoolArgs {
         }
     }
 
-    /// Returns max batch size for transaction batch insertion.
-    fn max_batch_size(&self) -> usize {
-        self.max_batch_size
+    /// Returns batch config for transaction batch insertion.
+    fn batch_config(&self) -> BatchConfig {
+        BatchConfig {
+            max_batch_size: self.max_batch_size,
+            batch_timeout: if self.batch_timeout.is_zero() {
+                None
+            } else {
+                Some(self.batch_timeout)
+            },
+        }
     }
 }
 
@@ -625,6 +650,7 @@ mod tests {
             transactions_backup_path: Some(PathBuf::from("/tmp/txpool-backup")),
             disable_transactions_backup: false,
             max_batch_size: 10,
+            batch_timeout: Duration::from_millis(50),
         };
 
         let parsed_args = CommandParser::<TxPoolArgs>::parse_from([
@@ -685,6 +711,8 @@ mod tests {
             "/tmp/txpool-backup",
             "--txpool.max-batch-size",
             "10",
+            "--txpool.batch-timeout",
+            "50ms",
         ])
         .args;
 

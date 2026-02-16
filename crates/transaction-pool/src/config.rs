@@ -6,6 +6,8 @@ use crate::{
 use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::{map::AddressSet, Address};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::{ops::Mul, time::Duration};
 
 /// Guarantees max transactions for one sender, compatible with geth/erigon
@@ -210,6 +212,23 @@ impl Default for PriceBumpConfig {
             default_price_bump: DEFAULT_PRICE_BUMP,
             replace_blob_tx_price_bump: REPLACE_BLOB_PRICE_BUMP,
         }
+    }
+}
+
+/// Configuration for transaction batching
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct BatchConfig {
+    /// Maximum number of transactions to batch before processing.
+    pub max_batch_size: usize,
+    /// Maximum duration to wait before processing a partial batch.
+    /// If None, batching is disabled (immediate processing).
+    pub batch_timeout: Option<Duration>,
+}
+
+impl Default for BatchConfig {
+    fn default() -> Self {
+        Self { max_batch_size: 1, batch_timeout: None }
     }
 }
 

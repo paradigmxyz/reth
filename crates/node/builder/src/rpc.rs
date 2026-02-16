@@ -999,7 +999,7 @@ where
             }),
         );
 
-        let eth_config = config.rpc.eth_config().max_batch_size(config.txpool.max_batch_size());
+        let eth_config = config.rpc.eth_config().batch_config(config.txpool.batch_config());
         let ctx = EthApiCtx {
             components: &node,
             config: eth_config,
@@ -1187,7 +1187,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
             .fee_history_cache_config(self.config.fee_history_cache)
             .proof_permits(self.config.proof_permits)
             .gas_oracle_config(self.config.gas_oracle)
-            .max_batch_size(self.config.max_batch_size)
+            .batch_config(self.config.batch_config)
             .max_blocking_io_requests(self.config.max_blocking_io_requests)
             .pending_block_kind(self.config.pending_block_kind)
             .raw_tx_forwarder(self.config.raw_tx_forwarder)
