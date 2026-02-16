@@ -528,15 +528,12 @@ mod tests {
 
     #[test]
     fn from_reverts_with_hashed_state() {
-        use reth_db_api::models::StorageBeforeTx;
+        use reth_db_api::models::{StorageBeforeTx, StorageSettings};
         use reth_provider::{StaticFileProviderFactory, StaticFileSegment, StaticFileWriter};
 
         let factory = create_test_provider_factory();
 
-        let mut settings = factory.cached_storage_settings();
-        settings.use_hashed_state = true;
-        settings.storage_changesets_in_static_files = true;
-        factory.set_storage_settings_cache(settings);
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let provider = factory.provider_rw().unwrap();
 
@@ -548,33 +545,32 @@ mod tests {
         let hashed_slot1 = keccak256(plain_slot1);
         let hashed_slot2 = keccak256(plain_slot2);
 
-        provider
-            .tx_ref()
-            .put::<tables::AccountChangeSets>(
-                1,
-                AccountBeforeTx {
-                    address: address1,
-                    info: Some(Account { nonce: 1, ..Default::default() }),
-                },
-            )
-            .unwrap();
-        provider
-            .tx_ref()
-            .put::<tables::AccountChangeSets>(
-                2,
-                AccountBeforeTx {
-                    address: address1,
-                    info: Some(Account { nonce: 2, ..Default::default() }),
-                },
-            )
-            .unwrap();
-        provider
-            .tx_ref()
-            .put::<tables::AccountChangeSets>(3, AccountBeforeTx { address: address2, info: None })
-            .unwrap();
-
         {
             let sf = factory.static_file_provider();
+
+            // Write account changesets to static files (v2 reads from here)
+            let mut aw = sf.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            aw.append_account_changeset(vec![], 0).unwrap();
+            aw.append_account_changeset(
+                vec![AccountBeforeTx {
+                    address: address1,
+                    info: Some(Account { nonce: 1, ..Default::default() }),
+                }],
+                1,
+            )
+            .unwrap();
+            aw.append_account_changeset(
+                vec![AccountBeforeTx {
+                    address: address1,
+                    info: Some(Account { nonce: 2, ..Default::default() }),
+                }],
+                2,
+            )
+            .unwrap();
+            aw.append_account_changeset(vec![AccountBeforeTx { address: address2, info: None }], 3)
+                .unwrap();
+            aw.commit().unwrap();
+
             let mut writer = sf.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
             writer.append_storage_changeset(vec![], 0).unwrap();
             writer

@@ -4,7 +4,7 @@ use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
     DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
@@ -18,7 +18,6 @@ use std::{
         Arc,
     },
     thread::JoinHandle,
-    time::Instant,
 };
 use thiserror::Error;
 use tracing::{debug, error, instrument};
@@ -119,7 +118,7 @@ where
         Ok(())
     }
 
-    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(new_tip_num))]
+    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(%new_tip_num))]
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,

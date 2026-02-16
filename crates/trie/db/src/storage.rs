@@ -149,7 +149,7 @@ mod tests {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
 
-        assert!(!provider.cached_storage_settings().use_hashed_state);
+        assert!(!provider.cached_storage_settings().use_hashed_state());
 
         let address = Address::with_last_byte(42);
         let slot1 = B256::from(U256::from(100));
@@ -191,18 +191,15 @@ mod tests {
 
     #[test]
     fn test_hashed_storage_from_reverts_hashed_state() {
-        use reth_db_api::models::StorageBeforeTx;
+        use reth_db_api::models::{StorageBeforeTx, StorageSettings};
 
         let factory = create_test_provider_factory();
 
-        let mut settings = factory.cached_storage_settings();
-        settings.use_hashed_state = true;
-        settings.storage_changesets_in_static_files = true;
-        factory.set_storage_settings_cache(settings);
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let provider = factory.provider_rw().unwrap();
-        assert!(provider.cached_storage_settings().use_hashed_state);
-        assert!(provider.cached_storage_settings().storage_changesets_in_static_files);
+        assert!(provider.cached_storage_settings().use_hashed_state());
+        assert!(provider.cached_storage_settings().is_v2());
 
         let address = Address::with_last_byte(42);
         let plain_slot1 = B256::from(U256::from(100));

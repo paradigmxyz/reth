@@ -51,8 +51,8 @@ use reth_db_api::{
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
-    Account, Block as _, BlockBody as _, Bytecode, RecoveredBlock, SealedHeader, StorageEntry,
-    StorageSlotKey,
+    Account, Block as _, BlockBody as _, Bytecode, FastInstant as Instant, RecoveredBlock,
+    SealedHeader, StorageEntry, StorageSlotKey,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -79,7 +79,6 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::Arc,
-    time::Instant,
 };
 use tracing::{debug, instrument, trace};
 
@@ -559,7 +558,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
         #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_enabled = rocksdb_ctx.storage_settings.any_in_rocksdb();
+        let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
 
         let mut sf_result = None;
         #[cfg(all(unix, feature = "rocksdb"))]
@@ -595,7 +594,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if !self.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
+            if !self.cached_storage_settings().storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
@@ -1396,7 +1395,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if self.cached_storage_settings().use_hashed_state {
+        if self.cached_storage_settings().use_hashed_state() {
             let hashed_address = keccak256(address);
             Ok(self.tx.get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?)
         } else {
@@ -1419,7 +1418,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
         &self,
         iter: impl IntoIterator<Item = Address>,
     ) -> ProviderResult<Vec<(Address, Option<Account>)>> {
-        if self.cached_storage_settings().use_hashed_state {
+        if self.cached_storage_settings().use_hashed_state() {
             let mut hashed_accounts = self.tx.cursor_read::<tables::HashedAccounts>()?;
             Ok(iter
                 .into_iter()
@@ -1448,7 +1447,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
 
         if let Some(highest) = highest_static_block &&
-            self.cached_storage_settings().account_changesets_in_static_files
+            self.cached_storage_settings().storage_v2
         {
             let start = *range.start();
             let static_end = (*range.end()).min(highest);
@@ -1489,7 +1488,7 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<(BlockNumberAddress, ChangesetEntry)>> {
-        if self.cached_storage_settings().storage_changesets_in_static_files {
+        if self.cached_storage_settings().storage_v2 {
             self.static_file_provider.storage_changeset(block_number)
         } else {
             let range = block_number..=block_number;
@@ -1517,7 +1516,7 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         address: Address,
         storage_key: B256,
     ) -> ProviderResult<Option<ChangesetEntry>> {
-        if self.cached_storage_settings().storage_changesets_in_static_files {
+        if self.cached_storage_settings().storage_v2 {
             self.static_file_provider.get_storage_before_block(block_number, address, storage_key)
         } else {
             Ok(self
@@ -1536,7 +1535,7 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, ChangesetEntry)>> {
-        if self.cached_storage_settings().storage_changesets_in_static_files {
+        if self.cached_storage_settings().storage_v2 {
             self.static_file_provider.storage_changesets_range(range)
         } else {
             self.tx
@@ -1557,7 +1556,7 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
     }
 
     fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        if self.cached_storage_settings().storage_changesets_in_static_files {
+        if self.cached_storage_settings().storage_v2 {
             self.static_file_provider.storage_changeset_count()
         } else {
             Ok(self.tx.entries::<tables::StorageChangeSets>()?)
@@ -1570,7 +1569,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
-        if self.cached_storage_settings().account_changesets_in_static_files {
+        if self.cached_storage_settings().storage_v2 {
             let static_changesets =
                 self.static_file_provider.account_block_changeset(block_number)?;
             Ok(static_changesets)
@@ -1592,7 +1591,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         block_number: BlockNumber,
         address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
-        if self.cached_storage_settings().account_changesets_in_static_files {
+        if self.cached_storage_settings().storage_v2 {
             Ok(self.static_file_provider.get_account_before_block(block_number, address)?)
         } else {
             self.tx
@@ -1608,7 +1607,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
-        if self.cached_storage_settings().account_changesets_in_static_files {
+        if self.cached_storage_settings().storage_v2 {
             self.static_file_provider.account_changesets_range(range)
         } else {
             self.tx
@@ -1622,7 +1621,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
     fn account_changeset_count(&self) -> ProviderResult<usize> {
         // check if account changesets are in static files, otherwise just count the changeset
         // entries in the DB
-        if self.cached_storage_settings().account_changesets_in_static_files {
+        if self.cached_storage_settings().storage_v2 {
             self.static_file_provider.account_changeset_count()
         } else {
             Ok(self.tx.entries::<tables::AccountChangeSets>()?)
@@ -2243,7 +2242,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
         &self,
         addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
     ) -> ProviderResult<Vec<(Address, Vec<StorageEntry>)>> {
-        if self.cached_storage_settings().use_hashed_state {
+        if self.cached_storage_settings().use_hashed_state() {
             let mut hashed_storage = self.tx.cursor_dup_read::<tables::HashedStorages>()?;
 
             addresses_with_keys
@@ -2290,7 +2289,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<Address, BTreeSet<B256>>> {
-        if self.cached_storage_settings().storage_changesets_in_static_files {
+        if self.cached_storage_settings().storage_v2 {
             self.storage_changesets_range(range)?.into_iter().try_fold(
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<Address, BTreeSet<B256>>, entry| {
@@ -2320,7 +2319,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<(Address, B256), Vec<u64>>> {
-        if self.cached_storage_settings().storage_changesets_in_static_files {
+        if self.cached_storage_settings().storage_v2 {
             self.storage_changesets_range(range)?.into_iter().try_fold(
                 BTreeMap::new(),
                 |mut storages: BTreeMap<(Address, B256), Vec<u64>>, (index, storage)| {
@@ -2470,7 +2469,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         first_block: BlockNumber,
         config: StateWriteConfig,
     ) -> ProviderResult<()> {
-        let use_hashed_state = self.cached_storage_settings().use_hashed_state;
+        let use_hashed_state = self.cached_storage_settings().use_hashed_state();
 
         // Write storage changes
         if config.write_storage_changesets {
@@ -2575,7 +2574,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // When use_hashed_state is enabled, skip plain state writes for accounts and storage.
         // The hashed state is already written by the separate `write_hashed_state()` call.
         // Bytecode writes remain unconditional since Bytecodes is not a plain/hashed table.
-        if !self.cached_storage_settings().use_hashed_state {
+        if !self.cached_storage_settings().use_hashed_state() {
             // Write new account state
             tracing::trace!(len = changes.accounts.len(), "Writing new account state");
             let mut accounts_cursor = self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
@@ -2709,8 +2708,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             block_bodies.first().expect("already checked if there are blocks").first_tx_num();
 
         let storage_range = BlockNumberAddress::range(range.clone());
-        let storage_changeset = if self.cached_storage_settings().storage_changesets_in_static_files
-        {
+        let storage_changeset = if self.cached_storage_settings().storage_v2 {
             let changesets = self.storage_changesets_range(range.clone())?;
             let mut changeset_writer =
                 self.static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
@@ -2724,8 +2722,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 })
                 .collect()
         };
-        let account_changeset = if self.cached_storage_settings().account_changesets_in_static_files
-        {
+        let account_changeset = if self.cached_storage_settings().storage_v2 {
             let changesets = self.account_changesets_range(range)?;
             let mut changeset_writer =
                 self.static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
@@ -2735,7 +2732,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             self.take::<tables::AccountChangeSets>(range)?
         };
 
-        if self.cached_storage_settings().use_hashed_state {
+        if self.cached_storage_settings().use_hashed_state() {
             let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
@@ -2868,7 +2865,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let storage_changeset = if let Some(highest_block) = self
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::StorageChangeSets) &&
-            self.cached_storage_settings().storage_changesets_in_static_files
+            self.cached_storage_settings().storage_v2
         {
             let changesets = self.storage_changesets_range(block + 1..=highest_block)?;
             let mut changeset_writer =
@@ -2889,7 +2886,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
         let account_changeset = if let Some(highest_block) = highest_changeset_block &&
-            self.cached_storage_settings().account_changesets_in_static_files
+            self.cached_storage_settings().storage_v2
         {
             // TODO: add a `take` method that removes and returns the items instead of doing this
             let changesets = self.account_changesets_range(block + 1..highest_block + 1)?;
@@ -2904,7 +2901,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             self.take::<tables::AccountChangeSets>(range)?
         };
 
-        let (state, reverts) = if self.cached_storage_settings().use_hashed_state {
+        let (state, reverts) = if self.cached_storage_settings().use_hashed_state() {
             let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
@@ -3260,7 +3257,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .collect::<Vec<_>>();
         last_indices.sort_unstable_by_key(|(a, _)| *a);
 
-        if self.cached_storage_settings().account_history_in_rocksdb {
+        if self.cached_storage_settings().storage_v2 {
             #[cfg(all(unix, feature = "rocksdb"))]
             {
                 let batch = self.rocksdb_provider.unwind_account_history_indices(&last_indices)?;
@@ -3322,7 +3319,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .collect::<Vec<_>>();
         storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
 
-        if self.cached_storage_settings().storages_history_in_rocksdb {
+        if self.cached_storage_settings().storage_v2 {
             #[cfg(all(unix, feature = "rocksdb"))]
             {
                 let batch =
@@ -3381,12 +3378,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
         let storage_settings = self.cached_storage_settings();
-        if !storage_settings.account_history_in_rocksdb {
+        if !storage_settings.storage_v2 {
             let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
-        if !storage_settings.storages_history_in_rocksdb {
+        if !storage_settings.storage_v2 {
             let indices = self.changed_storages_and_blocks_with_range(range)?;
             self.insert_storage_history_index(indices)?;
         }
@@ -3645,7 +3642,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // This is necessary because with edge storage, changesets are written to static files
         // whose index isn't updated until commit, making them invisible to subsequent reads
         // within the same transaction.
-        let use_hashed = self.cached_storage_settings().use_hashed_state;
+        let use_hashed = self.cached_storage_settings().use_hashed_state();
         let (account_transitions, storage_transitions) = {
             let mut account_transitions: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
             let mut storage_transitions: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
@@ -3681,7 +3678,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // Note: For MDBX we use insert_*_history_index. For RocksDB we use
         // append_*_history_shard which handles read-merge-write internally.
         let storage_settings = self.cached_storage_settings();
-        if storage_settings.account_history_in_rocksdb {
+        if storage_settings.storage_v2 {
             #[cfg(all(unix, feature = "rocksdb"))]
             self.with_rocksdb_batch(|mut batch| {
                 for (address, blocks) in account_transitions {
@@ -3692,7 +3689,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         } else {
             self.insert_account_history_index(account_transitions)?;
         }
-        if storage_settings.storages_history_in_rocksdb {
+        if storage_settings.storage_v2 {
             #[cfg(all(unix, feature = "rocksdb"))]
             self.with_rocksdb_batch(|mut batch| {
                 for ((address, key), blocks) in storage_transitions {
@@ -4445,7 +4442,7 @@ mod tests {
         // Static files mode
         {
             let factory = create_test_provider_factory();
-            let storage_settings = StorageSettings::v1().with_receipts_in_static_files(true);
+            let storage_settings = StorageSettings::v2();
             factory.set_storage_settings_cache(storage_settings);
             let factory = factory.with_prune_modes(PruneModes {
                 receipts: Some(PruneMode::Before(2)),
@@ -4603,7 +4600,7 @@ mod tests {
     fn test_write_and_remove_state_roundtrip_legacy() {
         let factory = create_test_provider_factory();
         let storage_settings = StorageSettings::v1();
-        assert!(!storage_settings.use_hashed_state);
+        assert!(!storage_settings.use_hashed_state());
         factory.set_storage_settings_cache(storage_settings);
 
         let address = Address::with_last_byte(1);
@@ -4771,7 +4768,7 @@ mod tests {
     fn test_unwind_storage_hashing_legacy() {
         let factory = create_test_provider_factory();
         let storage_settings = StorageSettings::v1();
-        assert!(!storage_settings.use_hashed_state);
+        assert!(!storage_settings.use_hashed_state());
         factory.set_storage_settings_cache(storage_settings);
 
         let address = Address::random();
@@ -5205,7 +5202,7 @@ mod tests {
     fn test_write_and_remove_state_roundtrip_v2() {
         let factory = create_test_provider_factory();
         let storage_settings = StorageSettings::v2();
-        assert!(storage_settings.use_hashed_state);
+        assert!(storage_settings.use_hashed_state());
         factory.set_storage_settings_cache(storage_settings);
 
         let address = Address::with_last_byte(1);

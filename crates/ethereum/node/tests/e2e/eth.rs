@@ -283,6 +283,7 @@ async fn test_sparse_trie_reuse_across_blocks() -> eyre::Result<()> {
                 .chain(MAINNET.chain)
                 .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
                 .cancun_activated()
+                .prague_activated()
                 .build(),
         ),
         false,

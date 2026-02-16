@@ -214,7 +214,7 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     TransactionTestContext::validate_sidecar(envelope);
 
     // build last Prague payload
-    node.payload.timestamp = current_timestamp + 11;
+    node.payload.timestamp = current_timestamp + 1;
     let prague_payload = node.new_payload().await?;
     assert!(matches!(prague_payload.sidecars(), BlobSidecars::Eip4844(_)));
 
@@ -227,7 +227,7 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     // validate sidecar
     TransactionTestContext::validate_sidecar(envelope);
 
-    tokio::time::sleep(Duration::from_secs(11)).await;
+    tokio::time::sleep(Duration::from_secs(6)).await;
 
     // fetch second blob tx from rpc again
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;

@@ -11,7 +11,7 @@ use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::ParallelIterator;
-use reth_primitives_traits::{Account, ParallelBridgeBuffered};
+use reth_primitives_traits::{Account, FastInstant as Instant, ParallelBridgeBuffered};
 use reth_tasks::Runtime;
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, Nibbles,
@@ -32,10 +32,7 @@ use reth_trie_sparse::{
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
-use std::{
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use std::{sync::mpsc, time::Duration};
 use tracing::{debug, debug_span, error, instrument, trace};
 
 #[expect(clippy::large_enum_variant)]
@@ -416,7 +413,9 @@ where
                     let update = match message {
                         Ok(m) => m,
                         Err(_) => {
-                            break
+                            return Err(ParallelStateRootError::Other(
+                                "updates channel disconnected before state root calculation".to_string(),
+                            ))
                         }
                     };
 
@@ -591,17 +590,23 @@ where
         self.process_leaf_updates(true)?;
 
         for (address, mut new) in self.new_storage_updates.drain() {
-            let updates = self.storage_updates.entry(address).or_default();
-            for (slot, new) in new.drain() {
-                match updates.entry(slot) {
-                    Entry::Occupied(mut entry) => {
-                        // Only overwrite existing entries with new values
-                        if new.is_changed() {
-                            entry.insert(new);
+            match self.storage_updates.entry(address) {
+                Entry::Vacant(entry) => {
+                    entry.insert(new); // insert the whole map at once, no per-slot loop
+                }
+                Entry::Occupied(mut entry) => {
+                    let updates = entry.get_mut();
+                    for (slot, new) in new.drain() {
+                        match updates.entry(slot) {
+                            Entry::Occupied(mut slot_entry) => {
+                                if new.is_changed() {
+                                    slot_entry.insert(new);
+                                }
+                            }
+                            Entry::Vacant(slot_entry) => {
+                                slot_entry.insert(new);
+                            }
                         }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(new);
                     }
                 }
             }

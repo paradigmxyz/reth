@@ -159,7 +159,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        let lookup_key = if self.provider.cached_storage_settings().use_hashed_state {
+        let lookup_key = if self.provider.cached_storage_settings().use_hashed_state() {
             storage_key.to_hashed()
         } else {
             debug_assert!(
@@ -193,7 +193,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     where
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
-        let lookup_key = if self.provider.cached_storage_settings().use_hashed_state {
+        let lookup_key = if self.provider.cached_storage_settings().use_hashed_state() {
             storage_key.to_hashed()
         } else {
             debug_assert!(
@@ -216,7 +216,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
                 .map(|entry| entry.value)
                 .map(Some),
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                if self.provider.cached_storage_settings().use_hashed_state {
+                if self.provider.cached_storage_settings().use_hashed_state() {
                     let hashed_address = alloy_primitives::keccak256(address);
                     Ok(self
                         .tx()
@@ -337,7 +337,7 @@ impl<
                     .map(|account_before| account_before.info)
             }
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                if self.provider.cached_storage_settings().use_hashed_state {
+                if self.provider.cached_storage_settings().use_hashed_state() {
                     let hashed_address = alloy_primitives::keccak256(address);
                     Ok(self.tx().get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?)
                 } else {
@@ -520,7 +520,7 @@ impl<
         address: Address,
         hashed_storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        if !self.provider.cached_storage_settings().use_hashed_state {
+        if !self.provider.cached_storage_settings().use_hashed_state() {
             return Err(ProviderError::UnsupportedProvider)
         }
         self.storage_by_lookup_key(address, StorageSlotKey::hashed(hashed_storage_key))
@@ -1033,7 +1033,7 @@ mod tests {
     fn history_provider_get_storage_legacy() {
         let factory = create_test_provider_factory();
 
-        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state);
+        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state());
 
         let tx = factory.provider_rw().unwrap().into_tx();
 
@@ -1277,7 +1277,7 @@ mod tests {
     #[test]
     fn test_historical_storage_by_hashed_key_unsupported_in_v1() {
         let factory = create_test_provider_factory();
-        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state);
+        assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state());
 
         let db = factory.provider().unwrap();
         let provider = HistoricalStateProviderRef::new(&db, 1);

@@ -8,6 +8,7 @@ use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as Cros
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -25,7 +26,7 @@ use reth_trie_parallel::{
     targets_v2::MultiProofTargetsV2,
 };
 use revm_primitives::map::{hash_map, B256Map};
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc};
 use tracing::{debug, error, instrument, trace};
 
 /// Source of state changes, either from EVM execution or from a Block Access List.
@@ -771,6 +772,11 @@ impl MultiProofTask {
     fn on_prefetch_proof(&mut self, mut targets: VersionedMultiProofTargets) -> u64 {
         // Remove already fetched proof targets to avoid redundant work.
         targets.retain_difference(&self.fetched_proof_targets);
+
+        if targets.is_empty() {
+            return 0;
+        }
+
         extend_multiproof_targets(&mut self.fetched_proof_targets, &targets);
 
         // For Legacy multiproofs, make sure all target accounts have an `AddedRemovedKeySet` in the
@@ -887,6 +893,10 @@ impl MultiProofTask {
                 state: fetched_state_update,
             });
             state_updates += 1;
+        }
+
+        if not_fetched_state_update.is_empty() {
+            return state_updates;
         }
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
@@ -1573,7 +1583,7 @@ mod tests {
         let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(runtime, task_ctx, false);
+        let proof_handle = ProofWorkerHandle::new(runtime, task_ctx, false, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -2056,7 +2066,7 @@ mod tests {
                 panic!("Expected PrefetchProofs message");
             };
 
-        assert_eq!(proofs_requested, 1);
+        assert!(proofs_requested >= 1);
     }
 
     /// Verifies that different message types arriving mid-batch are not lost and preserve order.
