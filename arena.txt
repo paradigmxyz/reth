@@ -1,0 +1,161 @@
+# Arena Parallel Sparse Trie
+
+Implementation of an arena-based parallel sparse trie.
+
+## Motivation
+
+Our current ParallelSparseTrie (PST) implementation uses HashMaps to index each sparse trie node by its Nibbles path. This is inefficient because traversing the trie requires us to do significant numbers of hashmap lookups, and we can see in the profiles that these are taking a non-trivial amount of time.
+
+We are in effect using node paths as pointers to the node itself, via a HashMap. If we were to instead switch to an arena-based implementation, with actual pointers or index-based pointers, we could eliminate the HashMap lookups and potentially improve memory allocation performance generally.
+
+## Summary
+
+We will implement a new arena-based SparseTrie implementation from scratch. The new ArenaParallelSparseTrie is expected to be used in precisely the same way as PST to maintain a cross-block cache of account and storage tries, and to efficiently calculate the state root at the end of each block.
+
+That said, the design will be radically different from PST:
+
+* It will use an arena for allocating ArenaSparseNodes
+* Nodes will track pointers to their child nodes, rather than looking children up by their paths
+* `nodes`/`values` dichotomy will not exist
+* Hash nodes will not exist; cached RlpNodes will be tracked on branch nodes
+* Branch masks will be stored directly on branch nodes
+* All method implementations will be completely different; it should not be assumed that any existing algorithms in PST will be carried over
+* Lower subtries will be tracked as an actual node type within the trie, rather than as separate structures in an array
+
+Just to emphasize: IMPLEMENTATION WILL BE COMPLETELY DIFFERENT THAN ParallelSparseTrie! JUST BECAUSE PST DOES SOMETHING DOES NOT MEAN IT IS CORRECT OR DESIREABLE. ALL DESIGN DECISIONS SHOULD BE EVALUATED ON THEIR OWN MERIT.
+
+## Pre-Work
+
+Work which will be completed before starting this effort:
+* SparseTrie's update_leaf and remove_leaf methods will be removed; update_leaves will be the only way to update the trie.
+* reveal_witness will no longer exist
+
+## Arena Usage
+
+* The `thunderdome` arena will be used.
+* In the future we _may_ want to roll our own arena, e.g. to only do generation checks in debug mode, thus saving on size of pointers.
+* The upper sparse trie and all lower sparse tries will each hold their own arena, to allow for parallel mutations of each subtrie.
+* The arena will effectively replace the path HashMap as the node allocating and indexing mechanism.
+
+## ArenaParallelSparseTrie Design
+
+### ArenaSparseNodeState
+
+* Two variants: Dirty and Cached
+    * Cached { rlp_node: RlpNode, num_leaves: u64 }
+    * Dirty { num_leaves: u64, num_dirty_leaves: u64 }
+* num_leaves tracks total number of revealed leaves underneath a branch, recursively
+* Both counters will be 1 on leaves themselves
+
+### ArenaSparseNode
+
+* Four variants: Branch, Leaf, Subtrie, and TakenSubtrie
+* Leaf variant
+    * Maintains ArenaSparseNodeState and value Vec<u8>
+* Branch variant
+    * Maintains ArenaSparseNodeState
+    * Introduce `enum Child { Revealed(NodeId), Blinded(B256), None }` which will be used to track the blinded/revealed children of each branch.
+    * short_key field tracks the short key of the branch, which would otherwise be logically represented by an extension node. When short_key is non-empty then the branch's path will be the path of the logical extension node.
+    * Tracks cached/revealed RlpNodes of children via a separate SmallVec<4>+bit mask.
+    * branch_masks tracks tree and hash masks for TrieUpdates (db persistence). Note that hash_mask is different from the mask tracking RlpNodes of children, though they both can share the Vec
+* Subtrie variant
+    * Holds a `Box<ArenaSparseSubtrie>`
+    * Can only exist at paths of length <2
+    * Inner nodes cannot be Subtries
+    * Any branch with a path (not counting its short key) length <2, which has no child subtries, should be a subtrie. Note that this allows for heterogeneous subtrie path lengths.
+        * Example 1)
+            * Branch at 0x, short key 0x123
+            * Leafs at 0x123a, 0x123b
+            * 0x will be Subtrie whose root is the 0x branch
+        * Example 2)
+            * Branch at 0x, short key 0x
+            * Branch at 0x1, short key 0x
+            * Leafs at 0x1a, 0x1b
+            * Branch at 0x2, short key 0x345
+            * Leafs at 0x345a, 0x345b
+            * 0x1a will be Subtrie whose root is the 0x1a leaf
+            * 0x1b will be Subtrie whose root is the 0x1b leaf
+            * 0x2 will be Subtrie whose root is the 0x2 branch
+        * In other words, when there is a case where the logical extension to a branch would cross the path-length-2 threshold, the subtrie is "moved back" to the extension node.
+    * When "taken" from the trie in order to perform parallel operations, Subtries are replaced with a TakenSubtrie, and replaced once completed. A debug_assert should ensure that all TakenSubtries are replaced before returning to the method caller.
+
+### ArenaSparseSubtrie
+
+* Maintains
+    * A thunderdome arena (directly, no wrapper)
+    * A root node
+    * Reusable buffers
+        * stacks
+        * update actions
+        * required proofs
+* For initial implementation we will traverse from root to reach subtries, leafs, etc... and build optimizations on top later
+* Dirty state will be set on each node, update_subtrie_hashes will walk down from root to find the subtries, checking their root for dirtiness.
+* For parallel operations, subtries will be taken out of the tree and replaced with TakenSubtrie. For the duration of the operation the subtrie's arena pointer can be tracked alongside it, so replacing it into the trie is instant.
+
+### ArenaParallelSparseTrie
+
+* Implements SparseTrie trait; update_leaf and remove_leaf are _not_ implemented, only update_leaves. update_leaf/remove_leaf will be removed from the trait separately very soon, so we won't worry about them
+* Implementation of all core methods will have to be re-done _from scratch_; they will not be able to significantly benefit from the work done on ParallelSparseTrie
+* Maintains
+    * The upper trie thunderdome arena (no wrapper)
+    * Root node
+    * SparseTrieUpdates
+    * Reusable buffers
+        * stacks
+        * update actions
+        * cleared ArenaSparseSubtries
+
+### SparseTrie
+
+Notes on method implementations
+
+* reveal_nodes
+    * Given `nodes: &mut [ProofTrieNodeV2]`, an unsorted set of nodes to-be-revealed.
+    * Nodes sorted lexicographically internally
+    * Walk down from root
+    * Use a stack to track the current "node" and all of its ancestors
+    * Once the first node to-be-revealed is reached and revealed, the next is popped off. The stack is popped until its head is an ancestor of the next node to-be-revealed.
+    * When a subtrie is reached, iterate forward in `nodes` to create a slice of all nodes in that subtrie. If the number of nodes exceeds a parallelism threshold, take the subtrie and put it and its slice of `nodes` into a Vec on the side.
+    * Once `nodes` has been exhausted, check the Vec of parallelizable subtries and if there is more than one reveal them in parallel using rayon (same general algorithm internally). If there is only one then reveal it syncronously. Put subtries back into their TakenSubtrie node once completed.
+
+* update_leaves
+    * Updates sorted lexicographically
+    * Walk down from root
+    * Use a stack to track the current "node" and all of its ancestors
+    * Once the first update is handled (applied or requires proof), the next is popped off. The stack is popped until its head is an ancestor of the next update.
+    * When a subtrie is reached, and its root is not a leaf, iterate forward in `updates` to create a slice of all updates in that subtrie. If the number of updates exceeds a parallelism threshold, take the subtrie and put it and its slice of `updates` into a Vec on the side.
+    * Once `updates` has been exhausted, check the Vec of parallelizable subtries and if there is more than one update them in parallel using rayon (same general algorithm internally). If there is only one then update it syncronously. Put subtries back into their TakenSubtrie node once completed.
+    * The search algorithm should only visit branch nodes.
+        * When handling LeafUpdate::Touched, it can simply check for the existence of a leaf at the appropriate child, descending if not a leaf.
+        * When handling a LeafUpdate::Updated (removal), it can check for the existence of a leaf at the appropriate child...
+            * If not a leaf: descend
+            * If a leaf but not the desired leaf: no-op
+            * If it is the desired leaf:
+                * Check if there remains only a single other child, if it's not revealed then request a proof to reveal it and make no change.
+                * Remove desired child.
+                * If there remains only a single other child on the branch, collapse the branch
+        * When handling a LeafUpdate::Updated (upsert), it can check for the existence of a leaf at the appropriate child...
+            * If child has a short key partially matching the desired update, then split the short key and create a new branch
+                * As a special case: if the child is a subtrie then it needs to be checked if the new branch needs to become the new root of that subtrie, or if the subtrie will become a child of the new branch
+    * If a change is made on a child of a branch, then the branch's ArenaSparseNodeState should be set to the Dirty variant. This way dirtiness propagates from down from the root.
+    * Update actions can be maintained on the subtrie an update is made to. Once all updates are made, and prior to subtries being put back, all subtrie updates can be drained and applied to the top-level updates set.
+    * Required proofs can be maintained on the subtrie an update is made to. Once all updates are made, and prior to the subtries being put back, the required proofs can be drained and called against the callback.
+    * num_leaves/num_dirty_leaves are maintained via the stack; one of a branch's fields on the stack is its counts prior to any changes being made, and immediately prior to being popped it adjusts its parent based on the difference with its new counts.
+
+* update_subtrie_hashes
+    * Walk down from root
+    * Use a stack to track the current "node" and all of its ancestors
+    * When a subtrie is encountered, and its num_dirty_leaves is greater than some parallelism threshold, take the subtrie and put it into a Vec on the side.
+    * Once all subtries have been iterated, check the Vec of parallelizable subtries and if there is more than one update their hashes using rayon. If there is only one then update it synchronously. Put subtries back into their TakenSubtrie node once completed.
+
+* root
+    * Calls update_subtrie_hashes
+    * Syncronously walk down from root and update all other hashes.
+
+* prune
+    * Works similar to update_subtrie_hashes, except parallelism threshold is based on num_leaves and in general pruning is based on num_leaves
+    * Nodes in the upper trie are never pruned
+
+* shrink_values_to will be a no-op
+
+* All other methods can be implemented trivially, no need to give details
