@@ -31,7 +31,7 @@ use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory,
     StateReader,
@@ -39,21 +39,18 @@ use reth_provider::{
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::Runtime;
 use reth_trie::MultiProofTargets;
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, channel, Receiver, Sender, SyncSender},
-        Arc,
-    },
-    time::Instant,
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self, channel, Receiver, Sender, SyncSender},
+    Arc,
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
-    /// Prewarm by executing transactions from a stream.
-    Transactions(Receiver<Tx>),
+    /// Prewarm by executing transactions from a stream, each paired with its block index.
+    Transactions(Receiver<(usize, Tx)>),
     /// Prewarm by prefetching slots from a Block Access List.
     BlockAccessList(Arc<BlockAccessList>),
     /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
@@ -136,7 +133,7 @@ where
     /// subsequent transactions in the block.
     fn spawn_all<Tx>(
         &self,
-        pending: mpsc::Receiver<Tx>,
+        pending: mpsc::Receiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     ) where
@@ -164,8 +161,8 @@ where
             let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor,  to_multi_proof.clone(), done_tx.clone());
 
             // Distribute transactions to workers
-            let mut tx_index = 0usize;
-            while let Ok(tx) = pending.recv() {
+            let mut tx_count = 0usize;
+            while let Ok((tx_index, tx)) = pending.recv() {
                 // Stop distributing if termination was requested
                 if ctx.terminate_execution.load(Ordering::Relaxed) {
                     trace!(
@@ -182,7 +179,7 @@ where
                 // exit early when signaled.
                 let _ = tx_sender.send(indexed_tx);
 
-                tx_index += 1;
+                tx_count += 1;
             }
 
             // Send withdrawal prefetch targets after all transactions have been distributed
@@ -201,7 +198,7 @@ where
             while done_rx.recv().is_ok() {}
 
             let _ = actions_tx
-                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_index });
+                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
         });
     }
 

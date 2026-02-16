@@ -31,8 +31,8 @@ use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
-    SealedHeader, SignerRecoverable,
+    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
+    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
@@ -49,7 +49,6 @@ use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
     sync::{mpsc::RecvTimeoutError, Arc},
-    time::Instant,
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
