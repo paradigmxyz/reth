@@ -40,7 +40,8 @@ use reth_eth_wire_types::{
 };
 use reth_network_p2p::sync::NetworkSyncUpdater;
 use reth_network_peers::NodeRecord;
-use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
+use reth_primitives_traits::FastInstant as Instant;
+use std::{future::Future, net::SocketAddr, sync::Arc};
 
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;

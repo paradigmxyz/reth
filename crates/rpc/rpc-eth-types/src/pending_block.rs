@@ -2,7 +2,7 @@
 //!
 //! Types used in block building.
 
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
 
 use crate::block::BlockAndReceipts;
 use alloy_consensus::BlockHeader;
@@ -13,7 +13,8 @@ use reth_chain_state::{BlockState, ExecutedBlock};
 use reth_ethereum_primitives::Receipt;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{
-    Block, BlockTy, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader,
+    Block, BlockTy, FastInstant as Instant, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock,
+    SealedHeader,
 };
 use reth_rpc_convert::{RpcConvert, RpcTypes};
 

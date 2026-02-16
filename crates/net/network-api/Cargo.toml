@@ -17,6 +17,7 @@ reth-network-peers.workspace = true
 reth-network-types.workspace = true
 reth-network-p2p.workspace = true
 reth-eth-wire-types.workspace = true
+reth-primitives-traits.workspace = true
 reth-tokio-util.workspace = true
 reth-ethereum-forks.workspace = true
 
@@ -40,12 +41,13 @@ derive_more.workspace = true
 
 [features]
 serde = [
-    "dep:serde",
-    "reth-eth-wire-types/serde",
-    "reth-network-types/serde",
-    "alloy-primitives/serde",
-    "enr/serde",
-    "reth-ethereum-forks/serde",
-    "alloy-consensus/serde",
-    "alloy-rpc-types-eth/serde",
+	"dep:serde",
+	"reth-eth-wire-types/serde",
+	"reth-network-types/serde",
+	"alloy-primitives/serde",
+	"enr/serde",
+	"reth-ethereum-forks/serde",
+	"alloy-consensus/serde",
+	"alloy-rpc-types-eth/serde",
+	"reth-primitives-traits/serde"
 ]

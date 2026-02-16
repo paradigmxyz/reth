@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-ethereum-forks.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
+reth-primitives-traits.workspace = true
 reth-tokio-util = { workspace = true, features = ["time"] }
 
 # ethereum
@@ -50,15 +51,16 @@ rand.workspace = true
 
 [features]
 serde = [
-    "dep:serde",
-    "dep:serde_with",
-    "alloy-chains/serde",
-    "alloy-primitives/serde",
-    "enr/serde",
-    "linked_hash_set/serde",
-    "rand/serde",
-    "secp256k1/serde",
-    "hickory-resolver/serde",
-    "reth-ethereum-forks/serde",
-    "dashmap/serde",
+	"dep:serde",
+	"dep:serde_with",
+	"alloy-chains/serde",
+	"alloy-primitives/serde",
+	"enr/serde",
+	"linked_hash_set/serde",
+	"rand/serde",
+	"secp256k1/serde",
+	"hickory-resolver/serde",
+	"reth-ethereum-forks/serde",
+	"dashmap/serde",
+	"reth-primitives-traits/serde"
 ]

@@ -1,5 +1,5 @@
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_primitives_traits::SealedHeader;
+use reth_primitives_traits::{FastInstant as Instant, SealedHeader};
 
 /// A type that can track updates related to fork choice updates.
 pub trait CanonChainTracker: Send + Sync {
@@ -12,7 +12,7 @@ pub trait CanonChainTracker: Send + Sync {
     /// Returns the last time a fork choice update was received from the CL
     /// ([`CanonChainTracker::on_forkchoice_update_received`])
     #[cfg(feature = "std")]
-    fn last_received_update_timestamp(&self) -> Option<std::time::Instant>;
+    fn last_received_update_timestamp(&self) -> Option<Instant>;
 
     /// Sets the canonical head of the chain.
     fn set_canonical_head(&self, header: SealedHeader<Self::Header>);

@@ -9,7 +9,9 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     RawValue,
 };
-use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
+use reth_primitives_traits::{
+    FastInstant as Instant, GotExpected, NodePrimitives, SignedTransaction,
+};
 use reth_provider::{
     BlockReader, DBProvider, EitherWriter, HeaderProvider, ProviderError, PruneCheckpointReader,
     PruneCheckpointWriter, StaticFileProviderFactory, StatsReader, StorageSettingsCache,
@@ -21,7 +23,7 @@ use reth_stages_api::{
     StageId, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use std::{fmt::Debug, ops::Range, sync::mpsc, time::Instant};
+use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
 use tracing::*;
 

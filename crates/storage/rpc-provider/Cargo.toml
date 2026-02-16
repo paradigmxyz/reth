@@ -25,6 +25,7 @@ reth-trie.workspace = true
 reth-stages-types.workspace = true
 reth-db-api.workspace = true
 reth-rpc-convert.workspace = true
+reth-primitives-traits.workspace = true
 
 # alloy
 alloy-provider = { workspace = true, features = ["debug-api"] }

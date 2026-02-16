@@ -17,6 +17,7 @@ reth-net-banlist.workspace = true
 reth-ethereum-forks.workspace = true
 reth-net-nat.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
+reth-primitives-traits.workspace = true
 
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand"] }
@@ -48,13 +49,17 @@ reth-tracing.workspace = true
 [features]
 default = ["serde"]
 serde = [
-    "dep:serde",
-    "alloy-primitives/serde",
-    "discv5/serde",
-    "enr/serde",
-    "parking_lot/serde",
-    "rand_08?/serde",
-    "secp256k1/serde",
-    "reth-ethereum-forks/serde",
+	"dep:serde",
+	"alloy-primitives/serde",
+	"discv5/serde",
+	"enr/serde",
+	"parking_lot/serde",
+	"rand_08?/serde",
+	"secp256k1/serde",
+	"reth-ethereum-forks/serde",
+	"reth-primitives-traits/serde"
 ]
-test-utils = ["dep:rand_08"]
+test-utils = [
+	"dep:rand_08",
+	"reth-primitives-traits/test-utils"
+]

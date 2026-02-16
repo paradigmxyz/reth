@@ -15,6 +15,7 @@
 use crate::shutdown::{signal, GracefulShutdown, Shutdown, Signal};
 use dyn_clone::DynClone;
 use futures_util::future::BoxFuture;
+use quanta::Instant;
 use std::{
     any::Any,
     fmt::{Display, Formatter},
@@ -255,9 +256,9 @@ impl TaskManager {
 
     fn do_graceful_shutdown(self, timeout: Option<std::time::Duration>) -> bool {
         drop(self.signal);
-        let deadline = timeout.map(|t| std::time::Instant::now() + t);
+        let deadline = timeout.map(|t| Instant::now() + t);
         while self.graceful_tasks.load(Ordering::SeqCst) > 0 {
-            if deadline.is_some_and(|d| std::time::Instant::now() > d) {
+            if deadline.is_some_and(|d| Instant::now() > d) {
                 debug!("graceful shutdown timed out");
                 return false;
             }

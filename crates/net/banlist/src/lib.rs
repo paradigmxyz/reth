@@ -10,7 +10,8 @@
 
 type PeerId = alloy_primitives::B512;
 
-use std::{collections::HashMap, net::IpAddr, str::FromStr, time::Instant};
+use reth_primitives_traits::FastInstant as Instant;
+use std::{collections::HashMap, net::IpAddr, str::FromStr};
 
 /// Determines whether or not the IP is globally routable.
 /// Should be replaced with [`IpAddr::is_global`](std::net::IpAddr::is_global) once it is stable.

@@ -39,6 +39,7 @@ bytes.workspace = true
 dashmap = { workspace = true, features = ["inline"], optional = true }
 derive_more.workspace = true
 once_cell.workspace = true
+quanta.workspace = true
 serde_with = { workspace = true, optional = true }
 thiserror.workspace = true
 

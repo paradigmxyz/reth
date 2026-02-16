@@ -1,8 +1,6 @@
+use reth_primitives_traits::FastInstant as Instant;
 use reth_prune_types::{PruneInterruptReason, PruneProgress};
-use std::{
-    num::NonZeroUsize,
-    time::{Duration, Instant},
-};
+use std::{num::NonZeroUsize, time::Duration};
 
 /// Limits a pruner run by either the number of entries (rows in the database) that can be deleted
 /// or the time it can run.

@@ -31,7 +31,7 @@ use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory,
     StateReader,
@@ -45,7 +45,6 @@ use std::{
         mpsc::{self, channel, Receiver, Sender, SyncSender},
         Arc,
     },
-    time::Instant,
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 

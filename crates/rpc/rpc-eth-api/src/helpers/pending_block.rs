@@ -15,7 +15,9 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
-use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
+use reth_primitives_traits::{
+    transaction::error::InvalidTransactionError, FastInstant as Instant, HeaderTy, SealedHeader,
+};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
@@ -31,10 +33,7 @@ use reth_transaction_pool::{
     PoolTransaction, TransactionPool,
 };
 use revm::context_interface::Block;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tracing::debug;
 

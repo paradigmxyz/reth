@@ -835,7 +835,7 @@ where
         // No-op for RPC provider
     }
 
-    fn last_received_update_timestamp(&self) -> Option<std::time::Instant> {
+    fn last_received_update_timestamp(&self) -> Option<reth_primitives_traits::FastInstant> {
         None
     }
 

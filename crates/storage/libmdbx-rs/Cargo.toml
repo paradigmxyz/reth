@@ -21,13 +21,14 @@ parking_lot.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+quanta = { workspace = true, optional = true }
 
 dashmap = { workspace = true, features = ["inline"], optional = true }
 
 [features]
 default = []
 return-borrowed = []
-read-tx-timeouts = ["dep:dashmap"]
+read-tx-timeouts = ["dep:dashmap", "dep:quanta"]
 
 [dev-dependencies]
 criterion.workspace = true

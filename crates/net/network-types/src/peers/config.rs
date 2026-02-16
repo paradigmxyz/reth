@@ -1,5 +1,6 @@
 //! Configuration for peering.
 
+use reth_primitives_traits::FastInstant as Instant;
 use std::{
     collections::HashSet,
     io::{self, ErrorKind},
@@ -62,10 +63,10 @@ impl PeerBackoffDurations {
     /// Returns the timestamp until which we should backoff.
     ///
     /// The Backoff duration is capped by the configured maximum backoff duration.
-    pub fn backoff_until(&self, kind: BackoffKind, backoff_counter: u8) -> std::time::Instant {
+    pub fn backoff_until(&self, kind: BackoffKind, backoff_counter: u8) -> Instant {
         let backoff_time = self.backoff(kind);
         let backoff_time = backoff_time + backoff_time * backoff_counter as u32;
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         now + backoff_time.min(self.max)
     }
 

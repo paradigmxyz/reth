@@ -117,6 +117,9 @@
 #[macro_use]
 extern crate alloc;
 
+/// Re-export of [`quanta::Instant`] for high-resolution timing with minimal overhead.
+pub use quanta::Instant as FastInstant;
+
 /// Common constants.
 pub mod constants;
 pub use constants::gas_units::{format_gas, format_gas_throughput};

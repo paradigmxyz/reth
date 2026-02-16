@@ -13,7 +13,8 @@ use reth_eth_wire::{
 use reth_network_api::PeerInfo;
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::PeerKind;
-use std::{io, net::SocketAddr, sync::Arc, time::Instant};
+use reth_primitives_traits::FastInstant as Instant;
+use std::{io, net::SocketAddr, sync::Arc};
 use tokio::sync::{
     mpsc::{self, error::SendError},
     oneshot,

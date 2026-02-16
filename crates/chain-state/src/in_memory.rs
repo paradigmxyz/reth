@@ -13,15 +13,15 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
-    BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-    SignedTransaction,
+    BlockBody as _, FastInstant as Instant, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock,
+    SealedHeader, SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{
     updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData,
     TrieInputSorted,
 };
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.

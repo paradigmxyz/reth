@@ -3,13 +3,10 @@ use alloy_eips::BlockNumHash;
 use alloy_primitives::BlockNumber;
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
-use reth_primitives_traits::{NodePrimitives, SealedHeader};
-use std::{
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    time::Instant,
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives, SealedHeader};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
 };
 use tokio::sync::watch;
 

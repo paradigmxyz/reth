@@ -1,8 +1,9 @@
 use crate::tree::{LinkEntry, TreeRootEntry};
 use enr::EnrKeyUnambiguous;
 use linked_hash_set::LinkedHashSet;
+use reth_primitives_traits::FastInstant as Instant;
 use secp256k1::SecretKey;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// A sync-able tree
 pub(crate) struct SyncTree<K: EnrKeyUnambiguous = SecretKey> {

@@ -126,10 +126,11 @@ mod read_transactions {
         txn_manager::TxnManager,
     };
     use dashmap::{DashMap, DashSet};
+    use quanta::Instant;
     use std::{
         backtrace::Backtrace,
         sync::{mpsc::sync_channel, Arc},
-        time::{Duration, Instant},
+        time::Duration,
     };
     use tracing::{error, trace, warn};
 

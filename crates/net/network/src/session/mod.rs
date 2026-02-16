@@ -28,6 +28,7 @@ use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
 use reth_network_types::SessionsConfig;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_tasks::TaskSpawner;
 use rustc_hash::FxHashMap;
 use secp256k1::SecretKey;
@@ -37,7 +38,7 @@ use std::{
     net::SocketAddr,
     sync::{atomic::AtomicU64, Arc},
     task::{Context, Poll},
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},

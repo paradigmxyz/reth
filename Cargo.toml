@@ -528,6 +528,7 @@ notify = { version = "8.0.0", default-features = false, features = ["macos_fseve
 nybbles = { version = "0.4.8", default-features = false }
 once_cell = { version = "1.19", default-features = false, features = ["critical-section"] }
 parking_lot = "0.12"
+quanta = "0.12"
 paste = "1.0"
 rand = "0.9"
 rayon = "1.7"

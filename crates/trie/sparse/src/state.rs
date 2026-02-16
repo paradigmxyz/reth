@@ -11,7 +11,7 @@ use alloy_primitives::{
 use alloy_rlp::{Decodable, Encodable};
 use alloy_trie::proof::DecodedProofNodes;
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
@@ -1191,7 +1191,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
     /// Keeps the top `max_storage_tries` by a score combining size and heat.
     /// Evicts lower-scored tries entirely, prunes kept tries to `max_depth`.
     fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        let fn_start = std::time::Instant::now();
+        let fn_start = Instant::now();
         let mut stats =
             StorageTriesPruneStats { total_tries_before: self.tries.len(), ..Default::default() };
 
@@ -1248,7 +1248,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
         // - They haven't been pruned since last access
         // - They're large enough to be worth pruning
         const MIN_SIZE_TO_PRUNE: usize = 1000;
-        let prune_start = std::time::Instant::now();
+        let prune_start = Instant::now();
         for (address, size) in &tries_to_keep {
             if *size < MIN_SIZE_TO_PRUNE {
                 stats.skipped_small += 1;

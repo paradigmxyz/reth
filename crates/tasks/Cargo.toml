@@ -26,6 +26,7 @@ auto_impl.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 dyn-clone.workspace = true
+quanta.workspace = true
 
 # feature `rayon`
 rayon = { workspace = true, optional = true }
