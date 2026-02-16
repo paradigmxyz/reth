@@ -7,7 +7,7 @@ use clap::Parser;
 use config_gen::{config_for_components, write_config};
 use eyre::Result;
 use lz4::Decoder;
-use manifest::{SnapshotComponentType, SnapshotManifest};
+use manifest::{ComponentUrlOverrides, SnapshotComponentType, SnapshotManifest};
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -183,6 +183,30 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     /// Skip reth.toml generation after download.
     #[arg(long)]
     no_config: bool,
+
+    /// Override URL for the state component archive.
+    #[arg(long, value_name = "URL")]
+    state_url: Option<String>,
+
+    /// Override URL for the headers component archive.
+    #[arg(long, value_name = "URL")]
+    headers_url: Option<String>,
+
+    /// Override URL for the transactions component archive.
+    #[arg(long, value_name = "URL")]
+    txs_url: Option<String>,
+
+    /// Override URL for the receipts component archive.
+    #[arg(long, value_name = "URL")]
+    receipts_url: Option<String>,
+
+    /// Override URL for the account changesets component archive.
+    #[arg(long, value_name = "URL")]
+    account_changesets_url: Option<String>,
+
+    /// Override URL for the storage changesets component archive.
+    #[arg(long, value_name = "URL")]
+    storage_changesets_url: Option<String>,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
@@ -206,20 +230,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             return Ok(());
         }
 
-        // Modular download: fetch manifest and select components
+        // Modular download: discover available components by convention
         let base_url = get_base_url(chain_id);
-        info!(target: "reth::cli", "Fetching snapshot manifest from {base_url}");
+        let overrides = ComponentUrlOverrides {
+            state: self.state_url.clone(),
+            headers: self.headers_url.clone(),
+            transactions: self.txs_url.clone(),
+            receipts: self.receipts_url.clone(),
+            account_changesets: self.account_changesets_url.clone(),
+            storage_changesets: self.storage_changesets_url.clone(),
+        };
 
-        let manifest = manifest::fetch_manifest(&base_url).await?;
-
-        if manifest.block > 0 {
-            info!(target: "reth::cli",
-                block = manifest.block,
-                chain_id = manifest.chain_id,
-                storage_version = %manifest.storage_version,
-                "Found snapshot manifest"
-            );
-        }
+        info!(target: "reth::cli", "Discovering available snapshot components from {base_url}");
+        let manifest = manifest::discover_components(&base_url, &overrides).await?;
 
         let selected = self.resolve_components(&manifest)?;
 
