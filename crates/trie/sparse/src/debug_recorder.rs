@@ -4,14 +4,14 @@
 //! infrastructure for recording all mutations to a [`crate::ParallelSparseTrie`]
 //! for post-hoc debugging of state root mismatches.
 
-use alloc::vec::Vec;
-use alloy_primitives::{Bytes, B256};
+use alloc::{string::String, vec::Vec};
+use alloy_primitives::{hex, Bytes, B256};
 use alloy_trie::nodes::TrieNode;
 use reth_trie_common::Nibbles;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// Records mutating operations performed on a sparse trie in the order they occurred.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct TrieDebugRecorder {
     ops: Vec<RecordedOp>,
 }
@@ -49,7 +49,7 @@ impl TrieDebugRecorder {
 }
 
 /// A mutating operation recorded from a sparse trie.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum RecordedOp {
     /// Records a `reveal_nodes` call with the nodes that were revealed.
     RevealNodes {
@@ -73,12 +73,12 @@ pub enum RecordedOp {
 }
 
 /// A serializable record of a proof trie node.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProofTrieNodeRecord {
     /// The nibble path of the node.
     pub path: Nibbles,
     /// The trie node.
-    pub node: TrieNode,
+    pub node: TrieNodeRecord,
     /// The branch node masks `(hash_mask, tree_mask)` stored as raw `u16` values, if present.
     pub masks: Option<(u16, u16)>,
 }
@@ -88,14 +88,55 @@ impl ProofTrieNodeRecord {
     pub fn from_proof_trie_node(node: &reth_trie_common::ProofTrieNode) -> Self {
         Self {
             path: node.path,
-            node: node.node.clone(),
+            node: TrieNodeRecord(node.node.clone()),
             masks: node.masks.map(|masks| (masks.hash_mask.get(), masks.tree_mask.get())),
         }
     }
 }
 
+/// A newtype wrapper around [`TrieNode`] with custom serialization that hex-encodes byte fields
+/// (leaf values, branch stack entries, extension child pointers) instead of serializing them as
+/// raw integer arrays.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrieNodeRecord(pub TrieNode);
+
+impl From<TrieNode> for TrieNodeRecord {
+    fn from(node: TrieNode) -> Self {
+        Self(node)
+    }
+}
+
+impl Serialize for TrieNodeRecord {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStructVariant;
+        match &self.0 {
+            TrieNode::EmptyRoot => serializer.serialize_unit_variant("TrieNode", 0, "EmptyRoot"),
+            TrieNode::Branch(branch) => {
+                let stack_hex: Vec<String> =
+                    branch.stack.iter().map(|n| hex::encode(n.as_ref())).collect();
+                let mut sv = serializer.serialize_struct_variant("TrieNode", 1, "Branch", 2)?;
+                sv.serialize_field("stack", &stack_hex)?;
+                sv.serialize_field("state_mask", &branch.state_mask.get())?;
+                sv.end()
+            }
+            TrieNode::Extension(ext) => {
+                let mut sv = serializer.serialize_struct_variant("TrieNode", 2, "Extension", 2)?;
+                sv.serialize_field("key", &ext.key)?;
+                sv.serialize_field("child", &hex::encode(ext.child.as_ref()))?;
+                sv.end()
+            }
+            TrieNode::Leaf(leaf) => {
+                let mut sv = serializer.serialize_struct_variant("TrieNode", 3, "Leaf", 2)?;
+                sv.serialize_field("key", &leaf.key)?;
+                sv.serialize_field("value", &hex::encode(&leaf.value))?;
+                sv.end()
+            }
+        }
+    }
+}
+
 /// A serializable record of a leaf update, mirroring [`crate::LeafUpdate`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum LeafUpdateRecord {
     /// The leaf value was changed to the given RLP-encoded value.
     Changed(Bytes),
