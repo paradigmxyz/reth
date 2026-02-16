@@ -1099,9 +1099,6 @@ where
         block_number: u64,
         recorders: &[(Option<B256>, TrieDebugRecorder)],
     ) {
-        if recorders.is_empty() {
-            return;
-        }
         let path = format!("trie_debug_block_{block_number}.json");
         match serde_json::to_string_pretty(recorders) {
             Ok(json) => match std::fs::write(&path, json) {
