@@ -37,6 +37,12 @@ pub mod shutdown;
 #[cfg(feature = "rayon")]
 pub mod pool;
 
+/// Lock-free ordered parallel iterator extension trait.
+#[cfg(feature = "rayon")]
+pub mod for_each_ordered;
+#[cfg(feature = "rayon")]
+pub use for_each_ordered::ForEachOrdered;
+
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
 pub use runtime::{Runtime, RuntimeBuildError, RuntimeBuilder, RuntimeConfig, TokioConfig};

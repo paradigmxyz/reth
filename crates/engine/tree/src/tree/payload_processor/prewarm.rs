@@ -42,7 +42,7 @@ use std::{
     ops::Range,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, channel, Receiver, Sender},
+        mpsc::{self, channel, Receiver, Sender, SyncSender},
         Arc,
     },
     time::Instant,
@@ -154,8 +154,6 @@ where
         self.executor.spawn_blocking(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
 
-            let (done_tx, done_rx) = mpsc::channel();
-
             // When transaction_count is 0, it means the count is unknown. In this case, spawn
             // max workers to handle potentially many transactions in parallel rather
             // than bottlenecking on a single worker.
@@ -165,6 +163,8 @@ where
             } else {
                 transaction_count.min(max_concurrency)
             };
+
+            let (done_tx, done_rx) = mpsc::sync_channel(workers_needed);
 
             // Spawn workers
             let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor,  to_multi_proof.clone(), done_tx.clone());
@@ -312,10 +312,10 @@ where
             return;
         }
 
-        let (done_tx, done_rx) = mpsc::channel();
-
         // Calculate number of workers needed (at most max_concurrency)
         let workers_needed = total_slots.min(self.max_concurrency);
+
+        let (done_tx, done_rx) = mpsc::sync_channel(workers_needed);
 
         // Calculate slots per worker
         let slots_per_worker = total_slots / workers_needed;
@@ -585,7 +585,7 @@ where
         self,
         txs: CrossbeamReceiver<IndexedTransaction<Tx>>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-        done_tx: Sender<()>,
+        done_tx: SyncSender<()>,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
@@ -660,7 +660,7 @@ where
         workers_needed: usize,
         task_executor: &Runtime,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-        done_tx: Sender<()>,
+        done_tx: SyncSender<()>,
     ) -> CrossbeamSender<IndexedTransaction<Tx>>
     where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
@@ -698,7 +698,7 @@ where
         executor: &Runtime,
         bal: Arc<BlockAccessList>,
         range: Range<usize>,
-        done_tx: Sender<()>,
+        done_tx: SyncSender<()>,
     ) {
         let ctx = self.clone();
         let span = debug_span!(
@@ -724,7 +724,7 @@ where
         self,
         bal: Arc<BlockAccessList>,
         range: Range<usize>,
-        done_tx: Sender<()>,
+        done_tx: SyncSender<()>,
     ) {
         let Self { saved_cache, provider, metrics, .. } = self;
 

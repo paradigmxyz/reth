@@ -908,7 +908,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 }
 
 /// Starts the authentication process for a connection initiated by a remote peer.
-#[instrument(level = "trace", target = "net::network", skip_all, fields(%remote_addr, peer_id))]
+#[instrument(level = "trace", target = "net::network", skip_all, fields(%remote_addr, peer_id = ?remote_peer_id))]
 #[expect(clippy::too_many_arguments)]
 async fn start_pending_outbound_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
