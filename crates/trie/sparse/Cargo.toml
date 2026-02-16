@@ -65,6 +65,8 @@ std = [
     "reth-storage-api/std",
     "reth-trie-common/std",
     "tracing/std",
+    "serde?/std",
+    "serde_json?/std",
 ]
 metrics = ["dep:reth-metrics", "dep:metrics", "std"]
 trie-debug = ["std", "dep:serde", "dep:serde_json", "alloy-primitives/serde", "alloy-trie/serde"]

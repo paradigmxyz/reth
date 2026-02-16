@@ -10,7 +10,7 @@ use reth_trie_common::Nibbles;
 use serde::{Deserialize, Serialize};
 
 /// Records mutating operations performed on a sparse trie in the order they occurred.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrieDebugRecorder {
     ops: Vec<RecordedOp>,
 }
@@ -48,7 +48,7 @@ impl TrieDebugRecorder {
 }
 
 /// A mutating operation recorded from a sparse trie.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RecordedOp {
     /// Records a `reveal_nodes` call with the nodes that were revealed.
     RevealNodes {
@@ -71,7 +71,7 @@ pub enum RecordedOp {
 /// This is a simplified version of [`reth_trie_common::ProofTrieNode`] that stores
 /// the RLP-encoded node bytes rather than the full [`alloy_trie::nodes::TrieNode`]
 /// (which does not implement `Serialize`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProofTrieNodeRecord {
     /// The nibble path of the node.
     pub path: Nibbles,
@@ -96,7 +96,7 @@ impl ProofTrieNodeRecord {
 }
 
 /// A serializable record of a leaf update, mirroring [`crate::LeafUpdate`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LeafUpdateRecord {
     /// The leaf value was changed to the given RLP-encoded value.
     Changed(Bytes),
