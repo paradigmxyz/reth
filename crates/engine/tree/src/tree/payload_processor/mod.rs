@@ -235,6 +235,7 @@ where
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
             + Clone
             + Send
+            + Sync
             + 'static,
     {
         // start preparing transactions immediately

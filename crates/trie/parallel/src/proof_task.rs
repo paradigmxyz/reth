@@ -71,7 +71,7 @@ use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::{channel, Receiver, Sender},
-        Arc, Mutex,
+        Arc,
     },
     time::{Duration, Instant},
 };
@@ -152,6 +152,7 @@ impl ProofWorkerHandle {
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
             + Clone
             + Send
+            + Sync
             + 'static,
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
@@ -167,10 +168,8 @@ impl ProofWorkerHandle {
 
         // Dynamically adjust the number of active threads if halving is requested.
         if halve_workers {
-            storage_pool
-                .set_num_threads(storage_pool.current_num_threads() / 2);
-            account_pool
-                .set_num_threads(account_pool.current_num_threads() / 2);
+            storage_pool.set_num_threads(storage_pool.current_num_threads() / 2);
+            account_pool.set_num_threads(account_pool.current_num_threads() / 2);
         } else {
             storage_pool.set_num_threads(storage_pool.current_num_threads());
             account_pool.set_num_threads(account_pool.current_num_threads());
@@ -188,32 +187,16 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
-        // Pre-build owned state for each storage worker so we can distribute via broadcast.
-        let storage_workers = Mutex::new(
-            (0..storage_worker_count)
-                .map(|worker_id| {
-                    (
-                        worker_id,
-                        task_ctx.clone(),
-                        storage_work_rx.clone(),
-                        storage_available_workers.clone(),
-                        cached_storage_roots.clone(),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        );
-
-        // broadcast blocks until all workers exit (channel close), so run on a
-        // dedicated OS thread.
-        let rt_storage = runtime.clone();
-        reth_tasks::spawn_os_thread("proof-storage-workers", move || {
-            rt_storage.proof_storage_worker_pool().broadcast(|_| {
-                let Some((worker_id, task_ctx, work_rx, available, roots)) =
-                    storage_workers.lock().unwrap().pop()
-                else {
-                    return;
-                };
-
+        // broadcast blocks until all workers exit (channel close), so run on
+        // tokio's blocking pool.
+        let storage_rt = runtime.clone();
+        let storage_task_ctx = task_ctx.clone();
+        let storage_avail = storage_available_workers.clone();
+        let storage_roots = cached_storage_roots.clone();
+        runtime.spawn_blocking(move || {
+            let worker_id = AtomicUsize::new(0);
+            storage_rt.proof_storage_worker_pool().broadcast(|_| {
+                let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
                 let span =
                     debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
                 let _guard = span.enter();
@@ -224,11 +207,11 @@ impl ProofWorkerHandle {
                 let cursor_metrics = ProofTaskCursorMetrics::new();
 
                 let worker = StorageProofWorker::new(
-                    task_ctx,
-                    work_rx,
+                    storage_task_ctx.clone(),
+                    storage_work_rx.clone(),
                     worker_id,
-                    available,
-                    roots,
+                    storage_avail.clone(),
+                    storage_roots.clone(),
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
@@ -246,31 +229,13 @@ impl ProofWorkerHandle {
             });
         });
 
-        // Pre-build owned state for each account worker.
-        let account_workers = Mutex::new(
-            (0..account_worker_count)
-                .map(|worker_id| {
-                    (
-                        worker_id,
-                        task_ctx.clone(),
-                        account_work_rx.clone(),
-                        storage_work_tx.clone(),
-                        account_available_workers.clone(),
-                        cached_storage_roots.clone(),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        );
-
-        let rt_account = runtime.clone();
-        reth_tasks::spawn_os_thread("proof-account-workers", move || {
-            rt_account.proof_account_worker_pool().broadcast(|_| {
-                let Some((worker_id, task_ctx, work_rx, storage_tx, available, roots)) =
-                    account_workers.lock().unwrap().pop()
-                else {
-                    return;
-                };
-
+        let account_rt = runtime.clone();
+        let account_tx = storage_work_tx.clone();
+        let account_avail = account_available_workers.clone();
+        runtime.spawn_blocking(move || {
+            let worker_id = AtomicUsize::new(0);
+            account_rt.proof_account_worker_pool().broadcast(|_| {
+                let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
                 let span =
                     debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
                 let _guard = span.enter();
@@ -281,12 +246,12 @@ impl ProofWorkerHandle {
                 let cursor_metrics = ProofTaskCursorMetrics::new();
 
                 let worker = AccountProofWorker::new(
-                    task_ctx,
-                    work_rx,
+                    task_ctx.clone(),
+                    account_work_rx.clone(),
                     worker_id,
-                    storage_tx,
-                    available,
-                    roots,
+                    account_tx.clone(),
+                    account_avail.clone(),
+                    cached_storage_roots.clone(),
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
