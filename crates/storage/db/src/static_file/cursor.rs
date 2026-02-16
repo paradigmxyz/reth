@@ -60,10 +60,7 @@ impl<'a> StaticFileCursor<'a> {
     ) -> ColumnResult<M::FIRST> {
         let row = self.get(key_or_num, M::MASK)?;
 
-        match row {
-            Some(row) => Ok(Some(M::FIRST::decompress(row[0])?)),
-            None => Ok(None),
-        }
+        Ok(row.map(|row| M::FIRST::decompress(row[0])).transpose()?)
     }
 
     /// Gets two column values from a row.
@@ -73,10 +70,11 @@ impl<'a> StaticFileCursor<'a> {
     ) -> ColumnResult<(M::FIRST, M::SECOND)> {
         let row = self.get(key_or_num, M::MASK)?;
 
-        match row {
-            Some(row) => Ok(Some((M::FIRST::decompress(row[0])?, M::SECOND::decompress(row[1])?))),
-            None => Ok(None),
-        }
+        Ok(row
+            .map(|row| -> Result<_, reth_db_api::DatabaseError> {
+                Ok((M::FIRST::decompress(row[0])?, M::SECOND::decompress(row[1])?))
+            })
+            .transpose()?)
     }
 
     /// Gets three column values from a row.
@@ -86,14 +84,15 @@ impl<'a> StaticFileCursor<'a> {
     ) -> ColumnResult<(M::FIRST, M::SECOND, M::THIRD)> {
         let row = self.get(key_or_num, M::MASK)?;
 
-        match row {
-            Some(row) => Ok(Some((
-                M::FIRST::decompress(row[0])?,
-                M::SECOND::decompress(row[1])?,
-                M::THIRD::decompress(row[2])?,
-            ))),
-            None => Ok(None),
-        }
+        Ok(row
+            .map(|row| -> Result<_, reth_db_api::DatabaseError> {
+                Ok((
+                    M::FIRST::decompress(row[0])?,
+                    M::SECOND::decompress(row[1])?,
+                    M::THIRD::decompress(row[2])?,
+                ))
+            })
+            .transpose()?)
     }
 }
 
@@ -117,3 +116,4 @@ impl From<u64> for KeyOrNumber<'_> {
         KeyOrNumber::Number(value)
     }
 }
+
