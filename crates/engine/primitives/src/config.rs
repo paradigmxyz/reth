@@ -32,6 +32,18 @@ fn default_account_worker_count() -> usize {
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
 
+/// The size of proof targets chunk optimized for small blocks (≤20M gas used).
+///
+/// Benchmarking showed that chunk size 30 yields the best throughput for blocks with ≤20M gas:
+/// - 10M gas: 1.2051 Ggas/s (best)
+/// - 20M gas: 1.4490 Ggas/s (within 0.3% of best)
+///
+/// See: <https://gist.github.com/yongkangc/fda9c24846f0ba891376bcf81b002008>
+pub const SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE: usize = 30;
+
+/// Gas threshold below which the small block chunk size is used.
+pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
+
 /// The size of proof targets chunk to spawn in one multiproof calculation when V2 proofs are
 /// enabled. This is 4x the default chunk size to take advantage of more efficient V2 proof
 /// computation.

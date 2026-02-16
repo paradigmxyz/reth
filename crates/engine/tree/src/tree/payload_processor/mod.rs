@@ -10,6 +10,7 @@ use crate::tree::{
     sparse_trie::{SparseTrieCacheTask, SparseTrieTask, SpawnedSparseTrieTask},
     StateProviderBuilder, TreeConfig,
 };
+use reth_engine_primitives::{SMALL_BLOCK_GAS_THRESHOLD, SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE};
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_evm::block::StateChangeSource;
@@ -247,6 +248,7 @@ where
         let v2_proofs_enabled = !config.disable_proof_v2();
         let parent_state_root = env.parent_state_root;
         let transaction_count = env.transaction_count;
+        let chunk_size = Self::adaptive_chunk_size(config, env.gas_used);
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -266,7 +268,7 @@ where
             let multi_proof_task = MultiProofTask::new(
                 proof_handle.clone(),
                 to_sparse_trie,
-                config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
+                chunk_size,
                 to_multi_proof.clone(),
                 from_multi_proof.clone(),
             )
@@ -301,6 +303,7 @@ where
             from_multi_proof,
             config,
             parent_state_root,
+            chunk_size,
         );
 
         PayloadHandle {
@@ -351,6 +354,24 @@ where
     /// recovery. Inspired by Nethermind's `RecoverSignature` which uses sequential `foreach`
     /// for small blocks.
     const SMALL_BLOCK_TX_THRESHOLD: usize = 30;
+
+    /// Returns the multiproof chunk size adapted to the block's gas usage.
+    ///
+    /// For blocks with ≤20M gas used, a smaller chunk size (30) yields better throughput.
+    /// For larger blocks, the configured default chunk size is used.
+    const fn adaptive_chunk_size(config: &TreeConfig, gas_used: u64) -> Option<usize> {
+        if !config.multiproof_chunking_enabled() {
+            return None;
+        }
+
+        let size = if gas_used > 0 && gas_used <= SMALL_BLOCK_GAS_THRESHOLD {
+            SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE
+        } else {
+            config.multiproof_chunk_size()
+        };
+
+        Some(size)
+    }
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
@@ -506,6 +527,7 @@ where
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
+    #[expect(clippy::too_many_arguments)]
     fn spawn_sparse_trie_task(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
@@ -514,6 +536,7 @@ where
         from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
         config: &TreeConfig,
         parent_state_root: B256,
+        chunk_size: Option<usize>,
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
@@ -521,8 +544,6 @@ where
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
         let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
-        let chunk_size =
-            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
@@ -995,6 +1016,9 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used to determine parallel worker count for prewarming.
     /// A value of 0 indicates the count is unknown.
     pub transaction_count: usize,
+    /// Total gas used by all transactions in the block.
+    /// Used to adaptively select multiproof chunk size for optimal throughput.
+    pub gas_used: u64,
     /// Withdrawals included in the block.
     /// Used to generate prefetch targets for withdrawal addresses.
     pub withdrawals: Option<Vec<Withdrawal>>,
@@ -1011,6 +1035,7 @@ where
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
             transaction_count: 0,
+            gas_used: 0,
             withdrawals: None,
         }
     }
