@@ -27,7 +27,7 @@ use reth_evm::{
     SpecFor, TxEnvFor,
 };
 use reth_metrics::Metrics;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProvider,
     StateProviderFactory, StateReader,
@@ -49,7 +49,6 @@ use std::{
         mpsc::{self, channel},
         Arc,
     },
-    time::Instant,
 };
 use tracing::{debug, debug_span, instrument, warn, Span};
 
@@ -366,7 +365,7 @@ where
         transactions: I,
         transaction_count: usize,
     ) -> (
-        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
+        mpsc::Receiver<(usize, WithTxEnv<TxEnvFor<Evm>, I::Recovered>)>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
     ) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
@@ -384,14 +383,14 @@ where
             );
             self.executor.spawn_blocking(move || {
                 let (transactions, convert) = transactions.into_parts();
-                for tx in transactions {
+                for (idx, tx) in transactions.into_iter().enumerate() {
                     let tx = convert.convert(tx);
                     let tx = tx.map(|tx| {
                         let (tx_env, tx) = tx.into_parts();
                         WithTxEnv { tx_env, tx: Arc::new(tx) }
                     });
                     if let Ok(tx) = &tx {
-                        let _ = prewarm_tx.send(tx.clone());
+                        let _ = prewarm_tx.send((idx, tx.clone()));
                     }
                     let _ = execute_tx.send(tx);
                 }
@@ -403,13 +402,14 @@ where
                 let (transactions, convert) = transactions.into_parts();
                 transactions
                     .into_par_iter()
-                    .map(|tx| {
+                    .enumerate()
+                    .map(|(idx, tx)| {
                         let tx = convert.convert(tx);
                         tx.map(|tx| {
                             let (tx_env, tx) = tx.into_parts();
                             let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
-                            // Send to prewarming out of order — order doesn't matter there.
-                            let _ = prewarm_tx.send(tx.clone());
+                            // Send to prewarming out of order with the original index.
+                            let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
                         })
                     })
@@ -432,7 +432,7 @@ where
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
@@ -611,7 +611,7 @@ where
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let deferred = if let Some(state_root) = computed_state_root {
-                let start = std::time::Instant::now();
+                let start = Instant::now();
                 let (trie, deferred) = task.into_trie_for_reuse(
                     prune_depth,
                     max_storage_tries,

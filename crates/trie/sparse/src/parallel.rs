@@ -13,6 +13,8 @@ use alloy_rlp::Decodable;
 use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
 use core::cmp::{Ord, Ordering, PartialOrd};
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, SparseTrieResult};
+#[cfg(feature = "metrics")]
+use reth_primitives_traits::FastInstant as Instant;
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
@@ -966,7 +968,7 @@ impl SparseTrie for ParallelSparseTrie {
 
             changed_subtries.par_iter_mut().for_each(|changed_subtrie| {
                 #[cfg(feature = "metrics")]
-                let start = std::time::Instant::now();
+                let start = Instant::now();
                 changed_subtrie.subtrie.update_hashes(
                     &mut changed_subtrie.prefix_set,
                     &mut changed_subtrie.update_actions_buf,
@@ -1320,14 +1322,12 @@ impl SparseTrie for ParallelSparseTrie {
     ) -> SparseTrieResult<()> {
         use crate::{provider::NoRevealProvider, LeafUpdate};
 
-        // Collect keys upfront since we mutate `updates` during iteration.
-        // On success, entries are removed; on blinded node failure, they're re-inserted.
-        let keys: Vec<B256> = updates.keys().copied().collect();
+        // Drain updates to avoid cloning keys while preserving the map's allocation.
+        // On success, entries remain removed; on blinded node failure, they're re-inserted.
+        let drained: Vec<_> = updates.drain().collect();
 
-        for key in keys {
+        for (key, update) in drained {
             let full_path = Nibbles::unpack(key);
-            // Remove upfront - we'll re-insert if the operation fails due to blinded node.
-            let update = updates.remove(&key).unwrap();
 
             match update {
                 LeafUpdate::Changed(value) => {
@@ -1976,7 +1976,7 @@ impl ParallelSparseTrie {
         });
 
         #[cfg(feature = "metrics")]
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         let mut update_actions_buf =
             self.updates_enabled().then(|| self.update_actions_buffers.pop().unwrap_or_default());

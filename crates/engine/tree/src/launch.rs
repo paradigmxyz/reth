@@ -25,7 +25,7 @@ use reth_provider::{
 };
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use reth_trie_db::ChangesetCache;
 use std::sync::Arc;
 
@@ -54,7 +54,7 @@ pub fn build_engine_orchestrator<N, Client, S, V, C>(
     client: Client,
     incoming_requests: S,
     pipeline: Pipeline<N>,
-    pipeline_task_spawner: Box<dyn TaskSpawner>,
+    pipeline_task_spawner: Runtime,
     provider: ProviderFactory<N>,
     blockchain_db: BlockchainProvider<N>,
     pruner: PrunerWithFactory<ProviderFactory<N>>,

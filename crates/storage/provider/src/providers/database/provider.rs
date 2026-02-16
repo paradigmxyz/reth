@@ -51,8 +51,8 @@ use reth_db_api::{
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
-    Account, Block as _, BlockBody as _, Bytecode, RecoveredBlock, SealedHeader, StorageEntry,
-    StorageSlotKey,
+    Account, Block as _, BlockBody as _, Bytecode, FastInstant as Instant, RecoveredBlock,
+    SealedHeader, StorageEntry, StorageSlotKey,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -79,7 +79,6 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::Arc,
-    time::Instant,
 };
 use tracing::{debug, instrument, trace};
 

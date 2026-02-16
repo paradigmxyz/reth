@@ -8,9 +8,9 @@ use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
-use reth_primitives_traits::constants::gas_units::MEGAGAS;
+use reth_primitives_traits::{constants::gas_units::MEGAGAS, FastInstant as Instant};
 use reth_trie::updates::TrieUpdates;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Upper bounds for each gas bucket. The last bucket is a catch-all for
 /// everything above the final threshold: <5M, 5-10M, 10-20M, 20-30M, 30-40M, >40M.
