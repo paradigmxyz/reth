@@ -886,7 +886,7 @@ impl RuntimeBuilder {
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
             let prewarming_pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(prewarming_threads)
-                .thread_name(|i| format!("prewarm-{i}"))
+                .thread_name(|i| format!("prewarm-{i:02}"))
                 .build()?;
 
             debug!(
