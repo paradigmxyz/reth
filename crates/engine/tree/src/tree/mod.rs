@@ -42,7 +42,7 @@ use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{fmt::Debug, ops, sync::Arc};
+use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -1557,42 +1557,27 @@ where
                             }
                             BeaconEngineMessage::RethNewPayload { payload, tx } => {
                                 let pending_persistence = self.persistence_state.rx.take();
-                                let validator = &self.payload_validator;
 
-                                debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
-                                let (persistence_tx, persistence_rx) = std::sync::mpsc::channel();
-                                if let Some((rx, start_time, _action)) = pending_persistence {
-                                    tokio::task::spawn_blocking(move || {
-                                        let start = Instant::now();
-                                        let result = rx.recv().ok();
-                                        let _ = persistence_tx.send((
-                                            result,
-                                            start_time,
-                                            start.elapsed(),
-                                        ));
-                                    });
-                                }
-
-                                let cache_wait = validator.wait_for_caches();
-                                let persistence_result = persistence_rx.try_recv().ok();
-
+                                // Wait for pending persistence to complete before processing
                                 let persistence_wait =
-                                    if let Some((result, start_time, wait_duration)) =
-                                        persistence_result
-                                    {
-                                        let _ = self
-                                            .on_persistence_complete(result.flatten(), start_time);
+                                    if let Some((rx, start_time, _action)) = pending_persistence {
+                                        let start = Instant::now();
+                                        let result = rx.recv().ok().flatten();
+                                        let wait_duration = start.elapsed();
+                                        let _ = self.on_persistence_complete(result, start_time);
                                         Some(wait_duration)
                                     } else {
                                         None
                                     };
+
+                                let cache_wait = self.payload_validator.wait_for_caches();
 
                                 debug!(
                                     target: "engine::tree",
                                     persistence_wait = ?persistence_wait,
                                     execution_cache_wait = ?cache_wait.execution_cache,
                                     sparse_trie_wait = ?cache_wait.sparse_trie,
-                                    "Peresistence finished and caches updated for reth_newPayload"
+                                    "Persistence finished and caches updated for reth_newPayload"
                                 );
 
                                 let start = Instant::now();
@@ -3122,4 +3107,27 @@ enum PersistTarget {
     Threshold,
     /// Persist all blocks up to and including the canonical head.
     Head,
+}
+
+/// Result of waiting for caches to become available.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CacheWaitDurations {
+    /// Time spent waiting for the execution cache lock.
+    pub execution_cache: Duration,
+    /// Time spent waiting for the sparse trie lock.
+    pub sparse_trie: Duration,
+}
+
+/// Trait for types that can wait for execution cache and sparse trie locks to become available.
+///
+/// This is used by `reth_newPayload` endpoint to ensure that payload processing
+/// waits for any ongoing operations to complete before starting.
+pub trait WaitForCaches {
+    /// Blocks until any post-validation cleanup from a previous payload has finished,
+    /// such as execution cache updates and sparse trie pruning.
+    ///
+    /// This ensures the next payload can be processed with a consistent state.
+    ///
+    /// Returns the time spent waiting for each cache separately.
+    fn wait_for_caches(&self) -> CacheWaitDurations;
 }

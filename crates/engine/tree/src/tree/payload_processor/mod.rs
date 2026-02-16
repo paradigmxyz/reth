@@ -8,7 +8,7 @@ use crate::tree::{
         sparse_trie::StateRootComputeOutcome,
     },
     sparse_trie::{SparseTrieCacheTask, SparseTrieTask, SpawnedSparseTrieTask},
-    StateProviderBuilder, TreeConfig,
+    CacheWaitDurations, StateProviderBuilder, TreeConfig,
 };
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
@@ -62,26 +62,6 @@ pub mod receipt_root_task;
 pub mod sparse_trie;
 
 use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
-
-/// Result of waiting for caches to become available.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct CacheWaitDurations {
-    /// Time spent waiting for the execution cache lock.
-    pub execution_cache: Duration,
-    /// Time spent waiting for the sparse trie lock.
-    pub sparse_trie: Duration,
-}
-
-/// Trait for types that can wait for execution cache and sparse trie locks to become available.
-///
-/// This is used by `reth_newPayload` endpoint to ensure that payload processing
-/// waits for any ongoing operations to complete before starting.
-pub trait WaitForCaches {
-    /// Waits for persistence and cache updates to complete.
-    ///
-    /// Returns the time spent waiting for each cache separately.
-    fn wait_for_caches(&self) -> CacheWaitDurations;
-}
 
 /// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
 ///
@@ -197,34 +177,14 @@ where
             disable_cache_metrics: config.disable_cache_metrics(),
         }
     }
-}
 
-impl<Evm> WaitForCaches for PayloadProcessor<Evm>
-where
-    Evm: ConfigureEvm,
-{
-    fn wait_for_caches(&self) -> CacheWaitDurations {
+    /// Blocks until any post-validation cleanup from a previous payload has finished,
+    /// such as execution cache updates and sparse trie pruning.
+    pub fn wait_for_caches(&self) -> CacheWaitDurations {
         debug!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
 
-        // Wait for both caches in parallel using std threads
-        let execution_cache = self.execution_cache.clone();
-        let sparse_trie = self.sparse_state_trie.clone();
-
-        // Use channels and spawn_blocking instead of std::thread::spawn
-        let (execution_tx, execution_rx) = std::sync::mpsc::channel();
-        let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
-
-        self.executor.spawn_blocking(move || {
-            let _ = execution_tx.send(execution_cache.wait_for_availability());
-        });
-        self.executor.spawn_blocking(move || {
-            let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
-        });
-
-        let execution_cache_duration =
-            execution_rx.recv().expect("execution cache wait task failed to send result");
-        let sparse_trie_duration =
-            sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
+        let execution_cache_duration = self.execution_cache.wait_for_availability();
+        let sparse_trie_duration = self.sparse_state_trie.wait_for_availability();
 
         debug!(
             target: "engine::tree::payload_processor",
