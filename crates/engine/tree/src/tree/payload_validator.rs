@@ -534,11 +534,18 @@ where
 
                         // Compare trie updates with serial computation if configured
                         if self.config.always_compare_trie_updates() {
-                            self.compare_trie_updates_with_serial(
+                            let has_diff = self.compare_trie_updates_with_serial(
                                 overlay_factory.clone(),
                                 &hashed_state,
                                 trie_updates.clone(),
                             );
+                            #[cfg(feature = "trie-debug")]
+                            if has_diff {
+                                Self::write_trie_debug_recorders(
+                                    block.header().number(),
+                                    &trie_debug_recorders,
+                                );
+                            }
                         }
 
                         // we double check the state root here for good measure
@@ -996,7 +1003,12 @@ where
                                 ))
                             })?;
                             let (state_root, trie_updates) = result?;
-                            return Ok(Ok(StateRootComputeOutcome { state_root, trie_updates }));
+                            return Ok(Ok(StateRootComputeOutcome {
+                                state_root,
+                                trie_updates,
+                                #[cfg(feature = "trie-debug")]
+                                debug_recorders: Vec::new(),
+                            }));
                         }
                         Err(RecvTimeoutError::Timeout) => {}
                     }
@@ -1008,7 +1020,12 @@ where
                             "State root timeout race won"
                         );
                         let (state_root, trie_updates) = result?;
-                        return Ok(Ok(StateRootComputeOutcome { state_root, trie_updates }));
+                        return Ok(Ok(StateRootComputeOutcome {
+                            state_root,
+                            trie_updates,
+                            #[cfg(feature = "trie-debug")]
+                            debug_recorders: Vec::new(),
+                        }));
                     }
                 }
             }
@@ -1026,7 +1043,7 @@ where
         overlay_factory: OverlayStateProviderFactory<P>,
         hashed_state: &HashedPostState,
         task_trie_updates: TrieUpdates,
-    ) {
+    ) -> bool {
         debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
 
         match Self::compute_state_root_serial(overlay_factory.clone(), hashed_state) {
@@ -1050,6 +1067,7 @@ where
                                 %err,
                                 "Error comparing trie updates"
                             );
+                            return true;
                         }
                     }
                     Err(err) => {
@@ -1069,6 +1087,7 @@ where
                 );
             }
         }
+        false
     }
 
     /// Writes trie debug recorders to a JSON file for the given block number.

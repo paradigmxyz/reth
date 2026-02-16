@@ -42,7 +42,7 @@ impl TrieDebugRecorder {
     }
 
     /// Returns `true` if no operations have been recorded.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.ops.is_empty()
     }
 }
