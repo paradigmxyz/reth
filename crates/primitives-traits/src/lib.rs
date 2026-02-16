@@ -118,6 +118,7 @@
 extern crate alloc;
 
 /// Re-export of [`quanta::Instant`] for high-resolution timing with minimal overhead.
+#[cfg(feature = "std")]
 pub use quanta::Instant as FastInstant;
 
 /// Common constants.
