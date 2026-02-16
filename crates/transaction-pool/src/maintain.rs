@@ -24,7 +24,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives_traits::{
-    transaction::signed::SignedTransaction, FastInstant as Instant, NodePrimitives, SealedHeader,
+    transaction::signed::SignedTransaction, NodePrimitives, SealedHeader,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -276,7 +276,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let queued = pool
                     .queued_transactions();
                 let mut stale_blobs = Vec::new();
-                let now = Instant::now();
+                let now = std::time::Instant::now();
                 let stale_txs: Vec<_> = queued
                     .into_iter()
                     .filter(|tx| {

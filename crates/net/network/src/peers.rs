@@ -22,7 +22,6 @@ use reth_network_types::{
     ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig,
     ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights,
 };
-use reth_primitives_traits::FastInstant as Instant;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     fmt::Display,
@@ -32,7 +31,10 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use tokio::{sync::mpsc, time::Interval};
+use tokio::{
+    sync::mpsc,
+    time::{Instant, Interval},
+};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{trace, warn};
 
@@ -69,7 +71,7 @@ pub struct PeersManager {
     /// Tracks unwanted ips/peer ids.
     ban_list: BanList,
     /// Tracks currently backed off peers.
-    backed_off_peers: HashMap<PeerId, Instant>,
+    backed_off_peers: HashMap<PeerId, std::time::Instant>,
     /// Interval at which to check for peers to unban and release from the backoff map.
     release_interval: Interval,
     /// How long to ban bad peers.
@@ -115,7 +117,7 @@ impl PeersManager {
             enforce_enr_fork_id,
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
-        let now = tokio::time::Instant::now();
+        let now = Instant::now();
 
         // We use half of the interval to decrease the max duration to `150%` in worst case
         let unban_interval = ban_duration.min(backoff_durations.low) / 2;
@@ -419,22 +421,23 @@ impl PeersManager {
             self.ban_duration
         };
 
-        self.ban_list.ban_peer_until(peer_id, Instant::now() + ban_duration);
+        self.ban_list.ban_peer_until(peer_id, std::time::Instant::now() + ban_duration);
         self.queued_actions.push_back(PeerAction::BanPeer { peer_id });
     }
 
     /// Bans the IP temporarily with the configured ban timeout
     fn ban_ip(&mut self, ip: IpAddr) {
-        self.ban_list.ban_ip_until(ip, Instant::now() + self.ban_duration);
+        self.ban_list.ban_ip_until(ip, std::time::Instant::now() + self.ban_duration);
     }
 
     /// Bans the IP temporarily to rate limit inbound connection attempts per IP.
     fn throttle_incoming_ip(&mut self, ip: IpAddr) {
-        self.ban_list.ban_ip_until(ip, Instant::now() + self.incoming_ip_throttle_duration);
+        self.ban_list
+            .ban_ip_until(ip, std::time::Instant::now() + self.incoming_ip_throttle_duration);
     }
 
     /// Temporarily puts the peer in timeout by inserting it into the backedoff peers set
-    fn backoff_peer_until(&mut self, peer_id: PeerId, until: Instant) {
+    fn backoff_peer_until(&mut self, peer_id: PeerId, until: std::time::Instant) {
         trace!(target: "net::peers", ?peer_id, "backing off");
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
@@ -574,8 +577,10 @@ impl PeersManager {
                     // up and to avoid any issues with ip throttling on the remote in case this
                     // session was terminated right away.
                     peer.backed_off = true;
-                    self.backed_off_peers
-                        .insert(peer_id, Instant::now() + self.incoming_ip_throttle_duration);
+                    self.backed_off_peers.insert(
+                        peer_id,
+                        std::time::Instant::now() + self.incoming_ip_throttle_duration,
+                    );
                     trace!(target: "net::peers", ?peer_id, kind=?peer.kind, duration=?self.incoming_ip_throttle_duration, "backing off on gracefully closed session");
                 }
             }
@@ -681,7 +686,7 @@ impl PeersManager {
                         // connection throttle that peer has in place, because this peer might not
                         // have us registered as a trusted peer.
                         let backoff = self.backoff_durations.low;
-                        backoff_until = Some(Instant::now() + backoff);
+                        backoff_until = Some(std::time::Instant::now() + backoff);
                         trace!(target: "net::peers", ?peer_id, ?backoff, "backing off trusted peer");
                     } else {
                         // Increment peer.backoff_counter
@@ -1065,7 +1070,7 @@ impl PeersManager {
             }
 
             if self.release_interval.poll_tick(cx).is_ready() {
-                let now = Instant::now();
+                let now = std::time::Instant::now();
                 let (_, unbanned_peers) = self.ban_list.evict(now);
 
                 for peer_id in unbanned_peers {
@@ -1575,7 +1580,7 @@ mod tests {
             .backoff_durations
             .backoff_until(BackoffKind::Low, peer_struct.severe_backoff_counter);
 
-        let expected = Instant::now() + peers.backoff_durations.low;
+        let expected = std::time::Instant::now() + peers.backoff_durations.low;
         assert!(backoff_timestamp <= expected);
     }
 
@@ -1591,7 +1596,7 @@ mod tests {
         // Simulate a peer that was already backed off once
         peer_struct.severe_backoff_counter = 1;
 
-        let now = Instant::now();
+        let now = std::time::Instant::now();
 
         // Simulate the increment that happens in on_connection_failure
         peer_struct.severe_backoff_counter += 1;

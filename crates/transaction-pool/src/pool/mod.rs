@@ -97,7 +97,7 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, Typed2718};
-use reth_primitives_traits::{FastInstant as Instant, Recovered};
+use reth_primitives_traits::Recovered;
 use rustc_hash::FxHashMap;
 use std::{
     fmt,
@@ -105,6 +105,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Instant,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};

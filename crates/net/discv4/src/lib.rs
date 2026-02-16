@@ -43,7 +43,6 @@ use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse};
 use reth_ethereum_forks::ForkId;
 use reth_network_peers::{pk2id, PeerId};
-use reth_primitives_traits::FastInstant as Instant;
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -56,7 +55,7 @@ use std::{
     rc::Rc,
     sync::Arc,
     task::{ready, Context, Poll},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     net::UdpSocket,

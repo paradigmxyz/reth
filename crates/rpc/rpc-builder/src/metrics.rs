@@ -8,13 +8,13 @@ use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
 };
-use reth_primitives_traits::FastInstant as Instant;
 use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Instant,
 };
 use tower::Layer;
 

@@ -15,7 +15,6 @@ workspace = true
 # reth
 reth-network-peers.workspace = true
 reth-net-banlist.workspace = true
-reth-primitives-traits.workspace = true
 
 alloy-eip2124.workspace = true
 
@@ -29,11 +28,8 @@ tracing.workspace = true
 
 [features]
 serde = [
-	"dep:serde",
-	"dep:humantime-serde",
-	"alloy-eip2124/serde",
-	"reth-primitives-traits/serde"
+    "dep:serde",
+    "dep:humantime-serde",
+    "alloy-eip2124/serde",
 ]
-test-utils = [
-	"reth-primitives-traits/test-utils"
-]
+test-utils = []

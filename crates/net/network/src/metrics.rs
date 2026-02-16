@@ -291,7 +291,7 @@ pub struct TransactionFetcherMetrics {
 #[macro_export]
 macro_rules! duration_metered_exec {
     ($code:expr, $acc:expr) => {{
-        let start = reth_primitives_traits::FastInstant::now();
+        let start = std::time::Instant::now();
 
         let res = $code;
 

@@ -24,7 +24,6 @@ use enr::Enr;
 pub use error::ParseDnsEntryError;
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
 use reth_network_peers::{pk2id, NodeRecord};
-use reth_primitives_traits::FastInstant as Instant;
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
@@ -33,7 +32,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use sync::SyncTree;
 use tokio::{

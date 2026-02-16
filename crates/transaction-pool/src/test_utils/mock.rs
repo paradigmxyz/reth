@@ -34,8 +34,7 @@ use reth_primitives_traits::{
 use alloy_consensus::error::ValueError;
 use alloy_eips::eip4844::env_settings::KzgSettings;
 use rand::distr::weighted::WeightedIndex;
-use reth_primitives_traits::FastInstant as Instant;
-use std::{ops::Range, sync::Arc, vec::IntoIter};
+use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
 ///
