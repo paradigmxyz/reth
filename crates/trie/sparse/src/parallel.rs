@@ -2816,11 +2816,6 @@ impl SparseSubtrie {
     ) -> SparseTrieResult<bool> {
         debug_assert!(path.starts_with(&self.path));
 
-        // If the node is already revealed and it's not a hash node, do nothing.
-        if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
-            return Ok(false)
-        }
-
         trace!(
             target: "trie::parallel_sparse",
             ?path,
@@ -2834,7 +2829,16 @@ impl SparseSubtrie {
                 // For an empty root, ensure that we are at the root path, and at the upper subtrie.
                 debug_assert!(path.is_empty());
                 debug_assert!(self.path.is_empty());
-                self.nodes.insert(path, SparseNode::Empty);
+                match self.nodes.entry(path) {
+                    Entry::Occupied(entry) => {
+                        if !entry.get().is_hash() {
+                            return Ok(false)
+                        }
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(SparseNode::Empty);
+                    }
+                }
             }
             TrieNode::Branch(branch) => {
                 // Update the branch node entry in the nodes map, handling cases where a blinded
@@ -2853,7 +2857,7 @@ impl SparseSubtrie {
                                 })),
                             });
                         }
-                        _ => unreachable!("checked that node is either a hash or non-existent"),
+                        _ => return Ok(false),
                     },
                     Entry::Vacant(entry) => {
                         entry.insert(SparseNode::new_branch(branch.state_mask));
@@ -2891,7 +2895,7 @@ impl SparseSubtrie {
                             self.reveal_node_or_hash(child_path, &ext.child)?;
                         }
                     }
-                    _ => unreachable!("checked that node is either a hash or non-existent"),
+                    _ => return Ok(false),
                 },
                 Entry::Vacant(entry) => {
                     let mut child_path = *entry.key();
@@ -2946,7 +2950,7 @@ impl SparseSubtrie {
                                 hash: Some(*hash),
                             });
                         }
-                        _ => unreachable!("checked that node is either a hash or non-existent"),
+                        _ => return Ok(false),
                     },
                     Entry::Vacant(entry) => {
                         entry.insert(SparseNode::new_leaf(leaf.key));
@@ -3185,7 +3189,7 @@ impl SparseSubtrieInner {
                     (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                 } else {
                     // Encode the leaf node and update its hash
-                    let value = self.values.get(&path).unwrap();
+                    let value = value.unwrap();
                     self.buffers.rlp_buf.clear();
                     let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.buffers.rlp_buf);
                     *hash = rlp_node.as_hash();
