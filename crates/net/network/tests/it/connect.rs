@@ -12,7 +12,7 @@ use reth_network::{
 };
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
-    NetworkInfo, Peers, PeersInfo,
+    NetworkInfo, PeerKind, Peers, PeersInfo,
 };
 use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
@@ -422,6 +422,11 @@ async fn test_trusted_peer_only() {
     // wait 1 second, the number of connections is still 1, because peer1 is untrusted.
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert_eq!(handle.num_connected_peers(), 1);
+
+    // remove handle from handle1's peer list to prevent a competing outgoing connection attempt
+    // from handle1 racing with handle's outgoing connection below, which can cause duplicate
+    // session resolution to drop a connection
+    handle1.remove_peer(*handle.peer_id(), PeerKind::Basic);
 
     handle.add_trusted_peer(*handle1.peer_id(), handle1.local_addr());
 
