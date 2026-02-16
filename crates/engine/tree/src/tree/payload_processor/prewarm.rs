@@ -39,12 +39,10 @@ use reth_provider::{
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::Runtime;
 use reth_trie::MultiProofTargets;
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, channel, Receiver, Sender, SyncSender},
-        Arc,
-    },
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self, channel, Receiver, Sender, SyncSender},
+    Arc,
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 

@@ -861,7 +861,7 @@ where
                                 self.proof_result_tx.clone(),
                                 0,
                                 HashedPostState::default(),
-                                std::time::Instant::now(),
+                                Instant::now(),
                             ),
                         },
                     ) {

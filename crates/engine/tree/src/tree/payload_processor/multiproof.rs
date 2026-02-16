@@ -486,7 +486,7 @@ impl MultiproofManager {
             self.proof_result_tx.clone(),
             proof_sequence_number,
             hashed_state_update,
-            std::time::Instant::now(),
+            start,
         );
 
         let input = match proof_targets {

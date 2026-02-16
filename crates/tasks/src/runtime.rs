@@ -17,7 +17,6 @@ use futures_util::{
     future::{select, BoxFuture},
     Future, FutureExt, TryFutureExt,
 };
-use quanta::Instant;
 #[cfg(feature = "rayon")]
 use std::thread::available_parallelism;
 use std::{
@@ -26,7 +25,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
 use tracing::{debug, error};
