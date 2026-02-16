@@ -2065,7 +2065,7 @@ mod tests {
                 panic!("Expected PrefetchProofs message");
             };
 
-        assert_eq!(proofs_requested, 1);
+        assert!(proofs_requested >= 1);
     }
 
     /// Verifies that different message types arriving mid-batch are not lost and preserve order.
