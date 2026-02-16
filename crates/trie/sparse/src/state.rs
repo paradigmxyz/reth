@@ -1187,7 +1187,7 @@ struct StorageTries<S = ParallelSparseTrie> {
 }
 
 #[cfg(feature = "std")]
-impl<S: SparseTrieTrait> StorageTries<S> {
+impl<S: SparseTrieTrait + Default> StorageTries<S> {
     /// Prunes and evicts storage tries.
     ///
     /// Keeps the top `max_storage_tries` by a score combining size and heat.
@@ -1199,6 +1199,65 @@ impl<S: SparseTrieTrait> StorageTries<S> {
 
         // Update heat for accessed tries
         self.modifications.update_and_reset();
+
+        let total_tries = self.tries.len();
+        if total_tries <= max_storage_tries {
+            stats.tries_to_keep = total_tries;
+
+            for paths in self.revealed_paths.values_mut() {
+                paths.clear();
+            }
+
+            // Prune storage tries that are kept, but only if:
+            // - They haven't been pruned since last access
+            // - They're large enough to be worth pruning
+            const MIN_SIZE_TO_PRUNE: usize = 1000;
+            let prune_start = Instant::now();
+            for (address, trie) in &mut self.tries {
+                let size = match trie {
+                    RevealableSparseTrie::Blind(_) => 0,
+                    RevealableSparseTrie::Revealed(t) => t.size_hint(),
+                };
+
+                if size < MIN_SIZE_TO_PRUNE {
+                    stats.skipped_small += 1;
+                    continue; // Small tries aren't worth the DFS cost
+                }
+
+                let Some(heat_state) = self.modifications.get_mut(address) else {
+                    continue; // No heat state = not tracked
+                };
+                // Only prune if backlog >= 2 (skip every other cycle)
+                if heat_state.prune_backlog < 2 {
+                    stats.skipped_recently_pruned += 1;
+                    continue; // Recently pruned, skip this cycle
+                }
+                if let Some(revealed) = trie.as_revealed_mut() {
+                    revealed.prune(max_depth);
+                    heat_state.prune_backlog = 0; // Reset backlog after prune
+                    stats.pruned_count += 1;
+                }
+            }
+            stats.prune_elapsed = prune_start.elapsed();
+
+            stats.total_tries_after = self.tries.len();
+            stats.total_elapsed = fn_start.elapsed();
+
+            debug!(
+                target: "trie::sparse",
+                before = stats.total_tries_before,
+                after = stats.total_tries_after,
+                kept = stats.tries_to_keep,
+                evicted = stats.tries_to_evict,
+                pruned = stats.pruned_count,
+                skipped_small = stats.skipped_small,
+                skipped_recent = stats.skipped_recently_pruned,
+                ?stats.prune_elapsed,
+                ?stats.total_elapsed,
+                "StorageTries::prune completed"
+            );
+            return;
+        }
 
         // Collect (address, size, score) for all tries
         // Score = size * heat_multiplier
@@ -1243,19 +1302,16 @@ impl<S: SparseTrieTrait> StorageTries<S> {
         stats.tries_to_evict = tries_to_evict;
 
         self.revealed_paths.retain(|address, paths| {
+            paths.clear();
             if tries_to_keep.contains_key(address) {
-                paths.clear();
                 true
             } else {
-                paths.clear();
                 self.cleared_revealed_paths.push(core::mem::take(paths));
                 false
             }
         });
 
-        self.modifications
-            .state
-            .retain(|address, _| tries_to_keep.contains_key(address));
+        self.modifications.state.retain(|address, _| tries_to_keep.contains_key(address));
         self.modifications
             .accessed_this_cycle
             .retain(|address| tries_to_keep.contains_key(address));
@@ -1305,7 +1361,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
     }
 }
 
-impl<S: SparseTrieTrait> StorageTries<S> {
+impl<S: SparseTrieTrait + Default> StorageTries<S> {
     /// Returns all fields to a cleared state, equivalent to the default state, keeping cleared
     /// collections for re-use later when possible.
     fn clear(&mut self) {

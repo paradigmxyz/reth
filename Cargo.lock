@@ -10615,6 +10615,7 @@ dependencies = [
  "arbitrary",
  "assert_matches",
  "auto_impl",
+ "codspeed-criterion-compat",
  "itertools 0.14.0",
  "metrics",
  "pretty_assertions",
