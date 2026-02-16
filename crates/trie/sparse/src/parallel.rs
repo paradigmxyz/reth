@@ -3842,19 +3842,6 @@ mod tests {
             self
         }
 
-        fn has_hash(self, path: &Nibbles, expected_hash: &B256) -> Self {
-            match self.subtrie.nodes.get(path) {
-                Some(SparseNode::Hash(hash)) => {
-                    assert_eq!(
-                        *hash, *expected_hash,
-                        "Expected hash at {path:?} to be {expected_hash:?}, found {hash:?}",
-                    );
-                }
-                node => panic!("Expected hash node at {path:?}, found {node:?}"),
-            }
-            self
-        }
-
         fn has_value(self, path: &Nibbles, expected_value: &[u8]) -> Self {
             let actual = self.subtrie.inner.values.get(path);
             assert_eq!(
