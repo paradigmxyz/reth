@@ -270,7 +270,9 @@ where
             let multi_proof_task = MultiProofTask::new(
                 proof_handle.clone(),
                 to_sparse_trie,
-                config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
+                config
+                    .multiproof_chunking_enabled()
+                    .then_some(config.effective_multiproof_chunk_size()),
                 to_multi_proof.clone(),
                 from_multi_proof.clone(),
             )
@@ -525,8 +527,9 @@ where
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
         let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
-        let chunk_size =
-            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
+        let chunk_size = config
+            .multiproof_chunking_enabled()
+            .then_some(config.effective_multiproof_chunk_size());
         let executor = self.executor.clone();
 
         let parent_span = Span::current();

@@ -657,3 +657,27 @@ impl TreeConfig {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_effective_multiproof_chunk_size_defaults_to_v2_value() {
+        let config = TreeConfig::default();
+        assert_eq!(config.multiproof_chunk_size(), DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE);
+        assert_eq!(config.effective_multiproof_chunk_size(), DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2);
+    }
+
+    #[test]
+    fn test_effective_multiproof_chunk_size_respects_explicit_override() {
+        let config = TreeConfig::default().with_multiproof_chunk_size(128);
+        assert_eq!(config.effective_multiproof_chunk_size(), 128);
+    }
+
+    #[test]
+    fn test_effective_multiproof_chunk_size_uses_legacy_value_when_v2_disabled() {
+        let config = TreeConfig::default().with_disable_proof_v2(true);
+        assert_eq!(config.effective_multiproof_chunk_size(), DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE);
+    }
+}

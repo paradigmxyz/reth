@@ -355,6 +355,21 @@ where
         }
     }
 
+    /// Returns true if pending targets should be dispatched immediately based on chunking
+    /// thresholds.
+    ///
+    /// Preserves legacy `None` behavior (`> 0`) while dispatching exactly-on-boundary when a
+    /// concrete chunk size is configured.
+    const fn should_dispatch_for_pending_targets(
+        pending_targets_len: usize,
+        chunk_size: Option<usize>,
+    ) -> bool {
+        match chunk_size {
+            Some(chunk_size) => pending_targets_len >= chunk_size,
+            None => pending_targets_len > 0,
+        }
+    }
+
     /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
     ///
     /// Should be called after the state root result has been sent.
@@ -464,7 +479,10 @@ where
                 // them to the trie,
                 self.process_new_updates()?;
                 self.dispatch_pending_targets();
-            } else if self.pending_targets.chunking_length() > self.chunk_size.unwrap_or_default() {
+            } else if Self::should_dispatch_for_pending_targets(
+                self.pending_targets.chunking_length(),
+                self.chunk_size,
+            ) {
                 // Make sure to dispatch targets if we've accumulated a lot of them.
                 self.dispatch_pending_targets();
             }
@@ -1103,5 +1121,29 @@ mod tests {
 
         assert!(hashed_state_rx.recv().is_err());
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_should_dispatch_for_pending_targets_at_chunk_boundary() {
+        assert!(SparseTrieCacheTask::<ParallelSparseTrie, ParallelSparseTrie>::should_dispatch_for_pending_targets(
+            240,
+            Some(240),
+        ));
+        assert!(!SparseTrieCacheTask::<ParallelSparseTrie, ParallelSparseTrie>::should_dispatch_for_pending_targets(
+            239,
+            Some(240),
+        ));
+    }
+
+    #[test]
+    fn test_should_dispatch_for_pending_targets_when_chunking_disabled() {
+        assert!(SparseTrieCacheTask::<ParallelSparseTrie, ParallelSparseTrie>::should_dispatch_for_pending_targets(
+            1,
+            None,
+        ));
+        assert!(!SparseTrieCacheTask::<ParallelSparseTrie, ParallelSparseTrie>::should_dispatch_for_pending_targets(
+            0,
+            None,
+        ));
     }
 }
