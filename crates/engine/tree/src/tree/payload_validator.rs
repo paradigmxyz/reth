@@ -7,8 +7,8 @@ use crate::tree::{
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
-    StateProviderDatabase, TreeConfig,
+    CacheWaitDurations, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
+    StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::BlockAccessList;
@@ -396,6 +396,7 @@ where
             parent_hash: input.parent_hash(),
             parent_state_root: parent_block.state_root(),
             transaction_count: input.transaction_count(),
+            gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
         };
 
@@ -1584,6 +1585,15 @@ where
     }
 }
 
+impl<P, Evm, V> WaitForCaches for BasicEngineValidator<P, Evm, V>
+where
+    Evm: ConfigureEvm,
+{
+    fn wait_for_caches(&self) -> CacheWaitDurations {
+        self.payload_processor.wait_for_caches()
+    }
+}
+
 /// Enum representing either block or payload being validated.
 #[derive(Debug)]
 pub enum BlockOrPayload<T: PayloadTypes> {
@@ -1659,6 +1669,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.withdrawals().map(|w| w.as_slice()),
             Self::Block(block) => block.body().withdrawals().map(|w| w.as_slice()),
+        }
+    }
+
+    /// Returns the total gas used by the block.
+    pub fn gas_used(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.gas_used(),
+            Self::Block(block) => block.gas_used(),
         }
     }
 }

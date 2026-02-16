@@ -13,10 +13,7 @@ use crate::{
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
     PanickedTaskError, TaskEvent, TaskManager,
 };
-use futures_util::{
-    future::{select, BoxFuture},
-    Future, FutureExt, TryFutureExt,
-};
+use futures_util::{future::select, Future, FutureExt, TryFutureExt};
 #[cfg(feature = "rayon")]
 use std::{num::NonZeroUsize, thread::available_parallelism};
 use std::{
@@ -300,17 +297,6 @@ impl std::fmt::Debug for Runtime {
     }
 }
 
-#[cfg(any(test, feature = "test-utils"))]
-impl Default for Runtime {
-    fn default() -> Self {
-        let config = match Handle::try_current() {
-            Ok(handle) => RuntimeConfig::with_existing_handle(handle),
-            Err(_) => RuntimeConfig::default(),
-        };
-        RuntimeBuilder::new(config).build().expect("failed to build default Runtime")
-    }
-}
-
 // ── Constructors ──────────────────────────────────────────────────────
 
 impl Runtime {
@@ -458,6 +444,10 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        match task_kind {
+            TaskKind::Default => self.0.metrics.inc_regular_tasks(),
+            TaskKind::Blocking => self.0.metrics.inc_regular_blocking_tasks(),
+        }
         let on_shutdown = self.0.on_shutdown.clone();
 
         let finished_counter = match task_kind {
@@ -533,6 +523,7 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        self.0.metrics.inc_critical_tasks();
         let panicked_tasks_tx = self.0.task_events_tx.clone();
         let on_shutdown = self.0.on_shutdown.clone();
 
@@ -734,63 +725,6 @@ impl Runtime {
         }
         debug!("gracefully shut down");
         true
-    }
-}
-
-// ── TaskSpawner impl ──────────────────────────────────────────────────
-
-impl crate::TaskSpawner for Runtime {
-    fn spawn_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.0.metrics.inc_regular_tasks();
-        Self::spawn_task(self, fut)
-    }
-
-    fn spawn_critical_task(
-        &self,
-        name: &'static str,
-        fut: BoxFuture<'static, ()>,
-    ) -> JoinHandle<()> {
-        self.0.metrics.inc_critical_tasks();
-        Self::spawn_critical_task(self, name, fut)
-    }
-
-    fn spawn_blocking_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.0.metrics.inc_regular_blocking_tasks();
-        Self::spawn_blocking_task(self, fut)
-    }
-
-    fn spawn_critical_blocking_task(
-        &self,
-        name: &'static str,
-        fut: BoxFuture<'static, ()>,
-    ) -> JoinHandle<()> {
-        self.0.metrics.inc_critical_tasks();
-        Self::spawn_critical_blocking_task(self, name, fut)
-    }
-}
-
-// ── TaskSpawnerExt impl ──────────────────────────────────────────────
-
-impl crate::TaskSpawnerExt for Runtime {
-    fn spawn_critical_with_graceful_shutdown_signal<F>(
-        &self,
-        name: &'static str,
-        f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        Self::spawn_critical_with_graceful_shutdown_signal(self, name, f)
-    }
-
-    fn spawn_with_graceful_shutdown_signal<F>(
-        &self,
-        f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        Self::spawn_with_graceful_shutdown_signal(self, f)
     }
 }
 

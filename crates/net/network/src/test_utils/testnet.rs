@@ -29,7 +29,7 @@ use reth_network_peers::PeerId;
 use reth_storage_api::{
     noop::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
 };
-use reth_tasks::TokioTaskExecutor;
+use reth_tasks::Runtime;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore,
@@ -198,7 +198,7 @@ where
                 peer.client.clone(),
                 EthEvmConfig::mainnet(),
                 blob_store.clone(),
-                TokioTaskExecutor::default(),
+                Runtime::test(),
             );
             peer.map_transactions_manager(EthTransactionPool::eth_pool(
                 pool,
@@ -228,7 +228,7 @@ where
                 peer.client.clone(),
                 EthEvmConfig::mainnet(),
                 blob_store.clone(),
-                TokioTaskExecutor::default(),
+                Runtime::test(),
             );
 
             peer.map_transactions_manager_with(
