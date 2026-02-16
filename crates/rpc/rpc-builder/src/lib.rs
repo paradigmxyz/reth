@@ -391,7 +391,7 @@ where
 
 impl<N: NodePrimitives> RpcModuleBuilder<N, (), (), (), (), ()> {
     /// Create a new instance of the builder with the given [`Runtime`].
-    pub fn with_runtime(executor: Runtime) -> Self {
+    pub const fn with_runtime(executor: Runtime) -> Self {
         Self::new((), (), (), executor, (), ())
     }
 }
