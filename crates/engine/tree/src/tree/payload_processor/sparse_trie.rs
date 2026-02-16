@@ -25,6 +25,8 @@ use reth_trie_parallel::{
     root::ParallelStateRootError,
     targets_v2::MultiProofTargetsV2,
 };
+#[cfg(feature = "trie-debug")]
+use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
@@ -910,7 +912,7 @@ pub struct StateRootComputeOutcome {
     /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
     /// and `Some(address)` for storage tries.
     #[cfg(feature = "trie-debug")]
-    pub debug_recorders: Vec<(Option<B256>, reth_trie_sparse::debug_recorder::TrieDebugRecorder)>,
+    pub debug_recorders: Vec<(Option<B256>, TrieDebugRecorder)>,
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.

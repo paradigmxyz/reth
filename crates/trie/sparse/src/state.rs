@@ -1,3 +1,5 @@
+#[cfg(feature = "trie-debug")]
+use crate::debug_recorder::TrieDebugRecorder;
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     traits::SparseTrie as SparseTrieTrait,
@@ -158,9 +160,7 @@ impl<A: SparseTrieTrait, S: SparseTrieTrait> SparseStateTrie<A, S> {
     /// Returns a vec of `(Option<B256>, TrieDebugRecorder)` where `None` is the account trie
     /// key, and `Some(address)` are storage trie keys.
     #[cfg(feature = "trie-debug")]
-    pub fn take_debug_recorders(
-        &mut self,
-    ) -> alloc::vec::Vec<(Option<B256>, crate::debug_recorder::TrieDebugRecorder)> {
+    pub fn take_debug_recorders(&mut self) -> alloc::vec::Vec<(Option<B256>, TrieDebugRecorder)> {
         let mut recorders = alloc::vec::Vec::new();
         if let Some(trie) = self.state.as_revealed_mut() {
             recorders.push((None, trie.take_debug_recorder()));

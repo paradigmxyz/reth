@@ -11,6 +11,8 @@ use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 
+#[cfg(feature = "trie-debug")]
+use crate::debug_recorder::TrieDebugRecorder;
 use crate::provider::TrieNodeProvider;
 
 /// Describes an update to a leaf in the sparse trie.
@@ -311,8 +313,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Returns the recorder containing all recorded mutations since the last reset.
     /// The default implementation returns an empty recorder.
     #[cfg(feature = "trie-debug")]
-    fn take_debug_recorder(&mut self) -> crate::debug_recorder::TrieDebugRecorder {
-        crate::debug_recorder::TrieDebugRecorder::default()
+    fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
+        TrieDebugRecorder::default()
     }
 
     /// Applies leaf updates to the sparse trie.

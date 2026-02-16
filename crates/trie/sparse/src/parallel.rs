@@ -1,3 +1,5 @@
+#[cfg(feature = "trie-debug")]
+use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
 use crate::{
     lower::LowerSparseSubtrie,
     provider::{RevealedNode, TrieNodeProvider},
@@ -133,7 +135,7 @@ pub struct ParallelSparseTrie {
     metrics: crate::metrics::ParallelSparseTrieMetrics,
     /// Debug recorder for tracking mutating operations.
     #[cfg(feature = "trie-debug")]
-    debug_recorder: crate::debug_recorder::TrieDebugRecorder,
+    debug_recorder: TrieDebugRecorder,
 }
 
 impl Default for ParallelSparseTrie {
@@ -188,11 +190,8 @@ impl SparseTrie for ParallelSparseTrie {
         }
 
         #[cfg(feature = "trie-debug")]
-        self.debug_recorder.record(crate::debug_recorder::RecordedOp::RevealNodes {
-            nodes: nodes
-                .iter()
-                .map(crate::debug_recorder::ProofTrieNodeRecord::from_proof_trie_node)
-                .collect(),
+        self.debug_recorder.record(RecordedOp::RevealNodes {
+            nodes: nodes.iter().map(ProofTrieNodeRecord::from_proof_trie_node).collect(),
         });
 
         // Sort nodes first by their subtrie, and secondarily by their path. This allows for
@@ -914,7 +913,7 @@ impl SparseTrie for ParallelSparseTrie {
         trace!(target: "trie::parallel_sparse", "Calculating trie root hash");
 
         #[cfg(feature = "trie-debug")]
-        self.debug_recorder.record(crate::debug_recorder::RecordedOp::Root);
+        self.debug_recorder.record(RecordedOp::Root);
 
         if self.prefix_set.is_empty() &&
             let Some(hash) =
@@ -948,7 +947,7 @@ impl SparseTrie for ParallelSparseTrie {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
         #[cfg(feature = "trie-debug")]
-        self.debug_recorder.record(crate::debug_recorder::RecordedOp::UpdateSubtrieHashes);
+        self.debug_recorder.record(RecordedOp::UpdateSubtrieHashes);
 
         // Take changed subtries according to the prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
@@ -1347,11 +1346,8 @@ impl SparseTrie for ParallelSparseTrie {
         use crate::{provider::NoRevealProvider, LeafUpdate};
 
         #[cfg(feature = "trie-debug")]
-        self.debug_recorder.record(crate::debug_recorder::RecordedOp::UpdateLeaves {
-            updates: updates
-                .iter()
-                .map(|(k, v)| (*k, crate::debug_recorder::LeafUpdateRecord::from(v)))
-                .collect(),
+        self.debug_recorder.record(RecordedOp::UpdateLeaves {
+            updates: updates.iter().map(|(k, v)| (*k, LeafUpdateRecord::from(v))).collect(),
         });
 
         // Drain updates to avoid cloning keys while preserving the map's allocation.
@@ -1414,7 +1410,7 @@ impl SparseTrie for ParallelSparseTrie {
     }
 
     #[cfg(feature = "trie-debug")]
-    fn take_debug_recorder(&mut self) -> crate::debug_recorder::TrieDebugRecorder {
+    fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
         core::mem::take(&mut self.debug_recorder)
     }
 }

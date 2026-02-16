@@ -15,6 +15,8 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
+#[cfg(feature = "trie-debug")]
+use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
@@ -1076,7 +1078,7 @@ where
     #[cfg(feature = "trie-debug")]
     fn write_trie_debug_recorders(
         block_number: u64,
-        recorders: &[(Option<B256>, reth_trie_sparse::debug_recorder::TrieDebugRecorder)],
+        recorders: &[(Option<B256>, TrieDebugRecorder)],
     ) {
         if recorders.is_empty() {
             return;
