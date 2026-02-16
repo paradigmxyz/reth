@@ -6,7 +6,10 @@ use std::{
     future::Future,
     panic::{catch_unwind, AssertUnwindSafe},
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     task::{ready, Context, Poll},
     thread,
 };
@@ -165,9 +168,15 @@ thread_local! {
 ///
 /// The pool supports multiple init/clear cycles, allowing reuse of the same threads with
 /// different state configurations.
+///
+/// The number of active threads can be dynamically controlled via [`set_num_threads`](Self::set_num_threads)
+/// without recreating the pool.
 #[derive(Debug)]
 pub struct WorkerPool {
     pool: rayon::ThreadPool,
+    /// How many threads should participate in [`broadcast`](Self::broadcast) calls.
+    /// Threads beyond this count skip the closure.
+    num_threads: AtomicUsize,
 }
 
 impl WorkerPool {
@@ -180,15 +189,54 @@ impl WorkerPool {
     pub fn from_builder(
         builder: rayon::ThreadPoolBuilder,
     ) -> Result<Self, rayon::ThreadPoolBuildError> {
-        Ok(Self { pool: builder.build()? })
+        let pool = builder.build()?;
+        let num_threads = pool.current_num_threads();
+        Ok(Self { pool, num_threads: AtomicUsize::new(num_threads) })
     }
 
-    /// Runs a closure on every thread in the pool, giving mutable access to each thread's
-    /// [`Worker`].
+    /// Returns the total number of threads in the underlying rayon pool.
+    pub fn current_num_threads(&self) -> usize {
+        self.pool.current_num_threads()
+    }
+
+    /// Returns the number of active threads that will participate in
+    /// [`broadcast`](Self::broadcast).
+    pub fn num_threads(&self) -> usize {
+        self.num_threads.load(Ordering::Relaxed)
+    }
+
+    /// Sets the number of threads that will participate in [`broadcast`](Self::broadcast).
+    ///
+    /// Clamped to the pool's total thread count.
+    pub fn set_num_threads(&self, n: usize) {
+        let clamped = n.min(self.pool.current_num_threads());
+        self.num_threads.store(clamped, Ordering::Relaxed);
+    }
+
+    /// Runs a closure on up to [`num_threads`](Self::num_threads) threads in the pool, giving
+    /// mutable access to each thread's [`Worker`].
     ///
     /// Use this to initialize or re-initialize per-thread state via [`Worker::init`].
+    /// Threads beyond the configured `num_threads` limit skip the closure.
     pub fn broadcast(&self, f: impl Fn(&mut Worker) + Sync) {
+        let remaining = AtomicUsize::new(self.num_threads.load(Ordering::Relaxed));
         self.pool.broadcast(|_| {
+            // Atomically claim a slot; threads that can't decrement skip the closure.
+            let mut current = remaining.load(Ordering::Relaxed);
+            loop {
+                if current == 0 {
+                    return;
+                }
+                match remaining.compare_exchange_weak(
+                    current,
+                    current - 1,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(actual) => current = actual,
+                }
+            }
             WORKER.with_borrow_mut(|worker| f(worker));
         });
     }
@@ -207,6 +255,19 @@ impl WorkerPool {
     /// [`WorkerPool::with_worker`] calls.
     pub fn install<R: Send>(&self, f: impl FnOnce(&Worker) -> R + Send) -> R {
         self.pool.install(|| WORKER.with_borrow(|worker| f(worker)))
+    }
+
+    /// Runs a closure on the pool without worker state access.
+    ///
+    /// Like [`install`](Self::install) but for closures that don't need per-thread [`Worker`]
+    /// state.
+    pub fn install_fn<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
+        self.pool.install(f)
+    }
+
+    /// Spawns a closure on the pool.
+    pub fn spawn(&self, f: impl FnOnce() + Send + 'static) {
+        self.pool.spawn(f);
     }
 
     /// Access the current thread's [`Worker`] from within an [`install`](Self::install) closure.

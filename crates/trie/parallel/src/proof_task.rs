@@ -162,11 +162,22 @@ impl ProofWorkerHandle {
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
-        let divisor = if halve_workers { 2 } else { 1 };
-        let storage_worker_count =
-            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
-        let account_worker_count =
-            runtime.proof_account_worker_pool().current_num_threads() / divisor;
+        let storage_pool = runtime.proof_storage_worker_pool();
+        let account_pool = runtime.proof_account_worker_pool();
+
+        // Dynamically adjust the number of active threads if halving is requested.
+        if halve_workers {
+            storage_pool
+                .set_num_threads(storage_pool.current_num_threads() / 2);
+            account_pool
+                .set_num_threads(account_pool.current_num_threads() / 2);
+        } else {
+            storage_pool.set_num_threads(storage_pool.current_num_threads());
+            account_pool.set_num_threads(account_pool.current_num_threads());
+        }
+
+        let storage_worker_count = storage_pool.num_threads();
+        let account_worker_count = account_pool.num_threads();
 
         debug!(
             target: "trie::proof_task",
@@ -177,7 +188,6 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
-        let storage_pool = runtime.proof_storage_worker_pool();
         let task_ctx_for_storage = task_ctx.clone();
         let cached_storage_roots_for_storage = cached_storage_roots.clone();
 
@@ -217,8 +227,6 @@ impl ProofWorkerHandle {
                 }
             });
         }
-
-        let account_pool = runtime.proof_account_worker_pool();
 
         for worker_id in 0..account_worker_count {
             let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
