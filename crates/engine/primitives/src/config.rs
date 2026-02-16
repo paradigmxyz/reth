@@ -38,7 +38,7 @@ pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
 /// - 10M gas: 1.2051 Ggas/s (best)
 /// - 20M gas: 1.4490 Ggas/s (within 0.3% of best)
 ///
-/// See: <https://gist.github.com/yongkangc/fda9c24846f0ba891376bcf81b002008>
+/// Benchmarks: <https://gist.github.com/yongkangc/fda9c24846f0ba891376bcf81b002008>
 pub const SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE: usize = 30;
 
 /// Gas threshold below which the small block chunk size is used.
