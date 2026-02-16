@@ -526,16 +526,18 @@ async fn run_pipeline_forward_and_unwind(
         .sealed_header(unwind_target)?
         .expect("unwind target header should exist");
 
+    let resync_runtime = reth_tasks::Runtime::test();
+
     let mut resync_header_downloader =
         ReverseHeadersDownloaderBuilder::new(resync_stages_config.headers)
             .build(resync_file_client.clone(), resync_consensus.clone())
-            .into_task();
+            .into_task_with(&resync_runtime);
     resync_header_downloader.update_local_head(unwind_head);
     resync_header_downloader.update_sync_target(SyncTarget::Tip(tip));
 
     let mut resync_body_downloader = BodiesDownloaderBuilder::new(resync_stages_config.bodies)
         .build(resync_file_client, resync_consensus, pipeline_provider_factory.clone())
-        .into_task();
+        .into_task_with(&resync_runtime);
     resync_body_downloader
         .set_download_range(unwind_target + 1..=max_block)
         .expect("set download range");
