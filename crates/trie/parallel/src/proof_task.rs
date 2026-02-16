@@ -136,7 +136,12 @@ impl ProofWorkerHandle {
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `halve_workers`: Whether to halve the worker pool size (for small blocks)
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
-    #[instrument(name = "ProofWorkerHandle::new", level = "debug", target = "trie::proof_task", skip_all)]
+    #[instrument(
+        name = "ProofWorkerHandle::new",
+        level = "debug",
+        target = "trie::proof_task",
+        skip_all
+    )]
     pub fn new<Factory>(
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
