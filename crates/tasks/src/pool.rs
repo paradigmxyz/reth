@@ -168,15 +168,9 @@ thread_local! {
 ///
 /// The pool supports multiple init/clear cycles, allowing reuse of the same threads with
 /// different state configurations.
-///
-/// The number of active threads can be dynamically controlled via [`set_num_threads`](Self::set_num_threads)
-/// without recreating the pool.
 #[derive(Debug)]
 pub struct WorkerPool {
     pool: rayon::ThreadPool,
-    /// How many threads should participate in [`broadcast`](Self::broadcast) calls.
-    /// Threads beyond this count skip the closure.
-    num_threads: AtomicUsize,
 }
 
 impl WorkerPool {
@@ -189,9 +183,7 @@ impl WorkerPool {
     pub fn from_builder(
         builder: rayon::ThreadPoolBuilder,
     ) -> Result<Self, rayon::ThreadPoolBuildError> {
-        let pool = builder.build()?;
-        let num_threads = pool.current_num_threads();
-        Ok(Self { pool, num_threads: AtomicUsize::new(num_threads) })
+        Ok(Self { pool: builder.build()? })
     }
 
     /// Returns the total number of threads in the underlying rayon pool.
@@ -199,27 +191,13 @@ impl WorkerPool {
         self.pool.current_num_threads()
     }
 
-    /// Returns the number of active threads that will participate in
-    /// [`broadcast`](Self::broadcast).
-    pub fn num_threads(&self) -> usize {
-        self.num_threads.load(Ordering::Relaxed)
-    }
-
-    /// Sets the number of threads that will participate in [`broadcast`](Self::broadcast).
-    ///
-    /// Clamped to the pool's total thread count.
-    pub fn set_num_threads(&self, n: usize) {
-        let clamped = n.min(self.pool.current_num_threads());
-        self.num_threads.store(clamped, Ordering::Relaxed);
-    }
-
-    /// Runs a closure on up to [`num_threads`](Self::num_threads) threads in the pool, giving
-    /// mutable access to each thread's [`Worker`].
+    /// Runs a closure on `num_threads` threads in the pool, giving mutable access to each
+    /// thread's [`Worker`].
     ///
     /// Use this to initialize or re-initialize per-thread state via [`Worker::init`].
-    /// Threads beyond the configured `num_threads` limit skip the closure.
-    pub fn broadcast(&self, f: impl Fn(&mut Worker) + Sync) {
-        let remaining = AtomicUsize::new(self.num_threads.load(Ordering::Relaxed));
+    /// Only `num_threads` threads execute the closure; the rest skip it.
+    pub fn broadcast(&self, num_threads: usize, f: impl Fn(&mut Worker) + Sync) {
+        let remaining = AtomicUsize::new(num_threads.min(self.pool.current_num_threads()));
         self.pool.broadcast(|_| {
             // Atomically claim a slot; threads that can't decrement skip the closure.
             let mut current = remaining.load(Ordering::Relaxed);
@@ -359,7 +337,7 @@ mod tests {
     fn worker_pool_init_and_access() {
         let pool = WorkerPool::new(2).unwrap();
 
-        pool.broadcast(|worker| {
+        pool.broadcast(2, |worker| {
             worker.init::<Vec<u8>>(|_| vec![1, 2, 3]);
         });
 
@@ -376,14 +354,14 @@ mod tests {
     fn worker_pool_reinit_reuses_resources() {
         let pool = WorkerPool::new(1).unwrap();
 
-        pool.broadcast(|worker| {
+        pool.broadcast(1, |worker| {
             worker.init::<Vec<u8>>(|existing| {
                 assert!(existing.is_none());
                 vec![1, 2, 3]
             });
         });
 
-        pool.broadcast(|worker| {
+        pool.broadcast(1, |worker| {
             worker.init::<Vec<u8>>(|existing| {
                 let v = existing.expect("should have existing state");
                 assert_eq!(v, &mut vec![1, 2, 3]);
@@ -402,7 +380,7 @@ mod tests {
     fn worker_pool_clear_and_reinit() {
         let pool = WorkerPool::new(1).unwrap();
 
-        pool.broadcast(|worker| {
+        pool.broadcast(1, |worker| {
             worker.init::<u64>(|_| 42);
         });
         let val = pool.install(|worker| *worker.get::<u64>());
@@ -410,7 +388,7 @@ mod tests {
 
         pool.clear();
 
-        pool.broadcast(|worker| {
+        pool.broadcast(1, |worker| {
             worker.init::<String>(|_| "hello".to_string());
         });
         let val = pool.install(|worker| worker.get::<String>().clone());
@@ -425,7 +403,7 @@ mod tests {
 
         let pool = WorkerPool::new(2).unwrap();
 
-        pool.broadcast(|worker| {
+        pool.broadcast(2, |worker| {
             worker.init::<u64>(|_| 10);
         });
 

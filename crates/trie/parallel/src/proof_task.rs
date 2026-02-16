@@ -163,20 +163,11 @@ impl ProofWorkerHandle {
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
-        let storage_pool = runtime.proof_storage_worker_pool();
-        let account_pool = runtime.proof_account_worker_pool();
-
-        // Dynamically adjust the number of active threads if halving is requested.
-        if halve_workers {
-            storage_pool.set_num_threads(storage_pool.current_num_threads() / 2);
-            account_pool.set_num_threads(account_pool.current_num_threads() / 2);
-        } else {
-            storage_pool.set_num_threads(storage_pool.current_num_threads());
-            account_pool.set_num_threads(account_pool.current_num_threads());
-        }
-
-        let storage_worker_count = storage_pool.num_threads();
-        let account_worker_count = account_pool.num_threads();
+        let divisor = if halve_workers { 2 } else { 1 };
+        let storage_worker_count =
+            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
+        let account_worker_count =
+            runtime.proof_account_worker_pool().current_num_threads() / divisor;
 
         debug!(
             target: "trie::proof_task",
@@ -195,7 +186,7 @@ impl ProofWorkerHandle {
         let storage_roots = cached_storage_roots.clone();
         runtime.spawn_blocking(move || {
             let worker_id = AtomicUsize::new(0);
-            storage_rt.proof_storage_worker_pool().broadcast(|_| {
+            storage_rt.proof_storage_worker_pool().broadcast(storage_worker_count, |_| {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
                 let span =
                     debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
@@ -234,7 +225,7 @@ impl ProofWorkerHandle {
         let account_avail = account_available_workers.clone();
         runtime.spawn_blocking(move || {
             let worker_id = AtomicUsize::new(0);
-            account_rt.proof_account_worker_pool().broadcast(|_| {
+            account_rt.proof_account_worker_pool().broadcast(account_worker_count, |_| {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
                 let span =
                     debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
