@@ -819,8 +819,8 @@ op-revm = { git = "https://github.com/bluealloy/revm", branch = "main" }
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", branch = "staging" }
 
 # alloy-evm bal-devnet2 patches
-alloy-evm = { git = "https://github.com/Soubhik-10/evm", branch = "bal-valid" }
-alloy-op-evm = { git = "https://github.com/Soubhik-10/evm", branch = "bal-valid" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "bal-devnet2" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", branch = "bal-devnet2" }
 
 # alloy bal-devnet2 patches
 alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
