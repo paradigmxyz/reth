@@ -374,10 +374,9 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_primitives_traits::StorageEntry;
-    use std::sync::Arc;
     use tempfile::TempDir;
 
-    fn create_test_db() -> Arc<DatabaseEnv> {
+    fn create_test_db() -> DatabaseEnv {
         let path = TempDir::new().unwrap();
         let mut db = DatabaseEnv::open(
             path.path(),
@@ -386,7 +385,7 @@ mod tests {
         )
         .unwrap();
         db.create_tables().unwrap();
-        Arc::new(db)
+        db
     }
 
     #[test]

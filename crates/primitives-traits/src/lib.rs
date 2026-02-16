@@ -117,6 +117,10 @@
 #[macro_use]
 extern crate alloc;
 
+/// Re-export of [`quanta::Instant`] for high-resolution timing with minimal overhead.
+#[cfg(feature = "std")]
+pub use quanta::Instant as FastInstant;
+
 /// Common constants.
 pub mod constants;
 pub use constants::gas_units::{format_gas, format_gas_throughput};
@@ -164,7 +168,7 @@ pub use alloy_primitives::{logs_bloom, Log, LogData};
 pub mod proofs;
 
 mod storage;
-pub use storage::{StorageEntry, ValueWithSubKey};
+pub use storage::{StorageEntry, StorageSlotKey, ValueWithSubKey};
 
 pub mod sync;
 
@@ -187,6 +191,12 @@ pub mod serde_bincode_compat;
 /// Heuristic size trait
 pub mod size;
 pub use size::InMemorySize;
+
+/// Rayon utilities
+#[cfg(feature = "rayon")]
+pub mod rayon;
+#[cfg(feature = "rayon")]
+pub use rayon::ParallelBridgeBuffered;
 
 /// Node traits
 pub mod node;
@@ -238,4 +248,13 @@ pub mod test_utils {
     pub use crate::header::test_utils::{generate_valid_header, valid_header_strategy};
     #[cfg(any(test, feature = "test-utils"))]
     pub use crate::{block::TestBlock, header::test_utils::TestHeader};
+}
+
+/// Re-exports of `dashmap` types with [`alloy_primitives::map::DefaultHashBuilder`] as the hasher.
+#[cfg(feature = "dashmap")]
+pub mod dashmap {
+    pub use ::dashmap::{mapref, DashSet, Entry};
+    /// Re-export of `DashMap` with [`alloy_primitives::map::DefaultHashBuilder`] as the hasher.
+    pub type DashMap<K, V, S = alloy_primitives::map::DefaultHashBuilder> =
+        ::dashmap::DashMap<K, V, S>;
 }

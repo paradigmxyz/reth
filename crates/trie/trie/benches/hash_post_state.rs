@@ -1,5 +1,5 @@
 #![allow(missing_docs, unreachable_pub)]
-use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
+use alloy_primitives::{keccak256, map::AddressMap, Address, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_trie::{HashedPostState, HashedStorage, KeccakKeyHasher};
@@ -30,7 +30,7 @@ pub fn hash_post_state(c: &mut Criterion) {
     }
 }
 
-fn from_bundle_state_seq(state: &HashMap<Address, BundleAccount>) -> HashedPostState {
+fn from_bundle_state_seq(state: &AddressMap<BundleAccount>) -> HashedPostState {
     let mut this = HashedPostState::default();
 
     for (address, account) in state {
@@ -49,7 +49,7 @@ fn from_bundle_state_seq(state: &HashMap<Address, BundleAccount>) -> HashedPostS
     this
 }
 
-fn generate_test_data(size: usize) -> HashMap<Address, BundleAccount> {
+fn generate_test_data(size: usize) -> AddressMap<BundleAccount> {
     let storage_size = 1_000;
     let mut runner = TestRunner::deterministic();
 

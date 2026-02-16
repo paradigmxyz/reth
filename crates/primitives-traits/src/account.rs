@@ -4,7 +4,9 @@ use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
 use alloy_trie::TrieAccount;
 use derive_more::Deref;
-use revm_bytecode::{Bytecode as RevmBytecode, BytecodeDecodeError, BytecodeKind};
+#[cfg(any(test, feature = "reth-codec"))]
+use revm_bytecode::BytecodeKind;
+use revm_bytecode::{Bytecode as RevmBytecode, BytecodeDecodeError};
 use revm_state::AccountInfo;
 
 #[cfg(any(test, feature = "reth-codec"))]
@@ -91,7 +93,11 @@ impl From<revm_state::Account> for Account {
 
 impl From<TrieAccount> for Account {
     fn from(value: TrieAccount) -> Self {
-        Self { balance: value.balance, nonce: value.nonce, bytecode_hash: Some(value.code_hash) }
+        Self {
+            balance: value.balance,
+            nonce: value.nonce,
+            bytecode_hash: (value.code_hash != KECCAK_EMPTY).then_some(value.code_hash),
+        }
     }
 }
 

@@ -8,6 +8,7 @@ use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as Cros
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -22,10 +23,10 @@ use reth_trie_parallel::{
         AccountMultiproofInput, ProofResult, ProofResultContext, ProofResultMessage,
         ProofWorkerHandle,
     },
-    targets_v2::{ChunkedMultiProofTargetsV2, MultiProofTargetsV2},
+    targets_v2::MultiProofTargetsV2,
 };
 use revm_primitives::map::{hash_map, B256Map};
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc};
 use tracing::{debug, error, instrument, trace};
 
 /// Source of state changes, either from EVM execution or from a Block Access List.
@@ -63,7 +64,7 @@ const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
-const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
+pub(crate) const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
@@ -100,7 +101,7 @@ impl SparseTrieUpdate {
 
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
-pub(super) enum MultiProofMessage {
+pub enum MultiProofMessage {
     /// Prefetch proof targets
     PrefetchProofs(VersionedMultiProofTargets),
     /// New state update from transaction execution with its source
@@ -115,6 +116,8 @@ pub(super) enum MultiProofMessage {
         /// The state update that was used to calculate the proof
         state: HashedPostState,
     },
+    /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
+    HashedStateUpdate(HashedPostState),
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
     ///
     /// When received, the task generates a single state update from the BAL and processes it.
@@ -257,7 +260,7 @@ fn extend_multiproof_targets(dest: &mut MultiProofTargets, src: &VersionedMultiP
 
 /// A set of multiproof targets which can be either in the legacy or V2 representations.
 #[derive(Debug)]
-pub(super) enum VersionedMultiProofTargets {
+pub enum VersionedMultiProofTargets {
     /// Legacy targets
     Legacy(MultiProofTargets),
     /// V2 targets
@@ -311,11 +314,7 @@ impl VersionedMultiProofTargets {
     fn chunking_length(&self) -> usize {
         match self {
             Self::Legacy(targets) => targets.chunking_length(),
-            Self::V2(targets) => {
-                // For V2, count accounts + storage slots
-                targets.account_targets.len() +
-                    targets.storage_targets.values().map(|slots| slots.len()).sum::<usize>()
-            }
+            Self::V2(targets) => targets.chunking_length(),
         }
     }
 
@@ -367,9 +366,7 @@ impl VersionedMultiProofTargets {
             Self::Legacy(targets) => {
                 Box::new(MultiProofTargets::chunks(targets, chunk_size).map(Self::Legacy))
             }
-            Self::V2(targets) => {
-                Box::new(ChunkedMultiProofTargetsV2::new(targets, chunk_size).map(Self::V2))
-            }
+            Self::V2(targets) => Box::new(targets.chunks(chunk_size).map(Self::V2)),
         }
     }
 }
@@ -587,6 +584,10 @@ pub(crate) struct MultiProofTaskMetrics {
     pub first_update_wait_time_histogram: Histogram,
     /// Total time spent waiting for the last proof result.
     pub last_proof_wait_time_histogram: Histogram,
+    /// Time spent preparing the sparse trie for reuse after state root computation.
+    pub into_trie_for_reuse_duration_histogram: Histogram,
+    /// Time spent waiting for preserved sparse trie cache to become available.
+    pub sparse_trie_cache_wait_duration_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -771,6 +772,11 @@ impl MultiProofTask {
     fn on_prefetch_proof(&mut self, mut targets: VersionedMultiProofTargets) -> u64 {
         // Remove already fetched proof targets to avoid redundant work.
         targets.retain_difference(&self.fetched_proof_targets);
+
+        if targets.is_empty() {
+            return 0;
+        }
+
         extend_multiproof_targets(&mut self.fetched_proof_targets, &targets);
 
         // For Legacy multiproofs, make sure all target accounts have an `AddedRemovedKeySet` in the
@@ -887,6 +893,10 @@ impl MultiProofTask {
                 state: fetched_state_update,
             });
             state_updates += 1;
+        }
+
+        if not_fetched_state_update.is_empty() {
+            return state_updates;
         }
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
@@ -1191,6 +1201,11 @@ impl MultiProofTask {
                 }
                 false
             }
+            MultiProofMessage::HashedStateUpdate(hashed_state) => {
+                batch_metrics.state_update_proofs_requested +=
+                    self.on_hashed_state_update(Source::BlockAccessList, hashed_state);
+                false
+            }
         }
     }
 
@@ -1492,7 +1507,7 @@ fn get_proof_targets(
 /// Dispatches work items as a single unit or in chunks based on target size and worker
 /// availability.
 #[allow(clippy::too_many_arguments)]
-fn dispatch_with_chunking<T, I>(
+pub(crate) fn dispatch_with_chunking<T, I>(
     items: T,
     chunking_len: usize,
     chunk_size: Option<usize>,
@@ -1536,23 +1551,18 @@ mod tests {
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
         PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StorageChangeSetReader,
+        StorageSettingsCache,
     };
     use reth_trie::MultiProof;
     use reth_trie_db::ChangesetCache;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
     use std::sync::{Arc, OnceLock};
-    use tokio::runtime::{Handle, Runtime};
 
-    /// Get a handle to the test runtime, creating it if necessary
-    fn get_test_runtime_handle() -> Handle {
-        static TEST_RT: OnceLock<Runtime> = OnceLock::new();
-        TEST_RT
-            .get_or_init(|| {
-                tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()
-            })
-            .handle()
-            .clone()
+    /// Get a test runtime, creating it if necessary
+    fn get_test_runtime() -> &'static reth_tasks::Runtime {
+        static TEST_RT: OnceLock<reth_tasks::Runtime> = OnceLock::new();
+        TEST_RT.get_or_init(reth_tasks::Runtime::test)
     }
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
@@ -1563,16 +1573,17 @@ mod tests {
                               + PruneCheckpointReader
                               + ChangeSetReader
                               + StorageChangeSetReader
+                              + StorageSettingsCache
                               + BlockNumReader,
             > + Clone
             + Send
             + 'static,
     {
-        let rt_handle = get_test_runtime_handle();
+        let runtime = get_test_runtime();
         let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);
+        let proof_handle = ProofWorkerHandle::new(runtime, task_ctx, false, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -1582,7 +1593,10 @@ mod tests {
     fn create_cached_provider<F>(factory: F) -> CachedStateProvider<StateProviderBox>
     where
         F: DatabaseProviderFactory<
-                Provider: BlockReader + StageCheckpointReader + PruneCheckpointReader,
+                Provider: BlockReader
+                              + StageCheckpointReader
+                              + PruneCheckpointReader
+                              + reth_provider::StorageSettingsCache,
             > + Clone
             + Send
             + 'static,
@@ -2052,7 +2066,7 @@ mod tests {
                 panic!("Expected PrefetchProofs message");
             };
 
-        assert_eq!(proofs_requested, 1);
+        assert!(proofs_requested >= 1);
     }
 
     /// Verifies that different message types arriving mid-batch are not lost and preserve order.

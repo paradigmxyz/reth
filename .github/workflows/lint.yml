@@ -76,7 +76,7 @@ jobs:
       - name: Run Wasm checks
         run: |
           sudo apt update && sudo apt install gcc-multilib
-          .github/assets/check_wasm.sh
+          .github/scripts/check_wasm.sh
 
   riscv:
     runs-on: depot-ubuntu-latest
@@ -94,7 +94,7 @@ jobs:
           cache-on-failure: true
       - uses: dcarbone/install-jq-action@v3
       - name: Run RISC-V checks
-        run: .github/assets/check_rv32imac.sh
+        run: .github/scripts/check_rv32imac.sh
 
   crate-checks:
     name: crate-checks (${{ matrix.partition }}/${{ matrix.total_partitions }})
@@ -119,22 +119,17 @@ jobs:
     name: MSRV
     runs-on: depot-ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      matrix:
-        include:
-          - binary: reth
-          - binary: op-reth
     steps:
       - uses: actions/checkout@v6
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.88" # MSRV
+          toolchain: "1.93" # MSRV
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo build --bin "${{ matrix.binary }}" --workspace
+      - run: cargo build --bin reth --workspace
         env:
           RUSTFLAGS: -D warnings
 
@@ -198,10 +193,9 @@ jobs:
         with:
           cache-on-failure: true
       - run: cargo build --bin reth --workspace
-      - run: cargo build --bin op-reth --workspace
         env:
           RUSTFLAGS: -D warnings
-      - run: ./docs/cli/update.sh target/debug/reth target/debug/op-reth
+      - run: ./docs/cli/update.sh target/debug/reth
       - name: Check docs changes
         run: git diff --exit-code
 

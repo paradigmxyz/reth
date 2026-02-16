@@ -39,10 +39,7 @@ use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
 };
-use reth_network_peers::{
-    holesky_nodes, hoodi_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes,
-    NodeRecord,
-};
+use reth_network_peers::{holesky_nodes, hoodi_nodes, mainnet_nodes, sepolia_nodes, NodeRecord};
 use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
@@ -556,7 +553,7 @@ impl<H: BlockHeader> ChainSpec<H> {
                     }
                 }
 
-                bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
+                bf_params.first().map(|(_, params)| *params).unwrap_or_else(BaseFeeParams::ethereum)
             }
         }
     }
@@ -795,15 +792,6 @@ impl<H: BlockHeader> ChainSpec<H> {
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
             C::Hoodi => Some(hoodi_nodes()),
-            // opstack uses the same bootnodes for all chains: <https://github.com/paradigmxyz/reth/issues/14603>
-            C::Base | C::Optimism | C::Unichain | C::World => Some(op_nodes()),
-            C::OptimismSepolia | C::BaseSepolia | C::UnichainSepolia | C::WorldSepolia => {
-                Some(op_testnet_nodes())
-            }
-
-            // fallback for optimism chains
-            chain if chain.is_optimism() && chain.is_testnet() => Some(op_testnet_nodes()),
-            chain if chain.is_optimism() => Some(op_nodes()),
             _ => None,
         }
     }

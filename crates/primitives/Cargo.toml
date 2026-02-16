@@ -20,27 +20,28 @@ reth-static-file-types.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
+alloy-primitives = { workspace = true, optional = true }
+alloy-rlp = { workspace = true, optional = true }
+alloy-eips = { workspace = true, optional = true }
+alloy-genesis = { workspace = true, optional = true }
 
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
 # misc
 once_cell.workspace = true
+reth-codecs = { workspace = true, optional = true }
 
 [dev-dependencies]
 # eth
 reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
 
-alloy-primitives.workspace = true
-alloy-rlp.workspace = true
 alloy-eips = { workspace = true, features = ["arbitrary"] }
-alloy-genesis.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
-reth-codecs.workspace = true
 
 criterion.workspace = true
 

@@ -57,6 +57,12 @@ pub enum StateProofError {
     /// RLP decoding error.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
+    /// Trie inconsistency detected during proof calculation.
+    ///
+    /// This occurs when cached trie nodes disagree with the leaf data, causing
+    /// proof calculation to be unable to make forward progress.
+    #[error("trie inconsistency: {0}")]
+    TrieInconsistency(alloc::string::String),
 }
 
 impl From<StateProofError> for ProviderError {
@@ -64,6 +70,7 @@ impl From<StateProofError> for ProviderError {
         match value {
             StateProofError::Database(error) => Self::Database(error),
             StateProofError::Rlp(error) => Self::Rlp(error),
+            StateProofError::TrieInconsistency(msg) => Self::Database(DatabaseError::Other(msg)),
         }
     }
 }
@@ -171,7 +178,7 @@ pub enum SparseTrieErrorKind {
         /// Path to the node.
         path: Nibbles,
         /// Node that was at the path when revealing.
-        node: Box<dyn core::fmt::Debug + Send>,
+        node: Box<dyn core::fmt::Debug + Send + Sync>,
     },
     /// RLP error.
     #[error(transparent)]
@@ -184,7 +191,7 @@ pub enum SparseTrieErrorKind {
     },
     /// Other.
     #[error(transparent)]
-    Other(#[from] Box<dyn core::error::Error + Send>),
+    Other(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
 /// Trie witness errors.

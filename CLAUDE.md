@@ -24,7 +24,7 @@ Reth is a high-performance Ethereum execution client written in Rust, focusing o
 
 - **Modularity**: Each crate can be used as a standalone library
 - **Performance**: Extensive use of parallelism, memory-mapped I/O, and optimized data structures
-- **Extensibility**: Traits and generic types allow for different implementations (Ethereum, Optimism, etc.)
+- **Extensibility**: Traits and generic types allow for different chain implementations
 - **Type Safety**: Strong typing throughout with minimal use of dynamic dispatch
 
 ## Development Workflow
@@ -38,7 +38,7 @@ Reth is a high-performance Ethereum execution client written in Rust, focusing o
 
 2. **Linting**: Run clippy with all features
    ```bash
-   RUSTFLAGS="-D warnings" cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features --locked
+   cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features 
    ```
 
 3. **Testing**: Use nextest for faster test execution
@@ -169,18 +169,16 @@ Based on PR patterns, avoid:
 Before submitting changes, ensure:
 
 1. **Format Check**: `cargo +nightly fmt --all --check`
-2. **Clippy**: No warnings with `RUSTFLAGS="-D warnings"`
+2. **Clippy**: No warnings
 3. **Tests Pass**: All unit and integration tests
 4. **Documentation**: Update relevant docs and add doc comments with `cargo docs --document-private-items`
 5. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
-
 
 ### Opening PRs against <https://github.com/paradigmxyz/reth>
 
 Label PRs appropriately, first check the available labels and then apply the relevant ones:
 * when changes are RPC related, add A-rpc label
 * when changes are docs related, add C-docs label
-* when changes are optimism related (e.g. new feature or exclusive changes to crates/optimism), add A-op-reth label
 * ... and so on, check the available labels for more options.
 * if being tasked to open a pr, ensure that all changes are properly formatted: `cargo +nightly fmt --all`
 
@@ -234,7 +232,7 @@ Tests often need expansion for:
 Common refactoring pattern:
 - Replace concrete types with generics
 - Add trait bounds for flexibility
-- Enable reuse across different chain types (Ethereum, Optimism)
+- Enable reuse across different chain types
 
 #### When to Comment
 
@@ -315,6 +313,74 @@ GLOBAL_COUNTER.fetch_add(1, Ordering::SeqCst);
 Before adding a comment, ask: Would someone reading just the current code (no PR, no history) find this helpful?
 
 
+#### Rust Style Guides
+
+##### Type Ordering in Files
+
+When defining structs, traits, and functions in a file, follow this ordering convention. The file's primary type (matching the file name) comes first, followed by supporting public types, then private types and helpers.
+
+```rust
+use ...;
+
+/// The primary type of this file (matches filename).
+pub struct PayloadProcessor { ... }
+
+impl PayloadProcessor { ... }
+
+// Followed by public auxiliary types that support the primary type
+
+/// Configuration for the processor.
+pub struct PayloadProcessorConfig { ... }
+
+/// Result type returned by processor operations.
+pub struct ProcessorResult { ... }
+
+// Followed by public traits related to the primary type
+
+pub trait ProcessorExt { ... }
+
+// Followed by private helper types
+
+struct InternalState { ... }
+
+// Followed by private helper functions
+
+fn validate_input() { ... }
+```
+
+❌ **Bad**: Adding new traits and auxiliary types **above** the file's primary type (see [#22133](https://github.com/paradigmxyz/reth/pull/22133)):
+
+```rust
+use ...;
+
+// ❌ BAD - new auxiliary struct added before the file's main type
+pub struct CacheWaitDurations { ... }
+
+// ❌ BAD - new trait added before the file's main type  
+pub trait WaitForCaches { ... }
+
+// The file's primary type is buried below unrelated additions
+pub struct PayloadProcessor { ... }
+```
+
+✅ **Good**: New types go **after** the primary type:
+
+```rust
+use ...;
+
+// ✅ The file's primary type stays at the top
+pub struct PayloadProcessor { ... }
+
+impl PayloadProcessor { ... }
+
+// ✅ Auxiliary types follow the primary type
+pub struct CacheWaitDurations { ... }
+
+pub trait WaitForCaches { ... }
+
+impl WaitForCaches for PayloadProcessor { ... }
+```
+
 ### Example Contribution Workflow
 
 Let's say you want to fix a bug where external IP resolution fails on startup:
@@ -349,11 +415,11 @@ Let's say you want to fix a bug where external IP resolution fails on startup:
    }
    ```
 
-5. **Run checks**:
+5. **Run checks** (IMPORTANT!):
    ```bash
    cargo +nightly fmt --all
-   cargo clippy --all-features
-   cargo test -p reth-discv4
+   cargo clippy --workspace --all-features # Make sure WHOLE WORKSPACE compiles!
+   cargo nextest run -p reth-discv4
    ```
 
 6. **Commit with clear message**:
@@ -374,7 +440,7 @@ Let's say you want to fix a bug where external IP resolution fails on startup:
 cargo +nightly fmt --all
 
 # Run lints
-RUSTFLAGS="-D warnings" cargo +nightly clippy --workspace --all-features --locked
+cargo +nightly clippy --workspace --all-features
 
 # Run tests
 cargo nextest run --workspace
@@ -383,7 +449,7 @@ cargo nextest run --workspace
 cargo bench --bench bench_name
 
 # Build optimized binary
-cargo build --release --features "jemalloc asm-keccak"
+cargo build --release
 
 # Check compilation for all features
 cargo check --workspace --all-features

@@ -8,8 +8,13 @@ use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, ForkCondition};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::SealedHeader;
+use revm::primitives::HashMap;
 use serde::Deserialize;
-use std::{collections::BTreeMap, ops::Deref};
+use std::{
+    collections::BTreeMap,
+    ops::Deref,
+    sync::{Arc, OnceLock, RwLock},
+};
 
 /// The definition of a blockchain test.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
@@ -323,59 +328,72 @@ pub enum ForkSpec {
     Osaka,
 }
 
-impl From<ForkSpec> for ChainSpec {
-    fn from(fork_spec: ForkSpec) -> Self {
+impl ForkSpec {
+    /// Converts this EF fork spec to a Reth [`ChainSpec`].
+    pub fn to_chain_spec(self) -> Arc<ChainSpec> {
+        static MAP: OnceLock<RwLock<HashMap<ForkSpec, Arc<ChainSpec>>>> = OnceLock::new();
+        let map = MAP.get_or_init(Default::default);
+        if let Some(r) = map.read().unwrap().get(&self) {
+            return r.clone();
+        }
+        map.write()
+            .unwrap()
+            .entry(self)
+            .or_insert_with(|| Arc::new(self.to_chain_spec_inner()))
+            .clone()
+    }
+
+    fn to_chain_spec_inner(self) -> ChainSpec {
         let spec_builder = ChainSpecBuilder::mainnet().reset();
 
-        match fork_spec {
-            ForkSpec::Frontier => spec_builder.frontier_activated(),
-            ForkSpec::FrontierToHomesteadAt5 => spec_builder
+        match self {
+            Self::Frontier => spec_builder.frontier_activated(),
+            Self::FrontierToHomesteadAt5 => spec_builder
                 .frontier_activated()
                 .with_fork(EthereumHardfork::Homestead, ForkCondition::Block(5)),
-            ForkSpec::Homestead => spec_builder.homestead_activated(),
-            ForkSpec::HomesteadToDaoAt5 => spec_builder
+            Self::Homestead => spec_builder.homestead_activated(),
+            Self::HomesteadToDaoAt5 => spec_builder
                 .homestead_activated()
                 .with_fork(EthereumHardfork::Dao, ForkCondition::Block(5)),
-            ForkSpec::HomesteadToEIP150At5 => spec_builder
+            Self::HomesteadToEIP150At5 => spec_builder
                 .homestead_activated()
                 .with_fork(EthereumHardfork::Tangerine, ForkCondition::Block(5)),
-            ForkSpec::EIP150 => spec_builder.tangerine_whistle_activated(),
-            ForkSpec::EIP158 => spec_builder.spurious_dragon_activated(),
-            ForkSpec::EIP158ToByzantiumAt5 => spec_builder
+            Self::EIP150 => spec_builder.tangerine_whistle_activated(),
+            Self::EIP158 => spec_builder.spurious_dragon_activated(),
+            Self::EIP158ToByzantiumAt5 => spec_builder
                 .spurious_dragon_activated()
                 .with_fork(EthereumHardfork::Byzantium, ForkCondition::Block(5)),
-            ForkSpec::Byzantium => spec_builder.byzantium_activated(),
-            ForkSpec::ByzantiumToConstantinopleAt5 => spec_builder
+            Self::Byzantium => spec_builder.byzantium_activated(),
+            Self::ByzantiumToConstantinopleAt5 => spec_builder
                 .byzantium_activated()
                 .with_fork(EthereumHardfork::Constantinople, ForkCondition::Block(5)),
-            ForkSpec::ByzantiumToConstantinopleFixAt5 => spec_builder
+            Self::ByzantiumToConstantinopleFixAt5 => spec_builder
                 .byzantium_activated()
                 .with_fork(EthereumHardfork::Petersburg, ForkCondition::Block(5)),
-            ForkSpec::Constantinople => spec_builder.constantinople_activated(),
-            ForkSpec::ConstantinopleFix => spec_builder.petersburg_activated(),
-            ForkSpec::Istanbul => spec_builder.istanbul_activated(),
-            ForkSpec::Berlin => spec_builder.berlin_activated(),
-            ForkSpec::BerlinToLondonAt5 => spec_builder
+            Self::Constantinople => spec_builder.constantinople_activated(),
+            Self::ConstantinopleFix => spec_builder.petersburg_activated(),
+            Self::Istanbul => spec_builder.istanbul_activated(),
+            Self::Berlin => spec_builder.berlin_activated(),
+            Self::BerlinToLondonAt5 => spec_builder
                 .berlin_activated()
                 .with_fork(EthereumHardfork::London, ForkCondition::Block(5)),
-            ForkSpec::London => spec_builder.london_activated(),
-            ForkSpec::Merge |
-            ForkSpec::MergeEOF |
-            ForkSpec::MergeMeterInitCode |
-            ForkSpec::MergePush0 => spec_builder.paris_activated(),
-            ForkSpec::ParisToShanghaiAtTime15k => spec_builder
+            Self::London => spec_builder.london_activated(),
+            Self::Merge | Self::MergeEOF | Self::MergeMeterInitCode | Self::MergePush0 => {
+                spec_builder.paris_activated()
+            }
+            Self::ParisToShanghaiAtTime15k => spec_builder
                 .paris_activated()
                 .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(15_000)),
-            ForkSpec::Shanghai => spec_builder.shanghai_activated(),
-            ForkSpec::ShanghaiToCancunAtTime15k => spec_builder
+            Self::Shanghai => spec_builder.shanghai_activated(),
+            Self::ShanghaiToCancunAtTime15k => spec_builder
                 .shanghai_activated()
                 .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(15_000)),
-            ForkSpec::Cancun => spec_builder.cancun_activated(),
-            ForkSpec::CancunToPragueAtTime15k => spec_builder
+            Self::Cancun => spec_builder.cancun_activated(),
+            Self::CancunToPragueAtTime15k => spec_builder
                 .cancun_activated()
                 .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(15_000)),
-            ForkSpec::Prague => spec_builder.prague_activated(),
-            ForkSpec::Osaka => spec_builder.osaka_activated(),
+            Self::Prague => spec_builder.prague_activated(),
+            Self::Osaka => spec_builder.osaka_activated(),
         }
         .build()
     }

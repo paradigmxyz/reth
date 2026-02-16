@@ -54,9 +54,7 @@ impl<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> Self::ExecutionData {
-        let (payload, sidecar) =
-            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
-        ExecutionData { payload, sidecar }
+        T::block_to_payload(block)
     }
 }
 

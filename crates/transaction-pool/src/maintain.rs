@@ -10,7 +10,10 @@ use crate::{
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
 use alloy_eips::{BlockNumberOrTag, Decodable2718, Encodable2718};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes};
+use alloy_primitives::{
+    map::{AddressSet, HashSet},
+    Address, BlockHash, BlockNumber, Bytes,
+};
 use alloy_rlp::Encodable;
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
@@ -24,11 +27,10 @@ use reth_primitives_traits::{
     transaction::signed::SignedTransaction, NodePrimitives, SealedHeader,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Borrow,
-    collections::HashSet,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::Arc,
@@ -93,11 +95,11 @@ impl LocalTransactionBackupConfig {
 }
 
 /// Returns a spawnable future for maintaining the state of the transaction pool.
-pub fn maintain_transaction_pool_future<N, Client, P, St, Tasks>(
+pub fn maintain_transaction_pool_future<N, Client, P, St>(
     client: Client,
     pool: P,
     events: St,
-    task_spawner: Tasks,
+    task_spawner: Runtime,
     config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
@@ -110,7 +112,6 @@ where
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>, Block = N::Block>
         + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
 {
     async move {
         maintain_transaction_pool(client, pool, events, task_spawner, config).await;
@@ -121,11 +122,11 @@ where
 /// Maintains the state of the transaction pool by handling new blocks and reorgs.
 ///
 /// This listens for any new blocks and reorgs and updates the transaction pool's state accordingly
-pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
+pub async fn maintain_transaction_pool<N, Client, P, St>(
     client: Client,
     pool: P,
     mut events: St,
-    task_spawner: Tasks,
+    task_spawner: Runtime,
     config: MaintainPoolConfig,
 ) where
     N: NodePrimitives,
@@ -137,7 +138,6 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>, Block = N::Block>
         + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
 {
     let metrics = MaintainPoolMetrics::default();
     let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
@@ -227,7 +227,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 .boxed()
             };
             reload_accounts_fut = rx.fuse();
-            task_spawner.spawn_blocking(fut);
+            task_spawner.spawn_blocking_task(fut);
         }
 
         // check if we have a new finalized block
@@ -241,10 +241,10 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
             pool.delete_blobs(blobs);
             // and also do periodic cleanup
             let pool = pool.clone();
-            task_spawner.spawn_blocking(Box::pin(async move {
+            task_spawner.spawn_blocking_task(async move {
                 debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
                 pool.cleanup_blobs();
-            }));
+            });
         }
 
         // outcomes of the futures we are waiting on
@@ -515,7 +515,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     let pool = pool.clone();
                     let spawner = task_spawner.clone();
                     let client = client.clone();
-                    task_spawner.spawn(Box::pin(async move {
+                    task_spawner.spawn_task(async move {
                         // Start converting not eaerlier than 4 seconds into current slot to ensure
                         // that our pool only contains valid transactions for the next block (as
                         // it's not Osaka yet).
@@ -563,7 +563,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                                 let converter = BlobSidecarConverter::new();
                                 let pool = pool.clone();
-                                spawner.spawn(Box::pin(async move {
+                                spawner.spawn_task(async move {
                                     // Convert sidecar to EIP-7594 format
                                     let Some(sidecar) = converter.convert(sidecar).await else {
                                         return;
@@ -578,7 +578,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                                         return;
                                     };
                                     let _ = pool.add_transaction(origin, tx).await;
-                                }));
+                                });
                             }
 
                             if last_iteration {
@@ -587,7 +587,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                             interval.tick().await;
                         }
-                    }));
+                    });
                 }
             }
         }
@@ -670,7 +670,7 @@ fn load_accounts<Client, I>(
     client: Client,
     at: BlockHash,
     addresses: I,
-) -> Result<LoadedAccounts, Box<(HashSet<Address>, ProviderError)>>
+) -> Result<LoadedAccounts, Box<(AddressSet, ProviderError)>>
 where
     I: IntoIterator<Item = Address>,
     Client: StateProviderFactory,
@@ -865,7 +865,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_fs_util as fs;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use reth_tasks::TaskManager;
+    use reth_tasks::Runtime;
 
     #[test]
     fn changed_acc_entry() {
@@ -904,10 +904,9 @@ mod tests {
 
         txpool.add_transaction(TransactionOrigin::Local, transaction.clone()).await.unwrap();
 
-        let handle = tokio::runtime::Handle::current();
-        let manager = TaskManager::new(handle);
+        let rt = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
         let config = LocalTransactionBackupConfig::with_local_txs_backup(transactions_path.clone());
-        manager.executor().spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
+        rt.spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
             backup_local_transactions_task(shutdown, txpool.clone(), config)
         });
 
@@ -916,8 +915,7 @@ mod tests {
 
         assert_eq!(*tx_to_cmp.hash(), *tx_on_finish.hash());
 
-        // shutdown the executor
-        manager.graceful_shutdown();
+        rt.graceful_shutdown();
 
         let data = fs::read(transactions_path).unwrap();
 

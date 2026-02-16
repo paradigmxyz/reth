@@ -806,12 +806,14 @@ mod rpc_compat {
                 .zip(senders)
                 .enumerate()
                 .map(|(idx, (tx, sender))| {
+                    #[allow(clippy::needless_update)]
                     let tx_info = TransactionInfo {
                         hash: Some(*tx.tx_hash()),
                         block_hash,
                         block_number: Some(block_number),
                         base_fee,
                         index: Some(idx as u64),
+                        ..Default::default()
                     };
 
                     converter(Recovered::new_unchecked(tx, sender), tx_info)
