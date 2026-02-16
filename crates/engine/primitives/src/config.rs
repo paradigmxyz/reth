@@ -1,6 +1,7 @@
 //! Engine tree configuration.
 
 use alloy_eips::merge::EPOCH_SLOTS;
+use core::time::Duration;
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
@@ -31,6 +32,13 @@ fn default_account_worker_count() -> usize {
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
 
+/// The size of proof targets chunk optimized for small blocks (≤20M gas used).
+/// Benchmarks: <https://gist.github.com/yongkangc/fda9c24846f0ba891376bcf81b002008>
+pub const SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE: usize = 30;
+
+/// Gas threshold below which the small block chunk size is used.
+pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
+
 /// The size of proof targets chunk to spawn in one multiproof calculation when V2 proofs are
 /// enabled. This is 4x the default chunk size to take advantage of more efficient V2 proof
 /// computation.
@@ -40,18 +48,6 @@ pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2: usize = DEFAULT_MULTIPROOF_TASK
 ///
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
-
-/// Returns the default maximum concurrency for prewarm task based on available parallelism.
-fn default_prewarm_max_concurrency() -> usize {
-    #[cfg(feature = "std")]
-    {
-        std::thread::available_parallelism().map_or(16, |n| n.get())
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        16
-    }
-}
 
 /// Default depth for sparse trie pruning.
 ///
@@ -63,6 +59,9 @@ pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 ///
 /// Storage tries beyond this limit are cleared (but allocations preserved).
 pub const DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES: usize = 100;
+
+/// Default timeout for the state root task before spawning a sequential fallback.
+pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
 
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
@@ -157,8 +156,6 @@ pub struct TreeConfig {
     /// where immediate payload regeneration is desired despite the head not changing or moving to
     /// an ancestor.
     always_process_payload_attributes_on_canonical_head: bool,
-    /// Maximum concurrency for the prewarm task.
-    prewarm_max_concurrency: usize,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
     /// Number of storage proof worker threads.
@@ -175,6 +172,13 @@ pub struct TreeConfig {
     sparse_trie_prune_depth: usize,
     /// Maximum number of storage tries to retain after pruning.
     sparse_trie_max_storage_tries: usize,
+    /// Whether to fully disable sparse trie cache pruning between blocks.
+    disable_sparse_trie_cache_pruning: bool,
+    /// Timeout for the state root task before spawning a sequential fallback computation.
+    /// If `Some`, after waiting this duration for the state root task, a sequential state root
+    /// computation is spawned in parallel and whichever finishes first is used.
+    /// If `None`, the timeout fallback is disabled.
+    state_root_task_timeout: Option<Duration>,
 }
 
 impl Default for TreeConfig {
@@ -198,7 +202,6 @@ impl Default for TreeConfig {
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
-            prewarm_max_concurrency: default_prewarm_max_concurrency(),
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
@@ -207,6 +210,8 @@ impl Default for TreeConfig {
             disable_trie_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            disable_sparse_trie_cache_pruning: false,
+            state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
         }
     }
 }
@@ -233,7 +238,6 @@ impl TreeConfig {
         precompile_cache_disabled: bool,
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
-        prewarm_max_concurrency: usize,
         allow_unwind_canonical_header: bool,
         storage_worker_count: usize,
         account_worker_count: usize,
@@ -241,6 +245,7 @@ impl TreeConfig {
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
         sparse_trie_max_storage_tries: usize,
+        state_root_task_timeout: Option<Duration>,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -261,7 +266,6 @@ impl TreeConfig {
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
-            prewarm_max_concurrency,
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
@@ -270,6 +274,8 @@ impl TreeConfig {
             disable_trie_cache: false,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            disable_sparse_trie_cache_pruning: false,
+            state_root_task_timeout,
         }
     }
 
@@ -517,17 +523,6 @@ impl TreeConfig {
         self.has_enough_parallelism && !self.legacy_state_root
     }
 
-    /// Setter for prewarm max concurrency.
-    pub const fn with_prewarm_max_concurrency(mut self, prewarm_max_concurrency: usize) -> Self {
-        self.prewarm_max_concurrency = prewarm_max_concurrency;
-        self
-    }
-
-    /// Return the prewarm max concurrency.
-    pub const fn prewarm_max_concurrency(&self) -> usize {
-        self.prewarm_max_concurrency
-    }
-
     /// Return the number of storage proof worker threads.
     pub const fn storage_worker_count(&self) -> usize {
         self.storage_worker_count
@@ -616,6 +611,28 @@ impl TreeConfig {
     /// Setter for maximum storage tries to retain.
     pub const fn with_sparse_trie_max_storage_tries(mut self, max_tries: usize) -> Self {
         self.sparse_trie_max_storage_tries = max_tries;
+        self
+    }
+
+    /// Returns whether sparse trie cache pruning is disabled.
+    pub const fn disable_sparse_trie_cache_pruning(&self) -> bool {
+        self.disable_sparse_trie_cache_pruning
+    }
+
+    /// Setter for whether to disable sparse trie cache pruning.
+    pub const fn with_disable_sparse_trie_cache_pruning(mut self, value: bool) -> Self {
+        self.disable_sparse_trie_cache_pruning = value;
+        self
+    }
+
+    /// Returns the state root task timeout.
+    pub const fn state_root_task_timeout(&self) -> Option<Duration> {
+        self.state_root_task_timeout
+    }
+
+    /// Setter for state root task timeout.
+    pub const fn with_state_root_task_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.state_root_task_timeout = timeout;
         self
     }
 }

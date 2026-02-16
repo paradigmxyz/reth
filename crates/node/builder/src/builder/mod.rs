@@ -903,8 +903,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             .request_handler(self.provider().clone())
             .split_with_handle();
 
-        self.executor.spawn_critical_blocking("p2p txpool", Box::pin(txpool));
-        self.executor.spawn_critical_blocking("p2p eth request handler", Box::pin(eth));
+        self.executor.spawn_critical_blocking_task("p2p txpool", Box::pin(txpool));
+        self.executor.spawn_critical_blocking_task("p2p eth request handler", Box::pin(eth));
 
         let default_peers_path = self.config().datadir().known_peers();
         let known_peers_file = self.config().network.persistent_peers_file(default_peers_path);
@@ -986,7 +986,7 @@ impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext
                 secret_key,
                 default_peers_path,
             )
-            .with_task_executor(Box::new(self.executor.clone()))
+            .with_task_executor(self.executor.clone())
             .set_head(self.head);
 
         Ok(builder)

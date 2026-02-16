@@ -27,7 +27,7 @@ use reth_rpc_eth_types::{
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskSpawner, TokioTaskExecutor,
+    Runtime,
 };
 use reth_transaction_pool::{
     blobstore::BlobSidecarConverter, noop::NoopTransactionPool, AddedTransactionOutcome,
@@ -168,7 +168,8 @@ where
             eth_proof_window,
             blocking_task_pool,
             fee_history_cache,
-            TokioTaskExecutor::default().boxed(),
+            Runtime::with_existing_handle(tokio::runtime::Handle::current())
+                .expect("called outside tokio runtime"),
             proof_permits,
             rpc_converter,
             (),
@@ -254,7 +255,7 @@ where
     Rpc: RpcConvert<Error = EthApiError>,
 {
     #[inline]
-    fn io_task_spawner(&self) -> impl TaskSpawner {
+    fn io_task_spawner(&self) -> &Runtime {
         self.inner.task_spawner()
     }
 
@@ -294,7 +295,7 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// The block number at which the node started
     starting_block: U256,
     /// The type that can spawn tasks which would otherwise block.
-    task_spawner: Box<dyn TaskSpawner>,
+    task_spawner: Runtime,
     /// Cached pending block if any
     pending_block: Mutex<Option<PendingBlock<N::Primitives>>>,
     /// A pool dedicated to CPU heavy blocking tasks.
@@ -356,7 +357,7 @@ where
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
-        task_spawner: Box<dyn TaskSpawner + 'static>,
+        task_spawner: Runtime,
         proof_permits: usize,
         converter: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
@@ -385,7 +386,7 @@ where
         // Create tx pool insertion batcher
         let (processor, tx_batch_sender) =
             BatchTxProcessor::new(components.pool().clone(), max_batch_size);
-        task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
+        task_spawner.spawn_critical_task("tx-batcher", processor);
 
         Self {
             components,
@@ -454,8 +455,8 @@ where
 
     /// Returns a handle to the task spawner.
     #[inline]
-    pub const fn task_spawner(&self) -> &dyn TaskSpawner {
-        &*self.task_spawner
+    pub const fn task_spawner(&self) -> &Runtime {
+        &self.task_spawner
     }
 
     /// Returns a handle to the blocking thread pool.

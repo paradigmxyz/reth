@@ -19,7 +19,7 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
-    ForkchoiceStateTracker, OnForkChoiceUpdated,
+    ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
@@ -27,12 +27,14 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{
+    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+};
 use reth_provider::{
     BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
     StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    TransactionVariant,
+    StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -40,7 +42,7 @@ use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{fmt::Debug, ops, sync::Arc, time::Instant};
+use std::{fmt::Debug, ops, sync::Arc};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -271,6 +273,9 @@ where
     evm_config: C,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Whether the node uses hashed state as canonical storage (v2 mode).
+    /// Cached at construction to avoid threading `StorageSettingsCache` bounds everywhere.
+    use_hashed_state: bool,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -296,6 +301,7 @@ where
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
+            .field("use_hashed_state", &self.use_hashed_state)
             .finish()
     }
 }
@@ -313,10 +319,11 @@ where
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StageCheckpointReader
         + ChangeSetReader
-        + StorageChangeSetReader,
+        + StorageChangeSetReader
+        + StorageSettingsCache,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineValidator<T>,
+    V: EngineValidator<T> + WaitForCaches,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[expect(clippy::too_many_arguments)]
@@ -334,6 +341,7 @@ where
         engine_kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
+        use_hashed_state: bool,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -355,6 +363,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
+            use_hashed_state,
         }
     }
 
@@ -375,6 +384,7 @@ where
         kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
+        use_hashed_state: bool,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -407,6 +417,7 @@ where
             kind,
             evm_config,
             changeset_cache,
+            use_hashed_state,
         );
         let incoming = task.incoming_tx.clone();
         spawn_os_thread("engine", || task.run());
@@ -1510,7 +1521,7 @@ where
                                         .engine
                                         .failed_forkchoice_updated_response_deliveries
                                         .increment(1);
-                                    error!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}");
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
@@ -1534,7 +1545,7 @@ where
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {
-                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    warn!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to deliver newPayload response, receiver dropped (request cancelled): {err:?}");
                                     self.metrics
                                         .engine
                                         .failed_new_payload_response_deliveries
@@ -1542,6 +1553,81 @@ where
                                 }
 
                                 // handle the event if any
+                                self.on_maybe_tree_event(maybe_event)?;
+                            }
+                            BeaconEngineMessage::RethNewPayload { payload, tx } => {
+                                let pending_persistence = self.persistence_state.rx.take();
+                                let validator = &self.payload_validator;
+
+                                debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
+                                let (persistence_tx, persistence_rx) = std::sync::mpsc::channel();
+                                if let Some((rx, start_time, _action)) = pending_persistence {
+                                    tokio::task::spawn_blocking(move || {
+                                        let start = Instant::now();
+                                        let result = rx.recv().ok();
+                                        let _ = persistence_tx.send((
+                                            result,
+                                            start_time,
+                                            start.elapsed(),
+                                        ));
+                                    });
+                                }
+
+                                let cache_wait = validator.wait_for_caches();
+                                let persistence_result = persistence_rx.try_recv().ok();
+
+                                let persistence_wait =
+                                    if let Some((result, start_time, wait_duration)) =
+                                        persistence_result
+                                    {
+                                        let _ = self
+                                            .on_persistence_complete(result.flatten(), start_time);
+                                        Some(wait_duration)
+                                    } else {
+                                        None
+                                    };
+
+                                debug!(
+                                    target: "engine::tree",
+                                    persistence_wait = ?persistence_wait,
+                                    execution_cache_wait = ?cache_wait.execution_cache,
+                                    sparse_trie_wait = ?cache_wait.sparse_trie,
+                                    "Peresistence finished and caches updated for reth_newPayload"
+                                );
+
+                                let start = Instant::now();
+                                let gas_used = payload.gas_used();
+                                let num_hash = payload.num_hash();
+                                let mut output = self.on_new_payload(payload);
+                                let latency = start.elapsed();
+                                self.metrics.engine.new_payload.update_response_metrics(
+                                    start,
+                                    &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
+                                    &output,
+                                    gas_used,
+                                );
+
+                                let maybe_event =
+                                    output.as_mut().ok().and_then(|out| out.event.take());
+
+                                let timings = NewPayloadTimings {
+                                    latency,
+                                    persistence_wait,
+                                    execution_cache_wait: cache_wait.execution_cache,
+                                    sparse_trie_wait: cache_wait.sparse_trie,
+                                };
+                                if let Err(err) =
+                                    tx.send(output.map(|o| (o.outcome, timings)).map_err(|e| {
+                                        BeaconOnNewPayloadError::Internal(Box::new(e))
+                                    }))
+                                {
+                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    self.metrics
+                                        .engine
+                                        .failed_new_payload_response_deliveries
+                                        .increment(1);
+                                }
+
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
                         }
@@ -2379,7 +2465,12 @@ where
 
             self.update_reorg_metrics(old.len(), old_first);
             self.reinsert_reorged_blocks(new.clone());
-            self.reinsert_reorged_blocks(old.clone());
+
+            // When use_hashed_state is enabled, skip reinserting the old chain — the
+            // bundle state references plain state reverts which don't exist.
+            if !self.use_hashed_state {
+                self.reinsert_reorged_blocks(old.clone());
+            }
         }
 
         // update the tracked in-memory state with the new chain
@@ -2588,7 +2679,7 @@ where
     /// Returns `InsertPayloadOk::Inserted(BlockStatus::Valid)` on successful execution,
     /// `InsertPayloadOk::AlreadySeen` if the block already exists, or
     /// `InsertPayloadOk::Inserted(BlockStatus::Disconnected)` if parent state is missing.
-    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_id))]
+    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(?block_id))]
     fn insert_block_or_payload<Input, Err>(
         &mut self,
         block_id: BlockWithParent,

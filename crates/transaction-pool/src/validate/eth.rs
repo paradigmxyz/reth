@@ -32,7 +32,7 @@ use reth_primitives_traits::{
     SealedBlock,
 };
 use reth_storage_api::{AccountInfoReader, BlockReaderIdExt, BytecodeReader, StateProviderFactory};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use revm::context_interface::Cfg;
 use revm_primitives::U256;
 use std::{
@@ -1252,13 +1252,12 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
     /// The validator will spawn `additional_tasks` additional tasks for validation.
     ///
     /// By default this will spawn 1 additional task.
-    pub fn build_with_tasks<Tx, T, S>(
+    pub fn build_with_tasks<Tx, S>(
         self,
-        tasks: T,
+        tasks: Runtime,
         blob_store: S,
     ) -> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx, Evm>>
     where
-        T: TaskSpawner,
         S: BlobStore,
     {
         let additional_tasks = self.additional_tasks;
@@ -1269,19 +1268,16 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
         // Spawn validation tasks, they are blocking because they perform db lookups
         for _ in 0..additional_tasks {
             let task = task.clone();
-            tasks.spawn_blocking(Box::pin(async move {
+            tasks.spawn_blocking_task(async move {
                 task.run().await;
-            }));
+            });
         }
 
         // we spawn them on critical tasks because validation, especially for EIP-4844 can be quite
         // heavy
-        tasks.spawn_critical_blocking(
-            "transaction-validation-service",
-            Box::pin(async move {
-                task.run().await;
-            }),
-        );
+        tasks.spawn_critical_blocking_task("transaction-validation-service", async move {
+            task.run().await;
+        });
 
         let to_validation_task = Arc::new(Mutex::new(tx));
 

@@ -4,13 +4,17 @@ use crate::{
     root::ParallelStateRootError,
     StorageRootTargets,
 };
-use crossbeam_channel::unbounded as crossbeam_unbounded;
+use alloy_primitives::{map::B256Set, B256};
+use crossbeam_channel::{unbounded as crossbeam_unbounded, Receiver as CrossbeamReceiver};
+use reth_execution_errors::StorageRootError;
+use reth_primitives_traits::FastInstant as Instant;
+use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
     DecodedMultiProof, HashedPostState, MultiProofTargets, Nibbles,
 };
 use reth_trie_common::added_removed_keys::MultiAddedRemovedKeys;
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
 use tracing::trace;
 
 /// Parallel proof calculator.
@@ -179,7 +183,6 @@ mod tests {
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::proof::Proof;
     use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-    use tokio::runtime::Runtime;
 
     #[test]
     fn random_parallel_proof() {
@@ -243,14 +246,12 @@ mod tests {
         let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_rw.tx_ref());
         let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
 
-        let rt = Runtime::new().unwrap();
-
         let changeset_cache = reth_trie_db::ChangesetCache::new();
         let factory =
             reth_provider::providers::OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(factory);
-        let proof_worker_handle =
-            ProofWorkerHandle::new(rt.handle().clone(), task_ctx, 1, 1, false);
+        let runtime = reth_tasks::Runtime::test();
+        let proof_worker_handle = ProofWorkerHandle::new(&runtime, task_ctx, false, false);
 
         let parallel_result = ParallelProof::new(Default::default(), proof_worker_handle.clone())
             .decoded_multiproof(targets.clone())

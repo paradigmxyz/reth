@@ -61,7 +61,7 @@ fn main() -> eyre::Result<()> {
         let subnetwork_peer_id = *subnetwork.peer_id();
         let subnetwork_peer_addr = subnetwork.local_addr();
         let subnetwork_handle = subnetwork.peers_handle();
-        node.task_executor.spawn(subnetwork);
+        node.task_executor.spawn_task(subnetwork);
 
         // connect the launched node to the subnetwork
         node.network.peers_handle().add_peer(subnetwork_peer_id, subnetwork_peer_addr);

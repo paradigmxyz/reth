@@ -117,6 +117,10 @@
 #[macro_use]
 extern crate alloc;
 
+/// Re-export of [`quanta::Instant`] for high-resolution timing with minimal overhead.
+#[cfg(feature = "std")]
+pub use quanta::Instant as FastInstant;
+
 /// Common constants.
 pub mod constants;
 pub use constants::gas_units::{format_gas, format_gas_throughput};
@@ -164,7 +168,7 @@ pub use alloy_primitives::{logs_bloom, Log, LogData};
 pub mod proofs;
 
 mod storage;
-pub use storage::{StorageEntry, ValueWithSubKey};
+pub use storage::{StorageEntry, StorageSlotKey, ValueWithSubKey};
 
 pub mod sync;
 

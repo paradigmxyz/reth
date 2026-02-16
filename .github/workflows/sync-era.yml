@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   sync:
+    if: github.repository == 'paradigmxyz/reth'
     name: sync (${{ matrix.chain.bin }})
     runs-on: depot-ubuntu-latest
     env:

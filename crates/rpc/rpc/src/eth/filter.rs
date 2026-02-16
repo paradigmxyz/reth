@@ -31,7 +31,7 @@ use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderReceipt, ReceiptProvider,
 };
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
     collections::{HashMap, VecDeque},
@@ -125,7 +125,7 @@ where
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::noop::NoopProvider;
     /// use reth_rpc::{EthApi, EthFilter};
-    /// use reth_tasks::TokioTaskExecutor;
+    /// use reth_tasks::Runtime;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
     /// let eth_api = EthApi::builder(
     ///     NoopProvider::default(),
@@ -134,9 +134,9 @@ where
     ///     EthEvmConfig::mainnet(),
     /// )
     /// .build();
-    /// let filter = EthFilter::new(eth_api, Default::default(), TokioTaskExecutor::default().boxed());
+    /// let filter = EthFilter::new(eth_api, Default::default(), Runtime::test());
     /// ```
-    pub fn new(eth_api: Eth, config: EthFilterConfig, task_spawner: Box<dyn TaskSpawner>) -> Self {
+    pub fn new(eth_api: Eth, config: EthFilterConfig, task_spawner: Runtime) -> Self {
         let EthFilterConfig { max_blocks_per_filter, max_logs_per_response, stale_filter_ttl } =
             config;
         let inner = EthFilterInner {
@@ -152,11 +152,11 @@ where
         let eth_filter = Self { inner: Arc::new(inner) };
 
         let this = eth_filter.clone();
-        eth_filter.inner.task_spawner.spawn_critical(
+        eth_filter.inner.task_spawner.spawn_critical_task(
             "eth-filters_stale-filters-clean",
-            Box::pin(async move {
+            async move {
                 this.watch_and_clear_stale_filters().await;
-            }),
+            },
         );
 
         eth_filter
@@ -436,7 +436,7 @@ struct EthFilterInner<Eth: EthApiTypes> {
     /// maximum number of headers to read at once for range filter
     max_headers_range: u64,
     /// The type that can spawn tasks.
-    task_spawner: Box<dyn TaskSpawner>,
+    task_spawner: Runtime,
     /// Duration since the last filter poll, after which the filter is considered stale
     stale_filter_ttl: Duration,
 }
@@ -634,7 +634,7 @@ where
 
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
-        self.task_spawner.spawn_blocking(Box::pin(async move {
+        self.task_spawner.spawn_blocking_task(Box::pin(async move {
             let res =
                 this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits).await;
             let _ = tx.send(res);
@@ -1320,7 +1320,7 @@ mod tests {
     use reth_rpc_convert::RpcConverter;
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
     use reth_rpc_eth_types::receipt::EthReceiptConverter;
-    use reth_tasks::TokioTaskExecutor;
+    use reth_tasks::Runtime;
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use std::{collections::VecDeque, sync::Arc};
@@ -1369,11 +1369,8 @@ mod tests {
         let provider = MockEthProvider::default();
         let eth_api = build_test_eth_api(provider);
 
-        let eth_filter = super::EthFilter::new(
-            eth_api,
-            EthFilterConfig::default(),
-            Box::new(TokioTaskExecutor::default()),
-        );
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers = vec![];
@@ -1397,11 +1394,8 @@ mod tests {
         let provider = MockEthProvider::default();
         let eth_api = build_test_eth_api(provider);
 
-        let eth_filter = super::EthFilter::new(
-            eth_api,
-            EthFilterConfig::default(),
-            Box::new(TokioTaskExecutor::default()),
-        );
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers = vec![
@@ -1515,11 +1509,8 @@ mod tests {
         let provider = MockEthProvider::default();
         let eth_api = build_test_eth_api(provider);
 
-        let eth_filter = super::EthFilter::new(
-            eth_api,
-            EthFilterConfig::default(),
-            Box::new(TokioTaskExecutor::default()),
-        );
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers = vec![SealedHeader::new(
@@ -1585,11 +1576,8 @@ mod tests {
 
         let eth_api = build_test_eth_api(provider);
 
-        let eth_filter = super::EthFilter::new(
-            eth_api,
-            EthFilterConfig::default(),
-            Box::new(TokioTaskExecutor::default()),
-        );
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers = vec![
@@ -1679,11 +1667,8 @@ mod tests {
 
         let eth_api = build_test_eth_api(provider);
 
-        let eth_filter = super::EthFilter::new(
-            eth_api,
-            EthFilterConfig::default(),
-            Box::new(TokioTaskExecutor::default()),
-        );
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers = vec![
@@ -1750,11 +1735,8 @@ mod tests {
         provider.add_receipts(test_block_number, vec![mock_receipt.clone()]);
 
         let eth_api = build_test_eth_api(provider);
-        let eth_filter = super::EthFilter::new(
-            eth_api,
-            EthFilterConfig::default(),
-            Box::new(TokioTaskExecutor::default()),
-        );
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers = vec![test_header.clone()];
@@ -1785,11 +1767,8 @@ mod tests {
         let provider = MockEthProvider::default();
         let eth_api = build_test_eth_api(provider);
 
-        let eth_filter = super::EthFilter::new(
-            eth_api,
-            EthFilterConfig::default(),
-            Box::new(TokioTaskExecutor::default()),
-        );
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers: Vec<SealedHeader<alloy_consensus::Header>> = vec![];
@@ -1882,11 +1861,7 @@ mod tests {
             .add_block_body_indices(103, StoredBlockBodyIndices { first_tx_num: 2, tx_count: 0 });
 
         let eth_api = build_test_eth_api(provider);
-        let eth_filter = EthFilter::new(
-            eth_api,
-            EthFilterConfig::default(),
-            Box::new(TokioTaskExecutor::default()),
-        );
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
 
         // Use default filter which will match any non-empty bloom
         let filter = Filter::default();

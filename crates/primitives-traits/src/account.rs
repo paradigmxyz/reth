@@ -91,7 +91,11 @@ impl From<revm_state::Account> for Account {
 
 impl From<TrieAccount> for Account {
     fn from(value: TrieAccount) -> Self {
-        Self { balance: value.balance, nonce: value.nonce, bytecode_hash: Some(value.code_hash) }
+        Self {
+            balance: value.balance,
+            nonce: value.nonce,
+            bytecode_hash: (value.code_hash != KECCAK_EMPTY).then_some(value.code_hash),
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 //! Builder support for rpc components.
 
 pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
+use reth_engine_tree::tree::WaitForCaches;
 pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
 pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity, Stack};
 pub use reth_trie_db::ChangesetCache;
@@ -992,7 +993,7 @@ where
 
         let new_canonical_blocks = node.provider().canonical_state_stream();
         let c = cache.clone();
-        node.task_executor().spawn_critical(
+        node.task_executor().spawn_critical_task(
             "cache canonical blocks task",
             Box::pin(async move {
                 cache_new_blocks_task(c, new_canonical_blocks).await;
@@ -1016,7 +1017,7 @@ where
             .with_provider(node.provider().clone())
             .with_pool(node.pool().clone())
             .with_network(node.network().clone())
-            .with_executor(Box::new(node.task_executor().clone()))
+            .with_executor(node.task_executor().clone())
             .with_evm_config(node.evm_config().clone())
             .with_consensus(node.consensus().clone())
             .build_with_auth_server(module_config, engine_api, eth_api, engine_events.clone());
@@ -1278,10 +1279,8 @@ pub trait PayloadValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone
 /// for block execution, state validation, and fork handling.
 pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The tree validator type that will be used by the consensus engine.
-    type EngineValidator: EngineValidator<
-        <Node::Types as NodeTypes>::Payload,
-        <Node::Types as NodeTypes>::Primitives,
-    >;
+    type EngineValidator: EngineValidator<<Node::Types as NodeTypes>::Payload, <Node::Types as NodeTypes>::Primitives>
+        + WaitForCaches;
 
     /// Builds the tree validator for the consensus engine.
     ///
@@ -1352,6 +1351,7 @@ where
             tree_config,
             invalid_block_hook,
             changeset_cache,
+            ctx.node.task_executor().clone(),
         ))
     }
 }
@@ -1402,7 +1402,7 @@ where
             ctx.beacon_engine_handle.clone(),
             PayloadStore::new(ctx.node.payload_builder_handle().clone()),
             ctx.node.pool().clone(),
-            Box::new(ctx.node.task_executor().clone()),
+            ctx.node.task_executor().clone(),
             client,
             EngineCapabilities::default(),
             engine_validator,

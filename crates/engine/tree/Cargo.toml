@@ -29,7 +29,7 @@ reth-provider.workspace = true
 reth-prune.workspace = true
 reth-revm = { workspace = true, features = ["optional-balance-check"] }
 reth-stages-api.workspace = true
-reth-tasks.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
 reth-trie.workspace = true
@@ -141,7 +141,15 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-node-ethereum/test-utils",
     "reth-evm-ethereum/test-utils",
+    "reth-tasks/test-utils",
 ]
+rocksdb = [
+    "reth-provider/rocksdb",
+    "reth-prune/rocksdb",
+    "reth-stages?/rocksdb",
+    "reth-e2e-test-utils/rocksdb",
+]
+edge = ["rocksdb"]
 
 [[test]]
 name = "e2e_testsuite"

@@ -11,16 +11,20 @@ pub mod keys {
 }
 
 /// Client trait for reading node metadata from the database.
-#[auto_impl::auto_impl(&)]
+#[auto_impl::auto_impl(&, Arc)]
 pub trait MetadataProvider: Send {
     /// Get a metadata value by key
     fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>>;
 
-    /// Get storage settings for this node
+    /// Get storage settings for this node.
+    ///
+    /// If the stored metadata can't be deserialized (e.g. the format changed),
+    /// this returns `None` instead of an error so commands like `db clear` can
+    /// still operate without requiring a compatible metadata schema.
     fn storage_settings(&self) -> ProviderResult<Option<StorageSettings>> {
-        self.get_metadata(keys::STORAGE_SETTINGS)?
-            .map(|bytes| serde_json::from_slice(&bytes).map_err(ProviderError::other))
-            .transpose()
+        Ok(self
+            .get_metadata(keys::STORAGE_SETTINGS)?
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok()))
     }
 }
 

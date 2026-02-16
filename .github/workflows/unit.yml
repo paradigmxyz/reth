@@ -49,6 +49,7 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
+            --no-fail-fast \
             --features "${{ matrix.features }} $EDGE_FEATURES" --locked \
             ${{ matrix.exclude_args }} --workspace \
             --exclude ef-tests --no-tests=warn \
@@ -87,7 +88,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo nextest run --cargo-profile hivetests -p ef-tests --features "asm-keccak ef-tests"
+      - run: cargo nextest run --no-fail-fast --cargo-profile hivetests -p ef-tests --features "asm-keccak ef-tests"
 
   doc:
     name: doc tests

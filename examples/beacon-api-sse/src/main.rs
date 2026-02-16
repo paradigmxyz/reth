@@ -33,7 +33,7 @@ fn main() {
         .run(|builder, args| async move {
             let handle = builder.node(EthereumNode::default()).launch().await?;
 
-            handle.node.task_executor.spawn(Box::pin(args.run()));
+            handle.node.task_executor.spawn_task(Box::pin(args.run()));
 
             handle.wait_for_node_exit().await
         })
