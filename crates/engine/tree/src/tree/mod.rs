@@ -1556,6 +1556,8 @@ where
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
                             BeaconEngineMessage::RethNewPayload { payload, tx } => {
+                                let cache_wait = self.payload_validator.wait_for_caches();
+
                                 let pending_persistence = self.persistence_state.rx.take();
 
                                 // Wait for pending persistence to complete before processing
@@ -1569,8 +1571,6 @@ where
                                     } else {
                                         None
                                     };
-
-                                let cache_wait = self.payload_validator.wait_for_caches();
 
                                 debug!(
                                     target: "engine::tree",
