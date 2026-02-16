@@ -60,6 +60,10 @@ target "_base_profiling" {
   inherits = ["_base"]
   platforms  = ["linux/amd64"]
 }
+target "_base_profiling" {
+  inherits = ["_base"]
+  platforms  = ["linux/amd64"]
+}
 
 // Ethereum (reth)
 target "ethereum" {

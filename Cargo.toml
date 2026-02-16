@@ -711,6 +711,28 @@ vergen-git2 = "9.1.0"
 ipnet = "2.11"
 
 [patch.crates-io]
+# revm staging patches
+revm = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+op-revm = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+revm-handler = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "33330a285e621b9170c30a21cfea9ab32e2a2169" }
+
+# revm-inspectors staging patch
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "e80e2eab72dfa18011e6a99abd37027290a46e83" }
+
+# alloy-evm staging patches
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "742dc14749ea0279c03ca27b1c26f26ac19fbefb" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "742dc14749ea0279c03ca27b1c26f26ac19fbefb" }
+
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
