@@ -38,7 +38,7 @@ jobs:
           cache-on-failure: true
       - name: Build reth
         run: |
-          cargo install --path bin/reth
+          cargo install --locked --path bin/reth
       - name: Run headers stage
         run: |
           reth stage run headers --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
