@@ -10,9 +10,9 @@ use alloy_eips::{
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar,
-    ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState,
-    ForkchoiceUpdated, PayloadId, PayloadStatus, PraguePayloadFields,
+    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId,
+    PayloadStatus, PraguePayloadFields,
 };
 
 // TODO: Replace with alloy types once available in alloy bal-devnet2 branch
@@ -277,10 +277,9 @@ where
             PayloadT::ExecutionData,
             PayloadT::PayloadAttributes,
         >::from_execution_payload(&payload);
-        self.inner.validator.validate_version_specific_fields(
-            EngineApiMessageVersion::V6,
-            payload_or_attrs,
-        )?;
+        self.inner
+            .validator
+            .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
         Ok(self.inner.beacon_consensus.new_payload(payload).await?)
     }
 

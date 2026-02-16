@@ -45,7 +45,7 @@ where
             execution_ctx: ctx,
             parent,
             transactions,
-            output: BlockExecutionResult { receipts, requests, gas_used, blob_gas_used },
+            output: BlockExecutionResult { receipts, requests, gas_used, blob_gas_used, .. },
             state_root,
             block_access_list_hash,
             ..
