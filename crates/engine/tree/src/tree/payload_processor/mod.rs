@@ -422,7 +422,7 @@ where
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
-            // to execution in order via `for_each_ordered` (lock-free atomic bitmap reorder).
+            // to execution in order via `for_each_ordered`.
             rayon::spawn(move || {
                 let (transactions, convert) = transactions.into_parts();
                 transactions
