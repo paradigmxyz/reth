@@ -63,12 +63,11 @@ async fn main() -> eyre::Result<()> {
     //    disk and don't handle new blocks/live sync etc, which is done by the blockchain tree.
     let provider = BlockchainProvider::new(factory)?;
 
-    let rpc_builder = RpcModuleBuilder::default()
+    let rpc_builder = RpcModuleBuilder::with_runtime(runtime)
         .with_provider(provider.clone())
         // Rest is just noops that do nothing
         .with_noop_pool()
         .with_noop_network()
-        .with_executor(runtime)
         .with_evm_config(EthEvmConfig::new(spec.clone()))
         .with_consensus(EthBeaconConsensus::new(spec.clone()));
 

@@ -216,12 +216,6 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         }
     }
 
-    /// Configure the task executor to use for additional tasks.
-    pub fn with_executor(self, executor: Runtime) -> Self {
-        let Self { pool, network, provider, evm_config, consensus, _primitives, .. } = self;
-        Self { provider, network, pool, executor, evm_config, consensus, _primitives }
-    }
-
     /// Configure the evm configuration type
     pub fn with_evm_config<E>(
         self,
@@ -389,17 +383,10 @@ where
     }
 }
 
-impl<N: NodePrimitives> Default for RpcModuleBuilder<N, (), (), (), (), ()> {
-    fn default() -> Self {
-        Self::new(
-            (),
-            (),
-            (),
-            Runtime::with_existing_handle(tokio::runtime::Handle::current())
-                .expect("failed to create Runtime"),
-            (),
-            (),
-        )
+impl<N: NodePrimitives> RpcModuleBuilder<N, (), (), (), (), ()> {
+    /// Create a new instance of the builder with the given [`Runtime`].
+    pub fn with_runtime(executor: Runtime) -> Self {
+        Self::new((), (), (), executor, (), ())
     }
 }
 
