@@ -1,5 +1,6 @@
 pub mod config_gen;
 pub mod manifest;
+pub mod manifest_cmd;
 mod tui;
 
 use crate::common::EnvironmentArgs;
@@ -7,7 +8,7 @@ use clap::Parser;
 use config_gen::{config_for_components, write_config};
 use eyre::Result;
 use lz4::Decoder;
-use manifest::{ComponentUrlOverrides, SnapshotComponentType, SnapshotManifest};
+use manifest::{SnapshotComponentType, SnapshotManifest};
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -159,6 +160,13 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, short, long_help = DownloadDefaults::get_global().long_help())]
     url: Option<String>,
 
+    /// URL to a snapshot manifest.json for modular component downloads.
+    ///
+    /// When provided, fetches this manifest instead of discovering it from the default
+    /// base URL. Useful for testing with custom or local manifests.
+    #[arg(long, value_name = "URL", conflicts_with = "url")]
+    manifest_url: Option<String>,
+
     /// Include transaction static files.
     #[arg(long)]
     with_txs: bool,
@@ -183,30 +191,6 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     /// Skip reth.toml generation after download.
     #[arg(long)]
     no_config: bool,
-
-    /// Override URL for the state component archive.
-    #[arg(long, value_name = "URL")]
-    state_url: Option<String>,
-
-    /// Override URL for the headers component archive.
-    #[arg(long, value_name = "URL")]
-    headers_url: Option<String>,
-
-    /// Override URL for the transactions component archive.
-    #[arg(long, value_name = "URL")]
-    txs_url: Option<String>,
-
-    /// Override URL for the receipts component archive.
-    #[arg(long, value_name = "URL")]
-    receipts_url: Option<String>,
-
-    /// Override URL for the account changesets component archive.
-    #[arg(long, value_name = "URL")]
-    account_changesets_url: Option<String>,
-
-    /// Override URL for the storage changesets component archive.
-    #[arg(long, value_name = "URL")]
-    storage_changesets_url: Option<String>,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
@@ -230,37 +214,60 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             return Ok(());
         }
 
-        // Modular download: discover available components by convention
-        let base_url = get_base_url(chain_id);
-        let overrides = ComponentUrlOverrides {
-            state: self.state_url.clone(),
-            headers: self.headers_url.clone(),
-            transactions: self.txs_url.clone(),
-            receipts: self.receipts_url.clone(),
-            account_changesets: self.account_changesets_url.clone(),
-            storage_changesets: self.storage_changesets_url.clone(),
+        // Modular download: fetch manifest and select components
+        let manifest_url = match &self.manifest_url {
+            Some(url) => url.clone(),
+            None => {
+                let base_url = get_base_url(chain_id);
+                format!("{base_url}/manifest.json")
+            }
         };
 
-        info!(target: "reth::cli", "Discovering available snapshot components from {base_url}");
-        let manifest = manifest::discover_components(&base_url, &overrides).await?;
+        info!(target: "reth::cli", url = %manifest_url, "Fetching snapshot manifest");
+        let manifest = manifest::fetch_manifest(&manifest_url).await?;
+
+        info!(target: "reth::cli",
+            block = manifest.block,
+            chain_id = manifest.chain_id,
+            storage_version = %manifest.storage_version,
+            components = manifest.components.len(),
+            "Loaded snapshot manifest"
+        );
 
         let selected = self.resolve_components(&manifest)?;
 
-        // Download each selected component
+        // Download each selected component (may be multiple archives for chunked components)
         let target_dir = data_dir.data_dir();
         for ty in &selected {
-            if let Some(component) = manifest.component(*ty) {
-                info!(target: "reth::cli",
-                    component = ty.display_name(),
-                    size = %DownloadProgress::format_size(component.size),
-                    "Downloading component"
-                );
-                stream_and_extract(&component.url, target_dir).await?;
-                info!(target: "reth::cli",
-                    component = ty.display_name(),
-                    "Component downloaded and extracted"
-                );
+            let urls = manifest.archive_urls(*ty);
+            if urls.is_empty() {
+                continue;
             }
+
+            let component_size = manifest.component(*ty).map(|c| c.total_size()).unwrap_or(0);
+
+            info!(target: "reth::cli",
+                component = ty.display_name(),
+                archives = urls.len(),
+                size = %DownloadProgress::format_size(component_size),
+                "Downloading component"
+            );
+
+            for (i, url) in urls.iter().enumerate() {
+                if urls.len() > 1 {
+                    info!(target: "reth::cli",
+                        component = ty.display_name(),
+                        archive = format!("{}/{}", i + 1, urls.len()),
+                        "Downloading archive"
+                    );
+                }
+                stream_and_extract(url, target_dir).await?;
+            }
+
+            info!(target: "reth::cli",
+                component = ty.display_name(),
+                "Component downloaded and extracted"
+            );
         }
 
         // Generate reth.toml
@@ -293,31 +300,27 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 .collect());
         }
 
-        // Explicit --with-* flags: state + specified components
+        // Explicit --with-* flags: state + headers (always) + specified components
         let has_explicit_flags = self.with_txs || self.with_receipts || self.with_changesets;
+        let available = |ty: SnapshotComponentType| manifest.component(ty).is_some();
 
         if has_explicit_flags || self.non_interactive {
             let mut selected = vec![SnapshotComponentType::State];
 
-            if manifest.component(SnapshotComponentType::Headers).is_some() {
+            if available(SnapshotComponentType::Headers) {
                 selected.push(SnapshotComponentType::Headers);
             }
-
-            if self.with_txs {
-                if manifest.component(SnapshotComponentType::Transactions).is_some() {
-                    selected.push(SnapshotComponentType::Transactions);
-                }
+            if self.with_txs && available(SnapshotComponentType::Transactions) {
+                selected.push(SnapshotComponentType::Transactions);
             }
-            if self.with_receipts {
-                if manifest.component(SnapshotComponentType::Receipts).is_some() {
-                    selected.push(SnapshotComponentType::Receipts);
-                }
+            if self.with_receipts && available(SnapshotComponentType::Receipts) {
+                selected.push(SnapshotComponentType::Receipts);
             }
             if self.with_changesets {
-                if let Some(_) = manifest.component(SnapshotComponentType::AccountChangesets) {
+                if available(SnapshotComponentType::AccountChangesets) {
                     selected.push(SnapshotComponentType::AccountChangesets);
                 }
-                if let Some(_) = manifest.component(SnapshotComponentType::StorageChangesets) {
+                if available(SnapshotComponentType::StorageChangesets) {
                     selected.push(SnapshotComponentType::StorageChangesets);
                 }
             }
