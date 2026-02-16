@@ -329,7 +329,6 @@ where
     PruneSenderRecoveryStage: Stage<Provider>,
     HashingStages: StageSet<Provider>,
     HistoryIndexingStages: StageSet<Provider>,
-    TransactionLookupStage: Stage<Provider>,
     PruneStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
@@ -346,14 +345,7 @@ where
         }))
         .add_set(HashingStages { stages_config: self.stages_config.clone() });
 
-        if self.stages_config.deferred_history_indexing {
-            // Only add transaction lookup — history indices will be built separately
-            builder = builder.add_stage(TransactionLookupStage::new(
-                self.stages_config.transaction_lookup,
-                self.stages_config.etl.clone(),
-                self.prune_modes.transaction_lookup,
-            ));
-        } else {
+        if !self.stages_config.deferred_history_indexing {
             builder = builder.add_set(HistoryIndexingStages {
                 stages_config: self.stages_config.clone(),
                 prune_modes: self.prune_modes.clone(),
