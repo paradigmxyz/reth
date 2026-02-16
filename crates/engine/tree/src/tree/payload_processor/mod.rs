@@ -392,9 +392,9 @@ where
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
     ) {
-        let (ooo_tx, ooo_rx) = mpsc::channel();
-        let (prewarm_tx, prewarm_rx) = mpsc::channel();
-        let (execute_tx, execute_rx) = mpsc::channel();
+        let (ooo_tx, ooo_rx) = mpsc::sync_channel(transaction_count);
+        let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
+        let (execute_tx, execute_rx) = mpsc::sync_channel(transaction_count);
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
