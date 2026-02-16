@@ -875,7 +875,39 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        // Create provider from factory
+        let mut storage_proofs_processed = 0u64;
+        let mut storage_nodes_processed = 0u64;
+        let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
+        let mut total_idle_time = Duration::ZERO;
+        let mut idle_start = Instant::now();
+
+        let first_job = match self.work_rx.recv() {
+            Ok(job) => {
+                total_idle_time += idle_start.elapsed();
+                job
+            }
+            Err(_) => {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id = self.worker_id,
+                    storage_proofs_processed,
+                    storage_nodes_processed,
+                    total_idle_time_us = total_idle_time.as_micros(),
+                    "Storage worker shutting down"
+                );
+
+                #[cfg(feature = "metrics")]
+                {
+                    self.metrics.record_storage_nodes(storage_nodes_processed as usize);
+                    self.metrics.record_storage_worker_idle_time(total_idle_time);
+                    self.cursor_metrics.record(&mut cursor_metrics_cache);
+                }
+
+                return Ok(());
+            }
+        };
+
+        // Create provider from factory only once we have work.
         let provider = self.task_ctx.factory.database_provider_ro()?;
         let proof_tx = ProofTaskTx::new(provider, self.worker_id);
 
@@ -885,9 +917,6 @@ where
             "Storage worker started"
         );
 
-        let mut storage_proofs_processed = 0u64;
-        let mut storage_nodes_processed = 0u64;
-        let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
         let mut v2_calculator = if self.v2_enabled {
             let trie_cursor = proof_tx.provider.storage_trie_cursor(B256::ZERO)?;
             let hashed_cursor = proof_tx.provider.hashed_storage_cursor(B256::ZERO)?;
@@ -899,12 +928,8 @@ where
         // Initially mark this worker as available.
         self.available_workers.fetch_add(1, Ordering::Relaxed);
 
-        let mut total_idle_time = Duration::ZERO;
-        let mut idle_start = Instant::now();
-
-        while let Ok(job) = self.work_rx.recv() {
-            total_idle_time += idle_start.elapsed();
-
+        let mut job = first_job;
+        loop {
             // Mark worker as busy.
             self.available_workers.fetch_sub(1, Ordering::Relaxed);
 
@@ -936,6 +961,13 @@ where
             self.available_workers.fetch_add(1, Ordering::Relaxed);
 
             idle_start = Instant::now();
+            match self.work_rx.recv() {
+                Ok(next_job) => {
+                    total_idle_time += idle_start.elapsed();
+                    job = next_job;
+                }
+                Err(_) => break,
+            }
         }
 
         trace!(
@@ -1185,6 +1217,40 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
+        let mut account_proofs_processed = 0u64;
+        let mut account_nodes_processed = 0u64;
+        let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
+        let mut total_idle_time = Duration::ZERO;
+        let mut idle_start = Instant::now();
+        let mut value_encoder_stats_cache = ValueEncoderStats::default();
+
+        let first_job = match self.work_rx.recv() {
+            Ok(job) => {
+                total_idle_time += idle_start.elapsed();
+                job
+            }
+            Err(_) => {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id=self.worker_id,
+                    account_proofs_processed,
+                    account_nodes_processed,
+                    total_idle_time_us = total_idle_time.as_micros(),
+                    "Account worker shutting down"
+                );
+
+                #[cfg(feature = "metrics")]
+                {
+                    self.metrics.record_account_nodes(account_nodes_processed as usize);
+                    self.metrics.record_account_worker_idle_time(total_idle_time);
+                    self.cursor_metrics.record(&mut cursor_metrics_cache);
+                    self.metrics.record_value_encoder_stats(&value_encoder_stats_cache);
+                }
+
+                return Ok(());
+            }
+        };
+
         let provider = self.task_ctx.factory.database_provider_ro()?;
 
         trace!(
@@ -1192,10 +1258,6 @@ where
             worker_id=self.worker_id,
             "Account worker started"
         );
-
-        let mut account_proofs_processed = 0u64;
-        let mut account_nodes_processed = 0u64;
-        let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
         // Create both account and storage calculators for V2 proofs.
         // The storage calculator is wrapped in Rc<RefCell<...>> for sharing with value encoders.
@@ -1227,13 +1289,8 @@ where
         // Count this worker as available only after successful initialization.
         self.available_workers.fetch_add(1, Ordering::Relaxed);
 
-        let mut total_idle_time = Duration::ZERO;
-        let mut idle_start = Instant::now();
-        let mut value_encoder_stats_cache = ValueEncoderStats::default();
-
-        while let Ok(job) = self.work_rx.recv() {
-            total_idle_time += idle_start.elapsed();
-
+        let mut job = first_job;
+        loop {
             // Mark worker as busy.
             self.available_workers.fetch_sub(1, Ordering::Relaxed);
 
@@ -1266,6 +1323,13 @@ where
             self.available_workers.fetch_add(1, Ordering::Relaxed);
 
             idle_start = Instant::now();
+            match self.work_rx.recv() {
+                Ok(next_job) => {
+                    total_idle_time += idle_start.elapsed();
+                    job = next_job;
+                }
+                Err(_) => break,
+            }
         }
 
         trace!(
