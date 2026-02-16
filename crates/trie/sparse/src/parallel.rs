@@ -1991,62 +1991,43 @@ impl ParallelSparseTrie {
         (target_key, min_len)
     }
 
-    /// Checks if a leaf in the upper subtrie is structurally tracked.
+    /// Checks if a leaf is structurally tracked in the upper subtrie.
     ///
     /// A leaf is tracked if either:
     /// 1. It's a RootLeaf at the root that points to this full_path
     /// 2. A branch has the leaf in its leaf_mask with a matching short_key
     ///
     /// Returns `false` for orphaned values that exist in `values` but aren't properly
-    /// tracked by the trie structure.
+    /// tracked by the trie structure, or if the leaf would be tracked in a lower subtrie.
     fn is_leaf_tracked_in_upper_subtrie(&self, full_path: &Nibbles) -> bool {
-        // Check if it's a RootLeaf at the empty path
-        if let Some(SparseNode::RootLeaf { key, .. }) =
-            self.upper_subtrie.nodes.get(&Nibbles::default())
-        {
-            if *key == *full_path {
-                return true;
-            }
-        }
-
-        // Traverse from root to find if any branch tracks this leaf
         let mut current = Nibbles::default();
-        while current.len() < full_path.len() && SparseSubtrieType::path_len_is_upper(current.len())
-        {
-            match self.upper_subtrie.nodes.get(&current) {
-                Some(SparseNode::Branch { leaf_mask, leaf_short_keys, state_mask, .. }) => {
-                    let child_nibble = full_path.get_unchecked(current.len());
-                    // Check if this branch tracks the leaf directly
-                    if leaf_mask.is_bit_set(child_nibble) {
-                        let rank = SparseNode::leaf_rank(*leaf_mask, child_nibble);
-                        if let Some(short_key) = leaf_short_keys.get(rank) {
-                            let mut computed_path = current;
-                            computed_path.push_unchecked(child_nibble);
-                            computed_path.extend(short_key);
-                            if computed_path == *full_path {
-                                return true;
-                            }
-                        }
-                    }
-                    // Continue to child if it exists in state_mask but not leaf_mask
-                    if state_mask.is_bit_set(child_nibble) && !leaf_mask.is_bit_set(child_nibble) {
-                        current.push_unchecked(child_nibble);
-                    } else {
+
+        loop {
+            // Don't traverse into lower subtrie territory
+            if current.len() >= UPPER_TRIE_MAX_DEPTH {
+                return false;
+            }
+
+            let Some(node) = self.upper_subtrie.nodes.get(&current) else {
+                return false;
+            };
+
+            match SparseSubtrie::find_next_to_leaf(&current, node, full_path) {
+                FindNextToLeafOutcome::Found | FindNextToLeafOutcome::FoundInBranch(_) => {
+                    return true
+                }
+                FindNextToLeafOutcome::ContinueFrom(next) => {
+                    // If next path would be in lower subtrie, leaf isn't tracked in upper
+                    if next.len() >= UPPER_TRIE_MAX_DEPTH {
                         return false;
                     }
+                    current = next;
                 }
-                Some(SparseNode::Extension { key, .. }) => {
-                    let remaining = full_path.slice(current.len()..);
-                    if remaining.starts_with(key) {
-                        current.extend(key);
-                    } else {
-                        return false;
-                    }
+                FindNextToLeafOutcome::NotFound | FindNextToLeafOutcome::BlindedNode(_) => {
+                    return false
                 }
-                _ => return false,
             }
         }
-        false
     }
 
     /// Rolls back a partial update by removing the value, removing any inserted nodes,
@@ -2182,65 +2163,7 @@ impl ParallelSparseTrie {
         from_node: &SparseNode,
         leaf_full_path: &Nibbles,
     ) -> FindNextToLeafOutcome {
-        debug_assert!(leaf_full_path.len() >= from_path.len());
-        debug_assert!(leaf_full_path.starts_with(from_path));
-
-        match from_node {
-            // If empty node is found it means the subtrie doesn't have any nodes in it, let alone
-            // the target leaf.
-            SparseNode::Empty => FindNextToLeafOutcome::NotFound,
-            SparseNode::Hash(rlp_node) => FindNextToLeafOutcome::BlindedNode(*rlp_node),
-            SparseNode::RootLeaf { key, .. } => {
-                let mut found_full_path = *from_path;
-                found_full_path.extend(key);
-
-                if &found_full_path == leaf_full_path {
-                    return FindNextToLeafOutcome::Found
-                }
-                FindNextToLeafOutcome::NotFound
-            }
-            SparseNode::Extension { key, .. } => {
-                if leaf_full_path.len() == from_path.len() {
-                    return FindNextToLeafOutcome::NotFound
-                }
-
-                let mut child_path = *from_path;
-                child_path.extend(key);
-
-                if !leaf_full_path.starts_with(&child_path) {
-                    return FindNextToLeafOutcome::NotFound
-                }
-                FindNextToLeafOutcome::ContinueFrom(child_path)
-            }
-            SparseNode::Branch { state_mask, leaf_mask, leaf_short_keys, .. } => {
-                if leaf_full_path.len() == from_path.len() {
-                    return FindNextToLeafOutcome::NotFound
-                }
-
-                let nibble = leaf_full_path.get_unchecked(from_path.len());
-                if !state_mask.is_bit_set(nibble) {
-                    return FindNextToLeafOutcome::NotFound
-                }
-
-                // Check if this child is a leaf tracked in leaf_mask
-                if leaf_mask.is_bit_set(nibble) {
-                    let idx = SparseNode::leaf_rank(*leaf_mask, nibble);
-                    let short_key = &leaf_short_keys[idx];
-                    // The remaining path after nibble should match short_key
-                    let remaining_path = leaf_full_path.slice(from_path.len() + 1..);
-                    if &remaining_path == short_key {
-                        return FindNextToLeafOutcome::FoundInBranch(nibble)
-                    }
-                    // Short key doesn't match - leaf not found
-                    return FindNextToLeafOutcome::NotFound
-                }
-
-                let mut child_path = *from_path;
-                child_path.push_unchecked(nibble);
-
-                FindNextToLeafOutcome::ContinueFrom(child_path)
-            }
-        }
+        SparseSubtrie::find_next_to_leaf(from_path, from_node, leaf_full_path)
     }
 
     /// Called when a child node has collapsed into its parent as part of `remove_leaf`.
@@ -3226,6 +3149,74 @@ impl SparseSubtrie {
         current_level == child_level
     }
 
+    /// Returns the next node in the traversal path from the given path towards the leaf for the
+    /// given full leaf path, or an error if any node along the traversal path is not revealed.
+    ///
+    ///
+    /// ## Panics
+    ///
+    /// If `from_path` is not a prefix of `leaf_full_path`.
+    fn find_next_to_leaf(
+        from_path: &Nibbles,
+        from_node: &SparseNode,
+        leaf_full_path: &Nibbles,
+    ) -> FindNextToLeafOutcome {
+        debug_assert!(leaf_full_path.len() >= from_path.len());
+        debug_assert!(leaf_full_path.starts_with(from_path));
+
+        match from_node {
+            SparseNode::Empty => FindNextToLeafOutcome::NotFound,
+            SparseNode::Hash(rlp_node) => FindNextToLeafOutcome::BlindedNode(*rlp_node),
+            SparseNode::RootLeaf { key, .. } => {
+                let mut found_full_path = *from_path;
+                found_full_path.extend(key);
+
+                if &found_full_path == leaf_full_path {
+                    return FindNextToLeafOutcome::Found
+                }
+                FindNextToLeafOutcome::NotFound
+            }
+            SparseNode::Extension { key, .. } => {
+                if leaf_full_path.len() == from_path.len() {
+                    return FindNextToLeafOutcome::NotFound
+                }
+
+                let mut child_path = *from_path;
+                child_path.extend(key);
+
+                if !leaf_full_path.starts_with(&child_path) {
+                    return FindNextToLeafOutcome::NotFound
+                }
+                FindNextToLeafOutcome::ContinueFrom(child_path)
+            }
+            SparseNode::Branch { state_mask, leaf_mask, leaf_short_keys, .. } => {
+                if leaf_full_path.len() == from_path.len() {
+                    return FindNextToLeafOutcome::NotFound
+                }
+
+                let nibble = leaf_full_path.get_unchecked(from_path.len());
+                if !state_mask.is_bit_set(nibble) {
+                    return FindNextToLeafOutcome::NotFound
+                }
+
+                if leaf_mask.is_bit_set(nibble) {
+                    let idx = SparseNode::leaf_rank(*leaf_mask, nibble);
+                    let short_key = &leaf_short_keys[idx];
+                    let remaining_path = leaf_full_path.slice(from_path.len() + 1..);
+                    if &remaining_path == short_key {
+                        return FindNextToLeafOutcome::FoundInBranch(nibble)
+                    }
+                    return FindNextToLeafOutcome::NotFound
+                }
+
+                let mut child_path = *from_path;
+                child_path.push_unchecked(nibble);
+
+                FindNextToLeafOutcome::ContinueFrom(child_path)
+            }
+        }
+    }
+
     /// Checks if a leaf node at the given path is reachable from its parent branch node.
     ///
     /// Returns `true` if:
@@ -3257,55 +3248,28 @@ impl SparseSubtrie {
     /// Returns `false` for orphaned values that exist in `values` but aren't properly
     /// tracked by the trie structure.
     fn is_leaf_tracked(&self, full_path: &Nibbles) -> bool {
-        // Check if it should be the root leaf of this subtrie
-        if let Some(SparseNode::RootLeaf { key, .. }) = self.nodes.get(&self.path) {
-            // For a RootLeaf, verify that it points to this exact full_path
-            // The full path for a RootLeaf is: subtrie.path + key
-            let mut computed_path = self.path;
-            computed_path.extend(key);
-            if computed_path == *full_path {
-                return true;
-            }
+        // Guard against inconsistent state
+        if !full_path.starts_with(&self.path) {
+            return false;
         }
 
-        // Check all branches to see if any tracks this leaf
-        // We traverse from the subtrie root towards the full_path
         let mut current = self.path;
-        while current.len() < full_path.len() {
-            match self.nodes.get(&current) {
-                Some(SparseNode::Branch { leaf_mask, leaf_short_keys, state_mask, .. }) => {
-                    let child_nibble = full_path.get_unchecked(current.len());
-                    // Check if this branch tracks the leaf directly
-                    if leaf_mask.is_bit_set(child_nibble) {
-                        let rank = SparseNode::leaf_rank(*leaf_mask, child_nibble);
-                        if let Some(short_key) = leaf_short_keys.get(rank) {
-                            let mut computed_path = current;
-                            computed_path.push_unchecked(child_nibble);
-                            computed_path.extend(short_key);
-                            if computed_path == *full_path {
-                                return true;
-                            }
-                        }
-                    }
-                    // Continue to child if it exists in state_mask but not leaf_mask
-                    if state_mask.is_bit_set(child_nibble) && !leaf_mask.is_bit_set(child_nibble) {
-                        current.push_unchecked(child_nibble);
-                    } else {
-                        return false;
-                    }
+
+        loop {
+            let Some(node) = self.nodes.get(&current) else {
+                return false;
+            };
+
+            match Self::find_next_to_leaf(&current, node, full_path) {
+                FindNextToLeafOutcome::Found | FindNextToLeafOutcome::FoundInBranch(_) => {
+                    return true
                 }
-                Some(SparseNode::Extension { key, .. }) => {
-                    let remaining = full_path.slice(current.len()..);
-                    if remaining.starts_with(key) {
-                        current.extend(key);
-                    } else {
-                        return false;
-                    }
+                FindNextToLeafOutcome::ContinueFrom(next) => current = next,
+                FindNextToLeafOutcome::NotFound | FindNextToLeafOutcome::BlindedNode(_) => {
+                    return false
                 }
-                _ => return false,
             }
         }
-        false
     }
 
     /// Updates or inserts a leaf node at the specified key path with the provided RLP-encoded
