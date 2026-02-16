@@ -18,7 +18,7 @@ use futures_util::{
     Future, FutureExt, TryFutureExt,
 };
 #[cfg(feature = "rayon")]
-use std::thread::available_parallelism;
+use std::{num::NonZeroUsize, thread::available_parallelism};
 use std::{
     pin::pin,
     sync::{
@@ -183,10 +183,10 @@ impl RayonConfig {
 
     /// Compute the default number of threads based on available parallelism.
     fn default_thread_count(&self) -> usize {
-        self.cpu_threads.unwrap_or_else(|| {
-            available_parallelism()
-                .map_or(1, |num| num.get().saturating_sub(self.reserved_cpu_cores).max(1))
-        })
+        // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
+        // sizes doesn't actually reserve CPU cores for other processes.
+        let _ = self.reserved_cpu_cores;
+        self.cpu_threads.unwrap_or_else(|| available_parallelism().map_or(1, NonZeroUsize::get))
     }
 }
 
