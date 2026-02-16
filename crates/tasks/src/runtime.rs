@@ -280,17 +280,6 @@ impl std::fmt::Debug for Runtime {
     }
 }
 
-#[cfg(any(test, feature = "test-utils"))]
-impl Default for Runtime {
-    fn default() -> Self {
-        let config = match Handle::try_current() {
-            Ok(handle) => RuntimeConfig::with_existing_handle(handle),
-            Err(_) => RuntimeConfig::default(),
-        };
-        RuntimeBuilder::new(config).build().expect("failed to build default Runtime")
-    }
-}
-
 // ── Constructors ──────────────────────────────────────────────────────
 
 impl Runtime {

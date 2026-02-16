@@ -1381,7 +1381,7 @@ mod tests {
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
         let (to_engine, engine_rx) = unbounded_channel();
-        let task_executor = Runtime::default();
+        let task_executor = Runtime::test();
         let api = EngineApi::new(
             provider.clone(),
             chain_spec.clone(),
@@ -1488,7 +1488,7 @@ mod tests {
             ConsensusEngineHandle::new(to_engine),
             payload_store.into(),
             NoopTransactionPool::default(),
-            Runtime::default(),
+            Runtime::test(),
             ClientVersionV1 {
                 code: ClientCode::RH,
                 name: "Reth".to_string(),

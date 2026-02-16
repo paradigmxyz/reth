@@ -49,7 +49,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         beacon_engine_handle,
         spawn_test_payload_service().into(),
         NoopTransactionPool::default(),
-        Runtime::default(),
+        Runtime::test(),
         client,
         EngineCapabilities::default(),
         EthereumEngineValidator::new(MAINNET.clone()),
@@ -130,7 +130,7 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
 pub fn test_rpc_builder(
 ) -> RpcModuleBuilder<EthPrimitives, NoopProvider, TestPool, NoopNetwork, EthEvmConfig, NoopConsensus>
 {
-    RpcModuleBuilder::with_runtime(Runtime::default())
+    RpcModuleBuilder::with_runtime(Runtime::test())
         .with_provider(NoopProvider::default())
         .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())

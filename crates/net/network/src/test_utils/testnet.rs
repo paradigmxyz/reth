@@ -198,7 +198,7 @@ where
                 peer.client.clone(),
                 EthEvmConfig::mainnet(),
                 blob_store.clone(),
-                Runtime::default(),
+                Runtime::test(),
             );
             peer.map_transactions_manager(EthTransactionPool::eth_pool(
                 pool,
@@ -228,7 +228,7 @@ where
                 peer.client.clone(),
                 EthEvmConfig::mainnet(),
                 blob_store.clone(),
-                Runtime::default(),
+                Runtime::test(),
             );
 
             peer.map_transactions_manager_with(

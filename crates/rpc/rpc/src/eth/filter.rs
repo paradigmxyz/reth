@@ -134,7 +134,7 @@ where
     ///     EthEvmConfig::mainnet(),
     /// )
     /// .build();
-    /// let filter = EthFilter::new(eth_api, Default::default(), Runtime::default());
+    /// let filter = EthFilter::new(eth_api, Default::default(), Runtime::test());
     /// ```
     pub fn new(eth_api: Eth, config: EthFilterConfig, task_spawner: Runtime) -> Self {
         let EthFilterConfig { max_blocks_per_filter, max_logs_per_response, stale_filter_ttl } =
@@ -1370,7 +1370,7 @@ mod tests {
         let eth_api = build_test_eth_api(provider);
 
         let eth_filter =
-            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::default());
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers = vec![];
@@ -1395,7 +1395,7 @@ mod tests {
         let eth_api = build_test_eth_api(provider);
 
         let eth_filter =
-            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::default());
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers = vec![
@@ -1510,7 +1510,7 @@ mod tests {
         let eth_api = build_test_eth_api(provider);
 
         let eth_filter =
-            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::default());
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers = vec![SealedHeader::new(
@@ -1577,7 +1577,7 @@ mod tests {
         let eth_api = build_test_eth_api(provider);
 
         let eth_filter =
-            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::default());
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers = vec![
@@ -1668,7 +1668,7 @@ mod tests {
         let eth_api = build_test_eth_api(provider);
 
         let eth_filter =
-            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::default());
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers = vec![
@@ -1736,7 +1736,7 @@ mod tests {
 
         let eth_api = build_test_eth_api(provider);
         let eth_filter =
-            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::default());
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers = vec![test_header.clone()];
@@ -1768,7 +1768,7 @@ mod tests {
         let eth_api = build_test_eth_api(provider);
 
         let eth_filter =
-            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::default());
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let filter_inner = eth_filter.inner;
 
         let headers: Vec<SealedHeader<alloy_consensus::Header>> = vec![];
@@ -1861,7 +1861,7 @@ mod tests {
             .add_block_body_indices(103, StoredBlockBodyIndices { first_tx_num: 2, tx_count: 0 });
 
         let eth_api = build_test_eth_api(provider);
-        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::default());
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
 
         // Use default filter which will match any non-empty bloom
         let filter = Filter::default();
