@@ -23,6 +23,12 @@ pub(crate) struct NewPayloadResult {
     pub(crate) gas_used: u64,
     /// The latency of the `newPayload` call.
     pub(crate) latency: Duration,
+    /// Time spent waiting for persistence. `None` when no persistence was in-flight.
+    pub(crate) persistence_wait: Option<Duration>,
+    /// Time spent waiting for execution cache lock.
+    pub(crate) execution_cache_wait: Duration,
+    /// Time spent waiting for sparse trie lock.
+    pub(crate) sparse_trie_wait: Duration,
 }
 
 impl NewPayloadResult {
@@ -53,9 +59,12 @@ impl Serialize for NewPayloadResult {
     {
         // convert the time to microseconds
         let time = self.latency.as_micros();
-        let mut state = serializer.serialize_struct("NewPayloadResult", 2)?;
+        let mut state = serializer.serialize_struct("NewPayloadResult", 5)?;
         state.serialize_field("gas_used", &self.gas_used)?;
         state.serialize_field("latency", &time)?;
+        state.serialize_field("persistence_wait", &self.persistence_wait.map(|d| d.as_micros()))?;
+        state.serialize_field("execution_cache_wait", &self.execution_cache_wait.as_micros())?;
+        state.serialize_field("sparse_trie_wait", &self.sparse_trie_wait.as_micros())?;
         state.end()
     }
 }
@@ -110,7 +119,7 @@ impl Serialize for CombinedResult {
         let fcu_latency = self.fcu_latency.as_micros();
         let new_payload_latency = self.new_payload_result.latency.as_micros();
         let total_latency = self.total_latency.as_micros();
-        let mut state = serializer.serialize_struct("CombinedResult", 6)?;
+        let mut state = serializer.serialize_struct("CombinedResult", 9)?;
 
         // flatten the new payload result because this is meant for CSV writing
         state.serialize_field("block_number", &self.block_number)?;
@@ -119,6 +128,18 @@ impl Serialize for CombinedResult {
         state.serialize_field("new_payload_latency", &new_payload_latency)?;
         state.serialize_field("fcu_latency", &fcu_latency)?;
         state.serialize_field("total_latency", &total_latency)?;
+        state.serialize_field(
+            "persistence_wait",
+            &self.new_payload_result.persistence_wait.map(|d| d.as_micros()),
+        )?;
+        state.serialize_field(
+            "execution_cache_wait",
+            &self.new_payload_result.execution_cache_wait.as_micros(),
+        )?;
+        state.serialize_field(
+            "sparse_trie_wait",
+            &self.new_payload_result.sparse_trie_wait.as_micros(),
+        )?;
         state.end()
     }
 }
