@@ -54,12 +54,20 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
         Ok(())
     }
 
-    /// Wait until the best built payload is ready
+    /// Wait until the best built payload is ready.
+    ///
+    /// Panics if the payload builder does not produce a non-empty payload within 30 seconds.
     pub async fn wait_for_built_payload(&self, payload_id: PayloadId) {
+        let start = std::time::Instant::now();
         loop {
             let payload =
                 self.payload_builder.best_payload(payload_id).await.transpose().ok().flatten();
             if payload.is_none_or(|p| p.block().body().transactions().is_empty()) {
+                assert!(
+                    start.elapsed() < std::time::Duration::from_secs(30),
+                    "timed out waiting for a non-empty payload for {payload_id} — \
+                     check that the chain spec supports all generated tx types"
+                );
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 continue
             }

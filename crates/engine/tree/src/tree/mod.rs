@@ -27,7 +27,9 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{
+    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+};
 use reth_provider::{
     BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
@@ -40,7 +42,7 @@ use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{fmt::Debug, ops, sync::Arc, time::Instant};
+use std::{fmt::Debug, ops, sync::Arc};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -2602,7 +2604,7 @@ where
     /// Returns `InsertPayloadOk::Inserted(BlockStatus::Valid)` on successful execution,
     /// `InsertPayloadOk::AlreadySeen` if the block already exists, or
     /// `InsertPayloadOk::Inserted(BlockStatus::Disconnected)` if parent state is missing.
-    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_id))]
+    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(?block_id))]
     fn insert_block_or_payload<Input, Err>(
         &mut self,
         block_id: BlockWithParent,

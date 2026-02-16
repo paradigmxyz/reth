@@ -43,7 +43,10 @@ use alloy_primitives::{
 use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofError};
-use reth_primitives_traits::dashmap::{self, DashMap};
+use reth_primitives_traits::{
+    dashmap::{self, DashMap},
+    FastInstant as Instant,
+};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
 use reth_tasks::Runtime;
@@ -73,9 +76,9 @@ use std::{
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
-use tracing::{debug, debug_span, error, trace};
+use tracing::{debug, debug_span, error, instrument, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::{
@@ -136,6 +139,12 @@ impl ProofWorkerHandle {
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `halve_workers`: Whether to halve the worker pool size (for small blocks)
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
+    #[instrument(
+        name = "ProofWorkerHandle::new",
+        level = "debug",
+        target = "trie::proof_task",
+        skip_all
+    )]
     pub fn new<Factory>(
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
