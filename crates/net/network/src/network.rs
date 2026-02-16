@@ -54,6 +54,8 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         num_active_peers: Arc<AtomicUsize>,
+        num_inbound_peers: Arc<AtomicUsize>,
+        num_outbound_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
         to_manager_tx: UnboundedSender<NetworkHandleMessage<N>>,
         secret_key: SecretKey,
@@ -69,6 +71,8 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
+            num_inbound_peers,
+            num_outbound_peers,
             to_manager_tx,
             listener_address,
             secret_key,
@@ -228,6 +232,14 @@ impl<N: NetworkPrimitives> NetworkProtocols for NetworkHandle<N> {
 impl<N: NetworkPrimitives> PeersInfo for NetworkHandle<N> {
     fn num_connected_peers(&self) -> usize {
         self.inner.num_active_peers.load(Ordering::Relaxed)
+    }
+
+    fn num_inbound_peers(&self) -> usize {
+        self.inner.num_inbound_peers.load(Ordering::Relaxed)
+    }
+
+    fn num_outbound_peers(&self) -> usize {
+        self.inner.num_outbound_peers.load(Ordering::Relaxed)
     }
 
     fn local_node_record(&self) -> NodeRecord {
@@ -459,6 +471,10 @@ impl<N: NetworkPrimitives> BlockDownloaderProvider for NetworkHandle<N> {
 struct NetworkInner<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
+    /// Number of active inbound peer connections.
+    num_inbound_peers: Arc<AtomicUsize>,
+    /// Number of active outbound peer connections.
+    num_outbound_peers: Arc<AtomicUsize>,
     /// Sender half of the message channel to the [`crate::NetworkManager`].
     to_manager_tx: UnboundedSender<NetworkHandleMessage<N>>,
     /// The local address that accepts incoming connections.

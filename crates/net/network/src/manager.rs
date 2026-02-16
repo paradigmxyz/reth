@@ -138,6 +138,12 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
     /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
     num_active_peers: Arc<AtomicUsize>,
+    /// Tracks the number of inbound peer connections.
+    /// Shared via `Arc` with the [`NetworkHandle`]
+    num_inbound_peers: Arc<AtomicUsize>,
+    /// Tracks the number of outbound peer connections.
+    /// Shared via `Arc` with the [`NetworkHandle`]
+    num_outbound_peers: Arc<AtomicUsize>,
     /// Metrics for the Network
     metrics: NetworkMetrics,
     /// Disconnect metrics for the Network, split by connection direction.
@@ -305,6 +311,8 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         let discv5 = discovery.discv5();
 
         let num_active_peers = Arc::new(AtomicUsize::new(0));
+        let num_inbound_peers = Arc::new(AtomicUsize::new(0));
+        let num_outbound_peers = Arc::new(AtomicUsize::new(0));
 
         let sessions = SessionManager::new(
             secret_key,
@@ -332,6 +340,8 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
         let handle = NetworkHandle::new(
             Arc::clone(&num_active_peers),
+            Arc::clone(&num_inbound_peers),
+            Arc::clone(&num_outbound_peers),
             Arc::new(Mutex::new(listener_addr)),
             to_manager_tx,
             secret_key,
@@ -361,6 +371,8 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             to_transactions_manager: None,
             to_eth_request_handler: None,
             num_active_peers,
+            num_inbound_peers,
+            num_outbound_peers,
             metrics: Default::default(),
             disconnect_metrics: Default::default(),
             closed_sessions_metrics: Default::default(),
@@ -1047,12 +1059,16 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// Updates the metrics for active,established connections
     #[inline]
     fn update_active_connection_metrics(&self) {
-        self.metrics
-            .incoming_connections
-            .set(self.swarm.state().peers().num_inbound_connections() as f64);
-        self.metrics
-            .outgoing_connections
-            .set(self.swarm.state().peers().num_outbound_connections() as f64);
+        let inbound = self.swarm.state().peers().num_inbound_connections();
+        let outbound = self.swarm.state().peers().num_outbound_connections();
+
+        // Update Prometheus metrics
+        self.metrics.incoming_connections.set(inbound as f64);
+        self.metrics.outgoing_connections.set(outbound as f64);
+
+        // Update atomic counters for NetworkHandle
+        self.num_inbound_peers.store(inbound, Ordering::Relaxed);
+        self.num_outbound_peers.store(outbound, Ordering::Relaxed);
     }
 
     /// Updates the metrics for pending connections
