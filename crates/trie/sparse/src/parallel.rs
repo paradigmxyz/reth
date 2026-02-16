@@ -376,22 +376,24 @@ impl SparseTrie for ParallelSparseTrie {
         );
 
         // Check if the value already exists - if so, just update it (no structural changes needed)
-        if self.upper_subtrie.inner.values.contains_key(&full_path) {
-            self.prefix_set.insert(full_path);
-            self.upper_subtrie.inner.values.insert(full_path, value);
-            return Ok(());
+        match self.upper_subtrie.inner.values.entry(full_path) {
+            Entry::Occupied(mut entry) => {
+                self.prefix_set.insert(full_path);
+                entry.insert(value);
+                return Ok(());
+            }
+            Entry::Vacant(_) => {}
         }
         // Also check lower subtries for existing value
-        if let Some(subtrie) = self.lower_subtrie_for_path(&full_path) &&
-            subtrie.inner.values.contains_key(&full_path)
-        {
-            self.prefix_set.insert(full_path);
-            self.lower_subtrie_for_path_mut(&full_path)
-                .expect("subtrie exists")
-                .inner
-                .values
-                .insert(full_path, value);
-            return Ok(());
+        if let SparseSubtrieType::Lower(idx) = SparseSubtrieType::from_path(&full_path) {
+            if let Some(subtrie) = self.lower_subtries[idx].as_revealed_mut() {
+                if let Entry::Occupied(mut entry) = subtrie.inner.values.entry(full_path) {
+                    self.prefix_set.insert(full_path);
+                    self.subtrie_heat.mark_modified(idx);
+                    entry.insert(value);
+                    return Ok(());
+                }
+            }
         }
 
         let retain_updates = self.updates_enabled();
