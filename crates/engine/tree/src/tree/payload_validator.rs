@@ -368,7 +368,7 @@ where
                 match $expr {
                     Ok(val) => val,
                     Err(e) => {
-                        let block = (convert_to_block)(input)?;
+                        let block = convert_to_block(input)?;
                         return Err(InsertBlockError::new(block, e.into()).into())
                     }
                 }
@@ -399,7 +399,7 @@ where
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                (convert_to_block)(input)?,
+                convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -412,7 +412,7 @@ where
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
-                (convert_to_block)(input)?,
+                convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -504,7 +504,7 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
-        let block = (convert_to_block)(input)?.with_senders(senders);
+        let block = convert_to_block(input)?.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = receipt_root_rx
