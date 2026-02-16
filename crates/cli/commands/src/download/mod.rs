@@ -1,7 +1,13 @@
+pub mod config_gen;
+pub mod manifest;
+mod tui;
+
 use crate::common::EnvironmentArgs;
 use clap::Parser;
+use config_gen::{config_for_components, write_config};
 use eyre::Result;
 use lz4::Decoder;
+use manifest::{SnapshotComponentType, SnapshotManifest};
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -17,6 +23,7 @@ use std::{
 use tar::Archive;
 use tokio::task;
 use tracing::info;
+use tui::{run_selector, SelectionResult};
 use url::Url;
 use zstd::stream::read::Decoder as ZstdDecoder;
 
@@ -146,36 +153,162 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[command(flatten)]
     env: EnvironmentArgs<C>,
 
-    /// Custom URL to download the snapshot from
+    /// Custom URL to download a single snapshot archive (legacy mode).
+    ///
+    /// When provided, downloads and extracts a single archive without component selection.
     #[arg(long, short, long_help = DownloadDefaults::get_global().long_help())]
     url: Option<String>,
+
+    /// Include transaction static files.
+    #[arg(long)]
+    with_txs: bool,
+
+    /// Include receipt static files.
+    #[arg(long)]
+    with_receipts: bool,
+
+    /// Include account and storage changeset static files.
+    #[arg(long)]
+    with_changesets: bool,
+
+    /// Download all available components (full archive).
+    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_changesets"])]
+    all: bool,
+
+    /// Skip interactive component selection. Downloads state only unless
+    /// explicit --with-* flags are provided.
+    #[arg(long, short = 'y')]
+    non_interactive: bool,
+
+    /// Skip reth.toml generation after download.
+    #[arg(long)]
+    no_config: bool,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
     pub async fn execute<N>(self) -> Result<()> {
-        let data_dir = self.env.datadir.resolve_datadir(self.env.chain.chain());
+        let chain = self.env.chain.chain();
+        let chain_id = chain.id();
+        let data_dir = self.env.datadir.clone().resolve_datadir(chain);
         fs::create_dir_all(&data_dir)?;
 
-        let url = match self.url {
-            Some(url) => url,
-            None => {
-                let url = get_latest_snapshot_url(self.env.chain.chain().id()).await?;
-                info!(target: "reth::cli", "Using default snapshot URL: {}", url);
-                url
+        // Legacy single-URL mode: download one archive and extract it
+        if let Some(url) = self.url {
+            info!(target: "reth::cli",
+                dir = ?data_dir.data_dir(),
+                url = %url,
+                "Starting snapshot download and extraction"
+            );
+
+            stream_and_extract(&url, data_dir.data_dir()).await?;
+            info!(target: "reth::cli", "Snapshot downloaded and extracted successfully");
+
+            return Ok(());
+        }
+
+        // Modular download: fetch manifest and select components
+        let base_url = get_base_url(chain_id);
+        info!(target: "reth::cli", "Fetching snapshot manifest from {base_url}");
+
+        let manifest = manifest::fetch_manifest(&base_url).await?;
+
+        if manifest.block > 0 {
+            info!(target: "reth::cli",
+                block = manifest.block,
+                chain_id = manifest.chain_id,
+                storage_version = %manifest.storage_version,
+                "Found snapshot manifest"
+            );
+        }
+
+        let selected = self.resolve_components(&manifest)?;
+
+        // Download each selected component
+        let target_dir = data_dir.data_dir();
+        for ty in &selected {
+            if let Some(component) = manifest.component(*ty) {
+                info!(target: "reth::cli",
+                    component = ty.display_name(),
+                    size = %DownloadProgress::format_size(component.size),
+                    "Downloading component"
+                );
+                stream_and_extract(&component.url, target_dir).await?;
+                info!(target: "reth::cli",
+                    component = ty.display_name(),
+                    "Component downloaded and extracted"
+                );
             }
-        };
+        }
 
-        info!(target: "reth::cli",
-            chain = %self.env.chain.chain(),
-            dir = ?data_dir.data_dir(),
-            url = %url,
-            "Starting snapshot download and extraction"
-        );
+        // Generate reth.toml
+        if !self.no_config {
+            let config = config_for_components(&selected);
+            if write_config(&config, target_dir)? {
+                let desc = config_gen::describe_prune_config(&selected);
+                for line in &desc {
+                    info!(target: "reth::cli", "{}", line);
+                }
+            }
+        }
 
-        stream_and_extract(&url, data_dir.data_dir()).await?;
-        info!(target: "reth::cli", "Snapshot downloaded and extracted successfully");
+        info!(target: "reth::cli", "Snapshot download complete. Run `reth node` to start syncing.");
 
         Ok(())
+    }
+
+    /// Determines which components to download based on CLI flags or interactive selection.
+    fn resolve_components(
+        &self,
+        manifest: &SnapshotManifest,
+    ) -> Result<Vec<SnapshotComponentType>> {
+        // --all: download everything available in the manifest
+        if self.all {
+            return Ok(SnapshotComponentType::ALL
+                .iter()
+                .copied()
+                .filter(|ty| manifest.component(*ty).is_some())
+                .collect());
+        }
+
+        // Explicit --with-* flags: state + specified components
+        let has_explicit_flags = self.with_txs || self.with_receipts || self.with_changesets;
+
+        if has_explicit_flags || self.non_interactive {
+            let mut selected = vec![SnapshotComponentType::State];
+
+            if manifest.component(SnapshotComponentType::Headers).is_some() {
+                selected.push(SnapshotComponentType::Headers);
+            }
+
+            if self.with_txs {
+                if manifest.component(SnapshotComponentType::Transactions).is_some() {
+                    selected.push(SnapshotComponentType::Transactions);
+                }
+            }
+            if self.with_receipts {
+                if manifest.component(SnapshotComponentType::Receipts).is_some() {
+                    selected.push(SnapshotComponentType::Receipts);
+                }
+            }
+            if self.with_changesets {
+                if let Some(_) = manifest.component(SnapshotComponentType::AccountChangesets) {
+                    selected.push(SnapshotComponentType::AccountChangesets);
+                }
+                if let Some(_) = manifest.component(SnapshotComponentType::StorageChangesets) {
+                    selected.push(SnapshotComponentType::StorageChangesets);
+                }
+            }
+
+            return Ok(selected);
+        }
+
+        // Interactive TUI selection
+        match run_selector(manifest.clone())? {
+            SelectionResult::Selected(selected) => Ok(selected),
+            SelectionResult::Cancelled => {
+                eyre::bail!("Download cancelled by user");
+            }
+        }
     }
 }
 
@@ -188,7 +321,7 @@ impl<C: ChainSpecParser> DownloadCommand<C> {
 
 // Monitor process status and display progress every 100ms
 // to avoid overwhelming stdout
-struct DownloadProgress {
+pub(crate) struct DownloadProgress {
     downloaded: u64,
     total_size: u64,
     last_displayed: Instant,
@@ -203,7 +336,7 @@ impl DownloadProgress {
     }
 
     /// Converts bytes to human readable format (B, KB, MB, GB)
-    fn format_size(size: u64) -> String {
+    pub(crate) fn format_size(size: u64) -> String {
         let mut size = size as f64;
         let mut unit_index = 0;
 
@@ -527,13 +660,21 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-// Builds default URL for latest mainnet archive snapshot using configured defaults
-async fn get_latest_snapshot_url(chain_id: u64) -> Result<String> {
+/// Builds the base URL for the given chain ID using configured defaults.
+fn get_base_url(chain_id: u64) -> String {
     let defaults = DownloadDefaults::get_global();
-    let base_url = match &defaults.default_chain_aware_base_url {
+    match &defaults.default_chain_aware_base_url {
         Some(url) => format!("{url}/{chain_id}"),
         None => defaults.default_base_url.to_string(),
-    };
+    }
+}
+
+/// Builds default URL for latest mainnet archive snapshot using configured defaults.
+///
+/// Used by the legacy single-archive download flow when no manifest is available.
+#[allow(dead_code)]
+async fn get_latest_snapshot_url(chain_id: u64) -> Result<String> {
+    let base_url = get_base_url(chain_id);
     let latest_url = format!("{base_url}/latest.txt");
     let filename = Client::new()
         .get(latest_url)
