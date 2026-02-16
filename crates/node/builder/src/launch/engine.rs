@@ -169,15 +169,16 @@ impl EngineNodeLauncher {
 
             let (pivot_hash, pivot_header) = if let Some(tip) = node_config.debug.tip {
                 info!(target: "reth::cli", %tip, "Using explicit pivot from --debug.tip");
-                let header = ctx
-                    .blockchain_db()
-                    .header(tip)
-                    .map_err(|e| eyre::eyre!("failed to get pivot header: {e}"))?
-                    .ok_or_else(|| {
-                        eyre::eyre!(
-                            "pivot block header {tip} not found in DB - run header sync first"
-                        )
-                    })?;
+                let header = match ctx.blockchain_db().header(tip) {
+                    Ok(Some(h)) => h,
+                    _ => {
+                        info!(target: "reth::cli", %tip, "Pivot header not in DB, fetching from network");
+                        let sealed = node_config
+                            .fetch_tip_from_network(network_client.clone(), tip.into())
+                            .await;
+                        sealed.into_header()
+                    }
+                };
                 (tip, header)
             } else {
                 info!(target: "reth::cli", "Selecting snap sync pivot from last available header");
