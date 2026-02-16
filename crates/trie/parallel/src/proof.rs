@@ -10,13 +10,14 @@ use crate::{
 use alloy_primitives::{map::B256Set, B256};
 use crossbeam_channel::{unbounded as crossbeam_unbounded, Receiver as CrossbeamReceiver};
 use reth_execution_errors::StorageRootError;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
     DecodedMultiProof, DecodedStorageMultiProof, HashedPostState, MultiProofTargets, Nibbles,
 };
 use reth_trie_common::added_removed_keys::MultiAddedRemovedKeys;
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
 use tracing::trace;
 
 /// Parallel proof calculator.
@@ -325,7 +326,7 @@ mod tests {
             reth_provider::providers::OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(factory);
         let runtime = reth_tasks::Runtime::test();
-        let proof_worker_handle = ProofWorkerHandle::new(&runtime, task_ctx, false);
+        let proof_worker_handle = ProofWorkerHandle::new(&runtime, task_ctx, false, false);
 
         let parallel_result = ParallelProof::new(Default::default(), proof_worker_handle.clone())
             .decoded_multiproof(targets.clone())

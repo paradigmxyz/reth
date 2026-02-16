@@ -30,7 +30,7 @@ use reth_rpc_api::{
     EngineApiServer, IntoEngineApiRpcModule, RethEngineApiServer, RethPayloadStatus,
 };
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use std::{
     sync::Arc,
@@ -93,7 +93,7 @@ where
         beacon_consensus: ConsensusEngineHandle<PayloadT>,
         payload_store: PayloadStore<PayloadT>,
         tx_pool: Pool,
-        task_spawner: Box<dyn TaskSpawner>,
+        task_spawner: Runtime,
         client: ClientVersionV1,
         capabilities: EngineCapabilities,
         validator: Validator,
@@ -562,7 +562,7 @@ where
         let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
 
-        self.inner.task_spawner.spawn_blocking_task(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking_task(async move {
             if count > MAX_PAYLOAD_BODIES_LIMIT {
                 tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count })).ok();
                 return;
@@ -604,7 +604,7 @@ where
                 };
             }
             tx.send(Ok(result)).ok();
-        }));
+        });
 
         rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
     }
@@ -689,7 +689,7 @@ where
         let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
 
-        self.inner.task_spawner.spawn_blocking_task(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking_task(async move {
             let mut result = Vec::with_capacity(hashes.len());
             for hash in hashes {
                 let block_result = inner.provider.block(BlockHashOrNumber::Hash(hash));
@@ -704,7 +704,7 @@ where
                 }
             }
             tx.send(Ok(result)).ok();
-        }));
+        });
 
         rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
     }
@@ -1381,7 +1381,7 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     /// The type that can communicate with the payload service to retrieve payloads.
     payload_store: PayloadStore<PayloadT>,
     /// For spawning and executing async tasks
-    task_spawner: Box<dyn TaskSpawner>,
+    task_spawner: Runtime,
     /// The latency and response type metrics for engine api calls
     metrics: EngineApiMetrics,
     /// Identification of the execution client used by the consensus client
@@ -1412,7 +1412,7 @@ mod tests {
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_tasks::TokioTaskExecutor;
+    use reth_tasks::Runtime;
     use reth_transaction_pool::noop::NoopTransactionPool;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
@@ -1437,7 +1437,7 @@ mod tests {
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
         let (to_engine, engine_rx) = unbounded_channel();
-        let task_executor = Box::<TokioTaskExecutor>::default();
+        let task_executor = Runtime::test();
         let api = EngineApi::new(
             provider.clone(),
             chain_spec.clone(),
@@ -1544,7 +1544,7 @@ mod tests {
             ConsensusEngineHandle::new(to_engine),
             payload_store.into(),
             NoopTransactionPool::default(),
-            Box::<TokioTaskExecutor>::default(),
+            Runtime::test(),
             ClientVersionV1 {
                 code: ClientCode::RH,
                 name: "Reth".to_string(),

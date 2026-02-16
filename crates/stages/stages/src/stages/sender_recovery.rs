@@ -9,7 +9,9 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     RawValue,
 };
-use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
+use reth_primitives_traits::{
+    FastInstant as Instant, GotExpected, NodePrimitives, SignedTransaction,
+};
 use reth_provider::{
     BlockReader, DBProvider, EitherWriter, HeaderProvider, ProviderError, PruneCheckpointReader,
     PruneCheckpointWriter, StaticFileProviderFactory, StatsReader, StorageSettingsCache,
@@ -21,7 +23,7 @@ use reth_stages_api::{
     StageId, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use std::{fmt::Debug, ops::Range, sync::mpsc, time::Instant};
+use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
 use tracing::*;
 
@@ -34,7 +36,7 @@ const BATCH_SIZE: usize = 100_000;
 const WORKER_CHUNK_SIZE: usize = 100;
 
 /// Type alias for a sender that transmits the result of sender recovery.
-type RecoveryResultSender = mpsc::Sender<Result<(u64, Address), Box<SenderRecoveryStageError>>>;
+type RecoveryResultSender = mpsc::SyncSender<Result<(u64, Address), Box<SenderRecoveryStageError>>>;
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
@@ -245,7 +247,7 @@ where
         .step_by(WORKER_CHUNK_SIZE)
         .map(|start| {
             let range = start..std::cmp::min(start + WORKER_CHUNK_SIZE as u64, tx_range.end);
-            let (tx, rx) = mpsc::channel();
+            let (tx, rx) = mpsc::sync_channel((range.end - range.start) as usize);
             // Range and channel sender will be sent to rayon worker
             ((range, tx), rx)
         })
@@ -540,9 +542,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let runner = SenderRecoveryTestRunner::default();
-        runner.db.factory.set_storage_settings_cache(
-            StorageSettings::v1().with_transaction_senders_in_static_files(true),
-        );
+        runner.db.factory.set_storage_settings_cache(StorageSettings::v2());
         let input = ExecInput {
             target: Some(target),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),

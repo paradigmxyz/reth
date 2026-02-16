@@ -13,19 +13,16 @@ use crate::{
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
     PanickedTaskError, TaskEvent, TaskManager,
 };
-use futures_util::{
-    future::{select, BoxFuture},
-    Future, FutureExt, TryFutureExt,
-};
+use futures_util::{future::select, Future, FutureExt, TryFutureExt};
 #[cfg(feature = "rayon")]
-use std::thread::available_parallelism;
+use std::{num::NonZeroUsize, thread::available_parallelism};
 use std::{
     pin::pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
 use tracing::{debug, error};
@@ -110,6 +107,9 @@ pub struct RayonConfig {
     /// Number of threads for the proof account worker pool (trie account proof workers).
     /// If `None`, derived from available parallelism.
     pub proof_account_worker_threads: Option<usize>,
+    /// Number of threads for the prewarming pool (execution prewarming workers).
+    /// If `None`, derived from available parallelism.
+    pub prewarming_threads: Option<usize>,
 }
 
 #[cfg(feature = "rayon")]
@@ -123,6 +123,7 @@ impl Default for RayonConfig {
             max_blocking_tasks: DEFAULT_MAX_BLOCKING_TASKS,
             proof_storage_worker_threads: None,
             proof_account_worker_threads: None,
+            prewarming_threads: None,
         }
     }
 }
@@ -171,12 +172,18 @@ impl RayonConfig {
         self
     }
 
+    /// Set the number of threads for the prewarming pool.
+    pub const fn with_prewarming_threads(mut self, prewarming_threads: usize) -> Self {
+        self.prewarming_threads = Some(prewarming_threads);
+        self
+    }
+
     /// Compute the default number of threads based on available parallelism.
     fn default_thread_count(&self) -> usize {
-        self.cpu_threads.unwrap_or_else(|| {
-            available_parallelism()
-                .map_or(1, |num| num.get().saturating_sub(self.reserved_cpu_cores).max(1))
-        })
+        // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
+        // sizes doesn't actually reserve CPU cores for other processes.
+        let _ = self.reserved_cpu_cores;
+        self.cpu_threads.unwrap_or_else(|| available_parallelism().map_or(1, NonZeroUsize::get))
     }
 }
 
@@ -260,10 +267,17 @@ struct RuntimeInner {
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
     proof_account_worker_pool: rayon::ThreadPool,
+    /// Prewarming pool (execution prewarming workers).
+    #[cfg(feature = "rayon")]
+    prewarming_pool: rayon::ThreadPool,
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
     task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
+    /// Handle to the quanta upkeep thread that periodically refreshes the cached
+    /// high-resolution timestamp used by [`quanta::Instant::recent()`].
+    /// Dropped when the runtime is dropped, stopping the upkeep thread.
+    _quanta_upkeep: Option<quanta::Handle>,
 }
 
 // ── Runtime ───────────────────────────────────────────────────────────
@@ -280,17 +294,6 @@ pub struct Runtime(Arc<RuntimeInner>);
 impl std::fmt::Debug for Runtime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Runtime").field("handle", &self.0.handle).finish()
-    }
-}
-
-#[cfg(any(test, feature = "test-utils"))]
-impl Default for Runtime {
-    fn default() -> Self {
-        let config = match Handle::try_current() {
-            Ok(handle) => RuntimeConfig::with_existing_handle(handle),
-            Err(_) => RuntimeConfig::default(),
-        };
-        RuntimeBuilder::new(config).build().expect("failed to build default Runtime")
     }
 }
 
@@ -355,6 +358,12 @@ impl Runtime {
     pub fn proof_account_worker_pool(&self) -> &rayon::ThreadPool {
         &self.0.proof_account_worker_pool
     }
+
+    /// Get the prewarming pool.
+    #[cfg(feature = "rayon")]
+    pub fn prewarming_pool(&self) -> &rayon::ThreadPool {
+        &self.0.prewarming_pool
+    }
 }
 
 // ── Test helpers ──────────────────────────────────────────────────────
@@ -394,6 +403,7 @@ impl Runtime {
                 max_blocking_tasks: 16,
                 proof_storage_worker_threads: Some(2),
                 proof_account_worker_threads: Some(2),
+                prewarming_threads: Some(2),
             },
         }
     }
@@ -434,6 +444,10 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        match task_kind {
+            TaskKind::Default => self.0.metrics.inc_regular_tasks(),
+            TaskKind::Blocking => self.0.metrics.inc_regular_blocking_tasks(),
+        }
         let on_shutdown = self.0.on_shutdown.clone();
 
         let finished_counter = match task_kind {
@@ -509,6 +523,7 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        self.0.metrics.inc_critical_tasks();
         let panicked_tasks_tx = self.0.task_events_tx.clone();
         let on_shutdown = self.0.on_shutdown.clone();
 
@@ -700,9 +715,9 @@ impl Runtime {
 
     fn do_graceful_shutdown(&self, timeout: Option<Duration>) -> bool {
         let _ = self.0.task_events_tx.send(TaskEvent::GracefulShutdown);
-        let deadline = timeout.map(|t| std::time::Instant::now() + t);
+        let deadline = timeout.map(|t| Instant::now() + t);
         while self.0.graceful_tasks.load(Ordering::SeqCst) > 0 {
-            if deadline.is_some_and(|d| std::time::Instant::now() > d) {
+            if deadline.is_some_and(|d| Instant::now() > d) {
                 debug!("graceful shutdown timed out");
                 return false;
             }
@@ -710,63 +725,6 @@ impl Runtime {
         }
         debug!("gracefully shut down");
         true
-    }
-}
-
-// ── TaskSpawner impl ──────────────────────────────────────────────────
-
-impl crate::TaskSpawner for Runtime {
-    fn spawn_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.0.metrics.inc_regular_tasks();
-        Self::spawn_task(self, fut)
-    }
-
-    fn spawn_critical_task(
-        &self,
-        name: &'static str,
-        fut: BoxFuture<'static, ()>,
-    ) -> JoinHandle<()> {
-        self.0.metrics.inc_critical_tasks();
-        Self::spawn_critical_task(self, name, fut)
-    }
-
-    fn spawn_blocking_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.0.metrics.inc_regular_blocking_tasks();
-        Self::spawn_blocking_task(self, fut)
-    }
-
-    fn spawn_critical_blocking_task(
-        &self,
-        name: &'static str,
-        fut: BoxFuture<'static, ()>,
-    ) -> JoinHandle<()> {
-        self.0.metrics.inc_critical_tasks();
-        Self::spawn_critical_blocking_task(self, name, fut)
-    }
-}
-
-// ── TaskSpawnerExt impl ──────────────────────────────────────────────
-
-impl crate::TaskSpawnerExt for Runtime {
-    fn spawn_critical_with_graceful_shutdown_signal<F>(
-        &self,
-        name: &'static str,
-        f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        Self::spawn_critical_with_graceful_shutdown_signal(self, name, f)
-    }
-
-    fn spawn_with_graceful_shutdown_signal<F>(
-        &self,
-        f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        Self::spawn_with_graceful_shutdown_signal(self, f)
     }
 }
 
@@ -824,6 +782,7 @@ impl RuntimeBuilder {
             blocking_guard,
             proof_storage_worker_pool,
             proof_account_worker_pool,
+            prewarming_pool,
         ) = {
             let default_threads = config.rayon.default_thread_count();
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
@@ -862,12 +821,19 @@ impl RuntimeBuilder {
                 .thread_name(|i| format!("proof-acct-{i:02}"))
                 .build()?;
 
+            let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
+            let prewarming_pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(prewarming_threads)
+                .thread_name(|i| format!("prewarm-{i:02}"))
+                .build()?;
+
             debug!(
                 default_threads,
                 rpc_threads,
                 storage_threads,
                 proof_storage_worker_threads,
                 proof_account_worker_threads,
+                prewarming_threads,
                 max_blocking_tasks = config.rayon.max_blocking_tasks,
                 "Initialized rayon thread pools"
             );
@@ -879,6 +845,7 @@ impl RuntimeBuilder {
                 blocking_guard,
                 proof_storage_worker_pool,
                 proof_account_worker_pool,
+                prewarming_pool,
             )
         };
 
@@ -889,6 +856,8 @@ impl RuntimeBuilder {
             }
             result
         });
+
+        let quanta_upkeep = quanta::Upkeep::new(Duration::from_millis(1)).start().ok();
 
         let inner = RuntimeInner {
             _tokio_runtime: owned_runtime,
@@ -909,7 +878,10 @@ impl RuntimeBuilder {
             proof_storage_worker_pool,
             #[cfg(feature = "rayon")]
             proof_account_worker_pool,
+            #[cfg(feature = "rayon")]
+            prewarming_pool,
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
+            _quanta_upkeep: quanta_upkeep,
         };
 
         Ok(Runtime(Arc::new(inner)))

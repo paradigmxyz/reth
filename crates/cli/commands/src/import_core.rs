@@ -139,7 +139,7 @@ where
         total_decoded_blocks += file_client.headers_len();
         total_decoded_txns += file_client.total_transactions();
 
-        let (mut pipeline, events) = build_import_pipeline_impl(
+        let (mut pipeline, events, _runtime) = build_import_pipeline_impl(
             config,
             provider_factory.clone(),
             &consensus,
@@ -265,7 +265,11 @@ pub fn build_import_pipeline_impl<N, C, E>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
     evm_config: E,
-) -> eyre::Result<(Pipeline<N>, impl futures::Stream<Item = NodeEvent<N::Primitives>> + use<N, C, E>)>
+) -> eyre::Result<(
+    Pipeline<N>,
+    impl futures::Stream<Item = NodeEvent<N::Primitives>> + use<N, C, E>,
+    reth_tasks::Runtime,
+)>
 where
     N: ProviderNodeTypes,
     C: FullConsensus<N::Primitives> + 'static,
@@ -281,9 +285,12 @@ where
         .sealed_header(last_block_number)?
         .ok_or_else(|| ProviderError::HeaderNotFound(last_block_number.into()))?;
 
+    let runtime = reth_tasks::Runtime::with_existing_handle(tokio::runtime::Handle::current())
+        .expect("failed to create runtime");
+
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
         .build(file_client.clone(), consensus.clone())
-        .into_task();
+        .into_task_with(&runtime);
     // TODO: The pipeline should correctly configure the downloader on its own.
     // Find the possibility to remove unnecessary pre-configuration.
     header_downloader.update_local_head(local_head);
@@ -291,7 +298,7 @@ where
 
     let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
         .build(file_client.clone(), consensus.clone(), provider_factory.clone())
-        .into_task();
+        .into_task_with(&runtime);
     // TODO: The pipeline should correctly configure the downloader on its own.
     // Find the possibility to remove unnecessary pre-configuration.
     body_downloader
@@ -326,5 +333,5 @@ where
 
     let events = pipeline.events().map(Into::into);
 
-    Ok((pipeline, events))
+    Ok((pipeline, events, runtime))
 }

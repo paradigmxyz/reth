@@ -27,12 +27,14 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{
+    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+};
 use reth_provider::{
     BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
     StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    TransactionVariant,
+    StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -40,7 +42,7 @@ use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{fmt::Debug, ops, sync::Arc, time::Instant};
+use std::{fmt::Debug, ops, sync::Arc};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -271,6 +273,9 @@ where
     evm_config: C,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Whether the node uses hashed state as canonical storage (v2 mode).
+    /// Cached at construction to avoid threading `StorageSettingsCache` bounds everywhere.
+    use_hashed_state: bool,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -296,6 +301,7 @@ where
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
+            .field("use_hashed_state", &self.use_hashed_state)
             .finish()
     }
 }
@@ -313,7 +319,8 @@ where
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StageCheckpointReader
         + ChangeSetReader
-        + StorageChangeSetReader,
+        + StorageChangeSetReader
+        + StorageSettingsCache,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
     V: EngineValidator<T> + WaitForCaches,
@@ -334,6 +341,7 @@ where
         engine_kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
+        use_hashed_state: bool,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -355,6 +363,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
+            use_hashed_state,
         }
     }
 
@@ -375,6 +384,7 @@ where
         kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
+        use_hashed_state: bool,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -407,6 +417,7 @@ where
             kind,
             evm_config,
             changeset_cache,
+            use_hashed_state,
         );
         let incoming = task.incoming_tx.clone();
         spawn_os_thread("engine", || task.run());
@@ -2454,7 +2465,12 @@ where
 
             self.update_reorg_metrics(old.len(), old_first);
             self.reinsert_reorged_blocks(new.clone());
-            self.reinsert_reorged_blocks(old.clone());
+
+            // When use_hashed_state is enabled, skip reinserting the old chain — the
+            // bundle state references plain state reverts which don't exist.
+            if !self.use_hashed_state {
+                self.reinsert_reorged_blocks(old.clone());
+            }
         }
 
         // update the tracked in-memory state with the new chain
@@ -2663,7 +2679,7 @@ where
     /// Returns `InsertPayloadOk::Inserted(BlockStatus::Valid)` on successful execution,
     /// `InsertPayloadOk::AlreadySeen` if the block already exists, or
     /// `InsertPayloadOk::Inserted(BlockStatus::Disconnected)` if parent state is missing.
-    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_id))]
+    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(?block_id))]
     fn insert_block_or_payload<Input, Err>(
         &mut self,
         block_id: BlockWithParent,

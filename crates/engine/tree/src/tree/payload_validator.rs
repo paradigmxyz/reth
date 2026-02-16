@@ -31,14 +31,14 @@ use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
-    SealedHeader, SignerRecoverable,
+    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
+    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, StorageChangeSetReader,
+    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, State};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
@@ -49,7 +49,6 @@ use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
     sync::{mpsc::RecvTimeoutError, Arc},
-    time::Instant,
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
@@ -146,7 +145,8 @@ where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
-                          + BlockNumReader,
+                          + BlockNumReader
+                          + StorageSettingsCache,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
@@ -396,6 +396,7 @@ where
             parent_hash: input.parent_hash(),
             parent_state_root: parent_block.state_root(),
             transaction_count: input.transaction_count(),
+            gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
         };
 
@@ -596,6 +597,8 @@ where
         };
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
+        self.metrics
+            .record_state_root_gas_bucket(block.header().gas_used(), root_elapsed.as_secs_f64());
         debug!(target: "engine::tree::payload_validator", ?root_elapsed, "Calculated state root");
 
         // ensure state root matches
@@ -764,6 +767,7 @@ where
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
+        self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
 
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
         Ok((output, senders, result_rx))
@@ -1141,7 +1145,7 @@ where
         level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
-        fields(strategy)
+        fields(?strategy)
     )]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
@@ -1526,7 +1530,8 @@ where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
-                          + BlockNumReader,
+                          + BlockNumReader
+                          + StorageSettingsCache,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
@@ -1664,6 +1669,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.withdrawals().map(|w| w.as_slice()),
             Self::Block(block) => block.body().withdrawals().map(|w| w.as_slice()),
+        }
+    }
+
+    /// Returns the total gas used by the block.
+    pub fn gas_used(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.gas_used(),
+            Self::Block(block) => block.gas_used(),
         }
     }
 }

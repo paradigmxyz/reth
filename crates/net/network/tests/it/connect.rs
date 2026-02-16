@@ -12,14 +12,13 @@ use reth_network::{
 };
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
-    NetworkInfo, Peers, PeersInfo,
+    NetworkInfo, PeerKind, Peers, PeersInfo,
 };
 use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     sync::{NetworkSyncUpdater, SyncState},
 };
 use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
-use reth_network_types::peers::config::PeerBackoffDurations;
 use reth_provider::test_utils::MockEthProvider;
 use reth_storage_api::noop::NoopProvider;
 use reth_tracing::init_test_tracing;
@@ -380,10 +379,7 @@ async fn test_trusted_peer_only() {
     let _handle = net.spawn();
 
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let peers_config = PeersConfig::default()
-        .with_backoff_durations(PeerBackoffDurations::test())
-        .with_ban_duration(Duration::from_millis(200))
-        .with_trusted_nodes_only(true);
+    let peers_config = PeersConfig::test().with_trusted_nodes_only(true);
 
     let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(0)
@@ -405,8 +401,8 @@ async fn test_trusted_peer_only() {
     // connect to an untrusted peer should fail.
     handle.add_peer(*handle0.peer_id(), handle0.local_addr());
 
-    // wait 1 second, the number of connection is still 0.
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // wait 500ms, the number of connection is still 0.
+    tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(handle.num_connected_peers(), 0);
 
     // add to trusted peer.
@@ -419,9 +415,14 @@ async fn test_trusted_peer_only() {
     // only receive connections from trusted peers.
     handle1.add_peer(*handle.peer_id(), handle.local_addr());
 
-    // wait 1 second, the number of connections is still 1, because peer1 is untrusted.
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // wait 500ms, the number of connections is still 1, because peer1 is untrusted.
+    tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(handle.num_connected_peers(), 1);
+
+    // remove handle from handle1's peer list to prevent a competing outgoing connection attempt
+    // from handle1 racing with handle's outgoing connection below, which can cause duplicate
+    // session resolution to drop a connection
+    handle1.remove_peer(*handle.peer_id(), PeerKind::Basic);
 
     handle.add_trusted_peer(*handle1.peer_id(), handle1.local_addr());
 
@@ -429,7 +430,7 @@ async fn test_trusted_peer_only() {
     let outgoing_peer_id1 = event_stream.next_session_established().await.unwrap();
     assert_eq!(outgoing_peer_id1, *handle1.peer_id());
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(handle.num_connected_peers(), 2);
 
     // check that handle0 and handle1 both have peers.
@@ -441,8 +442,7 @@ async fn test_trusted_peer_only() {
 async fn test_network_state_change() {
     let net = Testnet::create(1).await;
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let peers_config =
-        PeersConfig::default().with_refill_slots_interval(Duration::from_millis(500));
+    let peers_config = PeersConfig::test();
 
     let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(0)
@@ -466,16 +466,16 @@ async fn test_network_state_change() {
 
     handle.add_peer(*handle0.peer_id(), handle0.local_addr());
 
-    // wait 2 seconds, the number of connections is still 0, because network is Hibernate.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // wait 500ms, the number of connections is still 0, because network is Hibernate.
+    tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(handle.num_connected_peers(), 0);
 
     // Set network state to Active.
     handle.set_network_active();
 
-    // wait 2 seconds, the number of connections should be 1, because network is Active and outbound
+    // wait 500ms, the number of connections should be 1, because network is Active and outbound
     // slot should be filled.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(handle.num_connected_peers(), 1);
 }
 
@@ -483,7 +483,7 @@ async fn test_network_state_change() {
 async fn test_exceed_outgoing_connections() {
     let net = Testnet::create(2).await;
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let peers_config = PeersConfig::default().with_max_outbound(1);
+    let peers_config = PeersConfig::test().with_max_outbound(1);
 
     let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(0)
@@ -514,9 +514,9 @@ async fn test_exceed_outgoing_connections() {
 
     handle.add_peer(*handle1.peer_id(), handle1.local_addr());
 
-    // wait 2 seconds, the number of connections is still 1, indicating that the max outbound is in
+    // wait 500ms, the number of connections is still 1, indicating that the max outbound is in
     // effect.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(handle.num_connected_peers(), 1);
 }
 
@@ -524,7 +524,7 @@ async fn test_exceed_outgoing_connections() {
 async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     let net = Testnet::create(1).await;
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let peers_config = PeersConfig::default().with_max_inbound(0);
+    let peers_config = PeersConfig::test().with_max_inbound(0);
 
     let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(0)
@@ -543,7 +543,7 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     tokio::task::spawn(network);
     let net_handle = net.spawn();
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     assert_eq!(handle.num_connected_peers(), 0);
 
@@ -623,15 +623,15 @@ async fn test_rejected_by_already_connect() {
     // incoming connection from the same peer should be rejected by already connected
     // and num_inbount should still be 1
     other_peer_handle1.add_peer(*handle.peer_id(), handle.local_addr());
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // incoming connection from other_peer2 should succeed
     other_peer_handle2.add_peer(*handle.peer_id(), handle.local_addr());
     let peer_id = events.next_session_established().await.unwrap();
     assert_eq!(peer_id, *other_peer_handle2.peer_id());
 
-    // wait 2 seconds and check that other_peer2 is not rejected by TooManyPeers
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // wait 500ms and check that other_peer2 is not rejected by TooManyPeers
+    tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(handle.num_connected_peers(), 2);
 }
 
@@ -641,7 +641,7 @@ async fn new_random_peer(
 ) -> NetworkManager<EthNetworkPrimitives> {
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let peers_config =
-        PeersConfig::default().with_max_inbound(max_in_bound).with_trusted_nodes(trusted_nodes);
+        PeersConfig::test().with_max_inbound(max_in_bound).with_trusted_nodes(trusted_nodes);
 
     let config = NetworkConfigBuilder::new(secret_key)
         .listener_port(0)
@@ -775,7 +775,7 @@ async fn test_reconnect_trusted() {
 
     // Await that handle1 (trusted peer) reconnects automatically
     let reconnect_result =
-        tokio::time::timeout(Duration::from_secs(60), listener0.next_session_established()).await;
+        tokio::time::timeout(Duration::from_secs(10), listener0.next_session_established()).await;
 
     match reconnect_result {
         Ok(Some(peer)) => {
