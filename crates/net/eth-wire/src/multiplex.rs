@@ -529,33 +529,6 @@ where
                 return Poll::Ready(Some(msg))
             }
 
-            let mut conn_ready = true;
-            loop {
-                match this.inner.conn.poll_ready_unpin(cx) {
-                    Poll::Ready(Ok(())) => {
-                        if let Some(msg) = this.inner.out_buffer.pop_front() {
-                            if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                                return Poll::Ready(Some(Err(err.into())))
-                            }
-                        } else {
-                            break
-                        }
-                    }
-                    Poll::Ready(Err(err)) => {
-                        if let Err(disconnect_err) =
-                            this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
-                        {
-                            return Poll::Ready(Some(Err(disconnect_err.into())))
-                        }
-                        return Poll::Ready(Some(Err(err.into())))
-                    }
-                    Poll::Pending => {
-                        conn_ready = false;
-                        break
-                    }
-                }
-            }
-
             // advance primary out
             loop {
                 match this.primary.from_primary.poll_next_unpin(cx) {
@@ -625,15 +598,12 @@ where
                         }
                     }
                     Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
-                    Poll::Ready(None) => {
-                        // connection closed
-                        return Poll::Ready(None)
-                    }
+                    Poll::Ready(None) => return Poll::Ready(None),
                     Poll::Pending => break,
                 }
             }
 
-            if !conn_ready || (!delegated && this.inner.out_buffer.is_empty()) {
+            if !delegated && this.inner.out_buffer.is_empty() {
                 return Poll::Pending
             }
         }
@@ -650,9 +620,30 @@ where
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
-        if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err.into()))
+
+        loop {
+            match this.inner.conn.poll_ready_unpin(cx) {
+                Poll::Ready(Ok(())) => {
+                    if let Some(msg) = this.inner.out_buffer.pop_front() {
+                        if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+                            return Poll::Ready(Err(err.into()))
+                        }
+                    } else {
+                        break
+                    }
+                }
+                Poll::Ready(Err(err)) => {
+                    if let Err(disconnect_err) =
+                        this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
+                    {
+                        return Poll::Ready(Err(disconnect_err.into()))
+                    }
+                    return Poll::Ready(Err(err.into()))
+                }
+                Poll::Pending => return Poll::Pending,
+            }
         }
+
         if let Err(err) = ready!(this.primary.st.poll_ready_unpin(cx)) {
             return Poll::Ready(Err(err))
         }
