@@ -197,26 +197,33 @@ impl WorkerPool {
     /// Use this to initialize or re-initialize per-thread state via [`Worker::init`].
     /// Only `num_threads` threads execute the closure; the rest skip it.
     pub fn broadcast(&self, num_threads: usize, f: impl Fn(&mut Worker) + Sync) {
-        let remaining = AtomicUsize::new(num_threads.min(self.pool.current_num_threads()));
-        self.pool.broadcast(|_| {
-            // Atomically claim a slot; threads that can't decrement skip the closure.
-            let mut current = remaining.load(Ordering::Relaxed);
-            loop {
-                if current == 0 {
-                    return;
+        if num_threads >= self.pool.current_num_threads() {
+            // Fast path: run on every thread, no atomic coordination needed.
+            self.pool.broadcast(|_| {
+                WORKER.with_borrow_mut(|worker| f(worker));
+            });
+        } else {
+            let remaining = AtomicUsize::new(num_threads);
+            self.pool.broadcast(|_| {
+                // Atomically claim a slot; threads that can't decrement skip the closure.
+                let mut current = remaining.load(Ordering::Relaxed);
+                loop {
+                    if current == 0 {
+                        return;
+                    }
+                    match remaining.compare_exchange_weak(
+                        current,
+                        current - 1,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => break,
+                        Err(actual) => current = actual,
+                    }
                 }
-                match remaining.compare_exchange_weak(
-                    current,
-                    current - 1,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => break,
-                    Err(actual) => current = actual,
-                }
-            }
-            WORKER.with_borrow_mut(|worker| f(worker));
-        });
+                WORKER.with_borrow_mut(|worker| f(worker));
+            });
+        }
     }
 
     /// Clears the state on every thread in the pool.
