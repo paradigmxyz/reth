@@ -116,4 +116,3 @@ impl From<u64> for KeyOrNumber<'_> {
         KeyOrNumber::Number(value)
     }
 }
-
