@@ -196,7 +196,7 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
             let size = app
                 .manifest
                 .component(*ty)
-                .map(|c| DownloadProgress::format_size(c.size))
+                .map(|c| DownloadProgress::format_size(c.total_size()))
                 .unwrap_or_default();
             let required = if ty.is_required() { " (required)" } else { "" };
 
