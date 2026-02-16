@@ -881,12 +881,16 @@ where
         let mut total_idle_time = Duration::ZERO;
         let mut idle_start = Instant::now();
 
+        self.available_workers.fetch_add(1, Ordering::Relaxed);
+
         let first_job = match self.work_rx.recv() {
             Ok(job) => {
+                self.available_workers.fetch_sub(1, Ordering::Relaxed);
                 total_idle_time += idle_start.elapsed();
                 job
             }
             Err(_) => {
+                self.available_workers.fetch_sub(1, Ordering::Relaxed);
                 trace!(
                     target: "trie::proof_task",
                     worker_id = self.worker_id,
@@ -924,9 +928,6 @@ where
         } else {
             None
         };
-
-        // Initially mark this worker as available.
-        self.available_workers.fetch_add(1, Ordering::Relaxed);
 
         let mut job = first_job;
         loop {
@@ -966,7 +967,10 @@ where
                     total_idle_time += idle_start.elapsed();
                     job = next_job;
                 }
-                Err(_) => break,
+                Err(_) => {
+                    self.available_workers.fetch_sub(1, Ordering::Relaxed);
+                    break;
+                }
             }
         }
 
@@ -1224,12 +1228,16 @@ where
         let mut idle_start = Instant::now();
         let mut value_encoder_stats_cache = ValueEncoderStats::default();
 
+        self.available_workers.fetch_add(1, Ordering::Relaxed);
+
         let first_job = match self.work_rx.recv() {
             Ok(job) => {
+                self.available_workers.fetch_sub(1, Ordering::Relaxed);
                 total_idle_time += idle_start.elapsed();
                 job
             }
             Err(_) => {
+                self.available_workers.fetch_sub(1, Ordering::Relaxed);
                 trace!(
                     target: "trie::proof_task",
                     worker_id=self.worker_id,
@@ -1286,9 +1294,6 @@ where
             (None, None)
         };
 
-        // Count this worker as available only after successful initialization.
-        self.available_workers.fetch_add(1, Ordering::Relaxed);
-
         let mut job = first_job;
         loop {
             // Mark worker as busy.
@@ -1328,7 +1333,10 @@ where
                     total_idle_time += idle_start.elapsed();
                     job = next_job;
                 }
-                Err(_) => break,
+                Err(_) => {
+                    self.available_workers.fetch_sub(1, Ordering::Relaxed);
+                    break;
+                }
             }
         }
 
