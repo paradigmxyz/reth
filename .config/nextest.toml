@@ -1,26 +1,32 @@
 [profile.default]
 retries = { backoff = "exponential", count = 2, delay = "2s", jitter = true }
-slow-timeout = { period = "30s", terminate-after = 4 }
+slow-timeout = { period = "30s", terminate-after = 2 }
+test-timeout = "60s"
 
 [[profile.default.overrides]]
 filter = "test(general_state_tests)"
 slow-timeout = { period = "1m", terminate-after = 10 }
+test-timeout = "10m"
 
 [[profile.default.overrides]]
 filter = "test(eest_fixtures)"
 slow-timeout = { period = "2m", terminate-after = 10 }
+test-timeout = "20m"
 
 # E2E tests using the testsuite framework from crates/e2e-test-utils
 # These tests are located in tests/e2e-testsuite/ directories across various crates
 [[profile.default.overrides]]
 filter = "binary(e2e_testsuite)"
 slow-timeout = { period = "2m", terminate-after = 3 }
+test-timeout = "6m"
 
 [[profile.default.overrides]]
 filter = "package(reth-era) and binary(it)"
 slow-timeout = { period = "2m", terminate-after = 10 }
+test-timeout = "20m"
 
 # Allow slower ethereum node e2e tests (p2p + blobs) to run up to 5 minutes.
 [[profile.default.overrides]]
 filter = "package(reth-node-ethereum) and binary(e2e)"
 slow-timeout = { period = "1m", terminate-after = 5 }
+test-timeout = "5m"
