@@ -132,8 +132,6 @@ where
     /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
     /// preservation across sequential payload validations.
     sparse_state_trie: SharedPreservedSparseTrie,
-    /// Maximum concurrency for prewarm task.
-    prewarm_max_concurrency: usize,
     /// Sparse trie prune depth.
     sparse_trie_prune_depth: usize,
     /// Maximum storage tries to retain after pruning.
@@ -172,7 +170,6 @@ where
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: SharedPreservedSparseTrie::default(),
-            prewarm_max_concurrency: config.prewarm_max_concurrency(),
             sparse_trie_prune_depth: config.sparse_trie_prune_depth(),
             sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
@@ -467,7 +464,6 @@ where
             self.execution_cache.clone(),
             prewarm_ctx,
             to_multi_proof,
-            self.prewarm_max_concurrency,
         );
 
         {
