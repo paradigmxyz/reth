@@ -90,6 +90,12 @@ where
             };
         }
 
+        let bal_hash = if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
+            block_access_list_hash
+        } else {
+            None
+        };
+
         let header = Header {
             parent_hash: ctx.parent_hash,
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -112,7 +118,7 @@ where
             blob_gas_used: block_blob_gas_used,
             excess_blob_gas,
             requests_hash,
-            block_access_list_hash,
+            block_access_list_hash: bal_hash,
             slot_number: ctx.slot_number,
         };
 

@@ -258,6 +258,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             &output.receipts,
             &output.requests,
             None,
+            &output.block_access_list,
             Some(output.gas_used),
         )
         .map_err(|err| Error::block_failed(block_number, err))?;
