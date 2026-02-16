@@ -213,14 +213,13 @@ where
 
     /// Saves the warmed caches back into the shared slot after prewarming completes.
     ///
-    /// Waits for block validation without any lock held, then only on success splits the
-    /// saved cache, inserts state, and publishes under a brief write lock. This avoids
-    /// the ~100ms+ lock hold that previously blocked concurrent readers during
-    /// `valid_block_rx.recv()`.
+    /// Waits for block validation without any lock held, then only on success inserts
+    /// state and publishes under a brief write lock. This avoids the ~100ms+ lock hold
+    /// that previously blocked concurrent readers during `valid_block_rx.recv()`.
     ///
-    /// The ordering is critical: `split()` releases the usage guard and `insert_state()`
-    /// mutates the shared fixed-caches in-place, so both must happen only after
-    /// validation to prevent concurrent readers from observing unvalidated state.
+    /// The ordering is critical: `insert_state()` mutates the shared fixed-caches
+    /// in-place while the usage guard is still held (keeping `is_available() == false`),
+    /// then `split()` releases the guard and publishes the new cache atomically.
     ///
     /// This method is called from `run()` only after all execution tasks are complete.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
@@ -247,24 +246,23 @@ where
                 return;
             }
 
-            // Block is valid — build and publish the warmed cache.
-            // split() consumes the SavedCache (releasing its usage guard) and insert_state()
-            // mutates the shared caches in-place, so these must only happen after validation
-            // to prevent concurrent readers from observing unvalidated state.
-            let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
-            let new_cache = SavedCache::new(hash, caches, cache_metrics)
-                .with_disable_cache_metrics(disable_cache_metrics);
-
-            if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+            // Block is valid — mutate caches while the usage guard is still held
+            // (keeping is_available() == false) so no concurrent reader can observe
+            // the cache mid-mutation via get_cache_for().
+            if saved_cache.cache().insert_state(&execution_outcome.state).is_err() {
                 execution_cache.update_with_guard(|cached| {
                     *cached = None;
                 });
                 debug!(target: "engine::caching", "cleared execution cache on update error");
             } else {
-                new_cache.update_metrics();
+                saved_cache.update_metrics();
 
-                // Publish under a brief lock.
+                // Now consume the SavedCache (releasing the usage guard) and publish
+                // the new cache under a brief lock.
                 execution_cache.update_with_guard(|cached| {
+                    let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
+                    let new_cache = SavedCache::new(hash, caches, cache_metrics)
+                        .with_disable_cache_metrics(disable_cache_metrics);
                     *cached = Some(new_cache);
                 });
             }

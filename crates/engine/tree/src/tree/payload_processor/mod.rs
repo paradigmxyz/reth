@@ -983,7 +983,7 @@ impl PayloadExecutionCache {
     /// This ensures that all cache operations happen atomically.
     ///
     /// Callers must not mutate the *underlying* [`ExecutionCache`] data (e.g. via
-    /// [`SavedCache::clear`]) while other tasks may hold clones of the same
+    /// `SavedCache::clear`) while other tasks may hold clones of the same
     /// `SavedCache`. Swapping the slot value (`*cached = Some(..)` / `*cached = None`)
     /// is always safe because existing clones retain their own `Arc` references.
     pub fn update_with_guard<F>(&self, update_fn: F)
