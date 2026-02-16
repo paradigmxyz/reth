@@ -1170,13 +1170,13 @@ mod tests {
             let result = sf_rw.get_storage_before_block(0, test_address, test_key).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
-            assert_eq!(entry.key, test_key);
+            assert_eq!(entry.key.as_b256(), test_key);
             assert_eq!(entry.value, U256::ZERO);
 
             let result = sf_rw.get_storage_before_block(2, test_address, test_key).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
-            assert_eq!(entry.key, test_key);
+            assert_eq!(entry.key.as_b256(), test_key);
             assert_eq!(entry.value, U256::from(9));
 
             let result = sf_rw.get_storage_before_block(1, test_address, test_key).unwrap();
@@ -1188,7 +1188,7 @@ mod tests {
             let result = sf_rw.get_storage_before_block(1, other_address, other_key).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
-            assert_eq!(entry.key, other_key);
+            assert_eq!(entry.key.as_b256(), other_key);
         }
     }
 
@@ -1334,20 +1334,20 @@ mod tests {
             let result = sf_rw.get_storage_before_block(block_num, address, keys[0]).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
-            assert_eq!(entry.key, keys[0]);
+            assert_eq!(entry.key.as_b256(), keys[0]);
             assert_eq!(entry.value, U256::from(0));
 
             let result =
                 sf_rw.get_storage_before_block(block_num, address, keys[num_slots - 1]).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
-            assert_eq!(entry.key, keys[num_slots - 1]);
+            assert_eq!(entry.key.as_b256(), keys[num_slots - 1]);
 
             let mid = num_slots / 2;
             let result = sf_rw.get_storage_before_block(block_num, address, keys[mid]).unwrap();
             assert!(result.is_some());
             let entry = result.unwrap();
-            assert_eq!(entry.key, keys[mid]);
+            assert_eq!(entry.key.as_b256(), keys[mid]);
 
             let missing_key = B256::with_last_byte(255);
             let result = sf_rw.get_storage_before_block(block_num, address, missing_key).unwrap();
@@ -1356,7 +1356,7 @@ mod tests {
             for i in (0..num_slots).step_by(10) {
                 let result = sf_rw.get_storage_before_block(block_num, address, keys[i]).unwrap();
                 assert!(result.is_some());
-                assert_eq!(result.unwrap().key, keys[i]);
+                assert_eq!(result.unwrap().key.as_b256(), keys[i]);
             }
         }
     }

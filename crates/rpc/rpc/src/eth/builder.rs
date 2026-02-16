@@ -542,7 +542,7 @@ where
             eth_proof_window,
             blocking_task_pool.unwrap_or_else(|| {
                 BlockingTaskPool::builder()
-                    .thread_name(|i| format!("blocking-{i}"))
+                    .thread_name(|i| format!("blocking-{i:02}"))
                     .build()
                     .map(BlockingTaskPool::new)
                     .expect("failed to build blocking task pool")

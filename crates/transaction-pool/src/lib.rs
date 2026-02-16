@@ -501,11 +501,26 @@ where
         results.pop().expect("result length is the same as the input")
     }
 
+    async fn add_transactions(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Self::Transaction>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        if transactions.is_empty() {
+            return Vec::new()
+        }
+        let validated = self
+            .pool
+            .validator()
+            .validate_transactions(transactions.into_iter().map(|tx| (origin, tx)))
+            .await;
+        self.pool.add_transactions(origin, validated)
+    }
+
     async fn add_transactions_with_origins(
         &self,
-        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
-        let transactions: Vec<_> = transactions.into_iter().collect();
         if transactions.is_empty() {
             return Vec::new()
         }

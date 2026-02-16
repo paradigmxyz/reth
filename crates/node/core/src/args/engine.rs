@@ -43,6 +43,7 @@ pub struct DefaultEngineValues {
     disable_trie_cache: bool,
     sparse_trie_prune_depth: usize,
     sparse_trie_max_storage_tries: usize,
+    disable_sparse_trie_cache_pruning: bool,
     state_root_task_timeout: Option<String>,
 }
 
@@ -198,6 +199,12 @@ impl DefaultEngineValues {
         self
     }
 
+    /// Set whether to disable sparse trie cache pruning by default
+    pub const fn with_disable_sparse_trie_cache_pruning(mut self, v: bool) -> Self {
+        self.disable_sparse_trie_cache_pruning = v;
+        self
+    }
+
     /// Set the default state root task timeout
     pub fn with_state_root_task_timeout(mut self, v: Option<String>) -> Self {
         self.state_root_task_timeout = v;
@@ -231,6 +238,7 @@ impl Default for DefaultEngineValues {
             disable_trie_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some("1s".to_string()),
         }
     }
@@ -372,6 +380,12 @@ pub struct EngineArgs {
     #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries)]
     pub sparse_trie_max_storage_tries: usize,
 
+    /// Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved
+    /// without any node pruning or storage trie eviction between blocks. Useful for benchmarking
+    /// the effects of retaining the full trie cache.
+    #[arg(long = "engine.disable-sparse-trie-cache-pruning", default_value_t = DefaultEngineValues::get_global().disable_sparse_trie_cache_pruning)]
+    pub disable_sparse_trie_cache_pruning: bool,
+
     /// Configure the timeout for the state root task before spawning a sequential fallback.
     /// If the state root task takes longer than this, a sequential computation starts in
     /// parallel and whichever finishes first is used.
@@ -415,6 +429,7 @@ impl Default for EngineArgs {
             disable_trie_cache,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            disable_sparse_trie_cache_pruning,
             state_root_task_timeout,
         } = DefaultEngineValues::get_global().clone();
         Self {
@@ -445,6 +460,7 @@ impl Default for EngineArgs {
             disable_trie_cache,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            disable_sparse_trie_cache_pruning,
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
                 .map(|s| humantime::parse_duration(s).expect("valid default duration")),
@@ -480,6 +496,7 @@ impl EngineArgs {
             .with_disable_trie_cache(self.disable_trie_cache)
             .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
             .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
+            .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
             .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
     }
 }
@@ -534,6 +551,7 @@ mod tests {
             disable_trie_cache: true,
             sparse_trie_prune_depth: 10,
             sparse_trie_max_storage_tries: 100,
+            disable_sparse_trie_cache_pruning: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
         };
 
@@ -570,6 +588,7 @@ mod tests {
             "10",
             "--engine.sparse-trie-max-storage-tries",
             "100",
+            "--engine.disable-sparse-trie-cache-pruning",
             "--engine.state-root-task-timeout",
             "2s",
         ])

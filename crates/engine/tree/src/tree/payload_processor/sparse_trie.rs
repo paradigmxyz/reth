@@ -72,6 +72,7 @@ where
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
+        disable_pruning: bool,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         match self {
             Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
@@ -80,6 +81,7 @@ where
                 max_storage_tries,
                 max_nodes_capacity,
                 max_values_capacity,
+                disable_pruning,
             ),
         }
     }
@@ -356,16 +358,23 @@ where
     /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
     ///
     /// Should be called after the state root result has been sent.
+    ///
+    /// When `disable_pruning` is true, the trie is preserved without any node pruning,
+    /// storage trie eviction, or capacity shrinking, keeping the full cache intact for
+    /// benchmarking purposes.
     pub(super) fn into_trie_for_reuse(
         self,
         prune_depth: usize,
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
+        disable_pruning: bool,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         let Self { mut trie, .. } = self;
-        trie.prune(prune_depth, max_storage_tries);
-        trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        if !disable_pruning {
+            trie.prune(prune_depth, max_storage_tries);
+            trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        }
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
     }
@@ -407,7 +416,9 @@ where
                     let update = match message {
                         Ok(m) => m,
                         Err(_) => {
-                            break
+                            return Err(ParallelStateRootError::Other(
+                                "updates channel disconnected before state root calculation".to_string(),
+                            ))
                         }
                     };
 
@@ -582,17 +593,23 @@ where
         self.process_leaf_updates(true)?;
 
         for (address, mut new) in self.new_storage_updates.drain() {
-            let updates = self.storage_updates.entry(address).or_default();
-            for (slot, new) in new.drain() {
-                match updates.entry(slot) {
-                    Entry::Occupied(mut entry) => {
-                        // Only overwrite existing entries with new values
-                        if new.is_changed() {
-                            entry.insert(new);
+            match self.storage_updates.entry(address) {
+                Entry::Vacant(entry) => {
+                    entry.insert(new); // insert the whole map at once, no per-slot loop
+                }
+                Entry::Occupied(mut entry) => {
+                    let updates = entry.get_mut();
+                    for (slot, new) in new.drain() {
+                        match updates.entry(slot) {
+                            Entry::Occupied(mut slot_entry) => {
+                                if new.is_changed() {
+                                    slot_entry.insert(new);
+                                }
+                            }
+                            Entry::Vacant(slot_entry) => {
+                                slot_entry.insert(new);
+                            }
                         }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(new);
                     }
                 }
             }

@@ -192,6 +192,15 @@ impl Command {
             parent_header = block.header;
             parent_hash = block_hash;
             blocks_processed += 1;
+
+            let progress = match mode {
+                RampMode::Blocks(total) => format!("{blocks_processed}/{total}"),
+                RampMode::TargetGasLimit(target) => {
+                    let pct = (parent_header.gas_limit as f64 / target as f64 * 100.0).min(100.0);
+                    format!("{pct:.1}%")
+                }
+            };
+            info!(target: "reth-bench", progress, block_number = parent_header.number, gas_limit = parent_header.gas_limit, "Block processed");
         }
 
         let final_gas_limit = parent_header.gas_limit;

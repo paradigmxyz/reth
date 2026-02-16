@@ -94,6 +94,10 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 /// 144MB.
 pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
+/// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
+/// prewarm workers exceeds the execution time saved.
+pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
+
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
@@ -135,6 +139,8 @@ where
     sparse_trie_prune_depth: usize,
     /// Maximum storage tries to retain after pruning.
     sparse_trie_max_storage_tries: usize,
+    /// Whether sparse trie cache pruning is fully disabled.
+    disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
 }
@@ -170,6 +176,7 @@ where
             prewarm_max_concurrency: config.prewarm_max_concurrency(),
             sparse_trie_prune_depth: config.sparse_trie_prune_depth(),
             sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
+            disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             disable_cache_metrics: config.disable_cache_metrics(),
         }
     }
@@ -235,7 +242,8 @@ where
             + 'static,
     {
         // start preparing transactions immediately
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx) =
+            self.spawn_tx_iterator(transactions, env.transaction_count);
 
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
@@ -244,8 +252,9 @@ where
         // Extract V2 proofs flag early so we can pass it to prewarm
         let v2_proofs_enabled = !config.disable_proof_v2();
 
-        // Capture parent_state_root before env is moved into spawn_caching_with
+        // Capture fields before env is moved into spawn_caching_with
         let parent_state_root = env.parent_state_root;
+        let transaction_count = env.transaction_count;
 
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
@@ -274,9 +283,11 @@ where
             )
         };
 
-        // Create and spawn the storage proof task
+        // Create and spawn the storage proof task.
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, v2_proofs_enabled);
+        let halve_workers = transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
+        let proof_handle =
+            ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers, v2_proofs_enabled);
 
         if config.disable_trie_cache() {
             let multi_proof_task = MultiProofTask::new(
@@ -342,7 +353,8 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx) =
+            self.spawn_tx_iterator(transactions, env.transaction_count);
         // This path doesn't use multiproof, so V2 proofs flag doesn't matter
         let prewarm_handle =
             self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal, false);
@@ -355,11 +367,27 @@ where
         }
     }
 
+    /// Transaction count threshold below which proof workers are halved, since fewer transactions
+    /// produce fewer state changes and most workers would be idle overhead.
+    const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
+
+    /// Transaction count threshold below which sequential signature recovery is used.
+    ///
+    /// For blocks with fewer than this many transactions, the rayon parallel iterator overhead
+    /// (work-stealing setup, channel-based reorder) exceeds the cost of sequential ECDSA
+    /// recovery. Inspired by Nethermind's `RecoverSignature` which uses sequential `foreach`
+    /// for small blocks.
+    const SMALL_BLOCK_TX_THRESHOLD: usize = 30;
+
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
+    ///
+    /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
+    /// sequential iteration to avoid rayon overhead.
     #[expect(clippy::type_complexity)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
+        transaction_count: usize,
     ) -> (
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
@@ -368,22 +396,51 @@ where
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
 
-        // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
-        rayon::spawn(move || {
-            let (transactions, convert) = transactions.into_parts();
-            transactions.into_par_iter().enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
-                let tx = convert.convert(tx);
-                let tx = tx.map(|tx| {
-                    let (tx_env, tx) = tx.into_parts();
-                    WithTxEnv { tx_env, tx: Arc::new(tx) }
-                });
-                // Only send Ok(_) variants to prewarming task.
-                if let Ok(tx) = &tx {
-                    let _ = prewarm_tx.send(tx.clone());
+        if transaction_count == 0 {
+            // Empty block — nothing to do.
+        } else if transaction_count < Self::SMALL_BLOCK_TX_THRESHOLD {
+            // Sequential path for small blocks — avoids rayon work-stealing setup and
+            // channel-based reorder overhead when it costs more than the ECDSA recovery itself.
+            debug!(
+                target: "engine::tree::payload_processor",
+                transaction_count,
+                "using sequential sig recovery for small block"
+            );
+            self.executor.spawn_blocking(move || {
+                let (transactions, convert) = transactions.into_parts();
+                for (idx, tx) in transactions.into_iter().enumerate() {
+                    let tx = convert.convert(tx);
+                    let tx = tx.map(|tx| {
+                        let (tx_env, tx) = tx.into_parts();
+                        WithTxEnv { tx_env, tx: Arc::new(tx) }
+                    });
+                    if let Ok(tx) = &tx {
+                        let _ = prewarm_tx.send(tx.clone());
+                    }
+                    let _ = ooo_tx.send((idx, tx));
                 }
-                let _ = ooo_tx.send((idx, tx));
             });
-        });
+        } else {
+            // Parallel path — spawn on rayon for parallel signature recovery.
+            rayon::spawn(move || {
+                let (transactions, convert) = transactions.into_parts();
+                transactions.into_par_iter().enumerate().for_each_with(
+                    ooo_tx,
+                    |ooo_tx, (idx, tx)| {
+                        let tx = convert.convert(tx);
+                        let tx = tx.map(|tx| {
+                            let (tx_env, tx) = tx.into_parts();
+                            WithTxEnv { tx_env, tx: Arc::new(tx) }
+                        });
+                        // Only send Ok(_) variants to prewarming task.
+                        if let Ok(tx) = &tx {
+                            let _ = prewarm_tx.send(tx.clone());
+                        }
+                        let _ = ooo_tx.send((idx, tx));
+                    },
+                );
+            });
+        }
 
         // Spawn a task that processes out-of-order transactions from the task above and sends them
         // to the execution task in order.
@@ -423,7 +480,8 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let skip_prewarm = self.disable_transaction_prewarming;
+        let skip_prewarm =
+            self.disable_transaction_prewarming || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD;
 
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -503,6 +561,7 @@ where
         let disable_trie_cache = config.disable_trie_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
+        let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
         let chunk_size =
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
         let executor = self.executor.clone();
@@ -599,6 +658,7 @@ where
                     max_storage_tries,
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                    disable_cache_pruning,
                 );
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
