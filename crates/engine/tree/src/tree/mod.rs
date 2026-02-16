@@ -19,7 +19,7 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
-    ForkchoiceStateTracker, OnForkChoiceUpdated,
+    ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
@@ -323,7 +323,7 @@ where
         + StorageSettingsCache,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineValidator<T>,
+    V: EngineValidator<T> + WaitForCaches,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[expect(clippy::too_many_arguments)]
@@ -1553,6 +1553,81 @@ where
                                 }
 
                                 // handle the event if any
+                                self.on_maybe_tree_event(maybe_event)?;
+                            }
+                            BeaconEngineMessage::RethNewPayload { payload, tx } => {
+                                let pending_persistence = self.persistence_state.rx.take();
+                                let validator = &self.payload_validator;
+
+                                debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
+                                let (persistence_tx, persistence_rx) = std::sync::mpsc::channel();
+                                if let Some((rx, start_time, _action)) = pending_persistence {
+                                    tokio::task::spawn_blocking(move || {
+                                        let start = Instant::now();
+                                        let result = rx.recv().ok();
+                                        let _ = persistence_tx.send((
+                                            result,
+                                            start_time,
+                                            start.elapsed(),
+                                        ));
+                                    });
+                                }
+
+                                let cache_wait = validator.wait_for_caches();
+                                let persistence_result = persistence_rx.try_recv().ok();
+
+                                let persistence_wait =
+                                    if let Some((result, start_time, wait_duration)) =
+                                        persistence_result
+                                    {
+                                        let _ = self
+                                            .on_persistence_complete(result.flatten(), start_time);
+                                        Some(wait_duration)
+                                    } else {
+                                        None
+                                    };
+
+                                debug!(
+                                    target: "engine::tree",
+                                    persistence_wait = ?persistence_wait,
+                                    execution_cache_wait = ?cache_wait.execution_cache,
+                                    sparse_trie_wait = ?cache_wait.sparse_trie,
+                                    "Peresistence finished and caches updated for reth_newPayload"
+                                );
+
+                                let start = Instant::now();
+                                let gas_used = payload.gas_used();
+                                let num_hash = payload.num_hash();
+                                let mut output = self.on_new_payload(payload);
+                                let latency = start.elapsed();
+                                self.metrics.engine.new_payload.update_response_metrics(
+                                    start,
+                                    &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
+                                    &output,
+                                    gas_used,
+                                );
+
+                                let maybe_event =
+                                    output.as_mut().ok().and_then(|out| out.event.take());
+
+                                let timings = NewPayloadTimings {
+                                    latency,
+                                    persistence_wait,
+                                    execution_cache_wait: cache_wait.execution_cache,
+                                    sparse_trie_wait: cache_wait.sparse_trie,
+                                };
+                                if let Err(err) =
+                                    tx.send(output.map(|o| (o.outcome, timings)).map_err(|e| {
+                                        BeaconOnNewPayloadError::Internal(Box::new(e))
+                                    }))
+                                {
+                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    self.metrics
+                                        .engine
+                                        .failed_new_payload_response_deliveries
+                                        .increment(1);
+                                }
+
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
                         }

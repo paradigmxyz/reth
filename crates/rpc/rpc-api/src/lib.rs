@@ -24,6 +24,7 @@ mod miner;
 mod net;
 mod otterscan;
 mod reth;
+mod reth_engine;
 mod rpc;
 mod testing;
 mod trace;
@@ -47,6 +48,7 @@ pub mod servers {
         net::NetApiServer,
         otterscan::OtterscanServer,
         reth::RethApiServer,
+        reth_engine::{RethEngineApiServer, RethPayloadStatus},
         rpc::RpcApiServer,
         testing::TestingApiServer,
         trace::TraceApiServer,
@@ -78,6 +80,7 @@ pub mod clients {
         net::NetApiClient,
         otterscan::OtterscanClient,
         reth::RethApiClient,
+        reth_engine::RethEngineApiClient,
         rpc::RpcApiServer,
         testing::TestingApiClient,
         trace::TraceApiClient,

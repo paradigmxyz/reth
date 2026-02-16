@@ -4,11 +4,11 @@ use crate::tree::{
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::InstrumentedStateProvider,
-    payload_processor::PayloadProcessor,
+    payload_processor::{CacheWaitDurations, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
     EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
-    StateProviderDatabase, TreeConfig,
+    StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::BlockAccessList;
@@ -1582,6 +1582,15 @@ where
             block.recovered_block.block_with_parent(),
             &block.execution_output.state,
         );
+    }
+}
+
+impl<P, Evm, V> WaitForCaches for BasicEngineValidator<P, Evm, V>
+where
+    Evm: ConfigureEvm,
+{
+    fn wait_for_caches(&self) -> CacheWaitDurations {
+        self.payload_processor.wait_for_caches()
     }
 }
 

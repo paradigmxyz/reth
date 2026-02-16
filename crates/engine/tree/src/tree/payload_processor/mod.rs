@@ -50,6 +50,7 @@ use std::{
         mpsc::{self, channel},
         Arc,
     },
+    time::Duration,
 };
 use tracing::{debug, debug_span, instrument, warn, Span};
 
@@ -61,6 +62,26 @@ pub mod receipt_root_task;
 pub mod sparse_trie;
 
 use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
+
+/// Result of waiting for caches to become available.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CacheWaitDurations {
+    /// Time spent waiting for the execution cache lock.
+    pub execution_cache: Duration,
+    /// Time spent waiting for the sparse trie lock.
+    pub sparse_trie: Duration,
+}
+
+/// Trait for types that can wait for execution cache and sparse trie locks to become available.
+///
+/// This is used by `reth_newPayload` endpoint to ensure that payload processing
+/// waits for any ongoing operations to complete before starting.
+pub trait WaitForCaches {
+    /// Waits for persistence and cache updates to complete.
+    ///
+    /// Returns the time spent waiting for each cache separately.
+    fn wait_for_caches(&self) -> CacheWaitDurations;
+}
 
 /// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
 ///
@@ -174,6 +195,46 @@ where
             sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             disable_cache_metrics: config.disable_cache_metrics(),
+        }
+    }
+}
+
+impl<Evm> WaitForCaches for PayloadProcessor<Evm>
+where
+    Evm: ConfigureEvm,
+{
+    fn wait_for_caches(&self) -> CacheWaitDurations {
+        debug!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
+
+        // Wait for both caches in parallel using std threads
+        let execution_cache = self.execution_cache.clone();
+        let sparse_trie = self.sparse_state_trie.clone();
+
+        // Use channels and spawn_blocking instead of std::thread::spawn
+        let (execution_tx, execution_rx) = std::sync::mpsc::channel();
+        let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
+
+        self.executor.spawn_blocking(move || {
+            let _ = execution_tx.send(execution_cache.wait_for_availability());
+        });
+        self.executor.spawn_blocking(move || {
+            let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
+        });
+
+        let execution_cache_duration =
+            execution_rx.recv().expect("execution cache wait task failed to send result");
+        let sparse_trie_duration =
+            sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
+
+        debug!(
+            target: "engine::tree::payload_processor",
+            ?execution_cache_duration,
+            ?sparse_trie_duration,
+            "Execution cache and sparse trie locks acquired"
+        );
+        CacheWaitDurations {
+            execution_cache: execution_cache_duration,
+            sparse_trie: sparse_trie_duration,
         }
     }
 }
@@ -964,6 +1025,27 @@ impl PayloadExecutionCache {
     #[expect(unused)]
     pub(crate) fn clear(&self) {
         self.inner.write().take();
+    }
+
+    /// Waits until the execution cache becomes available for use.
+    ///
+    /// This acquires a write lock to ensure exclusive access, then immediately releases it.
+    /// This is useful for synchronization before starting payload processing.
+    ///
+    /// Returns the time spent waiting for the lock.
+    pub fn wait_for_availability(&self) -> Duration {
+        let start = Instant::now();
+        // Acquire write lock to wait for any current holders to finish
+        let _guard = self.inner.write();
+        let elapsed = start.elapsed();
+        if elapsed.as_millis() > 5 {
+            debug!(
+                target: "engine::tree::payload_processor",
+                blocked_for=?elapsed,
+                "Waited for execution cache to become available"
+            );
+        }
+        elapsed
     }
 
     /// Updates the cache with a closure that has exclusive access to the guard.
