@@ -2,7 +2,7 @@
 
 use crate::BranchNodeMasks;
 use alloc::vec::Vec;
-use alloy_primitives::{hex, B256};
+use alloy_primitives::hex;
 use alloy_rlp::{bytes, Decodable, Encodable, EMPTY_STRING_CODE};
 use alloy_trie::{
     nodes::{BranchNodeRef, ExtensionNode, ExtensionNodeRef, LeafNode, RlpNode, TrieNode},
@@ -47,7 +47,7 @@ impl ProofTrieNodeV2 {
                         path,
                         node: TrieNodeV2::Branch(BranchNodeV2 {
                             key: Nibbles::new(),
-                            hash: None,
+                            branch_rlp_node: None,
                             stack: branch.stack,
                             state_mask: branch.state_mask,
                         }),
@@ -72,7 +72,7 @@ impl ProofTrieNodeV2 {
                             branch_v2.key
                         );
                         branch_v2.key = ext.key;
-                        branch_v2.hash = ext.child.as_hash();
+                        branch_v2.branch_rlp_node = Some(ext.child);
                         last.path = path;
                     }
 
@@ -110,31 +110,20 @@ pub enum TrieNodeV2 {
     Extension(ExtensionNode),
 }
 
-impl TrieNodeV2 {
-    /// Converts this node into its RLP node representation, encoding into the provided buffer.
-    ///
-    /// Returns the [`RlpNode`] pointing to the encoded data.
-    pub fn encode_rlp(&self, buf: &mut Vec<u8>) {
-        match self {
-            Self::EmptyRoot => {
-                buf.push(EMPTY_STRING_CODE);
-            }
-            Self::Leaf(leaf) => {
-                leaf.as_ref().encode(buf);
-            }
-            Self::Branch(branch) => branch.encode_rlp(buf),
-            Self::Extension(ext) => {
-                ext.encode(buf);
-            }
-        }
-    }
-}
-
 impl Encodable for TrieNodeV2 {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        let mut buf = Vec::new();
-        self.encode_rlp(&mut buf);
-        out.put_slice(&buf);
+        match self {
+            Self::EmptyRoot => {
+                out.put_u8(EMPTY_STRING_CODE);
+            }
+            Self::Leaf(leaf) => {
+                leaf.as_ref().encode(out);
+            }
+            Self::Branch(branch) => branch.encode(out),
+            Self::Extension(ext) => {
+                ext.encode(out);
+            }
+        }
     }
 }
 
@@ -185,13 +174,9 @@ pub struct BranchNodeV2 {
     pub stack: Vec<RlpNode>,
     /// The bitmask indicating the presence of children at the respective nibble positions
     pub state_mask: TrieMask,
-    /// The hash of the branch node.
-    ///
-    /// This is [`None`] in 2 cases:
-    ///   - When the `key` is empty, i.e this branch is not coupled with a child extension node.
-    ///   - When the branch encoding is short enough that it can be stored in the database without
-    ///     hashing.
-    pub hash: Option<B256>,
+    /// [`RlpNode`] encoding of the branch node. Always provided when `key` is not empty (i.e this
+    /// is an extension node).
+    pub branch_rlp_node: Option<RlpNode>,
 }
 
 impl fmt::Debug for BranchNodeV2 {
@@ -200,7 +185,7 @@ impl fmt::Debug for BranchNodeV2 {
             .field("key", &self.key)
             .field("stack", &self.stack.iter().map(hex::encode).collect::<Vec<_>>())
             .field("state_mask", &self.state_mask)
-            .field("hash", &self.hash)
+            .field("branch_rlp_node", &self.branch_rlp_node)
             .finish()
     }
 }
@@ -211,29 +196,24 @@ impl BranchNodeV2 {
         key: Nibbles,
         stack: Vec<RlpNode>,
         state_mask: TrieMask,
-        hash: Option<B256>,
+        branch_rlp_node: Option<RlpNode>,
     ) -> Self {
-        Self { key, stack, state_mask, hash }
+        Self { key, stack, state_mask, branch_rlp_node }
     }
+}
 
-    /// Converts this node into its RLP node representation, encoding into the provided buffer.
-    ///
-    /// Returns the [`RlpNode`] pointing to the encoded data.
-    pub fn encode_rlp(&self, buf: &mut Vec<u8>) {
-        // We always start by encoding the branch
-        let branch_ref = BranchNodeRef::new(&self.stack, self.state_mask);
-        branch_ref.encode(buf);
-
-        // If key is empty then there is no parent extension, the encoded branch is the result
+impl Encodable for BranchNodeV2 {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
         if self.key.is_empty() {
-            return
+            BranchNodeRef::new(&self.stack, self.state_mask).encode(out);
+            return;
         }
 
-        // Convert branch to `RlpNode`. This will hash it if it's >32 bytes encoded.
-        let branch_rlp_node = RlpNode::from_rlp(buf);
+        let branch_rlp_node = self
+            .branch_rlp_node
+            .as_ref()
+            .expect("branch_rlp_node must always be present for extension nodes");
 
-        // Clear the buffer and encode the extension into it.
-        buf.clear();
-        ExtensionNodeRef::new(&self.key, branch_rlp_node.as_slice()).encode(buf);
+        ExtensionNodeRef::new(&self.key, branch_rlp_node.as_slice()).encode(out);
     }
 }

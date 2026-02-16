@@ -2060,7 +2060,7 @@ impl ParallelSparseTrie {
                             branch.state_mask,
                             &branch.stack,
                             masks,
-                            branch.hash,
+                            branch.branch_rlp_node.clone(),
                         )?
                 } else if !SparseSubtrieType::path_len_is_upper(branch_path.len() + 1) {
                     // If a branch is at the cutoff level of the trie then it will be in the upper
@@ -2620,7 +2620,7 @@ impl SparseSubtrie {
         state_mask: TrieMask,
         children: &[RlpNode],
         masks: Option<BranchNodeMasks>,
-        hash: Option<B256>,
+        rlp_node: Option<RlpNode>,
     ) -> SparseTrieResult<()> {
         match self.nodes.entry(path) {
             Entry::Occupied(mut entry) => {
@@ -2644,7 +2644,7 @@ impl SparseSubtrie {
             Entry::Vacant(entry) => {
                 entry.insert(SparseNode::Branch {
                     state_mask,
-                    hash,
+                    hash: rlp_node.as_ref().and_then(|n| n.as_hash()),
                     store_in_db_trie: Some(
                         masks.is_some_and(|m| !m.hash_mask.is_empty() || !m.tree_mask.is_empty()),
                     ),
@@ -2721,7 +2721,13 @@ impl SparseSubtrie {
             }
             TrieNodeV2::Branch(branch) => {
                 if branch.key.is_empty() {
-                    self.reveal_branch(path, branch.state_mask, &branch.stack, masks, branch.hash)?;
+                    self.reveal_branch(
+                        path,
+                        branch.state_mask,
+                        &branch.stack,
+                        masks,
+                        branch.branch_rlp_node.clone(),
+                    )?;
                     return Ok(true);
                 }
 
@@ -2774,7 +2780,7 @@ impl SparseSubtrie {
                     branch.state_mask,
                     &branch.stack,
                     masks,
-                    branch.hash,
+                    branch.branch_rlp_node.clone(),
                 )?;
             }
             TrieNodeV2::Extension(ext) => match self.nodes.entry(path) {

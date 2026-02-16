@@ -1285,7 +1285,7 @@ fn filter_revealed_v2_proof_nodes(
                     path: node.path,
                     node: {
                         let mut buf = Vec::new();
-                        node.node.encode_rlp(&mut buf);
+                        node.node.encode(&mut buf);
                         buf.into()
                     },
                 }
@@ -1344,7 +1344,7 @@ mod tests {
                         key: Nibbles::default(),
                         stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
                         state_mask: TrieMask::new(0b11),
-                        hash: None,
+                        branch_rlp_node: None,
                     }))
                     .into(),
                 ),
@@ -1419,7 +1419,7 @@ mod tests {
                                 key: Nibbles::default(),
                                 stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
                                 state_mask: TrieMask::new(0b11),
-                                hash: None,
+                                branch_rlp_node: None,
                             }))
                             .into(),
                         ),
@@ -1500,7 +1500,7 @@ mod tests {
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
             ],
             state_mask: TrieMask::new(0b11),
-            hash: None,
+            branch_rlp_node: None,
         });
 
         // Create V2 proof nodes with masks already included
@@ -1565,7 +1565,7 @@ mod tests {
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
             ],
             state_mask: TrieMask::new(0b11),
-            hash: None,
+            branch_rlp_node: None,
         });
 
         let v2_proof_nodes = vec![

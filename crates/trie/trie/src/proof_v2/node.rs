@@ -60,7 +60,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 Ok((RlpNode::from_rlp(&buf[value_enc_len..]), None))
             }
             Self::Branch { node: branch_node, .. } => {
-                branch_node.encode_rlp(buf);
+                branch_node.encode(buf);
                 Ok((RlpNode::from_rlp(buf), Some(branch_node.stack)))
             }
             Self::RlpNode(rlp_node) => Ok((rlp_node, None)),
@@ -125,10 +125,10 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
             Self::Leaf { short_key, .. } => {
                 *short_key = trim_nibbles_prefix(short_key, len);
             }
-            Self::Branch { node: BranchNodeV2 { key, hash, .. }, .. } => {
+            Self::Branch { node: BranchNodeV2 { key, branch_rlp_node, .. }, .. } => {
                 *key = trim_nibbles_prefix(key, len);
                 if key.is_empty() {
-                    *hash = None;
+                    *branch_rlp_node = None;
                 }
             }
             Self::RlpNode(_) => {

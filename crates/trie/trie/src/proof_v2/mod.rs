@@ -280,7 +280,7 @@ where
             // Use the `ProofTrieNodeV2` to encode the `RlpNode`, and then push it onto retained
             // nodes before returning.
             self.rlp_encode_buf.clear();
-            proof_node.node.encode_rlp(&mut self.rlp_encode_buf);
+            proof_node.node.encode(&mut self.rlp_encode_buf);
 
             self.retained_proofs.push(proof_node);
             return Ok(RlpNode::from_rlp(&self.rlp_encode_buf));
@@ -543,20 +543,17 @@ where
         );
 
         // Compute hash for the branch node if it has a parent extension.
-        let hash = if short_key.is_empty() {
+        let rlp_node = if short_key.is_empty() {
             None
         } else {
-            let branch = BranchNodeRef::new(&rlp_nodes_buf, branch.state_mask);
-            (branch.length() > 32).then(|| {
-                self.rlp_encode_buf.clear();
-                branch.encode(&mut self.rlp_encode_buf);
-                keccak256(&self.rlp_encode_buf)
-            })
+            self.rlp_encode_buf.clear();
+            BranchNodeRef::new(&rlp_nodes_buf, branch.state_mask).encode(&mut self.rlp_encode_buf);
+            Some(RlpNode::from_rlp(&self.rlp_encode_buf))
         };
 
         // Wrap the `BranchNodeV2` so it can be pushed onto the child stack.
         let branch_as_child = ProofTrieBranchChild::Branch {
-            node: BranchNodeV2::new(short_key, rlp_nodes_buf, branch.state_mask, hash),
+            node: BranchNodeV2::new(short_key, rlp_nodes_buf, branch.state_mask, rlp_node),
             masks: branch.masks,
         };
 
@@ -1364,7 +1361,7 @@ where
 
         // Compute the hash of the root node
         self.rlp_encode_buf.clear();
-        root.node.encode_rlp(&mut self.rlp_encode_buf);
+        root.node.encode(&mut self.rlp_encode_buf);
         let root_hash = keccak256(&self.rlp_encode_buf);
 
         Ok(Some(root_hash))
