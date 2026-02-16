@@ -1,4 +1,4 @@
-//! Helpers for testing.
+//! A no-op EVM configuration used as a typesystem placeholder to satisfy [`ConfigureEvm`] bounds.
 
 use crate::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
