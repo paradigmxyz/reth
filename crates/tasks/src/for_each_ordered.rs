@@ -1,13 +1,10 @@
+use crossbeam_utils::CachePadded;
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::{
     cell::UnsafeCell,
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, Ordering},
 };
-
-use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-
-mod bitmap;
-use bitmap::AtomicBitmap;
 
 /// Extension trait for [`IndexedParallelIterator`]
 /// that streams results to a sequential consumer in index order.
@@ -36,47 +33,63 @@ impl<I: IndexedParallelIterator> ForEachOrdered for I {
     }
 }
 
-struct Slot<T>(UnsafeCell<MaybeUninit<T>>);
+/// A cache-line-padded slot with an atomic ready flag.
+struct Slot<T> {
+    value: UnsafeCell<MaybeUninit<T>>,
+    ready: AtomicBool,
+}
 
-// SAFETY: Each index is written by exactly one producer and read by exactly one consumer.
-// The AtomicBitmap synchronizes access (Release on set, Acquire on check).
-unsafe impl<T: Send> Sync for Slot<T> {}
+// SAFETY: Each slot is written by exactly one producer and read by exactly one consumer.
+// The AtomicBool synchronizes access (Release on write, Acquire on read).
 unsafe impl<T: Send> Send for Slot<T> {}
+unsafe impl<T: Send> Sync for Slot<T> {}
 
 struct Shared<T> {
-    slots: Box<[Slot<T>]>,
-    ready: AtomicBitmap,
+    slots: Box<[CachePadded<Slot<T>>]>,
     panicked: AtomicBool,
 }
 
 impl<T> Shared<T> {
     fn new(n: usize) -> Self {
-        let slots = (0..n).map(|_| Slot(UnsafeCell::new(MaybeUninit::uninit()))).collect();
-        Self { slots, ready: AtomicBitmap::new(n), panicked: AtomicBool::new(false) }
+        Self {
+            // SAFETY: Zero is a valid bit pattern for Slot.
+            // Needs to be zero for `ready` to be false.
+            slots: unsafe {
+                Box::<[_]>::assume_init(Box::<[CachePadded<Slot<T>>]>::new_zeroed_slice(n))
+            },
+            panicked: AtomicBool::new(false),
+        }
     }
 
     /// # Safety
     /// Index `i` must be in bounds and must only be written once.
-    unsafe fn write(&self, i: usize, value: T) {
-        unsafe { (*self.slots.get_unchecked(i).0.get()).write(value) };
-        unsafe { self.ready.set_unchecked(i, Ordering::Release) };
+    #[inline]
+    unsafe fn write(&self, i: usize, val: T) {
+        let slot = unsafe { self.slots.get_unchecked(i) };
+        unsafe { (*slot.value.get()).write(val) };
+        slot.ready.store(true, Ordering::Release);
     }
 
     /// # Safety
-    /// Index `i` must be in bounds.
-    /// Must only be called after observing readiness via `ready.is_set(i)`.
+    /// Index `i` must be in bounds. Must only be called after `ready` is observed `true`.
+    #[inline]
     unsafe fn take(&self, i: usize) -> T {
-        let v = unsafe { (*self.slots.get_unchecked(i).0.get()).assume_init_read() };
-        unsafe { self.ready.clear_unchecked(i, Ordering::Relaxed) };
-        v
+        let slot = unsafe { self.slots.get_unchecked(i) };
+        unsafe { (*slot.value.get()).assume_init_read() }
+    }
+
+    #[inline]
+    fn is_ready(&self, i: usize) -> bool {
+        // SAFETY: caller ensures `i < n`.
+        unsafe { self.slots.get_unchecked(i) }.ready.load(Ordering::Acquire)
     }
 }
 
 impl<T> Drop for Shared<T> {
     fn drop(&mut self) {
-        for idx in self.ready.iter_set_mut() {
-            unsafe {
-                (*self.slots[idx].0.get()).assume_init_drop();
+        for slot in &mut *self.slots {
+            if *slot.ready.get_mut() {
+                unsafe { (*slot.value.get()).assume_init_drop() };
             }
         }
     }
@@ -84,12 +97,11 @@ impl<T> Drop for Shared<T> {
 
 /// Executes a parallel iterator and delivers results to a sequential callback in index order.
 ///
-/// This works by pre-allocating a slot buffer with one entry per item. A rayon task computes
-/// all items in parallel, writing each result into its corresponding slot and marking it ready
-/// via an atomic bitmap (`Release` store). Meanwhile, the calling thread acts as the consumer:
-/// it walks slots 0, 1, 2, … in order, spin-waiting on the ready bit (`Acquire` load) for
-/// each, then taking the value and passing it to `f`. This guarantees `f` sees items in the
-/// original iterator order while still benefiting from parallel computation.
+/// This works by pre-allocating one cache-line-padded slot per item. Each slot holds an
+/// `UnsafeCell<MaybeUninit<T>>` and an `AtomicBool` ready flag. A rayon task computes all
+/// items in parallel, writing each result into its slot and setting the flag (`Release`).
+/// The calling thread walks slots 0, 1, 2, … in order, spinning on the flag (`Acquire`),
+/// then reading the value and passing it to `f`.
 fn ordered_impl<I, F>(iter: I, mut f: F)
 where
     I: IndexedParallelIterator,
@@ -112,9 +124,7 @@ where
                 iter.enumerate().for_each(|(i, item)| {
                     // SAFETY: `enumerate()` on an IndexedParallelIterator yields each
                     // index exactly once.
-                    unsafe {
-                        shared.write(i, item);
-                    }
+                    unsafe { shared.write(i, item) };
                 });
             }));
             if let Err(payload) = res {
@@ -129,8 +139,7 @@ where
         for i in 0..n {
             let mut backoff = 0u32;
             'wait: loop {
-                // SAFETY: `i < n` and the bitmap was sized for `n` bits.
-                if unsafe { shared.ready.is_set_unchecked(i, Ordering::Acquire) } {
+                if shared.is_ready(i) {
                     break 'wait;
                 }
 
@@ -154,7 +163,7 @@ where
                     std::thread::yield_now();
                 }
             }
-            // SAFETY: we just observed the ready bit with Acquire ordering.
+            // SAFETY: `i < n` and we just observed the ready flag with Acquire ordering.
             let value = unsafe { shared.take(i) };
             f(value);
         }

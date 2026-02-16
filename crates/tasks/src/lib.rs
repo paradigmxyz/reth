@@ -42,9 +42,9 @@ pub mod pool;
 
 /// Lock-free ordered parallel iterator extension trait.
 #[cfg(feature = "rayon")]
-pub mod rayon_ordered;
+pub mod for_each_ordered;
 #[cfg(feature = "rayon")]
-pub use rayon_ordered::ForEachOrdered;
+pub use for_each_ordered::ForEachOrdered;
 
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
