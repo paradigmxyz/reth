@@ -1268,11 +1268,21 @@ impl SparseTrie for ParallelSparseTrie {
         // Upper prune roots that are prefixes of lower subtrie root paths cause the entire
         // subtrie to be cleared (preserving allocations for reuse).
         if !roots_upper.is_empty() {
+            let mut root_idx = 0;
+            let mut current_root: Option<&Nibbles> = None;
+
             for subtrie in &mut *self.lower_subtries {
-                let should_clear = subtrie.as_revealed_ref().is_some_and(|s| {
-                    let search_idx = roots_upper.partition_point(|(root, _)| root <= &s.path);
-                    search_idx > 0 && s.path.starts_with(&roots_upper[search_idx - 1].0)
-                });
+                let Some(subtrie_path) = subtrie.as_revealed_ref().map(|subtrie| subtrie.path)
+                else {
+                    continue;
+                };
+
+                while root_idx < roots_upper.len() && roots_upper[root_idx].0 <= subtrie_path {
+                    current_root = Some(&roots_upper[root_idx].0);
+                    root_idx += 1;
+                }
+
+                let should_clear = current_root.is_some_and(|root| subtrie_path.starts_with(root));
                 if should_clear {
                     subtrie.clear();
                 }
