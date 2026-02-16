@@ -56,9 +56,9 @@ where
     // Validate that the block access list hash matches the calculated block access list hash
     if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
         let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
-        let block_access_list_hash = compute_block_access_list_hash(
-            &block_access_list.as_ref().unwrap_or(&BlockAccessList::default()),
-        );
+        let default_bal = BlockAccessList::default();
+        let block_access_list_hash =
+            compute_block_access_list_hash(block_access_list.as_ref().unwrap_or(&default_bal));
         if block_access_list_hash != block_bal_hash {
             return Err(ConsensusError::BlockAccessListHashMismatch(
                 (block_access_list_hash, block_bal_hash).into(),
