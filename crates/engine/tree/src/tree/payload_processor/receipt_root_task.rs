@@ -13,6 +13,31 @@ use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tokio::sync::oneshot;
 
+/// Computes the receipt root and aggregated bloom filter from a slice of receipts.
+///
+/// This uses the same `OrderedTrieRootEncodedBuilder` algorithm as
+/// [`ReceiptRootTaskHandle::run`], ensuring identical results regardless of whether the
+/// computation runs inline or in a background task.
+pub fn compute_receipt_root_bloom<R: Receipt>(receipts: &[R]) -> (B256, Bloom) {
+    let mut builder = OrderedTrieRootEncodedBuilder::new(receipts.len());
+    let mut aggregated_bloom = Bloom::ZERO;
+    let mut encode_buf = Vec::new();
+
+    for (index, receipt) in receipts.iter().enumerate() {
+        let receipt_with_bloom = receipt.with_bloom_ref();
+
+        encode_buf.clear();
+        receipt_with_bloom.encode_2718(&mut encode_buf);
+
+        aggregated_bloom |= *receipt_with_bloom.bloom_ref();
+        // Safety: indices are sequential and within bounds, push cannot fail.
+        let _ = builder.push(index, &encode_buf);
+    }
+
+    let root = builder.finalize().expect("sequential indices should always produce a valid root");
+    (root, aggregated_bloom)
+}
+
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
 pub struct IndexedReceipt<R> {
@@ -242,6 +267,51 @@ mod tests {
 
         assert_eq!(task_root, expected_root);
         assert_eq!(task_bloom, expected_bloom);
+    }
+
+    #[test]
+    fn test_compute_receipt_root_bloom_matches_task() {
+        let receipts = vec![
+            Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 21000,
+                success: true,
+                logs: vec![],
+            },
+            Receipt {
+                tx_type: TxType::Eip1559,
+                cumulative_gas_used: 42000,
+                success: true,
+                logs: vec![Log {
+                    address: Address::ZERO,
+                    data: alloy_primitives::LogData::new_unchecked(vec![B256::ZERO], Bytes::new()),
+                }],
+            },
+            Receipt {
+                tx_type: TxType::Eip2930,
+                cumulative_gas_used: 63000,
+                success: false,
+                logs: vec![],
+            },
+        ];
+
+        let (inline_root, inline_bloom) = compute_receipt_root_bloom(&receipts);
+
+        // Verify against the standard calculation
+        let receipts_with_bloom: Vec<_> = receipts.iter().map(|r| r.with_bloom_ref()).collect();
+        let expected_root = calculate_receipt_root(&receipts_with_bloom);
+        let expected_bloom =
+            receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
+
+        assert_eq!(inline_root, expected_root);
+        assert_eq!(inline_bloom, expected_bloom);
+    }
+
+    #[test]
+    fn test_compute_receipt_root_bloom_empty() {
+        let (root, bloom) = compute_receipt_root_bloom::<Receipt>(&[]);
+        assert_eq!(root, reth_trie_common::EMPTY_ROOT_HASH);
+        assert_eq!(bloom, Bloom::ZERO);
     }
 
     #[tokio::test]
