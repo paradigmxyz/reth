@@ -13,6 +13,7 @@ use crate::{
     bench::{
         context::BenchContext,
         helpers::parse_duration,
+        metrics_scraper::MetricsScraper,
         output::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
@@ -30,7 +31,7 @@ use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_core::args::BenchmarkArgs;
 use std::time::{Duration, Instant};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// `reth benchmark new-payload-fcu` command
 #[derive(Debug, Parser)]
@@ -154,6 +155,8 @@ impl Command {
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
+
+        let mut metrics_scraper = MetricsScraper::maybe_new(self.benchmark.metrics_url.clone());
 
         if use_reth_namespace {
             info!("Using reth_newPayload endpoint");
@@ -288,6 +291,12 @@ impl Command {
             };
             info!(target: "reth-bench", progress, %combined_result);
 
+            if let Some(scraper) = metrics_scraper.as_mut() {
+                if let Err(err) = scraper.scrape_after_block(block_number).await {
+                    warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
+                }
+            }
+
             if let Some(w) = &mut waiter {
                 w.on_block(block_number).await?;
             }
@@ -311,6 +320,10 @@ impl Command {
 
         if let Some(ref path) = self.benchmark.output {
             write_benchmark_results(path, &gas_output_results, &combined_results)?;
+        }
+
+        if let (Some(path), Some(scraper)) = (&self.benchmark.output, &metrics_scraper) {
+            scraper.write_csv(path)?;
         }
 
         let gas_output =

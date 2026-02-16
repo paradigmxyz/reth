@@ -15,6 +15,7 @@ use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
     bench::{
         helpers::parse_duration,
+        metrics_scraper::MetricsScraper,
         output::{
             write_benchmark_results, CombinedResult, GasRampPayloadFile, NewPayloadResult,
             TotalGasOutput, TotalGasRow,
@@ -135,6 +136,14 @@ pub struct Command {
     /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     reth_new_payload: bool,
+
+    /// Optional Prometheus metrics endpoint to scrape after each block.
+    ///
+    /// When provided, reth-bench will fetch metrics from this URL after each
+    /// payload, recording per-block execution and state root durations.
+    /// Results are written to `metrics.csv` in the output directory.
+    #[arg(long = "metrics-url", value_name = "URL", verbatim_doc_comment)]
+    metrics_url: Option<String>,
 }
 
 /// A loaded payload ready for execution.
@@ -203,6 +212,8 @@ impl Command {
             }
             (None, false) => None,
         };
+
+        let mut metrics_scraper = MetricsScraper::maybe_new(self.metrics_url.clone());
 
         // Set up authenticated engine provider
         let jwt =
@@ -395,6 +406,12 @@ impl Command {
             let progress = format!("{}/{}", i + 1, payloads.len());
             info!(target: "reth-bench", progress, %combined_result);
 
+            if let Some(scraper) = metrics_scraper.as_mut() {
+                if let Err(err) = scraper.scrape_after_block(block_number).await {
+                    tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
+                }
+            }
+
             if let Some(w) = &mut waiter {
                 w.on_block(block_number).await?;
             }
@@ -416,6 +433,10 @@ impl Command {
 
         if let Some(ref path) = self.output {
             write_benchmark_results(path, &gas_output_results, &combined_results)?;
+        }
+
+        if let (Some(path), Some(scraper)) = (&self.output, &metrics_scraper) {
+            scraper.write_csv(path)?;
         }
 
         let gas_output =
