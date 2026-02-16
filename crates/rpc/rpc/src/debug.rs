@@ -40,9 +40,78 @@ use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
+
+/// Parses a Go-style duration string into a [`Duration`].
+///
+/// Go duration strings consist of decimal numbers, each with an optional fractional part
+/// and a unit suffix. Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".
+///
+/// Examples: "5s", "100ms", "1.5s", "2h45m", "300ms"
+///
+/// A pure numeric string is treated as nanoseconds.
+fn parse_go_duration(s: &str) -> Option<Duration> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+
+    // Pure number is treated as nanoseconds
+    if let Ok(nanos) = s.parse::<u64>() {
+        return if nanos == 0 { None } else { Some(Duration::from_nanos(nanos)) };
+    }
+
+    let mut total_nanos: f64 = 0.0;
+    let mut remaining = s.as_bytes();
+
+    while !remaining.is_empty() {
+        // Parse the numeric part (integer or floating point)
+        let mut i = 0;
+        while i < remaining.len() && (remaining[i].is_ascii_digit() || remaining[i] == b'.') {
+            i += 1;
+        }
+        if i == 0 {
+            return None;
+        }
+        let num_str = std::str::from_utf8(&remaining[..i]).ok()?;
+        let value: f64 = num_str.parse().ok()?;
+        remaining = &remaining[i..];
+
+        // Parse the unit suffix
+        let (multiplier, consumed) = if remaining.starts_with(b"ns") {
+            (1.0_f64, 2)
+        } else if remaining.starts_with(b"us") {
+            (1_000.0, 2)
+        } else if remaining.starts_with(b"\xc2\xb5s") {
+            // µ (U+00B5, micro sign) followed by 's'
+            (1_000.0, 3)
+        } else if remaining.starts_with(b"\xce\xbcs") {
+            // μ (U+03BC, Greek small letter mu) followed by 's'
+            (1_000.0, 3)
+        } else if remaining.starts_with(b"ms") {
+            (1_000_000.0, 2)
+        } else if remaining.starts_with(b"s") {
+            (1_000_000_000.0, 1)
+        } else if remaining.starts_with(b"m") {
+            (60_000_000_000.0, 1)
+        } else if remaining.starts_with(b"h") {
+            (3_600_000_000_000.0, 1)
+        } else {
+            return None;
+        };
+
+        total_nanos += value * multiplier;
+        remaining = &remaining[consumed..];
+    }
+
+    if total_nanos <= 0.0 {
+        return None;
+    }
+
+    Some(Duration::from_nanos(total_nanos as u64))
+}
 
 /// `debug` API implementation.
 ///
@@ -113,8 +182,11 @@ where
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
-        self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+        let timeout = opts.timeout.as_deref().and_then(parse_go_duration);
+
+        let trace_fut = self.eth_api().spawn_with_state_at_block(
+            block.parent_hash(),
+            move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
                 eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
@@ -155,8 +227,17 @@ where
                 }
 
                 Ok(results)
-            })
-            .await
+            },
+        );
+
+        if let Some(timeout_duration) = timeout {
+            match tokio::time::timeout(timeout_duration, trace_fut).await {
+                Ok(result) => result,
+                Err(_) => Err(EthApiError::ExecutionTimedOut(timeout_duration).into()),
+            }
+        } else {
+            trace_fut.await
+        }
     }
 
     /// Replays the given block and returns the trace of each transaction.
@@ -228,13 +309,15 @@ where
         };
         let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
 
+        let timeout = opts.timeout.as_deref().and_then(parse_go_duration);
+
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash().into();
         let block_hash = block.hash();
 
-        self.eth_api()
-            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
+        let trace_fut =
+            self.eth_api().spawn_with_state_at_block(state_at, move |eth_api, mut db| {
                 let block_txs = block.transactions_recovered();
 
                 // configure env for the target transaction
@@ -270,8 +353,16 @@ where
                     .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
-            })
-            .await
+            });
+
+        if let Some(timeout_duration) = timeout {
+            match tokio::time::timeout(timeout_duration, trace_fut).await {
+                Ok(result) => result,
+                Err(_) => Err(EthApiError::ExecutionTimedOut(timeout_duration).into()),
+            }
+        } else {
+            trace_fut.await
+        }
     }
 
     /// The `debug_traceCall` method lets you run an `eth_call` within the context of the given
@@ -296,32 +387,51 @@ where
             block_overrides,
             tx_index,
         } = opts;
+
+        let timeout = tracing_options.timeout.as_deref().and_then(parse_go_duration);
         let overrides = EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
 
-        // Check if we need to replay transactions for a specific tx_index
-        if let Some(tx_idx) = tx_index {
-            return self
-                .debug_trace_call_at_tx_index(call, at, tx_idx as usize, tracing_options, overrides)
-                .await;
-        }
+        let trace_fut = async {
+            // Check if we need to replay transactions for a specific tx_index
+            if let Some(tx_idx) = tx_index {
+                return self
+                    .debug_trace_call_at_tx_index(
+                        call,
+                        at,
+                        tx_idx as usize,
+                        tracing_options,
+                        overrides,
+                    )
+                    .await;
+            }
 
-        let this = self.clone();
-        self.eth_api()
-            .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                let mut inspector =
-                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
-                let res = this.eth_api().inspect(
-                    &mut *db,
-                    evm_env.clone(),
-                    tx_env.clone(),
-                    &mut inspector,
-                )?;
-                let trace = inspector
-                    .get_result(None, &tx_env, &evm_env.block_env, &res, db)
-                    .map_err(Eth::Error::from_eth_err)?;
-                Ok(trace)
-            })
-            .await
+            let this = self.clone();
+            self.eth_api()
+                .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
+                    let mut inspector =
+                        DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
+                    let res = this.eth_api().inspect(
+                        &mut *db,
+                        evm_env.clone(),
+                        tx_env.clone(),
+                        &mut inspector,
+                    )?;
+                    let trace = inspector
+                        .get_result(None, &tx_env, &evm_env.block_env, &res, db)
+                        .map_err(Eth::Error::from_eth_err)?;
+                    Ok(trace)
+                })
+                .await
+        };
+
+        if let Some(timeout_duration) = timeout {
+            match tokio::time::timeout(timeout_duration, trace_fut).await {
+                Ok(result) => result,
+                Err(_) => Err(EthApiError::ExecutionTimedOut(timeout_duration).into()),
+            }
+        } else {
+            trace_fut.await
+        }
     }
 
     /// Helper method to execute `debug_trace_call` at a specific transaction index within a block.
@@ -412,6 +522,8 @@ where
         let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
 
+        let timeout = tracing_options.timeout.as_deref().and_then(parse_go_duration);
+
         // we're essentially replaying the transactions in the block here, hence we need the state
         // that points to the beginning of the block, which is the state at the parent block
         let mut at = block.parent_hash();
@@ -428,70 +540,78 @@ where
             replay_block_txs = false;
         }
 
-        self.eth_api()
-            .spawn_with_state_at_block(at, move |eth_api, mut db| {
-                // the outer vec for the bundles
-                let mut all_bundles = Vec::with_capacity(bundles.len());
+        let trace_fut = self.eth_api().spawn_with_state_at_block(at, move |eth_api, mut db| {
+            // the outer vec for the bundles
+            let mut all_bundles = Vec::with_capacity(bundles.len());
 
-                if replay_block_txs {
-                    // only need to replay the transactions in the block if not all transactions are
-                    // to be replayed
-                    let transactions = block.transactions_recovered().take(num_txs);
+            if replay_block_txs {
+                // only need to replay the transactions in the block if not all transactions are
+                // to be replayed
+                let transactions = block.transactions_recovered().take(num_txs);
 
-                    // Execute all transactions until index
-                    for tx in transactions {
-                        let tx_env = eth_api.evm_config().tx_env(tx);
-                        let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                // Execute all transactions until index
+                for tx in transactions {
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                    db.commit(res.state);
+                }
+            }
+
+            // Trace all bundles
+            let mut bundles = bundles.into_iter().peekable();
+            let mut inspector =
+                DebugInspector::new(tracing_options.clone()).map_err(Eth::Error::from_eth_err)?;
+            while let Some(bundle) = bundles.next() {
+                let mut results = Vec::with_capacity(bundle.transactions.len());
+                let Bundle { transactions, block_override } = bundle;
+
+                let block_overrides = block_override.map(Box::new);
+
+                let mut transactions = transactions.into_iter().peekable();
+                while let Some(tx) = transactions.next() {
+                    // apply state overrides only once, before the first transaction
+                    let state_overrides = state_overrides.take();
+                    let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
+
+                    let (evm_env, tx_env) =
+                        eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
+
+                    let res = eth_api.inspect(
+                        &mut db,
+                        evm_env.clone(),
+                        tx_env.clone(),
+                        &mut inspector,
+                    )?;
+                    let trace = inspector
+                        .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
+                        .map_err(Eth::Error::from_eth_err)?;
+
+                    // If there is more transactions, commit the database
+                    // If there is no transactions, but more bundles, commit to the database
+                    // too
+                    if transactions.peek().is_some() || bundles.peek().is_some() {
+                        inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         db.commit(res.state);
                     }
+                    results.push(trace);
                 }
+                // Increment block_env number and timestamp for the next bundle
+                evm_env.block_env.inner_mut().number += uint!(1_U256);
+                evm_env.block_env.inner_mut().timestamp += uint!(12_U256);
 
-                // Trace all bundles
-                let mut bundles = bundles.into_iter().peekable();
-                let mut inspector = DebugInspector::new(tracing_options.clone())
-                    .map_err(Eth::Error::from_eth_err)?;
-                while let Some(bundle) = bundles.next() {
-                    let mut results = Vec::with_capacity(bundle.transactions.len());
-                    let Bundle { transactions, block_override } = bundle;
+                all_bundles.push(results);
+            }
+            Ok(all_bundles)
+        });
 
-                    let block_overrides = block_override.map(Box::new);
-
-                    let mut transactions = transactions.into_iter().peekable();
-                    while let Some(tx) = transactions.next() {
-                        // apply state overrides only once, before the first transaction
-                        let state_overrides = state_overrides.take();
-                        let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
-
-                        let (evm_env, tx_env) =
-                            eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
-
-                        let res = eth_api.inspect(
-                            &mut db,
-                            evm_env.clone(),
-                            tx_env.clone(),
-                            &mut inspector,
-                        )?;
-                        let trace = inspector
-                            .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
-                            .map_err(Eth::Error::from_eth_err)?;
-
-                        // If there is more transactions, commit the database
-                        // If there is no transactions, but more bundles, commit to the database too
-                        if transactions.peek().is_some() || bundles.peek().is_some() {
-                            inspector.fuse().map_err(Eth::Error::from_eth_err)?;
-                            db.commit(res.state);
-                        }
-                        results.push(trace);
-                    }
-                    // Increment block_env number and timestamp for the next bundle
-                    evm_env.block_env.inner_mut().number += uint!(1_U256);
-                    evm_env.block_env.inner_mut().timestamp += uint!(12_U256);
-
-                    all_bundles.push(results);
-                }
-                Ok(all_bundles)
-            })
-            .await
+        if let Some(timeout_duration) = timeout {
+            match tokio::time::timeout(timeout_duration, trace_fut).await {
+                Ok(result) => result,
+                Err(_) => Err(EthApiError::ExecutionTimedOut(timeout_duration).into()),
+            }
+        } else {
+            trace_fut.await
+        }
     }
 
     /// Generates an execution witness for the given block hash. see
@@ -1155,5 +1275,114 @@ impl<B: BlockTrait> BadBlockStore<B> {
 impl<B: BlockTrait> Default for BadBlockStore<B> {
     fn default() -> Self {
         Self::new(64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_rpc_types_trace::geth::GethDebugTracingOptions;
+
+    #[test]
+    fn parse_go_duration_seconds() {
+        assert_eq!(parse_go_duration("5s"), Some(Duration::from_secs(5)));
+        assert_eq!(parse_go_duration("10s"), Some(Duration::from_secs(10)));
+        assert_eq!(parse_go_duration("1s"), Some(Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn parse_go_duration_milliseconds() {
+        assert_eq!(parse_go_duration("100ms"), Some(Duration::from_millis(100)));
+        assert_eq!(parse_go_duration("500ms"), Some(Duration::from_millis(500)));
+        assert_eq!(parse_go_duration("1ms"), Some(Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn parse_go_duration_fractional() {
+        assert_eq!(parse_go_duration("1.5s"), Some(Duration::from_millis(1500)));
+        assert_eq!(parse_go_duration("0.5s"), Some(Duration::from_millis(500)));
+        assert_eq!(parse_go_duration("2.5m"), Some(Duration::from_secs(150)));
+    }
+
+    #[test]
+    fn parse_go_duration_compound() {
+        assert_eq!(parse_go_duration("1h30m"), Some(Duration::from_secs(3600 + 30 * 60)));
+        assert_eq!(
+            parse_go_duration("2h45m30s"),
+            Some(Duration::from_secs(2 * 3600 + 45 * 60 + 30))
+        );
+    }
+
+    #[test]
+    fn parse_go_duration_nanoseconds_string() {
+        // Pure number is treated as nanoseconds
+        assert_eq!(parse_go_duration("5000000000"), Some(Duration::from_secs(5)));
+        assert_eq!(parse_go_duration("1000000000"), Some(Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn parse_go_duration_units() {
+        assert_eq!(parse_go_duration("1h"), Some(Duration::from_secs(3600)));
+        assert_eq!(parse_go_duration("1m"), Some(Duration::from_secs(60)));
+        assert_eq!(parse_go_duration("1s"), Some(Duration::from_secs(1)));
+        assert_eq!(parse_go_duration("1000us"), Some(Duration::from_millis(1)));
+        assert_eq!(parse_go_duration("1000ns"), Some(Duration::from_micros(1)));
+    }
+
+    #[test]
+    fn parse_go_duration_invalid() {
+        assert_eq!(parse_go_duration(""), None);
+        assert_eq!(parse_go_duration("  "), None);
+        assert_eq!(parse_go_duration("invalid"), None);
+        assert_eq!(parse_go_duration("s"), None);
+        assert_eq!(parse_go_duration("0"), None);
+        assert_eq!(parse_go_duration("0s"), None);
+        assert_eq!(parse_go_duration("5x"), None);
+        assert_eq!(parse_go_duration("-5s"), None);
+        assert_eq!(parse_go_duration("1.2.3s"), None);
+    }
+
+    #[test]
+    fn parse_go_duration_whitespace() {
+        assert_eq!(parse_go_duration("  5s  "), Some(Duration::from_secs(5)));
+    }
+
+    /// Verifies that durations produced by alloy's `GethDebugTracingOptions::with_timeout`
+    /// (which formats as `"{}ms"`) are correctly parsed back.
+    #[test]
+    fn parse_go_duration_alloy_with_timeout_roundtrip() {
+        let opts = GethDebugTracingOptions::default().with_timeout(Duration::from_secs(5));
+        let parsed = opts.timeout.as_deref().and_then(parse_go_duration);
+        assert_eq!(parsed, Some(Duration::from_secs(5)));
+
+        let opts = GethDebugTracingOptions::default().with_timeout(Duration::from_millis(500));
+        let parsed = opts.timeout.as_deref().and_then(parse_go_duration);
+        assert_eq!(parsed, Some(Duration::from_millis(500)));
+
+        let opts = GethDebugTracingOptions::default().with_timeout(Duration::from_millis(100));
+        let parsed = opts.timeout.as_deref().and_then(parse_go_duration);
+        assert_eq!(parsed, Some(Duration::from_millis(100)));
+    }
+
+    /// Verifies that `GethDebugTracingOptions` without a timeout produces `None`.
+    #[test]
+    fn parse_go_duration_no_timeout_returns_none() {
+        let opts = GethDebugTracingOptions::default();
+        let parsed = opts.timeout.as_deref().and_then(parse_go_duration);
+        assert_eq!(parsed, None);
+    }
+
+    /// Verifies that `tokio::time::timeout` correctly aborts a slow future, matching
+    /// the pattern used in the debug trace methods.
+    #[tokio::test]
+    async fn timeout_aborts_slow_operation() {
+        let timeout_duration = Duration::from_millis(50);
+        let slow_future = async {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            Ok::<i32, String>(42)
+        };
+
+        let result = tokio::time::timeout(timeout_duration, slow_future).await;
+        assert!(result.is_err(), "expected timeout to fire");
     }
 }
