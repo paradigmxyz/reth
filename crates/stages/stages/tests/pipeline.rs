@@ -153,23 +153,26 @@ fn build_downloaders_from_file_client(
     provider_factory: reth_provider::ProviderFactory<
         reth_provider::test_utils::MockNodeTypesWithDB,
     >,
-) -> (impl HeaderDownloader<Header = Header>, impl BodyDownloader<Block = Block>) {
+) -> (impl HeaderDownloader<Header = Header>, impl BodyDownloader<Block = Block>, reth_tasks::Runtime)
+{
     let tip = file_client.tip().expect("file client should have tip");
     let min_block = file_client.min_block().expect("file client should have min block");
     let max_block = file_client.max_block().expect("file client should have max block");
 
+    let runtime = reth_tasks::Runtime::test();
+
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(stages_config.headers)
         .build(file_client.clone(), consensus.clone())
-        .into_task();
+        .into_task_with(&runtime);
     header_downloader.update_local_head(genesis);
     header_downloader.update_sync_target(SyncTarget::Tip(tip));
 
     let mut body_downloader = BodiesDownloaderBuilder::new(stages_config.bodies)
         .build(file_client, consensus, provider_factory)
-        .into_task();
+        .into_task_with(&runtime);
     body_downloader.set_download_range(min_block..=max_block).expect("set download range");
 
-    (header_downloader, body_downloader)
+    (header_downloader, body_downloader, runtime)
 }
 
 /// Builds a pipeline with `DefaultStages`.
@@ -415,7 +418,7 @@ async fn run_pipeline_forward_and_unwind(
     let tip = file_client.tip().expect("tip");
 
     let stages_config = StageConfig::default();
-    let (header_downloader, body_downloader) = build_downloaders_from_file_client(
+    let (header_downloader, body_downloader, _runtime) = build_downloaders_from_file_client(
         file_client,
         pipeline_genesis,
         stages_config,
@@ -523,16 +526,18 @@ async fn run_pipeline_forward_and_unwind(
         .sealed_header(unwind_target)?
         .expect("unwind target header should exist");
 
+    let resync_runtime = reth_tasks::Runtime::test();
+
     let mut resync_header_downloader =
         ReverseHeadersDownloaderBuilder::new(resync_stages_config.headers)
             .build(resync_file_client.clone(), resync_consensus.clone())
-            .into_task();
+            .into_task_with(&resync_runtime);
     resync_header_downloader.update_local_head(unwind_head);
     resync_header_downloader.update_sync_target(SyncTarget::Tip(tip));
 
     let mut resync_body_downloader = BodiesDownloaderBuilder::new(resync_stages_config.bodies)
         .build(resync_file_client, resync_consensus, pipeline_provider_factory.clone())
-        .into_task();
+        .into_task_with(&resync_runtime);
     resync_body_downloader
         .set_download_range(unwind_target + 1..=max_block)
         .expect("set download range");
