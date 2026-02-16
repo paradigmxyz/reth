@@ -42,7 +42,7 @@ use reth_trie::MultiProofTargets;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, channel, Receiver, Sender},
+        mpsc::{self, channel, Receiver, Sender, SyncSender},
         Arc,
     },
     time::Instant,
@@ -149,8 +149,6 @@ where
         self.executor.spawn_blocking(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
 
-            let (done_tx, done_rx) = mpsc::channel();
-
             let pool_threads = executor.prewarming_pool().current_num_threads();
             // Don't spawn more workers than transactions. When transaction_count is 0
             // (unknown), use all pool threads.
@@ -159,6 +157,8 @@ where
             } else {
                 pool_threads
             };
+
+            let (done_tx, done_rx) = mpsc::sync_channel(workers_needed);
 
             // Spawn workers
             let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor,  to_multi_proof.clone(), done_tx.clone());
@@ -553,7 +553,7 @@ where
         self,
         txs: CrossbeamReceiver<IndexedTransaction<Tx>>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-        done_tx: Sender<()>,
+        done_tx: SyncSender<()>,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
@@ -628,7 +628,7 @@ where
         workers_needed: usize,
         task_executor: &Runtime,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-        done_tx: Sender<()>,
+        done_tx: SyncSender<()>,
     ) -> CrossbeamSender<IndexedTransaction<Tx>>
     where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
