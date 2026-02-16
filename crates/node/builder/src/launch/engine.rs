@@ -180,13 +180,13 @@ impl EngineNodeLauncher {
                     })?;
                 (tip, header)
             } else {
-                info!(target: "reth::cli", "Selecting snap sync pivot from best synced block");
-                let best_number = ctx
+                info!(target: "reth::cli", "Selecting snap sync pivot from last available header");
+                let last_number = ctx
                     .blockchain_db()
-                    .best_block_number()
-                    .map_err(|e| eyre::eyre!("failed to get best block number: {e}"))?;
+                    .last_block_number()
+                    .map_err(|e| eyre::eyre!("failed to get last block number: {e}"))?;
 
-                if best_number == 0 {
+                if last_number == 0 {
                     return Err(eyre::eyre!(
                         "No blocks synced yet. Snap sync needs headers synced first. \
                          Either run header sync first or provide --debug.tip explicitly."
@@ -195,12 +195,12 @@ impl EngineNodeLauncher {
 
                 let sealed = ctx
                     .blockchain_db()
-                    .sealed_header(best_number)
+                    .sealed_header(last_number)
                     .map_err(|e| eyre::eyre!("failed to get sealed header: {e}"))?
-                    .ok_or_else(|| eyre::eyre!("header at block {best_number} not found"))?;
+                    .ok_or_else(|| eyre::eyre!("header at block {last_number} not found"))?;
 
                 let hash = sealed.hash();
-                info!(target: "reth::cli", best_number, %hash, "Using best synced block as snap sync pivot");
+                info!(target: "reth::cli", last_number, %hash, "Using last available header as snap sync pivot");
                 (hash, sealed.into_header())
             };
 
