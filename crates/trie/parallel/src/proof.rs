@@ -4,11 +4,8 @@ use crate::{
     root::ParallelStateRootError,
     StorageRootTargets,
 };
-use alloy_primitives::{map::B256Set, B256};
-use crossbeam_channel::{unbounded as crossbeam_unbounded, Receiver as CrossbeamReceiver};
-use reth_execution_errors::StorageRootError;
+use crossbeam_channel::unbounded as crossbeam_unbounded;
 use reth_primitives_traits::FastInstant as Instant;
-use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
     DecodedMultiProof, HashedPostState, MultiProofTargets, Nibbles,

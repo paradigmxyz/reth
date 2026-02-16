@@ -6,7 +6,7 @@ use crate::{
 use alloc::vec::Vec;
 use alloy_primitives::{
     map::{B256Map, B256Set, HashSet},
-    Bytes, B256,
+    B256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
@@ -502,17 +502,6 @@ where
         bufs.push(nodes);
 
         Ok(metric_values)
-    }
-
-    /// Reveal state witness with the given state root.
-    /// The state witness is expected to be a map of `keccak(rlp(node)): rlp(node).`
-    /// NOTE: This method does not extensively validate the witness.
-    pub fn reveal_witness(
-        &mut self,
-        _state_root: B256,
-        _witness: &B256Map<Bytes>,
-    ) -> SparseStateTrieResult<()> {
-        unimplemented!()
     }
 
     /// Wipe the storage trie at the provided address.
