@@ -534,13 +534,13 @@ where
 
                         // Compare trie updates with serial computation if configured
                         if self.config.always_compare_trie_updates() {
-                            let has_diff = self.compare_trie_updates_with_serial(
+                            let _has_diff = self.compare_trie_updates_with_serial(
                                 overlay_factory.clone(),
                                 &hashed_state,
                                 trie_updates.clone(),
                             );
                             #[cfg(feature = "trie-debug")]
-                            if has_diff {
+                            if _has_diff {
                                 Self::write_trie_debug_recorders(
                                     block.header().number(),
                                     &trie_debug_recorders,
