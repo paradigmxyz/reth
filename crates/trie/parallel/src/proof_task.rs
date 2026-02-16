@@ -43,10 +43,7 @@ use alloy_primitives::{
 use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofError};
-use reth_primitives_traits::{
-    dashmap::{self, DashMap},
-    FastInstant as Instant,
-};
+use reth_primitives_traits::dashmap::{self, DashMap};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
 use reth_tasks::Runtime;
@@ -76,7 +73,7 @@ use std::{
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, error, instrument, trace};
 

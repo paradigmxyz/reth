@@ -10,7 +10,6 @@
 use crate::{DatabaseStateRoot, DatabaseTrieCursorFactory};
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
-use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader, StorageChangeSetReader,
     StorageSettingsCache,
@@ -22,7 +21,7 @@ use reth_trie::{
     StateRoot, TrieInputSorted,
 };
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
-use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
 use tracing::debug;
 
 #[cfg(feature = "metrics")]

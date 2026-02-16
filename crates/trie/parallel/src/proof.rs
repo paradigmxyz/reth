@@ -10,14 +10,13 @@ use crate::{
 use alloy_primitives::{map::B256Set, B256};
 use crossbeam_channel::{unbounded as crossbeam_unbounded, Receiver as CrossbeamReceiver};
 use reth_execution_errors::StorageRootError;
-use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
     DecodedMultiProof, DecodedStorageMultiProof, HashedPostState, MultiProofTargets, Nibbles,
 };
 use reth_trie_common::added_removed_keys::MultiAddedRemovedKeys;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tracing::trace;
 
 /// Parallel proof calculator.

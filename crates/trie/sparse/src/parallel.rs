@@ -13,7 +13,6 @@ use alloy_rlp::Decodable;
 use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
 use core::cmp::{Ord, Ordering, PartialOrd};
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, SparseTrieResult};
-use reth_primitives_traits::FastInstant as Instant;
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
@@ -967,7 +966,7 @@ impl SparseTrie for ParallelSparseTrie {
 
             changed_subtries.par_iter_mut().for_each(|changed_subtrie| {
                 #[cfg(feature = "metrics")]
-                let start = Instant::now();
+                let start = std::time::Instant::now();
                 changed_subtrie.subtrie.update_hashes(
                     &mut changed_subtrie.prefix_set,
                     &mut changed_subtrie.update_actions_buf,
@@ -1977,7 +1976,7 @@ impl ParallelSparseTrie {
         });
 
         #[cfg(feature = "metrics")]
-        let start = Instant::now();
+        let start = std::time::Instant::now();
 
         let mut update_actions_buf =
             self.updates_enabled().then(|| self.update_actions_buffers.pop().unwrap_or_default());
