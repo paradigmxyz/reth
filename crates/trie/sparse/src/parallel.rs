@@ -1322,14 +1322,10 @@ impl SparseTrie for ParallelSparseTrie {
     ) -> SparseTrieResult<()> {
         use crate::{provider::NoRevealProvider, LeafUpdate};
 
-        // Collect keys upfront since we mutate `updates` during iteration.
-        // On success, entries are removed; on blinded node failure, they're re-inserted.
-        let keys: Vec<B256> = updates.keys().copied().collect();
+        let mut pending = Vec::new();
 
-        for key in keys {
+        for (key, update) in updates.drain() {
             let full_path = Nibbles::unpack(key);
-            // Remove upfront - we'll re-insert if the operation fails due to blinded node.
-            let update = updates.remove(&key).unwrap();
 
             match update {
                 LeafUpdate::Changed(value) => {
@@ -1343,7 +1339,7 @@ impl SparseTrie for ParallelSparseTrie {
                                     let (target_key, min_len) =
                                         Self::proof_target_for_path(key, &full_path, &path);
                                     proof_required_fn(target_key, min_len);
-                                    updates.insert(key, LeafUpdate::Changed(value));
+                                    pending.push((key, LeafUpdate::Changed(value)));
                                 } else {
                                     return Err(e);
                                 }
@@ -1357,7 +1353,7 @@ impl SparseTrie for ParallelSparseTrie {
                                 let (target_key, min_len) =
                                     Self::proof_target_for_path(key, &full_path, &path);
                                 proof_required_fn(target_key, min_len);
-                                updates.insert(key, LeafUpdate::Changed(value));
+                                pending.push((key, LeafUpdate::Changed(value)));
                             } else {
                                 return Err(e);
                             }
@@ -1371,7 +1367,7 @@ impl SparseTrie for ParallelSparseTrie {
                             let (target_key, min_len) =
                                 Self::proof_target_for_path(key, &full_path, &path);
                             proof_required_fn(target_key, min_len);
-                            updates.insert(key, LeafUpdate::Touched);
+                            pending.push((key, LeafUpdate::Touched));
                         }
                         // Path is fully revealed (exists or proven non-existent), no action needed.
                         Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {}
@@ -1379,6 +1375,8 @@ impl SparseTrie for ParallelSparseTrie {
                 }
             }
         }
+
+        updates.extend(pending);
 
         Ok(())
     }
