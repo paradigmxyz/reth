@@ -34,7 +34,7 @@ use reth_provider::{
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::Runtime;
-use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+use reth_trie_parallel::targets::MultiProofTargets;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, channel, Receiver, Sender, SyncSender},
@@ -680,12 +680,12 @@ where
     }
 }
 
-/// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
+/// Returns a set of [`MultiProofTargets`] and the total amount of storage targets, based on the
 /// given state.
-fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize) {
+fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) {
     use reth_trie::proof_v2;
 
-    let mut targets = MultiProofTargetsV2::default();
+    let mut targets = MultiProofTargets::default();
     let mut storage_target_count = 0;
     for (addr, account) in state {
         // if the account was not touched, or if the account was selfdestructed, do not
@@ -722,12 +722,12 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
     (targets, storage_target_count)
 }
 
-/// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
+/// Returns [`MultiProofTargets`] for withdrawal addresses.
 ///
 /// Withdrawals only modify account balances (no storage), so the targets contain
 /// only account-level entries with empty storage sets.
-fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProofTargetsV2 {
-    MultiProofTargetsV2 {
+fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProofTargets {
+    MultiProofTargets {
         account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
         ..Default::default()
     }

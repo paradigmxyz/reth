@@ -1,4 +1,4 @@
-//! Proof calculation version 2: Leaf-only implementation.
+//! Proof calculation: Leaf-only implementation.
 //!
 //! This module provides a rewritten proof calculator that:
 //! - Uses only leaf data (HashedAccounts/Storages) to generate proofs
@@ -16,7 +16,7 @@ use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2,
+    BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNode, RlpNode, TrieNodeV2,
 };
 use std::cmp::Ordering;
 use tracing::{error, instrument, trace};
@@ -88,7 +88,7 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     cached_branch_stack: Vec<(Nibbles, BranchNodeCompact)>,
     /// The proofs which will be returned from the calculation. This gets taken at the end of every
     /// proof call.
-    retained_proofs: Vec<ProofTrieNodeV2>,
+    retained_proofs: Vec<ProofTrieNode>,
     /// Free-list of re-usable buffers of [`RlpNode`]s, used for encoding branch nodes to RLP.
     ///
     /// We are generally able to re-use these buffers across different branch nodes for the
@@ -195,7 +195,7 @@ where
 
         trace!(target: TRACE_TARGET, ?path, target = ?lower, "should_retain: called");
         debug_assert!(self.retained_proofs.last().is_none_or(
-                |ProofTrieNodeV2 { path: last_retained_path, .. }| {
+                |ProofTrieNode { path: last_retained_path, .. }| {
                     depth_first::cmp(path, last_retained_path) == Ordering::Greater
                 }
             ),
@@ -270,14 +270,14 @@ where
         if self.should_retain(targets, &child_path, true) {
             trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
 
-            // Convert to `ProofTrieNodeV2`, which will be what is retained.
+            // Convert to `ProofTrieNode`, which will be what is retained.
             //
             // If this node is a branch then its `rlp_nodes_buf` will be taken and not returned to
             // the `rlp_nodes_bufs` free-list.
             self.rlp_encode_buf.clear();
             let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
 
-            // Use the `ProofTrieNodeV2` to encode the `RlpNode`, and then push it onto retained
+            // Use the `ProofTrieNode` to encode the `RlpNode`, and then push it onto retained
             // nodes before returning.
             self.rlp_encode_buf.clear();
             proof_node.node.encode(&mut self.rlp_encode_buf);
@@ -1268,7 +1268,7 @@ where
             (true, None) => {
                 // If `child_stack` is empty it means there was no keys at all, retain an empty
                 // root node.
-                self.retained_proofs.push(ProofTrieNodeV2 {
+                self.retained_proofs.push(ProofTrieNode {
                     path: Nibbles::new(), // root path
                     node: TrieNodeV2::EmptyRoot,
                     masks: None,
@@ -1292,7 +1292,7 @@ where
         &mut self,
         value_encoder: &mut VE,
         targets: &mut [Target],
-    ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         // If there are no targets then nothing could be returned, return early.
         if targets.is_empty() {
             trace!(target: TRACE_TARGET, "Empty targets, returning");
@@ -1336,7 +1336,7 @@ where
         &mut self,
         value_encoder: &mut VE,
         targets: &mut [Target],
-    ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
         self.proof_inner(value_encoder, targets)
@@ -1350,7 +1350,7 @@ where
     /// This method reuses the internal RLP encode buffer for efficiency.
     pub fn compute_root_hash(
         &mut self,
-        proof_nodes: &[ProofTrieNodeV2],
+        proof_nodes: &[ProofTrieNode],
     ) -> Result<Option<B256>, StateProofError> {
         // Find the root node (node at empty path)
         let root_node = proof_nodes.iter().find(|node| node.path.is_empty());
@@ -1372,10 +1372,7 @@ where
     /// This method does not accept targets nor retain proofs. Returns the root node which can
     /// be used to compute the root hash via [`Self::compute_root_hash`].
     #[instrument(target = TRACE_TARGET, level = "trace", skip(self, value_encoder))]
-    pub fn root_node(
-        &mut self,
-        value_encoder: &mut VE,
-    ) -> Result<ProofTrieNodeV2, StateProofError> {
+    pub fn root_node(&mut self, value_encoder: &mut VE) -> Result<ProofTrieNode, StateProofError> {
         // Initialize the variables which track the state of the two cursors. Both indicate the
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
@@ -1441,13 +1438,13 @@ where
         &mut self,
         hashed_address: B256,
         targets: &mut [Target],
-    ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.hashed_cursor.set_hashed_address(hashed_address);
 
         // Shortcut: check if storage is empty
         if self.hashed_cursor.is_storage_empty()? {
             // Return a single EmptyRoot node at the root path
-            return Ok(vec![ProofTrieNodeV2 {
+            return Ok(vec![ProofTrieNode {
                 path: Nibbles::default(),
                 node: TrieNodeV2::EmptyRoot,
                 masks: None,
@@ -1471,11 +1468,11 @@ where
     pub fn storage_root_node(
         &mut self,
         hashed_address: B256,
-    ) -> Result<ProofTrieNodeV2, StateProofError> {
+    ) -> Result<ProofTrieNode, StateProofError> {
         self.hashed_cursor.set_hashed_address(hashed_address);
 
         if self.hashed_cursor.is_storage_empty()? {
-            return Ok(ProofTrieNodeV2 {
+            return Ok(ProofTrieNode {
                 path: Nibbles::default(),
                 node: TrieNodeV2::EmptyRoot,
                 masks: None,
@@ -1654,26 +1651,26 @@ mod tests {
     use reth_primitives_traits::Account;
     use reth_trie_common::{
         updates::{StorageTrieUpdates, TrieUpdates},
-        HashedPostState, MultiProofTargets, ProofTrieNode, TrieNode,
+        HashedPostState, LegacyProofTrieNode, MultiProofTargets, TrieNode,
     };
 
     /// Target to use with the `tracing` crate.
     static TRACE_TARGET: &str = "trie::proof_v2::tests";
 
-    /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
-    /// nodes.
+    /// Converts legacy proofs to the current format by combining extension nodes with their child
+    /// branch nodes.
     ///
-    /// In the legacy proof format, extension nodes and branch nodes are separate. In the V2 format,
-    /// they are combined into a single `BranchNodeV2` where the extension's key becomes the
-    /// branch's `key` field.
+    /// In the legacy proof format, extension nodes and branch nodes are separate. In the current
+    /// format, they are combined into a single `BranchNodeV2` where the extension's key becomes
+    /// the branch's `key` field.
     ///
-    /// Converts legacy proofs (sorted in depth-first order) to V2 format.
+    /// Converts legacy proofs (sorted in depth-first order) to the current format.
     ///
     /// In depth-first order, children come BEFORE parents. So when we encounter an extension node,
     /// its child branch has already been processed and is in the result. We need to pop it and
     /// combine it with the extension.
-    fn convert_legacy_proofs_to_v2(legacy_proofs: &[ProofTrieNode]) -> Vec<ProofTrieNodeV2> {
-        ProofTrieNodeV2::from_sorted_trie_nodes(
+    fn convert_legacy_proofs(legacy_proofs: &[LegacyProofTrieNode]) -> Vec<ProofTrieNode> {
+        ProofTrieNode::from_sorted_trie_nodes(
             legacy_proofs.iter().map(|p| (p.path, p.node.clone(), p.masks)),
         )
     }
@@ -1813,19 +1810,19 @@ mod tests {
                         proof_legacy_result.branch_node_masks.get(path).copied()
                     };
 
-                    ProofTrieNode { path: *path, node, masks }
+                    LegacyProofTrieNode { path: *path, node, masks }
                 })
                 .sorted_by(|a, b| depth_first::cmp(&a.path, &b.path))
                 .collect::<Vec<_>>();
 
-            // Convert legacy proofs to V2 proofs by combining extensions with their child branches
-            let proof_legacy_nodes_v2 = convert_legacy_proofs_to_v2(&proof_legacy_nodes);
+            // Convert legacy proofs by combining extensions with their child branches
+            let proof_legacy_nodes_v2 = convert_legacy_proofs(&proof_legacy_nodes);
 
             // Filter to only keep nodes which match a target. We do this after conversion so we
             // don't keep branches whose extension parents are excluded due to a min_len.
             let proof_legacy_nodes_v2 = proof_legacy_nodes_v2
                 .into_iter()
-                .filter(|ProofTrieNodeV2 { path, .. }| node_matches_target(path))
+                .filter(|ProofTrieNode { path, .. }| node_matches_target(path))
                 .collect::<Vec<_>>();
 
             // Basic comparison: both should succeed and produce identical results
