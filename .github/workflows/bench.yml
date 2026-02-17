@@ -84,6 +84,24 @@ jobs:
       BENCH_RPC_URL: https://ethereum.reth.rs/rpc
       SCHELK_MOUNT: /reth-bench
     steps:
+      - name: Check org membership
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const user = context.payload.comment.user.login;
+            try {
+              const { status } = await github.rest.orgs.checkMembershipForUser({
+                org: 'paradigmxyz',
+                username: user,
+              });
+              if (status !== 204 && status !== 302) {
+                core.setFailed(`@${user} is not a member of paradigmxyz`);
+              }
+            } catch (e) {
+              core.setFailed(`@${user} is not a member of paradigmxyz`);
+            }
+
       - name: Parse arguments
         id: args
         uses: actions/github-script@v7
