@@ -21,10 +21,6 @@ use std::time::Duration;
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command
 pub struct Command {
-    /// Skip consistency checks for static files.
-    #[arg(long, default_value_t = false)]
-    pub(crate) skip_consistency_checks: bool,
-
     /// Show only the total size for static files.
     #[arg(long, default_value_t = false)]
     detailed_sizes: bool,

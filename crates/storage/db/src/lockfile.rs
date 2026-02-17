@@ -23,6 +23,15 @@ const LOCKFILE_NAME: &str = "lock";
 pub struct StorageLock(Arc<StorageLockInner>);
 
 impl StorageLock {
+    /// Returns `true` if the storage directory at the given path is locked by another process.
+    pub fn is_locked(path: &Path) -> bool {
+        let file_path = path.join(LOCKFILE_NAME);
+        ProcessUID::parse(&file_path)
+            .ok()
+            .flatten()
+            .is_some_and(|lock| lock.pid != (process::id() as usize) && lock.is_active())
+    }
+
     /// Tries to acquire a write lock on the target directory, returning [`StorageLockError`] if
     /// unsuccessful.
     ///

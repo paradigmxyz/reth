@@ -1,5 +1,5 @@
 //! Command that initializes the node by importing a chain from ERA files.
-use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
+use crate::common::{CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_chains::{ChainKind, NamedChain};
 use clap::{Args, Parser};
 use eyre::eyre;
@@ -70,7 +70,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
     {
         info!(target: "reth::cli", "reth {} starting", version_metadata().short_version);
 
-        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } = self.env.init::<N>()?;
 
         let mut hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
 

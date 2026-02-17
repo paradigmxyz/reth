@@ -1,6 +1,6 @@
 //! Command that initializes the node by importing a chain from a file.
 use crate::{
-    common::{AccessRights, CliNodeComponents, CliNodeTypes, Environment, EnvironmentArgs},
+    common::{CliNodeComponents, CliNodeTypes, Environment, EnvironmentArgs},
     import_core::{import_blocks_from_file, ImportConfig},
 };
 use clap::Parser;
@@ -54,7 +54,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
     {
         info!(target: "reth::cli", "reth {} starting", version_metadata().short_version);
 
-        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } = self.env.init::<N>()?;
 
         let components = components(provider_factory.chain_spec());
 
