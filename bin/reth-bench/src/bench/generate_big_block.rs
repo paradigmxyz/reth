@@ -774,7 +774,7 @@ impl Command {
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
             },
-            transactions: transactions.to_vec(),
+            transactions: Some(transactions.to_vec()),
             extra_data: None,
         };
 
@@ -787,8 +787,18 @@ impl Command {
             parent_hash = %parent_hash,
             "Sending to testing_buildBlockV1"
         );
-        let envelope: ExecutionPayloadEnvelopeV5 =
-            testing_provider.client().request("testing_buildBlockV1", [request]).await?;
+        let envelope: ExecutionPayloadEnvelopeV5 = testing_provider
+            .client()
+            .request(
+                "testing_buildBlockV1",
+                (
+                    request.parent_block_hash,
+                    request.payload_attributes,
+                    request.transactions,
+                    request.extra_data,
+                ),
+            )
+            .await?;
 
         let v4_envelope = envelope.try_into_v4()?;
 

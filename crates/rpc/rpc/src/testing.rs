@@ -17,9 +17,9 @@
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::eip2718::Decodable2718;
 use alloy_evm::{Evm, RecoveredTx};
-use alloy_primitives::{map::HashSet, Address, U256};
+use alloy_primitives::{map::HashSet, Address, Bytes, B256, U256};
 use alloy_rlp::Encodable;
-use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV5;
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, PayloadAttributes};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -33,7 +33,7 @@ use reth_primitives_traits::{
     AlloyBlockHeader as BlockTrait, TxTy,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
+use reth_rpc_api::TestingApiServer;
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReader, HeaderProvider};
@@ -76,12 +76,15 @@ where
 {
     async fn build_block_v1(
         &self,
-        request: TestingBuildBlockRequestV1,
+        parent_block_hash: B256,
+        payload_attributes: PayloadAttributes,
+        transactions: Option<Vec<Bytes>>,
+        extra_data: Option<Bytes>,
     ) -> Result<ExecutionPayloadEnvelopeV5, Eth::Error> {
         let evm_config = self.evm_config.clone();
         let skip_invalid_transactions = self.skip_invalid_transactions;
         self.eth_api
-            .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
+            .spawn_with_state_at_block(parent_block_hash, move |eth_api, state| {
                 let state = state.database.0;
                 let mut db = State::builder()
                     .with_bundle_update()
@@ -89,26 +92,26 @@ where
                     .build();
                 let parent = eth_api
                     .provider()
-                    .sealed_header_by_hash(request.parent_block_hash)?
+                    .sealed_header_by_hash(parent_block_hash)?
                     .ok_or_else(|| {
-                    EthApiError::HeaderNotFound(request.parent_block_hash.into())
+                    EthApiError::HeaderNotFound(parent_block_hash.into())
                 })?;
 
                 let chain_spec = eth_api.provider().chain_spec();
                 let is_osaka =
-                    chain_spec.is_osaka_active_at_timestamp(request.payload_attributes.timestamp);
+                    chain_spec.is_osaka_active_at_timestamp(payload_attributes.timestamp);
 
-                let withdrawals = request.payload_attributes.withdrawals.clone();
+                let withdrawals = payload_attributes.withdrawals.clone();
                 let withdrawals_rlp_length = withdrawals.as_ref().map(|w| w.length()).unwrap_or(0);
 
                 let env_attrs = NextBlockEnvAttributes {
-                    timestamp: request.payload_attributes.timestamp,
-                    suggested_fee_recipient: request.payload_attributes.suggested_fee_recipient,
-                    prev_randao: request.payload_attributes.prev_randao,
+                    timestamp: payload_attributes.timestamp,
+                    suggested_fee_recipient: payload_attributes.suggested_fee_recipient,
+                    prev_randao: payload_attributes.prev_randao,
                     gas_limit: parent.gas_limit(),
-                    parent_beacon_block_root: request.payload_attributes.parent_beacon_block_root,
+                    parent_beacon_block_root: payload_attributes.parent_beacon_block_root,
                     withdrawals: withdrawals.map(Into::into),
-                    extra_data: request.extra_data.unwrap_or_default(),
+                    extra_data: extra_data.unwrap_or_default(),
                 };
 
                 let mut builder = evm_config
@@ -123,8 +126,16 @@ where
                 let mut invalid_senders: HashSet<Address, DefaultHashBuilder> = HashSet::default();
                 let mut block_transactions_rlp_length = 0usize;
 
+                // When transactions is None (JSON null), the spec says to build from mempool.
+                // Mempool-based block building is not yet supported via this endpoint.
+                let transactions = transactions.ok_or_else(|| {
+                    Eth::Error::from_eth_err(EthApiError::InvalidParams(
+                        "transactions=null (mempool build) is not supported yet".to_string(),
+                    ))
+                })?;
+
                 // Decode and recover all transactions in parallel
-                let recovered_txs = try_recover_signers(&request.transactions, |tx| {
+                let recovered_txs = try_recover_signers(&transactions, |tx| {
                     TxTy::<Evm::Primitives>::decode_2718_exact(tx.as_ref())
                         .map_err(RecoveryError::from_source)
                 })
@@ -229,8 +240,13 @@ where
     /// work to the blocking pool to avoid stalling the async runtime.
     async fn build_block_v1(
         &self,
-        request: TestingBuildBlockRequestV1,
+        parent_block_hash: B256,
+        payload_attributes: PayloadAttributes,
+        transactions: Option<Vec<Bytes>>,
+        extra_data: Option<Bytes>,
     ) -> RpcResult<ExecutionPayloadEnvelopeV5> {
-        self.build_block_v1(request).await.map_err(Into::into)
+        self.build_block_v1(parent_block_hash, payload_attributes, transactions, extra_data)
+            .await
+            .map_err(Into::into)
     }
 }
