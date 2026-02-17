@@ -649,7 +649,7 @@ where
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
-        trace!(target: "engine::tree", "try inserting new payload,{payload:?}");
+        info!(target: "engine::tree", "try inserting new payload,{payload:?}");
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
