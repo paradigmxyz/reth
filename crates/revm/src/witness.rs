@@ -47,6 +47,7 @@ impl ExecutionWitnessRecord {
             accessed_codes.entry(keccak256(&code)).or_insert(code);
         }
         self.codes = accessed_codes.into_values().collect();
+        self.codes.sort();
 
         for (address, account) in &statedb.cache.accounts {
             let hashed_address = keccak256(address);

@@ -483,9 +483,13 @@ impl<
 
     fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
         input.prepend(self.revert_state()?.into());
-        TrieWitness::overlay_witness(self.tx(), input, target)
-            .map_err(ProviderError::from)
-            .map(|hm| hm.into_values().collect())
+        TrieWitness::overlay_witness(self.tx(), input, target).map_err(ProviderError::from).map(
+            |hm| {
+                let mut v: Vec<_> = hm.into_values().collect();
+                v.sort();
+                v
+            },
+        )
     }
 }
 
