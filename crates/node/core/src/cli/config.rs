@@ -19,8 +19,17 @@ pub trait PayloadBuilderConfig {
     fn extra_data(&self) -> Cow<'_, str>;
 
     /// Returns the extra data as bytes.
+    ///
+    /// If the extra data is a hex string (prefixed with `0x`), it is decoded into raw bytes.
+    /// Otherwise, the raw UTF-8 bytes of the string are used.
     fn extra_data_bytes(&self) -> Bytes {
-        self.extra_data().as_bytes().to_vec().into()
+        let data = self.extra_data();
+        if let Some(hex_str) = data.strip_prefix("0x") {
+            if let Ok(decoded) = alloy_primitives::hex::decode(hex_str) {
+                return decoded.into();
+            }
+        }
+        data.as_bytes().to_vec().into()
     }
 
     /// The interval at which the job should build a new payload after the last.
@@ -91,4 +100,47 @@ pub trait RethTransactionPoolConfig {
 
     /// Returns max batch size for transaction batch insertion.
     fn max_batch_size(&self) -> usize;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::borrow::Cow;
+
+    struct TestConfig {
+        extra_data: String,
+    }
+
+    impl PayloadBuilderConfig for TestConfig {
+        fn extra_data(&self) -> Cow<'_, str> {
+            self.extra_data.as_str().into()
+        }
+        fn interval(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(12)
+        }
+        fn gas_limit(&self) -> Option<u64> {
+            None
+        }
+        fn max_payload_tasks(&self) -> usize {
+            1
+        }
+        fn max_blobs_per_block(&self) -> Option<u64> {
+            None
+        }
+    }
+
+    #[test]
+    fn test_extra_data_bytes_plain_string() {
+        let config = TestConfig { extra_data: "reth/v1.0.0".to_string() };
+        assert_eq!(config.extra_data_bytes().as_ref(), b"reth/v1.0.0");
+    }
+
+    #[test]
+    fn test_extra_data_bytes_hex_string() {
+        let config = TestConfig { extra_data: "0xdeadbeef".to_string() };
+        assert_eq!(config.extra_data_bytes().as_ref(), &[0xde, 0xad, 0xbe, 0xef]);
+    }
 }

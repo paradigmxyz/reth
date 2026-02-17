@@ -181,7 +181,39 @@ impl TypedValueParser for ExtraDataValueParser {
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        if val.len() > MAXIMUM_EXTRA_DATA_SIZE {
+
+        // Determine the byte length: if the value is a 0x-prefixed hex string, validate the
+        // decoded byte length; otherwise, validate the raw UTF-8 byte length.
+        let byte_len = if let Some(hex_str) = val.strip_prefix("0x") {
+            if hex_str.len() % 2 != 0 {
+                return Err(clap::Error::raw(
+                    clap::error::ErrorKind::InvalidValue,
+                    "Hex extradata must have an even number of digits",
+                ))
+            }
+            // Reject before decoding to avoid unnecessary allocation
+            let decoded_len = hex_str.len() / 2;
+            if decoded_len > MAXIMUM_EXTRA_DATA_SIZE {
+                return Err(clap::Error::raw(
+                    clap::error::ErrorKind::InvalidValue,
+                    format!(
+                        "Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}-byte limit"
+                    ),
+                ))
+            }
+            // Validate that it's actually valid hex
+            alloy_primitives::hex::decode(hex_str).map_err(|e| {
+                clap::Error::raw(
+                    clap::error::ErrorKind::InvalidValue,
+                    format!("Invalid hex in extradata: {e}"),
+                )
+            })?;
+            decoded_len
+        } else {
+            val.len()
+        };
+
+        if byte_len > MAXIMUM_EXTRA_DATA_SIZE {
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,
                 format!(
@@ -242,6 +274,51 @@ mod tests {
             "reth",
             "--builder.extradata",
             extra_data.as_str(),
+        ]);
+        assert!(args.is_err());
+    }
+
+    #[test]
+    fn test_valid_hex_extra_data() {
+        // 32 bytes encoded as hex (64 hex chars + 0x prefix) should be accepted
+        let hex = format!("0x{}", "ab".repeat(MAXIMUM_EXTRA_DATA_SIZE));
+        let args = CommandParser::<PayloadBuilderArgs>::parse_from([
+            "reth",
+            "--builder.extradata",
+            hex.as_str(),
+        ])
+        .args;
+        assert_eq!(args.extra_data, hex);
+    }
+
+    #[test]
+    fn test_oversized_hex_extra_data() {
+        // 33 bytes encoded as hex should be rejected
+        let hex = format!("0x{}", "ab".repeat(MAXIMUM_EXTRA_DATA_SIZE + 1));
+        let args = CommandParser::<PayloadBuilderArgs>::try_parse_from([
+            "reth",
+            "--builder.extradata",
+            hex.as_str(),
+        ]);
+        assert!(args.is_err());
+    }
+
+    #[test]
+    fn test_invalid_hex_extra_data() {
+        let args = CommandParser::<PayloadBuilderArgs>::try_parse_from([
+            "reth",
+            "--builder.extradata",
+            "0xZZZZ",
+        ]);
+        assert!(args.is_err());
+    }
+
+    #[test]
+    fn test_odd_length_hex_extra_data() {
+        let args = CommandParser::<PayloadBuilderArgs>::try_parse_from([
+            "reth",
+            "--builder.extradata",
+            "0xabc",
         ]);
         assert!(args.is_err());
     }
