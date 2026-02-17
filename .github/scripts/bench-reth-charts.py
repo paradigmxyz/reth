@@ -72,17 +72,17 @@ def plot_latency_and_throughput(
         for r in baseline:
             lat_s = r["new_payload_latency_us"] / 1_000_000
             base_ggas.append(r["gas_used"] / lat_s / GIGAGAS if lat_s > 0 else 0)
-        ax1.plot(base_x, base_lat, linewidth=0.8, label="run 1", alpha=0.7)
-        ax2.plot(base_x, base_ggas, linewidth=0.8, label="run 1", alpha=0.7)
+        ax1.plot(base_x, base_lat, linewidth=0.8, label="main", alpha=0.7)
+        ax2.plot(base_x, base_ggas, linewidth=0.8, label="main", alpha=0.7)
 
-    ax1.plot(feat_x, feat_lat, linewidth=0.8, label="run 2")
+    ax1.plot(feat_x, feat_lat, linewidth=0.8, label="branch")
     ax1.set_ylabel("Latency (ms)")
     ax1.set_title("newPayload Latency per Block")
     ax1.grid(True, alpha=0.3)
     if baseline:
         ax1.legend()
 
-    ax2.plot(feat_x, feat_ggas, linewidth=0.8, label="run 2")
+    ax2.plot(feat_x, feat_ggas, linewidth=0.8, label="branch")
     ax2.set_ylabel("Ggas/s")
     ax2.set_title("Execution Throughput per Block")
     ax2.grid(True, alpha=0.3)
@@ -126,12 +126,12 @@ def plot_wait_breakdown(feature: list[dict], baseline: list[dict] | None, out: P
             bx = [r["block_number"] for r in baseline if r[key] is not None]
             by = [r[key] / 1_000 for r in baseline if r[key] is not None]
             if bx:
-                ax.plot(bx, by, linewidth=0.8, label="run 1", alpha=0.7)
+                ax.plot(bx, by, linewidth=0.8, label="main", alpha=0.7)
 
         fx = [r["block_number"] for r in feature if r[key] is not None]
         fy = [r[key] / 1_000 for r in feature if r[key] is not None]
         if fx:
-            ax.plot(fx, fy, linewidth=0.8, label="run 2")
+            ax.plot(fx, fy, linewidth=0.8, label="branch")
 
         ax.set_ylabel("ms")
         ax.set_title(label)
