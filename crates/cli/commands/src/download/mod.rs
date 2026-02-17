@@ -5,7 +5,7 @@ mod tui;
 
 use crate::common::EnvironmentArgs;
 use clap::Parser;
-use config_gen::{config_for_components, write_config};
+use config_gen::{config_for_components, write_config, write_prune_checkpoints};
 use eyre::Result;
 use futures::stream::{self, StreamExt};
 use lz4::Decoder;
@@ -13,6 +13,7 @@ use manifest::{SnapshotComponentType, SnapshotManifest};
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
+use reth_db::init_db;
 use reth_fs_util as fs;
 use std::{
     borrow::Cow,
@@ -286,15 +287,23 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             result?;
         }
 
-        // Generate reth.toml
+        // Generate reth.toml and set prune checkpoints
+        let config = config_for_components(&selected);
         if !self.no_config {
-            let config = config_for_components(&selected);
             if write_config(&config, target_dir)? {
                 let desc = config_gen::describe_prune_config(&selected);
                 for line in &desc {
                     info!(target: "reth::cli", "{}", line);
                 }
             }
+        }
+
+        // Write prune checkpoints to the DB so the pruner knows data before the
+        // snapshot block is already in the expected pruned state
+        if config.prune.segments != Default::default() {
+            let db_path = data_dir.db();
+            let db = init_db(&db_path, self.env.db.database_args())?;
+            write_prune_checkpoints(&db, &config, manifest.block)?;
         }
 
         info!(target: "reth::cli", "Snapshot download complete. Run `reth node` to start syncing.");
