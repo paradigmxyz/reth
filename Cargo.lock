@@ -10660,6 +10660,7 @@ dependencies = [
  "reth-trie-common",
  "reth-trie-db",
  "smallvec",
+ "thunderdome",
  "tracing",
 ]
 
@@ -12115,6 +12116,12 @@ checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
 dependencies = [
  "num_cpus",
 ]
+
+[[package]]
+name = "thunderdome"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92e170f93360bf9ae6fe3c31116bbf27adb1d054cedd6bc3d7857e34f2d98d0b"
 
 [[package]]
 name = "tikv-jemalloc-ctl"

@@ -27,6 +27,7 @@ alloy-rlp.workspace = true
 auto_impl.workspace = true
 rayon = { workspace = true, optional = true }
 smallvec.workspace = true
+thunderdome.workspace = true
 
 # metrics
 reth-metrics = { workspace = true, optional = true }

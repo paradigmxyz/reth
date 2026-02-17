@@ -3672,7 +3672,7 @@ fn starts_with_pruned_in(roots: &[(Nibbles, B256)], path: &Nibbles) -> bool {
 
 /// Used by lower subtries to communicate updates to the top-level [`SparseTrieUpdates`] set.
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum SparseTrieUpdatesAction {
+pub(crate) enum SparseTrieUpdatesAction {
     /// Remove the path from the `updated_nodes`, if it was present, and add it to `removed_nodes`.
     InsertRemoved(Nibbles),
     /// Remove the path from the `updated_nodes`, if it was present, leaving `removed_nodes`
