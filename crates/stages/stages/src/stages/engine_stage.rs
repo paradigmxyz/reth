@@ -4,12 +4,13 @@
 //! through a single executor instance backed by a single DB state provider.
 //! Sender recovery is read from the DB (written by SenderRecoveryStage).
 //! Hashed state is computed once from the accumulated BundleState.
+//! State root is verified via overlay_root_with_updates.
 //! Persistence writes use the same methods that `save_blocks` calls internally.
 
 use alloy_consensus::BlockHeader as _;
 use reth_db_api::transaction::DbTxMut;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_primitives_traits::{Block as _, NodePrimitives};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, BlockReader, DBProvider,
     HashingWriter, HistoryWriter, ProviderFactory,
@@ -22,7 +23,8 @@ use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_storage_api::StateWriteConfig;
-use reth_trie::{HashedPostState, KeccakKeyHasher};
+use reth_trie::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
+use reth_trie_db::DatabaseStateRoot;
 
 use tracing::*;
 
@@ -89,9 +91,13 @@ where
             .block_with_senders_range(start..=batch_end)
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
+        let expected_state_root = recovered
+            .last()
+            .expect("non-empty block range")
+            .header()
+            .state_root();
+
         // EVM execution: single executor, single DB state provider.
-        // The executor accumulates state changes internally (BundleState),
-        // so each block sees the state from all prior blocks.
         let state_provider = self
             .provider_factory
             .latest()
@@ -102,26 +108,43 @@ where
             .execute_batch(&recovered)
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
-        // Compute hashed state once from the accumulated BundleState
+        // Compute hashed state from the accumulated BundleState
         let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(
             execution_outcome.bundle.state(),
         );
         let sorted_hashed_state = hashed_state.into_sorted();
 
-        // Write state + receipts + changesets.
-        // OriginalValuesKnown::Yes — the batch executor tracks original values,
-        // so we skip re-reading them from DB for changeset generation.
+        // Write state + receipts + changesets
         provider.write_state(
             &execution_outcome,
             OriginalValuesKnown::Yes,
             StateWriteConfig::default(),
         ).map_err(|e| StageError::Fatal(Box::new(e)))?;
 
-        // Write hashed state
-        if !sorted_hashed_state.is_empty() {
-            provider.write_hashed_state(&sorted_hashed_state)
-                .map_err(|e| StageError::Fatal(Box::new(e)))?;
+        // Write hashed state (must be written before state root computation
+        // so the overlay cursor can read from DB)
+        provider.write_hashed_state(&sorted_hashed_state)
+            .map_err(|e| StageError::Fatal(Box::new(e)))?;
+
+        // Compute state root via overlay and verify against expected
+        let (state_root, trie_updates) =
+            reth_trie::StateRoot::overlay_root_with_updates(
+                provider.tx_ref(),
+                &sorted_hashed_state,
+            )
+            .map_err(|e| StageError::Fatal(Box::new(e)))?;
+
+        if state_root != expected_state_root {
+            return Err(StageError::Fatal(
+                format!(
+                    "state root mismatch at block {batch_end}: computed {state_root}, expected {expected_state_root}"
+                ).into(),
+            ));
         }
+
+        // Write trie updates
+        provider.write_trie_updates(trie_updates)
+            .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
         // Update history indices
         provider.update_history_indices(start..=batch_end)
@@ -132,6 +155,12 @@ where
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
         let done = batch_end >= target;
+
+        info!(
+            target: "sync::stages::engine",
+            start, batch_end, %state_root,
+            "Executed and verified block range"
+        );
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(batch_end), done })
     }
