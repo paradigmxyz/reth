@@ -123,11 +123,13 @@ fn parse_go_duration(s: &str) -> Option<Duration> {
     Some(Duration::from_nanos(total_nanos as u64))
 }
 
-/// An inspector that halts EVM execution when a shared cancellation flag is set.
+/// Inspector that halts EVM execution when a shared cancellation flag is set.
 ///
-/// Designed to be composed with [`DebugInspector`] via tuple `(TimeoutInspector, DebugInspector)`
-/// so both inspectors' hooks are invoked on each opcode. When the flag is set (by a timer task),
-/// [`Interpreter::halt_fatal`] is called in `step()`, which stops the interpreter loop.
+/// Composed with [`DebugInspector`] as `(TimeoutInspector, DebugInspector)` so the flag is
+/// checked on every opcode in [`Inspector::step`]; when set, [`Interpreter::halt_fatal`] stops
+/// the interpreter loop so the blocking task actually exits. A separate timer task sets the flag
+/// after the configured duration; [`tokio::time::timeout`] around the request is kept so the
+/// client receives a timely [`EthApiError::ExecutionTimedOut`] even if the task is slow to exit.
 struct TimeoutInspector {
     /// Shared flag set to `true` by the timeout timer task.
     cancelled: Arc<AtomicBool>,
@@ -214,6 +216,7 @@ where
         let timeout = opts.timeout.as_deref().and_then(parse_go_duration);
         let cancel = timeout.as_ref().map(|_| Arc::new(AtomicBool::new(false)));
         let cancel_for_closure = cancel.clone();
+        let cancel_for_check = cancel.clone();
 
         let trace_fut = self.eth_api().spawn_with_state_at_block(
             block.parent_hash(),
@@ -273,9 +276,16 @@ where
                 cancel.store(true, Ordering::Relaxed);
             });
             match tokio::time::timeout(timeout_duration, trace_fut).await {
-                Ok(result) => {
+                Ok(Ok(results)) => Ok(results),
+                Ok(Err(_))
+                    if cancel_for_check.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) =>
+                {
                     timer.abort();
-                    result
+                    Err(EthApiError::ExecutionTimedOut(timeout_duration).into())
+                }
+                Ok(Err(e)) => {
+                    timer.abort();
+                    Err(e)
                 }
                 Err(_) => Err(EthApiError::ExecutionTimedOut(timeout_duration).into()),
             }
@@ -356,6 +366,7 @@ where
         let timeout = opts.timeout.as_deref().and_then(parse_go_duration);
         let cancel = timeout.as_ref().map(|_| Arc::new(AtomicBool::new(false)));
         let cancel_for_closure = cancel.clone();
+        let cancel_for_check = cancel.clone();
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
@@ -414,9 +425,16 @@ where
                 cancel.store(true, Ordering::Relaxed);
             });
             match tokio::time::timeout(timeout_duration, trace_fut).await {
-                Ok(result) => {
+                Ok(Ok(trace)) => Ok(trace),
+                Ok(Err(_))
+                    if cancel_for_check.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) =>
+                {
                     timer.abort();
-                    result
+                    Err(EthApiError::ExecutionTimedOut(timeout_duration).into())
+                }
+                Ok(Err(e)) => {
+                    timer.abort();
+                    Err(e)
                 }
                 Err(_) => Err(EthApiError::ExecutionTimedOut(timeout_duration).into()),
             }
@@ -451,6 +469,7 @@ where
         let timeout = tracing_options.timeout.as_deref().and_then(parse_go_duration);
         let cancel = timeout.as_ref().map(|_| Arc::new(AtomicBool::new(false)));
         let cancel_for_timer = cancel.clone();
+        let cancel_for_check = cancel.clone();
         let overrides = EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
 
         let trace_fut = async {
@@ -504,9 +523,16 @@ where
                 cancel.store(true, Ordering::Relaxed);
             });
             match tokio::time::timeout(timeout_duration, trace_fut).await {
-                Ok(result) => {
+                Ok(Ok(trace)) => Ok(trace),
+                Ok(Err(_))
+                    if cancel_for_check.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) =>
+                {
                     timer.abort();
-                    result
+                    Err(EthApiError::ExecutionTimedOut(timeout_duration).into())
+                }
+                Ok(Err(e)) => {
+                    timer.abort();
+                    Err(e)
                 }
                 Err(_) => Err(EthApiError::ExecutionTimedOut(timeout_duration).into()),
             }
@@ -611,6 +637,7 @@ where
         let timeout = tracing_options.timeout.as_deref().and_then(parse_go_duration);
         let cancel = timeout.as_ref().map(|_| Arc::new(AtomicBool::new(false)));
         let cancel_for_closure = cancel.clone();
+        let cancel_for_check = cancel.clone();
 
         // we're essentially replaying the transactions in the block here, hence we need the state
         // that points to the beginning of the block, which is the state at the parent block
@@ -693,9 +720,16 @@ where
                 cancel.store(true, Ordering::Relaxed);
             });
             match tokio::time::timeout(timeout_duration, trace_fut).await {
-                Ok(result) => {
+                Ok(Ok(bundles)) => Ok(bundles),
+                Ok(Err(_))
+                    if cancel_for_check.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) =>
+                {
                     timer.abort();
-                    result
+                    Err(EthApiError::ExecutionTimedOut(timeout_duration).into())
+                }
+                Ok(Err(e)) => {
+                    timer.abort();
+                    Err(e)
                 }
                 Err(_) => Err(EthApiError::ExecutionTimedOut(timeout_duration).into()),
             }
