@@ -210,10 +210,21 @@ jobs:
           echo "All dependencies found"
 
       # Build binaries
+      - name: Resolve PR head branch
+        id: pr-info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            core.setOutput('head-ref', pr.head.ref);
+            core.setOutput('head-sha', pr.head.sha);
+
       - name: Resolve refs
         id: refs
-        env:
-          DEFAULT_FEATURE_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
           BASELINE_ARG="${{ steps.args.outputs.baseline }}"
           FEATURE_ARG="${{ steps.args.outputs.feature }}"
@@ -232,8 +243,8 @@ jobs:
             FEATURE_REF=$(git rev-parse "$FEATURE_ARG" 2>/dev/null || git rev-parse "origin/$FEATURE_ARG" 2>/dev/null)
             FEATURE_NAME="$FEATURE_ARG"
           else
-            FEATURE_REF="${{ github.sha }}"
-            FEATURE_NAME="$DEFAULT_FEATURE_NAME"
+            FEATURE_REF="${{ steps.pr-info.outputs.head-sha }}"
+            FEATURE_NAME="${{ steps.pr-info.outputs.head-ref }}"
           fi
 
           echo "baseline-ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
