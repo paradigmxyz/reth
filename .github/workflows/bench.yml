@@ -16,7 +16,7 @@ env:
 name: bench
 jobs:
   codspeed:
-    runs-on: depot-ubuntu-latest
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     strategy:
       matrix:
         partition: [1, 2]
