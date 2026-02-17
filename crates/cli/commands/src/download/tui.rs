@@ -1,4 +1,7 @@
-use crate::download::manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest};
+use crate::download::{
+    manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest},
+    DownloadProgress,
+};
 use crossterm::{
     event::{self, Event, KeyCode},
     execute,
@@ -142,14 +145,14 @@ impl SelectorApp {
         self.available.iter().copied().zip(self.selections.iter().copied()).collect()
     }
 
-    fn total_chunks(&self) -> u64 {
+    fn total_selected_size(&self) -> u64 {
         self.available
             .iter()
             .zip(&self.selections)
             .map(|(ty, sel)| match sel {
                 ComponentSelection::None => 0,
-                ComponentSelection::All => self.manifest.chunks_for_distance(*ty, None),
-                ComponentSelection::Distance(d) => self.manifest.chunks_for_distance(*ty, Some(*d)),
+                ComponentSelection::All => self.manifest.size_for_distance(*ty, None),
+                ComponentSelection::Distance(d) => self.manifest.size_for_distance(*ty, Some(*d)),
             })
             .sum()
     }
@@ -255,17 +258,14 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
             let sel = &app.selections[i];
             let sel_str = format_selection(sel);
 
-            let num_chunks = match sel {
+            let size = match sel {
                 ComponentSelection::None => 0,
-                ComponentSelection::All => app.manifest.chunks_for_distance(*ty, None),
-                ComponentSelection::Distance(d) => app.manifest.chunks_for_distance(*ty, Some(*d)),
+                ComponentSelection::All => app.manifest.size_for_distance(*ty, None),
+                ComponentSelection::Distance(d) => app.manifest.size_for_distance(*ty, Some(*d)),
             };
 
-            let chunks_str = if num_chunks > 0 && ty.is_chunked() {
-                format!("{num_chunks} chunks")
-            } else {
-                String::new()
-            };
+            let size_str =
+                if size > 0 { DownloadProgress::format_size(size) } else { String::new() };
 
             let required = if ty.is_required() { " (required)" } else { "" };
 
@@ -293,18 +293,18 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
                     format!("{arrows} {:<12}", sel_str),
                     style.add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!("{:>12}", chunks_str), style.add_modifier(Modifier::DIM)),
+                Span::styled(format!("{:>10}", size_str), style.add_modifier(Modifier::DIM)),
                 Span::styled(required.to_string(), Style::default().fg(Color::DarkGray)),
             ]))
         })
         .collect();
 
-    let total_chunks = app.total_chunks();
+    let total_str = DownloadProgress::format_size(app.total_selected_size());
     let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!("Components — {total_chunks} archives")),
+                .title(format!("Components — Total: {total_str}")),
         )
         .highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::DarkGray))
         .highlight_symbol("▸ ");
