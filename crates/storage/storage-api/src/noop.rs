@@ -35,8 +35,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -450,6 +450,13 @@ impl<C: Send + Sync, N: NodePrimitives> StateRootProvider for NoopProvider<C, N>
     fn state_root_with_updates(
         &self,
         _state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        Ok((B256::default(), TrieUpdates::default()))
+    }
+
+    fn state_root_with_updates_sorted(
+        &self,
+        _hashed_state: &HashedPostStateSorted,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
     }

@@ -12,8 +12,9 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
-    StateRoot, StorageMultiProof, StorageRoot, TrieInput, TrieInputSorted,
+    AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher,
+    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
+    TrieInputSorted,
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
@@ -94,6 +95,13 @@ impl<Provider: DBProvider> StateRootProvider for LatestStateProviderRef<'_, Prov
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok(StateRoot::overlay_root_with_updates(self.tx(), &hashed_state.into_sorted())?)
+    }
+
+    fn state_root_with_updates_sorted(
+        &self,
+        hashed_state: &HashedPostStateSorted,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        Ok(StateRoot::overlay_root_with_updates(self.tx(), hashed_state)?)
     }
 
     fn state_root_from_nodes_with_updates(

@@ -8,8 +8,8 @@ use reth_storage_api::{
     StateProvider, StateProviderBox, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    MultiProof, MultiProofTargets, StorageMultiProof, TrieInput,
 };
 use revm_database::BundleState;
 use std::{borrow::Cow, sync::OnceLock};
@@ -136,6 +136,13 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
         state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.state_root_from_nodes_with_updates(TrieInput::from_state(state))
+    }
+
+    fn state_root_with_updates_sorted(
+        &self,
+        hashed_state: &HashedPostStateSorted,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.state_root_with_updates(hashed_state.clone().into())
     }
 
     fn state_root_from_nodes_with_updates(
