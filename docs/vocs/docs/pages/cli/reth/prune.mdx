@@ -111,77 +111,6 @@ Static Files:
       --static-files.blocks-per-file.storage-change-sets <BLOCKS_PER_FILE_STORAGE_CHANGE_SETS>
           Number of blocks per file for the storage changesets segment
 
-      --static-files.receipts <RECEIPTS>
-          Store receipts in static files instead of the database.
-
-          When enabled, receipts will be written to static files on disk instead of the database.
-
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
-      --static-files.transaction-senders <TRANSACTION_SENDERS>
-          Store transaction senders in static files instead of the database.
-
-          When enabled, transaction senders will be written to static files on disk instead of the database.
-
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
-      --static-files.account-change-sets <ACCOUNT_CHANGESETS>
-          Store account changesets in static files.
-
-          When enabled, account changesets will be written to static files on disk instead of the database.
-
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
-      --static-files.storage-change-sets <STORAGE_CHANGESETS>
-          Store storage changesets in static files.
-
-          When enabled, storage changesets will be written to static files on disk instead of the database.
-
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
-RocksDB:
-      --rocksdb.all
-          Route all supported tables to `RocksDB` instead of MDBX.
-
-          This enables `RocksDB` for `tx-hash`, `storages-history`, and `account-history` tables. Cannot be combined with individual flags set to false.
-
-      --rocksdb.tx-hash <TX_HASH>
-          Route tx hash -> number table to `RocksDB` instead of MDBX.
-
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
-      --rocksdb.storages-history <STORAGES_HISTORY>
-          Route storages history tables to `RocksDB` instead of MDBX.
-
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
-      --rocksdb.account-history <ACCOUNT_HISTORY>
-          Route account history tables to `RocksDB` instead of MDBX.
-
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
 Storage:
       --storage.v2
           Enable v2 storage defaults (static files + `RocksDB` routing).
@@ -191,13 +120,6 @@ Storage:
           This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
 
           Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
-
-      --storage.use-hashed-state
-          Use hashed state tables (`HashedAccounts`/`HashedStorages`) as canonical state representation instead of plain state tables.
-
-          When enabled, execution writes directly to hashed tables, eliminating the need for separate hashing stages. This should only be enabled for new databases.
-
-          WARNING: Changing this setting on an existing database requires a full resync.
 
 Metrics:
       --metrics <PROMETHEUS>

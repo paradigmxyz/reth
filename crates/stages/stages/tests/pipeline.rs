@@ -3,7 +3,7 @@
 use alloy_consensus::{constants::ETH_TO_WEI, Header, TxEip1559, TxReceipt};
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
 use alloy_genesis::{Genesis, GenesisAccount};
-use alloy_primitives::{bytes, Address, Bytes, TxKind, B256, U256};
+use alloy_primitives::{bytes, keccak256, Address, Bytes, TxKind, B256, U256};
 use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider, MAINNET};
 use reth_config::config::StageConfig;
 use reth_consensus::noop::NoopConsensus;
@@ -36,7 +36,7 @@ use reth_stages::sets::DefaultStages;
 use reth_stages_api::{Pipeline, StageId};
 use reth_static_file::StaticFileProducer;
 use reth_storage_api::{
-    ChangeSetReader, StateProvider, StorageChangeSetReader, StorageSettingsCache,
+    ChangeSetReader, StateProvider, StorageChangeSetReader, StorageSettings, StorageSettingsCache,
 };
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
@@ -79,7 +79,7 @@ fn assert_changesets_queryable(
     let settings = provider.cached_storage_settings();
 
     // Verify storage changesets
-    if settings.storage_changesets_in_static_files {
+    if settings.storage_v2 {
         let static_file_provider = provider_factory.static_file_provider();
         static_file_provider.initialize_index()?;
         let storage_changesets =
@@ -89,6 +89,11 @@ fn assert_changesets_queryable(
             "storage changesets should be queryable from static files for blocks {:?}",
             block_range
         );
+
+        // Verify keys are in hashed format (v2 mode)
+        for (_, entry) in &storage_changesets {
+            assert!(entry.key.is_hashed(), "v2: storage changeset keys should be tagged as hashed");
+        }
     } else {
         let storage_changesets: Vec<_> = provider
             .tx_ref()
@@ -100,10 +105,20 @@ fn assert_changesets_queryable(
             "storage changesets should be queryable from MDBX for blocks {:?}",
             block_range
         );
+
+        // Verify keys are plain (not hashed) in v1 mode
+        for (_, entry) in &storage_changesets {
+            let key = entry.key;
+            assert_ne!(
+                key,
+                keccak256(key),
+                "v1: storage changeset key should be plain (not its own keccak256)"
+            );
+        }
     }
 
     // Verify account changesets
-    if settings.account_changesets_in_static_files {
+    if settings.storage_v2 {
         let static_file_provider = provider_factory.static_file_provider();
         static_file_provider.initialize_index()?;
         let account_changesets =
@@ -138,23 +153,26 @@ fn build_downloaders_from_file_client(
     provider_factory: reth_provider::ProviderFactory<
         reth_provider::test_utils::MockNodeTypesWithDB,
     >,
-) -> (impl HeaderDownloader<Header = Header>, impl BodyDownloader<Block = Block>) {
+) -> (impl HeaderDownloader<Header = Header>, impl BodyDownloader<Block = Block>, reth_tasks::Runtime)
+{
     let tip = file_client.tip().expect("file client should have tip");
     let min_block = file_client.min_block().expect("file client should have min block");
     let max_block = file_client.max_block().expect("file client should have max block");
 
+    let runtime = reth_tasks::Runtime::test();
+
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(stages_config.headers)
         .build(file_client.clone(), consensus.clone())
-        .into_task();
+        .into_task_with(&runtime);
     header_downloader.update_local_head(genesis);
     header_downloader.update_sync_target(SyncTarget::Tip(tip));
 
     let mut body_downloader = BodiesDownloaderBuilder::new(stages_config.bodies)
         .build(file_client, consensus, provider_factory)
-        .into_task();
+        .into_task_with(&runtime);
     body_downloader.set_download_range(min_block..=max_block).expect("set download range");
 
-    (header_downloader, body_downloader)
+    (header_downloader, body_downloader, runtime)
 }
 
 /// Builds a pipeline with `DefaultStages`.
@@ -201,19 +219,22 @@ where
     pipeline
 }
 
-/// Tests pipeline with ALL stages enabled using both ETH transfers and contract storage changes.
+/// Shared helper for pipeline forward sync and unwind tests.
 ///
-/// This test:
 /// 1. Pre-funds a signer account and deploys a Counter contract in genesis
 /// 2. Each block contains two transactions:
 ///    - ETH transfer to a recipient (account state changes)
 ///    - Counter `increment()` call (storage state changes)
 /// 3. Runs the full pipeline with ALL stages enabled
-/// 4. Forward syncs to block 5, unwinds to block 2
+/// 4. Forward syncs to `num_blocks`, unwinds to `unwind_target`, then re-syncs back to `num_blocks`
 ///
-/// This exercises both account and storage hashing/history stages.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_pipeline() -> eyre::Result<()> {
+/// When `storage_settings` is `Some`, the pipeline provider factory is configured with the given
+/// settings before genesis initialization (e.g. v2 storage mode).
+async fn run_pipeline_forward_and_unwind(
+    storage_settings: Option<StorageSettings>,
+    num_blocks: u64,
+    unwind_target: u64,
+) -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // Generate a keypair for signing transactions
@@ -259,7 +280,6 @@ async fn test_pipeline() -> eyre::Result<()> {
     let evm_config = EthEvmConfig::new(chain_spec.clone());
 
     // Build blocks by actually executing transactions to get correct state roots
-    let num_blocks = 5u64;
     let mut blocks: Vec<SealedBlock<Block>> = Vec::new();
     let mut parent_hash = genesis.hash();
 
@@ -384,17 +404,21 @@ async fn test_pipeline() -> eyre::Result<()> {
     // This is needed because we wrote state during block generation for computing state roots
     let pipeline_provider_factory =
         create_test_provider_factory_with_chain_spec(chain_spec.clone());
+    if let Some(settings) = storage_settings {
+        pipeline_provider_factory.set_storage_settings_cache(settings);
+    }
     init_genesis(&pipeline_provider_factory).expect("init genesis");
     let pipeline_genesis =
         pipeline_provider_factory.sealed_header(0)?.expect("genesis should exist");
     let pipeline_consensus = NoopConsensus::arc();
 
+    let blocks_clone = blocks.clone();
     let file_client = create_file_client_from_blocks(blocks);
     let max_block = file_client.max_block().unwrap();
     let tip = file_client.tip().expect("tip");
 
     let stages_config = StageConfig::default();
-    let (header_downloader, body_downloader) = build_downloaders_from_file_client(
+    let (header_downloader, body_downloader, _runtime) = build_downloaders_from_file_client(
         file_client,
         pipeline_genesis,
         stages_config,
@@ -417,7 +441,7 @@ async fn test_pipeline() -> eyre::Result<()> {
     {
         let provider = pipeline_provider_factory.provider()?;
         let last_block = provider.last_block_number()?;
-        assert_eq!(last_block, 5, "should have synced 5 blocks");
+        assert_eq!(last_block, num_blocks, "should have synced {num_blocks} blocks");
 
         for stage_id in [
             StageId::Headers,
@@ -435,29 +459,28 @@ async fn test_pipeline() -> eyre::Result<()> {
             let checkpoint = provider.get_stage_checkpoint(stage_id)?;
             assert_eq!(
                 checkpoint.map(|c| c.block_number),
-                Some(5),
-                "{stage_id} checkpoint should be at block 5"
+                Some(num_blocks),
+                "{stage_id} checkpoint should be at block {num_blocks}"
             );
         }
 
         // Verify the counter contract's storage was updated
-        // After 5 blocks with 1 increment each, slot 0 should be 5
+        // After num_blocks blocks with 1 increment each, slot 0 should be num_blocks
         let state = provider.latest();
         let counter_storage = state.storage(CONTRACT_ADDRESS, B256::ZERO)?;
         assert_eq!(
             counter_storage,
-            Some(U256::from(5)),
-            "Counter storage slot 0 should be 5 after 5 increments"
+            Some(U256::from(num_blocks)),
+            "Counter storage slot 0 should be {num_blocks} after {num_blocks} increments"
         );
     }
 
     // Verify changesets are queryable before unwind
     // This validates that the #21561 fix works - unwind needs to read changesets from the correct
     // source
-    assert_changesets_queryable(&pipeline_provider_factory, 1..=5)?;
+    assert_changesets_queryable(&pipeline_provider_factory, 1..=num_blocks)?;
 
-    // Unwind to block 2
-    let unwind_target = 2u64;
+    // Unwind to unwind_target
     pipeline.unwind(unwind_target, None)?;
 
     // Verify unwind
@@ -484,7 +507,116 @@ async fn test_pipeline() -> eyre::Result<()> {
                 );
             }
         }
+
+        let state = provider.latest();
+        let counter_storage = state.storage(CONTRACT_ADDRESS, B256::ZERO)?;
+        assert_eq!(
+            counter_storage,
+            Some(U256::from(unwind_target)),
+            "Counter storage slot 0 should be {unwind_target} after unwinding to block {unwind_target}"
+        );
+    }
+
+    // Re-sync: build a new pipeline starting from unwind_target and sync back to num_blocks
+    let resync_file_client = create_file_client_from_blocks(blocks_clone);
+    let resync_consensus = NoopConsensus::arc();
+    let resync_stages_config = StageConfig::default();
+
+    let unwind_head = pipeline_provider_factory
+        .sealed_header(unwind_target)?
+        .expect("unwind target header should exist");
+
+    let resync_runtime = reth_tasks::Runtime::test();
+
+    let mut resync_header_downloader =
+        ReverseHeadersDownloaderBuilder::new(resync_stages_config.headers)
+            .build(resync_file_client.clone(), resync_consensus.clone())
+            .into_task_with(&resync_runtime);
+    resync_header_downloader.update_local_head(unwind_head);
+    resync_header_downloader.update_sync_target(SyncTarget::Tip(tip));
+
+    let mut resync_body_downloader = BodiesDownloaderBuilder::new(resync_stages_config.bodies)
+        .build(resync_file_client, resync_consensus, pipeline_provider_factory.clone())
+        .into_task_with(&resync_runtime);
+    resync_body_downloader
+        .set_download_range(unwind_target + 1..=max_block)
+        .expect("set download range");
+
+    let resync_pipeline = build_pipeline(
+        pipeline_provider_factory.clone(),
+        resync_header_downloader,
+        resync_body_downloader,
+        max_block,
+        tip,
+    );
+
+    let (_resync_pipeline, resync_result) = resync_pipeline.run_as_fut(None).await;
+    resync_result?;
+
+    // Verify re-sync
+    {
+        let provider = pipeline_provider_factory.provider()?;
+        let last_block = provider.last_block_number()?;
+        assert_eq!(last_block, num_blocks, "should have re-synced to {num_blocks} blocks");
+
+        for stage_id in [
+            StageId::Headers,
+            StageId::Bodies,
+            StageId::SenderRecovery,
+            StageId::Execution,
+            StageId::AccountHashing,
+            StageId::StorageHashing,
+            StageId::MerkleExecute,
+            StageId::TransactionLookup,
+            StageId::IndexAccountHistory,
+            StageId::IndexStorageHistory,
+            StageId::Finish,
+        ] {
+            let checkpoint = provider.get_stage_checkpoint(stage_id)?;
+            assert_eq!(
+                checkpoint.map(|c| c.block_number),
+                Some(num_blocks),
+                "{stage_id} checkpoint should be at block {num_blocks} after re-sync"
+            );
+        }
+
+        let state = provider.latest();
+        let counter_storage = state.storage(CONTRACT_ADDRESS, B256::ZERO)?;
+        assert_eq!(
+            counter_storage,
+            Some(U256::from(num_blocks)),
+            "Counter storage slot 0 should be {num_blocks} after re-sync"
+        );
     }
 
     Ok(())
+}
+
+/// Tests pipeline with ALL stages enabled using both ETH transfers and contract storage changes.
+///
+/// This test:
+/// 1. Pre-funds a signer account and deploys a Counter contract in genesis
+/// 2. Each block contains two transactions:
+///    - ETH transfer to a recipient (account state changes)
+///    - Counter `increment()` call (storage state changes)
+/// 3. Runs the full pipeline with ALL stages enabled
+/// 4. Forward syncs to block 5, unwinds to block 2, then re-syncs to block 5
+///
+/// This exercises both account and storage hashing/history stages.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pipeline() -> eyre::Result<()> {
+    run_pipeline_forward_and_unwind(None, 5, 2).await
+}
+
+/// Same as [`test_pipeline`] but runs with v2 storage settings (`use_hashed_state=true`,
+/// `is_v2()=true`, etc.).
+///
+/// In v2 mode:
+/// - The execution stage writes directly to `HashedAccounts`/`HashedStorages`
+/// - `AccountHashingStage` and `StorageHashingStage` are no-ops during forward execution
+/// - Changesets are stored in static files with pre-hashed storage keys
+/// - Unwind must still revert hashed state via the hashing stages before `MerkleUnwind` validates
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pipeline_v2() -> eyre::Result<()> {
+    run_pipeline_forward_and_unwind(Some(StorageSettings::v2()), 5, 2).await
 }

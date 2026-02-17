@@ -7,7 +7,8 @@ use reth_chainspec::EthereumHardforks;
 use reth_node_api::{BlockTy, NodeTypes, TxTy};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, BlobStore, CoinbaseTipOrdering, PoolConfig, PoolTransaction,
-    SubPoolLimit, TransactionPool, TransactionValidationTaskExecutor, TransactionValidator,
+    SubPoolLimit, TransactionOrdering, TransactionPool, TransactionValidationTaskExecutor,
+    TransactionValidator,
 };
 use std::future::Future;
 
@@ -174,10 +175,31 @@ where
     where
         BS: BlobStore,
     {
-        let ctx = self.ctx;
-        let transaction_pool = self.build(blob_store, pool_config);
-        // Spawn maintenance tasks using standalone functions
-        spawn_maintenance_tasks(ctx, transaction_pool.clone(), transaction_pool.config())?;
+        self.build_with_ordering_and_spawn_maintenance_task(
+            CoinbaseTipOrdering::default(),
+            blob_store,
+            pool_config,
+        )
+    }
+
+    /// Build the transaction pool with a custom [`TransactionOrdering`] and spawn its maintenance
+    /// tasks.
+    pub fn build_with_ordering_and_spawn_maintenance_task<BS, O>(
+        self,
+        ordering: O,
+        blob_store: BS,
+        pool_config: PoolConfig,
+    ) -> eyre::Result<reth_transaction_pool::Pool<TransactionValidationTaskExecutor<V>, O, BS>>
+    where
+        BS: BlobStore,
+        O: TransactionOrdering<Transaction = V::Transaction>,
+    {
+        let TxPoolBuilder { ctx, validator, .. } = self;
+
+        let transaction_pool =
+            reth_transaction_pool::Pool::new(validator, ordering, blob_store, pool_config.clone());
+
+        spawn_maintenance_tasks(ctx, transaction_pool.clone(), &pool_config)?;
 
         Ok(transaction_pool)
     }

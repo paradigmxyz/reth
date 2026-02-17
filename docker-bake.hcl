@@ -9,7 +9,7 @@ variable "TAG" {
 }
 
 variable "BUILD_PROFILE" {
-  default = "maxperf"
+  default = "maxperf-symbols"
 }
 
 variable "FEATURES" {
@@ -137,4 +137,3 @@ target "kurtosis" {
   tags   = ["ghcr.io/paradigmxyz/reth:kurtosis-ci"]
   output = ["type=docker,dest=${HIVE_OUTPUT_DIR}/reth_image.tar"]
 }
-

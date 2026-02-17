@@ -85,7 +85,7 @@ use reth_tracing::{
 };
 use reth_transaction_pool::TransactionPool;
 use reth_trie_db::ChangesetCache;
-use std::{sync::Arc, thread::available_parallelism, time::Duration};
+use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
@@ -228,11 +228,13 @@ impl LaunchContext {
         }
 
         // Configure the implicit global rayon pool for `par_iter` usage.
-        let num_threads = available_parallelism()
-            .map_or(0, |num| num.get().saturating_sub(reserved_cpu_cores).max(1));
+        // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
+        // sizes doesn't actually reserve CPU cores for other processes.
+        let _ = reserved_cpu_cores;
+        let num_threads = available_parallelism().map_or(1, NonZeroUsize::get);
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
-            .thread_name(|i| format!("rayon-{i}"))
+            .thread_name(|i| format!("rayon-{i:02}"))
             .build_global()
         {
             warn!(%err, "Failed to build global thread pool")

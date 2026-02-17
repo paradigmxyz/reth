@@ -5,7 +5,7 @@ use crate::{
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNode};
+use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNode, TrieNodeV2};
 use tracing::instrument;
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
@@ -63,7 +63,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// A mutable reference to the underlying [`RevealableSparseTrie`](SparseTrieTrait).
     pub fn reveal_root(
         &mut self,
-        root: TrieNode,
+        root: TrieNodeV2,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
     ) -> SparseTrieResult<&mut T> {

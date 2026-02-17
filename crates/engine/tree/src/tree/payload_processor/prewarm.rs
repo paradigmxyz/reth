@@ -14,7 +14,7 @@
 use crate::tree::{
     cached_state::{CachedStateProvider, SavedCache},
     payload_processor::{
-        bal::{self, total_slots, BALSlotIter},
+        bal,
         multiproof::{MultiProofMessage, VersionedMultiProofTargets},
         PayloadExecutionCache,
     },
@@ -25,12 +25,13 @@ use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::Database;
-use alloy_primitives::{keccak256, map::B256Set, B256};
+use alloy_primitives::{keccak256, map::B256Set, StorageKey, B256};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use metrics::{Counter, Gauge, Histogram};
+use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory,
     StateReader,
@@ -38,24 +39,23 @@ use reth_provider::{
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::Runtime;
 use reth_trie::MultiProofTargets;
-use std::{
-    ops::Range,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, channel, Receiver, Sender},
-        Arc,
-    },
-    time::Instant,
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self, channel, Receiver, Sender, SyncSender},
+    Arc,
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
-/// Determines the prewarming mode: transaction-based or BAL-based.
+/// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
-    /// Prewarm by executing transactions from a stream.
-    Transactions(Receiver<Tx>),
+    /// Prewarm by executing transactions from a stream, each paired with its block index.
+    Transactions(Receiver<(usize, Tx)>),
     /// Prewarm by prefetching slots from a Block Access List.
     BlockAccessList(Arc<BlockAccessList>),
+    /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
+    /// benefit). No workers are spawned.
+    Skipped,
 }
 
 /// A wrapper for transactions that includes their index in the block.
@@ -83,8 +83,6 @@ where
     execution_cache: PayloadExecutionCache,
     /// Context provided to execution tasks
     ctx: PrewarmContext<N, P, Evm>,
-    /// How many transactions should be executed in parallel
-    max_concurrency: usize,
     /// Sender to emit evm state outcome messages, if any.
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
@@ -105,13 +103,12 @@ where
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-        max_concurrency: usize,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
 
         trace!(
             target: "engine::tree::payload_processor::prewarm",
-            max_concurrency,
+            prewarming_threads = executor.prewarming_pool().current_num_threads(),
             transaction_count = ctx.env.transaction_count,
             "Initialized prewarm task"
         );
@@ -121,7 +118,6 @@ where
                 executor,
                 execution_cache,
                 ctx,
-                max_concurrency,
                 to_multi_proof,
                 actions_rx,
                 parent_span: Span::current(),
@@ -137,7 +133,7 @@ where
     /// subsequent transactions in the block.
     fn spawn_all<Tx>(
         &self,
-        pending: mpsc::Receiver<Tx>,
+        pending: mpsc::Receiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     ) where
@@ -145,30 +141,28 @@ where
     {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
-        let max_concurrency = self.max_concurrency;
         let span = Span::current();
 
         self.executor.spawn_blocking(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
 
-            let (done_tx, done_rx) = mpsc::channel();
-
-            // When transaction_count is 0, it means the count is unknown. In this case, spawn
-            // max workers to handle potentially many transactions in parallel rather
-            // than bottlenecking on a single worker.
-            let transaction_count = ctx.env.transaction_count;
-            let workers_needed = if transaction_count == 0 {
-                max_concurrency
+            let pool_threads = executor.prewarming_pool().current_num_threads();
+            // Don't spawn more workers than transactions. When transaction_count is 0
+            // (unknown), use all pool threads.
+            let workers_needed = if ctx.env.transaction_count > 0 {
+                ctx.env.transaction_count.min(pool_threads)
             } else {
-                transaction_count.min(max_concurrency)
+                pool_threads
             };
+
+            let (done_tx, done_rx) = mpsc::sync_channel(workers_needed);
 
             // Spawn workers
             let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor,  to_multi_proof.clone(), done_tx.clone());
 
             // Distribute transactions to workers
-            let mut tx_index = 0usize;
-            while let Ok(tx) = pending.recv() {
+            let mut tx_count = 0usize;
+            while let Ok((tx_index, tx)) = pending.recv() {
                 // Stop distributing if termination was requested
                 if ctx.terminate_execution.load(Ordering::Relaxed) {
                     trace!(
@@ -185,7 +179,7 @@ where
                 // exit early when signaled.
                 let _ = tx_sender.send(indexed_tx);
 
-                tx_index += 1;
+                tx_count += 1;
             }
 
             // Send withdrawal prefetch targets after all transactions have been distributed
@@ -204,7 +198,7 @@ where
             while done_rx.recv().is_ok() {}
 
             let _ = actions_tx
-                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_index });
+                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
         });
     }
 
@@ -271,10 +265,8 @@ where
         }
     }
 
-    /// Runs BAL-based prewarming by spawning workers to prefetch storage slots.
-    ///
-    /// Divides the total slots across `max_concurrency` workers, each responsible for
-    /// prefetching a range of slots from the BAL.
+    /// Runs BAL-based prewarming by using the prewarming pool's parallel iterator to prefetch
+    /// accounts and storage slots.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
         &self,
@@ -293,59 +285,35 @@ where
             return;
         }
 
-        let total_slots = total_slots(&bal);
-
-        trace!(
-            target: "engine::tree::payload_processor::prewarm",
-            total_slots,
-            max_concurrency = self.max_concurrency,
-            "Starting BAL prewarm"
-        );
-
-        if total_slots == 0 {
+        if bal.is_empty() {
             self.send_bal_hashed_state(&bal);
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
             return;
         }
 
-        let (done_tx, done_rx) = mpsc::channel();
+        trace!(
+            target: "engine::tree::payload_processor::prewarm",
+            accounts = bal.len(),
+            "Starting BAL prewarm"
+        );
 
-        // Calculate number of workers needed (at most max_concurrency)
-        let workers_needed = total_slots.min(self.max_concurrency);
-
-        // Calculate slots per worker
-        let slots_per_worker = total_slots / workers_needed;
-        let remainder = total_slots % workers_needed;
-
-        // Spawn workers with their assigned ranges
-        for i in 0..workers_needed {
-            let start = i * slots_per_worker + i.min(remainder);
-            let extra = if i < remainder { 1 } else { 0 };
-            let end = start + slots_per_worker + extra;
-
-            self.ctx.spawn_bal_worker(
-                i,
-                &self.executor,
-                Arc::clone(&bal),
-                start..end,
-                done_tx.clone(),
+        let ctx = self.ctx.clone();
+        self.executor.prewarming_pool().install_fn(|| {
+            bal.par_iter().for_each_init(
+                || (ctx.clone(), None::<CachedStateProvider<reth_provider::StateProviderBox>>),
+                |(ctx, provider), account| {
+                    if ctx.terminate_execution.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    ctx.prefetch_bal_account(provider, account);
+                },
             );
-        }
-
-        // Drop our handle to done_tx so we can detect completion
-        drop(done_tx);
-
-        // Wait for all workers to complete
-        let mut completed_workers = 0;
-        while done_rx.recv().is_ok() {
-            completed_workers += 1;
-        }
+        });
 
         trace!(
             target: "engine::tree::payload_processor::prewarm",
-            completed_workers,
-            "All BAL prewarm workers completed"
+            "All BAL prewarm accounts completed"
         );
 
         // Convert BAL to HashedPostState and send to multiproof task
@@ -415,6 +383,10 @@ where
             }
             PrewarmMode::BlockAccessList(bal) => {
                 self.run_bal_prewarm(bal, actions_tx);
+            }
+            PrewarmMode::Skipped => {
+                let _ = actions_tx
+                    .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
             }
         }
 
@@ -528,11 +500,8 @@ where
         if let Some(saved_cache) = saved_cache {
             let caches = saved_cache.cache().clone();
             let cache_metrics = saved_cache.metrics().clone();
-            state_provider = Box::new(
-                CachedStateProvider::new(state_provider, caches, cache_metrics)
-                    // ensure we pre-warm the cache
-                    .prewarm(),
-            );
+            state_provider =
+                Box::new(CachedStateProvider::new_prewarm(state_provider, caches, cache_metrics));
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
@@ -576,12 +545,11 @@ where
     ///
     /// Note: There are no ordering guarantees; this does not reflect the state produced by
     /// sequential execution.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn transact_batch<Tx>(
         self,
         txs: CrossbeamReceiver<IndexedTransaction<Tx>>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-        done_tx: Sender<()>,
+        done_tx: SyncSender<()>,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
@@ -591,13 +559,10 @@ where
         };
 
         while let Ok(IndexedTransaction { index, tx }) = txs.recv() {
-            let enter = debug_span!(
+            let _enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 "prewarm tx",
-                index,
-                tx_hash = %tx.tx().tx_hash(),
-                is_success = tracing::field::Empty,
-                gas_used = tracing::field::Empty,
+                i=index,
             )
             .entered();
 
@@ -628,12 +593,6 @@ where
             };
             metrics.execution_duration.record(start.elapsed());
 
-            // record some basic information about the transactions
-            enter.record("gas_used", res.result.gas_used());
-            enter.record("is_success", res.result.is_success());
-
-            drop(enter);
-
             // If the task was cancelled, stop execution, and exit.
             if terminate_execution.load(Ordering::Relaxed) {
                 break
@@ -642,16 +601,12 @@ where
             // Only send outcome for transactions after the first txn
             // as the main execution will be just as fast
             if index > 0 {
-                let _enter =
-                    debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm outcome", index, tx_hash=%tx.tx().tx_hash())
-                        .entered();
                 let (targets, storage_targets) =
                     multiproof_targets_from_state(res.state, v2_proofs_enabled);
                 metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_multi_proof) = &to_multi_proof {
                     let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
                 }
-                drop(_enter);
             }
 
             metrics.total_runtime.record(start.elapsed());
@@ -669,7 +624,7 @@ where
         workers_needed: usize,
         task_executor: &Runtime,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-        done_tx: Sender<()>,
+        done_tx: SyncSender<()>,
     ) -> CrossbeamSender<IndexedTransaction<Tx>>
     where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
@@ -677,115 +632,65 @@ where
         let (tx_sender, tx_receiver) = crossbeam_channel::unbounded();
 
         // Spawn workers that all pull from the shared receiver
-        let executor = task_executor.clone();
         let span = Span::current();
-        task_executor.spawn_blocking(move || {
-            let _enter = span.entered();
-            for idx in 0..workers_needed {
-                let ctx = self.clone();
-                let to_multi_proof = to_multi_proof.clone();
-                let done_tx = done_tx.clone();
-                let rx = tx_receiver.clone();
-                let span = debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm worker", idx);
-                executor.spawn_blocking(move || {
-                    let _enter = span.entered();
-                    ctx.transact_batch(rx, to_multi_proof, done_tx);
-                });
-            }
-        });
+        for idx in 0..workers_needed {
+            let ctx = self.clone();
+            let to_multi_proof = to_multi_proof.clone();
+            let done_tx = done_tx.clone();
+            let rx = tx_receiver.clone();
+            let span = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: &span, "prewarm worker", idx);
+            task_executor.prewarming_pool().spawn(move || {
+                let _enter = span.entered();
+                ctx.transact_batch(rx, to_multi_proof, done_tx);
+            });
+        }
 
         tx_sender
     }
 
-    /// Spawns a worker task for BAL slot prefetching.
+    /// Prefetches a single account and all its storage slots from the BAL into the cache.
     ///
-    /// The worker iterates over the specified range of slots in the BAL and ensures
-    /// each slot is loaded into the cache by accessing it through the state provider.
-    fn spawn_bal_worker(
+    /// The `provider` is lazily initialized on first call and reused across accounts on the same
+    /// thread.
+    fn prefetch_bal_account(
         &self,
-        idx: usize,
-        executor: &Runtime,
-        bal: Arc<BlockAccessList>,
-        range: Range<usize>,
-        done_tx: Sender<()>,
+        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox>>,
+        account: &alloy_eip7928::AccountChanges,
     ) {
-        let ctx = self.clone();
-        let span = debug_span!(
-            target: "engine::tree::payload_processor::prewarm",
-            "bal prewarm worker",
-            idx,
-            range_start = range.start,
-            range_end = range.end
-        );
-
-        executor.spawn_blocking(move || {
-            let _enter = span.entered();
-            ctx.prefetch_bal_slots(bal, range, done_tx);
-        });
-    }
-
-    /// Prefetches storage slots from a BAL range into the cache.
-    ///
-    /// This iterates through the specified range of slots and accesses them via the state
-    /// provider to populate the cache.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn prefetch_bal_slots(
-        self,
-        bal: Arc<BlockAccessList>,
-        range: Range<usize>,
-        done_tx: Sender<()>,
-    ) {
-        let Self { saved_cache, provider, metrics, .. } = self;
-
-        // Build state provider
-        let state_provider = match provider.build() {
-            Ok(provider) => provider,
-            Err(err) => {
-                trace!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    %err,
-                    "Failed to build state provider in BAL prewarm thread"
-                );
-                let _ = done_tx.send(());
-                return;
+        let state_provider = match provider {
+            Some(p) => p,
+            slot @ None => {
+                let built = match self.provider.build() {
+                    Ok(p) => p,
+                    Err(err) => {
+                        trace!(
+                            target: "engine::tree::payload_processor::prewarm",
+                            %err,
+                            "Failed to build state provider in BAL prewarm thread"
+                        );
+                        return;
+                    }
+                };
+                let saved_cache =
+                    self.saved_cache.as_ref().expect("BAL prewarm should only run with cache");
+                let caches = saved_cache.cache().clone();
+                let cache_metrics = saved_cache.metrics().clone();
+                slot.insert(CachedStateProvider::new(built, caches, cache_metrics))
             }
         };
 
-        // Wrap with cache (guaranteed to be Some since run_bal_prewarm checks)
-        let saved_cache = saved_cache.expect("BAL prewarm should only run with cache");
-        let caches = saved_cache.cache().clone();
-        let cache_metrics = saved_cache.metrics().clone();
-        let state_provider = CachedStateProvider::new(state_provider, caches, cache_metrics);
-
         let start = Instant::now();
 
-        // Track last seen address to avoid fetching the same account multiple times.
-        let mut last_address = None;
+        let _ = state_provider.basic_account(&account.address);
 
-        // Iterate through the assigned range of slots
-        for (address, slot) in BALSlotIter::new(&bal, range.clone()) {
-            // Fetch the account if this is a different address than the last one
-            if last_address != Some(address) {
-                let _ = state_provider.basic_account(&address);
-                last_address = Some(address);
-            }
-
-            // Access the slot to populate the cache
-            let _ = state_provider.storage(address, slot);
+        for slot in &account.storage_changes {
+            let _ = state_provider.storage(account.address, StorageKey::from(slot.slot));
+        }
+        for &slot in &account.storage_reads {
+            let _ = state_provider.storage(account.address, StorageKey::from(slot));
         }
 
-        let elapsed = start.elapsed();
-
-        trace!(
-            target: "engine::tree::payload_processor::prewarm",
-            ?range,
-            elapsed_ms = elapsed.as_millis(),
-            "BAL prewarm worker completed"
-        );
-
-        // Signal completion
-        let _ = done_tx.send(());
-        metrics.bal_slot_iteration_duration.record(elapsed.as_secs_f64());
+        self.metrics.bal_slot_iteration_duration.record(start.elapsed().as_secs_f64());
     }
 }
 

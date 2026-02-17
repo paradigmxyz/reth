@@ -293,6 +293,11 @@ Networking:
 
           Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
 
+      --enforce-enr-fork-id
+          Enforce EIP-868 ENR fork ID validation for discovered peers.
+
+          When enabled, peers discovered without a confirmed fork ID are not added to the peer set until their fork ID is verified via EIP-868 ENR request. This filters out peers from other networks that pollute the discovery table.
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -907,33 +912,6 @@ Pruning:
       --prune.bodies.before <BLOCK_NUMBER>
           Prune storage history before the specified block number. The specified block number is not pruned
 
-RocksDB:
-      --rocksdb.all
-          Route all supported tables to `RocksDB` instead of MDBX.
-
-          This enables `RocksDB` for `tx-hash`, `storages-history`, and `account-history` tables. Cannot be combined with individual flags set to false.
-
-      --rocksdb.tx-hash <TX_HASH>
-          Route tx hash -> number table to `RocksDB` instead of MDBX.
-
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
-      --rocksdb.storages-history <STORAGES_HISTORY>
-          Route storages history tables to `RocksDB` instead of MDBX.
-
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
-      --rocksdb.account-history <ACCOUNT_HISTORY>
-          Route account history tables to `RocksDB` instead of MDBX.
-
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
 Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for the engine. This determines how many canonical blocks must be in-memory, ahead of the last persisted block, before flushing canonical blocks to disk again.
@@ -1003,6 +981,9 @@ Engine:
       --engine.account-worker-count <ACCOUNT_WORKER_COUNT>
           Configure the number of account proof workers in the Tokio blocking pool. If not specified, defaults to the same count as storage workers
 
+      --engine.prewarming-threads <PREWARMING_THREADS>
+          Configure the number of prewarming threads. If not specified, defaults to available parallelism
+
       --engine.disable-proof-v2
           Disable V2 storage proofs for state root calculations
 
@@ -1021,6 +1002,18 @@ Engine:
           Maximum number of storage tries to retain after sparse trie pruning
 
           [default: 100]
+
+      --engine.disable-sparse-trie-cache-pruning
+          Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved without any node pruning or storage trie eviction between blocks. Useful for benchmarking the effects of retaining the full trie cache
+
+      --engine.state-root-task-timeout <STATE_ROOT_TASK_TIMEOUT>
+          Configure the timeout for the state root task before spawning a sequential fallback. If the state root task takes longer than this, a sequential computation starts in parallel and whichever finishes first is used.
+
+          --engine.state-root-task-timeout 1s --engine.state-root-task-timeout 400ms
+
+          Set to 0s to disable.
+
+          [default: 1s]
 
 ERA:
       --era.enable
@@ -1056,50 +1049,6 @@ Static Files:
       --static-files.blocks-per-file.storage-change-sets <BLOCKS_PER_FILE_STORAGE_CHANGE_SETS>
           Number of blocks per file for the storage changesets segment
 
-      --static-files.receipts <RECEIPTS>
-          Store receipts in static files instead of the database.
-
-          When enabled, receipts will be written to static files on disk instead of the database.
-
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
-      --static-files.transaction-senders <TRANSACTION_SENDERS>
-          Store transaction senders in static files instead of the database.
-
-          When enabled, transaction senders will be written to static files on disk instead of the database.
-
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
-      --static-files.account-change-sets <ACCOUNT_CHANGESETS>
-          Store account changesets in static files.
-
-          When enabled, account changesets will be written to static files on disk instead of the database.
-
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
-      --static-files.storage-change-sets <STORAGE_CHANGESETS>
-          Store storage changesets in static files.
-
-          When enabled, storage changesets will be written to static files on disk instead of the database.
-
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          Defaults to the base storage mode (v1: false, v2: true).
-
-          [possible values: true, false]
-
 Storage:
       --storage.v2
           Enable v2 storage defaults (static files + `RocksDB` routing).
@@ -1109,37 +1058,6 @@ Storage:
           This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
 
           Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
-
-      --storage.use-hashed-state
-          Use hashed state tables (`HashedAccounts`/`HashedStorages`) as canonical state representation instead of plain state tables.
-
-          When enabled, execution writes directly to hashed tables, eliminating the need for separate hashing stages. This should only be enabled for new databases.
-
-          WARNING: Changing this setting on an existing database requires a full resync.
-
-Ress:
-      --ress.enable
-          Enable support for `ress` subprotocol
-
-      --ress.max-active-connections <MAX_ACTIVE_CONNECTIONS>
-          The maximum number of active connections for `ress` subprotocol
-
-          [default: 5]
-
-      --ress.max-witness-window <MAX_WITNESS_WINDOW>
-          The maximum witness lookback window
-
-          [default: 1024]
-
-      --ress.witness-max-parallel <WITNESS_MAX_PARALLEL>
-          The maximum number of witnesses to generate in parallel
-
-          [default: 5]
-
-      --ress.witness-cache-size <WITNESS_CACHE_SIZE>
-          Witness cache size
-
-          [default: 10]
 
 Logging:
       --log.stdout.format <FORMAT>
