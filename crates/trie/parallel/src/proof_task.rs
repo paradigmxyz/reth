@@ -6,27 +6,27 @@
 //! - **Worker Pools**: Pre-spawned workers with dedicated database transactions
 //!   - Storage pool: Handles storage proofs and blinded storage node requests
 //!   - Account pool: Handles account multiproofs and blinded account node requests
-//! - **Direct Channel Access**: [`ProofWorkerHandle`] provides type-safe queue methods with direct
+//! - **Direct Channel Access**: `ProofWorkerHandle` provides type-safe queue methods with direct
 //!   access to worker channels, eliminating routing overhead
 //! - **Automatic Shutdown**: Workers terminate gracefully when all handles are dropped
 //!
 //! # Message Flow
 //!
-//! 1. `MultiProofTask` prepares a storage or account job and hands it to [`ProofWorkerHandle`]. The
-//!    job carries a [`ProofResultContext`] so the worker knows how to send the result back.
-//! 2. A worker receives the job, runs the proof, and sends a [`ProofResultMessage`] through the
-//!    provided [`ProofResultSender`].
-//! 3. `MultiProofTask` receives the message, uses `sequence_number` to keep proofs in order, and
+//! 1. The multiproof task prepares a storage or account job and hands it to `ProofWorkerHandle`.
+//!    The job carries a `ProofResultContext` so the worker knows how to send the result back.
+//! 2. A worker receives the job, runs the proof, and sends a `ProofResultMessage` through the
+//!    provided `ProofResultSender`.
+//! 3. The multiproof task receives the message, uses `sequence_number` to keep proofs in order, and
 //!    proceeds with its state-root logic.
 //!
-//! Each job gets its own direct channel so results go straight back to `MultiProofTask`. That keeps
-//! ordering decisions in one place and lets workers run independently.
+//! Each job gets its own direct channel so results go straight back to the multiproof task. That
+//! keeps ordering decisions in one place and lets workers run independently.
 //!
 //! ```text
-//! MultiProofTask -> MultiproofManager -> ProofWorkerHandle -> Storage/Account Worker
-//!        ^                                          |
-//!        |                                          v
-//! ProofResultMessage <-------- ProofResultSender ---
+//! SparseTrieCacheTask -> ProofWorkerHandle -> Storage/Account Worker
+//!        ^                       |
+//!        |                       v
+//! ProofResultMessage <-- ProofResultSender
 //! ```
 
 use crate::{
