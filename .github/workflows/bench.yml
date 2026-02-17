@@ -255,7 +255,9 @@ jobs:
           BRANCH_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           git fetch origin main --quiet
-          MERGE_BASE=$(git merge-base HEAD origin/main 2>/dev/null || echo "${{ github.sha }}")
+          # Use the actual PR head commit, not HEAD (which is the merge commit
+          # refs/pull/N/merge and always has origin/main as a parent).
+          MERGE_BASE=$(git merge-base "${BRANCH_SHA}" origin/main 2>/dev/null || echo "${{ github.sha }}")
           MAIN_HEAD=$(git rev-parse origin/main 2>/dev/null || echo "")
           BEHIND_MAIN=0
           if [ -n "$MAIN_HEAD" ] && [ "$MERGE_BASE" != "$MAIN_HEAD" ]; then
