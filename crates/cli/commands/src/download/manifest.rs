@@ -62,24 +62,6 @@ pub struct ChunkedArchive {
     pub blocks_per_file: u64,
     /// Total number of blocks covered by this component.
     pub total_blocks: u64,
-    /// Optional per-chunk metadata. When absent, chunk file names are derived from the
-    /// naming convention: `{component}-{start}-{end}.tar.zst`
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub chunks: Option<Vec<ChunkMetadata>>,
-}
-
-/// Metadata for a single chunk within a chunked archive.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChunkMetadata {
-    /// Start block (inclusive).
-    pub start: u64,
-    /// End block (inclusive).
-    pub end: u64,
-    /// Compressed archive size in bytes.
-    pub size: u64,
-    /// Optional SHA-256 checksum.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checksum: Option<String>,
 }
 
 /// The types of snapshot components that can be downloaded.
@@ -191,14 +173,8 @@ impl ComponentManifest {
     pub fn total_size(&self) -> u64 {
         match self {
             Self::Single(s) => s.size,
-            Self::Chunked(c) => {
-                if let Some(chunks) = &c.chunks {
-                    chunks.iter().map(|ch| ch.size).sum()
-                } else {
-                    // Estimate not available without chunk metadata
-                    0
-                }
-            }
+            // Individual chunk sizes are discovered at download time
+            Self::Chunked(_) => 0,
         }
     }
 }
@@ -261,7 +237,8 @@ pub fn generate_manifest(
         info!(target: "reth::cli", size = %super::DownloadProgress::format_size(size), "Found indexes archive");
     }
 
-    // Chunked components
+    // Chunked components — just record blocks_per_file + total_blocks,
+    // the client derives chunk URLs from the naming convention.
     for ty in &[
         SnapshotComponentType::Headers,
         SnapshotComponentType::Transactions,
@@ -270,21 +247,22 @@ pub fn generate_manifest(
         SnapshotComponentType::StorageChangesets,
     ] {
         let key = ty.key();
-        let chunks = discover_chunks(archive_dir, key, block, blocks_per_file)?;
-        if !chunks.is_empty() {
-            let total_blocks = chunks.last().map(|c| c.end + 1).unwrap_or(0);
+        // Check if at least the first chunk exists
+        let first_end = blocks_per_file.min(block) - 1;
+        let first_chunk = archive_dir.join(format!("{key}-0-{first_end}.tar.zst"));
+        if first_chunk.exists() {
+            let num_chunks = block.div_ceil(blocks_per_file);
             info!(target: "reth::cli",
                 component = ty.display_name(),
-                chunks = chunks.len(),
-                total_blocks,
+                chunks = num_chunks,
+                total_blocks = block,
                 "Found chunked component"
             );
             components.insert(
                 key.to_string(),
                 ComponentManifest::Chunked(ChunkedArchive {
                     blocks_per_file,
-                    total_blocks,
-                    chunks: Some(chunks),
+                    total_blocks: block,
                 }),
             );
         }
@@ -300,31 +278,6 @@ pub fn generate_manifest(
         base_url: base_url.to_string(),
         components,
     })
-}
-
-/// Discovers chunk archives for a component in a directory.
-fn discover_chunks(
-    dir: &Path,
-    component_key: &str,
-    max_block: u64,
-    blocks_per_file: u64,
-) -> Result<Vec<ChunkMetadata>> {
-    let mut chunks = Vec::new();
-    let num_chunks = max_block.div_ceil(blocks_per_file);
-
-    for i in 0..num_chunks {
-        let start = i * blocks_per_file;
-        let end = ((i + 1) * blocks_per_file).min(max_block) - 1;
-        let filename = format!("{component_key}-{start}-{end}.tar.zst");
-        let path = dir.join(&filename);
-
-        if path.exists() {
-            let size = std::fs::metadata(&path)?.len();
-            chunks.push(ChunkMetadata { start, end, size, checksum: None });
-        }
-    }
-
-    Ok(chunks)
 }
 
 /// Resolves an archive file path from a component key and naming convention.
