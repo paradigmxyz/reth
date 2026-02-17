@@ -143,44 +143,12 @@ jobs:
       # Build binaries
       - name: Fetch or build main binaries
         run: |
-          MC="mc --config-dir /home/ubuntu/.mc"
           MERGE_BASE=$(git merge-base HEAD origin/main 2>/dev/null || echo "${{ github.sha }}")
-          BUCKET="minio/reth-binaries/${MERGE_BASE}"
-
-          mkdir -p target/profiling-baseline
-          if $MC stat "${BUCKET}/reth" &>/dev/null; then
-            echo "Cache hit for main (${MERGE_BASE}), downloading binary..."
-            $MC cp "${BUCKET}/reth" target/profiling-baseline/reth
-            chmod +x target/profiling-baseline/reth
-          else
-            echo "Cache miss for main (${MERGE_BASE}), building from source..."
-            CURRENT_REF=$(git rev-parse HEAD)
-            git checkout "${MERGE_BASE}"
-            cargo build --profile profiling --bin reth
-            cp target/profiling/reth target/profiling-baseline/reth
-            $MC cp target/profiling-baseline/reth "${BUCKET}/reth"
-            git checkout "${CURRENT_REF}"
-          fi
+          .github/scripts/bench-reth-build.sh main "$MERGE_BASE"
       - name: Fetch or build branch binaries
         run: |
-          MC="mc --config-dir /home/ubuntu/.mc"
-          COMMIT="${{ github.event.pull_request.head.sha || github.sha }}"
-          BUCKET="minio/reth-binaries/${COMMIT}"
-
-          if $MC stat "${BUCKET}/reth" &>/dev/null && $MC stat "${BUCKET}/reth-bench" &>/dev/null; then
-            echo "Cache hit for ${COMMIT}, downloading binaries..."
-            mkdir -p target/profiling
-            $MC cp "${BUCKET}/reth" target/profiling/reth
-            $MC cp "${BUCKET}/reth-bench" /home/ubuntu/.cargo/bin/reth-bench
-            chmod +x target/profiling/reth /home/ubuntu/.cargo/bin/reth-bench
-          else
-            echo "Cache miss for ${COMMIT}, building from source..."
-            rustup show active-toolchain || rustup default stable
-            make profiling
-            make install-reth-bench
-            $MC cp target/profiling/reth "${BUCKET}/reth"
-            $MC cp "$(which reth-bench)" "${BUCKET}/reth-bench"
-          fi
+          BRANCH_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          .github/scripts/bench-reth-build.sh branch "$BRANCH_SHA"
 
       # System tuning for reproducible benchmarks
       - name: System setup
@@ -241,10 +209,10 @@ jobs:
             });
 
       - name: "Run benchmark: baseline"
-        run: .github/scripts/bench-reth-run.sh baseline target/profiling-baseline/reth /tmp/bench-results-baseline
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline target/profiling-baseline/reth /tmp/bench-results-baseline
 
       - name: "Run benchmark: branch"
-        run: .github/scripts/bench-reth-run.sh branch target/profiling/reth /tmp/bench-results-branch
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh branch target/profiling/reth /tmp/bench-results-branch
 
       # Results & charts
       - name: Parse results

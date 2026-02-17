@@ -38,16 +38,10 @@ free -h
 grep Cached /proc/meminfo
 
 # Start reth
-# CPU layout: core 0 = OS/IRQs, cores 1-14 = reth node, core 15 = reth-bench
+# CPU layout: core 0 = OS/IRQs/reth-bench/aux, cores 1+ = reth node
 RETH_BENCH="$(which reth-bench)"
 ONLINE=$(nproc)
-if [ "$ONLINE" -ge 16 ]; then
-  RETH_CPUS="1-$(( ONLINE - 2 ))"
-  BENCH_CPUS="$(( ONLINE - 1 ))"
-else
-  RETH_CPUS="1-$(( ONLINE - 1 ))"
-  BENCH_CPUS="0-$(( ONLINE - 1 ))"
-fi
+RETH_CPUS="1-$(( ONLINE - 1 ))"
 sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" node \
   --datadir "$DATADIR" \
   --engine.accept-execution-requests-hash \
@@ -79,7 +73,7 @@ for i in $(seq 1 60); do
 done
 
 # Warmup
-sudo taskset -c "$BENCH_CPUS" nice -n -20 "$RETH_BENCH" new-payload-fcu \
+sudo nice -n -20 "$RETH_BENCH" new-payload-fcu \
   --rpc-url "$BENCH_RPC_URL" \
   --engine-rpc-url http://127.0.0.1:8551 \
   --jwt-secret "$DATADIR/jwt.hex" \
@@ -87,7 +81,7 @@ sudo taskset -c "$BENCH_CPUS" nice -n -20 "$RETH_BENCH" new-payload-fcu \
   --reth-new-payload 2>&1 | sed -u "s/^/[bench] /"
 
 # Benchmark
-sudo taskset -c "$BENCH_CPUS" nice -n -20 "$RETH_BENCH" new-payload-fcu \
+sudo nice -n -20 "$RETH_BENCH" new-payload-fcu \
   --rpc-url "$BENCH_RPC_URL" \
   --engine-rpc-url http://127.0.0.1:8551 \
   --jwt-secret "$DATADIR/jwt.hex" \
