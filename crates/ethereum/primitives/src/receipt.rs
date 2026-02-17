@@ -11,30 +11,6 @@ pub type Receipt<T = TxType> = EthereumReceipt<T>;
 /// Receipt representation for RPC.
 pub type RpcReceipt<T = TxType> = EthereumReceipt<T, alloy_rpc_types_eth::Log>;
 
-/// Extension trait for [`Receipt`] providing reth-specific methods.
-pub trait ReceiptExt<T> {
-    /// Converts the logs of the receipt to RPC logs.
-    #[cfg(feature = "rpc")]
-    fn into_rpc(
-        self,
-        next_log_index: usize,
-        meta: alloy_consensus::transaction::TransactionMeta,
-    ) -> RpcReceipt<T>;
-}
-
-#[cfg(feature = "rpc")]
-impl<T> ReceiptExt<T> for Receipt<T> {
-    fn into_rpc(
-        self,
-        next_log_index: usize,
-        meta: alloy_consensus::transaction::TransactionMeta,
-    ) -> RpcReceipt<T> {
-        let Self { tx_type, success, cumulative_gas_used, logs } = self;
-        let logs = alloy_rpc_types_eth::Log::collect_for_receipt(next_log_index, meta, logs);
-        RpcReceipt { tx_type, success, cumulative_gas_used, logs }
-    }
-}
-
 /// Calculates the receipt root for a header for the reference type of [`Receipt`].
 ///
 /// NOTE: Prefer `proofs::calculate_receipt_root` if you have log blooms memoized.

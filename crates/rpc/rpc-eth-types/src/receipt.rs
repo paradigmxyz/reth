@@ -6,7 +6,7 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use reth_chainspec::EthChainSpec;
-use reth_ethereum_primitives::{Receipt, ReceiptExt};
+use reth_ethereum_primitives::Receipt;
 use reth_primitives_traits::{NodePrimitives, TransactionMeta};
 use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
 use std::sync::Arc;
@@ -78,8 +78,24 @@ impl<ChainSpec> EthReceiptConverter<ChainSpec> {
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self {
             chain_spec,
-            build_rpc_receipt: |receipt, next_log_index, meta| {
-                receipt.into_rpc(next_log_index, meta).into()
+            build_rpc_receipt: |receipt: Receipt, next_log_index, meta: TransactionMeta| {
+                let mut log_index = next_log_index;
+                receipt
+                    .map_logs(|log| {
+                        let idx = log_index;
+                        log_index += 1;
+                        Log {
+                            inner: log,
+                            block_hash: Some(meta.block_hash),
+                            block_number: Some(meta.block_number),
+                            block_timestamp: Some(meta.timestamp),
+                            transaction_hash: Some(meta.tx_hash),
+                            transaction_index: Some(meta.index),
+                            log_index: Some(idx as u64),
+                            removed: false,
+                        }
+                    })
+                    .into()
             },
         }
     }
