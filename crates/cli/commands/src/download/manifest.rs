@@ -64,8 +64,31 @@ pub struct ChunkedArchive {
     pub total_blocks: u64,
 }
 
+/// How much of a component to download.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComponentSelection {
+    /// Download all chunks (full archive).
+    All,
+    /// Download only the most recent chunks covering at least `distance` blocks.
+    /// Maps to `PruneMode::Distance(distance)` in the generated config.
+    Distance(u64),
+    /// Don't download this component at all.
+    /// Maps to `PruneMode::Full` for tx-based segments, or a minimal distance for others.
+    None,
+}
+
+impl std::fmt::Display for ComponentSelection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::All => write!(f, "All"),
+            Self::Distance(d) => write!(f, "Last {d} blocks"),
+            Self::None => write!(f, "None"),
+        }
+    }
+}
+
 /// The types of snapshot components that can be downloaded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SnapshotComponentType {
     /// State database (mdbx). Always required. Single archive.
     State,
@@ -185,6 +208,61 @@ impl SnapshotManifest {
             }
         }
     }
+
+    /// Returns archive URLs for a component, limited to chunks covering at least `distance`
+    /// blocks from the tip. Returns all URLs if distance is `None` (All mode).
+    pub fn archive_urls_for_distance(
+        &self,
+        ty: SnapshotComponentType,
+        distance: Option<u64>,
+    ) -> Vec<String> {
+        let Some(component) = self.component(ty) else {
+            return vec![];
+        };
+
+        match component {
+            ComponentManifest::Single(single) => {
+                vec![format!("{}/{}", self.base_url, single.file)]
+            }
+            ComponentManifest::Chunked(chunked) => {
+                let key = ty.key();
+                let num_chunks = chunked.num_chunks();
+
+                // Calculate which chunks to include
+                let start_chunk = match distance {
+                    Some(dist) => {
+                        // We need chunks covering the last `dist` blocks
+                        let needed_blocks = dist.min(chunked.total_blocks);
+                        let needed_chunks = needed_blocks.div_ceil(chunked.blocks_per_file);
+                        num_chunks.saturating_sub(needed_chunks)
+                    }
+                    None => 0, // All chunks
+                };
+
+                (start_chunk..num_chunks)
+                    .map(|i| {
+                        let start = i * chunked.blocks_per_file;
+                        let end = ((i + 1) * chunked.blocks_per_file).min(chunked.total_blocks) - 1;
+                        format!("{}/{key}-{start}-{end}.tar.zst", self.base_url)
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// Returns the number of chunks that would be downloaded for a given distance.
+    pub fn chunks_for_distance(&self, ty: SnapshotComponentType, distance: Option<u64>) -> u64 {
+        let Some(ComponentManifest::Chunked(chunked)) = self.component(ty) else {
+            return if self.component(ty).is_some() { 1 } else { 0 };
+        };
+        match distance {
+            Some(dist) => {
+                let needed = dist.min(chunked.total_blocks);
+                needed.div_ceil(chunked.blocks_per_file)
+            }
+            None => chunked.num_chunks(),
+        }
+    }
 }
 
 impl ComponentManifest {
@@ -299,4 +377,111 @@ pub fn generate_manifest(
 /// Resolves an archive file path from a component key and naming convention.
 pub fn chunk_filename(component_key: &str, start: u64, end: u64) -> String {
     format!("{component_key}-{start}-{end}.tar.zst")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_manifest() -> SnapshotManifest {
+        let mut components = BTreeMap::new();
+        components.insert(
+            "state".to_string(),
+            ComponentManifest::Single(SingleArchive {
+                file: "state.tar.zst".to_string(),
+                size: 100,
+                checksum: None,
+            }),
+        );
+        components.insert(
+            "transactions".to_string(),
+            ComponentManifest::Chunked(ChunkedArchive {
+                blocks_per_file: 500_000,
+                total_blocks: 1_500_000,
+            }),
+        );
+        components.insert(
+            "headers".to_string(),
+            ComponentManifest::Chunked(ChunkedArchive {
+                blocks_per_file: 500_000,
+                total_blocks: 1_500_000,
+            }),
+        );
+        SnapshotManifest {
+            block: 1_500_000,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: "https://example.com".to_string(),
+            components,
+        }
+    }
+
+    #[test]
+    fn archive_urls_for_distance_all() {
+        let m = test_manifest();
+        let urls = m.archive_urls_for_distance(SnapshotComponentType::Transactions, None);
+        assert_eq!(urls.len(), 3);
+        assert_eq!(urls[0], "https://example.com/transactions-0-499999.tar.zst");
+        assert_eq!(urls[2], "https://example.com/transactions-1000000-1499999.tar.zst");
+    }
+
+    #[test]
+    fn archive_urls_for_distance_partial() {
+        let m = test_manifest();
+        // 600k blocks → needs 2 chunks (each 500k)
+        let urls = m.archive_urls_for_distance(SnapshotComponentType::Transactions, Some(600_000));
+        assert_eq!(urls.len(), 2);
+        assert_eq!(urls[0], "https://example.com/transactions-500000-999999.tar.zst");
+        assert_eq!(urls[1], "https://example.com/transactions-1000000-1499999.tar.zst");
+    }
+
+    #[test]
+    fn archive_urls_for_distance_single_component() {
+        let m = test_manifest();
+        // Single archives always return one URL regardless of distance
+        let urls = m.archive_urls_for_distance(SnapshotComponentType::State, Some(100));
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0], "https://example.com/state.tar.zst");
+    }
+
+    #[test]
+    fn archive_urls_for_distance_missing_component() {
+        let m = test_manifest();
+        let urls = m.archive_urls_for_distance(SnapshotComponentType::Receipts, None);
+        assert!(urls.is_empty());
+    }
+
+    #[test]
+    fn chunks_for_distance_all() {
+        let m = test_manifest();
+        assert_eq!(m.chunks_for_distance(SnapshotComponentType::Transactions, None), 3);
+    }
+
+    #[test]
+    fn chunks_for_distance_partial() {
+        let m = test_manifest();
+        assert_eq!(m.chunks_for_distance(SnapshotComponentType::Transactions, Some(600_000)), 2);
+        assert_eq!(m.chunks_for_distance(SnapshotComponentType::Transactions, Some(100_000)), 1);
+    }
+
+    #[test]
+    fn chunks_for_distance_single() {
+        let m = test_manifest();
+        assert_eq!(m.chunks_for_distance(SnapshotComponentType::State, None), 1);
+        assert_eq!(m.chunks_for_distance(SnapshotComponentType::State, Some(100)), 1);
+    }
+
+    #[test]
+    fn chunks_for_distance_missing() {
+        let m = test_manifest();
+        assert_eq!(m.chunks_for_distance(SnapshotComponentType::Receipts, None), 0);
+    }
+
+    #[test]
+    fn component_selection_display() {
+        assert_eq!(ComponentSelection::All.to_string(), "All");
+        assert_eq!(ComponentSelection::Distance(10_064).to_string(), "Last 10064 blocks");
+        assert_eq!(ComponentSelection::None.to_string(), "None");
+    }
 }
