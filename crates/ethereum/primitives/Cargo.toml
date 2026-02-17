@@ -20,13 +20,10 @@ reth-primitives-traits.workspace = true
 alloy-eips = { workspace = true, features = ["k256"] }
 alloy-primitives.workspace = true
 alloy-consensus = { workspace = true, features = ["serde"] }
-alloy-serde = { workspace = true, optional = true }
 alloy-rpc-types-eth = { workspace = true, optional = true }
 
 # misc
-arbitrary = { workspace = true, optional = true, features = ["derive"] }
 serde = { workspace = true, optional = true }
-serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloy-serde.workspace = true
@@ -53,17 +50,17 @@ test-utils = [
 std = [
     "alloy-consensus/std",
     "alloy-primitives/std",
-    "alloy-rlp/std",
     "reth-primitives-traits/std",
-    "reth-zstd-compressors/std",
     "serde?/std",
     "alloy-eips/std",
-    "derive_more/std",
-    "serde_with?/std",
-    "secp256k1/std",
     "alloy-rpc-types-eth?/std",
-    "alloy-serde?/std",
+    "alloy-rlp/std",
+    "alloy-serde/std",
+    "derive_more/std",
+    "reth-zstd-compressors/std",
+    "secp256k1/std",
     "serde_json/std",
+    "serde_with/std",
 ]
 reth-codec = [
     "std",
@@ -71,7 +68,6 @@ reth-codec = [
 ]
 arbitrary = [
     "std",
-    "dep:arbitrary",
     "alloy-consensus/arbitrary",
     "alloy-consensus/k256",
     "alloy-primitives/arbitrary",
@@ -79,10 +75,9 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
-    "alloy-serde?/arbitrary",
+    "alloy-serde/arbitrary",
 ]
 serde-bincode-compat = [
-    "dep:serde_with",
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
@@ -90,15 +85,14 @@ serde-bincode-compat = [
 ]
 serde = [
     "dep:serde",
-    "dep:alloy-serde",
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "reth-codecs?/serde",
     "reth-primitives-traits/serde",
-    "rand/serde",
-    "rand_08/serde",
-    "secp256k1/serde",
     "alloy-rpc-types-eth?/serde",
+    "rand_08/serde",
+    "rand/serde",
+    "secp256k1/serde",
 ]
 rpc = ["dep:alloy-rpc-types-eth"]

@@ -9,17 +9,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(test)]
-extern crate alloc;
-
-#[cfg(all(not(test), feature = "serde"))]
-use alloy_serde as _;
-#[cfg(all(not(test), feature = "arbitrary"))]
-use arbitrary as _;
-#[cfg(all(not(test), feature = "reth-codec"))]
+// Feature-only dep: activated by `reth-codec` feature for downstream consumers.
+#[cfg(feature = "reth-codec")]
 use reth_codecs as _;
-#[cfg(all(not(test), feature = "serde-bincode-compat"))]
-use serde_with as _;
 
 mod receipt;
 pub use receipt::*;
