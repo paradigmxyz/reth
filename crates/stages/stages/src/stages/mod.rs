@@ -3,6 +3,8 @@ mod bodies;
 mod era;
 /// The execution stage that generates state diff.
 mod execution;
+/// The engine stage that combines all offline stages.
+mod engine_stage;
 /// The finish stage
 mod finish;
 /// Account hashing stage.
@@ -26,6 +28,7 @@ mod tx_lookup;
 pub use bodies::*;
 pub use era::*;
 pub use execution::*;
+pub use engine_stage::*;
 pub use finish::*;
 pub use hashing_account::*;
 pub use hashing_storage::*;

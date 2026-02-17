@@ -36,6 +36,7 @@ reth-prune-types.workspace = true
 reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
 reth-revm.workspace = true
+reth-chain-state.workspace = true
 reth-stages-api.workspace = true
 reth-static-file-types.workspace = true
 reth-tasks.workspace = true

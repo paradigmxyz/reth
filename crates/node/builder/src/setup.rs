@@ -17,15 +17,20 @@ use reth_network_p2p::{
 };
 use reth_node_api::HeaderTy;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
+use reth_config::config::{EtlConfig, SenderRecoveryConfig, TransactionLookupConfig};
 use reth_stages::{
     prelude::DefaultStages,
-    stages::{EraImportSource, ExecutionStage},
+    stages::{
+        BodyStage, EngineStage, EraImportSource, ExecutionStage, HeaderStage,
+        SenderRecoveryStage, TransactionLookupStage,
+    },
     Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::debug;
+use reth_tracing::tracing::{debug, info};
 use tokio::sync::watch;
+use reth_prune::PruneMode;
 
 /// Constructs a [Pipeline] that's wired to the network
 #[expect(clippy::too_many_arguments)]
@@ -106,30 +111,55 @@ where
 
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
-    let pipeline = builder
-        .with_tip_sender(tip_tx)
-        .with_metrics_tx(metrics_tx)
-        .add_stages(
-            DefaultStages::new(
+    let use_engine_pipeline = std::env::var("RETH_ENGINE_PIPELINE").is_ok();
+
+    let pipeline = if use_engine_pipeline {
+        info!(target: "reth::cli", "Using engine pipeline (H \u{2192} B \u{2192} SR \u{2192} TxLookup \u{2192} EngineStage)");
+        let engine_stage = EngineStage::with_defaults(evm_config, provider_factory.clone());
+        builder
+            .with_tip_sender(tip_tx)
+            .with_metrics_tx(metrics_tx)
+            .add_stage(HeaderStage::new(
                 provider_factory.clone(),
-                tip_rx,
-                Arc::clone(&consensus),
                 header_downloader,
-                body_downloader,
-                evm_config.clone(),
-                stage_config.clone(),
-                prune_config.segments,
-                era_import_source,
+                tip_rx,
+                stage_config.etl.clone(),
+            ))
+            .add_stage(BodyStage::new(body_downloader))
+            .add_stage(SenderRecoveryStage::new(SenderRecoveryConfig::default(), Some(PruneMode::Full)))
+            .add_stage(TransactionLookupStage::new(
+                TransactionLookupConfig::default(),
+                EtlConfig::default(),
+                None,
+            ))
+            .add_stage(engine_stage)
+            .build(provider_factory, static_file_producer)
+    } else {
+        builder
+            .with_tip_sender(tip_tx)
+            .with_metrics_tx(metrics_tx)
+            .add_stages(
+                DefaultStages::new(
+                    provider_factory.clone(),
+                    tip_rx,
+                    Arc::clone(&consensus),
+                    header_downloader,
+                    body_downloader,
+                    evm_config.clone(),
+                    stage_config.clone(),
+                    prune_config.segments,
+                    era_import_source,
+                )
+                .set(ExecutionStage::new(
+                    evm_config,
+                    consensus,
+                    stage_config.execution.into(),
+                    stage_config.execution_external_clean_threshold(),
+                    exex_manager_handle,
+                )),
             )
-            .set(ExecutionStage::new(
-                evm_config,
-                consensus,
-                stage_config.execution.into(),
-                stage_config.execution_external_clean_threshold(),
-                exex_manager_handle,
-            )),
-        )
-        .build(provider_factory, static_file_producer);
+            .build(provider_factory, static_file_producer)
+    };
 
     Ok(pipeline)
 }
