@@ -9,6 +9,7 @@ use reth_errors::ProviderResult;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_types::NodeTypesWithDBAdapter;
 use reth_primitives_traits::{Account, StorageEntry};
+use reth_storage_api::StorageSettingsCache;
 use reth_trie::StateRoot;
 
 use std::sync::Arc;
@@ -105,7 +106,7 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
         reth_trie_db::DatabaseHashedCursorFactory<_>,
     > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(
         provider.tx_ref(),
-        reth_db_api::models::StorageLayout::V1,
+        provider.cached_storage_settings().layout(),
     )
     .root_with_updates()?;
     provider.write_trie_updates(updates).unwrap();

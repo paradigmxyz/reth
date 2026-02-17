@@ -7,9 +7,9 @@ use reth_db::{
     tables,
     transaction::DbTxMut,
 };
-use reth_db_api::models::StorageLayout;
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_provider::test_utils::create_test_provider_factory;
+use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
     test_utils::{state_root_prehashed, storage_root_prehashed},
     trie_cursor::InMemoryTrieCursorFactory,
@@ -43,7 +43,7 @@ proptest! {
         }
 
         // Compute initial root and updates
-        let (_, mut trie_nodes) = DbStateRoot::from_tx(provider.tx_ref(), StorageLayout::V1)
+        let (_, mut trie_nodes) = DbStateRoot::from_tx(provider.tx_ref(), provider.cached_storage_settings().layout())
             .root_with_updates()
             .unwrap();
 
@@ -64,10 +64,10 @@ proptest! {
             }
 
             // Compute root with in-memory trie nodes overlay
-            let (state_root, trie_updates) = DbStateRoot::from_tx(provider.tx_ref(), StorageLayout::V1)
+            let (state_root, trie_updates) = DbStateRoot::from_tx(provider.tx_ref(), provider.cached_storage_settings().layout())
                 .with_prefix_sets(hashed_state.construct_prefix_sets().freeze())
                 .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
-                    DatabaseTrieCursorFactory::new(provider.tx_ref(), StorageLayout::V1), &trie_nodes.clone().into_sorted())
+                    DatabaseTrieCursorFactory::new(provider.tx_ref(), provider.cached_storage_settings().layout()), &trie_nodes.clone().into_sorted())
                 )
                 .root_with_updates()
                 .unwrap();
@@ -99,7 +99,7 @@ proptest! {
 
         // Compute initial storage root and updates
         let (_, _, mut storage_trie_nodes) =
-            DbStorageRoot::from_tx_hashed(provider.tx_ref(), hashed_address, StorageLayout::V1).root_with_updates().unwrap();
+            DbStorageRoot::from_tx_hashed(provider.tx_ref(), hashed_address, provider.cached_storage_settings().layout()).root_with_updates().unwrap();
 
         let mut storage = init_storage;
         for (is_deleted, mut storage_update) in storage_updates {
@@ -119,10 +119,10 @@ proptest! {
             let mut trie_nodes = TrieUpdates::default();
             trie_nodes.insert_storage_updates(hashed_address, storage_trie_nodes.clone());
             let (storage_root, _, trie_updates) =
-                DbStorageRoot::from_tx_hashed(provider.tx_ref(), hashed_address, StorageLayout::V1)
+                DbStorageRoot::from_tx_hashed(provider.tx_ref(), hashed_address, provider.cached_storage_settings().layout())
                     .with_prefix_set(hashed_storage.construct_prefix_set().freeze())
                     .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
-                        DatabaseTrieCursorFactory::new(provider.tx_ref(), StorageLayout::V1),
+                        DatabaseTrieCursorFactory::new(provider.tx_ref(), provider.cached_storage_settings().layout()),
                         &trie_nodes.into_sorted(),
                     ))
                     .root_with_updates()

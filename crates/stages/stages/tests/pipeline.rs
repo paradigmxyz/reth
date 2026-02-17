@@ -7,11 +7,7 @@ use alloy_primitives::{bytes, keccak256, Address, Bytes, TxKind, B256, U256};
 use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider, MAINNET};
 use reth_config::config::StageConfig;
 use reth_consensus::noop::NoopConsensus;
-use reth_db_api::{
-    cursor::DbCursorRO,
-    models::{BlockNumberAddress, StorageLayout},
-    transaction::DbTx,
-};
+use reth_db_api::{cursor::DbCursorRO, models::BlockNumberAddress, transaction::DbTx};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
@@ -367,7 +363,7 @@ async fn run_pipeline_forward_and_unwind(
         let (state_root, _trie_updates) = StateRoot::overlay_root_with_updates(
             provider.tx_ref(),
             &hashed_state.clone().into_sorted(),
-            StorageLayout::V1,
+            provider.cached_storage_settings().layout(),
         )?;
 
         // Create receipts for receipt root calculation (one per transaction)

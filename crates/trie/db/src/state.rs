@@ -379,15 +379,14 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
 mod tests {
     use super::*;
     use alloy_primitives::{hex, keccak256, map::HashMap, Address, B256, U256};
-    use reth_db::test_utils::create_test_rw_db;
     use reth_db_api::{
-        database::Database,
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
         transaction::DbTxMut,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::test_utils::create_test_provider_factory;
+    use reth_storage_api::StorageSettingsCache;
     use reth_trie::{HashedPostState, HashedStorage, KeccakKeyHasher, StateRoot};
     use revm::state::AccountInfo;
     use revm_database::BundleState;
@@ -400,8 +399,8 @@ mod tests {
     /// Overlay root calculation works with sorted state.
     #[test]
     fn overlay_root_with_sorted_state() {
-        let db = create_test_rw_db();
-        let tx = db.tx().expect("failed to create transaction");
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
 
         let mut hashed_state = HashedPostState::default();
         hashed_state.accounts.insert(
@@ -415,7 +414,12 @@ mod tests {
         );
 
         let sorted = hashed_state.into_sorted();
-        let overlay_root = DbStateRoot::overlay_root(&tx, &sorted, StorageLayout::V1).unwrap();
+        let overlay_root = DbStateRoot::overlay_root(
+            provider.tx_ref(),
+            &sorted,
+            provider.cached_storage_settings().layout(),
+        )
+        .unwrap();
 
         // Just verify it produces a valid root
         assert!(!overlay_root.is_zero());
@@ -444,10 +448,15 @@ mod tests {
         assert_eq!(post_state.accounts.len(), 2);
         assert_eq!(post_state.storages.len(), 2);
 
-        let db = create_test_rw_db();
-        let tx = db.tx().expect("failed to create transaction");
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
         assert_eq!(
-            DbStateRoot::overlay_root(&tx, &post_state.into_sorted(), StorageLayout::V1).unwrap(),
+            DbStateRoot::overlay_root(
+                provider.tx_ref(),
+                &post_state.into_sorted(),
+                provider.cached_storage_settings().layout()
+            )
+            .unwrap(),
             hex!("b464525710cafcf5d4044ac85b72c08b1e76231b8d91f288fe438cc41d8eaafd")
         );
     }

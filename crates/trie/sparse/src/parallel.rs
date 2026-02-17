@@ -3707,6 +3707,7 @@ mod tests {
     use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
     use reth_primitives_traits::Account;
     use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
+    use reth_storage_api::StorageSettingsCache;
     use reth_trie::{
         hashed_cursor::{noop::NoopHashedCursor, HashedPostStateCursor},
         node_iter::{TrieElement, TrieNodeIter},
@@ -3721,7 +3722,7 @@ mod tests {
         BranchNode, BranchNodeMasks, BranchNodeMasksMap, ExtensionNode, HashBuilder, LeafNode,
         ProofTrieNode, RlpNode, TrieMask, TrieNode, EMPTY_ROOT_HASH,
     };
-    use reth_trie_db::{DatabaseTrieCursorFactory, StorageLayout};
+    use reth_trie_db::DatabaseTrieCursorFactory;
     use std::collections::{BTreeMap, BTreeSet};
 
     /// Pad nibbles to the length of a B256 hash with zeros on the right.
@@ -6144,8 +6145,10 @@ mod tests {
                     // Insert state updates into the hash builder and calculate the root
                     state.extend(update);
                     let provider = provider_factory.provider().unwrap();
-                    let trie_cursor =
-                        DatabaseTrieCursorFactory::new(provider.tx_ref(), StorageLayout::V1);
+                    let trie_cursor = DatabaseTrieCursorFactory::new(
+                        provider.tx_ref(),
+                        provider.cached_storage_settings().layout(),
+                    );
                     let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
                         run_hash_builder(
                             state.clone(),
@@ -6190,8 +6193,10 @@ mod tests {
                     let sparse_updates = updated_sparse.take_updates();
 
                     let provider = provider_factory.provider().unwrap();
-                    let trie_cursor =
-                        DatabaseTrieCursorFactory::new(provider.tx_ref(), StorageLayout::V1);
+                    let trie_cursor = DatabaseTrieCursorFactory::new(
+                        provider.tx_ref(),
+                        provider.cached_storage_settings().layout(),
+                    );
                     let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
                         run_hash_builder(
                             state.clone(),

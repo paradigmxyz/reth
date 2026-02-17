@@ -254,9 +254,11 @@ mod tests {
     };
     use rand::Rng;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
+    use reth_provider::{
+        test_utils::create_test_provider_factory, HashingWriter, StorageSettingsCache,
+    };
     use reth_trie::proof::Proof;
-    use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, StorageLayout};
+    use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 
     #[test]
     fn random_parallel_proof() {
@@ -317,8 +319,10 @@ mod tests {
         }
 
         let provider_rw = factory.provider_rw().unwrap();
-        let trie_cursor_factory =
-            DatabaseTrieCursorFactory::new(provider_rw.tx_ref(), StorageLayout::V1);
+        let trie_cursor_factory = DatabaseTrieCursorFactory::new(
+            provider_rw.tx_ref(),
+            provider_rw.cached_storage_settings().layout(),
+        );
         let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
 
         let changeset_cache = reth_trie_db::ChangesetCache::new();
