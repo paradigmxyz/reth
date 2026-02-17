@@ -1551,7 +1551,7 @@ impl ParallelSparseTrie {
             // If empty node is found it means the subtrie doesn't have any nodes in it, let alone
             // the target leaf.
             SparseNode::Empty => FindNextToLeafOutcome::NotFound,
-            SparseNode::Hash(hash) => FindNextToLeafOutcome::BlindedNode(*hash),
+            SparseNode::Hash(rlp_node) => FindNextToLeafOutcome::BlindedNode(*rlp_node),
             SparseNode::Leaf { key, .. } => {
                 let mut found_full_path = *from_path;
                 found_full_path.extend(key);
@@ -2696,10 +2696,12 @@ impl SparseSubtrie {
                             state_mask,
                             // Memoize the hash of a previously blinded node in a new branch
                             // node.
-                            hash: Some(*hash),
-                            store_in_db_trie: Some(masks.is_some_and(|m| {
-                                !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
-                            })),
+                            state: SparseNodeState::Cached {
+                                rlp_node: RlpNode::word_rlp(hash),
+                                store_in_db_trie: Some(masks.is_some_and(|m| {
+                                    !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
+                                })),
+                            },
                         });
                     }
                     // Branch already revealed, do nothing
@@ -2707,13 +2709,17 @@ impl SparseSubtrie {
                 }
             }
             Entry::Vacant(entry) => {
-                entry.insert(SparseNode::Branch {
-                    state_mask,
-                    hash: rlp_node.as_ref().and_then(|n| n.as_hash()),
-                    store_in_db_trie: Some(
-                        masks.is_some_and(|m| !m.hash_mask.is_empty() || !m.tree_mask.is_empty()),
-                    ),
-                });
+                let state =
+                    match rlp_node.as_ref() {
+                        Some(rlp_node) => SparseNodeState::Cached {
+                            rlp_node: rlp_node.clone(),
+                            store_in_db_trie: Some(masks.is_some_and(|m| {
+                                !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
+                            })),
+                        },
+                        None => SparseNodeState::Dirty,
+                    };
+                entry.insert(SparseNode::Branch { state_mask, state });
             }
         }
 
