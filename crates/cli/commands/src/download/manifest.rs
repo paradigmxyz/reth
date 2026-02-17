@@ -121,9 +121,28 @@ impl SnapshotComponentType {
         }
     }
 
-    /// Whether this component is always required.
+    /// Whether this component is always required for a functional node.
+    ///
+    /// State and headers are always needed — a node cannot operate without block headers.
     pub const fn is_required(&self) -> bool {
-        matches!(self, Self::State)
+        matches!(self, Self::State | Self::Headers)
+    }
+
+    /// Whether this component is part of the minimal download set.
+    ///
+    /// The minimal set mirrors `--minimal` prune settings: state + headers + transactions +
+    /// account/storage changesets. This is the smallest download that produces a working node.
+    /// Receipts and indexes are excluded since `--minimal` prunes receipts to only the last
+    /// 64 blocks and doesn't need indexes.
+    pub const fn is_minimal(&self) -> bool {
+        matches!(
+            self,
+            Self::State |
+                Self::Headers |
+                Self::Transactions |
+                Self::AccountChangesets |
+                Self::StorageChangesets
+        )
     }
 
     /// Whether this component type uses chunked archives.
@@ -260,10 +279,7 @@ pub fn generate_manifest(
             );
             components.insert(
                 key.to_string(),
-                ComponentManifest::Chunked(ChunkedArchive {
-                    blocks_per_file,
-                    total_blocks: block,
-                }),
+                ComponentManifest::Chunked(ChunkedArchive { blocks_per_file, total_blocks: block }),
             );
         }
     }

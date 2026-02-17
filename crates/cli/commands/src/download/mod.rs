@@ -184,8 +184,8 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_changesets"])]
     all: bool,
 
-    /// Skip interactive component selection. Downloads state only unless
-    /// explicit --with-* flags are provided.
+    /// Skip interactive component selection. Downloads the minimal set
+    /// (state + headers + transactions + changesets) unless explicit --with-* flags narrow it.
     #[arg(long, short = 'y')]
     non_interactive: bool,
 
@@ -316,11 +316,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 .collect());
         }
 
-        // Explicit --with-* flags: state + headers (always) + specified components
         let has_explicit_flags = self.with_txs || self.with_receipts || self.with_changesets;
         let available = |ty: SnapshotComponentType| manifest.component(ty).is_some();
 
-        if has_explicit_flags || self.non_interactive {
+        if has_explicit_flags {
+            // Explicit --with-* flags: state + headers (always) + specified components
             let mut selected = vec![SnapshotComponentType::State];
 
             if available(SnapshotComponentType::Headers) {
@@ -342,6 +342,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             }
 
             return Ok(selected);
+        }
+
+        if self.non_interactive {
+            // No explicit flags: download the minimal set for a working node
+            return Ok(SnapshotComponentType::ALL
+                .iter()
+                .copied()
+                .filter(|ty| ty.is_minimal() && available(*ty))
+                .collect());
         }
 
         // Interactive TUI selection
@@ -686,10 +695,8 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
 fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path) -> Result<()> {
     let (downloaded_path, total_size) = resumable_download(url, target_dir)?;
 
-    let file_name = downloaded_path
-        .file_name()
-        .map(|f| f.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let file_name =
+        downloaded_path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
 
     info!(target: "reth::cli",
         file = %file_name,
