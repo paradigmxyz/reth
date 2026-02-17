@@ -299,7 +299,7 @@ where
         );
 
         let ctx = self.ctx.clone();
-        self.executor.prewarming_pool().install(|| {
+        self.executor.prewarming_pool().install_fn(|| {
             bal.par_iter().for_each_init(
                 || (ctx.clone(), None::<CachedStateProvider<reth_provider::StateProviderBox>>),
                 |(ctx, provider), account| {
