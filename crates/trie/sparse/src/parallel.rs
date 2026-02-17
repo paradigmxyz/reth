@@ -6216,11 +6216,7 @@ mod tests {
         // Check that the branch node exists with only two nibbles set
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::Branch {
-                state_mask: 0b101.into(),
-                hash: None,
-                store_in_db_trie: Some(false)
-            })
+            Some(&SparseNode::Branch { state_mask: 0b101.into(), state: SparseNodeState::Dirty })
         );
 
         // Insert the leaf for the second key
@@ -6229,11 +6225,7 @@ mod tests {
         // Check that the branch node was updated and another nibble was set
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::Branch {
-                state_mask: 0b111.into(),
-                hash: None,
-                store_in_db_trie: Some(false)
-            })
+            Some(&SparseNode::Branch { state_mask: 0b111.into(), state: SparseNodeState::Dirty })
         );
 
         // Generate the proof for the third key and reveal it in the sparse trie
@@ -6259,11 +6251,7 @@ mod tests {
         // Check that nothing changed in the branch node
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::Branch {
-                state_mask: 0b111.into(),
-                hash: None,
-                store_in_db_trie: Some(false)
-            })
+            Some(&SparseNode::Branch { state_mask: 0b111.into(), state: SparseNodeState::Dirty })
         );
 
         // Generate the nodes for the full trie with all three key using the hash builder, and
@@ -6349,11 +6337,7 @@ mod tests {
         // Check that the branch node exists
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::Branch {
-                state_mask: 0b11.into(),
-                hash: None,
-                store_in_db_trie: Some(true)
-            })
+            Some(&SparseNode::Branch { state_mask: 0b11.into(), state: SparseNodeState::Dirty })
         );
 
         // Remove the leaf for the first key
@@ -8990,35 +8974,51 @@ mod tests {
 
         // Create leaves with empty keys (full path consumed by extension + branch)
         // and simple values
-        let leaf1_node = TrieNode::Leaf(LeafNode::new(Nibbles::default(), vec![0x1]));
-        let leaf2_node = TrieNode::Leaf(LeafNode::new(Nibbles::default(), vec![0x2]));
+        let leaf1_node = LeafNode::new(Nibbles::default(), vec![0x1]);
+        let leaf2_node = LeafNode::new(Nibbles::default(), vec![0x2]);
 
         // RLP encode the leaves to get their RlpNode representations
-        let leaf1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(&leaf1_node));
-        let leaf2_rlp = RlpNode::from_rlp(&alloy_rlp::encode(&leaf2_node));
+        let leaf1_rlp =
+            RlpNode::from_rlp(&alloy_rlp::encode(&TrieNodeV2::Leaf(leaf1_node.clone())));
+        let leaf2_rlp =
+            RlpNode::from_rlp(&alloy_rlp::encode(&TrieNodeV2::Leaf(leaf2_node.clone())));
 
-        // Create the branch node with children at indices 1 and 2, using the RLP-encoded leaves
-        let branch_node = TrieNode::Branch(BranchNode::new(
-            vec![leaf1_rlp, leaf2_rlp],
-            TrieMask::new(0b0000_0110), // bits 1 and 2 set
+        // Create the branch node with children at indices 1 and 2, using the RLP-encoded leaves.
+        // In V2, branch and extension are combined: the key holds the extension prefix.
+        let state_mask = TrieMask::new(0b0000_0110); // bits 1 and 2 set
+        let stack = vec![leaf1_rlp, leaf2_rlp];
+
+        // RLP encode the extension+branch to get its RlpNode representation
+        let ext_branch =
+            BranchNodeV2::new(Nibbles::from_nibbles(ext_key), stack.clone(), state_mask, None);
+        let branch_rlp = RlpNode::from_rlp(&alloy_rlp::encode(&ext_branch));
+
+        // Create the combined extension+branch node as the root.
+        // Since branch is < 32 bytes, it will be embedded directly.
+        let root_node = TrieNodeV2::Branch(BranchNodeV2::new(
+            Nibbles::from_nibbles(ext_key),
+            stack.clone(),
+            state_mask,
+            Some(branch_rlp),
         ));
 
-        // RLP encode the branch to get its RlpNode representation
-        let branch_rlp = RlpNode::from_rlp(&alloy_rlp::encode(&branch_node));
-
-        // Create the extension node pointing to the branch using its RLP encoding
-        // Since branch is < 32 bytes, it will be embedded directly
-        let ext_node =
-            TrieNode::Extension(ExtensionNode::new(Nibbles::from_nibbles(ext_key), branch_rlp));
-
-        // Initialize trie with the extension as root
-        let mut trie = ParallelSparseTrie::from_root(ext_node, None, false).unwrap();
+        // Initialize trie with the extension+branch as root
+        let mut trie = ParallelSparseTrie::from_root(root_node, None, false).unwrap();
 
         // Reveal the branch and leaves
         let mut nodes = vec![
-            ProofTrieNode { path: branch_path, node: branch_node, masks: None },
-            ProofTrieNode { path: leaf1_path, node: leaf1_node, masks: None },
-            ProofTrieNode { path: leaf2_path, node: leaf2_node, masks: None },
+            ProofTrieNodeV2 {
+                path: branch_path,
+                node: TrieNodeV2::Branch(BranchNodeV2::new(
+                    Nibbles::new(),
+                    stack,
+                    state_mask,
+                    None,
+                )),
+                masks: None,
+            },
+            ProofTrieNodeV2 { path: leaf1_path, node: TrieNodeV2::Leaf(leaf1_node), masks: None },
+            ProofTrieNodeV2 { path: leaf2_path, node: TrieNodeV2::Leaf(leaf2_node), masks: None },
         ];
         trie.reveal_nodes(&mut nodes).unwrap();
 
