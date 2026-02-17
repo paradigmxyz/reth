@@ -2,12 +2,14 @@
 
 use alloy_primitives::B256;
 use reth_db_api::{cursor::DbCursorRW, tables, transaction::DbTxMut};
-use reth_provider::test_utils::create_test_provider_factory;
+use reth_provider::{test_utils::create_test_provider_factory, StorageSettingsCache};
 use reth_trie::{
-    prefix_set::PrefixSetMut, trie_cursor::TrieCursor, walker::TrieWalker, BranchNodeCompact,
-    Nibbles, StorageTrieEntry,
+    prefix_set::PrefixSetMut,
+    trie_cursor::{TrieCursor, TrieCursorFactory},
+    walker::TrieWalker,
+    BranchNodeCompact, Nibbles, StorageTrieEntry,
 };
-use reth_trie_db::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, LegacyKeyAdapter};
+use reth_trie_db::DatabaseTrieCursorFactory;
 
 #[test]
 fn walk_nodes_with_common_prefix() {
@@ -34,12 +36,15 @@ fn walk_nodes_with_common_prefix() {
 
     let factory = create_test_provider_factory();
     let tx = factory.provider_rw().unwrap();
+    let layout = tx.cached_storage_settings().layout();
 
     let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
     for (k, v) in &inputs {
         account_cursor.upsert(k.clone().into(), &v.clone()).unwrap();
     }
-    let account_trie = DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(account_cursor);
+
+    let trie_factory = DatabaseTrieCursorFactory::new(tx.tx_ref(), layout);
+    let account_trie = trie_factory.account_trie_cursor().unwrap();
     test_cursor(account_trie, &expected);
 
     let hashed_address = B256::random();
@@ -52,8 +57,9 @@ fn walk_nodes_with_common_prefix() {
             )
             .unwrap();
     }
-    let storage_trie =
-        DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(storage_cursor, hashed_address);
+
+    let trie_factory = DatabaseTrieCursorFactory::new(tx.tx_ref(), layout);
+    let storage_trie = trie_factory.storage_trie_cursor(hashed_address).unwrap();
     test_cursor(storage_trie, &expected);
 }
 
@@ -80,6 +86,7 @@ where
 fn cursor_rootnode_with_changesets() {
     let factory = create_test_provider_factory();
     let tx = factory.provider_rw().unwrap();
+    let layout = tx.cached_storage_settings().layout();
     let mut cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
     let nodes = vec![
@@ -112,7 +119,8 @@ fn cursor_rootnode_with_changesets() {
         cursor.upsert(hashed_address, &StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
     }
 
-    let mut trie = DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(cursor, hashed_address);
+    let trie_factory = DatabaseTrieCursorFactory::new(tx.tx_ref(), layout);
+    let mut trie = trie_factory.storage_trie_cursor(hashed_address).unwrap();
 
     // No changes
     let mut cursor = TrieWalker::<_>::state_trie(&mut trie, Default::default());

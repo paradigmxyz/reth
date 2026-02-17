@@ -607,8 +607,12 @@ mod tests {
     // tests that upsert and seek match on the storage trie cursor
     #[test]
     fn test_storage_cursor_abstraction() {
+        use reth_storage_api::StorageSettingsCache;
+        use reth_trie::trie_cursor::{TrieCursor, TrieCursorFactory};
+
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
+        let layout = provider.cached_storage_settings().layout();
         let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
         let hashed_address = B256::random();
@@ -619,8 +623,8 @@ mod tests {
             .upsert(hashed_address, &StorageTrieEntry { nibbles: key.clone(), node: value.clone() })
             .unwrap();
 
-        let mut cursor: DatabaseStorageTrieCursor<_, LegacyKeyAdapter> =
-            DatabaseStorageTrieCursor::new(cursor, hashed_address);
+        let trie_factory = DatabaseTrieCursorFactory::new(provider.tx_ref(), layout);
+        let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
         assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
     }
 }
