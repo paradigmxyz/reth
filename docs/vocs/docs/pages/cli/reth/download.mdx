@@ -133,6 +133,29 @@ Storage:
 
           Local file:// URLs are also supported for extracting snapshots from disk.
 
+      --manifest-url <URL>
+          URL to a snapshot manifest.json for modular component downloads.
+
+          When provided, fetches this manifest instead of discovering it from the default base URL. Useful for testing with custom or local manifests.
+
+      --with-txs
+          Include transaction static files
+
+      --with-receipts
+          Include receipt static files
+
+      --with-changesets
+          Include account and storage changeset static files
+
+      --all
+          Download all available components (full archive)
+
+  -y, --non-interactive
+          Skip interactive component selection. Downloads state only unless explicit --with-* flags are provided
+
+      --no-config
+          Skip reth.toml generation after download
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
