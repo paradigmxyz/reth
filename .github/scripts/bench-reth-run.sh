@@ -40,7 +40,7 @@ grep Cached /proc/meminfo
 # Start reth
 # CPU layout: core 0 = OS/IRQs/reth-bench/aux, cores 1+ = reth node
 RETH_BENCH="$(which reth-bench)"
-ONLINE=$(nproc)
+ONLINE=$(nproc --all)
 RETH_CPUS="1-$(( ONLINE - 1 ))"
 sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" node \
   --datadir "$DATADIR" \
