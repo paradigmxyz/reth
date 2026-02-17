@@ -3,24 +3,6 @@
 use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
 
-/// The storage layout format for trie nibble encoding.
-///
-/// Determines how nibble keys are encoded in the database trie tables.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum StorageLayout {
-    /// Legacy (v1) layout: 1 nibble per byte, 65-byte subkeys.
-    V1,
-    /// Packed (v2) layout: 2 nibbles per byte, 33-byte subkeys.
-    V2,
-}
-
-impl StorageLayout {
-    /// Returns `true` if this is the v2 (packed) layout.
-    pub const fn is_v2(self) -> bool {
-        matches!(self, Self::V2)
-    }
-}
-
 /// Storage configuration settings for this node.
 ///
 /// Controls whether this node uses v2 storage layout (static files + `RocksDB` routing)
@@ -83,15 +65,6 @@ impl StorageSettings {
     /// Returns `true` if this node uses v2 storage layout.
     pub const fn is_v2(&self) -> bool {
         self.storage_v2
-    }
-
-    /// Returns the storage layout for this node.
-    pub const fn layout(&self) -> StorageLayout {
-        if self.storage_v2 {
-            StorageLayout::V2
-        } else {
-            StorageLayout::V1
-        }
     }
 
     /// Whether receipts are stored in static files.

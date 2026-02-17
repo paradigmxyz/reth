@@ -117,11 +117,17 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
     let mut tx = db.tx()?;
     tx.disable_long_read_transaction_safety();
 
-    let layout = tool.provider_factory.cached_storage_settings().layout();
+    if tool.provider_factory.cached_storage_settings().is_v2() {
+        do_verify_only::<_, reth_trie_db::PackedKeyAdapter>(&tx)
+    } else {
+        do_verify_only::<_, reth_trie_db::LegacyKeyAdapter>(&tx)
+    }
+}
 
+fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
     // Create the verifier
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx, layout);
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
     let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
 
     let metrics = RepairTrieMetrics::new();
@@ -212,9 +218,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     // Check that a pipeline sync isn't in progress.
     verify_checkpoints(provider_rw.as_ref())?;
 
-    let layout = tool.provider_factory.cached_storage_settings().layout();
-
-    let inconsistent_nodes = if layout.is_v2() {
+    let inconsistent_nodes = if tool.provider_factory.cached_storage_settings().is_v2() {
         do_verify_and_repair::<_, reth_trie_db::PackedKeyAdapter>(&mut provider_rw)?
     } else {
         do_verify_and_repair::<_, reth_trie_db::LegacyKeyAdapter>(&mut provider_rw)?
@@ -246,7 +250,7 @@ where
     // require it to be AsRef.
     let tx = provider_rw.tx_ref();
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx, A::LAYOUT);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
 
     // Create the verifier
     let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;

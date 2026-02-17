@@ -1,7 +1,7 @@
 use alloy_primitives::{BlockNumber, B256};
 use metrics::{Counter, Histogram};
 use reth_chain_state::LazyOverlay;
-use reth_db_api::{models::StorageLayout, DatabaseError};
+use reth_db_api::{tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
 use reth_primitives_traits::dashmap::{self, DashMap};
@@ -14,11 +14,15 @@ use reth_storage_api::{
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
-    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
+    trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::TrieUpdatesSorted,
     HashedPostStateSorted,
 };
-use reth_trie_db::{ChangesetCache, DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use reth_trie_db::{
+    ChangesetCache, DatabaseAccountTrieCursor, DatabaseHashedCursorFactory,
+    DatabaseStorageTrieCursor, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
+    PackedStoragesTrie,
+};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -469,10 +473,9 @@ where
 
         let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
 
-        let layout = provider.cached_storage_settings().layout();
-
+        let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, layout))
+        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
     }
 }
 
@@ -486,7 +489,7 @@ pub struct OverlayStateProvider<Provider: DBProvider> {
     provider: Provider,
     trie_updates: Arc<TrieUpdatesSorted>,
     hashed_post_state: Arc<HashedPostStateSorted>,
-    layout: StorageLayout,
+    is_v2: bool,
 }
 
 impl<Provider> OverlayStateProvider<Provider>
@@ -499,49 +502,60 @@ where
         provider: Provider,
         trie_updates: Arc<TrieUpdatesSorted>,
         hashed_post_state: Arc<HashedPostStateSorted>,
-        layout: StorageLayout,
+        is_v2: bool,
     ) -> Self {
-        Self { provider, trie_updates, hashed_post_state, layout }
+        Self { provider, trie_updates, hashed_post_state, is_v2 }
     }
 }
 
 impl<Provider> TrieCursorFactory for OverlayStateProvider<Provider>
 where
     Provider: DBProvider,
+    Provider::Tx: DbTx,
 {
     type AccountTrieCursor<'a>
-        = <InMemoryTrieCursorFactory<
-        DatabaseTrieCursorFactory<&'a Provider::Tx>,
-        &'a TrieUpdatesSorted,
-    > as TrieCursorFactory>::AccountTrieCursor<'a>
+        = InMemoryTrieCursor<'a, Box<dyn TrieCursor + Send + 'a>>
     where
         Self: 'a;
 
     type StorageTrieCursor<'a>
-        = <InMemoryTrieCursorFactory<
-        DatabaseTrieCursorFactory<&'a Provider::Tx>,
-        &'a TrieUpdatesSorted,
-    > as TrieCursorFactory>::StorageTrieCursor<'a>
+        = InMemoryTrieCursor<'a, Box<dyn TrieStorageCursor + Send + 'a>>
     where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        let db_trie_cursor_factory =
-            DatabaseTrieCursorFactory::new(self.provider.tx_ref(), self.layout);
-        let trie_cursor_factory =
-            InMemoryTrieCursorFactory::new(db_trie_cursor_factory, self.trie_updates.as_ref());
-        trie_cursor_factory.account_trie_cursor()
+        let tx = self.provider.tx_ref();
+        let trie_updates = self.trie_updates.as_ref();
+        let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
+            Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
+                tx.cursor_read::<PackedAccountsTrie>()?,
+            ))
+        } else {
+            Box::new(DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
+                tx.cursor_read::<tables::AccountsTrie>()?,
+            ))
+        };
+        Ok(InMemoryTrieCursor::new_account(cursor, trie_updates))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        let db_trie_cursor_factory =
-            DatabaseTrieCursorFactory::new(self.provider.tx_ref(), self.layout);
-        let trie_cursor_factory =
-            InMemoryTrieCursorFactory::new(db_trie_cursor_factory, self.trie_updates.as_ref());
-        trie_cursor_factory.storage_trie_cursor(hashed_address)
+        let tx = self.provider.tx_ref();
+        let trie_updates = self.trie_updates.as_ref();
+        let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
+            Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
+                tx.cursor_dup_read::<PackedStoragesTrie>()?,
+                hashed_address,
+            ))
+        } else {
+            Box::new(DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
+                tx.cursor_dup_read::<tables::StoragesTrie>()?,
+                hashed_address,
+            ))
+        };
+        Ok(InMemoryTrieCursor::new_storage(cursor, trie_updates, hashed_address))
     }
 }
 

@@ -37,8 +37,8 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseStateRoot;
 
-type DbStateRoot<'a, TX> = StateRootComputer<
-    reth_trie_db::DatabaseTrieCursorFactory<&'a TX>,
+type DbStateRoot<'a, TX, A> = StateRootComputer<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
 
@@ -832,16 +832,30 @@ fn compute_state_root<Provider>(
 where
     Provider: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
 {
+    if provider.cached_storage_settings().is_v2() {
+        compute_state_root_inner::<_, reth_trie_db::PackedKeyAdapter>(provider, prefix_sets)
+    } else {
+        compute_state_root_inner::<_, reth_trie_db::LegacyKeyAdapter>(provider, prefix_sets)
+    }
+}
+
+fn compute_state_root_inner<Provider, A>(
+    provider: &Provider,
+    prefix_sets: Option<TriePrefixSets>,
+) -> Result<B256, InitStorageError>
+where
+    Provider: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
+    A: reth_trie_db::TrieTableAdapter,
+{
     trace!(target: "reth::cli", "Computing state root");
 
     let tx = provider.tx_ref();
     let mut intermediate_state: Option<IntermediateStateRootState> = None;
     let mut total_flushed_updates = 0;
 
-    let layout = provider.cached_storage_settings().layout();
     loop {
         let mut state_root =
-            DbStateRoot::from_tx(tx, layout).with_intermediate_state(intermediate_state);
+            DbStateRoot::<_, A>::from_tx(tx).with_intermediate_state(intermediate_state);
 
         if let Some(sets) = prefix_sets.clone() {
             state_root = state_root.with_prefix_sets(sets);

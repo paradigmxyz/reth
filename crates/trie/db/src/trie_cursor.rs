@@ -1,7 +1,6 @@
 use alloy_primitives::B256;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    models::StorageLayout,
     table::{DupSort, Key, Table, Value},
     tables,
     transaction::DbTx,
@@ -20,8 +19,6 @@ use std::marker::PhantomData;
 /// packed (33-byte) nibble encodings. The underlying cursor types are monomorphized per
 /// adapter, while [`DatabaseTrieCursorFactory`] selects the encoding at runtime.
 pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
-    /// The storage layout this adapter targets.
-    const LAYOUT: StorageLayout;
     /// The key type for account trie lookups (e.g., `StoredNibbles` or `PackedStoredNibbles`).
     type AccountKey: Key + From<Nibbles> + Clone;
 
@@ -54,8 +51,6 @@ pub trait StorageTrieEntryLike: Sized {
     fn new(nibbles: Self::SubKey, node: BranchNodeCompact) -> Self;
 }
 
-// ── Legacy encoding adapter ───────────────────────────────────────────
-
 use reth_trie::{StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
 
 impl StorageTrieEntryLike for StorageTrieEntry {
@@ -79,7 +74,6 @@ impl StorageTrieEntryLike for StorageTrieEntry {
 pub struct LegacyKeyAdapter;
 
 impl TrieKeyAdapter for LegacyKeyAdapter {
-    const LAYOUT: StorageLayout = StorageLayout::V1;
     type AccountKey = StoredNibbles;
     type StorageSubKey = StoredNibblesSubKey;
     type StorageValue = StorageTrieEntry;
@@ -92,8 +86,6 @@ impl TrieKeyAdapter for LegacyKeyAdapter {
         subkey.0
     }
 }
-
-// ── Packed encoding adapter ──────────────────────────────────────────
 
 use reth_trie::{PackedStorageTrieEntry, PackedStoredNibbles, PackedStoredNibblesSubKey};
 
@@ -118,7 +110,6 @@ impl StorageTrieEntryLike for PackedStorageTrieEntry {
 pub struct PackedKeyAdapter;
 
 impl TrieKeyAdapter for PackedKeyAdapter {
-    const LAYOUT: StorageLayout = StorageLayout::V2;
     type AccountKey = PackedStoredNibbles;
     type StorageSubKey = PackedStoredNibblesSubKey;
     type StorageValue = PackedStorageTrieEntry;
@@ -131,13 +122,6 @@ impl TrieKeyAdapter for PackedKeyAdapter {
         subkey.0
     }
 }
-
-// ── Table views for packed encoding ─────────────────────────────────
-//
-// These are Rust-side "views" of the same physical MDBX tables
-// (`AccountsTrie`, `StoragesTrie`) but with packed key types.
-// They resolve to the same `NAME` constant so MDBX opens the same table.
-// Not added to the `Tables` enum — they are only used via the cursor factory.
 
 /// Packed-encoding view of the `AccountsTrie` table.
 #[derive(Debug)]
@@ -165,8 +149,6 @@ impl DupSort for PackedStoragesTrie {
     type SubKey = PackedStoredNibblesSubKey;
 }
 
-// ── Helper trait for table mapping ──────────────────────────────────
-
 /// Helper trait to map a [`TrieKeyAdapter`] to the correct table types.
 ///
 /// This indirection is needed because the `tables!` macro generates non-generic
@@ -190,211 +172,53 @@ impl TrieTableAdapter for PackedKeyAdapter {
     type StorageTrieTable = PackedStoragesTrie;
 }
 
-// ── Enum cursor wrappers ────────────────────────────────────────────
-//
-// These enums hold either the legacy or packed cursor variant, allowing
-// `DatabaseTrieCursorFactory` to implement `TrieCursorFactory` without
-// leaking the adapter type parameter to callers.
-
-/// Account trie cursor that dispatches between legacy and packed encoding at runtime.
-#[derive(Debug)]
-pub enum EitherAccountTrieCursor<LegacyCursor, PackedCursor> {
-    /// Legacy (v1) encoding cursor.
-    Legacy(DatabaseAccountTrieCursor<LegacyCursor, LegacyKeyAdapter>),
-    /// Packed (v2) encoding cursor.
-    Packed(DatabaseAccountTrieCursor<PackedCursor, PackedKeyAdapter>),
-}
-
-impl<LC, PC> TrieCursor for EitherAccountTrieCursor<LC, PC>
-where
-    LC: DbCursorRO<tables::AccountsTrie> + Send,
-    PC: DbCursorRO<PackedAccountsTrie> + Send,
-{
-    fn seek_exact(
-        &mut self,
-        key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        match self {
-            Self::Legacy(c) => c.seek_exact(key),
-            Self::Packed(c) => c.seek_exact(key),
-        }
-    }
-
-    fn seek(
-        &mut self,
-        key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        match self {
-            Self::Legacy(c) => c.seek(key),
-            Self::Packed(c) => c.seek(key),
-        }
-    }
-
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        match self {
-            Self::Legacy(c) => c.next(),
-            Self::Packed(c) => c.next(),
-        }
-    }
-
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        match self {
-            Self::Legacy(c) => c.current(),
-            Self::Packed(c) => c.current(),
-        }
-    }
-
-    fn reset(&mut self) {
-        match self {
-            Self::Legacy(c) => c.reset(),
-            Self::Packed(c) => c.reset(),
-        }
-    }
-}
-
-/// Storage trie cursor that dispatches between legacy and packed encoding at runtime.
-#[derive(Debug)]
-pub enum EitherStorageTrieCursor<LegacyCursor, PackedCursor> {
-    /// Legacy (v1) encoding cursor.
-    Legacy(DatabaseStorageTrieCursor<LegacyCursor, LegacyKeyAdapter>),
-    /// Packed (v2) encoding cursor.
-    Packed(DatabaseStorageTrieCursor<PackedCursor, PackedKeyAdapter>),
-}
-
-impl<LC, PC> TrieCursor for EitherStorageTrieCursor<LC, PC>
-where
-    LC: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send,
-    PC: DbCursorRO<PackedStoragesTrie> + DbDupCursorRO<PackedStoragesTrie> + Send,
-{
-    fn seek_exact(
-        &mut self,
-        key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        match self {
-            Self::Legacy(c) => c.seek_exact(key),
-            Self::Packed(c) => c.seek_exact(key),
-        }
-    }
-
-    fn seek(
-        &mut self,
-        key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        match self {
-            Self::Legacy(c) => c.seek(key),
-            Self::Packed(c) => c.seek(key),
-        }
-    }
-
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        match self {
-            Self::Legacy(c) => c.next(),
-            Self::Packed(c) => c.next(),
-        }
-    }
-
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        match self {
-            Self::Legacy(c) => c.current(),
-            Self::Packed(c) => c.current(),
-        }
-    }
-
-    fn reset(&mut self) {
-        match self {
-            Self::Legacy(c) => c.reset(),
-            Self::Packed(c) => c.reset(),
-        }
-    }
-}
-
-impl<LC, PC> TrieStorageCursor for EitherStorageTrieCursor<LC, PC>
-where
-    LC: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send,
-    PC: DbCursorRO<PackedStoragesTrie> + DbDupCursorRO<PackedStoragesTrie> + Send,
-{
-    fn set_hashed_address(&mut self, hashed_address: B256) {
-        match self {
-            Self::Legacy(c) => c.set_hashed_address(hashed_address),
-            Self::Packed(c) => c.set_hashed_address(hashed_address),
-        }
-    }
-}
-
-// ── Cursor factory with runtime dispatch ────────────────────────────
-
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
-///
-/// Holds a runtime [`StorageLayout`] to dispatch between legacy and packed nibble encodings
-/// internally, so callers never need to know which encoding is in use.
 #[derive(Debug, Clone)]
-pub struct DatabaseTrieCursorFactory<T> {
+pub struct DatabaseTrieCursorFactory<T, A: TrieKeyAdapter> {
     tx: T,
-    layout: StorageLayout,
+    _adapter: PhantomData<A>,
 }
 
-impl<T> DatabaseTrieCursorFactory<T> {
-    /// Create new [`DatabaseTrieCursorFactory`] with the given [`StorageLayout`].
-    pub const fn new(tx: T, layout: StorageLayout) -> Self {
-        Self { tx, layout }
+impl<T, A: TrieKeyAdapter> DatabaseTrieCursorFactory<T, A> {
+    /// Create new [`DatabaseTrieCursorFactory`].
+    pub const fn new(tx: T) -> Self {
+        Self { tx, _adapter: PhantomData }
     }
 }
 
-impl<TX> TrieCursorFactory for DatabaseTrieCursorFactory<&TX>
+impl<TX, A> TrieCursorFactory for DatabaseTrieCursorFactory<&TX, A>
 where
     TX: DbTx,
+    A: TrieTableAdapter,
 {
     type AccountTrieCursor<'a>
-        = EitherAccountTrieCursor<
-        <TX as DbTx>::Cursor<tables::AccountsTrie>,
-        <TX as DbTx>::Cursor<PackedAccountsTrie>,
-    >
+        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<A::AccountTrieTable>, A>
     where
         Self: 'a;
 
     type StorageTrieCursor<'a>
-        = EitherStorageTrieCursor<
-        <TX as DbTx>::DupCursor<tables::StoragesTrie>,
-        <TX as DbTx>::DupCursor<PackedStoragesTrie>,
-    >
+        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<A::StorageTrieTable>, A>
     where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        if self.layout.is_v2() {
-            Ok(EitherAccountTrieCursor::Packed(DatabaseAccountTrieCursor::new(
-                self.tx.cursor_read::<PackedAccountsTrie>()?,
-            )))
-        } else {
-            Ok(EitherAccountTrieCursor::Legacy(DatabaseAccountTrieCursor::new(
-                self.tx.cursor_read::<tables::AccountsTrie>()?,
-            )))
-        }
+        Ok(DatabaseAccountTrieCursor::new(self.tx.cursor_read::<A::AccountTrieTable>()?))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        if self.layout.is_v2() {
-            Ok(EitherStorageTrieCursor::Packed(DatabaseStorageTrieCursor::new(
-                self.tx.cursor_dup_read::<PackedStoragesTrie>()?,
-                hashed_address,
-            )))
-        } else {
-            Ok(EitherStorageTrieCursor::Legacy(DatabaseStorageTrieCursor::new(
-                self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
-                hashed_address,
-            )))
-        }
+        Ok(DatabaseStorageTrieCursor::new(
+            self.tx.cursor_dup_read::<A::StorageTrieTable>()?,
+            hashed_address,
+        ))
     }
 }
 
-// ── Generic account trie cursor ──────────────────────────────────────
-
 /// A cursor over the account trie.
 #[derive(Debug)]
-pub struct DatabaseAccountTrieCursor<C, A: TrieKeyAdapter = LegacyKeyAdapter>(C, PhantomData<A>);
+pub struct DatabaseAccountTrieCursor<C, A: TrieKeyAdapter>(C, PhantomData<A>);
 
 impl<C, A: TrieKeyAdapter> DatabaseAccountTrieCursor<C, A> {
     /// Create a new account trie cursor.
@@ -441,11 +265,9 @@ where
     }
 }
 
-// ── Generic storage trie cursor ──────────────────────────────────────
-
 /// A cursor over the storage tries stored in the database.
 #[derive(Debug)]
-pub struct DatabaseStorageTrieCursor<C, A: TrieKeyAdapter = LegacyKeyAdapter> {
+pub struct DatabaseStorageTrieCursor<C, A: TrieKeyAdapter> {
     /// The underlying cursor.
     pub cursor: C,
     /// Hashed address used for cursor positioning.
@@ -612,7 +434,6 @@ mod tests {
 
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
-        let layout = provider.cached_storage_settings().layout();
         let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
         let hashed_address = B256::random();
@@ -623,8 +444,16 @@ mod tests {
             .upsert(hashed_address, &StorageTrieEntry { nibbles: key.clone(), node: value.clone() })
             .unwrap();
 
-        let trie_factory = DatabaseTrieCursorFactory::new(provider.tx_ref(), layout);
-        let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
-        assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
+        if provider.cached_storage_settings().is_v2() {
+            let trie_factory =
+                DatabaseTrieCursorFactory::<_, PackedKeyAdapter>::new(provider.tx_ref());
+            let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
+            assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
+        } else {
+            let trie_factory =
+                DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(provider.tx_ref());
+            let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
+            assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
+        }
     }
 }

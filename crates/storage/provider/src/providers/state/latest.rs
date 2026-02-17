@@ -17,28 +17,28 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
-    DatabaseTrieWitness,
+    DatabaseTrieWitness, LegacyKeyAdapter, PackedKeyAdapter, TrieTableAdapter,
 };
 
-type DbStateRoot<'a, TX> = StateRoot<
-    reth_trie_db::DatabaseTrieCursorFactory<&'a TX>,
+type DbStateRoot<'a, TX, A> = StateRoot<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
-type DbStorageRoot<'a, TX> = StorageRoot<
-    reth_trie_db::DatabaseTrieCursorFactory<&'a TX>,
+type DbStorageRoot<'a, TX, A> = StorageRoot<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
-type DbStorageProof<'a, TX> = StorageProof<
+type DbStorageProof<'a, TX, A> = StorageProof<
     'static,
-    reth_trie_db::DatabaseTrieCursorFactory<&'a TX>,
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
-type DbProof<'a, TX> = Proof<
-    reth_trie_db::DatabaseTrieCursorFactory<&'a TX>,
+type DbProof<'a, TX, A> = Proof<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
-type DbTrieWitness<'a, TX> = TrieWitness<
-    reth_trie_db::DatabaseTrieCursorFactory<&'a TX>,
+type DbTrieWitness<'a, TX, A> = TrieWitness<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
 
@@ -106,37 +106,41 @@ impl<Provider: DBProvider + StorageSettingsCache> StateRootProvider
     for LatestStateProviderRef<'_, Provider>
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        let layout = self.0.cached_storage_settings().layout();
-        Ok(DbStateRoot::overlay_root(self.tx(), &hashed_state.into_sorted(), layout)?)
+        if self.0.cached_storage_settings().is_v2() {
+            self.state_root_inner::<PackedKeyAdapter>(hashed_state)
+        } else {
+            self.state_root_inner::<LegacyKeyAdapter>(hashed_state)
+        }
     }
 
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
-        let layout = self.0.cached_storage_settings().layout();
-        Ok(DbStateRoot::overlay_root_from_nodes(
-            self.tx(),
-            TrieInputSorted::from_unsorted(input),
-            layout,
-        )?)
+        if self.0.cached_storage_settings().is_v2() {
+            self.state_root_from_nodes_inner::<PackedKeyAdapter>(input)
+        } else {
+            self.state_root_from_nodes_inner::<LegacyKeyAdapter>(input)
+        }
     }
 
     fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let layout = self.0.cached_storage_settings().layout();
-        Ok(DbStateRoot::overlay_root_with_updates(self.tx(), &hashed_state.into_sorted(), layout)?)
+        if self.0.cached_storage_settings().is_v2() {
+            self.state_root_with_updates_inner::<PackedKeyAdapter>(hashed_state)
+        } else {
+            self.state_root_with_updates_inner::<LegacyKeyAdapter>(hashed_state)
+        }
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let layout = self.0.cached_storage_settings().layout();
-        Ok(DbStateRoot::overlay_root_from_nodes_with_updates(
-            self.tx(),
-            TrieInputSorted::from_unsorted(input),
-            layout,
-        )?)
+        if self.0.cached_storage_settings().is_v2() {
+            self.state_root_from_nodes_with_updates_inner::<PackedKeyAdapter>(input)
+        } else {
+            self.state_root_from_nodes_with_updates_inner::<LegacyKeyAdapter>(input)
+        }
     }
 }
 
@@ -148,9 +152,11 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        let layout = self.0.cached_storage_settings().layout();
-        DbStorageRoot::overlay_root(self.tx(), address, hashed_storage, layout)
-            .map_err(|err| ProviderError::Database(err.into()))
+        if self.0.cached_storage_settings().is_v2() {
+            self.storage_root_inner::<PackedKeyAdapter>(address, hashed_storage)
+        } else {
+            self.storage_root_inner::<LegacyKeyAdapter>(address, hashed_storage)
+        }
     }
 
     fn storage_proof(
@@ -159,9 +165,11 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        let layout = self.0.cached_storage_settings().layout();
-        DbStorageProof::overlay_storage_proof(self.tx(), address, slot, hashed_storage, layout)
-            .map_err(ProviderError::from)
+        if self.0.cached_storage_settings().is_v2() {
+            self.storage_proof_inner::<PackedKeyAdapter>(address, slot, hashed_storage)
+        } else {
+            self.storage_proof_inner::<LegacyKeyAdapter>(address, slot, hashed_storage)
+        }
     }
 
     fn storage_multiproof(
@@ -170,15 +178,11 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        let layout = self.0.cached_storage_settings().layout();
-        DbStorageProof::overlay_storage_multiproof(
-            self.tx(),
-            address,
-            slots,
-            hashed_storage,
-            layout,
-        )
-        .map_err(ProviderError::from)
+        if self.0.cached_storage_settings().is_v2() {
+            self.storage_multiproof_inner::<PackedKeyAdapter>(address, slots, hashed_storage)
+        } else {
+            self.storage_multiproof_inner::<LegacyKeyAdapter>(address, slots, hashed_storage)
+        }
     }
 }
 
@@ -191,9 +195,11 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        let layout = self.0.cached_storage_settings().layout();
-        let proof = DbProof::from_tx(self.tx(), layout);
-        proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
+        if self.0.cached_storage_settings().is_v2() {
+            self.proof_inner::<PackedKeyAdapter>(input, address, slots)
+        } else {
+            self.proof_inner::<LegacyKeyAdapter>(input, address, slots)
+        }
     }
 
     fn multiproof(
@@ -201,14 +207,121 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        let layout = self.0.cached_storage_settings().layout();
-        let proof = DbProof::from_tx(self.tx(), layout);
-        proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
+        if self.0.cached_storage_settings().is_v2() {
+            self.multiproof_inner::<PackedKeyAdapter>(input, targets)
+        } else {
+            self.multiproof_inner::<LegacyKeyAdapter>(input, targets)
+        }
     }
 
     fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
-        let layout = self.0.cached_storage_settings().layout();
-        Ok(DbTrieWitness::overlay_witness(self.tx(), input, target, layout)?
+        if self.0.cached_storage_settings().is_v2() {
+            self.witness_inner::<PackedKeyAdapter>(input, target)
+        } else {
+            self.witness_inner::<LegacyKeyAdapter>(input, target)
+        }
+    }
+}
+
+impl<Provider: DBProvider + StorageSettingsCache> LatestStateProviderRef<'_, Provider> {
+    fn state_root_inner<A: TrieTableAdapter>(
+        &self,
+        hashed_state: HashedPostState,
+    ) -> ProviderResult<B256> {
+        let sorted = hashed_state.into_sorted();
+        Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root(self.tx(), &sorted)?)
+    }
+
+    fn state_root_from_nodes_inner<A: TrieTableAdapter>(
+        &self,
+        input: TrieInput,
+    ) -> ProviderResult<B256> {
+        Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes(
+            self.tx(),
+            TrieInputSorted::from_unsorted(input),
+        )?)
+    }
+
+    fn state_root_with_updates_inner<A: TrieTableAdapter>(
+        &self,
+        hashed_state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let sorted = hashed_state.into_sorted();
+        Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_with_updates(
+            self.tx(),
+            &sorted,
+        )?)
+    }
+
+    fn state_root_from_nodes_with_updates_inner<A: TrieTableAdapter>(
+        &self,
+        input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes_with_updates(
+            self.tx(),
+            TrieInputSorted::from_unsorted(input),
+        )?)
+    }
+
+    fn storage_root_inner<A: TrieTableAdapter>(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, hashed_storage)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn storage_proof_inner<A: TrieTableAdapter>(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        <DbStorageProof<'_, _, A>>::overlay_storage_proof(self.tx(), address, slot, hashed_storage)
+            .map_err(ProviderError::from)
+    }
+
+    fn storage_multiproof_inner<A: TrieTableAdapter>(
+        &self,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof> {
+        <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
+            self.tx(),
+            address,
+            slots,
+            hashed_storage,
+        )
+        .map_err(ProviderError::from)
+    }
+
+    fn proof_inner<A: TrieTableAdapter>(
+        &self,
+        input: TrieInput,
+        address: Address,
+        slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
+        proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
+    }
+
+    fn multiproof_inner<A: TrieTableAdapter>(
+        &self,
+        input: TrieInput,
+        targets: MultiProofTargets,
+    ) -> ProviderResult<MultiProof> {
+        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
+        proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
+    }
+
+    fn witness_inner<A: TrieTableAdapter>(
+        &self,
+        input: TrieInput,
+        target: HashedPostState,
+    ) -> ProviderResult<Vec<Bytes>> {
+        Ok(<DbTrieWitness<'_, _, A>>::overlay_witness(self.tx(), input, target)?
             .into_values()
             .collect())
     }

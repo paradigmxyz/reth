@@ -319,10 +319,6 @@ mod tests {
         }
 
         let provider_rw = factory.provider_rw().unwrap();
-        let trie_cursor_factory = DatabaseTrieCursorFactory::new(
-            provider_rw.tx_ref(),
-            provider_rw.cached_storage_settings().layout(),
-        );
         let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
 
         let changeset_cache = reth_trie_db::ChangesetCache::new();
@@ -336,12 +332,27 @@ mod tests {
             .decoded_multiproof(targets.clone())
             .unwrap();
 
-        let sequential_result_raw = Proof::new(trie_cursor_factory, hashed_cursor_factory)
-            .multiproof(targets.clone())
-            .unwrap(); // targets might be consumed by parallel_result
-        let sequential_result_decoded: DecodedMultiProof = sequential_result_raw
-            .try_into()
-            .expect("Failed to decode sequential_result for test comparison");
+        let sequential_result_decoded = if provider_rw.cached_storage_settings().is_v2() {
+            let trie_cursor_factory =
+                DatabaseTrieCursorFactory::<_, reth_trie_db::PackedKeyAdapter>::new(
+                    provider_rw.tx_ref(),
+                );
+            let raw = Proof::new(trie_cursor_factory, hashed_cursor_factory)
+                .multiproof(targets.clone())
+                .unwrap();
+            DecodedMultiProof::try_from(raw)
+                .expect("Failed to decode sequential_result for test comparison")
+        } else {
+            let trie_cursor_factory =
+                DatabaseTrieCursorFactory::<_, reth_trie_db::LegacyKeyAdapter>::new(
+                    provider_rw.tx_ref(),
+                );
+            let raw = Proof::new(trie_cursor_factory, hashed_cursor_factory)
+                .multiproof(targets.clone())
+                .unwrap();
+            DecodedMultiProof::try_from(raw)
+                .expect("Failed to decode sequential_result for test comparison")
+        };
 
         // to help narrow down what is wrong - first compare account subtries
         assert_eq!(parallel_result.account_subtree, sequential_result_decoded.account_subtree);

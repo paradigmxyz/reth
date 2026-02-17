@@ -2,14 +2,27 @@
 
 use alloy_primitives::B256;
 use reth_db_api::{cursor::DbCursorRW, tables, transaction::DbTxMut};
-use reth_provider::{test_utils::create_test_provider_factory, StorageSettingsCache};
+use reth_provider::test_utils::create_test_provider_factory;
+use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
     prefix_set::PrefixSetMut,
     trie_cursor::{TrieCursor, TrieCursorFactory},
     walker::TrieWalker,
     BranchNodeCompact, Nibbles, StorageTrieEntry,
 };
-use reth_trie_db::DatabaseTrieCursorFactory;
+use reth_trie_db::{DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedKeyAdapter};
+
+macro_rules! with_adapter {
+    ($provider:expr, |$A:ident| $body:expr) => {
+        if $provider.cached_storage_settings().is_v2() {
+            type $A = PackedKeyAdapter;
+            $body
+        } else {
+            type $A = LegacyKeyAdapter;
+            $body
+        }
+    };
+}
 
 #[test]
 fn walk_nodes_with_common_prefix() {
@@ -36,31 +49,32 @@ fn walk_nodes_with_common_prefix() {
 
     let factory = create_test_provider_factory();
     let tx = factory.provider_rw().unwrap();
-    let layout = tx.cached_storage_settings().layout();
 
     let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
     for (k, v) in &inputs {
         account_cursor.upsert(k.clone().into(), &v.clone()).unwrap();
     }
 
-    let trie_factory = DatabaseTrieCursorFactory::new(tx.tx_ref(), layout);
-    let account_trie = trie_factory.account_trie_cursor().unwrap();
-    test_cursor(account_trie, &expected);
+    with_adapter!(tx, |A| {
+        let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(tx.tx_ref());
+        let account_trie = trie_factory.account_trie_cursor().unwrap();
+        test_cursor(account_trie, &expected);
 
-    let hashed_address = B256::random();
-    let mut storage_cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
-    for (k, v) in &inputs {
-        storage_cursor
-            .upsert(
-                hashed_address,
-                &StorageTrieEntry { nibbles: k.clone().into(), node: v.clone() },
-            )
-            .unwrap();
-    }
+        let hashed_address = B256::random();
+        let mut storage_cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+        for (k, v) in &inputs {
+            storage_cursor
+                .upsert(
+                    hashed_address,
+                    &StorageTrieEntry { nibbles: k.clone().into(), node: v.clone() },
+                )
+                .unwrap();
+        }
 
-    let trie_factory = DatabaseTrieCursorFactory::new(tx.tx_ref(), layout);
-    let storage_trie = trie_factory.storage_trie_cursor(hashed_address).unwrap();
-    test_cursor(storage_trie, &expected);
+        let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(tx.tx_ref());
+        let storage_trie = trie_factory.storage_trie_cursor(hashed_address).unwrap();
+        test_cursor(storage_trie, &expected);
+    });
 }
 
 fn test_cursor<T>(mut trie: T, expected: &[Vec<u8>])
@@ -86,7 +100,6 @@ where
 fn cursor_rootnode_with_changesets() {
     let factory = create_test_provider_factory();
     let tx = factory.provider_rw().unwrap();
-    let layout = tx.cached_storage_settings().layout();
     let mut cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
     let nodes = vec![
@@ -119,32 +132,34 @@ fn cursor_rootnode_with_changesets() {
         cursor.upsert(hashed_address, &StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
     }
 
-    let trie_factory = DatabaseTrieCursorFactory::new(tx.tx_ref(), layout);
-    let mut trie = trie_factory.storage_trie_cursor(hashed_address).unwrap();
+    with_adapter!(tx, |A| {
+        let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(tx.tx_ref());
+        let mut trie = trie_factory.storage_trie_cursor(hashed_address).unwrap();
 
-    // No changes
-    let mut cursor = TrieWalker::<_>::state_trie(&mut trie, Default::default());
-    assert_eq!(cursor.key().copied(), Some(Nibbles::new())); // root
-    assert!(cursor.can_skip_current_node); // due to root_hash
-    cursor.advance().unwrap(); // skips to the end of trie
-    assert_eq!(cursor.key().copied(), None);
+        // No changes
+        let mut cursor = TrieWalker::<_>::state_trie(&mut trie, Default::default());
+        assert_eq!(cursor.key().copied(), Some(Nibbles::new())); // root
+        assert!(cursor.can_skip_current_node); // due to root_hash
+        cursor.advance().unwrap(); // skips to the end of trie
+        assert_eq!(cursor.key().copied(), None);
 
-    // We insert something that's not part of the existing trie/prefix.
-    let mut changed = PrefixSetMut::default();
-    changed.insert(Nibbles::from_nibbles([0xF, 0x1]));
-    let mut cursor = TrieWalker::<_>::state_trie(&mut trie, changed.freeze());
+        // We insert something that's not part of the existing trie/prefix.
+        let mut changed = PrefixSetMut::default();
+        changed.insert(Nibbles::from_nibbles([0xF, 0x1]));
+        let mut cursor = TrieWalker::<_>::state_trie(&mut trie, changed.freeze());
 
-    // Root node
-    assert_eq!(cursor.key().copied(), Some(Nibbles::new()));
-    // Should not be able to skip state due to the changed values
-    assert!(!cursor.can_skip_current_node);
-    cursor.advance().unwrap();
-    assert_eq!(cursor.key().copied(), Some(Nibbles::from_nibbles([0x2])));
-    cursor.advance().unwrap();
-    assert_eq!(cursor.key().copied(), Some(Nibbles::from_nibbles([0x2, 0x1])));
-    cursor.advance().unwrap();
-    assert_eq!(cursor.key().copied(), Some(Nibbles::from_nibbles([0x4])));
+        // Root node
+        assert_eq!(cursor.key().copied(), Some(Nibbles::new()));
+        // Should not be able to skip state due to the changed values
+        assert!(!cursor.can_skip_current_node);
+        cursor.advance().unwrap();
+        assert_eq!(cursor.key().copied(), Some(Nibbles::from_nibbles([0x2])));
+        cursor.advance().unwrap();
+        assert_eq!(cursor.key().copied(), Some(Nibbles::from_nibbles([0x2, 0x1])));
+        cursor.advance().unwrap();
+        assert_eq!(cursor.key().copied(), Some(Nibbles::from_nibbles([0x4])));
 
-    cursor.advance().unwrap();
-    assert_eq!(cursor.key().copied(), None); // the end of trie
+        cursor.advance().unwrap();
+        assert_eq!(cursor.key().copied(), None); // the end of trie
+    });
 }

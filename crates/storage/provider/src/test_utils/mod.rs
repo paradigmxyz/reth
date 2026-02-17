@@ -15,8 +15,8 @@ use reth_trie_db::DatabaseStateRoot;
 
 use std::sync::Arc;
 
-type DbStateRoot<'a, TX> = StateRoot<
-    reth_trie_db::DatabaseTrieCursorFactory<&'a TX>,
+type DbStateRoot<'a, TX, A> = StateRoot<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
 
@@ -107,9 +107,13 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
 
-    let (root, updates) =
-        DbStateRoot::from_tx(provider.tx_ref(), provider.cached_storage_settings().layout())
-            .root_with_updates()?;
+    let (root, updates) = if provider.cached_storage_settings().is_v2() {
+        DbStateRoot::<_, reth_trie_db::PackedKeyAdapter>::from_tx(provider.tx_ref())
+            .root_with_updates()?
+    } else {
+        DbStateRoot::<_, reth_trie_db::LegacyKeyAdapter>::from_tx(provider.tx_ref())
+            .root_with_updates()?
+    };
     provider.write_trie_updates(updates).unwrap();
 
     provider.commit()?;
