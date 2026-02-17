@@ -59,10 +59,10 @@ impl SelectorApp {
     }
 
     fn toggle_current(&mut self) {
-        if let Some(ty) = self.available.get(self.cursor) {
-            if !ty.is_required() {
-                self.selected[self.cursor] = !self.selected[self.cursor];
-            }
+        if let Some(ty) = self.available.get(self.cursor) &&
+            !ty.is_required()
+        {
+            self.selected[self.cursor] = !self.selected[self.cursor];
         }
     }
 
@@ -138,23 +138,22 @@ fn event_loop(
         let timeout =
             tick_rate.checked_sub(last_tick.elapsed()).unwrap_or_else(|| Duration::from_secs(0));
 
-        if crossterm::event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == event::KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => {
-                            return Ok(SelectionResult::Cancelled);
-                        }
-                        KeyCode::Enter => {
-                            return Ok(SelectionResult::Selected(app.selected_types()));
-                        }
-                        KeyCode::Char(' ') => app.toggle_current(),
-                        KeyCode::Char('a') => app.select_all(),
-                        KeyCode::Up | KeyCode::Char('k') => app.move_up(),
-                        KeyCode::Down | KeyCode::Char('j') => app.move_down(),
-                        _ => {}
-                    }
+        if crossterm::event::poll(timeout)? &&
+            let Event::Key(key) = event::read()? &&
+            key.kind == event::KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    return Ok(SelectionResult::Cancelled);
                 }
+                KeyCode::Enter => {
+                    return Ok(SelectionResult::Selected(app.selected_types()));
+                }
+                KeyCode::Char(' ') => app.toggle_current(),
+                KeyCode::Char('a') => app.select_all(),
+                KeyCode::Up | KeyCode::Char('k') => app.move_up(),
+                KeyCode::Down | KeyCode::Char('j') => app.move_down(),
+                _ => {}
             }
         }
 

@@ -202,7 +202,7 @@ impl ComponentManifest {
 impl ChunkedArchive {
     /// Returns the number of chunks.
     pub fn num_chunks(&self) -> u64 {
-        (self.total_blocks + self.blocks_per_file - 1) / self.blocks_per_file
+        self.total_blocks.div_ceil(self.blocks_per_file)
     }
 }
 
@@ -291,7 +291,7 @@ fn discover_chunks(
     blocks_per_file: u64,
 ) -> Result<Vec<ChunkMetadata>> {
     let mut chunks = Vec::new();
-    let num_chunks = (max_block + blocks_per_file - 1) / blocks_per_file;
+    let num_chunks = max_block.div_ceil(blocks_per_file);
 
     for i in 0..num_chunks {
         let start = i * blocks_per_file;

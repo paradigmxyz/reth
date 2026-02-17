@@ -7,6 +7,7 @@ use crate::common::EnvironmentArgs;
 use clap::Parser;
 use config_gen::{config_for_components, write_config};
 use eyre::Result;
+use futures::stream::{self, StreamExt};
 use lz4::Decoder;
 use manifest::{SnapshotComponentType, SnapshotManifest};
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
@@ -236,38 +237,53 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         let selected = self.resolve_components(&manifest)?;
 
-        // Download each selected component (may be multiple archives for chunked components)
+        // Collect all archive URLs across all selected components
         let target_dir = data_dir.data_dir();
+        let mut all_downloads: Vec<(String, String)> = Vec::new();
         for ty in &selected {
             let urls = manifest.archive_urls(*ty);
-            if urls.is_empty() {
-                continue;
-            }
-
+            let name = ty.display_name().to_string();
             let component_size = manifest.component(*ty).map(|c| c.total_size()).unwrap_or(0);
 
-            info!(target: "reth::cli",
-                component = ty.display_name(),
-                archives = urls.len(),
-                size = %DownloadProgress::format_size(component_size),
-                "Downloading component"
-            );
-
-            for (i, url) in urls.iter().enumerate() {
-                if urls.len() > 1 {
-                    info!(target: "reth::cli",
-                        component = ty.display_name(),
-                        archive = format!("{}/{}", i + 1, urls.len()),
-                        "Downloading archive"
-                    );
-                }
-                stream_and_extract(url, target_dir).await?;
+            if !urls.is_empty() {
+                info!(target: "reth::cli",
+                    component = %name,
+                    archives = urls.len(),
+                    size = %DownloadProgress::format_size(component_size),
+                    "Queued component for download"
+                );
             }
 
-            info!(target: "reth::cli",
-                component = ty.display_name(),
-                "Component downloaded and extracted"
-            );
+            for url in urls {
+                all_downloads.push((url, name.clone()));
+            }
+        }
+
+        let total_archives = all_downloads.len();
+        info!(target: "reth::cli",
+            archives = total_archives,
+            "Downloading all archives in parallel"
+        );
+
+        // Download and extract all archives in parallel (up to 4 concurrent)
+        let target = target_dir.to_path_buf();
+        let results: Vec<Result<()>> = stream::iter(all_downloads)
+            .map(|(url, component)| {
+                let dir = target.clone();
+                async move {
+                    info!(target: "reth::cli", component, url = %url, "Starting archive download");
+                    stream_and_extract(&url, &dir).await?;
+                    info!(target: "reth::cli", component, url = %url, "Archive extracted");
+                    Ok(())
+                }
+            })
+            .buffer_unordered(4)
+            .collect()
+            .await;
+
+        // Check for errors
+        for result in results {
+            result?;
         }
 
         // Generate reth.toml
