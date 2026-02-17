@@ -299,7 +299,7 @@ where
         );
 
         let ctx = self.ctx.clone();
-        self.executor.prewarming_pool().install(|| {
+        self.executor.prewarming_pool().install_fn(|| {
             bal.par_iter().for_each_init(
                 || (ctx.clone(), None::<CachedStateProvider<reth_provider::StateProviderBox>>),
                 |(ctx, provider), account| {
@@ -545,7 +545,6 @@ where
     ///
     /// Note: There are no ordering guarantees; this does not reflect the state produced by
     /// sequential execution.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn transact_batch<Tx>(
         self,
         txs: CrossbeamReceiver<IndexedTransaction<Tx>>,
@@ -563,7 +562,7 @@ where
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 "prewarm tx",
-                index,
+                i=index,
             )
             .entered();
 
