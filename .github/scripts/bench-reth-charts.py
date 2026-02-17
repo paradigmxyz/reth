@@ -163,13 +163,13 @@ def plot_gas_vs_latency(feature: list[dict], baseline: list[dict] | None, out: P
     if baseline:
         bgas = [r["gas_used"] / 1_000_000 for r in baseline]
         blat = [r["new_payload_latency_us"] / 1_000 for r in baseline]
-        ax.scatter(bgas, blat, s=8, alpha=0.5, label="main")
-        _add_regression(ax, bgas, blat, "tab:blue", "main fit")
+        ax.scatter(bgas, blat, s=8, alpha=0.5)
+        _add_regression(ax, bgas, blat, "tab:blue", "main")
 
     fgas = [r["gas_used"] / 1_000_000 for r in feature]
     flat = [r["new_payload_latency_us"] / 1_000 for r in feature]
-    ax.scatter(fgas, flat, s=8, alpha=0.6, label="branch")
-    _add_regression(ax, fgas, flat, "tab:orange", "branch fit")
+    ax.scatter(fgas, flat, s=8, alpha=0.6)
+    _add_regression(ax, fgas, flat, "tab:orange", "branch")
 
     ax.set_xlabel("Gas Used (Mgas)")
     ax.set_ylabel("newPayload Latency (ms)")
