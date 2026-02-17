@@ -241,11 +241,11 @@ where
             });
 
             let tx = provider.tx_ref();
-            let is_v2 = provider.cached_storage_settings().is_v2();
+            let layout = provider.cached_storage_settings().layout();
             let progress = <StateRoot<
                 reth_trie_db::DatabaseTrieCursorFactory<_>,
                 reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(tx, is_v2)
+            > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(tx, layout)
             .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
             .root_with_progress()
             .map_err(|e| {

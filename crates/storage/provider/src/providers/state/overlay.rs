@@ -1,7 +1,7 @@
 use alloy_primitives::{BlockNumber, B256};
 use metrics::{Counter, Histogram};
 use reth_chain_state::LazyOverlay;
-use reth_db_api::DatabaseError;
+use reth_db_api::{models::StorageLayout, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
 use reth_primitives_traits::dashmap::{self, DashMap};
@@ -469,10 +469,10 @@ where
 
         let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
 
-        let is_v2 = provider.cached_storage_settings().is_v2();
+        let layout = provider.cached_storage_settings().layout();
 
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
+        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, layout))
     }
 }
 
@@ -486,7 +486,7 @@ pub struct OverlayStateProvider<Provider: DBProvider> {
     provider: Provider,
     trie_updates: Arc<TrieUpdatesSorted>,
     hashed_post_state: Arc<HashedPostStateSorted>,
-    is_v2: bool,
+    layout: StorageLayout,
 }
 
 impl<Provider> OverlayStateProvider<Provider>
@@ -499,9 +499,9 @@ where
         provider: Provider,
         trie_updates: Arc<TrieUpdatesSorted>,
         hashed_post_state: Arc<HashedPostStateSorted>,
-        is_v2: bool,
+        layout: StorageLayout,
     ) -> Self {
-        Self { provider, trie_updates, hashed_post_state, is_v2 }
+        Self { provider, trie_updates, hashed_post_state, layout }
     }
 }
 
@@ -527,7 +527,7 @@ where
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         let db_trie_cursor_factory =
-            DatabaseTrieCursorFactory::new(self.provider.tx_ref(), self.is_v2);
+            DatabaseTrieCursorFactory::new(self.provider.tx_ref(), self.layout);
         let trie_cursor_factory =
             InMemoryTrieCursorFactory::new(db_trie_cursor_factory, self.trie_updates.as_ref());
         trie_cursor_factory.account_trie_cursor()
@@ -538,7 +538,7 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let db_trie_cursor_factory =
-            DatabaseTrieCursorFactory::new(self.provider.tx_ref(), self.is_v2);
+            DatabaseTrieCursorFactory::new(self.provider.tx_ref(), self.layout);
         let trie_cursor_factory =
             InMemoryTrieCursorFactory::new(db_trie_cursor_factory, self.trie_updates.as_ref());
         trie_cursor_factory.storage_trie_cursor(hashed_address)

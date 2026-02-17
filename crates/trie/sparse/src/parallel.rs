@@ -3721,7 +3721,7 @@ mod tests {
         BranchNode, BranchNodeMasks, BranchNodeMasksMap, ExtensionNode, HashBuilder, LeafNode,
         ProofTrieNode, RlpNode, TrieMask, TrieNode, EMPTY_ROOT_HASH,
     };
-    use reth_trie_db::DatabaseTrieCursorFactory;
+    use reth_trie_db::{DatabaseTrieCursorFactory, StorageLayout};
     use std::collections::{BTreeMap, BTreeSet};
 
     /// Pad nibbles to the length of a B256 hash with zeros on the right.
@@ -6145,7 +6145,7 @@ mod tests {
                     state.extend(update);
                     let provider = provider_factory.provider().unwrap();
                     let trie_cursor =
-                        DatabaseTrieCursorFactory::new(provider.tx_ref(), false);
+                        DatabaseTrieCursorFactory::new(provider.tx_ref(), StorageLayout::V1);
                     let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
                         run_hash_builder(
                             state.clone(),
@@ -6191,7 +6191,7 @@ mod tests {
 
                     let provider = provider_factory.provider().unwrap();
                     let trie_cursor =
-                        DatabaseTrieCursorFactory::new(provider.tx_ref(), false);
+                        DatabaseTrieCursorFactory::new(provider.tx_ref(), StorageLayout::V1);
                     let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
                         run_hash_builder(
                             state.clone(),

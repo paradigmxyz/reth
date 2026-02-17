@@ -7,7 +7,7 @@
 //! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
 //! - **Memory efficiency**: Automatic eviction ensures bounded memory usage
 
-use crate::DatabaseTrieCursorFactory;
+use crate::{DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory};
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
 use reth_storage_api::{
@@ -17,9 +17,8 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     changesets::compute_trie_changesets,
-    hashed_cursor::HashedPostStateCursorFactory,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory},
-    StateRoot, TrieInputSorted,
+    TrieInputSorted,
 };
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
@@ -99,23 +98,18 @@ where
         prefix_sets_prev,
     );
 
-    let is_v2 = provider.cached_storage_settings().is_v2();
+    let layout = provider.cached_storage_settings().layout();
 
-    let cumulative_trie_updates_prev = StateRoot::new(
-        InMemoryTrieCursorFactory::new(
-            DatabaseTrieCursorFactory::new(provider.tx_ref(), is_v2),
-            input_prev.nodes.as_ref(),
-        ),
-        HashedPostStateCursorFactory::new(
-            crate::DatabaseHashedCursorFactory::new(provider.tx_ref()),
-            input_prev.state.as_ref(),
-        ),
-    )
-    .with_prefix_sets(input_prev.prefix_sets.freeze())
-    .root_with_updates()
-    .map_err(ProviderError::other)?
-    .1
-    .into_sorted();
+    type DbStateRoot<'a, TX> = reth_trie::StateRoot<
+        DatabaseTrieCursorFactory<&'a TX>,
+        DatabaseHashedCursorFactory<&'a TX>,
+    >;
+
+    let cumulative_trie_updates_prev =
+        DbStateRoot::overlay_root_from_nodes_with_updates(provider.tx_ref(), input_prev, layout)
+            .map_err(ProviderError::other)?
+            .1
+            .into_sorted();
 
     // Create prefix sets from individual revert (only paths changed by this block)
     let prefix_sets = individual_state_revert.construct_prefix_sets();
@@ -127,28 +121,18 @@ where
         prefix_sets,
     );
 
-    let trie_updates = StateRoot::new(
-        InMemoryTrieCursorFactory::new(
-            DatabaseTrieCursorFactory::new(provider.tx_ref(), is_v2),
-            input.nodes.as_ref(),
-        ),
-        HashedPostStateCursorFactory::new(
-            crate::DatabaseHashedCursorFactory::new(provider.tx_ref()),
-            input.state.as_ref(),
-        ),
-    )
-    .with_prefix_sets(input.prefix_sets.freeze())
-    .root_with_updates()
-    .map_err(ProviderError::other)?
-    .1
-    .into_sorted();
+    let trie_updates =
+        DbStateRoot::overlay_root_from_nodes_with_updates(provider.tx_ref(), input, layout)
+            .map_err(ProviderError::other)?
+            .1
+            .into_sorted();
 
     // Compute changesets using cumulative trie updates for block-1 as overlay
-    let db_cursor_factory = DatabaseTrieCursorFactory::new(provider.tx_ref(), is_v2);
+    let db_cursor_factory = DatabaseTrieCursorFactory::new(provider.tx_ref(), layout);
     let overlay_factory =
         InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
-    let changesets = compute_trie_changesets(&overlay_factory, &trie_updates)
-        .map_err(ProviderError::other)?;
+    let changesets =
+        compute_trie_changesets(&overlay_factory, &trie_updates).map_err(ProviderError::other)?;
 
     debug!(
         target: "trie::changeset_cache",
@@ -231,8 +215,8 @@ where
 
     // Step 4: Create an InMemoryTrieCursorFactory with the reverts
     // This gives us the trie state as it was after the target block was processed
-    let is_v2 = provider.cached_storage_settings().is_v2();
-    let db_cursor_factory = DatabaseTrieCursorFactory::new(tx, is_v2);
+    let layout = provider.cached_storage_settings().layout();
+    let db_cursor_factory = DatabaseTrieCursorFactory::new(tx, layout);
     let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
 
     // Step 5: Collect all account trie nodes that changed in the target block
@@ -265,10 +249,7 @@ where
 
         storage_tries.insert(
             *hashed_address,
-            StorageTrieUpdatesSorted {
-                storage_nodes,
-                is_deleted: storage_changeset.is_deleted,
-            },
+            StorageTrieUpdatesSorted { storage_nodes, is_deleted: storage_changeset.is_deleted },
         );
     }
 

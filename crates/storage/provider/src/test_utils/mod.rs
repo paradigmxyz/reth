@@ -103,7 +103,10 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
     let (root, updates) = <StateRoot<
         reth_trie_db::DatabaseTrieCursorFactory<_>,
         reth_trie_db::DatabaseHashedCursorFactory<_>,
-    > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(provider.tx_ref(), false)
+    > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(
+        provider.tx_ref(),
+        reth_db_api::models::StorageLayout::V1,
+    )
     .root_with_updates()?;
     provider.write_trie_updates(updates).unwrap();
 

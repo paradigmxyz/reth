@@ -8,7 +8,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::EMPTY_STRING_CODE;
 use reth_db::{cursor::DbCursorRW, tables};
-use reth_db_api::transaction::DbTxMut;
+use reth_db_api::{models::StorageLayout, transaction::DbTxMut};
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
 use reth_trie::{
@@ -38,7 +38,7 @@ fn includes_empty_node_preimage() {
 
     // witness includes empty state trie root node
     assert_eq!(
-        DbTrieWitness::from_tx(provider.tx_ref(), false)
+        DbTrieWitness::from_tx(provider.tx_ref(), StorageLayout::V1)
             .compute(HashedPostState {
                 accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
                 storages: HashMap::default(),
@@ -50,8 +50,8 @@ fn includes_empty_node_preimage() {
     // Insert account into database
     provider.insert_account_for_hashing([(address, Some(Account::default()))]).unwrap();
 
-    let state_root = DbStateRoot::from_tx(provider.tx_ref(), false).root().unwrap();
-    let proof = <DbProof<'_, _> as DatabaseProof>::from_tx(provider.tx_ref(), false);
+    let state_root = DbStateRoot::from_tx(provider.tx_ref(), StorageLayout::V1).root().unwrap();
+    let proof = <DbProof<'_, _> as DatabaseProof>::from_tx(provider.tx_ref(), StorageLayout::V1);
     let multiproof = proof
         .multiproof(MultiProofTargets::from_iter([(
             hashed_address,
@@ -59,7 +59,7 @@ fn includes_empty_node_preimage() {
         )]))
         .unwrap();
 
-    let witness = DbTrieWitness::from_tx(provider.tx_ref(), false)
+    let witness = DbTrieWitness::from_tx(provider.tx_ref(), StorageLayout::V1)
         .compute(HashedPostState {
             accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
             storages: HashMap::from_iter([(
@@ -92,8 +92,8 @@ fn includes_nodes_for_destroyed_storage_nodes() {
         .insert_storage_for_hashing([(address, [StorageEntry { key: slot, value: U256::from(1) }])])
         .unwrap();
 
-    let state_root = DbStateRoot::from_tx(provider.tx_ref(), false).root().unwrap();
-    let proof = <DbProof<'_, _> as DatabaseProof>::from_tx(provider.tx_ref(), false);
+    let state_root = DbStateRoot::from_tx(provider.tx_ref(), StorageLayout::V1).root().unwrap();
+    let proof = <DbProof<'_, _> as DatabaseProof>::from_tx(provider.tx_ref(), StorageLayout::V1);
     let multiproof = proof
         .multiproof(MultiProofTargets::from_iter([(
             hashed_address,
@@ -102,7 +102,7 @@ fn includes_nodes_for_destroyed_storage_nodes() {
         .unwrap();
 
     let witness =
-        DbTrieWitness::from_tx(provider.tx_ref(), false)
+        DbTrieWitness::from_tx(provider.tx_ref(), StorageLayout::V1)
             .compute(HashedPostState {
                 accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
                 storages: HashMap::from_iter([(
@@ -141,8 +141,8 @@ fn correctly_decodes_branch_node_values() {
         .upsert(hashed_address, &StorageEntry { key: hashed_slot2, value: U256::from(1) })
         .unwrap();
 
-    let state_root = DbStateRoot::from_tx(provider.tx_ref(), false).root().unwrap();
-    let proof = <DbProof<'_, _> as DatabaseProof>::from_tx(provider.tx_ref(), false);
+    let state_root = DbStateRoot::from_tx(provider.tx_ref(), StorageLayout::V1).root().unwrap();
+    let proof = <DbProof<'_, _> as DatabaseProof>::from_tx(provider.tx_ref(), StorageLayout::V1);
     let multiproof = proof
         .multiproof(MultiProofTargets::from_iter([(
             hashed_address,
@@ -150,7 +150,7 @@ fn correctly_decodes_branch_node_values() {
         )]))
         .unwrap();
 
-    let witness = DbTrieWitness::from_tx(provider.tx_ref(), false)
+    let witness = DbTrieWitness::from_tx(provider.tx_ref(), StorageLayout::V1)
         .compute(HashedPostState {
             accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
             storages: HashMap::from_iter([(

@@ -1,6 +1,7 @@
 use alloy_primitives::B256;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    models::StorageLayout,
     table::{DupSort, Key, Table, Value},
     tables,
     transaction::DbTx,
@@ -19,8 +20,8 @@ use std::marker::PhantomData;
 /// packed (33-byte) nibble encodings. The underlying cursor types are monomorphized per
 /// adapter, while [`DatabaseTrieCursorFactory`] selects the encoding at runtime.
 pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
-    /// Whether this adapter uses v2 (packed) encoding.
-    const IS_V2: bool;
+    /// The storage layout this adapter targets.
+    const LAYOUT: StorageLayout;
     /// The key type for account trie lookups (e.g., `StoredNibbles` or `PackedStoredNibbles`).
     type AccountKey: Key + From<Nibbles> + Clone;
 
@@ -78,7 +79,7 @@ impl StorageTrieEntryLike for StorageTrieEntry {
 pub struct LegacyKeyAdapter;
 
 impl TrieKeyAdapter for LegacyKeyAdapter {
-    const IS_V2: bool = false;
+    const LAYOUT: StorageLayout = StorageLayout::V1;
     type AccountKey = StoredNibbles;
     type StorageSubKey = StoredNibblesSubKey;
     type StorageValue = StorageTrieEntry;
@@ -117,7 +118,7 @@ impl StorageTrieEntryLike for PackedStorageTrieEntry {
 pub struct PackedKeyAdapter;
 
 impl TrieKeyAdapter for PackedKeyAdapter {
-    const IS_V2: bool = true;
+    const LAYOUT: StorageLayout = StorageLayout::V2;
     type AccountKey = PackedStoredNibbles;
     type StorageSubKey = PackedStoredNibblesSubKey;
     type StorageValue = PackedStorageTrieEntry;
@@ -324,18 +325,18 @@ where
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
 ///
-/// Holds a runtime `is_v2` flag to dispatch between legacy and packed nibble encodings
+/// Holds a runtime [`StorageLayout`] to dispatch between legacy and packed nibble encodings
 /// internally, so callers never need to know which encoding is in use.
 #[derive(Debug, Clone)]
 pub struct DatabaseTrieCursorFactory<T> {
     tx: T,
-    is_v2: bool,
+    layout: StorageLayout,
 }
 
 impl<T> DatabaseTrieCursorFactory<T> {
-    /// Create new [`DatabaseTrieCursorFactory`] with the given encoding flag.
-    pub const fn new(tx: T, is_v2: bool) -> Self {
-        Self { tx, is_v2 }
+    /// Create new [`DatabaseTrieCursorFactory`] with the given [`StorageLayout`].
+    pub const fn new(tx: T, layout: StorageLayout) -> Self {
+        Self { tx, layout }
     }
 }
 
@@ -345,22 +346,22 @@ where
 {
     type AccountTrieCursor<'a>
         = EitherAccountTrieCursor<
-            <TX as DbTx>::Cursor<tables::AccountsTrie>,
-            <TX as DbTx>::Cursor<PackedAccountsTrie>,
-        >
+        <TX as DbTx>::Cursor<tables::AccountsTrie>,
+        <TX as DbTx>::Cursor<PackedAccountsTrie>,
+    >
     where
         Self: 'a;
 
     type StorageTrieCursor<'a>
         = EitherStorageTrieCursor<
-            <TX as DbTx>::DupCursor<tables::StoragesTrie>,
-            <TX as DbTx>::DupCursor<PackedStoragesTrie>,
-        >
+        <TX as DbTx>::DupCursor<tables::StoragesTrie>,
+        <TX as DbTx>::DupCursor<PackedStoragesTrie>,
+    >
     where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        if self.is_v2 {
+        if matches!(self.layout, StorageLayout::V2) {
             Ok(EitherAccountTrieCursor::Packed(DatabaseAccountTrieCursor::new(
                 self.tx.cursor_read::<PackedAccountsTrie>()?,
             )))
@@ -375,7 +376,7 @@ where
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        if self.is_v2 {
+        if matches!(self.layout, StorageLayout::V2) {
             Ok(EitherStorageTrieCursor::Packed(DatabaseStorageTrieCursor::new(
                 self.tx.cursor_dup_read::<PackedStoragesTrie>()?,
                 hashed_address,

@@ -5,6 +5,7 @@ use reth_cli_util::parse_socket_address;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
+    models::StorageLayout,
     transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::DbTool;
@@ -117,11 +118,11 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
     let mut tx = db.tx()?;
     tx.disable_long_read_transaction_safety();
 
-    let is_v2 = tool.provider_factory.cached_storage_settings().is_v2();
+    let layout = tool.provider_factory.cached_storage_settings().layout();
 
     // Create the verifier
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx, is_v2);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx, layout);
     let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
 
     let metrics = RepairTrieMetrics::new();
@@ -212,9 +213,9 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     // Check that a pipeline sync isn't in progress.
     verify_checkpoints(provider_rw.as_ref())?;
 
-    let is_v2 = tool.provider_factory.cached_storage_settings().is_v2();
+    let layout = tool.provider_factory.cached_storage_settings().layout();
 
-    let inconsistent_nodes = if is_v2 {
+    let inconsistent_nodes = if matches!(layout, StorageLayout::V2) {
         do_verify_and_repair::<_, reth_trie_db::PackedKeyAdapter>(&mut provider_rw)?
     } else {
         do_verify_and_repair::<_, reth_trie_db::LegacyKeyAdapter>(&mut provider_rw)?
@@ -246,7 +247,7 @@ where
     // require it to be AsRef.
     let tx = provider_rw.tx_ref();
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx, A::IS_V2);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx, A::LAYOUT);
 
     // Create the verifier
     let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
