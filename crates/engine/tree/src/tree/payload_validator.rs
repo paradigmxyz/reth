@@ -892,7 +892,10 @@ where
             trace!(target: "engine::tree", "Executing transaction");
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx)?;
+            let output = debug_span!(target: "engine::tree", "evm transact")
+                .in_scope(|| executor.execute_transaction_without_commit(tx))?;
+            debug_span!(target: "engine::tree", "commit changes")
+                .in_scope(|| executor.commit_transaction(output))?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
             let current_len = executor.receipts().len();
