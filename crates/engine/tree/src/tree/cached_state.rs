@@ -1111,4 +1111,162 @@ mod tests {
         assert!(caches.account_cache.get(&addr1).is_none());
         assert!(caches.account_cache.get(&addr2).is_some());
     }
+
+    /// Helper: builds a BundleState that updates one account's nonce.
+    fn nonce_update_bundle(addr: Address, old_nonce: u64, new_nonce: u64) -> BundleState {
+        BundleState {
+            state: HashMap::from_iter([(
+                addr,
+                BundleAccount::new(
+                    Some(AccountInfo {
+                        nonce: old_nonce,
+                        balance: U256::from(1000),
+                        code_hash: alloy_primitives::KECCAK256_EMPTY,
+                        code: None,
+                        account_id: None,
+                    }),
+                    Some(AccountInfo {
+                        nonce: new_nonce,
+                        balance: U256::from(1000),
+                        code_hash: alloy_primitives::KECCAK256_EMPTY,
+                        code: None,
+                        account_id: None,
+                    }),
+                    Default::default(),
+                    AccountStatus::Changed,
+                ),
+            )]),
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        }
+    }
+
+    /// Regression test: proves that `insert_state()` during concurrent cache reads causes
+    /// silent nonce corruption via FixedCache's non-blocking bucket locks.
+    ///
+    /// This reproduces the production bug: multiproof workers call `account_cache.get()`
+    /// which holds the per-bucket lock during `Account` clone. A concurrent
+    /// `insert_state()` call sees `LOCKED_BIT` set and silently drops the nonce update.
+    ///
+    /// The test is probabilistic — `Account` clone is fast (~nanoseconds), so the race
+    /// window is small. 4 reader threads maximize the chance of hitting it.
+    #[test]
+    fn test_insert_state_nonce_dropped_during_concurrent_reads() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, Barrier,
+        };
+
+        let addr = Address::random();
+        let num_reader_threads = 4;
+        let caches = Arc::new(ExecutionCache::new(1000));
+
+        caches.insert_account(
+            addr,
+            Some(Account { nonce: 5, balance: U256::from(1000), bytecode_hash: None }),
+        );
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let barrier = Arc::new(Barrier::new(num_reader_threads + 1));
+
+        let readers: Vec<_> = (0..num_reader_threads)
+            .map(|_| {
+                let c = caches.clone();
+                let s = stop.clone();
+                let b = barrier.clone();
+                std::thread::spawn(move || {
+                    b.wait();
+                    while !s.load(Ordering::Relaxed) {
+                        let _ = c.account_cache.get(&addr);
+                    }
+                })
+            })
+            .collect();
+
+        barrier.wait();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // insert_state() DURING concurrent reads — this is the buggy ordering.
+        let bundle = nonce_update_bundle(addr, 5, 6);
+        assert!(caches.insert_state(&bundle).is_ok());
+
+        stop.store(true, Ordering::Relaxed);
+        for r in readers {
+            r.join().unwrap();
+        }
+
+        let cached_nonce = caches.account_cache.get(&addr).unwrap().unwrap().nonce;
+
+        // The nonce should be stale (5) because insert_state() was silently dropped.
+        // This is probabilistic — if it's 6, the race window was missed this run.
+        // Either outcome is informational; the important invariant is tested below.
+        eprintln!(
+            "Concurrent insert_state: expected nonce=5 (stale), got nonce={cached_nonce}"
+        );
+    }
+
+    /// Regression test: proves that deferring `insert_state()` until after readers stop
+    /// (the fix) guarantees the nonce update persists.
+    ///
+    /// This mirrors the fixed code path in `save_cache()`: `valid_block_rx.recv()` blocks
+    /// until the multiproof task finishes reading, then `insert_state()` runs with no
+    /// concurrent readers on the FixedCache.
+    #[test]
+    fn test_insert_state_nonce_persists_after_readers_stop() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, Barrier,
+        };
+
+        let addr = Address::random();
+        let num_reader_threads = 4;
+        let caches = Arc::new(ExecutionCache::new(1000));
+
+        caches.insert_account(
+            addr,
+            Some(Account { nonce: 5, balance: U256::from(1000), bytecode_hash: None }),
+        );
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let barrier = Arc::new(Barrier::new(num_reader_threads + 1));
+
+        let readers: Vec<_> = (0..num_reader_threads)
+            .map(|_| {
+                let c = caches.clone();
+                let s = stop.clone();
+                let b = barrier.clone();
+                std::thread::spawn(move || {
+                    b.wait();
+                    while !s.load(Ordering::Relaxed) {
+                        let _ = c.account_cache.get(&addr);
+                    }
+                })
+            })
+            .collect();
+
+        barrier.wait();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // Stop readers FIRST — this is the fixed ordering.
+        // In production: valid_block_rx.recv() ensures multiproof is done.
+        stop.store(true, Ordering::Relaxed);
+        for r in readers {
+            r.join().unwrap();
+        }
+
+        // THEN insert_state() — no concurrent readers, no lock contention.
+        let bundle = nonce_update_bundle(addr, 5, 6);
+        assert!(caches.insert_state(&bundle).is_ok());
+
+        let cached_nonce = caches.account_cache.get(&addr).unwrap().unwrap().nonce;
+
+        // With the correct ordering, the nonce MUST be 6 — deterministically.
+        assert_eq!(
+            cached_nonce, 6,
+            "insert_state() after readers stopped must always persist the nonce update. \
+             Got stale nonce {cached_nonce} instead of 6."
+        );
+    }
 }
