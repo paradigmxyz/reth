@@ -6,6 +6,7 @@ use crate::{
 };
 use alloy_primitives::BlockNumber;
 use reth_exex_types::FinishedExExHeight;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{
     DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
     StageCheckpointReader,
@@ -13,7 +14,7 @@ use reth_provider::{
 use reth_prune_types::{PruneProgress, PrunedSegmentInfo, PrunerOutput};
 use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::watch;
 use tracing::{debug, instrument};
 

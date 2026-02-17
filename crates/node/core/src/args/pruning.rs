@@ -354,7 +354,7 @@ pub(crate) fn parse_receipts_log_filter(
 ) -> Result<ReceiptsLogPruneConfig, ReceiptsLogError> {
     let mut config = BTreeMap::new();
     // Split out each of the filters.
-    let filters = value.split(',');
+    let filters = value.split(',').map(str::trim);
     for filter in filters {
         let parts: Vec<&str> = filter.split(':').collect();
         if parts.len() < 2 {
@@ -448,6 +448,23 @@ mod tests {
         assert_eq!(config.0.get(&addr1), Some(&PruneMode::Full));
         assert_eq!(config.0.get(&addr2), Some(&PruneMode::Distance(1000)));
         assert_eq!(config.0.get(&addr3), Some(&PruneMode::Before(5000000)));
+    }
+
+    #[test]
+    fn test_parse_receipts_log_filter_with_spaces() {
+        // Verify that spaces after commas are handled correctly
+        let filters = "0x0000000000000000000000000000000000000001:full, 0x0000000000000000000000000000000000000002:distance:1000";
+
+        let result = parse_receipts_log_filter(filters);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.0.len(), 2);
+
+        let addr1: Address = "0x0000000000000000000000000000000000000001".parse().unwrap();
+        let addr2: Address = "0x0000000000000000000000000000000000000002".parse().unwrap();
+
+        assert_eq!(config.0.get(&addr1), Some(&PruneMode::Full));
+        assert_eq!(config.0.get(&addr2), Some(&PruneMode::Distance(1000)));
     }
 
     #[test]

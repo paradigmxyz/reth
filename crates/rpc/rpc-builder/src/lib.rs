@@ -57,7 +57,7 @@ use reth_storage_api::{
     AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, NodePrimitivesProvider,
     StateProviderFactory,
 };
-use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
+use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_tokio_util::EventSender;
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
@@ -123,7 +123,7 @@ pub struct RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus> {
     /// The Network type to when creating all rpc handlers
     network: Network,
     /// How additional tasks are spawned, for example in the eth pubsub namespace
-    executor: Box<dyn TaskSpawner + 'static>,
+    executor: Option<Runtime>,
     /// Defines how the EVM should be configured before execution.
     evm_config: EvmConfig,
     /// The consensus implementation.
@@ -142,11 +142,19 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         provider: Provider,
         pool: Pool,
         network: Network,
-        executor: Box<dyn TaskSpawner + 'static>,
+        executor: Runtime,
         evm_config: EvmConfig,
         consensus: Consensus,
     ) -> Self {
-        Self { provider, pool, network, executor, evm_config, consensus, _primitives: PhantomData }
+        Self {
+            provider,
+            pool,
+            network,
+            executor: Some(executor),
+            evm_config,
+            consensus,
+            _primitives: PhantomData,
+        }
     }
 
     /// Configure the provider instance.
@@ -217,22 +225,13 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     }
 
     /// Configure the task executor to use for additional tasks.
-    pub fn with_executor(self, executor: Box<dyn TaskSpawner + 'static>) -> Self {
-        let Self { pool, network, provider, evm_config, consensus, _primitives, .. } = self;
-        Self { provider, network, pool, executor, evm_config, consensus, _primitives }
-    }
-
-    /// Configure [`TokioTaskExecutor`] as the task executor to use for additional tasks.
-    ///
-    /// This will spawn additional tasks directly via `tokio::task::spawn`, See
-    /// [`TokioTaskExecutor`].
-    pub fn with_tokio_executor(self) -> Self {
+    pub fn with_executor(self, executor: Runtime) -> Self {
         let Self { pool, network, provider, evm_config, consensus, _primitives, .. } = self;
         Self {
             provider,
             network,
             pool,
-            executor: Box::new(TokioTaskExecutor::default()),
+            executor: Some(executor),
             evm_config,
             consensus,
             _primitives,
@@ -365,6 +364,8 @@ where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
         let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
+        let executor =
+            executor.expect("RpcModuleBuilder requires a Runtime to be set via `with_executor`");
         RpcRegistryInner::new(
             provider,
             pool,
@@ -408,7 +409,15 @@ where
 
 impl<N: NodePrimitives> Default for RpcModuleBuilder<N, (), (), (), (), ()> {
     fn default() -> Self {
-        Self::new((), (), (), Box::new(TokioTaskExecutor::default()), (), ())
+        Self {
+            provider: (),
+            pool: (),
+            network: (),
+            executor: None,
+            evm_config: (),
+            consensus: (),
+            _primitives: PhantomData,
+        }
     }
 }
 
@@ -486,7 +495,7 @@ pub struct RpcRegistryInner<Provider, Pool, Network, EthApi: EthApiTypes, EvmCon
     provider: Provider,
     pool: Pool,
     network: Network,
-    executor: Box<dyn TaskSpawner + 'static>,
+    executor: Runtime,
     evm_config: EvmConfig,
     consensus: Consensus,
     /// Holds all `eth_` namespace handlers
@@ -525,7 +534,7 @@ where
         provider: Provider,
         pool: Pool,
         network: Network,
-        executor: Box<dyn TaskSpawner + 'static>,
+        executor: Runtime,
         consensus: Consensus,
         config: RpcModuleConfig,
         evm_config: EvmConfig,
@@ -578,8 +587,8 @@ where
     }
 
     /// Returns a reference to the tasks type
-    pub const fn tasks(&self) -> &(dyn TaskSpawner + 'static) {
-        &*self.executor
+    pub const fn tasks(&self) -> &Runtime {
+        &self.executor
     }
 
     /// Returns a reference to the provider
@@ -944,7 +953,7 @@ where
                         RethRpcModule::Debug => DebugApi::new(
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
-                            &*self.executor,
+                            &self.executor,
                             self.engine_events.new_listener(),
                         )
                         .into_rpc()

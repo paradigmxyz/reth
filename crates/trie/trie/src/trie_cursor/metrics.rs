@@ -1,8 +1,9 @@
 use super::{TrieCursor, TrieStorageCursor};
 use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::trace_span;
 
 #[cfg(feature = "metrics")]

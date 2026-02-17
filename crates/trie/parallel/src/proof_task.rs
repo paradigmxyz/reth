@@ -43,7 +43,10 @@ use alloy_primitives::{
 use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofError};
-use reth_primitives_traits::dashmap::{self, DashMap};
+use reth_primitives_traits::{
+    dashmap::{self, DashMap},
+    FastInstant as Instant,
+};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
 use reth_tasks::Runtime;
@@ -56,7 +59,7 @@ use reth_trie::{
     trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieCursorMetricsCache},
     walker::TrieWalker,
     DecodedMultiProof, DecodedMultiProofV2, DecodedStorageMultiProof, HashBuilder, HashedPostState,
-    MultiProofTargets, Nibbles, ProofTrieNode, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    MultiProofTargets, Nibbles, ProofTrieNodeV2, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
@@ -73,9 +76,9 @@ use std::{
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
-use tracing::{debug, debug_span, error, trace};
+use tracing::{debug, debug_span, error, instrument, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::{
@@ -134,16 +137,25 @@ impl ProofWorkerHandle {
     /// # Parameters
     /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
+    /// - `halve_workers`: Whether to halve the worker pool size (for small blocks)
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
+    #[instrument(
+        name = "ProofWorkerHandle::new",
+        level = "debug",
+        target = "trie::proof_task",
+        skip_all
+    )]
     pub fn new<Factory>(
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
+        halve_workers: bool,
         v2_proofs_enabled: bool,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
             + Clone
             + Send
+            + Sync
             + 'static,
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
@@ -154,41 +166,45 @@ impl ProofWorkerHandle {
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
-        let storage_worker_count = runtime.proof_storage_worker_pool().current_num_threads();
-        let account_worker_count = runtime.proof_account_worker_pool().current_num_threads();
+        let divisor = if halve_workers { 2 } else { 1 };
+        let storage_worker_count =
+            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
+        let account_worker_count =
+            runtime.proof_account_worker_pool().current_num_threads() / divisor;
 
         debug!(
             target: "trie::proof_task",
             storage_worker_count,
             account_worker_count,
+            halve_workers,
             ?v2_proofs_enabled,
             "Spawning proof worker pools"
         );
 
-        let storage_pool = runtime.proof_storage_worker_pool();
-        let task_ctx_for_storage = task_ctx.clone();
-        let cached_storage_roots_for_storage = cached_storage_roots.clone();
+        // broadcast blocks until all workers exit (channel close), so run on
+        // tokio's blocking pool.
+        let storage_rt = runtime.clone();
+        let storage_task_ctx = task_ctx.clone();
+        let storage_avail = storage_available_workers.clone();
+        let storage_roots = cached_storage_roots.clone();
+        runtime.spawn_blocking(move || {
+            let worker_id = AtomicUsize::new(0);
+            storage_rt.proof_storage_worker_pool().broadcast(storage_worker_count, |_| {
+                let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
+                let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
+                let _guard = span.enter();
 
-        for worker_id in 0..storage_worker_count {
-            let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
-            let task_ctx_clone = task_ctx_for_storage.clone();
-            let work_rx_clone = storage_work_rx.clone();
-            let storage_available_workers_clone = storage_available_workers.clone();
-            let cached_storage_roots = cached_storage_roots_for_storage.clone();
-
-            storage_pool.spawn(move || {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
                 #[cfg(feature = "metrics")]
                 let cursor_metrics = ProofTaskCursorMetrics::new();
 
-                let _guard = span.enter();
                 let worker = StorageProofWorker::new(
-                    task_ctx_clone,
-                    work_rx_clone,
+                    storage_task_ctx.clone(),
+                    storage_work_rx.clone(),
                     worker_id,
-                    storage_available_workers_clone,
-                    cached_storage_roots,
+                    storage_avail.clone(),
+                    storage_roots.clone(),
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
@@ -204,32 +220,30 @@ impl ProofWorkerHandle {
                     );
                 }
             });
-        }
+        });
 
-        let account_pool = runtime.proof_account_worker_pool();
+        let account_rt = runtime.clone();
+        let account_tx = storage_work_tx.clone();
+        let account_avail = account_available_workers.clone();
+        runtime.spawn_blocking(move || {
+            let worker_id = AtomicUsize::new(0);
+            account_rt.proof_account_worker_pool().broadcast(account_worker_count, |_| {
+                let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
+                let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
+                let _guard = span.enter();
 
-        for worker_id in 0..account_worker_count {
-            let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
-            let task_ctx_clone = task_ctx.clone();
-            let work_rx_clone = account_work_rx.clone();
-            let storage_work_tx_clone = storage_work_tx.clone();
-            let account_available_workers_clone = account_available_workers.clone();
-            let cached_storage_roots = cached_storage_roots.clone();
-
-            account_pool.spawn(move || {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
                 #[cfg(feature = "metrics")]
                 let cursor_metrics = ProofTaskCursorMetrics::new();
 
-                let _guard = span.enter();
                 let worker = AccountProofWorker::new(
-                    task_ctx_clone,
-                    work_rx_clone,
+                    task_ctx.clone(),
+                    account_work_rx.clone(),
                     worker_id,
-                    storage_work_tx_clone,
-                    account_available_workers_clone,
-                    cached_storage_roots,
+                    account_tx.clone(),
+                    account_avail.clone(),
+                    cached_storage_roots.clone(),
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
@@ -245,7 +259,7 @@ impl ProofWorkerHandle {
                     );
                 }
             });
-        }
+        });
 
         Self {
             storage_work_tx,
@@ -511,7 +525,7 @@ where
         let span = debug_span!(
             target: "trie::proof_task",
             "V2 Storage proof calculation",
-            targets = ?targets.len(),
+            n = %targets.len(),
         );
         let _span_guard = span.enter();
 
@@ -723,7 +737,7 @@ pub(crate) enum StorageProofResult {
     },
     V2 {
         /// The calculated V2 proof nodes
-        proof: Vec<ProofTrieNode>,
+        proof: Vec<ProofTrieNodeV2>,
         /// The storage root calculated by the V2 proof
         root: Option<B256>,
     },
@@ -735,23 +749,6 @@ impl StorageProofResult {
         match self {
             Self::Legacy { proof } => Some(proof.root),
             Self::V2 { root, .. } => *root,
-        }
-    }
-}
-
-impl From<StorageProofResult> for Option<DecodedStorageMultiProof> {
-    /// Returns None if the V2 proof result doesn't have a calculated root hash.
-    fn from(proof_result: StorageProofResult) -> Self {
-        match proof_result {
-            StorageProofResult::Legacy { proof } => Some(proof),
-            StorageProofResult::V2 { proof, root } => root.map(|root| {
-                let branch_node_masks = proof
-                    .iter()
-                    .filter_map(|node| node.masks.map(|masks| (node.path, masks)))
-                    .collect();
-                let subtree = proof.into_iter().map(|node| (node.path, node.node)).collect();
-                DecodedStorageMultiProof { root, subtree, branch_node_masks }
-            }),
         }
     }
 }
@@ -1635,17 +1632,10 @@ where
                             proof_msg.hashed_address, hashed_address,
                             "storage worker must return same address"
                         );
-                        let proof_result = proof_msg.result?;
-                        let Some(root) = proof_result.root() else {
-                            trace!(
-                                target: "trie::proof_task",
-                                ?proof_result,
-                                "Received proof_result without root",
-                            );
-                            panic!("Partial proofs are not yet supported");
+                        let StorageProofResult::Legacy { proof } = proof_msg.result? else {
+                            unreachable!("v2 result in legacy worker")
                         };
-                        let proof = Into::<Option<DecodedStorageMultiProof>>::into(proof_result)
-                            .expect("Partial proofs are not yet supported (into)");
+                        let root = proof.root;
                         collected_decoded_storages.insert(hashed_address, proof);
                         root
                     }
@@ -1721,9 +1711,9 @@ where
         let wait_start = Instant::now();
         if let Ok(proof_msg) = receiver.recv() {
             *storage_wait_time += wait_start.elapsed();
-            let proof_result = proof_msg.result?;
-            let proof = Into::<Option<DecodedStorageMultiProof>>::into(proof_result)
-                .expect("Partial proofs are not yet supported");
+            let StorageProofResult::Legacy { proof } = proof_msg.result? else {
+                unreachable!("v2 result in legacy worker")
+            };
             collected_decoded_storages.insert(hashed_address, proof);
         }
     }
@@ -2012,7 +2002,7 @@ mod tests {
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();
-        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false);
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, false);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();

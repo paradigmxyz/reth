@@ -20,7 +20,7 @@ use crate::{
             derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
         },
     },
-    valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload},
+    valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload_with_reth},
 };
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -150,10 +150,15 @@ impl Command {
             auth_provider,
             mut next_block,
             is_optimism,
-            ..
+            use_reth_namespace,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
+
+        if use_reth_namespace {
+            info!("Using reth_newPayload endpoint");
+        }
+
         let buffer_size = self.rpc_block_buffer_size;
 
         // Use a oneshot channel to propagate errors from the spawned task
@@ -230,16 +235,40 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
-            let (version, params) = block_to_new_payload(block, is_optimism)?;
+            let (version, params, execution_data) = block_to_new_payload(block, is_optimism)?;
             let start = Instant::now();
-            call_new_payload(&auth_provider, version, params).await?;
+            let reth_data = use_reth_namespace.then_some(execution_data);
+            let server_timings =
+                call_new_payload_with_reth(&auth_provider, version, params, reth_data).await?;
 
-            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
+            let np_latency =
+                server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
+            let new_payload_result = NewPayloadResult {
+                gas_used,
+                latency: np_latency,
+                persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
+                execution_cache_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.execution_cache_wait)
+                    .unwrap_or_default(),
+                sparse_trie_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.sparse_trie_wait)
+                    .unwrap_or_default(),
+            };
 
+            let fcu_start = Instant::now();
             call_forkchoice_updated(&auth_provider, version, forkchoice_state, None).await?;
+            let fcu_latency = fcu_start.elapsed();
 
-            let total_latency = start.elapsed();
-            let fcu_latency = total_latency - new_payload_result.latency;
+            let total_latency = if server_timings.is_some() {
+                // When using server-side latency for newPayload, derive total from the
+                // independently measured components to avoid mixing server-side and
+                // client-side (network-inclusive) timings.
+                np_latency + fcu_latency
+            } else {
+                start.elapsed()
+            };
             let combined_result = CombinedResult {
                 block_number,
                 gas_limit,
