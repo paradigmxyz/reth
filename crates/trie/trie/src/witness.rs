@@ -144,7 +144,7 @@ where
             // Skip storage proof nodes for accounts that don't target any storage slots.
             // These nodes may be produced while deriving account storage roots, but they are
             // unnecessary for stateless execution witness verification.
-            if !proof_targets.get(hashed_address).is_some_and(|slots| !slots.is_empty()) {
+            if proof_targets.get(hashed_address).is_none_or(|slots| slots.is_empty()) {
                 continue;
             }
             for storage_node in storage_mp.subtree.values() {
