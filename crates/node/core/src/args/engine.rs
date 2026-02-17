@@ -38,6 +38,7 @@ pub struct DefaultEngineValues {
     allow_unwind_canonical_header: bool,
     storage_worker_count: Option<usize>,
     account_worker_count: Option<usize>,
+    prewarming_threads: Option<usize>,
     disable_proof_v2: bool,
     cache_metrics_disabled: bool,
     disable_trie_cache: bool,
@@ -169,6 +170,12 @@ impl DefaultEngineValues {
         self
     }
 
+    /// Set the default prewarming thread count
+    pub const fn with_prewarming_threads(mut self, v: Option<usize>) -> Self {
+        self.prewarming_threads = v;
+        self
+    }
+
     /// Set whether to disable proof V2 by default
     pub const fn with_disable_proof_v2(mut self, v: bool) -> Self {
         self.disable_proof_v2 = v;
@@ -233,6 +240,7 @@ impl Default for DefaultEngineValues {
             allow_unwind_canonical_header: false,
             storage_worker_count: None,
             account_worker_count: None,
+            prewarming_threads: None,
             disable_proof_v2: false,
             cache_metrics_disabled: false,
             disable_trie_cache: false,
@@ -360,6 +368,11 @@ pub struct EngineArgs {
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
 
+    /// Configure the number of prewarming threads.
+    /// If not specified, defaults to available parallelism.
+    #[arg(long = "engine.prewarming-threads", default_value = Resettable::from(DefaultEngineValues::get_global().prewarming_threads.map(|v| v.to_string().into())))]
+    pub prewarming_threads: Option<usize>,
+
     /// Disable V2 storage proofs for state root calculations
     #[arg(long = "engine.disable-proof-v2", default_value_t = DefaultEngineValues::get_global().disable_proof_v2)]
     pub disable_proof_v2: bool,
@@ -424,6 +437,7 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
+            prewarming_threads,
             disable_proof_v2,
             cache_metrics_disabled,
             disable_trie_cache,
@@ -455,6 +469,7 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
+            prewarming_threads,
             disable_proof_v2,
             cache_metrics_disabled,
             disable_trie_cache,
@@ -546,6 +561,7 @@ mod tests {
             allow_unwind_canonical_header: true,
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
+            prewarming_threads: Some(4),
             disable_proof_v2: false,
             cache_metrics_disabled: true,
             disable_trie_cache: true,
@@ -582,6 +598,8 @@ mod tests {
             "16",
             "--engine.account-worker-count",
             "8",
+            "--engine.prewarming-threads",
+            "4",
             "--engine.disable-cache-metrics",
             "--engine.disable-trie-cache",
             "--engine.sparse-trie-prune-depth",

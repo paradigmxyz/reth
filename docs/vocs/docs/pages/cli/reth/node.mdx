@@ -981,6 +981,9 @@ Engine:
       --engine.account-worker-count <ACCOUNT_WORKER_COUNT>
           Configure the number of account proof workers in the Tokio blocking pool. If not specified, defaults to the same count as storage workers
 
+      --engine.prewarming-threads <PREWARMING_THREADS>
+          Configure the number of prewarming threads. If not specified, defaults to available parallelism
+
       --engine.disable-proof-v2
           Disable V2 storage proofs for state root calculations
 

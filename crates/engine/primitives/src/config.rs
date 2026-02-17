@@ -32,6 +32,13 @@ fn default_account_worker_count() -> usize {
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
 
+/// The size of proof targets chunk optimized for small blocks (≤20M gas used).
+/// Benchmarks: <https://gist.github.com/yongkangc/fda9c24846f0ba891376bcf81b002008>
+pub const SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE: usize = 30;
+
+/// Gas threshold below which the small block chunk size is used.
+pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
+
 /// The size of proof targets chunk to spawn in one multiproof calculation when V2 proofs are
 /// enabled. This is 4x the default chunk size to take advantage of more efficient V2 proof
 /// computation.
@@ -41,18 +48,6 @@ pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2: usize = DEFAULT_MULTIPROOF_TASK
 ///
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
-
-/// Returns the default maximum concurrency for prewarm task based on available parallelism.
-fn default_prewarm_max_concurrency() -> usize {
-    #[cfg(feature = "std")]
-    {
-        std::thread::available_parallelism().map_or(16, |n| n.get())
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        16
-    }
-}
 
 /// Default depth for sparse trie pruning.
 ///
@@ -161,8 +156,6 @@ pub struct TreeConfig {
     /// where immediate payload regeneration is desired despite the head not changing or moving to
     /// an ancestor.
     always_process_payload_attributes_on_canonical_head: bool,
-    /// Maximum concurrency for the prewarm task.
-    prewarm_max_concurrency: usize,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
     /// Number of storage proof worker threads.
@@ -209,7 +202,6 @@ impl Default for TreeConfig {
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
-            prewarm_max_concurrency: default_prewarm_max_concurrency(),
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
@@ -246,7 +238,6 @@ impl TreeConfig {
         precompile_cache_disabled: bool,
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
-        prewarm_max_concurrency: usize,
         allow_unwind_canonical_header: bool,
         storage_worker_count: usize,
         account_worker_count: usize,
@@ -275,7 +266,6 @@ impl TreeConfig {
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
-            prewarm_max_concurrency,
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
@@ -531,17 +521,6 @@ impl TreeConfig {
     /// Whether or not to use state root task
     pub const fn use_state_root_task(&self) -> bool {
         self.has_enough_parallelism && !self.legacy_state_root
-    }
-
-    /// Setter for prewarm max concurrency.
-    pub const fn with_prewarm_max_concurrency(mut self, prewarm_max_concurrency: usize) -> Self {
-        self.prewarm_max_concurrency = prewarm_max_concurrency;
-        self
-    }
-
-    /// Return the prewarm max concurrency.
-    pub const fn prewarm_max_concurrency(&self) -> usize {
-        self.prewarm_max_concurrency
     }
 
     /// Return the number of storage proof worker threads.

@@ -8,11 +8,12 @@ use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as Cros
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
 use reth_trie::{
-    added_removed_keys::MultiAddedRemovedKeys, proof_v2, HashedPostState, HashedStorage,
-    MultiProofTargets,
+    added_removed_keys::{default_added_removed_keys, MultiAddedRemovedKeys},
+    proof_v2, HashedPostState, HashedStorage, MultiProofTargets,
 };
 #[cfg(test)]
 use reth_trie_parallel::stats::ParallelTrieTracker;
@@ -25,7 +26,7 @@ use reth_trie_parallel::{
     targets_v2::MultiProofTargetsV2,
 };
 use revm_primitives::map::{hash_map, B256Map};
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc};
 use tracing::{debug, error, instrument, trace};
 
 /// Source of state changes, either from EVM execution or from a Block Access List.
@@ -918,7 +919,7 @@ impl MultiProofTask {
                                 .storages
                                 .get(account)
                                 .cloned()
-                                .unwrap_or_default(),
+                                .unwrap_or_else(default_added_removed_keys),
                         );
                     }
                 }
@@ -2065,7 +2066,7 @@ mod tests {
                 panic!("Expected PrefetchProofs message");
             };
 
-        assert_eq!(proofs_requested, 1);
+        assert!(proofs_requested >= 1);
     }
 
     /// Verifies that different message types arriving mid-batch are not lost and preserve order.

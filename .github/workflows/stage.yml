@@ -23,7 +23,7 @@ jobs:
     name: stage-run-test
     # Only run stage commands test in merge groups
     if: github.event_name == 'merge_group'
-    runs-on: depot-ubuntu-latest
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
@@ -38,7 +38,7 @@ jobs:
           cache-on-failure: true
       - name: Build reth
         run: |
-          cargo install --path bin/reth
+          cargo install --locked --path bin/reth
       - name: Run headers stage
         run: |
           reth stage run headers --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints

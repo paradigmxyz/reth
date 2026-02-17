@@ -23,7 +23,7 @@
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
-use std::time::Instant;
+use reth_primitives_traits::FastInstant as Instant;
 use tracing::trace;
 
 /// The state of the persistence task.
