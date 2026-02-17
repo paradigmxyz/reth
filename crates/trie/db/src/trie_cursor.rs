@@ -9,7 +9,8 @@ use reth_db_api::{
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::StorageTrieUpdatesSorted,
-    BranchNodeCompact, Nibbles,
+    BranchNodeCompact, Nibbles, PackedStorageTrieEntry, PackedStoredNibbles,
+    PackedStoredNibblesSubKey, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
 use std::marker::PhantomData;
 
@@ -51,8 +52,6 @@ pub trait StorageTrieEntryLike: Sized {
     fn new(nibbles: Self::SubKey, node: BranchNodeCompact) -> Self;
 }
 
-use reth_trie::{StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
-
 impl StorageTrieEntryLike for StorageTrieEntry {
     type SubKey = StoredNibblesSubKey;
 
@@ -86,8 +85,6 @@ impl TrieKeyAdapter for LegacyKeyAdapter {
         subkey.0
     }
 }
-
-use reth_trie::{PackedStorageTrieEntry, PackedStoredNibbles, PackedStoredNibblesSubKey};
 
 impl StorageTrieEntryLike for PackedStorageTrieEntry {
     type SubKey = PackedStoredNibblesSubKey;

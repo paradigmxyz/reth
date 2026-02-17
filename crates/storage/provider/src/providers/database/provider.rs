@@ -3046,6 +3046,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         TX: DbTxMut,
     {
         let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
+        // Process sorted account nodes
         for (key, updated_node) in trie_updates.account_nodes_ref() {
             let nibbles = A::AccountKey::from(*key);
             match updated_node {

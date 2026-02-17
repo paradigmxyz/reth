@@ -53,7 +53,7 @@ reth-tasks.workspace = true
 reth-storage-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
-reth-trie-common = { workspace = true, optional = true }
+reth-trie-common.workspace = true
 reth-primitives-traits.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
@@ -113,7 +113,6 @@ arbitrary = [
     "dep:proptest",
     "dep:arbitrary",
     "dep:proptest-arbitrary-interop",
-    "dep:reth-trie-common",
     "reth-db-api/arbitrary",
     "reth-eth-wire/arbitrary",
     "reth-db/arbitrary",

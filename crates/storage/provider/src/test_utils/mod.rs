@@ -12,7 +12,6 @@ use reth_primitives_traits::{Account, StorageEntry};
 use reth_storage_api::StorageSettingsCache;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
-
 use std::sync::Arc;
 
 type DbStateRoot<'a, TX, A> = StateRoot<

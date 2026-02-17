@@ -28,7 +28,7 @@ use reth_trie::{
 use reth_trie_db::{
     hashed_storage_from_reverts_with_provider, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness, LegacyKeyAdapter,
-    PackedKeyAdapter, TrieTableAdapter,
+    PackedKeyAdapter,
 };
 
 use std::fmt::Debug;
@@ -388,6 +388,23 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader> BlockHashReader
     }
 }
 
+/// Helper macro to dispatch a trie operation based on the storage settings.
+macro_rules! with_adapter {
+    ($self:expr, |$A:ident| $body:expr) => {
+        if $self.provider.cached_storage_settings().is_v2() {
+            {
+                type $A = PackedKeyAdapter;
+                $body
+            }
+        } else {
+            {
+                type $A = LegacyKeyAdapter;
+                $body
+            }
+        }
+    };
+}
+
 impl<
         Provider: DBProvider
             + ChangeSetReader
@@ -397,41 +414,49 @@ impl<
     > StateRootProvider for HistoricalStateProviderRef<'_, Provider>
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        if self.provider.cached_storage_settings().is_v2() {
-            self.state_root_inner::<PackedKeyAdapter>(hashed_state)
-        } else {
-            self.state_root_inner::<LegacyKeyAdapter>(hashed_state)
-        }
+        with_adapter!(self, |A| {
+            let mut revert_state = self.revert_state()?;
+            let hashed_state_sorted = hashed_state.into_sorted();
+            revert_state.extend_ref_and_sort(&hashed_state_sorted);
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root(self.tx(), &revert_state)?)
+        })
     }
 
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
-        if self.provider.cached_storage_settings().is_v2() {
-            self.state_root_from_nodes_inner::<PackedKeyAdapter>(input)
-        } else {
-            self.state_root_from_nodes_inner::<LegacyKeyAdapter>(input)
-        }
+        with_adapter!(self, |A| {
+            let mut input = input;
+            input.prepend(self.revert_state()?.into());
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(
+                self.tx(),
+                TrieInputSorted::from_unsorted(input),
+            )?)
+        })
     }
 
     fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        if self.provider.cached_storage_settings().is_v2() {
-            self.state_root_with_updates_inner::<PackedKeyAdapter>(hashed_state)
-        } else {
-            self.state_root_with_updates_inner::<LegacyKeyAdapter>(hashed_state)
-        }
+        with_adapter!(self, |A| {
+            let mut revert_state = self.revert_state()?;
+            let hashed_state_sorted = hashed_state.into_sorted();
+            revert_state.extend_ref_and_sort(&hashed_state_sorted);
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_with_updates(self.tx(), &revert_state)?)
+        })
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        if self.provider.cached_storage_settings().is_v2() {
-            self.state_root_from_nodes_with_updates_inner::<PackedKeyAdapter>(input)
-        } else {
-            self.state_root_from_nodes_with_updates_inner::<LegacyKeyAdapter>(input)
-        }
+        with_adapter!(self, |A| {
+            let mut input = input;
+            input.prepend(self.revert_state()?.into());
+            Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(
+                self.tx(),
+                TrieInputSorted::from_unsorted(input),
+            )?)
+        })
     }
 }
 
@@ -448,11 +473,12 @@ impl<
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        if self.provider.cached_storage_settings().is_v2() {
-            self.storage_root_inner::<PackedKeyAdapter>(address, hashed_storage)
-        } else {
-            self.storage_root_inner::<LegacyKeyAdapter>(address, hashed_storage)
-        }
+        with_adapter!(self, |A| {
+            let mut revert_storage = self.revert_storage(address)?;
+            revert_storage.extend(&hashed_storage);
+            <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, revert_storage)
+                .map_err(|err| ProviderError::Database(err.into()))
+        })
     }
 
     fn storage_proof(
@@ -461,11 +487,17 @@ impl<
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        if self.provider.cached_storage_settings().is_v2() {
-            self.storage_proof_inner::<PackedKeyAdapter>(address, slot, hashed_storage)
-        } else {
-            self.storage_proof_inner::<LegacyKeyAdapter>(address, slot, hashed_storage)
-        }
+        with_adapter!(self, |A| {
+            let mut revert_storage = self.revert_storage(address)?;
+            revert_storage.extend(&hashed_storage);
+            <DbStorageProof<'_, _, A>>::overlay_storage_proof(
+                self.tx(),
+                address,
+                slot,
+                revert_storage,
+            )
+            .map_err(ProviderError::from)
+        })
     }
 
     fn storage_multiproof(
@@ -474,11 +506,17 @@ impl<
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        if self.provider.cached_storage_settings().is_v2() {
-            self.storage_multiproof_inner::<PackedKeyAdapter>(address, slots, hashed_storage)
-        } else {
-            self.storage_multiproof_inner::<LegacyKeyAdapter>(address, slots, hashed_storage)
-        }
+        with_adapter!(self, |A| {
+            let mut revert_storage = self.revert_storage(address)?;
+            revert_storage.extend(&hashed_storage);
+            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
+                self.tx(),
+                address,
+                slots,
+                revert_storage,
+            )
+            .map_err(ProviderError::from)
+        })
     }
 }
 
@@ -497,11 +535,12 @@ impl<
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        if self.provider.cached_storage_settings().is_v2() {
-            self.proof_inner::<PackedKeyAdapter>(input, address, slots)
-        } else {
-            self.proof_inner::<LegacyKeyAdapter>(input, address, slots)
-        }
+        with_adapter!(self, |A| {
+            let mut input = input;
+            input.prepend(self.revert_state()?.into());
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
+            proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
+        })
     }
 
     fn multiproof(
@@ -509,142 +548,22 @@ impl<
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        if self.provider.cached_storage_settings().is_v2() {
-            self.multiproof_inner::<PackedKeyAdapter>(input, targets)
-        } else {
-            self.multiproof_inner::<LegacyKeyAdapter>(input, targets)
-        }
+        with_adapter!(self, |A| {
+            let mut input = input;
+            input.prepend(self.revert_state()?.into());
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
+            proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
+        })
     }
 
     fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
-        if self.provider.cached_storage_settings().is_v2() {
-            self.witness_inner::<PackedKeyAdapter>(input, target)
-        } else {
-            self.witness_inner::<LegacyKeyAdapter>(input, target)
-        }
-    }
-}
-
-impl<
-        Provider: DBProvider
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + BlockNumReader
-            + StorageSettingsCache,
-    > HistoricalStateProviderRef<'_, Provider>
-{
-    fn state_root_inner<A: TrieTableAdapter>(
-        &self,
-        hashed_state: HashedPostState,
-    ) -> ProviderResult<B256> {
-        let mut revert_state = self.revert_state()?;
-        let hashed_state_sorted = hashed_state.into_sorted();
-        revert_state.extend_ref_and_sort(&hashed_state_sorted);
-        Ok(<DbStateRoot<'_, _, A>>::overlay_root(self.tx(), &revert_state)?)
-    }
-
-    fn state_root_from_nodes_inner<A: TrieTableAdapter>(
-        &self,
-        mut input: TrieInput,
-    ) -> ProviderResult<B256> {
-        input.prepend(self.revert_state()?.into());
-        Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(
-            self.tx(),
-            TrieInputSorted::from_unsorted(input),
-        )?)
-    }
-
-    fn state_root_with_updates_inner<A: TrieTableAdapter>(
-        &self,
-        hashed_state: HashedPostState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
-        let mut revert_state = self.revert_state()?;
-        let hashed_state_sorted = hashed_state.into_sorted();
-        revert_state.extend_ref_and_sort(&hashed_state_sorted);
-        Ok(<DbStateRoot<'_, _, A>>::overlay_root_with_updates(self.tx(), &revert_state)?)
-    }
-
-    fn state_root_from_nodes_with_updates_inner<A: TrieTableAdapter>(
-        &self,
-        mut input: TrieInput,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
-        input.prepend(self.revert_state()?.into());
-        Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(
-            self.tx(),
-            TrieInputSorted::from_unsorted(input),
-        )?)
-    }
-
-    fn storage_root_inner<A: TrieTableAdapter>(
-        &self,
-        address: Address,
-        hashed_storage: HashedStorage,
-    ) -> ProviderResult<B256> {
-        let mut revert_storage = self.revert_storage(address)?;
-        revert_storage.extend(&hashed_storage);
-        <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, revert_storage)
-            .map_err(|err| ProviderError::Database(err.into()))
-    }
-
-    fn storage_proof_inner<A: TrieTableAdapter>(
-        &self,
-        address: Address,
-        slot: B256,
-        hashed_storage: HashedStorage,
-    ) -> ProviderResult<reth_trie::StorageProof> {
-        let mut revert_storage = self.revert_storage(address)?;
-        revert_storage.extend(&hashed_storage);
-        <DbStorageProof<'_, _, A>>::overlay_storage_proof(self.tx(), address, slot, revert_storage)
-            .map_err(ProviderError::from)
-    }
-
-    fn storage_multiproof_inner<A: TrieTableAdapter>(
-        &self,
-        address: Address,
-        slots: &[B256],
-        hashed_storage: HashedStorage,
-    ) -> ProviderResult<StorageMultiProof> {
-        let mut revert_storage = self.revert_storage(address)?;
-        revert_storage.extend(&hashed_storage);
-        <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
-            self.tx(),
-            address,
-            slots,
-            revert_storage,
-        )
-        .map_err(ProviderError::from)
-    }
-
-    fn proof_inner<A: TrieTableAdapter>(
-        &self,
-        mut input: TrieInput,
-        address: Address,
-        slots: &[B256],
-    ) -> ProviderResult<AccountProof> {
-        input.prepend(self.revert_state()?.into());
-        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
-        proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
-    }
-
-    fn multiproof_inner<A: TrieTableAdapter>(
-        &self,
-        mut input: TrieInput,
-        targets: MultiProofTargets,
-    ) -> ProviderResult<MultiProof> {
-        input.prepend(self.revert_state()?.into());
-        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
-        proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
-    }
-
-    fn witness_inner<A: TrieTableAdapter>(
-        &self,
-        mut input: TrieInput,
-        target: HashedPostState,
-    ) -> ProviderResult<Vec<Bytes>> {
-        input.prepend(self.revert_state()?.into());
-        <DbTrieWitness<'_, _, A>>::overlay_witness(self.tx(), input, target)
-            .map_err(ProviderError::from)
-            .map(|hm| hm.into_values().collect())
+        with_adapter!(self, |A| {
+            let mut input = input;
+            input.prepend(self.revert_state()?.into());
+            <DbTrieWitness<'_, _, A>>::overlay_witness(self.tx(), input, target)
+                .map_err(ProviderError::from)
+                .map(|hm| hm.into_values().collect())
+        })
     }
 }
 
