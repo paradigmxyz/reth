@@ -127,7 +127,7 @@ jobs:
       - name: Check dependencies
         run: |
           missing=()
-          for cmd in mc schelk cpupower taskset stdbuf python3 curl make; do
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -275,7 +275,6 @@ jobs:
       - name: Generate charts
         if: success()
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
           CHART_ARGS="/tmp/bench-results-branch/combined_latency.csv --output-dir /tmp/bench-charts"
           CHART_ARGS="$CHART_ARGS --baseline /tmp/bench-results-baseline/combined_latency.csv"
           # shellcheck disable=SC2086
