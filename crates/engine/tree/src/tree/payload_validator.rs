@@ -16,6 +16,8 @@ use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
+#[cfg(feature = "trie-debug")]
+use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
@@ -533,6 +535,8 @@ where
         let root_time = Instant::now();
         let mut maybe_state_root = None;
         let mut state_root_task_failed = false;
+        #[cfg(feature = "trie-debug")]
+        let mut trie_debug_recorders = Vec::new();
 
         match strategy {
             StateRootStrategy::StateRootTask => {
@@ -548,17 +552,34 @@ where
                 );
 
                 match task_result {
-                    Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
+                    Ok(StateRootComputeOutcome {
+                        state_root,
+                        trie_updates,
+                        #[cfg(feature = "trie-debug")]
+                        debug_recorders,
+                    }) => {
                         let elapsed = root_time.elapsed();
                         info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
 
+                        #[cfg(feature = "trie-debug")]
+                        {
+                            trie_debug_recorders = debug_recorders;
+                        }
+
                         // Compare trie updates with serial computation if configured
                         if self.config.always_compare_trie_updates() {
-                            self.compare_trie_updates_with_serial(
+                            let _has_diff = self.compare_trie_updates_with_serial(
                                 overlay_factory.clone(),
                                 &hashed_state,
                                 trie_updates.clone(),
                             );
+                            #[cfg(feature = "trie-debug")]
+                            if _has_diff {
+                                Self::write_trie_debug_recorders(
+                                    block.header().number(),
+                                    &trie_debug_recorders,
+                                );
+                            }
                         }
 
                         // we double check the state root here for good measure
@@ -570,6 +591,11 @@ where
                                 ?state_root,
                                 block_state_root = ?block.header().state_root(),
                                 "State root task returned incorrect state root"
+                            );
+                            #[cfg(feature = "trie-debug")]
+                            Self::write_trie_debug_recorders(
+                                block.header().number(),
+                                &trie_debug_recorders,
                             );
                             state_root_task_failed = true;
                         }
@@ -636,6 +662,9 @@ where
 
         // ensure state root matches
         if state_root != block.header().state_root() {
+            #[cfg(feature = "trie-debug")]
+            Self::write_trie_debug_recorders(block.header().number(), &trie_debug_recorders);
+
             // call post-block hook
             self.on_invalid_block(
                 &parent_block,
@@ -1052,7 +1081,12 @@ where
                                 ))
                             })?;
                             let (state_root, trie_updates) = result?;
-                            return Ok(Ok(StateRootComputeOutcome { state_root, trie_updates }));
+                            return Ok(Ok(StateRootComputeOutcome {
+                                state_root,
+                                trie_updates,
+                                #[cfg(feature = "trie-debug")]
+                                debug_recorders: Vec::new(),
+                            }));
                         }
                         Err(RecvTimeoutError::Timeout) => {}
                     }
@@ -1064,7 +1098,12 @@ where
                             "State root timeout race won"
                         );
                         let (state_root, trie_updates) = result?;
-                        return Ok(Ok(StateRootComputeOutcome { state_root, trie_updates }));
+                        return Ok(Ok(StateRootComputeOutcome {
+                            state_root,
+                            trie_updates,
+                            #[cfg(feature = "trie-debug")]
+                            debug_recorders: Vec::new(),
+                        }));
                     }
                 }
             }
@@ -1082,7 +1121,7 @@ where
         overlay_factory: OverlayStateProviderFactory<P>,
         hashed_state: &HashedPostState,
         task_trie_updates: TrieUpdates,
-    ) {
+    ) -> bool {
         debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
 
         match Self::compute_state_root_serial(overlay_factory.clone(), hashed_state) {
@@ -1106,6 +1145,7 @@ where
                                 %err,
                                 "Error comparing trie updates"
                             );
+                            return true;
                         }
                     }
                     Err(err) => {
@@ -1122,6 +1162,45 @@ where
                     target: "engine::tree::payload_validator",
                     %err,
                     "Failed to compute serial state root for comparison"
+                );
+            }
+        }
+        false
+    }
+
+    /// Writes trie debug recorders to a JSON file for the given block number.
+    ///
+    /// The file is written to the current working directory as
+    /// `trie_debug_block_{block_number}.json`.
+    #[cfg(feature = "trie-debug")]
+    fn write_trie_debug_recorders(
+        block_number: u64,
+        recorders: &[(Option<B256>, TrieDebugRecorder)],
+    ) {
+        let path = format!("trie_debug_block_{block_number}.json");
+        match serde_json::to_string_pretty(recorders) {
+            Ok(json) => match std::fs::write(&path, json) {
+                Ok(()) => {
+                    warn!(
+                        target: "engine::tree::payload_validator",
+                        %path,
+                        "Wrote trie debug recorders to file"
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        target: "engine::tree::payload_validator",
+                        %err,
+                        %path,
+                        "Failed to write trie debug recorders"
+                    );
+                }
+            },
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    "Failed to serialize trie debug recorders"
                 );
             }
         }

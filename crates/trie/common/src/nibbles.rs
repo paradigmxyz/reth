@@ -1,6 +1,27 @@
 use alloc::vec::Vec;
+use core::cmp::Ordering;
 use derive_more::Deref;
 pub use nybbles::Nibbles;
+
+/// Compares two [`Nibbles`] in depth-first order.
+///
+/// In depth-first ordering:
+/// - Descendants come before their ancestors (children before parents)
+/// - Siblings are ordered lexicographically
+pub fn depth_first_cmp(a: &Nibbles, b: &Nibbles) -> Ordering {
+    if a.len() == b.len() {
+        return a.cmp(b)
+    }
+
+    let common_prefix_len = a.common_prefix_length(b);
+    if a.len() == common_prefix_len {
+        return Ordering::Greater
+    } else if b.len() == common_prefix_len {
+        return Ordering::Less
+    }
+
+    a.get_unchecked(common_prefix_len).cmp(&b.get_unchecked(common_prefix_len))
+}
 
 /// The representation of nibbles of the merkle trie stored in the database.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Index)]
