@@ -3,7 +3,7 @@
 # The reth-bench job replays real blocks via the Engine API against a reth node
 # backed by a local snapshot managed with schelk.
 #
-# It runs the main (baseline) binary and the branch (candidate) binary on the
+# It runs the baseline binary and the feature (candidate) binary on the
 # same block range (snapshot recovered between runs) to compare performance.
 
 on:
@@ -108,8 +108,9 @@ jobs:
         with:
           script: |
             const body = context.payload.comment.body.trim();
-            const known = new Set(['blocks', 'warmup']);
-            const defaults = { blocks: '500', warmup: '100' };
+            const intArgs = new Set(['blocks', 'warmup']);
+            const refArgs = new Set(['baseline', 'feature']);
+            const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '' };
             const unknown = [];
             const invalid = [];
             const args = body.replace(/^derek bench\s*/, '');
@@ -121,19 +122,27 @@ jobs:
               }
               const key = part.slice(0, eq);
               const value = part.slice(eq + 1);
-              if (!known.has(key)) {
-                unknown.push(key);
-              } else if (!/^\d+$/.test(value)) {
-                invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
+              if (intArgs.has(key)) {
+                if (!/^\d+$/.test(value)) {
+                  invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
+                } else {
+                  defaults[key] = value;
+                }
+              } else if (refArgs.has(key)) {
+                if (!value) {
+                  invalid.push(`\`${key}=\` (must be a git ref)`);
+                } else {
+                  defaults[key] = value;
+                }
               } else {
-                defaults[key] = value;
+                unknown.push(key);
               }
             }
             const errors = [];
             if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
             if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
             if (errors.length) {
-              const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`derek bench [blocks=N] [warmup=N]\``;
+              const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`derek bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF]\``;
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -145,6 +154,8 @@ jobs:
             }
             core.setOutput('blocks', defaults.blocks);
             core.setOutput('warmup', defaults.warmup);
+            core.setOutput('baseline', defaults.baseline);
+            core.setOutput('feature', defaults.feature);
             core.exportVariable('BENCH_BLOCKS', defaults.blocks);
             core.exportVariable('BENCH_WARMUP_BLOCKS', defaults.warmup);
 
@@ -163,11 +174,13 @@ jobs:
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const blocks = '${{ steps.args.outputs.blocks }}';
             const warmup = '${{ steps.args.outputs.warmup }}';
+            const baseline = '${{ steps.args.outputs.baseline }}' || 'merge-base';
+            const feature = '${{ steps.args.outputs.feature }}' || 'PR head';
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `🚀 Benchmark started! [View run](${runUrl})\n\n⏳ **Status:** Building binaries...\n\n**Config:** ${blocks} blocks, ${warmup} warmup blocks`,
+              body: `🚀 Benchmark started! [View run](${runUrl})\n\n⏳ **Status:** Building binaries...\n\n**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``,
             });
             core.setOutput('comment-id', comment.id);
       - uses: actions/checkout@v6
@@ -197,14 +210,52 @@ jobs:
           echo "All dependencies found"
 
       # Build binaries
-      - name: Fetch or build main binaries
+      - name: Resolve PR head branch
+        id: pr-info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            core.setOutput('head-ref', pr.head.ref);
+            core.setOutput('head-sha', pr.head.sha);
+
+      - name: Resolve refs
+        id: refs
         run: |
-          MERGE_BASE=$(git merge-base HEAD origin/main 2>/dev/null || echo "${{ github.sha }}")
-          .github/scripts/bench-reth-build.sh main "$MERGE_BASE"
-      - name: Fetch or build branch binaries
-        run: |
-          BRANCH_SHA="${{ github.sha }}"
-          .github/scripts/bench-reth-build.sh branch "$BRANCH_SHA"
+          BASELINE_ARG="${{ steps.args.outputs.baseline }}"
+          FEATURE_ARG="${{ steps.args.outputs.feature }}"
+
+          if [ -n "$BASELINE_ARG" ]; then
+            git fetch origin "$BASELINE_ARG" --quiet 2>/dev/null || true
+            BASELINE_REF=$(git rev-parse "$BASELINE_ARG" 2>/dev/null || git rev-parse "origin/$BASELINE_ARG" 2>/dev/null)
+            BASELINE_NAME="$BASELINE_ARG"
+          else
+            BASELINE_REF=$(git merge-base HEAD origin/main 2>/dev/null || echo "${{ github.sha }}")
+            BASELINE_NAME="main"
+          fi
+
+          if [ -n "$FEATURE_ARG" ]; then
+            git fetch origin "$FEATURE_ARG" --quiet 2>/dev/null || true
+            FEATURE_REF=$(git rev-parse "$FEATURE_ARG" 2>/dev/null || git rev-parse "origin/$FEATURE_ARG" 2>/dev/null)
+            FEATURE_NAME="$FEATURE_ARG"
+          else
+            FEATURE_REF="${{ steps.pr-info.outputs.head-sha }}"
+            FEATURE_NAME="${{ steps.pr-info.outputs.head-ref }}"
+          fi
+
+          echo "baseline-ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
+          echo "baseline-name=$BASELINE_NAME" >> "$GITHUB_OUTPUT"
+          echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
+          echo "feature-name=$FEATURE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch or build baseline binaries
+        run: .github/scripts/bench-reth-build.sh baseline "${{ steps.refs.outputs.baseline-ref }}"
+      - name: Fetch or build feature binaries
+        run: .github/scripts/bench-reth-build.sh feature "${{ steps.refs.outputs.feature-ref }}"
 
       # System tuning for reproducible benchmarks
       - name: System setup
@@ -267,38 +318,38 @@ jobs:
       - name: "Run benchmark: baseline"
         run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline target/profiling-baseline/reth /tmp/bench-results-baseline
 
-      - name: "Run benchmark: branch"
-        run: taskset -c 0 .github/scripts/bench-reth-run.sh branch target/profiling/reth /tmp/bench-results-branch
+      - name: "Run benchmark: feature"
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh feature target/profiling/reth /tmp/bench-results-feature
 
       # Results & charts
       - name: Parse results
         id: results
         if: success()
         env:
-          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
-          BRANCH_SHA: ${{ github.sha }}
+          BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+          BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
+          FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
+          FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
         run: |
-          git fetch origin main --quiet
-          # Use the actual PR head commit, not HEAD (which is the merge commit
-          # refs/pull/N/merge and always has origin/main as a parent).
-          MERGE_BASE=$(git merge-base "${BRANCH_SHA}" origin/main 2>/dev/null || echo "${{ github.sha }}")
-          MAIN_HEAD=$(git rev-parse origin/main 2>/dev/null || echo "")
-          BEHIND_MAIN=0
-          if [ -n "$MAIN_HEAD" ] && [ "$MERGE_BASE" != "$MAIN_HEAD" ]; then
-            BEHIND_MAIN=$(git rev-list --count "${MERGE_BASE}..${MAIN_HEAD}" 2>/dev/null || echo "0")
+          git fetch origin "${BASELINE_NAME}" --quiet 2>/dev/null || true
+          BASELINE_HEAD=$(git rev-parse "origin/${BASELINE_NAME}" 2>/dev/null || echo "")
+          BEHIND_BASELINE=0
+          if [ -n "$BASELINE_HEAD" ] && [ "$BASELINE_REF" != "$BASELINE_HEAD" ]; then
+            BEHIND_BASELINE=$(git rev-list --count "${BASELINE_REF}..${BASELINE_HEAD}" 2>/dev/null || echo "0")
           fi
 
           SUMMARY_ARGS="--output-summary /tmp/bench-summary.json"
           SUMMARY_ARGS="$SUMMARY_ARGS --output-markdown /tmp/bench-comment.md"
           SUMMARY_ARGS="$SUMMARY_ARGS --repo ${{ github.repository }}"
-          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-ref ${MERGE_BASE}"
-          SUMMARY_ARGS="$SUMMARY_ARGS --branch-name ${BRANCH_NAME}"
-          SUMMARY_ARGS="$SUMMARY_ARGS --branch-sha ${BRANCH_SHA}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-ref ${BASELINE_REF}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-name ${BASELINE_NAME}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-name ${FEATURE_NAME}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-ref ${FEATURE_REF}"
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv /tmp/bench-results-baseline/combined_latency.csv"
-          SUMMARY_ARGS="$SUMMARY_ARGS --branch-csv /tmp/bench-results-branch/combined_latency.csv"
-          SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv /tmp/bench-results-branch/total_gas.csv"
-          if [ "$BEHIND_MAIN" -gt 0 ]; then
-            SUMMARY_ARGS="$SUMMARY_ARGS --behind-main $BEHIND_MAIN"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv /tmp/bench-results-feature/combined_latency.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv /tmp/bench-results-feature/total_gas.csv"
+          if [ "$BEHIND_BASELINE" -gt 0 ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --behind-baseline $BEHIND_BASELINE"
           fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
@@ -306,11 +357,13 @@ jobs:
       - name: Generate charts
         if: success()
         env:
-          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+          BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
+          FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
         run: |
-          CHART_ARGS="/tmp/bench-results-branch/combined_latency.csv --output-dir /tmp/bench-charts"
+          CHART_ARGS="/tmp/bench-results-feature/combined_latency.csv --output-dir /tmp/bench-charts"
           CHART_ARGS="$CHART_ARGS --baseline /tmp/bench-results-baseline/combined_latency.csv"
-          CHART_ARGS="$CHART_ARGS --branch-name ${BRANCH_NAME}"
+          CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
+          CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
           uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
@@ -321,7 +374,7 @@ jobs:
           name: bench-reth-results
           path: |
             /tmp/bench-results-baseline/
-            /tmp/bench-results-branch/
+            /tmp/bench-results-feature/
             /tmp/bench-summary.json
             /tmp/bench-charts/
 
@@ -410,7 +463,7 @@ jobs:
           name: reth-node-log
           path: |
             /tmp/reth-bench-node-baseline.log
-            /tmp/reth-bench-node-branch.log
+            /tmp/reth-bench-node-feature.log
 
       - name: Restore system settings
         if: always()
