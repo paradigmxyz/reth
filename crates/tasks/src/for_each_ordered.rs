@@ -1,6 +1,6 @@
 use crossbeam_utils::CachePadded;
-use parking_lot::{Condvar, Mutex};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+use parking_lot::{Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Extension trait for [`IndexedParallelIterator`]
@@ -104,21 +104,20 @@ where
     }
 
     let shared = Shared::<I::Item>::new(n);
-    let shared_ref = &shared;
 
     rayon::in_place_scope(|s| {
         // Producer: compute items in parallel and write them into their slots.
         s.spawn(|_| {
             let res = catch_unwind(AssertUnwindSafe(|| {
                 iter.enumerate().for_each(|(i, item)| {
-                    shared_ref.write(i, item);
+                    shared.write(i, item);
                 });
             }));
             if let Err(payload) = res {
-                shared_ref.panicked.store(true, Ordering::Release);
+                shared.panicked.store(true, Ordering::Release);
                 // Wake all slots so the consumer doesn't hang. Lock each slot's mutex
                 // first to serialize with the consumer's panicked check → wait sequence.
-                for slot in &*shared_ref.slots {
+                for slot in &*shared.slots {
                     let _guard = slot.value.lock();
                     slot.notify.notify_one();
                 }
@@ -128,7 +127,7 @@ where
 
         // Consumer: sequential, ordered, on the calling thread.
         for i in 0..n {
-            let Some(value) = shared_ref.take(i) else {
+            let Some(value) = shared.take(i) else {
                 return;
             };
             f(value);
@@ -332,12 +331,15 @@ mod tests {
         let n = 64usize;
         let input: Vec<usize> = (0..n).collect();
         let mut output = Vec::with_capacity(n);
-        input.par_iter().map(|&i| i).for_each_ordered(|x| {
-            if x % 8 == 0 {
-                std::thread::yield_now();
-            }
-            output.push(x);
-        });
+        input
+            .par_iter()
+            .map(|&i| i)
+            .for_each_ordered(|x| {
+                if x % 8 == 0 {
+                    std::thread::yield_now();
+                }
+                output.push(x);
+            });
         assert_eq!(output, input);
     }
 
