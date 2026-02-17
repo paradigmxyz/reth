@@ -570,6 +570,7 @@ where
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine::tree", "invoked new payload");
+        info!("On new payload: payload {:?}", payload);
 
         // start timing for the new payload process
         let start = Instant::now();
