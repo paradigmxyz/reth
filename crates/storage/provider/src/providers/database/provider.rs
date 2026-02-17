@@ -3037,6 +3037,56 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     }
 }
 
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    fn write_account_trie_updates<A: TrieTableAdapter>(
+        tx: &TX,
+        trie_updates: &TrieUpdatesSorted,
+        num_entries: &mut usize,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut,
+    {
+        let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
+        for (key, updated_node) in trie_updates.account_nodes_ref() {
+            let nibbles = A::AccountKey::from(*key);
+            match updated_node {
+                Some(node) => {
+                    if !key.is_empty() {
+                        *num_entries += 1;
+                        account_trie_cursor.upsert(nibbles, node)?;
+                    }
+                }
+                None => {
+                    *num_entries += 1;
+                    if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                        account_trie_cursor.delete_current()?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn write_storage_tries<A: TrieTableAdapter>(
+        tx: &TX,
+        storage_tries: Vec<(&B256, &StorageTrieUpdatesSorted)>,
+        num_entries: &mut usize,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut,
+    {
+        let mut cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
+        for (hashed_address, storage_trie_updates) in storage_tries {
+            let mut db_storage_trie_cursor: DatabaseStorageTrieCursor<_, A> =
+                DatabaseStorageTrieCursor::new(cursor, *hashed_address);
+            *num_entries +=
+                db_storage_trie_cursor.write_storage_trie_updates_sorted(storage_trie_updates)?;
+            cursor = db_storage_trie_cursor.cursor;
+        }
+        Ok(())
+    }
+}
+
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider<TX, N> {
     /// Writes trie updates to the database with already sorted updates.
     ///
@@ -3051,31 +3101,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         let mut num_entries = 0;
 
         let is_v2 = self.cached_storage_settings().is_v2();
-        reth_trie_db::dispatch_trie_adapter!(is_v2, |A| {
-            let tx = self.tx_ref();
-            let mut account_trie_cursor =
-                tx.cursor_write::<<A as TrieTableAdapter>::AccountTrieTable>()?;
-
-            // Process sorted account nodes
-            for (key, updated_node) in trie_updates.account_nodes_ref() {
-                let nibbles = <A as reth_trie_db::TrieKeyAdapter>::AccountKey::from(*key);
-                match updated_node {
-                    Some(node) => {
-                        if !key.is_empty() {
-                            num_entries += 1;
-                            account_trie_cursor.upsert(nibbles, node)?;
-                        }
-                    }
-                    None => {
-                        num_entries += 1;
-                        if account_trie_cursor.seek_exact(nibbles)?.is_some() {
-                            account_trie_cursor.delete_current()?;
-                        }
-                    }
-                }
-            }
-            Ok::<_, reth_storage_errors::provider::ProviderError>(())
-        })?;
+        if is_v2 {
+            Self::write_account_trie_updates::<reth_trie_db::PackedKeyAdapter>(
+                self.tx_ref(),
+                trie_updates,
+                &mut num_entries,
+            )?;
+        } else {
+            Self::write_account_trie_updates::<reth_trie_db::LegacyKeyAdapter>(
+                self.tx_ref(),
+                trie_updates,
+                &mut num_entries,
+            )?;
+        }
 
         num_entries +=
             self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
@@ -3098,18 +3136,20 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         let mut storage_tries = storage_tries.collect::<Vec<_>>();
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
         let is_v2 = self.cached_storage_settings().is_v2();
-        reth_trie_db::dispatch_trie_adapter!(is_v2, |A| {
-            let mut cursor =
-                self.tx_ref().cursor_dup_write::<<A as TrieTableAdapter>::StorageTrieTable>()?;
-            for (hashed_address, storage_trie_updates) in storage_tries {
-                let mut db_storage_trie_cursor: DatabaseStorageTrieCursor<_, A> =
-                    DatabaseStorageTrieCursor::new(cursor, *hashed_address);
-                num_entries += db_storage_trie_cursor
-                    .write_storage_trie_updates_sorted(storage_trie_updates)?;
-                cursor = db_storage_trie_cursor.cursor;
-            }
-            Ok(num_entries)
-        })
+        if is_v2 {
+            Self::write_storage_tries::<reth_trie_db::PackedKeyAdapter>(
+                self.tx_ref(),
+                storage_tries,
+                &mut num_entries,
+            )?;
+        } else {
+            Self::write_storage_tries::<reth_trie_db::LegacyKeyAdapter>(
+                self.tx_ref(),
+                storage_tries,
+                &mut num_entries,
+            )?;
+        }
+        Ok(num_entries)
     }
 }
 

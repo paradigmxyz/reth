@@ -377,25 +377,24 @@ impl<
         let mut revert_state = self.revert_state()?;
         let hashed_state_sorted = hashed_state.into_sorted();
         revert_state.extend_ref_and_sort(&hashed_state_sorted);
-        reth_trie_db::dispatch_trie_adapter!(self.provider.cached_storage_settings().is_v2(), |A| {
-            Ok(<StateRoot<
-                reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseStateRoot<_>>::overlay_root(self.tx(), &revert_state)?)
-        })
+        let is_v2 = self.provider.cached_storage_settings().is_v2();
+        Ok(<StateRoot<
+            reth_trie_db::DatabaseTrieCursorFactory<_>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as DatabaseStateRoot<_>>::overlay_root(self.tx(), &revert_state, is_v2)?)
     }
 
     fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
         input.prepend(self.revert_state()?.into());
-        reth_trie_db::dispatch_trie_adapter!(self.provider.cached_storage_settings().is_v2(), |A| {
-            Ok(<StateRoot<
-                reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseStateRoot<_>>::overlay_root_from_nodes(
-                self.tx(),
-                TrieInputSorted::from_unsorted(input),
-            )?)
-        })
+        let is_v2 = self.provider.cached_storage_settings().is_v2();
+        Ok(<StateRoot<
+            reth_trie_db::DatabaseTrieCursorFactory<_>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as DatabaseStateRoot<_>>::overlay_root_from_nodes(
+            self.tx(),
+            TrieInputSorted::from_unsorted(input),
+            is_v2,
+        )?)
     }
 
     fn state_root_with_updates(
@@ -405,14 +404,13 @@ impl<
         let mut revert_state = self.revert_state()?;
         let hashed_state_sorted = hashed_state.into_sorted();
         revert_state.extend_ref_and_sort(&hashed_state_sorted);
-        reth_trie_db::dispatch_trie_adapter!(self.provider.cached_storage_settings().is_v2(), |A| {
-            Ok(<StateRoot<
-                reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseStateRoot<_>>::overlay_root_with_updates(
-                self.tx(), &revert_state
-            )?)
-        })
+        let is_v2 = self.provider.cached_storage_settings().is_v2();
+        Ok(<StateRoot<
+            reth_trie_db::DatabaseTrieCursorFactory<_>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as DatabaseStateRoot<_>>::overlay_root_with_updates(
+            self.tx(), &revert_state, is_v2,
+        )?)
     }
 
     fn state_root_from_nodes_with_updates(
@@ -420,15 +418,15 @@ impl<
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         input.prepend(self.revert_state()?.into());
-        reth_trie_db::dispatch_trie_adapter!(self.provider.cached_storage_settings().is_v2(), |A| {
-            Ok(<StateRoot<
-                reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseStateRoot<_>>::overlay_root_from_nodes_with_updates(
-                self.tx(),
-                TrieInputSorted::from_unsorted(input),
-            )?)
-        })
+        let is_v2 = self.provider.cached_storage_settings().is_v2();
+        Ok(<StateRoot<
+            reth_trie_db::DatabaseTrieCursorFactory<_>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as DatabaseStateRoot<_>>::overlay_root_from_nodes_with_updates(
+            self.tx(),
+            TrieInputSorted::from_unsorted(input),
+            is_v2,
+        )?)
     }
 }
 
@@ -447,15 +445,14 @@ impl<
     ) -> ProviderResult<B256> {
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
-        reth_trie_db::dispatch_trie_adapter!(self.provider.cached_storage_settings().is_v2(), |A| {
-            <StorageRoot<
-                reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseStorageRoot<_>>::overlay_root(
-                self.tx(), address, revert_storage
-            )
-            .map_err(|err| ProviderError::Database(err.into()))
-        })
+        let is_v2 = self.provider.cached_storage_settings().is_v2();
+        <StorageRoot<
+            reth_trie_db::DatabaseTrieCursorFactory<_>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as DatabaseStorageRoot<_>>::overlay_root(
+            self.tx(), address, revert_storage, is_v2,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn storage_proof(
@@ -466,19 +463,19 @@ impl<
     ) -> ProviderResult<reth_trie::StorageProof> {
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
-        reth_trie_db::dispatch_trie_adapter!(self.provider.cached_storage_settings().is_v2(), |A| {
-            <StorageProof<
-                'static,
-                reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseStorageProof<_>>::overlay_storage_proof(
-                self.tx(),
-                address,
-                slot,
-                revert_storage,
-            )
-            .map_err(ProviderError::from)
-        })
+        let is_v2 = self.provider.cached_storage_settings().is_v2();
+        <StorageProof<
+            'static,
+            reth_trie_db::DatabaseTrieCursorFactory<_>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as DatabaseStorageProof<_>>::overlay_storage_proof(
+            self.tx(),
+            address,
+            slot,
+            revert_storage,
+            is_v2,
+        )
+        .map_err(ProviderError::from)
     }
 
     fn storage_multiproof(
@@ -489,19 +486,19 @@ impl<
     ) -> ProviderResult<StorageMultiProof> {
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
-        reth_trie_db::dispatch_trie_adapter!(self.provider.cached_storage_settings().is_v2(), |A| {
-            <StorageProof<
-                'static,
-                reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseStorageProof<_>>::overlay_storage_multiproof(
-                self.tx(),
-                address,
-                slots,
-                revert_storage,
-            )
-            .map_err(ProviderError::from)
-        })
+        let is_v2 = self.provider.cached_storage_settings().is_v2();
+        <StorageProof<
+            'static,
+            reth_trie_db::DatabaseTrieCursorFactory<_>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as DatabaseStorageProof<_>>::overlay_storage_multiproof(
+            self.tx(),
+            address,
+            slots,
+            revert_storage,
+            is_v2,
+        )
+        .map_err(ProviderError::from)
     }
 }
 
@@ -521,13 +518,12 @@ impl<
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         input.prepend(self.revert_state()?.into());
-        reth_trie_db::dispatch_trie_adapter!(self.provider.cached_storage_settings().is_v2(), |A| {
-            let proof = <Proof<
-                reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseProof>::from_tx(self.tx());
-            proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
-        })
+        let is_v2 = self.provider.cached_storage_settings().is_v2();
+        let proof = <Proof<
+            reth_trie_db::DatabaseTrieCursorFactory<_>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as DatabaseProof>::from_tx(self.tx(), is_v2);
+        proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
     }
 
     fn multiproof(
@@ -536,25 +532,23 @@ impl<
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         input.prepend(self.revert_state()?.into());
-        reth_trie_db::dispatch_trie_adapter!(self.provider.cached_storage_settings().is_v2(), |A| {
-            let proof = <Proof<
-                reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseProof>::from_tx(self.tx());
-            proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
-        })
+        let is_v2 = self.provider.cached_storage_settings().is_v2();
+        let proof = <Proof<
+            reth_trie_db::DatabaseTrieCursorFactory<_>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as DatabaseProof>::from_tx(self.tx(), is_v2);
+        proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
     }
 
     fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
         input.prepend(self.revert_state()?.into());
-        reth_trie_db::dispatch_trie_adapter!(self.provider.cached_storage_settings().is_v2(), |A| {
-            <TrieWitness<
-                reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseTrieWitness<_>>::overlay_witness(self.tx(), input, target)
-            .map_err(ProviderError::from)
-            .map(|hm| hm.into_values().collect())
-        })
+        let is_v2 = self.provider.cached_storage_settings().is_v2();
+        <TrieWitness<
+            reth_trie_db::DatabaseTrieCursorFactory<_>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as DatabaseTrieWitness<_>>::overlay_witness(self.tx(), input, target, is_v2)
+        .map_err(ProviderError::from)
+        .map(|hm| hm.into_values().collect())
     }
 }
 

@@ -101,66 +101,64 @@ where
 
     let is_v2 = provider.cached_storage_settings().is_v2();
 
-    crate::dispatch_trie_adapter!(is_v2, |A| {
-        let cumulative_trie_updates_prev = StateRoot::new(
-            InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
-                input_prev.nodes.as_ref(),
-            ),
-            HashedPostStateCursorFactory::new(
-                crate::DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                input_prev.state.as_ref(),
-            ),
-        )
-        .with_prefix_sets(input_prev.prefix_sets.freeze())
-        .root_with_updates()
-        .map_err(ProviderError::other)?
-        .1
-        .into_sorted();
+    let cumulative_trie_updates_prev = StateRoot::new(
+        InMemoryTrieCursorFactory::new(
+            DatabaseTrieCursorFactory::new(provider.tx_ref(), is_v2),
+            input_prev.nodes.as_ref(),
+        ),
+        HashedPostStateCursorFactory::new(
+            crate::DatabaseHashedCursorFactory::new(provider.tx_ref()),
+            input_prev.state.as_ref(),
+        ),
+    )
+    .with_prefix_sets(input_prev.prefix_sets.freeze())
+    .root_with_updates()
+    .map_err(ProviderError::other)?
+    .1
+    .into_sorted();
 
-        // Create prefix sets from individual revert (only paths changed by this block)
-        let prefix_sets = individual_state_revert.construct_prefix_sets();
+    // Create prefix sets from individual revert (only paths changed by this block)
+    let prefix_sets = individual_state_revert.construct_prefix_sets();
 
-        // Calculate trie updates for block
-        let input = TrieInputSorted::new(
-            Arc::new(cumulative_trie_updates_prev.clone()),
-            Arc::new(cumulative_state_revert),
-            prefix_sets,
-        );
+    // Calculate trie updates for block
+    let input = TrieInputSorted::new(
+        Arc::new(cumulative_trie_updates_prev.clone()),
+        Arc::new(cumulative_state_revert),
+        prefix_sets,
+    );
 
-        let trie_updates = StateRoot::new(
-            InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
-                input.nodes.as_ref(),
-            ),
-            HashedPostStateCursorFactory::new(
-                crate::DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                input.state.as_ref(),
-            ),
-        )
-        .with_prefix_sets(input.prefix_sets.freeze())
-        .root_with_updates()
-        .map_err(ProviderError::other)?
-        .1
-        .into_sorted();
+    let trie_updates = StateRoot::new(
+        InMemoryTrieCursorFactory::new(
+            DatabaseTrieCursorFactory::new(provider.tx_ref(), is_v2),
+            input.nodes.as_ref(),
+        ),
+        HashedPostStateCursorFactory::new(
+            crate::DatabaseHashedCursorFactory::new(provider.tx_ref()),
+            input.state.as_ref(),
+        ),
+    )
+    .with_prefix_sets(input.prefix_sets.freeze())
+    .root_with_updates()
+    .map_err(ProviderError::other)?
+    .1
+    .into_sorted();
 
-        // Compute changesets using cumulative trie updates for block-1 as overlay
-        let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
-        let overlay_factory =
-            InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
-        let changesets = compute_trie_changesets(&overlay_factory, &trie_updates)
-            .map_err(ProviderError::other)?;
+    // Compute changesets using cumulative trie updates for block-1 as overlay
+    let db_cursor_factory = DatabaseTrieCursorFactory::new(provider.tx_ref(), is_v2);
+    let overlay_factory =
+        InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
+    let changesets = compute_trie_changesets(&overlay_factory, &trie_updates)
+        .map_err(ProviderError::other)?;
 
-        debug!(
-            target: "trie::changeset_cache",
-            block_number,
-            num_account_nodes = changesets.account_nodes_ref().len(),
-            num_storage_tries = changesets.storage_tries_ref().len(),
-            "Computed block trie changesets successfully"
-        );
+    debug!(
+        target: "trie::changeset_cache",
+        block_number,
+        num_account_nodes = changesets.account_nodes_ref().len(),
+        num_storage_tries = changesets.storage_tries_ref().len(),
+        "Computed block trie changesets successfully"
+    );
 
-        Ok(changesets)
-    })
+    Ok(changesets)
 }
 
 /// Computes block trie updates using the changeset cache.
@@ -234,49 +232,47 @@ where
     // Step 4: Create an InMemoryTrieCursorFactory with the reverts
     // This gives us the trie state as it was after the target block was processed
     let is_v2 = provider.cached_storage_settings().is_v2();
-    crate::dispatch_trie_adapter!(is_v2, |A| {
-        let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-        let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
+    let db_cursor_factory = DatabaseTrieCursorFactory::new(tx, is_v2);
+    let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
 
-        // Step 5: Collect all account trie nodes that changed in the target block
-        let account_nodes_ref = changesets.account_nodes_ref();
-        let mut account_nodes = Vec::with_capacity(account_nodes_ref.len());
-        let mut account_cursor = cursor_factory.account_trie_cursor()?;
+    // Step 5: Collect all account trie nodes that changed in the target block
+    let account_nodes_ref = changesets.account_nodes_ref();
+    let mut account_nodes = Vec::with_capacity(account_nodes_ref.len());
+    let mut account_cursor = cursor_factory.account_trie_cursor()?;
 
-        // Iterate over the account nodes from the changesets
-        for (nibbles, _old_node) in account_nodes_ref {
-            // Look up the current value of this trie node using the overlay cursor
-            let node_value = account_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
-            account_nodes.push((*nibbles, node_value));
+    // Iterate over the account nodes from the changesets
+    for (nibbles, _old_node) in account_nodes_ref {
+        // Look up the current value of this trie node using the overlay cursor
+        let node_value = account_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
+        account_nodes.push((*nibbles, node_value));
+    }
+
+    // Step 6: Collect all storage trie nodes that changed in the target block
+    let mut storage_tries = B256Map::default();
+
+    // Iterate over the storage tries from the changesets
+    for (hashed_address, storage_changeset) in changesets.storage_tries_ref() {
+        let mut storage_cursor = cursor_factory.storage_trie_cursor(*hashed_address)?;
+        let storage_nodes_ref = storage_changeset.storage_nodes_ref();
+        let mut storage_nodes = Vec::with_capacity(storage_nodes_ref.len());
+
+        // Iterate over the storage nodes for this account
+        for (nibbles, _old_node) in storage_nodes_ref {
+            // Look up the current value of this storage trie node
+            let node_value = storage_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
+            storage_nodes.push((*nibbles, node_value));
         }
 
-        // Step 6: Collect all storage trie nodes that changed in the target block
-        let mut storage_tries = B256Map::default();
+        storage_tries.insert(
+            *hashed_address,
+            StorageTrieUpdatesSorted {
+                storage_nodes,
+                is_deleted: storage_changeset.is_deleted,
+            },
+        );
+    }
 
-        // Iterate over the storage tries from the changesets
-        for (hashed_address, storage_changeset) in changesets.storage_tries_ref() {
-            let mut storage_cursor = cursor_factory.storage_trie_cursor(*hashed_address)?;
-            let storage_nodes_ref = storage_changeset.storage_nodes_ref();
-            let mut storage_nodes = Vec::with_capacity(storage_nodes_ref.len());
-
-            // Iterate over the storage nodes for this account
-            for (nibbles, _old_node) in storage_nodes_ref {
-                // Look up the current value of this storage trie node
-                let node_value = storage_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
-                storage_nodes.push((*nibbles, node_value));
-            }
-
-            storage_tries.insert(
-                *hashed_address,
-                StorageTrieUpdatesSorted {
-                    storage_nodes,
-                    is_deleted: storage_changeset.is_deleted,
-                },
-            );
-        }
-
-        Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
-    })
+    Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
 }
 
 /// Thread-safe changeset cache.

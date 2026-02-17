@@ -16,8 +16,11 @@ use std::marker::PhantomData;
 /// Trait abstracting nibble encoding for trie keys.
 ///
 /// Allows the same cursor implementation to work with both legacy (65-byte) and
-/// packed (33-byte) nibble encodings via monomorphization.
+/// packed (33-byte) nibble encodings. The underlying cursor types are monomorphized per
+/// adapter, while [`DatabaseTrieCursorFactory`] selects the encoding at runtime.
 pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
+    /// Whether this adapter uses v2 (packed) encoding.
+    const IS_V2: bool;
     /// The key type for account trie lookups (e.g., `StoredNibbles` or `PackedStoredNibbles`).
     type AccountKey: Key + From<Nibbles> + Clone;
 
@@ -75,6 +78,7 @@ impl StorageTrieEntryLike for StorageTrieEntry {
 pub struct LegacyKeyAdapter;
 
 impl TrieKeyAdapter for LegacyKeyAdapter {
+    const IS_V2: bool = false;
     type AccountKey = StoredNibbles;
     type StorageSubKey = StoredNibblesSubKey;
     type StorageValue = StorageTrieEntry;
@@ -113,6 +117,7 @@ impl StorageTrieEntryLike for PackedStorageTrieEntry {
 pub struct PackedKeyAdapter;
 
 impl TrieKeyAdapter for PackedKeyAdapter {
+    const IS_V2: bool = true;
     type AccountKey = PackedStoredNibbles;
     type StorageSubKey = PackedStoredNibblesSubKey;
     type StorageValue = PackedStorageTrieEntry;
@@ -159,22 +164,7 @@ impl DupSort for PackedStoragesTrie {
     type SubKey = PackedStoredNibblesSubKey;
 }
 
-// ── Generic cursor factory ───────────────────────────────────────────
-
-/// Wrapper struct for database transaction implementing trie cursor factory trait.
-///
-/// Generic over [`TrieKeyAdapter`] to support both legacy and packed nibble encodings.
-/// Uses the same underlying MDBX tables (`AccountsTrie`, `StoragesTrie`) regardless
-/// of encoding — the type parameter only controls how keys are encoded/decoded.
-#[derive(Debug, Clone)]
-pub struct DatabaseTrieCursorFactory<T, A: TrieKeyAdapter = LegacyKeyAdapter>(T, PhantomData<A>);
-
-impl<T, A: TrieKeyAdapter> DatabaseTrieCursorFactory<T, A> {
-    /// Create new [`DatabaseTrieCursorFactory`].
-    pub const fn new(tx: T) -> Self {
-        Self(tx, PhantomData)
-    }
-}
+// ── Helper trait for table mapping ──────────────────────────────────
 
 /// Helper trait to map a [`TrieKeyAdapter`] to the correct table types.
 ///
@@ -199,33 +189,203 @@ impl TrieTableAdapter for PackedKeyAdapter {
     type StorageTrieTable = PackedStoragesTrie;
 }
 
-impl<TX, A> TrieCursorFactory for DatabaseTrieCursorFactory<&TX, A>
+// ── Enum cursor wrappers ────────────────────────────────────────────
+//
+// These enums hold either the legacy or packed cursor variant, allowing
+// `DatabaseTrieCursorFactory` to implement `TrieCursorFactory` without
+// leaking the adapter type parameter to callers.
+
+/// Account trie cursor that dispatches between legacy and packed encoding at runtime.
+#[derive(Debug)]
+pub enum EitherAccountTrieCursor<LegacyCursor, PackedCursor> {
+    /// Legacy (v1) encoding cursor.
+    Legacy(DatabaseAccountTrieCursor<LegacyCursor, LegacyKeyAdapter>),
+    /// Packed (v2) encoding cursor.
+    Packed(DatabaseAccountTrieCursor<PackedCursor, PackedKeyAdapter>),
+}
+
+impl<LC, PC> TrieCursor for EitherAccountTrieCursor<LC, PC>
+where
+    LC: DbCursorRO<tables::AccountsTrie> + Send,
+    PC: DbCursorRO<PackedAccountsTrie> + Send,
+{
+    fn seek_exact(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        match self {
+            Self::Legacy(c) => c.seek_exact(key),
+            Self::Packed(c) => c.seek_exact(key),
+        }
+    }
+
+    fn seek(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        match self {
+            Self::Legacy(c) => c.seek(key),
+            Self::Packed(c) => c.seek(key),
+        }
+    }
+
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        match self {
+            Self::Legacy(c) => c.next(),
+            Self::Packed(c) => c.next(),
+        }
+    }
+
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        match self {
+            Self::Legacy(c) => c.current(),
+            Self::Packed(c) => c.current(),
+        }
+    }
+
+    fn reset(&mut self) {
+        match self {
+            Self::Legacy(c) => c.reset(),
+            Self::Packed(c) => c.reset(),
+        }
+    }
+}
+
+/// Storage trie cursor that dispatches between legacy and packed encoding at runtime.
+#[derive(Debug)]
+pub enum EitherStorageTrieCursor<LegacyCursor, PackedCursor> {
+    /// Legacy (v1) encoding cursor.
+    Legacy(DatabaseStorageTrieCursor<LegacyCursor, LegacyKeyAdapter>),
+    /// Packed (v2) encoding cursor.
+    Packed(DatabaseStorageTrieCursor<PackedCursor, PackedKeyAdapter>),
+}
+
+impl<LC, PC> TrieCursor for EitherStorageTrieCursor<LC, PC>
+where
+    LC: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send,
+    PC: DbCursorRO<PackedStoragesTrie> + DbDupCursorRO<PackedStoragesTrie> + Send,
+{
+    fn seek_exact(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        match self {
+            Self::Legacy(c) => c.seek_exact(key),
+            Self::Packed(c) => c.seek_exact(key),
+        }
+    }
+
+    fn seek(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        match self {
+            Self::Legacy(c) => c.seek(key),
+            Self::Packed(c) => c.seek(key),
+        }
+    }
+
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        match self {
+            Self::Legacy(c) => c.next(),
+            Self::Packed(c) => c.next(),
+        }
+    }
+
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        match self {
+            Self::Legacy(c) => c.current(),
+            Self::Packed(c) => c.current(),
+        }
+    }
+
+    fn reset(&mut self) {
+        match self {
+            Self::Legacy(c) => c.reset(),
+            Self::Packed(c) => c.reset(),
+        }
+    }
+}
+
+impl<LC, PC> TrieStorageCursor for EitherStorageTrieCursor<LC, PC>
+where
+    LC: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send,
+    PC: DbCursorRO<PackedStoragesTrie> + DbDupCursorRO<PackedStoragesTrie> + Send,
+{
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        match self {
+            Self::Legacy(c) => c.set_hashed_address(hashed_address),
+            Self::Packed(c) => c.set_hashed_address(hashed_address),
+        }
+    }
+}
+
+// ── Cursor factory with runtime dispatch ────────────────────────────
+
+/// Wrapper struct for database transaction implementing trie cursor factory trait.
+///
+/// Holds a runtime `is_v2` flag to dispatch between legacy and packed nibble encodings
+/// internally, so callers never need to know which encoding is in use.
+#[derive(Debug, Clone)]
+pub struct DatabaseTrieCursorFactory<T> {
+    tx: T,
+    is_v2: bool,
+}
+
+impl<T> DatabaseTrieCursorFactory<T> {
+    /// Create new [`DatabaseTrieCursorFactory`] with the given encoding flag.
+    pub const fn new(tx: T, is_v2: bool) -> Self {
+        Self { tx, is_v2 }
+    }
+}
+
+impl<TX> TrieCursorFactory for DatabaseTrieCursorFactory<&TX>
 where
     TX: DbTx,
-    A: TrieTableAdapter,
 {
     type AccountTrieCursor<'a>
-        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<A::AccountTrieTable>, A>
+        = EitherAccountTrieCursor<
+            <TX as DbTx>::Cursor<tables::AccountsTrie>,
+            <TX as DbTx>::Cursor<PackedAccountsTrie>,
+        >
     where
         Self: 'a;
 
     type StorageTrieCursor<'a>
-        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<A::StorageTrieTable>, A>
+        = EitherStorageTrieCursor<
+            <TX as DbTx>::DupCursor<tables::StoragesTrie>,
+            <TX as DbTx>::DupCursor<PackedStoragesTrie>,
+        >
     where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        Ok(DatabaseAccountTrieCursor::new(self.0.cursor_read::<A::AccountTrieTable>()?))
+        if self.is_v2 {
+            Ok(EitherAccountTrieCursor::Packed(DatabaseAccountTrieCursor::new(
+                self.tx.cursor_read::<PackedAccountsTrie>()?,
+            )))
+        } else {
+            Ok(EitherAccountTrieCursor::Legacy(DatabaseAccountTrieCursor::new(
+                self.tx.cursor_read::<tables::AccountsTrie>()?,
+            )))
+        }
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        Ok(DatabaseStorageTrieCursor::new(
-            self.0.cursor_dup_read::<A::StorageTrieTable>()?,
-            hashed_address,
-        ))
+        if self.is_v2 {
+            Ok(EitherStorageTrieCursor::Packed(DatabaseStorageTrieCursor::new(
+                self.tx.cursor_dup_read::<PackedStoragesTrie>()?,
+                hashed_address,
+            )))
+        } else {
+            Ok(EitherStorageTrieCursor::Legacy(DatabaseStorageTrieCursor::new(
+                self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
+                hashed_address,
+            )))
+        }
     }
 }
 
@@ -394,34 +554,6 @@ where
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.hashed_address = hashed_address;
     }
-}
-
-/// Dispatch between [`LegacyKeyAdapter`] and [`PackedKeyAdapter`] based on a runtime boolean.
-///
-/// The body is monomorphized for each adapter — no dynamic dispatch involved.
-/// Both branches must return the same type.
-///
-/// # Usage
-///
-/// ```ignore
-/// dispatch_trie_adapter!(provider.cached_storage_settings().is_v2(), |A| {
-///     DatabaseTrieCursorFactory::<_, A>::new(tx)
-/// })
-/// ```
-#[macro_export]
-macro_rules! dispatch_trie_adapter {
-    ($is_v2:expr, |$A:ident| $body:block) => {{
-        if $is_v2 {
-            type $A = $crate::PackedKeyAdapter;
-            $body
-        } else {
-            type $A = $crate::LegacyKeyAdapter;
-            $body
-        }
-    }};
-    ($is_v2:expr, |$A:ident| $body:expr) => {
-        $crate::dispatch_trie_adapter!($is_v2, |$A| { $body })
-    };
 }
 
 #[cfg(test)]

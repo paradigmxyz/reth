@@ -833,55 +833,53 @@ where
     let mut total_flushed_updates = 0;
 
     let is_v2 = provider.cached_storage_settings().is_v2();
-    reth_trie_db::dispatch_trie_adapter!(is_v2, |A| {
-        loop {
-            let mut state_root = <StateRootComputer<
-                reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(tx)
-            .with_intermediate_state(intermediate_state);
+    loop {
+        let mut state_root = <StateRootComputer<
+            reth_trie_db::DatabaseTrieCursorFactory<_>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(tx, is_v2)
+        .with_intermediate_state(intermediate_state);
 
-            if let Some(sets) = prefix_sets.clone() {
-                state_root = state_root.with_prefix_sets(sets);
-            }
+        if let Some(sets) = prefix_sets.clone() {
+            state_root = state_root.with_prefix_sets(sets);
+        }
 
-            match state_root.root_with_progress()? {
-                StateRootProgress::Progress(state, _, updates) => {
-                    let updated_len = provider.write_trie_updates(updates)?;
-                    total_flushed_updates += updated_len;
+        match state_root.root_with_progress()? {
+            StateRootProgress::Progress(state, _, updates) => {
+                let updated_len = provider.write_trie_updates(updates)?;
+                total_flushed_updates += updated_len;
 
-                    trace!(target: "reth::cli",
-                        last_account_key = %state.account_root_state.last_hashed_key,
-                        updated_len,
+                trace!(target: "reth::cli",
+                    last_account_key = %state.account_root_state.last_hashed_key,
+                    updated_len,
+                    total_flushed_updates,
+                    "Flushing trie updates"
+                );
+
+                intermediate_state = Some(*state);
+
+                if total_flushed_updates.is_multiple_of(SOFT_LIMIT_COUNT_FLUSHED_UPDATES) {
+                    info!(target: "reth::cli",
                         total_flushed_updates,
                         "Flushing trie updates"
                     );
-
-                    intermediate_state = Some(*state);
-
-                    if total_flushed_updates.is_multiple_of(SOFT_LIMIT_COUNT_FLUSHED_UPDATES) {
-                        info!(target: "reth::cli",
-                            total_flushed_updates,
-                            "Flushing trie updates"
-                        );
-                    }
-                }
-                StateRootProgress::Complete(root, _, updates) => {
-                    let updated_len = provider.write_trie_updates(updates)?;
-                    total_flushed_updates += updated_len;
-
-                    trace!(target: "reth::cli",
-                        %root,
-                        updated_len,
-                        total_flushed_updates,
-                        "State root has been computed"
-                    );
-
-                    return Ok(root)
                 }
             }
+            StateRootProgress::Complete(root, _, updates) => {
+                let updated_len = provider.write_trie_updates(updates)?;
+                total_flushed_updates += updated_len;
+
+                trace!(target: "reth::cli",
+                    %root,
+                    updated_len,
+                    total_flushed_updates,
+                    "State root has been computed"
+                );
+
+                return Ok(root)
+            }
         }
-    })
+    }
 }
 
 /// Type to deserialize state root from state dump file.

@@ -1,4 +1,4 @@
-use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, TrieTableAdapter};
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use alloy_primitives::{keccak256, map::B256Map, BlockNumber, B256};
 use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress},
@@ -23,7 +23,7 @@ use tracing::{debug, instrument};
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
 pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// Create a new [`StateRoot`] instance.
-    fn from_tx(tx: &'a TX) -> Self;
+    fn from_tx(tx: &'a TX, is_v2: bool) -> Self;
 
     /// Given a block number range, identifies all the accounts and storage keys that
     /// have changed.
@@ -110,33 +110,42 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// // Calculate the state root
     /// let tx = db.tx().expect("failed to create transaction");
     /// let state_root = <StateRoot<
-    ///     reth_trie_db::DatabaseTrieCursorFactory<_, reth_trie_db::LegacyKeyAdapter>,
+    ///     reth_trie_db::DatabaseTrieCursorFactory<_>,
     ///     reth_trie_db::DatabaseHashedCursorFactory<_>,
-    /// > as DatabaseStateRoot<_>>::overlay_root(&tx, &hashed_state.into_sorted());
+    /// > as DatabaseStateRoot<_>>::overlay_root(&tx, &hashed_state.into_sorted(), false);
     /// ```
     ///
     /// # Returns
     ///
     /// The state root for this [`HashedPostStateSorted`].
-    fn overlay_root(tx: &'a TX, post_state: &HashedPostStateSorted)
-        -> Result<B256, StateRootError>;
+    fn overlay_root(
+        tx: &'a TX,
+        post_state: &HashedPostStateSorted,
+        is_v2: bool,
+    ) -> Result<B256, StateRootError>;
 
     /// Calculates the state root for this [`HashedPostStateSorted`] and returns it alongside trie
     /// updates. See [`Self::overlay_root`] for more info.
     fn overlay_root_with_updates(
         tx: &'a TX,
         post_state: &HashedPostStateSorted,
+        is_v2: bool,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 
     /// Calculates the state root for provided [`HashedPostStateSorted`] using cached intermediate
     /// nodes.
-    fn overlay_root_from_nodes(tx: &'a TX, input: TrieInputSorted) -> Result<B256, StateRootError>;
+    fn overlay_root_from_nodes(
+        tx: &'a TX,
+        input: TrieInputSorted,
+        is_v2: bool,
+    ) -> Result<B256, StateRootError>;
 
     /// Calculates the state root and trie updates for provided [`HashedPostStateSorted`] using
     /// cached intermediate nodes.
     fn overlay_root_from_nodes_with_updates(
         tx: &'a TX,
         input: TrieInputSorted,
+        is_v2: bool,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 }
 
@@ -156,11 +165,11 @@ pub trait DatabaseHashedPostState: Sized {
     ) -> Result<HashedPostStateSorted, ProviderError>;
 }
 
-impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStateRoot<'a, TX>
-    for StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
+impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
+    for StateRoot<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
 {
-    fn from_tx(tx: &'a TX) -> Self {
-        Self::new(DatabaseTrieCursorFactory::<_, A>::new(tx), DatabaseHashedCursorFactory::new(tx))
+    fn from_tx(tx: &'a TX, is_v2: bool) -> Self {
+        Self::new(DatabaseTrieCursorFactory::new(tx, is_v2), DatabaseHashedCursorFactory::new(tx))
     }
 
     fn incremental_root_calculator(
@@ -172,7 +181,8 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStateRoot<'a, TX>
     ) -> Result<Self, StateRootError> {
         let loaded_prefix_sets =
             crate::prefix_set::load_prefix_sets_with_provider(provider, range)?;
-        Ok(Self::from_tx(provider.tx_ref()).with_prefix_sets(loaded_prefix_sets))
+        let is_v2 = provider.cached_storage_settings().is_v2();
+        Ok(Self::from_tx(provider.tx_ref(), is_v2).with_prefix_sets(loaded_prefix_sets))
     }
 
     fn incremental_root(
@@ -211,10 +221,11 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStateRoot<'a, TX>
     fn overlay_root(
         tx: &'a TX,
         post_state: &HashedPostStateSorted,
+        is_v2: bool,
     ) -> Result<B256, StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         StateRoot::new(
-            DatabaseTrieCursorFactory::<_, A>::new(tx),
+            DatabaseTrieCursorFactory::new(tx, is_v2),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), post_state),
         )
         .with_prefix_sets(prefix_sets)
@@ -224,20 +235,25 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStateRoot<'a, TX>
     fn overlay_root_with_updates(
         tx: &'a TX,
         post_state: &HashedPostStateSorted,
+        is_v2: bool,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         StateRoot::new(
-            DatabaseTrieCursorFactory::<_, A>::new(tx),
+            DatabaseTrieCursorFactory::new(tx, is_v2),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), post_state),
         )
         .with_prefix_sets(prefix_sets)
         .root_with_updates()
     }
 
-    fn overlay_root_from_nodes(tx: &'a TX, input: TrieInputSorted) -> Result<B256, StateRootError> {
+    fn overlay_root_from_nodes(
+        tx: &'a TX,
+        input: TrieInputSorted,
+        is_v2: bool,
+    ) -> Result<B256, StateRootError> {
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::<_, A>::new(tx),
+                DatabaseTrieCursorFactory::new(tx, is_v2),
                 input.nodes.as_ref(),
             ),
             HashedPostStateCursorFactory::new(
@@ -252,10 +268,11 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStateRoot<'a, TX>
     fn overlay_root_from_nodes_with_updates(
         tx: &'a TX,
         input: TrieInputSorted,
+        is_v2: bool,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         StateRoot::new(
             InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::<_, A>::new(tx),
+                DatabaseTrieCursorFactory::new(tx, is_v2),
                 input.nodes.as_ref(),
             ),
             HashedPostStateCursorFactory::new(
@@ -374,7 +391,7 @@ mod tests {
     use revm_database::BundleState;
 
     type DbStateRoot<'a, TX> = StateRoot<
-        crate::DatabaseTrieCursorFactory<&'a TX, crate::LegacyKeyAdapter>,
+        crate::DatabaseTrieCursorFactory<&'a TX>,
         crate::DatabaseHashedCursorFactory<&'a TX>,
     >;
 
@@ -396,7 +413,7 @@ mod tests {
         );
 
         let sorted = hashed_state.into_sorted();
-        let overlay_root = DbStateRoot::overlay_root(&tx, &sorted).unwrap();
+        let overlay_root = DbStateRoot::overlay_root(&tx, &sorted, false).unwrap();
 
         // Just verify it produces a valid root
         assert!(!overlay_root.is_zero());
@@ -428,7 +445,7 @@ mod tests {
         let db = create_test_rw_db();
         let tx = db.tx().expect("failed to create transaction");
         assert_eq!(
-            DbStateRoot::overlay_root(&tx, &post_state.into_sorted()).unwrap(),
+            DbStateRoot::overlay_root(&tx, &post_state.into_sorted(), false).unwrap(),
             hex!("b464525710cafcf5d4044ac85b72c08b1e76231b8d91f288fe438cc41d8eaafd")
         );
     }

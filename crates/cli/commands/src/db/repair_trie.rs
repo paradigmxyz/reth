@@ -27,8 +27,7 @@ use reth_trie::{
     Nibbles,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, StorageTrieEntryLike, TrieKeyAdapter,
-    TrieTableAdapter,
+    DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, StorageTrieEntryLike, TrieTableAdapter,
 };
 use std::{
     net::SocketAddr,
@@ -120,50 +119,48 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
 
     let is_v2 = tool.provider_factory.cached_storage_settings().is_v2();
 
-    reth_trie_db::dispatch_trie_adapter!(is_v2, |A| {
-        // Create the verifier
-        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
-        let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(&tx);
-        let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
+    // Create the verifier
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx, is_v2);
+    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
 
-        let metrics = RepairTrieMetrics::new();
+    let metrics = RepairTrieMetrics::new();
 
-        let mut inconsistent_nodes = 0;
-        let start_time = Instant::now();
-        let mut last_progress_time = Instant::now();
+    let mut inconsistent_nodes = 0;
+    let start_time = Instant::now();
+    let mut last_progress_time = Instant::now();
 
-        // Iterate over the verifier and repair inconsistencies
-        for output_result in verifier {
-            let output = output_result?;
+    // Iterate over the verifier and repair inconsistencies
+    for output_result in verifier {
+        let output = output_result?;
 
-            if let Output::Progress(path) = output {
-                if last_progress_time.elapsed() > PROGRESS_PERIOD {
-                    output_progress(path, start_time, inconsistent_nodes);
-                    last_progress_time = Instant::now();
+        if let Output::Progress(path) = output {
+            if last_progress_time.elapsed() > PROGRESS_PERIOD {
+                output_progress(path, start_time, inconsistent_nodes);
+                last_progress_time = Instant::now();
+            }
+        } else {
+            warn!("Inconsistency found: {output:?}");
+            inconsistent_nodes += 1;
+
+            // Record metrics based on output type
+            match output {
+                Output::AccountExtra(_, _) |
+                Output::AccountWrong { .. } |
+                Output::AccountMissing(_, _) => {
+                    metrics.account_inconsistencies.increment(1);
                 }
-            } else {
-                warn!("Inconsistency found: {output:?}");
-                inconsistent_nodes += 1;
-
-                // Record metrics based on output type
-                match output {
-                    Output::AccountExtra(_, _) |
-                    Output::AccountWrong { .. } |
-                    Output::AccountMissing(_, _) => {
-                        metrics.account_inconsistencies.increment(1);
-                    }
-                    Output::StorageExtra(_, _, _) |
-                    Output::StorageWrong { .. } |
-                    Output::StorageMissing(_, _, _) => {
-                        metrics.storage_inconsistencies.increment(1);
-                    }
-                    Output::Progress(_) => unreachable!(),
+                Output::StorageExtra(_, _, _) |
+                Output::StorageWrong { .. } |
+                Output::StorageMissing(_, _, _) => {
+                    metrics.storage_inconsistencies.increment(1);
                 }
+                Output::Progress(_) => unreachable!(),
             }
         }
+    }
 
-        info!("Found {} inconsistencies (dry run - no changes made)", inconsistent_nodes);
-    });
+    info!("Found {} inconsistencies (dry run - no changes made)", inconsistent_nodes);
 
     Ok(())
 }
@@ -217,113 +214,118 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
 
     let is_v2 = tool.provider_factory.cached_storage_settings().is_v2();
 
-    reth_trie_db::dispatch_trie_adapter!(is_v2, |A| {
-        // Create cursors for making modifications with
-        let tx = provider_rw.tx_mut();
-        tx.disable_long_read_transaction_safety();
-        let mut account_trie_cursor =
-            tx.cursor_write::<<A as TrieTableAdapter>::AccountTrieTable>()?;
-        let mut storage_trie_cursor =
-            tx.cursor_dup_write::<<A as TrieTableAdapter>::StorageTrieTable>()?;
+    let inconsistent_nodes = if is_v2 {
+        do_verify_and_repair::<_, reth_trie_db::PackedKeyAdapter>(&mut provider_rw)?
+    } else {
+        do_verify_and_repair::<_, reth_trie_db::LegacyKeyAdapter>(&mut provider_rw)?
+    };
 
-        // Create the cursor factories. These cannot accept the `&mut` tx above because they
-        // require it to be AsRef.
-        let tx = provider_rw.tx_ref();
-        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-        let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-
-        // Create the verifier
-        let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
-
-        let metrics = RepairTrieMetrics::new();
-
-        let mut inconsistent_nodes = 0;
-        let start_time = Instant::now();
-        let mut last_progress_time = Instant::now();
-
-        // Iterate over the verifier and repair inconsistencies
-        for output_result in verifier {
-            let output = output_result?;
-
-            if !matches!(output, Output::Progress(_)) {
-                warn!("Inconsistency found, will repair: {output:?}");
-                inconsistent_nodes += 1;
-
-                // Record metrics based on output type
-                match &output {
-                    Output::AccountExtra(_, _) |
-                    Output::AccountWrong { .. } |
-                    Output::AccountMissing(_, _) => {
-                        metrics.account_inconsistencies.increment(1);
-                    }
-                    Output::StorageExtra(_, _, _) |
-                    Output::StorageWrong { .. } |
-                    Output::StorageMissing(_, _, _) => {
-                        metrics.storage_inconsistencies.increment(1);
-                    }
-                    Output::Progress(_) => {}
-                }
-            }
-
-            match output {
-                Output::AccountExtra(path, _node) => {
-                    // Extra account node in trie, remove it
-                    let key: <A as TrieKeyAdapter>::AccountKey = path.into();
-                    if account_trie_cursor.seek_exact(key)?.is_some() {
-                        account_trie_cursor.delete_current()?;
-                    }
-                }
-                Output::StorageExtra(account, path, _node) => {
-                    // Extra storage node in trie, remove it
-                    let subkey: <A as TrieKeyAdapter>::StorageSubKey = path.into();
-                    if storage_trie_cursor
-                        .seek_by_key_subkey(account, subkey.clone())?
-                        .filter(|e| *e.nibbles() == subkey)
-                        .is_some()
-                    {
-                        storage_trie_cursor.delete_current()?;
-                    }
-                }
-                Output::AccountWrong { path, expected: node, .. } |
-                Output::AccountMissing(path, node) => {
-                    // Wrong/missing account node value, upsert it
-                    let key: <A as TrieKeyAdapter>::AccountKey = path.into();
-                    account_trie_cursor.upsert(key, &node)?;
-                }
-                Output::StorageWrong { account, path, expected: node, .. } |
-                Output::StorageMissing(account, path, node) => {
-                    // Wrong/missing storage node value, upsert it
-                    // (We can't just use `upsert` method with a dup cursor, it's not properly
-                    // supported)
-                    let subkey: <A as TrieKeyAdapter>::StorageSubKey = path.into();
-                    let entry = <A as TrieKeyAdapter>::StorageValue::new(subkey.clone(), node);
-                    if storage_trie_cursor
-                        .seek_by_key_subkey(account, subkey.clone())?
-                        .filter(|v| *v.nibbles() == subkey)
-                        .is_some()
-                    {
-                        storage_trie_cursor.delete_current()?;
-                    }
-                    storage_trie_cursor.upsert(account, &entry)?;
-                }
-                Output::Progress(path) => {
-                    if last_progress_time.elapsed() > PROGRESS_PERIOD {
-                        output_progress(path, start_time, inconsistent_nodes);
-                        last_progress_time = Instant::now();
-                    }
-                }
-            }
-        }
-
-        if inconsistent_nodes == 0 {
-            info!("No inconsistencies found");
-        } else {
-            provider_rw.commit()?;
-            info!("Repaired {} inconsistencies and committed changes", inconsistent_nodes);
-        }
-    });
+    if inconsistent_nodes == 0 {
+        info!("No inconsistencies found");
+    } else {
+        provider_rw.commit()?;
+        info!("Repaired {} inconsistencies and committed changes", inconsistent_nodes);
+    }
 
     Ok(())
+}
+
+fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
+    provider_rw: &mut reth_provider::DatabaseProviderRW<N::DB, N>,
+) -> eyre::Result<usize>
+where
+    <N::DB as reth_db_api::database::Database>::TXMut: DbTxMut + DbTx,
+{
+    // Create cursors for making modifications with
+    let tx = provider_rw.tx_mut();
+    tx.disable_long_read_transaction_safety();
+    let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
+    let mut storage_trie_cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
+
+    // Create the cursor factories. These cannot accept the `&mut` tx above because they
+    // require it to be AsRef.
+    let tx = provider_rw.tx_ref();
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx, A::IS_V2);
+
+    // Create the verifier
+    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
+
+    let metrics = RepairTrieMetrics::new();
+
+    let mut inconsistent_nodes = 0;
+    let start_time = Instant::now();
+    let mut last_progress_time = Instant::now();
+
+    // Iterate over the verifier and repair inconsistencies
+    for output_result in verifier {
+        let output = output_result?;
+
+        if !matches!(output, Output::Progress(_)) {
+            warn!("Inconsistency found, will repair: {output:?}");
+            inconsistent_nodes += 1;
+
+            // Record metrics based on output type
+            match &output {
+                Output::AccountExtra(_, _) |
+                Output::AccountWrong { .. } |
+                Output::AccountMissing(_, _) => {
+                    metrics.account_inconsistencies.increment(1);
+                }
+                Output::StorageExtra(_, _, _) |
+                Output::StorageWrong { .. } |
+                Output::StorageMissing(_, _, _) => {
+                    metrics.storage_inconsistencies.increment(1);
+                }
+                Output::Progress(_) => {}
+            }
+        }
+
+        match output {
+            Output::AccountExtra(path, _node) => {
+                let key: A::AccountKey = path.into();
+                if account_trie_cursor.seek_exact(key)?.is_some() {
+                    account_trie_cursor.delete_current()?;
+                }
+            }
+            Output::StorageExtra(account, path, _node) => {
+                let subkey: A::StorageSubKey = path.into();
+                if storage_trie_cursor
+                    .seek_by_key_subkey(account, subkey.clone())?
+                    .filter(|e| *e.nibbles() == subkey)
+                    .is_some()
+                {
+                    storage_trie_cursor.delete_current()?;
+                }
+            }
+            Output::AccountWrong { path, expected: node, .. } |
+            Output::AccountMissing(path, node) => {
+                let key: A::AccountKey = path.into();
+                account_trie_cursor.upsert(key, &node)?;
+            }
+            Output::StorageWrong { account, path, expected: node, .. } |
+            Output::StorageMissing(account, path, node) => {
+                let subkey: A::StorageSubKey = path.into();
+                let entry = A::StorageValue::new(subkey.clone(), node);
+                if storage_trie_cursor
+                    .seek_by_key_subkey(account, subkey.clone())?
+                    .filter(|v| *v.nibbles() == subkey)
+                    .is_some()
+                {
+                    storage_trie_cursor.delete_current()?;
+                }
+                storage_trie_cursor.upsert(account, &entry)?;
+            }
+            Output::Progress(path) => {
+                if last_progress_time.elapsed() > PROGRESS_PERIOD {
+                    output_progress(path, start_time, inconsistent_nodes);
+                    last_progress_time = Instant::now();
+                }
+            }
+        }
+    }
+
+    Ok(inconsistent_nodes as usize)
 }
 
 /// Output progress information based on the last seen account path.

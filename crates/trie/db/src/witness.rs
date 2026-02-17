@@ -1,4 +1,4 @@
-use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, TrieTableAdapter};
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use alloy_primitives::{map::B256Map, Bytes};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::TrieWitnessError;
@@ -10,33 +10,35 @@ use reth_trie::{
 /// Extends [`TrieWitness`] with operations specific for working with a database transaction.
 pub trait DatabaseTrieWitness<'a, TX> {
     /// Create a new [`TrieWitness`] from database transaction.
-    fn from_tx(tx: &'a TX) -> Self;
+    fn from_tx(tx: &'a TX, is_v2: bool) -> Self;
 
     /// Generates trie witness for target state based on [`TrieInput`].
     fn overlay_witness(
         tx: &'a TX,
         input: TrieInput,
         target: HashedPostState,
+        is_v2: bool,
     ) -> Result<B256Map<Bytes>, TrieWitnessError>;
 }
 
-impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseTrieWitness<'a, TX>
-    for TrieWitness<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
+impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
+    for TrieWitness<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
 {
-    fn from_tx(tx: &'a TX) -> Self {
-        Self::new(DatabaseTrieCursorFactory::<_, A>::new(tx), DatabaseHashedCursorFactory::new(tx))
+    fn from_tx(tx: &'a TX, is_v2: bool) -> Self {
+        Self::new(DatabaseTrieCursorFactory::new(tx, is_v2), DatabaseHashedCursorFactory::new(tx))
     }
 
     fn overlay_witness(
         tx: &'a TX,
         input: TrieInput,
         target: HashedPostState,
+        is_v2: bool,
     ) -> Result<B256Map<Bytes>, TrieWitnessError> {
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();
         TrieWitness::new(
             InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::<_, A>::new(tx),
+                DatabaseTrieCursorFactory::new(tx, is_v2),
                 &nodes_sorted,
             ),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),

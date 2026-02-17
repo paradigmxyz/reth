@@ -363,6 +363,7 @@ async fn run_pipeline_forward_and_unwind(
         let (state_root, _trie_updates) = StateRoot::overlay_root_with_updates(
             provider.tx_ref(),
             &hashed_state.clone().into_sorted(),
+            false,
         )?;
 
         // Create receipts for receipt root calculation (one per transaction)

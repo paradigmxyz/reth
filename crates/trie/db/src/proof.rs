@@ -1,4 +1,4 @@
-use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, TrieTableAdapter};
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use alloy_primitives::{keccak256, map::HashMap, Address, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
@@ -16,7 +16,7 @@ pub trait DatabaseProof<'a> {
     type Tx;
 
     /// Create a new [`Proof`] instance from database transaction.
-    fn from_tx(tx: &'a Self::Tx) -> Self;
+    fn from_tx(tx: &'a Self::Tx, is_v2: bool) -> Self;
 
     /// Generates the state proof for target account based on [`TrieInput`].
     fn overlay_account_proof(
@@ -34,13 +34,13 @@ pub trait DatabaseProof<'a> {
     ) -> Result<MultiProof, StateProofError>;
 }
 
-impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
-    for Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
+impl<'a, TX: DbTx> DatabaseProof<'a>
+    for Proof<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
 {
     type Tx = TX;
 
-    fn from_tx(tx: &'a Self::Tx) -> Self {
-        Self::new(DatabaseTrieCursorFactory::<_, A>::new(tx), DatabaseHashedCursorFactory::new(tx))
+    fn from_tx(tx: &'a Self::Tx, is_v2: bool) -> Self {
+        Self::new(DatabaseTrieCursorFactory::new(tx, is_v2), DatabaseHashedCursorFactory::new(tx))
     }
     fn overlay_account_proof(
         &self,
@@ -77,7 +77,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
 /// Extends [`StorageProof`] with operations specific for working with a database transaction.
 pub trait DatabaseStorageProof<'a, TX> {
     /// Create a new [`StorageProof`] from database transaction and account address.
-    fn from_tx(tx: &'a TX, address: Address) -> Self;
+    fn from_tx(tx: &'a TX, address: Address, is_v2: bool) -> Self;
 
     /// Generates the storage proof for target slot based on [`TrieInput`].
     fn overlay_storage_proof(
@@ -85,6 +85,7 @@ pub trait DatabaseStorageProof<'a, TX> {
         address: Address,
         slot: B256,
         storage: HashedStorage,
+        is_v2: bool,
     ) -> Result<reth_trie::StorageProof, StateProofError>;
 
     /// Generates the storage multiproof for target slots based on [`TrieInput`].
@@ -93,19 +94,20 @@ pub trait DatabaseStorageProof<'a, TX> {
         address: Address,
         slots: &[B256],
         storage: HashedStorage,
+        is_v2: bool,
     ) -> Result<StorageMultiProof, StateProofError>;
 }
 
-impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
+impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
     for StorageProof<
         'static,
-        DatabaseTrieCursorFactory<&'a TX, A>,
+        DatabaseTrieCursorFactory<&'a TX>,
         DatabaseHashedCursorFactory<&'a TX>,
     >
 {
-    fn from_tx(tx: &'a TX, address: Address) -> Self {
+    fn from_tx(tx: &'a TX, address: Address, is_v2: bool) -> Self {
         Self::new(
-            DatabaseTrieCursorFactory::<_, A>::new(tx),
+            DatabaseTrieCursorFactory::new(tx, is_v2),
             DatabaseHashedCursorFactory::new(tx),
             address,
         )
@@ -116,6 +118,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
         address: Address,
         slot: B256,
         storage: HashedStorage,
+        is_v2: bool,
     ) -> Result<reth_trie::StorageProof, StateProofError> {
         let hashed_address = keccak256(address);
         let prefix_set = storage.construct_prefix_set();
@@ -124,7 +127,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
         StorageProof::new(
-            DatabaseTrieCursorFactory::<_, A>::new(tx),
+            DatabaseTrieCursorFactory::new(tx, is_v2),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
             address,
         )
@@ -137,6 +140,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
         address: Address,
         slots: &[B256],
         storage: HashedStorage,
+        is_v2: bool,
     ) -> Result<StorageMultiProof, StateProofError> {
         let hashed_address = keccak256(address);
         let targets = slots.iter().map(keccak256).collect();
@@ -146,7 +150,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
         StorageProof::new(
-            DatabaseTrieCursorFactory::<_, A>::new(tx),
+            DatabaseTrieCursorFactory::new(tx, is_v2),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
             address,
         )
