@@ -23,7 +23,7 @@ pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
     /// The key type for account trie lookups (e.g., `StoredNibbles` or `PackedStoredNibbles`).
     type AccountKey: Key + From<Nibbles> + Clone;
 
-    /// The subkey type for storage trie DupSort lookups
+    /// The subkey type for storage trie `DupSort` lookups
     /// (e.g., `StoredNibblesSubKey` or `PackedStoredNibblesSubKey`).
     type StorageSubKey: Key + From<Nibbles> + Clone + PartialEq;
 

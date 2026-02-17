@@ -143,9 +143,14 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         db.insert_accounts_and_storages(start_state.clone()).unwrap();
 
         // make first block after genesis have valid state root
-        let (root, updates) = StateRoot::from_tx(db.factory.provider_rw().unwrap().tx_ref())
-            .root_with_updates()
-            .unwrap();
+        let (root, updates) = <StateRoot<
+            reth_trie_db::DatabaseTrieCursorFactory<_, reth_trie_db::LegacyKeyAdapter>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(
+            db.factory.provider_rw().unwrap().tx_ref(),
+        )
+        .root_with_updates()
+        .unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header().clone();

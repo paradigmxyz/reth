@@ -117,7 +117,7 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
     let mut tx = db.tx()?;
     tx.disable_long_read_transaction_safety();
 
-    reth_trie_db::with_adapter!(tool.provider_factory, |A| { do_verify_only::<_, A>(&tx) })
+    reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<_, A>(&tx))
 }
 
 fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
