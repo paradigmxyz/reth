@@ -13,7 +13,6 @@
 # See docs/repo/ci.md for runner setup instructions.
 
 on:
-  pull_request:
   # TODO: Disabled temporarily for https://github.com/CodSpeedHQ/runner/issues/55
   # merge_group:
   push:
@@ -83,7 +82,7 @@ jobs:
           token: ${{ secrets.CODSPEED_TOKEN }}
 
   reth-bench:
-    if: github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, 'derek bench'))
+    if: github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.body == 'derek bench'
     name: reth-bench
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 120
@@ -95,7 +94,6 @@ jobs:
     steps:
       - name: Acknowledge request
         id: ack
-        if: github.event_name == 'issue_comment'
         uses: actions/github-script@v7
         with:
           script: |
@@ -118,7 +116,7 @@ jobs:
         with:
           submodules: true
           fetch-depth: 0
-          ref: ${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/merge', github.event.issue.number) || '' }}
+          ref: ${{ format('refs/pull/{0}/merge', github.event.issue.number) }}
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
@@ -147,7 +145,7 @@ jobs:
           .github/scripts/bench-reth-build.sh main "$MERGE_BASE"
       - name: Fetch or build branch binaries
         run: |
-          BRANCH_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          BRANCH_SHA="${{ github.sha }}"
           .github/scripts/bench-reth-build.sh branch "$BRANCH_SHA"
 
       # System tuning for reproducible benchmarks
@@ -220,7 +218,7 @@ jobs:
         if: success()
         env:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
-          BRANCH_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BRANCH_SHA: ${{ github.sha }}
         run: |
           git fetch origin main --quiet
           # Use the actual PR head commit, not HEAD (which is the merge commit
@@ -271,9 +269,9 @@ jobs:
 
       - name: Push charts
         id: push-charts
-        if: (github.event_name == 'pull_request' || github.event_name == 'issue_comment') && success()
+        if: success()
         run: |
-          PR_NUMBER=${{ github.event.pull_request.number || github.event.issue.number }}
+          PR_NUMBER=${{ github.event.issue.number }}
           RUN_ID=${{ github.run_id }}
           CHART_DIR="pr/${PR_NUMBER}/${RUN_ID}"
 
@@ -293,7 +291,7 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Compare & comment
-        if: (github.event_name == 'pull_request' || github.event_name == 'issue_comment') && success()
+        if: success()
         uses: actions/github-script@v7
         with:
           script: |
@@ -326,7 +324,7 @@ jobs:
 
             comment += chartMarkdown;
 
-            const requestedBy = '${{ github.event.comment.user.login || github.actor }}';
+            const requestedBy = '${{ github.event.comment.user.login }}';
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const body = `cc @${requestedBy}\n\n✅ Benchmark complete! [View run](${runUrl})\n\n${comment}`;
             const ackCommentId = '${{ steps.ack.outputs.comment-id }}';
