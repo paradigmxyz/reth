@@ -337,10 +337,15 @@ where
                 let payload_clone = input.clone();
                 let validator = self.validator.clone();
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                self.payload_processor.executor().spawn_blocking(move || {
-                    let BlockOrPayload::Payload(payload) = payload_clone else { unreachable!() };
-                    let _ = tx.send(validator.convert_payload_to_block(payload));
-                });
+                self.payload_processor.executor().spawn_blocking_named(
+                    "payload-convert",
+                    move || {
+                        let BlockOrPayload::Payload(payload) = payload_clone else {
+                            unreachable!()
+                        };
+                        let _ = tx.send(validator.convert_payload_to_block(payload));
+                    },
+                );
                 Either::Left(rx)
             }
             BlockOrPayload::Block(_) => Either::Right(()),
@@ -768,7 +773,9 @@ where
         let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor.executor().spawn_blocking(move || task_handle.run(receipts_len));
+        self.payload_processor
+            .executor()
+            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
         let transaction_count = input.transaction_count();
         let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));
@@ -979,10 +986,14 @@ where
 
                 let seq_overlay = overlay_factory;
                 let seq_hashed_state = hashed_state.clone();
-                self.payload_processor.executor().spawn_blocking(move || {
-                    let result = Self::compute_state_root_serial(seq_overlay, &seq_hashed_state);
-                    let _ = seq_tx.send(result);
-                });
+                self.payload_processor.executor().spawn_blocking_named(
+                    "state-root-serial",
+                    move || {
+                        let result =
+                            Self::compute_state_root_serial(seq_overlay, &seq_hashed_state);
+                        let _ = seq_tx.send(result);
+                    },
+                );
 
                 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
 
@@ -1473,7 +1484,9 @@ where
         };
 
         // Spawn task that computes trie data asynchronously.
-        self.payload_processor.executor().spawn_blocking(compute_trie_input_task);
+        self.payload_processor
+            .executor()
+            .spawn_blocking_named("trie-input", compute_trie_input_task);
 
         ExecutedBlock::with_deferred_trie_data(
             Arc::new(block),

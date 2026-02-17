@@ -143,7 +143,7 @@ where
         let ctx = self.ctx.clone();
         let span = Span::current();
 
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("prewarm-spawn", move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
 
             let pool_threads = executor.prewarming_pool().current_num_threads();

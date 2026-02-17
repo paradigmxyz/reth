@@ -319,7 +319,7 @@ where
             // spawn multi-proof task
             let parent_span = span.clone();
             let saved_cache = prewarm_handle.saved_cache.clone();
-            self.executor.spawn_blocking(move || {
+            self.executor.spawn_blocking_named("multiproof", move || {
                 let _enter = parent_span.entered();
                 // Build a state provider for the multiproof task
                 let provider = provider_builder.build().expect("failed to build provider");
@@ -535,7 +535,7 @@ where
 
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            self.executor.spawn_blocking(move || {
+            self.executor.spawn_blocking_named("prewarm", move || {
                 let mode = if skip_prewarm {
                     PrewarmMode::Skipped
                 } else if let Some(bal) = bal {
@@ -593,7 +593,7 @@ where
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("sparse-trie", move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 

@@ -33,6 +33,7 @@ use tracing::debug;
 pub mod metrics;
 pub mod runtime;
 pub mod shutdown;
+pub(crate) mod worker_map;
 
 #[cfg(feature = "rayon")]
 pub mod pool;
