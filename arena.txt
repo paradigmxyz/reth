@@ -41,7 +41,8 @@ Work which will be completed before starting this effort:
 
 ### ArenaSparseNodeState
 
-* Two variants: Dirty and Cached
+* Multipl variants:
+    * Revealed { num_leaves: u64 } - used when a node is revealed but its RlpNode was never cached
     * Cached { rlp_node: RlpNode, num_leaves: u64 }
     * Dirty { num_leaves: u64, num_dirty_leaves: u64 }
 * num_leaves tracks total number of revealed leaves underneath a branch, recursively
@@ -54,9 +55,8 @@ Work which will be completed before starting this effort:
     * Maintains ArenaSparseNodeState and value Vec<u8>
 * Branch variant
     * Maintains ArenaSparseNodeState
-    * Introduce `enum Child { Revealed(NodeId), Blinded(B256), None }` which will be used to track the blinded/revealed children of each branch.
+    * Introduce `enum Child { Revealed(NodeId), Blinded(RlpNode) }` which will be used to track the blinded/revealed children of each branch.
     * short_key field tracks the short key of the branch, which would otherwise be logically represented by an extension node. When short_key is non-empty then the branch's path will be the path of the logical extension node.
-    * Tracks cached/revealed RlpNodes of children via a separate SmallVec<4>+bit mask.
     * branch_masks tracks tree and hash masks for TrieUpdates (db persistence). Note that hash_mask is different from the mask tracking RlpNodes of children, though they both can share the Vec
 * Subtrie variant
     * Holds a `Box<ArenaSparseSubtrie>`
