@@ -14,6 +14,13 @@ pub enum StorageLayout {
     V2,
 }
 
+impl StorageLayout {
+    /// Returns `true` if this is the v2 (packed) layout.
+    pub const fn is_v2(self) -> bool {
+        matches!(self, Self::V2)
+    }
+}
+
 /// Storage configuration settings for this node.
 ///
 /// Controls whether this node uses v2 storage layout (static files + `RocksDB` routing)

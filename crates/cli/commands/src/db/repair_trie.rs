@@ -5,7 +5,6 @@ use reth_cli_util::parse_socket_address;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
-    models::StorageLayout,
     transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::DbTool;
@@ -215,7 +214,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
 
     let layout = tool.provider_factory.cached_storage_settings().layout();
 
-    let inconsistent_nodes = if matches!(layout, StorageLayout::V2) {
+    let inconsistent_nodes = if layout.is_v2() {
         do_verify_and_repair::<_, reth_trie_db::PackedKeyAdapter>(&mut provider_rw)?
     } else {
         do_verify_and_repair::<_, reth_trie_db::LegacyKeyAdapter>(&mut provider_rw)?
@@ -284,12 +283,14 @@ where
 
         match output {
             Output::AccountExtra(path, _node) => {
+                // Extra account node in trie, remove it
                 let key: A::AccountKey = path.into();
                 if account_trie_cursor.seek_exact(key)?.is_some() {
                     account_trie_cursor.delete_current()?;
                 }
             }
             Output::StorageExtra(account, path, _node) => {
+                // Extra storage node in trie, remove it
                 let subkey: A::StorageSubKey = path.into();
                 if storage_trie_cursor
                     .seek_by_key_subkey(account, subkey.clone())?
@@ -301,11 +302,13 @@ where
             }
             Output::AccountWrong { path, expected: node, .. } |
             Output::AccountMissing(path, node) => {
+                // Wrong/missing account node value, upsert it
                 let key: A::AccountKey = path.into();
                 account_trie_cursor.upsert(key, &node)?;
             }
             Output::StorageWrong { account, path, expected: node, .. } |
             Output::StorageMissing(account, path, node) => {
+                // Wrong/missing storage node value, upsert it
                 let subkey: A::StorageSubKey = path.into();
                 let entry = A::StorageValue::new(subkey.clone(), node);
                 if storage_trie_cursor

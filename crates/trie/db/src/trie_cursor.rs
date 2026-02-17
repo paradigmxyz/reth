@@ -361,7 +361,7 @@ where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        if matches!(self.layout, StorageLayout::V2) {
+        if self.layout.is_v2() {
             Ok(EitherAccountTrieCursor::Packed(DatabaseAccountTrieCursor::new(
                 self.tx.cursor_read::<PackedAccountsTrie>()?,
             )))
@@ -376,7 +376,7 @@ where
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        if matches!(self.layout, StorageLayout::V2) {
+        if self.layout.is_v2() {
             Ok(EitherStorageTrieCursor::Packed(DatabaseStorageTrieCursor::new(
                 self.tx.cursor_dup_read::<PackedStoragesTrie>()?,
                 hashed_address,

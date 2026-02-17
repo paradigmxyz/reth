@@ -40,7 +40,7 @@ use reth_db_api::{
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
-        BlockNumberAddressRange, ShardedKey, StorageBeforeTx, StorageLayout, StorageSettings,
+        BlockNumberAddressRange, ShardedKey, StorageBeforeTx, StorageSettings,
         StoredBlockBodyIndices,
     },
     table::Table,
@@ -3101,7 +3101,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         let mut num_entries = 0;
 
         let layout = self.cached_storage_settings().layout();
-        if matches!(layout, StorageLayout::V2) {
+        if layout.is_v2() {
             Self::write_account_trie_updates::<reth_trie_db::PackedKeyAdapter>(
                 self.tx_ref(),
                 trie_updates,
@@ -3136,7 +3136,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         let mut storage_tries = storage_tries.collect::<Vec<_>>();
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
         let layout = self.cached_storage_settings().layout();
-        if matches!(layout, StorageLayout::V2) {
+        if layout.is_v2() {
             Self::write_storage_tries::<reth_trie_db::PackedKeyAdapter>(
                 self.tx_ref(),
                 storage_tries,
