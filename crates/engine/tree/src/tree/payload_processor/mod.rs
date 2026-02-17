@@ -461,7 +461,7 @@ where
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
             // to execution in order via `for_each_ordered`.
-            rayon::spawn(move || {
+            self.executor.spawn_blocking(move || {
                 let (transactions, convert) = transactions.into_parts();
                 transactions
                     .into_par_iter()
