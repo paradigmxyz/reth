@@ -182,33 +182,16 @@ impl TypedValueParser for ExtraDataValueParser {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
 
-        // Determine the byte length: if the value is a 0x-prefixed hex string, validate the
-        // decoded byte length; otherwise, validate the raw UTF-8 byte length.
-        let byte_len = if let Some(hex_str) = val.strip_prefix("0x") {
-            if hex_str.len() % 2 != 0 {
-                return Err(clap::Error::raw(
-                    clap::error::ErrorKind::InvalidValue,
-                    "Hex extradata must have an even number of digits",
-                ))
-            }
-            // Reject before decoding to avoid unnecessary allocation
-            let decoded_len = hex_str.len() / 2;
-            if decoded_len > MAXIMUM_EXTRA_DATA_SIZE {
-                return Err(clap::Error::raw(
-                    clap::error::ErrorKind::InvalidValue,
-                    format!(
-                        "Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}-byte limit"
-                    ),
-                ))
-            }
-            // Validate that it's actually valid hex
-            alloy_primitives::hex::decode(hex_str).map_err(|e| {
+        // If the value is a 0x-prefixed hex string, validate it and check the decoded byte
+        // length; otherwise, validate the raw string length.
+        let byte_len = if val.starts_with("0x") {
+            alloy_primitives::hex::check(val).map_err(|e| {
                 clap::Error::raw(
                     clap::error::ErrorKind::InvalidValue,
                     format!("Invalid hex in extradata: {e}"),
                 )
             })?;
-            decoded_len
+            (val.len() - 2) / 2
         } else {
             val.len()
         };
