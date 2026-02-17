@@ -24,10 +24,8 @@ pub trait PayloadBuilderConfig {
     /// Otherwise, the raw UTF-8 bytes of the string are used.
     fn extra_data_bytes(&self) -> Bytes {
         let data = self.extra_data();
-        if let Some(hex_str) = data.strip_prefix("0x") {
-            if let Ok(decoded) = alloy_primitives::hex::decode(hex_str) {
-                return decoded.into();
-            }
+        if let Some(Ok(decoded)) = data.strip_prefix("0x").map(alloy_primitives::hex::decode) {
+            return decoded.into();
         }
         data.as_bytes().to_vec().into()
     }
