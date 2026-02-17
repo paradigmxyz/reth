@@ -1340,12 +1340,13 @@ mod tests {
         let _full_path_1 = leaf_key([0x1], 64);
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
+        // Leaf key is 63 nibbles (suffix after 1-nibble node path)
         let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            Nibbles::default(),
+            leaf_key([], 63),
             leaf_value.clone(),
         )));
         let leaf_2 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            Nibbles::default(),
+            leaf_key([], 63),
             leaf_value.clone(),
         )));
 
@@ -1407,11 +1408,11 @@ mod tests {
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            Nibbles::default(),
+            leaf_key([], 63),
             leaf_value.clone(),
         )));
         let leaf_2 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            Nibbles::default(),
+            leaf_key([], 63),
             leaf_value.clone(),
         )));
 
@@ -1487,8 +1488,8 @@ mod tests {
         let full_path_0 = leaf_key([0x0], 64);
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), leaf_value.clone()));
-        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), leaf_value.clone()));
+        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
+        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
 
         let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
             key: Nibbles::default(),
@@ -1545,10 +1546,8 @@ mod tests {
         let full_path_0 = leaf_key([0x0], 64);
 
         let storage_value: Vec<u8> = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
-        let leaf_1_node =
-            TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), storage_value.clone()));
-        let leaf_2_node =
-            TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), storage_value.clone()));
+        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.clone()));
+        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.clone()));
 
         let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
             key: Nibbles::default(),

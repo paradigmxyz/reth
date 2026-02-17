@@ -8986,13 +8986,11 @@ mod tests {
         let state_mask = TrieMask::new(0b0000_0110); // bits 1 and 2 set
         let stack = vec![leaf1_rlp, leaf2_rlp];
 
-        // RLP encode the extension+branch to get its RlpNode representation
-        let ext_branch =
-            BranchNodeV2::new(Nibbles::from_nibbles(ext_key), stack.clone(), state_mask, None);
-        let branch_rlp = RlpNode::from_rlp(&alloy_rlp::encode(&ext_branch));
+        // First encode the bare branch (empty key) to get its RlpNode
+        let bare_branch = BranchNodeV2::new(Nibbles::new(), stack.clone(), state_mask, None);
+        let branch_rlp = RlpNode::from_rlp(&alloy_rlp::encode(&bare_branch));
 
         // Create the combined extension+branch node as the root.
-        // Since branch is < 32 bytes, it will be embedded directly.
         let root_node = TrieNodeV2::Branch(BranchNodeV2::new(
             Nibbles::from_nibbles(ext_key),
             stack.clone(),
