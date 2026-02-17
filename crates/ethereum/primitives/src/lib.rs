@@ -12,10 +12,14 @@
 #[cfg(test)]
 extern crate alloc;
 
+#[cfg(all(not(test), feature = "serde"))]
+use alloy_serde as _;
 #[cfg(all(not(test), feature = "arbitrary"))]
 use arbitrary as _;
 #[cfg(all(not(test), feature = "reth-codec"))]
 use reth_codecs as _;
+#[cfg(all(not(test), feature = "serde-bincode-compat"))]
+use serde_with as _;
 
 mod receipt;
 pub use receipt::*;
