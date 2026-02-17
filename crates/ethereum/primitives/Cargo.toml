@@ -51,7 +51,9 @@ test-utils = [
 std = [
     "alloy-consensus/std",
     "alloy-primitives/std",
+    "alloy-rlp/std",
     "reth-primitives-traits/std",
+    "reth-zstd-compressors/std",
     "serde?/std",
     "alloy-eips/std",
     "derive_more/std",
