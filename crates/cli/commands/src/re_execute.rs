@@ -60,11 +60,15 @@ impl<C: ChainSpecParser> Command<C> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
     /// Execute `re-execute` command
-    pub async fn execute<N>(self, components: impl CliComponentsBuilder<N>) -> eyre::Result<()>
+    pub async fn execute<N>(
+        self,
+        components: impl CliComponentsBuilder<N>,
+        runtime: reth_tasks::Runtime,
+    ) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO, runtime)?;
 
         let components = components(provider_factory.chain_spec());
 

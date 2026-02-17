@@ -147,8 +147,7 @@ where
             blocking_task_pool: None,
             fee_history_cache_config: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
-            task_spawner: Runtime::with_existing_handle(tokio::runtime::Handle::current())
-                .expect("called outside tokio runtime"),
+            task_spawner: Runtime::test(),
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),

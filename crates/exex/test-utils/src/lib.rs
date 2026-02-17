@@ -266,7 +266,7 @@ pub async fn test_exex_context_with_chain_spec(
     )
     .await?;
     let network = network_manager.handle().clone();
-    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::test();
     let task_executor = runtime.clone();
     runtime.spawn_task(network_manager);
 

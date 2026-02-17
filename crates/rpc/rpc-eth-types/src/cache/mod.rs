@@ -113,12 +113,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
     where
         Provider: BlockReader<Block = N::Block, Receipt = N::Receipt> + Clone + Unpin + 'static,
     {
-        Self::spawn_with(
-            provider,
-            config,
-            Runtime::with_existing_handle(tokio::runtime::Handle::current())
-                .expect("failed to create Runtime"),
-        )
+        Self::spawn_with(provider, config, Runtime::test())
     }
 
     /// Creates a new async LRU backed cache service task and spawns it to a new task via the given

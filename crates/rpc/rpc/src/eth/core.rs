@@ -168,8 +168,7 @@ where
             eth_proof_window,
             blocking_task_pool,
             fee_history_cache,
-            Runtime::with_existing_handle(tokio::runtime::Handle::current())
-                .expect("called outside tokio runtime"),
+            Runtime::test(),
             proof_permits,
             rpc_converter,
             (),

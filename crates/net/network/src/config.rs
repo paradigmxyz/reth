@@ -691,11 +691,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             chain_id,
             block_import: block_import.unwrap_or_else(|| Box::<ProofOfStakeBlockImport>::default()),
             network_mode,
-            executor: executor.unwrap_or_else(|| match tokio::runtime::Handle::try_current() {
-                Ok(handle) => Runtime::with_existing_handle(handle)
-                    .expect("failed to create runtime with existing handle"),
-                Err(_) => Runtime::test(),
-            }),
+            executor: executor.unwrap_or_else(Runtime::test),
             status,
             hello_message,
             extra_protocols,

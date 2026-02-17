@@ -45,11 +45,7 @@ impl<Eth> EthPubSub<Eth> {
     ///
     /// Subscription tasks are spawned via [`tokio::task::spawn`]
     pub fn new(eth_api: Eth) -> Self {
-        Self::with_spawner(
-            eth_api,
-            Runtime::with_existing_handle(tokio::runtime::Handle::current())
-                .expect("called outside tokio runtime"),
-        )
+        Self::with_spawner(eth_api, Runtime::test())
     }
 
     /// Creates a new, shareable instance.
