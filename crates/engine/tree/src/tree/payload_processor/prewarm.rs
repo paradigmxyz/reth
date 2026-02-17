@@ -563,7 +563,7 @@ where
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 "prewarm tx",
-                index,
+                i=index,
             )
             .entered();
 

@@ -525,7 +525,7 @@ where
         let span = debug_span!(
             target: "trie::proof_task",
             "V2 Storage proof calculation",
-            targets = ?targets.len(),
+            n = %targets.len(),
         );
         let _span_guard = span.enter();
 
