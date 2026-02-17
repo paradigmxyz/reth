@@ -158,7 +158,7 @@ def _add_regression(ax, x, y, color, label):
     m, b = np.polyfit(xa, ya, 1)
     x_range = np.linspace(xa.min(), xa.max(), 100)
     ax.plot(x_range, m * x_range + b, color=color, linewidth=1.5, alpha=0.8,
-            label=f"{label} ({m:.3f} ms/Mgas)")
+            label=label)
 
 
 def plot_gas_vs_latency(
