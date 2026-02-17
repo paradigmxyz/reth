@@ -126,6 +126,9 @@ jobs:
       # Verify all required tools are available
       - name: Check dependencies
         run: |
+          export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
           for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
