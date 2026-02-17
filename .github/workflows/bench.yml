@@ -5,12 +5,6 @@
 #
 # It runs the main (baseline) binary and the branch (candidate) binary on the
 # same block range (snapshot recovered between runs) to compare performance.
-#
-# The self-hosted runner must have:
-#   - schelk initialised (virgin + scratch volumes, ramdisk)
-#   - The BENCH_RPC_URL secret set to a reference RPC endpoint
-#
-# See docs/repo/ci.md for runner setup instructions.
 
 on:
   # TODO: Disabled temporarily for https://github.com/CodSpeedHQ/runner/issues/55
@@ -404,5 +398,3 @@ jobs:
         if: always()
         run: |
           sudo systemctl start irqbalance cron atd 2>/dev/null || true
-
-
