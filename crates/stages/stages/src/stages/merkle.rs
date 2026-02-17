@@ -16,8 +16,14 @@ use reth_stages_api::{
     StageCheckpoint, StageError, StageId, StorageRootMerkleCheckpoint, UnwindInput, UnwindOutput,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
+use reth_trie_db::DatabaseStateRoot;
 
 use std::fmt::Debug;
+
+type DbStateRoot<'a, TX> = StateRoot<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
 use tracing::*;
 
 // TODO: automate the process outlined below so the user can just send in a debugging package
@@ -242,10 +248,7 @@ where
 
             let tx = provider.tx_ref();
             let layout = provider.cached_storage_settings().layout();
-            let progress = <StateRoot<
-                reth_trie_db::DatabaseTrieCursorFactory<_>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(tx, layout)
+            let progress = DbStateRoot::from_tx(tx, layout)
             .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
             .root_with_progress()
             .map_err(|e| {
@@ -318,13 +321,8 @@ where
                     chunk_range = ?chunk_range,
                     "Processing chunk"
                 );
-                let (root, updates) = <StateRoot<
-                    reth_trie_db::DatabaseTrieCursorFactory<_>,
-                    reth_trie_db::DatabaseHashedCursorFactory<_>,
-                > as reth_trie_db::DatabaseStateRoot<_>>::incremental_root_with_updates(
-                    provider,
-                    chunk_range,
-                )
+                let (root, updates) =
+                    DbStateRoot::incremental_root_with_updates(provider, chunk_range)
                 .map_err(|e| {
                     error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                     StageError::Fatal(Box::new(e))
@@ -401,13 +399,8 @@ where
         if range.is_empty() {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
-            let (block_root, updates) = <StateRoot<
-                reth_trie_db::DatabaseTrieCursorFactory<_>,
-                reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as reth_trie_db::DatabaseStateRoot<_>>::incremental_root_with_updates(
-                provider, range,
-            )
-            .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            let (block_root, updates) = DbStateRoot::incremental_root_with_updates(provider, range)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             // Validate the calculated state root
             let target = provider
@@ -605,10 +598,7 @@ mod tests {
         let actual_root = runner
             .db
             .query_with_provider(|provider| {
-                Ok(<StateRoot<
-                    reth_trie_db::DatabaseTrieCursorFactory<_>,
-                    reth_trie_db::DatabaseHashedCursorFactory<_>,
-                > as reth_trie_db::DatabaseStateRoot<_>>::incremental_root_with_updates(
+                Ok(DbStateRoot::incremental_root_with_updates(
                     &provider,
                     stage_progress + 1..=previous_stage,
                 ))

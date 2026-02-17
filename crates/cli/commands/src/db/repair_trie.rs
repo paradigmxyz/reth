@@ -309,6 +309,8 @@ where
             Output::StorageWrong { account, path, expected: node, .. } |
             Output::StorageMissing(account, path, node) => {
                 // Wrong/missing storage node value, upsert it
+                // (We can't just use `upsert` method with a dup cursor, it's not properly
+                // supported)
                 let subkey: A::StorageSubKey = path.into();
                 let entry = A::StorageValue::new(subkey.clone(), node);
                 if storage_trie_cursor
