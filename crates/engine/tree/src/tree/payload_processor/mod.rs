@@ -445,6 +445,8 @@ where
                 "using sequential sig recovery for small block"
             );
             self.executor.spawn_blocking(move || {
+                let _enter =
+                    debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
                 let (transactions, convert) = transactions.into_parts();
                 for (idx, tx) in transactions.into_iter().enumerate() {
                     let tx = convert.convert(tx);
@@ -461,7 +463,9 @@ where
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
             // to execution in order via `for_each_ordered`.
-            rayon::spawn(move || {
+            self.executor.spawn_blocking(move || {
+                let _enter =
+                    debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
                 let (transactions, convert) = transactions.into_parts();
                 transactions
                     .into_par_iter()

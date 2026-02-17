@@ -10354,6 +10354,7 @@ dependencies = [
  "crossbeam-utils",
  "futures-util",
  "metrics",
+ "parking_lot",
  "pin-project",
  "quanta",
  "rayon",
