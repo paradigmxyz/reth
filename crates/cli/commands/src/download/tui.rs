@@ -49,8 +49,8 @@ impl SelectorApp {
             .filter(|ty| manifest.component(*ty).is_some())
             .collect();
 
-        // State is always selected by default
-        let selected = available.iter().map(|ty| ty.is_required()).collect();
+        // Minimal set is selected by default (state + headers + txs + changesets)
+        let selected = available.iter().map(|ty| ty.is_minimal()).collect();
 
         let mut list_state = ListState::default();
         list_state.select(Some(0));

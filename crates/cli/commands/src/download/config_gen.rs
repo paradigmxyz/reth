@@ -4,12 +4,20 @@ use reth_prune_types::PruneMode;
 use std::path::Path;
 use tracing::info;
 
+/// Minimum blocks to keep for receipts, matching `--minimal` prune settings.
+const MINIMUM_RECEIPTS_DISTANCE: u64 = 64;
+
+/// Minimum blocks to keep for history/bodies, matching `--minimal` prune settings
+/// (`MINIMUM_UNWIND_SAFE_DISTANCE`).
+const MINIMUM_HISTORY_DISTANCE: u64 = 10064;
+
 /// Generates an appropriate [`Config`] based on which snapshot components were downloaded.
 ///
-/// If a data category wasn't downloaded, the corresponding prune segments are set to avoid
-/// indexing or serving that data. Transaction lookup and sender recovery are pruned whenever
-/// transaction bodies are not present since the lookup index is useless without the underlying
-/// data.
+/// The generated prune config mirrors reth's `--minimal` prune settings for components
+/// that weren't downloaded:
+/// - Missing transactions: prune sender recovery, transaction lookup, and bodies history
+/// - Missing receipts: prune receipts to last 64 blocks
+/// - Missing changesets: prune account/storage history to last 10,064 blocks
 pub fn config_for_components(selected: &[SnapshotComponentType]) -> Config {
     let has_txs = selected.contains(&SnapshotComponentType::Transactions);
     let has_receipts = selected.contains(&SnapshotComponentType::Receipts);
@@ -25,15 +33,16 @@ pub fn config_for_components(selected: &[SnapshotComponentType]) -> Config {
         if !has_txs {
             prune.segments.transaction_lookup = Some(PruneMode::Full);
             prune.segments.sender_recovery = Some(PruneMode::Full);
+            prune.segments.bodies_history = Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE));
         }
 
         if !has_receipts {
-            prune.segments.receipts = Some(PruneMode::Full);
+            prune.segments.receipts = Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE));
         }
 
         if !has_changesets {
-            prune.segments.account_history = Some(PruneMode::Distance(10064));
-            prune.segments.storage_history = Some(PruneMode::Distance(10064));
+            prune.segments.account_history = Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE));
+            prune.segments.storage_history = Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE));
         }
 
         config.prune = prune;
@@ -86,15 +95,16 @@ pub fn describe_prune_config(selected: &[SnapshotComponentType]) -> Vec<String> 
     if !has_txs {
         lines.push("transaction_lookup = \"full\"".to_string());
         lines.push("sender_recovery = \"full\"".to_string());
+        lines.push(format!("bodies_history = {{ distance = {MINIMUM_HISTORY_DISTANCE} }}"));
     }
 
     if !has_receipts {
-        lines.push("receipts = \"full\"".to_string());
+        lines.push(format!("receipts = {{ distance = {MINIMUM_RECEIPTS_DISTANCE} }}"));
     }
 
     if !has_changesets {
-        lines.push("account_history = { distance = 10064 }".to_string());
-        lines.push("storage_history = { distance = 10064 }".to_string());
+        lines.push(format!("account_history = {{ distance = {MINIMUM_HISTORY_DISTANCE} }}"));
+        lines.push(format!("storage_history = {{ distance = {MINIMUM_HISTORY_DISTANCE} }}"));
     }
 
     lines
@@ -111,9 +121,40 @@ mod tests {
 
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.receipts, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.account_history, Some(PruneMode::Distance(10064)));
-        assert_eq!(config.prune.segments.storage_history, Some(PruneMode::Distance(10064)));
+        assert_eq!(
+            config.prune.segments.bodies_history,
+            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
+        );
+        assert_eq!(
+            config.prune.segments.receipts,
+            Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE))
+        );
+        assert_eq!(
+            config.prune.segments.account_history,
+            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
+        );
+        assert_eq!(
+            config.prune.segments.storage_history,
+            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
+        );
+    }
+
+    #[test]
+    fn minimal_components_mirrors_minimal_flag() {
+        let selected: Vec<_> =
+            SnapshotComponentType::ALL.iter().copied().filter(|ty| ty.is_minimal()).collect();
+        let config = config_for_components(&selected);
+
+        // Minimal downloads txs + changesets, so only receipts should be pruned
+        assert_eq!(config.prune.segments.transaction_lookup, None);
+        assert_eq!(config.prune.segments.sender_recovery, None);
+        assert_eq!(config.prune.segments.bodies_history, None);
+        assert_eq!(
+            config.prune.segments.receipts,
+            Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE))
+        );
+        assert_eq!(config.prune.segments.account_history, None);
+        assert_eq!(config.prune.segments.storage_history, None);
     }
 
     #[test]
@@ -123,6 +164,7 @@ mod tests {
 
         assert_eq!(config.prune.segments.transaction_lookup, None);
         assert_eq!(config.prune.segments.sender_recovery, None);
+        assert_eq!(config.prune.segments.bodies_history, None);
         assert_eq!(config.prune.segments.receipts, None);
         assert_eq!(config.prune.segments.account_history, None);
         assert_eq!(config.prune.segments.storage_history, None);
@@ -135,8 +177,15 @@ mod tests {
 
         assert_eq!(config.prune.segments.transaction_lookup, None);
         assert_eq!(config.prune.segments.sender_recovery, None);
-        assert_eq!(config.prune.segments.receipts, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.account_history, Some(PruneMode::Distance(10064)));
+        assert_eq!(config.prune.segments.bodies_history, None);
+        assert_eq!(
+            config.prune.segments.receipts,
+            Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE))
+        );
+        assert_eq!(
+            config.prune.segments.account_history,
+            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
+        );
     }
 
     #[test]
@@ -153,7 +202,10 @@ mod tests {
         let selected = vec![SnapshotComponentType::State];
         let desc = describe_prune_config(&selected);
         assert!(desc.contains(&"transaction_lookup = \"full\"".to_string()));
-        assert!(desc.contains(&"receipts = \"full\"".to_string()));
+        assert!(desc.contains(&format!("receipts = {{ distance = {MINIMUM_RECEIPTS_DISTANCE} }}")));
+        assert!(
+            desc.contains(&format!("bodies_history = {{ distance = {MINIMUM_HISTORY_DISTANCE} }}"))
+        );
     }
 
     #[test]
