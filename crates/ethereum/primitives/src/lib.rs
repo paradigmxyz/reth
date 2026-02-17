@@ -9,7 +9,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate alloc;
+// Feature-only dep: activated by `reth-codec` feature for downstream consumers.
+#[cfg(feature = "reth-codec")]
+use reth_codecs as _;
 
 mod receipt;
 pub use receipt::*;
@@ -35,8 +37,7 @@ pub type PooledTransactionVariant =
 /// Bincode-compatible serde implementations.
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {
-    pub use super::receipt::serde_bincode_compat::*;
-    pub use alloy_consensus::serde_bincode_compat::transaction::*;
+    pub use alloy_consensus::serde_bincode_compat::{transaction::*, EthereumReceipt as Receipt};
 }
 
 /// Type alias for the ethereum block

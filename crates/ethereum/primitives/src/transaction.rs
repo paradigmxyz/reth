@@ -1,6 +1,8 @@
 //! This file contains the legacy reth `TransactionSigned` type that has been replaced with
 //! alloy's TxEnvelope To test for consistency this is kept
 
+extern crate alloc;
+
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
