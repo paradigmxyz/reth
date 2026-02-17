@@ -92,6 +92,25 @@ impl ProofTrieNodeRecord {
             masks: node.masks.map(|masks| (masks.hash_mask.get(), masks.tree_mask.get())),
         }
     }
+
+    /// Creates a record from a [`reth_trie_common::ProofTrieNodeV2`].
+    pub fn from_proof_trie_node_v2(node: &reth_trie_common::ProofTrieNodeV2) -> Self {
+        use reth_trie_common::TrieNodeV2;
+        let trie_node = match &node.node {
+            TrieNodeV2::EmptyRoot => TrieNode::EmptyRoot,
+            TrieNodeV2::Leaf(leaf) => TrieNode::Leaf(leaf.clone()),
+            TrieNodeV2::Extension(ext) => TrieNode::Extension(ext.clone()),
+            TrieNodeV2::Branch(branch) => TrieNode::Branch(alloy_trie::nodes::BranchNode::new(
+                branch.stack.clone(),
+                branch.state_mask,
+            )),
+        };
+        Self {
+            path: node.path,
+            node: TrieNodeRecord(trie_node),
+            masks: node.masks.map(|masks| (masks.hash_mask.get(), masks.tree_mask.get())),
+        }
+    }
 }
 
 /// A newtype wrapper around [`TrieNode`] with custom serialization that hex-encodes byte fields

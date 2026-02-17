@@ -191,7 +191,7 @@ impl SparseTrie for ParallelSparseTrie {
 
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.record(RecordedOp::RevealNodes {
-            nodes: nodes.iter().map(ProofTrieNodeRecord::from_proof_trie_node).collect(),
+            nodes: nodes.iter().map(ProofTrieNodeRecord::from_proof_trie_node_v2).collect(),
         });
 
         // Sort nodes first by their subtrie, and secondarily by their path. This allows for
