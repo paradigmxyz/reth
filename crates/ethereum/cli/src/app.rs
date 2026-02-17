@@ -144,6 +144,8 @@ where
     N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
     SubCmd: ExtendedCommand + Subcommand + fmt::Debug,
 {
+    let rt = runner.runtime();
+
     match cli.command {
         Commands::Node(command) => {
             // Validate RPC modules using the configured validator
@@ -169,13 +171,13 @@ where
                 command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
             })
         }
-        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>(rt)),
+        Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>(rt)),
         Commands::Import(command) => {
-            runner.run_blocking_until_ctrl_c(command.execute::<N, _>(components))
+            runner.run_blocking_until_ctrl_c(command.execute::<N, _>(components, rt))
         }
-        Commands::ImportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::ExportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::ImportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>(rt)),
+        Commands::ExportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>(rt)),
         Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::Db(command) => {
             runner.run_blocking_command_until_exit(|ctx| command.execute::<N>(ctx))
@@ -189,7 +191,9 @@ where
         Commands::Prune(command) => runner.run_command_until_exit(|ctx| command.execute::<N>(ctx)),
         #[cfg(feature = "dev")]
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::ReExecute(command) => runner.run_until_ctrl_c(command.execute::<N>(components)),
+        Commands::ReExecute(command) => {
+            runner.run_until_ctrl_c(command.execute::<N>(components, rt))
+        }
         Commands::Ext(command) => command.execute(runner),
     }
 }
