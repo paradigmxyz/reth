@@ -1,9 +1,9 @@
-use crate::download::manifest::SnapshotComponentType;
+use crate::download::manifest::{ComponentSelection, SnapshotComponentType};
 use reth_config::config::{Config, PruneConfig};
 use reth_db::{tables, Database, DatabaseEnv};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 use tracing::info;
 
 /// Minimum blocks to keep for receipts, matching `--minimal` prune settings.
@@ -172,6 +172,123 @@ pub fn describe_prune_config(selected: &[SnapshotComponentType]) -> Vec<String> 
     lines
 }
 
+/// Generates a [`Config`] from per-component range selections.
+///
+/// Each component's selection directly maps to prune settings:
+/// - `All`: no pruning for that data category
+/// - `Distance(n)`: prune to keep last `n` blocks
+/// - `None`: fully prune (or minimal distance for segments that require it)
+pub fn config_for_selections(
+    selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
+) -> Config {
+    let tx_sel = selections
+        .get(&SnapshotComponentType::Transactions)
+        .copied()
+        .unwrap_or(ComponentSelection::None);
+    let receipt_sel = selections
+        .get(&SnapshotComponentType::Receipts)
+        .copied()
+        .unwrap_or(ComponentSelection::None);
+    let account_cs_sel = selections
+        .get(&SnapshotComponentType::AccountChangesets)
+        .copied()
+        .unwrap_or(ComponentSelection::None);
+    let storage_cs_sel = selections
+        .get(&SnapshotComponentType::StorageChangesets)
+        .copied()
+        .unwrap_or(ComponentSelection::None);
+
+    let mut config = Config::default();
+
+    let tx_mode = selection_to_prune_mode(tx_sel);
+    let receipt_mode = selection_to_prune_mode(receipt_sel);
+    let account_cs_mode = selection_to_prune_mode(account_cs_sel);
+    let storage_cs_mode = selection_to_prune_mode(storage_cs_sel);
+
+    if tx_mode.is_some() ||
+        receipt_mode.is_some() ||
+        account_cs_mode.is_some() ||
+        storage_cs_mode.is_some()
+    {
+        let mut prune = PruneConfig::default();
+
+        if let Some(mode) = tx_mode {
+            prune.segments.sender_recovery = Some(mode);
+            prune.segments.transaction_lookup = Some(mode);
+            prune.segments.bodies_history = Some(mode);
+        }
+
+        if let Some(mode) = receipt_mode {
+            prune.segments.receipts = Some(mode);
+        }
+
+        if let Some(mode) = account_cs_mode {
+            prune.segments.account_history = Some(mode);
+        }
+
+        if let Some(mode) = storage_cs_mode {
+            prune.segments.storage_history = Some(mode);
+        }
+
+        config.prune = prune;
+    }
+
+    config
+}
+
+/// Converts a [`ComponentSelection`] to an optional [`PruneMode`].
+fn selection_to_prune_mode(sel: ComponentSelection) -> Option<PruneMode> {
+    match sel {
+        ComponentSelection::All => None,
+        ComponentSelection::Distance(d) => Some(PruneMode::Distance(d)),
+        ComponentSelection::None => Some(PruneMode::Full),
+    }
+}
+
+/// Human-readable prune config summary from per-component selections.
+pub fn describe_prune_config_from_selections(
+    selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
+) -> Vec<String> {
+    let config = config_for_selections(selections);
+    let segments = &config.prune.segments;
+
+    // Check if everything is default (no pruning)
+    if *segments == Default::default() {
+        return vec!["Full archive node — no pruning configured".to_string()];
+    }
+
+    let mut lines = vec!["[prune.segments]".to_string()];
+
+    if let Some(mode) = &segments.sender_recovery {
+        lines.push(format!("sender_recovery = {}", format_mode(mode)));
+    }
+    if let Some(mode) = &segments.transaction_lookup {
+        lines.push(format!("transaction_lookup = {}", format_mode(mode)));
+    }
+    if let Some(mode) = &segments.bodies_history {
+        lines.push(format!("bodies_history = {}", format_mode(mode)));
+    }
+    if let Some(mode) = &segments.receipts {
+        lines.push(format!("receipts = {}", format_mode(mode)));
+    }
+    if let Some(mode) = &segments.account_history {
+        lines.push(format!("account_history = {}", format_mode(mode)));
+    }
+    if let Some(mode) = &segments.storage_history {
+        lines.push(format!("storage_history = {}", format_mode(mode)));
+    }
+
+    lines
+}
+
+fn format_mode(mode: &PruneMode) -> String {
+    match mode {
+        PruneMode::Full => "\"full\"".to_string(),
+        PruneMode::Distance(d) => format!("{{ distance = {d} }}"),
+        PruneMode::Before(b) => format!("{{ before = {b} }}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +444,81 @@ mod tests {
                 "expected no checkpoint for {segment}"
             );
         }
+    }
+
+    #[test]
+    fn selections_all_no_pruning() {
+        let mut selections = BTreeMap::new();
+        for ty in SnapshotComponentType::ALL {
+            selections.insert(ty, ComponentSelection::All);
+        }
+        let config = config_for_selections(&selections);
+        assert_eq!(config.prune.segments.transaction_lookup, None);
+        assert_eq!(config.prune.segments.sender_recovery, None);
+        assert_eq!(config.prune.segments.receipts, None);
+        assert_eq!(config.prune.segments.account_history, None);
+        assert_eq!(config.prune.segments.storage_history, None);
+    }
+
+    #[test]
+    fn selections_none_prunes_full() {
+        let mut selections = BTreeMap::new();
+        selections.insert(SnapshotComponentType::State, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
+        // Everything else omitted → defaults to None → Full prune
+        let config = config_for_selections(&selections);
+        assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
+        assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
+        assert_eq!(config.prune.segments.bodies_history, Some(PruneMode::Full));
+        assert_eq!(config.prune.segments.receipts, Some(PruneMode::Full));
+        assert_eq!(config.prune.segments.account_history, Some(PruneMode::Full));
+        assert_eq!(config.prune.segments.storage_history, Some(PruneMode::Full));
+    }
+
+    #[test]
+    fn selections_distance_maps_to_prune_distance() {
+        let mut selections = BTreeMap::new();
+        selections.insert(SnapshotComponentType::State, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
+        selections
+            .insert(SnapshotComponentType::Transactions, ComponentSelection::Distance(10_064));
+        selections.insert(SnapshotComponentType::Receipts, ComponentSelection::None);
+        selections
+            .insert(SnapshotComponentType::AccountChangesets, ComponentSelection::Distance(10_064));
+        selections
+            .insert(SnapshotComponentType::StorageChangesets, ComponentSelection::Distance(10_064));
+        let config = config_for_selections(&selections);
+
+        assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Distance(10_064)));
+        assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Distance(10_064)));
+        assert_eq!(config.prune.segments.bodies_history, Some(PruneMode::Distance(10_064)));
+        assert_eq!(config.prune.segments.receipts, Some(PruneMode::Full));
+        assert_eq!(config.prune.segments.account_history, Some(PruneMode::Distance(10_064)));
+        assert_eq!(config.prune.segments.storage_history, Some(PruneMode::Distance(10_064)));
+    }
+
+    #[test]
+    fn describe_selections_all_archive() {
+        let mut selections = BTreeMap::new();
+        for ty in SnapshotComponentType::ALL {
+            selections.insert(ty, ComponentSelection::All);
+        }
+        let desc = describe_prune_config_from_selections(&selections);
+        assert_eq!(desc.len(), 1);
+        assert!(desc[0].contains("no pruning"));
+    }
+
+    #[test]
+    fn describe_selections_with_distances() {
+        let mut selections = BTreeMap::new();
+        selections.insert(SnapshotComponentType::State, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
+        selections
+            .insert(SnapshotComponentType::Transactions, ComponentSelection::Distance(10_064));
+        selections.insert(SnapshotComponentType::Receipts, ComponentSelection::None);
+        let desc = describe_prune_config_from_selections(&selections);
+        assert!(desc.contains(&"[prune.segments]".to_string()));
+        assert!(desc.contains(&"sender_recovery = { distance = 10064 }".to_string()));
+        assert!(desc.contains(&"receipts = \"full\"".to_string()));
     }
 }
