@@ -50,6 +50,8 @@ sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" node \
   --ws \
   --ws.api all \
   --authrpc.port 8551 \
+  --disable-discovery \
+  --no-persist-peers \
   > "$LOG" 2>&1 &
 
 RETH_PID=$!

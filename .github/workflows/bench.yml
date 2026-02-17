@@ -179,7 +179,7 @@ jobs:
             echo 0 | sudo tee "$irq" 2>/dev/null || true
           done
           # Stop noisy background services
-          sudo systemctl stop cron atd unattended-upgrades snapd 2>/dev/null || true
+          sudo systemctl stop irqbalance cron atd unattended-upgrades snapd 2>/dev/null || true
           # Log environment for reproducibility
           echo "=== Benchmark environment ==="
           uname -r
@@ -355,5 +355,10 @@ jobs:
           path: |
             /tmp/reth-bench-node-baseline.log
             /tmp/reth-bench-node-branch.log
+
+      - name: Restore system settings
+        if: always()
+        run: |
+          sudo systemctl start irqbalance cron atd 2>/dev/null || true
 
 
