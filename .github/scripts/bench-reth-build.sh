@@ -2,15 +2,15 @@
 #
 # Builds (or fetches from cache) reth binaries for benchmarking.
 #
-# Usage: bench-reth-build.sh <main|branch> <commit> [branch-sha]
+# Usage: bench-reth-build.sh <baseline|feature> <commit> [branch-sha]
 #
-#   main   — build/fetch the baseline binary at <commit> (merge-base)
-#   branch — build/fetch the candidate binary + reth-bench at <commit>
-#            optional branch-sha is the PR head commit for cache key
+#   baseline — build/fetch the baseline binary at <commit> (merge-base)
+#   feature  — build/fetch the candidate binary + reth-bench at <commit>
+#              optional branch-sha is the PR head commit for cache key
 #
 # Outputs:
-#   main:   target/profiling-baseline/reth
-#   branch: target/profiling/reth, reth-bench installed to cargo bin
+#   baseline: target/profiling-baseline/reth
+#   feature:  target/profiling/reth, reth-bench installed to cargo bin
 #
 # Required: mc (MinIO client) configured at /home/ubuntu/.mc
 set -euo pipefail
@@ -20,16 +20,16 @@ MODE="$1"
 COMMIT="$2"
 
 case "$MODE" in
-  main)
+  baseline|main)
     BUCKET="minio/reth-binaries/${COMMIT}"
     mkdir -p target/profiling-baseline
 
     if $MC stat "${BUCKET}/reth" &>/dev/null; then
-      echo "Cache hit for main (${COMMIT}), downloading binary..."
+      echo "Cache hit for baseline (${COMMIT}), downloading binary..."
       $MC cp "${BUCKET}/reth" target/profiling-baseline/reth
       chmod +x target/profiling-baseline/reth
     else
-      echo "Cache miss for main (${COMMIT}), building from source..."
+      echo "Cache miss for baseline (${COMMIT}), building from source..."
       CURRENT_REF=$(git rev-parse HEAD)
       git checkout "${COMMIT}"
       cargo build --profile profiling --bin reth
@@ -39,7 +39,7 @@ case "$MODE" in
     fi
     ;;
 
-  branch)
+  feature|branch)
     BRANCH_SHA="${3:-$COMMIT}"
     BUCKET="minio/reth-binaries/${BRANCH_SHA}"
 
@@ -60,7 +60,7 @@ case "$MODE" in
     ;;
 
   *)
-    echo "Usage: $0 <main|branch> <commit> [branch-sha]"
+    echo "Usage: $0 <baseline|feature> <commit> [branch-sha]"
     exit 1
     ;;
 esac
