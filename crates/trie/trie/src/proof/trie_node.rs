@@ -85,7 +85,7 @@ where
 
         trace!(
             target: "trie::proof::blinded",
-            elapsed = ?start.unwrap().elapsed(),
+            elapsed = ?start.map(|started| started.elapsed()),
             ?path,
             ?node,
             ?tree_mask,
@@ -139,7 +139,7 @@ where
         trace!(
             target: "trie::proof::blinded",
             account = ?self.account,
-            elapsed = ?start.unwrap().elapsed(),
+            elapsed = ?start.map(|started| started.elapsed()),
             ?path,
             ?node,
             ?tree_mask,
