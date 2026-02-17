@@ -406,10 +406,10 @@ impl Command {
             let progress = format!("{}/{}", i + 1, payloads.len());
             info!(target: "reth-bench", progress, %combined_result);
 
-            if let Some(scraper) = metrics_scraper.as_mut() {
-                if let Err(err) = scraper.scrape_after_block(block_number).await {
-                    tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
-                }
+            if let Some(scraper) = metrics_scraper.as_mut() &&
+                let Err(err) = scraper.scrape_after_block(block_number).await
+            {
+                tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
             }
 
             if let Some(w) = &mut waiter {

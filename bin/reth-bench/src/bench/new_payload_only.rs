@@ -146,10 +146,10 @@ impl Command {
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((row, new_payload_result));
 
-            if let Some(scraper) = metrics_scraper.as_mut() {
-                if let Err(err) = scraper.scrape_after_block(block_number).await {
-                    tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
-                }
+            if let Some(scraper) = metrics_scraper.as_mut() &&
+                let Err(err) = scraper.scrape_after_block(block_number).await
+            {
+                tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
             }
         }
 

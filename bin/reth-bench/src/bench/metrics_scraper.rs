@@ -113,10 +113,10 @@ fn parse_gauge(text: &str, name: &str) -> Option<f64> {
         // Format: `metric_name{labels} value [timestamp]` or `metric_name value [timestamp]`
         // Value is always the second whitespace-separated token.
         let mut parts = line.split_whitespace();
-        if let Some(value_str) = parts.nth(1) {
-            if let Ok(v) = value_str.parse::<f64>() {
-                result = Some(v);
-            }
+        if let Some(value_str) = parts.nth(1) &&
+            let Ok(v) = value_str.parse::<f64>()
+        {
+            result = Some(v);
         }
     }
     result
