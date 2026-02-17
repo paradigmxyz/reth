@@ -1300,15 +1300,30 @@ where
         let mut trie_cursor_state = TrieCursorState::unseeked();
         let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
 
-        // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
-        // overall trie, and handle all proofs within that sub-trie.
-        for sub_trie_targets in iter_sub_trie_targets(targets) {
+        if targets.len() == 1 {
+            // Fast path: skip sorting and chunking overhead of `iter_sub_trie_targets`.
+            let sub_trie_targets = SubTrieTargets {
+                prefix: targets[0].sub_trie_prefix(),
+                retain_root: targets[0].min_len == 0,
+                targets,
+            };
             self.proof_subtrie(
                 value_encoder,
                 &mut trie_cursor_state,
                 &mut hashed_cursor_current,
                 sub_trie_targets,
             )?;
+        } else {
+            // Divide targets into chunks, each chunk corresponding to a different sub-trie within
+            // the overall trie, and handle all proofs within that sub-trie.
+            for sub_trie_targets in iter_sub_trie_targets(targets) {
+                self.proof_subtrie(
+                    value_encoder,
+                    &mut trie_cursor_state,
+                    &mut hashed_cursor_current,
+                    sub_trie_targets,
+                )?;
+            }
         }
 
         trace!(

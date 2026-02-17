@@ -54,7 +54,7 @@ impl Target {
     // `min_len` of both 0 and 1 will therefore construct the root node, but only those with
     // `min_len` of 0 will retain it.
     #[inline]
-    fn sub_trie_prefix(&self) -> Nibbles {
+    pub(crate) fn sub_trie_prefix(&self) -> Nibbles {
         let mut sub_trie_prefix = self.key;
         sub_trie_prefix.truncate(self.min_len.saturating_sub(1) as usize);
         sub_trie_prefix
