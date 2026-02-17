@@ -106,7 +106,7 @@ impl ProofTrieNodeRecord {
             )),
         };
         Self {
-            path: node.path.clone(),
+            path: node.path,
             node: TrieNodeRecord(trie_node),
             masks: node.masks.map(|masks| (masks.hash_mask.get(), masks.tree_mask.get())),
         }
