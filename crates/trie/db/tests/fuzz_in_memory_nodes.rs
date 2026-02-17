@@ -18,21 +18,8 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory,
-    LegacyKeyAdapter, PackedKeyAdapter,
 };
 use std::collections::BTreeMap;
-
-macro_rules! with_adapter {
-    ($provider:expr, |$A:ident| $body:expr) => {
-        if $provider.cached_storage_settings().is_v2() {
-            type $A = PackedKeyAdapter;
-            $body
-        } else {
-            type $A = LegacyKeyAdapter;
-            $body
-        }
-    };
-}
 
 type DbStateRoot<'a, TX, A> =
     StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
@@ -55,7 +42,7 @@ proptest! {
             hashed_account_cursor.upsert(hashed_address, &Account { balance, ..Default::default() }).unwrap();
         }
 
-        with_adapter!(provider, |A| {
+        reth_trie_db::with_adapter!(provider, |A| {
             // Compute initial root and updates
             let (_, mut trie_nodes) = DbStateRoot::<_, A>::from_tx(provider.tx_ref())
                 .root_with_updates()
@@ -112,7 +99,7 @@ proptest! {
                 .unwrap();
         }
 
-        with_adapter!(provider, |A| {
+        reth_trie_db::with_adapter!(provider, |A| {
             // Compute initial storage root and updates
             let (_, _, mut storage_trie_nodes) =
                 DbStorageRoot::<_, A>::from_tx_hashed(provider.tx_ref(), hashed_address).root_with_updates().unwrap();

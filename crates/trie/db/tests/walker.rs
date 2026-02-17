@@ -10,19 +10,7 @@ use reth_trie::{
     walker::TrieWalker,
     BranchNodeCompact, Nibbles, StorageTrieEntry,
 };
-use reth_trie_db::{DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedKeyAdapter};
-
-macro_rules! with_adapter {
-    ($provider:expr, |$A:ident| $body:expr) => {
-        if $provider.cached_storage_settings().is_v2() {
-            type $A = PackedKeyAdapter;
-            $body
-        } else {
-            type $A = LegacyKeyAdapter;
-            $body
-        }
-    };
-}
+use reth_trie_db::DatabaseTrieCursorFactory;
 
 #[test]
 fn walk_nodes_with_common_prefix() {
@@ -55,7 +43,7 @@ fn walk_nodes_with_common_prefix() {
         account_cursor.upsert(k.clone().into(), &v.clone()).unwrap();
     }
 
-    with_adapter!(tx, |A| {
+    reth_trie_db::with_adapter!(tx, |A| {
         let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(tx.tx_ref());
         let account_trie = trie_factory.account_trie_cursor().unwrap();
         test_cursor(account_trie, &expected);
@@ -132,7 +120,7 @@ fn cursor_rootnode_with_changesets() {
         cursor.upsert(hashed_address, &StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
     }
 
-    with_adapter!(tx, |A| {
+    reth_trie_db::with_adapter!(tx, |A| {
         let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(tx.tx_ref());
         let mut trie = trie_factory.storage_trie_cursor(hashed_address).unwrap();
 

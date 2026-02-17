@@ -8,26 +8,11 @@ use reth_primitives_traits::Account;
 use reth_provider::test_utils::{create_test_provider_factory, insert_genesis};
 use reth_storage_api::StorageSettingsCache;
 use reth_trie::{proof::Proof, AccountProof, Nibbles, StorageProof};
-use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory, LegacyKeyAdapter,
-    PackedKeyAdapter,
-};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
 use std::{
     str::FromStr,
     sync::{Arc, LazyLock},
 };
-
-macro_rules! with_adapter {
-    ($provider:expr, |$A:ident| $body:expr) => {
-        if $provider.cached_storage_settings().is_v2() {
-            type $A = PackedKeyAdapter;
-            $body
-        } else {
-            type $A = LegacyKeyAdapter;
-            $body
-        }
-    };
-}
 
 type DbProof<'a, TX, A> =
     Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
@@ -103,7 +88,7 @@ fn testspec_proofs() {
     ]);
 
     let provider = factory.provider().unwrap();
-    with_adapter!(provider, |A| {
+    reth_trie_db::with_adapter!(provider, |A| {
         for (target, expected_proof) in data {
             let target = Address::from_str(target).unwrap();
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
@@ -128,7 +113,7 @@ fn testspec_empty_storage_proof() {
     let slots = Vec::from([B256::with_last_byte(1), B256::with_last_byte(3)]);
 
     let provider = factory.provider().unwrap();
-    with_adapter!(provider, |A| {
+    reth_trie_db::with_adapter!(provider, |A| {
         let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
         let account_proof = proof.account_proof(target, &slots).unwrap();
         assert_eq!(account_proof.storage_root, EMPTY_ROOT_HASH, "expected empty storage root");
@@ -166,7 +151,7 @@ fn mainnet_genesis_account_proof() {
     ]);
 
     let provider = factory.provider().unwrap();
-    with_adapter!(provider, |A| {
+    reth_trie_db::with_adapter!(provider, |A| {
         let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
         let account_proof = proof.account_proof(target, &[]).unwrap();
         similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
@@ -192,7 +177,7 @@ fn mainnet_genesis_account_proof_nonexistent() {
     ]);
 
     let provider = factory.provider().unwrap();
-    with_adapter!(provider, |A| {
+    reth_trie_db::with_adapter!(provider, |A| {
         let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
         let account_proof = proof.account_proof(target, &[]).unwrap();
         similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
@@ -290,7 +275,7 @@ fn holesky_deposit_contract_proof() {
     };
 
     let provider = factory.provider().unwrap();
-    with_adapter!(provider, |A| {
+    reth_trie_db::with_adapter!(provider, |A| {
         let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
         let account_proof = proof.account_proof(target, &slots).unwrap();
         similar_asserts::assert_eq!(account_proof, expected);

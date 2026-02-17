@@ -18,20 +18,8 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot, DatabaseTrieCursorFactory,
-    DatabaseTrieWitness, LegacyKeyAdapter, PackedKeyAdapter,
+    DatabaseTrieWitness,
 };
-
-macro_rules! with_adapter {
-    ($provider:expr, |$A:ident| $body:expr) => {
-        if $provider.cached_storage_settings().is_v2() {
-            type $A = PackedKeyAdapter;
-            $body
-        } else {
-            type $A = LegacyKeyAdapter;
-            $body
-        }
-    };
-}
 
 type DbStateRoot<'a, TX, A> =
     StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
@@ -49,7 +37,7 @@ fn includes_empty_node_preimage() {
     let hashed_address = keccak256(address);
     let hashed_slot = B256::random();
 
-    with_adapter!(provider, |A| {
+    reth_trie_db::with_adapter!(provider, |A| {
         // witness includes empty state trie root node
         assert_eq!(
             DbTrieWitness::<_, A>::from_tx(provider.tx_ref())
@@ -107,7 +95,7 @@ fn includes_nodes_for_destroyed_storage_nodes() {
         .insert_storage_for_hashing([(address, [StorageEntry { key: slot, value: U256::from(1) }])])
         .unwrap();
 
-    with_adapter!(provider, |A| {
+    reth_trie_db::with_adapter!(provider, |A| {
         let state_root = DbStateRoot::<_, A>::from_tx(provider.tx_ref()).root().unwrap();
         let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
         let multiproof = proof
@@ -157,7 +145,7 @@ fn correctly_decodes_branch_node_values() {
         .upsert(hashed_address, &StorageEntry { key: hashed_slot2, value: U256::from(1) })
         .unwrap();
 
-    with_adapter!(provider, |A| {
+    reth_trie_db::with_adapter!(provider, |A| {
         let state_root = DbStateRoot::<_, A>::from_tx(provider.tx_ref()).root().unwrap();
         let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
         let multiproof = proof

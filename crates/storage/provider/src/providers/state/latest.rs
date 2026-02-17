@@ -17,7 +17,7 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
-    DatabaseTrieWitness, LegacyKeyAdapter, PackedKeyAdapter,
+    DatabaseTrieWitness,
 };
 
 type DbStateRoot<'a, TX, A> = StateRoot<
@@ -102,36 +102,18 @@ impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, P
     }
 }
 
-/// Helper macro to dispatch a trie operation based on the storage settings.
-/// Calls the given expression with the appropriate adapter type parameter.
-macro_rules! with_adapter {
-    ($self:expr, |$A:ident| $body:expr) => {
-        if $self.0.cached_storage_settings().is_v2() {
-            {
-                type $A = PackedKeyAdapter;
-                $body
-            }
-        } else {
-            {
-                type $A = LegacyKeyAdapter;
-                $body
-            }
-        }
-    };
-}
-
 impl<Provider: DBProvider + StorageSettingsCache> StateRootProvider
     for LatestStateProviderRef<'_, Provider>
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        with_adapter!(self, |A| {
+        reth_trie_db::with_adapter!(self.0, |A| {
             let sorted = hashed_state.into_sorted();
             Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root(self.tx(), &sorted)?)
         })
     }
 
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
-        with_adapter!(self, |A| {
+        reth_trie_db::with_adapter!(self.0, |A| {
             Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes(
                 self.tx(),
                 TrieInputSorted::from_unsorted(input),
@@ -143,7 +125,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StateRootProvider
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        with_adapter!(self, |A| {
+        reth_trie_db::with_adapter!(self.0, |A| {
             let sorted = hashed_state.into_sorted();
             Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_with_updates(
                 self.tx(),
@@ -156,7 +138,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StateRootProvider
         &self,
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        with_adapter!(self, |A| {
+        reth_trie_db::with_adapter!(self.0, |A| {
             Ok(
                 <DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes_with_updates(
                     self.tx(),
@@ -175,7 +157,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        with_adapter!(self, |A| {
+        reth_trie_db::with_adapter!(self.0, |A| {
             <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, hashed_storage)
                 .map_err(|err| ProviderError::Database(err.into()))
         })
@@ -187,7 +169,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        with_adapter!(self, |A| {
+        reth_trie_db::with_adapter!(self.0, |A| {
             <DbStorageProof<'_, _, A>>::overlay_storage_proof(
                 self.tx(),
                 address,
@@ -204,7 +186,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        with_adapter!(self, |A| {
+        reth_trie_db::with_adapter!(self.0, |A| {
             <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
                 self.tx(),
                 address,
@@ -225,7 +207,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        with_adapter!(self, |A| {
+        reth_trie_db::with_adapter!(self.0, |A| {
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
             proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
         })
@@ -236,14 +218,14 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        with_adapter!(self, |A| {
+        reth_trie_db::with_adapter!(self.0, |A| {
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
             proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
         })
     }
 
     fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
-        with_adapter!(self, |A| {
+        reth_trie_db::with_adapter!(self.0, |A| {
             Ok(<DbTrieWitness<'_, _, A>>::overlay_witness(self.tx(), input, target)?
                 .into_values()
                 .collect())
