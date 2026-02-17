@@ -158,8 +158,7 @@ impl NetworkManager {
     /// use reth_chainspec::MAINNET;
     /// use reth_network::{NetworkConfig, NetworkManager};
     /// use reth_tasks::Runtime;
-    /// let config = NetworkConfig::builder_with_rng_secret_key()
-    ///     .with_task_executor(Runtime::test())
+    /// let config = NetworkConfig::builder_with_rng_secret_key(Runtime::test())
     ///     .build_with_noop_provider(MAINNET.clone());
     /// let manager = NetworkManager::eth(config).await;
     /// # }
