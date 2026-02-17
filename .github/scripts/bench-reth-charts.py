@@ -17,6 +17,8 @@ import csv
 import sys
 from pathlib import Path
 
+import numpy as np
+
 try:
     import matplotlib
 
@@ -144,24 +146,36 @@ def plot_wait_breakdown(feature: list[dict], baseline: list[dict] | None, out: P
     plt.close(fig)
 
 
+def _add_regression(ax, x, y, color, label):
+    """Add a linear regression line to the axes."""
+    if len(x) < 2:
+        return
+    xa, ya = np.array(x), np.array(y)
+    m, b = np.polyfit(xa, ya, 1)
+    x_range = np.linspace(xa.min(), xa.max(), 100)
+    ax.plot(x_range, m * x_range + b, color=color, linewidth=1.5, alpha=0.8,
+            label=f"{label} ({m:.3f} ms/Mgas)")
+
+
 def plot_gas_vs_latency(feature: list[dict], baseline: list[dict] | None, out: Path):
     fig, ax = plt.subplots(figsize=(8, 6))
 
     if baseline:
         bgas = [r["gas_used"] / 1_000_000 for r in baseline]
         blat = [r["new_payload_latency_us"] / 1_000 for r in baseline]
-        ax.scatter(bgas, blat, s=8, alpha=0.5, label="run 1")
+        ax.scatter(bgas, blat, s=8, alpha=0.5, label="main")
+        _add_regression(ax, bgas, blat, "tab:blue", "main fit")
 
     fgas = [r["gas_used"] / 1_000_000 for r in feature]
     flat = [r["new_payload_latency_us"] / 1_000 for r in feature]
-    ax.scatter(fgas, flat, s=8, alpha=0.6, label="run 2")
+    ax.scatter(fgas, flat, s=8, alpha=0.6, label="branch")
+    _add_regression(ax, fgas, flat, "tab:orange", "branch fit")
 
     ax.set_xlabel("Gas Used (Mgas)")
     ax.set_ylabel("newPayload Latency (ms)")
     ax.set_title("Gas Used vs Latency")
     ax.grid(True, alpha=0.3)
-    if baseline:
-        ax.legend()
+    ax.legend()
     fig.tight_layout()
     fig.savefig(out, dpi=150)
     plt.close(fig)
