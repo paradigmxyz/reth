@@ -8978,10 +8978,8 @@ mod tests {
         let leaf2_node = LeafNode::new(Nibbles::default(), vec![0x2]);
 
         // RLP encode the leaves to get their RlpNode representations
-        let leaf1_rlp =
-            RlpNode::from_rlp(&alloy_rlp::encode(&TrieNodeV2::Leaf(leaf1_node.clone())));
-        let leaf2_rlp =
-            RlpNode::from_rlp(&alloy_rlp::encode(&TrieNodeV2::Leaf(leaf2_node.clone())));
+        let leaf1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(TrieNodeV2::Leaf(leaf1_node.clone())));
+        let leaf2_rlp = RlpNode::from_rlp(&alloy_rlp::encode(TrieNodeV2::Leaf(leaf2_node.clone())));
 
         // Create the branch node with children at indices 1 and 2, using the RLP-encoded leaves.
         // In V2, branch and extension are combined: the key holds the extension prefix.
