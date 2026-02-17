@@ -8,8 +8,7 @@
 //! - **Memory efficiency**: Automatic eviction ensures bounded memory usage
 
 use crate::{
-    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, LegacyKeyAdapter,
-    PackedKeyAdapter, TrieTableAdapter,
+    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, TrieTableAdapter,
 };
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
@@ -74,11 +73,9 @@ where
         + BlockNumReader
         + StorageSettingsCache,
 {
-    if provider.cached_storage_settings().is_v2() {
-        compute_block_trie_changesets_inner::<_, PackedKeyAdapter>(provider, block_number)
-    } else {
-        compute_block_trie_changesets_inner::<_, LegacyKeyAdapter>(provider, block_number)
-    }
+    crate::with_adapter!(provider, |A| {
+        compute_block_trie_changesets_inner::<_, A>(provider, block_number)
+    })
 }
 
 fn compute_block_trie_changesets_inner<Provider, A>(
@@ -212,11 +209,9 @@ where
         + BlockNumReader
         + StorageSettingsCache,
 {
-    if provider.cached_storage_settings().is_v2() {
-        compute_block_trie_updates_inner::<_, PackedKeyAdapter>(cache, provider, block_number)
-    } else {
-        compute_block_trie_updates_inner::<_, LegacyKeyAdapter>(cache, provider, block_number)
-    }
+    crate::with_adapter!(provider, |A| {
+        compute_block_trie_updates_inner::<_, A>(cache, provider, block_number)
+    })
 }
 
 fn compute_block_trie_updates_inner<Provider, A>(

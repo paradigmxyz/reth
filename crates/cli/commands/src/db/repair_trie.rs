@@ -117,11 +117,7 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
     let mut tx = db.tx()?;
     tx.disable_long_read_transaction_safety();
 
-    if tool.provider_factory.cached_storage_settings().is_v2() {
-        do_verify_only::<_, reth_trie_db::PackedKeyAdapter>(&tx)
-    } else {
-        do_verify_only::<_, reth_trie_db::LegacyKeyAdapter>(&tx)
-    }
+    reth_trie_db::with_adapter!(tool.provider_factory, |A| { do_verify_only::<_, A>(&tx) })
 }
 
 fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
@@ -218,11 +214,9 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     // Check that a pipeline sync isn't in progress.
     verify_checkpoints(provider_rw.as_ref())?;
 
-    let inconsistent_nodes = if tool.provider_factory.cached_storage_settings().is_v2() {
-        do_verify_and_repair::<_, reth_trie_db::PackedKeyAdapter>(&mut provider_rw)?
-    } else {
-        do_verify_and_repair::<_, reth_trie_db::LegacyKeyAdapter>(&mut provider_rw)?
-    };
+    let inconsistent_nodes = reth_trie_db::with_adapter!(tool.provider_factory, |A| {
+        do_verify_and_repair::<_, A>(&mut provider_rw)?
+    });
 
     if inconsistent_nodes == 0 {
         info!("No inconsistencies found");

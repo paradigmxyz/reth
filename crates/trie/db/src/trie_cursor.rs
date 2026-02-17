@@ -441,16 +441,10 @@ mod tests {
             .upsert(hashed_address, &StorageTrieEntry { nibbles: key.clone(), node: value.clone() })
             .unwrap();
 
-        if provider.cached_storage_settings().is_v2() {
-            let trie_factory =
-                DatabaseTrieCursorFactory::<_, PackedKeyAdapter>::new(provider.tx_ref());
+        crate::with_adapter!(provider, |A| {
+            let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
             let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
             assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
-        } else {
-            let trie_factory =
-                DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(provider.tx_ref());
-            let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
-            assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
-        }
+        });
     }
 }

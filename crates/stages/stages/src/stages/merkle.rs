@@ -247,15 +247,11 @@ where
             });
 
             let tx = provider.tx_ref();
-            let progress = if provider.cached_storage_settings().is_v2() {
-                DbStateRoot::<_, reth_trie_db::PackedKeyAdapter>::from_tx(tx)
+            let progress = reth_trie_db::with_adapter!(provider, |A| {
+                DbStateRoot::<_, A>::from_tx(tx)
                     .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
                     .root_with_progress()
-            } else {
-                DbStateRoot::<_, reth_trie_db::LegacyKeyAdapter>::from_tx(tx)
-                    .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
-                    .root_with_progress()
-            }
+            })
             .map_err(|e| {
                 error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                 StageError::Fatal(Box::new(e))
@@ -326,11 +322,9 @@ where
                     chunk_range = ?chunk_range,
                     "Processing chunk"
                 );
-                let (root, updates) = if provider.cached_storage_settings().is_v2() {
-                    DbStateRoot::<_, reth_trie_db::PackedKeyAdapter>::incremental_root_with_updates(provider, chunk_range)
-                } else {
-                    DbStateRoot::<_, reth_trie_db::LegacyKeyAdapter>::incremental_root_with_updates(provider, chunk_range)
-                }
+                let (root, updates) = reth_trie_db::with_adapter!(provider, |A| {
+                    DbStateRoot::<_, A>::incremental_root_with_updates(provider, chunk_range)
+                })
                 .map_err(|e| {
                     error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                     StageError::Fatal(Box::new(e))
@@ -407,15 +401,9 @@ where
         if range.is_empty() {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
-            let (block_root, updates) = if provider.cached_storage_settings().is_v2() {
-                DbStateRoot::<_, reth_trie_db::PackedKeyAdapter>::incremental_root_with_updates(
-                    provider, range,
-                )
-            } else {
-                DbStateRoot::<_, reth_trie_db::LegacyKeyAdapter>::incremental_root_with_updates(
-                    provider, range,
-                )
-            }
+            let (block_root, updates) = reth_trie_db::with_adapter!(provider, |A| {
+                DbStateRoot::<_, A>::incremental_root_with_updates(provider, range)
+            })
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             // Validate the calculated state root
@@ -614,17 +602,12 @@ mod tests {
         let actual_root = runner
             .db
             .query_with_provider(|provider| {
-                Ok(if provider.cached_storage_settings().is_v2() {
-                    DbStateRoot::<_, reth_trie_db::PackedKeyAdapter>::incremental_root_with_updates(
+                Ok(reth_trie_db::with_adapter!(provider, |A| {
+                    DbStateRoot::<_, A>::incremental_root_with_updates(
                         &provider,
                         stage_progress + 1..=previous_stage,
                     )
-                } else {
-                    DbStateRoot::<_, reth_trie_db::LegacyKeyAdapter>::incremental_root_with_updates(
-                        &provider,
-                        stage_progress + 1..=previous_stage,
-                    )
-                })
+                }))
             })
             .unwrap();
 

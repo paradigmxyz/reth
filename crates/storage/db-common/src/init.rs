@@ -832,11 +832,9 @@ fn compute_state_root<Provider>(
 where
     Provider: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
 {
-    if provider.cached_storage_settings().is_v2() {
-        compute_state_root_inner::<_, reth_trie_db::PackedKeyAdapter>(provider, prefix_sets)
-    } else {
-        compute_state_root_inner::<_, reth_trie_db::LegacyKeyAdapter>(provider, prefix_sets)
-    }
+    reth_trie_db::with_adapter!(provider, |A| {
+        compute_state_root_inner::<_, A>(provider, prefix_sets)
+    })
 }
 
 fn compute_state_root_inner<Provider, A>(

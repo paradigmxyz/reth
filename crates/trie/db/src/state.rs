@@ -380,19 +380,13 @@ mod tests {
         tx: &TX,
         sorted: &HashedPostStateSorted,
     ) -> Result<B256, StateRootError> {
-        if provider.cached_storage_settings().is_v2() {
+        crate::with_adapter!(provider, |A| {
             type S<'a, TX> = StateRoot<
-                crate::DatabaseTrieCursorFactory<&'a TX, crate::PackedKeyAdapter>,
+                crate::DatabaseTrieCursorFactory<&'a TX, A>,
                 crate::DatabaseHashedCursorFactory<&'a TX>,
             >;
             S::overlay_root(tx, sorted)
-        } else {
-            type S<'a, TX> = StateRoot<
-                crate::DatabaseTrieCursorFactory<&'a TX, crate::LegacyKeyAdapter>,
-                crate::DatabaseHashedCursorFactory<&'a TX>,
-            >;
-            S::overlay_root(tx, sorted)
-        }
+        })
     }
 
     /// Overlay root calculation works with sorted state.

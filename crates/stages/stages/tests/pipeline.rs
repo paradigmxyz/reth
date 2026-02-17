@@ -367,17 +367,12 @@ async fn run_pipeline_forward_and_unwind(
             reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
             reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
         >;
-        let (state_root, _trie_updates) = if provider.cached_storage_settings().is_v2() {
-            TestStateRoot::<_, reth_trie_db::PackedKeyAdapter>::overlay_root_with_updates(
+        let (state_root, _trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
+            TestStateRoot::<_, A>::overlay_root_with_updates(
                 provider.tx_ref(),
                 &hashed_state.clone().into_sorted(),
             )
-        } else {
-            TestStateRoot::<_, reth_trie_db::LegacyKeyAdapter>::overlay_root_with_updates(
-                provider.tx_ref(),
-                &hashed_state.clone().into_sorted(),
-            )
-        }?;
+        })?;
 
         // Create receipts for receipt root calculation (one per transaction)
         let receipts: Vec<_> = output.receipts.iter().map(|r| r.with_bloom_ref()).collect();

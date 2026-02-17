@@ -5995,29 +5995,16 @@ mod tests {
                     state.extend(update);
                     let provider = provider_factory.provider().unwrap();
                     let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
-                        if provider_factory.cached_storage_settings().is_v2() {
-                            let trie_cursor = DatabaseTrieCursorFactory::<
-                                _,
-                                reth_trie_db::PackedKeyAdapter,
-                            >::new(provider.tx_ref());
+                        reth_trie_db::with_adapter!(provider_factory, |A| {
+                            let trie_cursor =
+                                DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
                             run_hash_builder(
                                 state.clone(),
                                 trie_cursor.account_trie_cursor().unwrap(),
                                 Default::default(),
                                 state.keys().copied(),
                             )
-                        } else {
-                            let trie_cursor = DatabaseTrieCursorFactory::<
-                                _,
-                                reth_trie_db::LegacyKeyAdapter,
-                            >::new(provider.tx_ref());
-                            run_hash_builder(
-                                state.clone(),
-                                trie_cursor.account_trie_cursor().unwrap(),
-                                Default::default(),
-                                state.keys().copied(),
-                            )
-                        };
+                        });
 
                     // Extract account nodes before moving hash_builder_updates
                     let hash_builder_account_nodes = hash_builder_updates.account_nodes.clone();
@@ -6056,11 +6043,9 @@ mod tests {
 
                     let provider = provider_factory.provider().unwrap();
                     let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
-                        if provider_factory.cached_storage_settings().is_v2() {
-                            let trie_cursor = DatabaseTrieCursorFactory::<
-                                _,
-                                reth_trie_db::PackedKeyAdapter,
-                            >::new(provider.tx_ref());
+                        reth_trie_db::with_adapter!(provider_factory, |A| {
+                            let trie_cursor =
+                                DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
                             run_hash_builder(
                                 state.clone(),
                                 trie_cursor.account_trie_cursor().unwrap(),
@@ -6070,21 +6055,7 @@ mod tests {
                                     .collect(),
                                 state.keys().copied(),
                             )
-                        } else {
-                            let trie_cursor = DatabaseTrieCursorFactory::<
-                                _,
-                                reth_trie_db::LegacyKeyAdapter,
-                            >::new(provider.tx_ref());
-                            run_hash_builder(
-                                state.clone(),
-                                trie_cursor.account_trie_cursor().unwrap(),
-                                keys_to_delete
-                                    .iter()
-                                    .map(|nibbles| B256::from_slice(&nibbles.pack()))
-                                    .collect(),
-                                state.keys().copied(),
-                            )
-                        };
+                        });
 
                     // Extract account nodes before moving hash_builder_updates
                     let hash_builder_account_nodes = hash_builder_updates.account_nodes.clone();
