@@ -1,0 +1,13 @@
+targets = ["x86_64-unknown-linux-gnu"]
+
+[change-detection]
+infrastructure = [
+    ".github/**",
+    "Cargo.lock",
+    "Cargo.toml",
+    "rust-toolchain.toml",
+    "deny.toml",
+    "dprint.json",
+    "clippy.toml",
+    "rustfmt.toml",
+]

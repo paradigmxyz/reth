@@ -21,9 +21,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect:
+    name: detect affected crates
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    env:
+      RUSTC_WRAPPER: ""
+    outputs:
+      cargo-args: ${{ steps.rail.outputs.cargo-args }}
+      count: ${{ steps.rail.outputs.count }}
+      rebuild-all: ${{ steps.rail.outputs.rebuild-all }}
+      docs-only: ${{ steps.rail.outputs.docs-only }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: loadingalias/cargo-rail-action@v2
+        id: rail
+
   test:
     name: test / ${{ matrix.network }} / ${{ matrix.storage }}
-    if: github.event_name != 'schedule'
+    needs: [detect]
+    if: |
+      always() &&
+      github.event_name != 'schedule' &&
+      (needs.detect.result == 'skipped' ||
+       (needs.detect.result == 'success' &&
+        (needs.detect.outputs.rebuild-all == 'true' ||
+         (needs.detect.outputs.count != '0' && needs.detect.outputs.docs-only != 'true'))))
     runs-on: depot-ubuntu-latest-4
     env:
       RUST_BACKTRACE: 1
@@ -45,22 +70,27 @@ jobs:
           cache-on-failure: true
       - name: Run tests
         run: |
+          SCOPE="${{ needs.detect.outputs.cargo-args }}"
+          if [ -z "$SCOPE" ] || [ "${{ needs.detect.outputs.rebuild-all }}" == "true" ]; then
+            SCOPE="--workspace"
+          fi
           cargo nextest run \
             --no-fail-fast \
             --locked --features "asm-keccak ${{ matrix.network }} ${{ matrix.storage == 'edge' && 'edge' || '' }}" \
-            --workspace --exclude ef-tests \
+            $SCOPE --exclude ef-tests \
             -E "kind(test) and not binary(e2e_testsuite)"
 
   integration-success:
     name: integration success
     runs-on: ubuntu-latest
     if: always() && github.event_name != 'schedule'
-    needs: [test]
+    needs: [detect, test]
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1
         with:
+          allowed-skips: detect, test
           jobs: ${{ toJSON(needs) }}
 
   era-files:
