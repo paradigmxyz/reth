@@ -28,6 +28,14 @@ T_CRITICAL = 1.96  # two-tailed 95% confidence
 BOOTSTRAP_ITERATIONS = 10_000
 
 
+def _opt_int(row: dict, key: str) -> int | None:
+    """Return int value for a CSV field, or None if missing/empty."""
+    v = row.get(key)
+    if v is None or v == "":
+        return None
+    return int(v)
+
+
 def parse_combined_csv(path: str) -> list[dict]:
     """Parse combined_latency.csv into a list of per-block dicts."""
     rows = []
@@ -43,11 +51,9 @@ def parse_combined_csv(path: str) -> list[dict]:
                     "new_payload_latency_us": int(row["new_payload_latency"]),
                     "fcu_latency_us": int(row["fcu_latency"]),
                     "total_latency_us": int(row["total_latency"]),
-                    "persistence_wait_us": int(row["persistence_wait"])
-                    if row.get("persistence_wait")
-                    else None,
-                    "execution_cache_wait_us": int(row.get("execution_cache_wait", 0)),
-                    "sparse_trie_wait_us": int(row.get("sparse_trie_wait", 0)),
+                    "persistence_wait_us": _opt_int(row, "persistence_wait"),
+                    "execution_cache_wait_us": _opt_int(row, "execution_cache_wait"),
+                    "sparse_trie_wait_us": _opt_int(row, "sparse_trie_wait"),
                 }
             )
     return rows
@@ -109,6 +115,25 @@ def compute_stats(combined: list[dict]) -> dict:
         "p90_ms": percentile(sorted_lat, 90),
         "p99_ms": percentile(sorted_lat, 99),
         "mean_mgas_s": mean_mgas_s,
+    }
+
+
+def compute_wait_stats(combined: list[dict], field: str) -> dict:
+    """Compute mean/p50/p95 for a wait time field (in ms)."""
+    values_ms = []
+    for r in combined:
+        v = r.get(field)
+        if v is not None:
+            values_ms.append(v / 1_000)
+    if not values_ms:
+        return {}
+    n = len(values_ms)
+    mean_val = sum(values_ms) / n
+    sorted_vals = sorted(values_ms)
+    return {
+        "mean_ms": mean_val,
+        "p50_ms": percentile(sorted_vals, 50),
+        "p95_ms": percentile(sorted_vals, 95),
     }
 
 
@@ -313,17 +338,51 @@ def generate_comparison_table(
     return "\n".join(lines)
 
 
+def generate_wait_time_table(
+    title: str,
+    baseline_stats: dict,
+    feature_stats: dict,
+    baseline_label: str,
+    feature_label: str,
+) -> str:
+    """Generate a markdown table for a wait time metric."""
+    if not baseline_stats or not feature_stats:
+        return ""
+    lines = [
+        f"### {title}",
+        "",
+        f"| Metric | {baseline_label} | {feature_label} |",
+        "|--------|------|--------|",
+        f"| Mean | {fmt_ms(baseline_stats['mean_ms'])} | {fmt_ms(feature_stats['mean_ms'])} |",
+        f"| P50 | {fmt_ms(baseline_stats['p50_ms'])} | {fmt_ms(feature_stats['p50_ms'])} |",
+        f"| P95 | {fmt_ms(baseline_stats['p95_ms'])} | {fmt_ms(feature_stats['p95_ms'])} |",
+    ]
+    return "\n".join(lines)
+
+
 def generate_markdown(
     summary: dict, comparison_table: str,
+    wait_time_tables: list[str] | None = None,
     behind_baseline: int = 0, repo: str = "", baseline_ref: str = "", baseline_name: str = "",
 ) -> str:
     """Generate a markdown comment body."""
-    lines = ["## Benchmark Results", "", comparison_table]
+    lines = ["## Benchmark Results", ""]
     if behind_baseline > 0:
         s = "s" if behind_baseline > 1 else ""
         diff_link = f"https://github.com/{repo}/compare/{baseline_ref[:12]}...{baseline_name}"
-        lines.append("")
         lines.append(f"> ⚠️ Feature is [**{behind_baseline} commit{s} behind `{baseline_name}`**]({diff_link}). Consider rebasing for accurate results.")
+        lines.append("")
+    lines.append(comparison_table)
+    if wait_time_tables:
+        lines.append("")
+        lines.append("<details>")
+        lines.append("<summary>Wait Time Breakdown</summary>")
+        lines.append("")
+        for table in wait_time_tables:
+            if table:
+                lines.append(table)
+                lines.append("")
+        lines.append("</details>")
     return "\n".join(lines)
 
 
@@ -389,25 +448,48 @@ def main():
         print("No common blocks between baseline and feature runs", file=sys.stderr)
         sys.exit(1)
 
+    baseline_ref = args.baseline_ref or "main"
+    baseline_name = args.baseline_name or "baseline"
+    feature_name = args.feature_name or "feature"
+    feature_sha = args.feature_ref or "unknown"
+
     comparison_table = generate_comparison_table(
         baseline_stats,
         feature_stats,
         paired_stats,
         repo=args.repo,
-        baseline_ref=args.baseline_ref or "main",
-        baseline_name=args.baseline_name or "baseline",
-        feature_name=args.feature_name or "feature",
-        feature_sha=args.feature_ref or "unknown",
+        baseline_ref=baseline_ref,
+        baseline_name=baseline_name,
+        feature_name=feature_name,
+        feature_sha=feature_sha,
     )
     print(f"Generated comparison ({paired_stats['n']} paired blocks, "
           f"mean diff {paired_stats['mean_diff_ms']:+.3f}ms ± {paired_stats['ci_ms']:.3f}ms)")
 
+    base_url = f"https://github.com/{args.repo}/commit"
+    baseline_label = f"[`{baseline_name}`]({base_url}/{baseline_ref})"
+    feature_label = f"[`{feature_name}`]({base_url}/{feature_sha})"
+
+    wait_fields = [
+        ("persistence_wait_us", "Persistence Wait"),
+        ("sparse_trie_wait_us", "Trie Cache Update Wait"),
+        ("execution_cache_wait_us", "Execution Cache Update Wait"),
+    ]
+    wait_time_tables = []
+    for field, title in wait_fields:
+        b_stats = compute_wait_stats(all_baseline, field)
+        f_stats = compute_wait_stats(all_feature, field)
+        table = generate_wait_time_table(title, b_stats, f_stats, baseline_label, feature_label)
+        if table:
+            wait_time_tables.append(table)
+
     markdown = generate_markdown(
         summary, comparison_table,
+        wait_time_tables=wait_time_tables,
         behind_baseline=args.behind_baseline,
         repo=args.repo,
-        baseline_ref=args.baseline_ref or "",
-        baseline_name=args.baseline_name or "main",
+        baseline_ref=baseline_ref,
+        baseline_name=baseline_name,
     )
 
     with open(args.output_markdown, "w") as f:
