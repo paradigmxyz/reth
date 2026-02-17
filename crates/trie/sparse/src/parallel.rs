@@ -2,7 +2,7 @@
 use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
 use crate::{
     lower::LowerSparseSubtrie,
-    provider::{RevealedNode, TrieNodeProvider},
+    provider::{TrieNodeProvider},
     LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeState, SparseNodeType,
     SparseTrie, SparseTrieUpdates,
 };
@@ -20,10 +20,10 @@ use reth_primitives_traits::FastInstant as Instant;
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
-    ProofTrieNodeV2, RlpNode, TrieNode, TrieNodeV2,
+    ProofTrieNodeV2, RlpNode, TrieNodeV2,
 };
 use smallvec::SmallVec;
-use tracing::{debug, instrument, trace};
+use tracing::{instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
 /// [`ParallelSparseTrie`]. All longer paths belong to a lower subtrie.
@@ -268,10 +268,52 @@ impl SparseTrie for ParallelSparseTrie {
                 }
                 self.lower_subtries[idx].reveal(&node.path);
                 self.subtrie_heat.mark_modified(idx);
-                self.lower_subtries[idx]
-                    .as_revealed_mut()
-                    .expect("just revealed")
-                    .reveal_node(node.path, &node.node, node.masks)?;
+                let subtrie = self.lower_subtries[idx].as_revealed_mut().expect("just revealed");
+
+                if subtrie.reveal_node(node.path, &node.node, node.masks)? &&
+                    node.path.len() == UPPER_TRIE_MAX_DEPTH &&
+                    let SparseNode::Branch { blinded_mask, blinded_hashes, .. } = self
+                        .upper_subtrie
+                        .nodes
+                        .get_mut(&node.path.slice(0..UPPER_TRIE_MAX_DEPTH - 1))
+                        .unwrap()
+                {
+                    let nibble = node.path.get_unchecked(UPPER_TRIE_MAX_DEPTH - 1);
+                    blinded_mask.unset_bit(nibble);
+                    if let Some(trie_node) = subtrie.nodes.get_mut(&node.path) {
+                        let hash = blinded_hashes[nibble as usize];
+                        match trie_node {
+                            SparseNode::Branch { state, .. } => {
+                                let masks = self.branch_node_masks.get(&node.path);
+                                *state = SparseNodeState::Cached {
+                                    rlp_node: RlpNode::word_rlp(&hash),
+                                    store_in_db_trie: masks.map(|m| {
+                                        !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
+                                    }),
+                                }
+                            }
+                            SparseNode::Extension { state, key } => {
+                                let mut branch_path = node.path;
+                                branch_path.extend(key);
+
+                                let masks = self.branch_node_masks.get(&branch_path);
+                                *state = SparseNodeState::Cached {
+                                    rlp_node: RlpNode::word_rlp(&hash),
+                                    store_in_db_trie: masks.map(|m| {
+                                        !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
+                                    }),
+                                }
+                            }
+                            SparseNode::Leaf { state, .. } => {
+                                *state = SparseNodeState::Cached {
+                                    rlp_node: RlpNode::word_rlp(&hash),
+                                    store_in_db_trie: Some(false),
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
             return Ok(())
         }
@@ -345,6 +387,8 @@ impl SparseTrie for ParallelSparseTrie {
                     // can cause multiple re-allocations as the hashmap grows.
                     subtrie.nodes.reserve(nodes.len());
 
+                    let mut revealed_root = None;
+
                     for node in nodes {
                         // For boundary leaves, check reachability from upper subtrie's parent
                         // branch
@@ -365,17 +409,71 @@ impl SparseTrie for ParallelSparseTrie {
                         // Reveal each node in the subtrie, returning early on any errors
                         let res = subtrie.reveal_node(node.path, &node.node, node.masks);
                         if res.is_err() {
-                            return (subtrie_idx, subtrie, res.map(|_| ()))
+                            return (subtrie_idx, subtrie, res.map(|_| ()), revealed_root)
+                        }
+
+                        if res.is_ok_and(|revealed| revealed) && subtrie.path == node.path {
+                            revealed_root = Some(node.path);
                         }
                     }
-                    (subtrie_idx, subtrie, Ok(()))
+                    (subtrie_idx, subtrie, Ok(()), revealed_root)
                 })
                 .collect();
 
             // Put subtries back which were processed in the rayon pool, collecting the last
             // seen error in the process and returning that.
             let mut any_err = Ok(());
-            for (subtrie_idx, subtrie, res) in results {
+            for (subtrie_idx, mut subtrie, res, revealed_root) in results {
+                // For all updated lower subtries, unset the blinded bits
+                if let Some(revealed_root) = revealed_root &&
+                    revealed_root.len() == UPPER_TRIE_MAX_DEPTH
+                {
+                    let nibble = subtrie.path.get_unchecked(UPPER_TRIE_MAX_DEPTH - 1);
+                    let upper_branch_path = subtrie.path.slice(0..UPPER_TRIE_MAX_DEPTH - 1);
+
+                    if let SparseNode::Branch { blinded_mask, blinded_hashes, .. } =
+                        self.upper_subtrie.nodes.get_mut(&upper_branch_path).unwrap()
+                    {
+                        blinded_mask
+                            .unset_bit(subtrie.path.get_unchecked(UPPER_TRIE_MAX_DEPTH - 1));
+
+                        if let Some(node) = subtrie.nodes.get_mut(&subtrie.path) {
+                            let hash = blinded_hashes[nibble as usize];
+
+                            match node {
+                                SparseNode::Branch { state, .. } => {
+                                    let masks = self.branch_node_masks.get(&subtrie.path);
+                                    *state = SparseNodeState::Cached {
+                                        rlp_node: RlpNode::word_rlp(&hash),
+                                        store_in_db_trie: masks.map(|m| {
+                                            !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
+                                        }),
+                                    }
+                                }
+                                SparseNode::Extension { state, key } => {
+                                    let mut branch_path = subtrie.path;
+                                    branch_path.extend(key);
+
+                                    let masks = self.branch_node_masks.get(&branch_path);
+                                    *state = SparseNodeState::Cached {
+                                        rlp_node: RlpNode::word_rlp(&hash),
+                                        store_in_db_trie: masks.map(|m| {
+                                            !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
+                                        }),
+                                    }
+                                }
+                                SparseNode::Leaf { state, .. } => {
+                                    *state = SparseNodeState::Cached {
+                                        rlp_node: RlpNode::word_rlp(&hash),
+                                        store_in_db_trie: Some(false),
+                                    }
+                                }
+                                _ => {}
+                            };
+                        }
+                    }
+                }
+
                 self.lower_subtries[subtrie_idx] = LowerSparseSubtrie::Revealed(subtrie);
                 if res.is_err() {
                     any_err = res;
@@ -558,7 +656,7 @@ impl SparseTrie for ParallelSparseTrie {
     fn remove_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: &Nibbles,
-        provider: P,
+        _provider: P,
     ) -> SparseTrieResult<()> {
         debug_assert_eq!(
             full_path.len(),
@@ -614,8 +712,8 @@ impl SparseTrie for ParallelSparseTrie {
 
             match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
                 FindNextToLeafOutcome::NotFound => return Ok(()), // leaf isn't in the trie
-                FindNextToLeafOutcome::BlindedNode(hash) => {
-                    return Err(SparseTrieErrorKind::BlindedNode { path: curr_path, hash }.into())
+                FindNextToLeafOutcome::BlindedNode { path, hash } => {
+                    return Err(SparseTrieErrorKind::BlindedNode { path, hash }.into())
                 }
                 FindNextToLeafOutcome::Found => {
                     // this node is the target leaf
@@ -675,28 +773,28 @@ impl SparseTrie for ParallelSparseTrie {
 
         // Before mutating, check if branch collapse would require revealing a blinded node.
         // This ensures remove_leaf is atomic: if it errors, the trie is unchanged.
-        if let (Some(branch_path), Some(SparseNode::Branch { state_mask, .. })) =
-            (&branch_parent_path, &branch_parent_node)
+        if let (
+            Some(branch_path),
+            Some(SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. }),
+        ) = (&branch_parent_path, &branch_parent_node)
         {
             let mut check_mask = *state_mask;
             let child_nibble = leaf_path.get_unchecked(branch_path.len());
             check_mask.unset_bit(child_nibble);
 
             if check_mask.count_bits() == 1 {
-                // Branch will collapse - check if remaining child needs revealing
-                let remaining_child_path = {
-                    let mut p = *branch_path;
-                    p.push_unchecked(
-                        check_mask.first_set_bit_index().expect("state mask is not empty"),
-                    );
-                    p
-                };
+                let remaining_nibble =
+                    check_mask.first_set_bit_index().expect("state mask is not empty");
 
-                // Pre-validate the entire reveal chain (including extension grandchildren).
-                // This check mirrors the logic in `reveal_remaining_child_on_leaf_removal` with
-                // `recurse_into_extension: true` to ensure all nodes that would be revealed
-                // are accessible before any mutations occur.
-                self.pre_validate_reveal_chain(&remaining_child_path, &provider)?;
+                if blinded_mask.is_bit_set(remaining_nibble) {
+                    let mut path = *branch_path;
+                    path.push_unchecked(remaining_nibble);
+                    return Err(SparseTrieErrorKind::BlindedNode {
+                        path,
+                        hash: blinded_hashes[remaining_nibble as usize],
+                    }
+                    .into());
+                }
             }
         }
 
@@ -743,22 +841,19 @@ impl SparseTrie for ParallelSparseTrie {
 
         // If there is a parent branch node (very likely, unless the leaf is at the root) execute
         // any required changes for that node, relative to the removed leaf.
-        if let (Some(branch_path), &Some(SparseNode::Branch { mut state_mask, .. })) =
-            (&branch_parent_path, &branch_parent_node)
+        if let (
+            Some(branch_path),
+            &Some(SparseNode::Branch { mut state_mask, blinded_mask, ref blinded_hashes, .. }),
+        ) = (&branch_parent_path, &branch_parent_node)
         {
             let child_nibble = leaf_path.get_unchecked(branch_path.len());
             state_mask.unset_bit(child_nibble);
 
             let new_branch_node = if state_mask.count_bits() == 1 {
-                // If only one child is left set in the branch node, we need to collapse it. Get
-                // full path of the only child node left.
-                let remaining_child_path = {
-                    let mut p = *branch_path;
-                    p.push_unchecked(
-                        state_mask.first_set_bit_index().expect("state mask is not empty"),
-                    );
-                    p
-                };
+                let remaining_child_nibble =
+                    state_mask.first_set_bit_index().expect("state mask is not empty");
+                let mut remaining_child_path = *branch_path;
+                remaining_child_path.push_unchecked(remaining_child_nibble);
 
                 trace!(
                     target: "trie::parallel_sparse",
@@ -768,18 +863,24 @@ impl SparseTrie for ParallelSparseTrie {
                     "Branch node has only one child",
                 );
 
-                // If the remaining child node is not yet revealed then we have to reveal it here,
-                // otherwise it's not possible to know how to collapse the branch.
-                let remaining_child_node = self.reveal_remaining_child_on_leaf_removal(
-                    provider,
-                    full_path,
-                    &remaining_child_path,
-                )?;
+                if blinded_mask.is_bit_set(remaining_child_nibble) {
+                    return Err(SparseTrieErrorKind::BlindedNode {
+                        path: remaining_child_path,
+                        hash: blinded_hashes[remaining_child_nibble as usize],
+                    }
+                    .into());
+                }
+
+                let remaining_child_node = self
+                    .subtrie_for_path_mut(&remaining_child_path)
+                    .nodes
+                    .get(&remaining_child_path)
+                    .unwrap();
 
                 let (new_branch_node, remove_child) = Self::branch_changes_on_leaf_removal(
                     branch_path,
                     &remaining_child_path,
-                    &remaining_child_node,
+                    remaining_child_node,
                 );
 
                 if remove_child {
@@ -800,7 +901,12 @@ impl SparseTrie for ParallelSparseTrie {
             } else {
                 // If more than one child is left set in the branch, we just re-insert it with the
                 // updated state_mask.
-                SparseNode::new_branch(state_mask)
+                SparseNode::Branch {
+                    state_mask,
+                    blinded_mask,
+                    blinded_hashes: blinded_hashes.clone(),
+                    state: SparseNodeState::Dirty,
+                }
             };
 
             let branch_subtrie = self.subtrie_for_path_mut(branch_path);
@@ -1041,8 +1147,8 @@ impl SparseTrie for ParallelSparseTrie {
 
             match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
                 FindNextToLeafOutcome::NotFound => return Ok(LeafLookup::NonExistent),
-                FindNextToLeafOutcome::BlindedNode(hash) => {
-                    return Err(LeafLookupError::BlindedNode { path: curr_path, hash });
+                FindNextToLeafOutcome::BlindedNode { path, hash } => {
+                    return Err(LeafLookupError::BlindedNode { path, hash });
                 }
                 FindNextToLeafOutcome::Found => {
                     panic!("target leaf {full_path:?} found at path {curr_path:?}, even though value wasn't in values hashmap");
@@ -1135,64 +1241,88 @@ impl SparseTrie for ParallelSparseTrie {
                 continue;
             }
 
-            // Get children to visit from current node (immutable access)
-            let mut is_extension = false;
-            let children: SmallVec<[Nibbles; 16]> = {
-                let Some(subtrie) = self.subtrie_for_path(&path) else { continue };
-                let Some(node) = subtrie.nodes.get(&path) else { continue };
+            let Some(subtrie) = self.subtrie_for_path_mut_untracked(&path) else { continue };
+            let Some(node) = subtrie.nodes.get_mut(&path) else { continue };
 
-                match node {
-                    SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {
-                        SmallVec::new()
-                    }
-                    SparseNode::Extension { key, .. } => {
+            match node {
+                SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {}
+                SparseNode::Extension { key, state, .. } => {
+                    if depth == max_depth {
+                        let Some(hash) = state.cached_hash() else { continue };
+                        subtrie.nodes.remove(&path);
+
+                        let parent_path = path.slice(0..path.len() - 1);
+                        let SparseNode::Branch { blinded_mask, blinded_hashes, .. } =
+                            subtrie.nodes.get_mut(&parent_path).unwrap()
+                        else {
+                            panic!("expected branch node at path {parent_path:?}");
+                        };
+
+                        let nibble = path.last().unwrap();
+                        blinded_mask.set_bit(nibble);
+                        blinded_hashes[nibble as usize] = hash;
+
+                        effective_pruned_roots.push(path);
+                    } else {
                         let mut child = path;
                         child.extend(key);
-                        is_extension = true;
-                        SmallVec::from_slice(&[child])
-                    }
-                    SparseNode::Branch { state_mask, .. } => {
-                        let mut children = SmallVec::new();
-                        let mut mask = state_mask.get();
-                        while mask != 0 {
-                            let nibble = mask.trailing_zeros() as u8;
-                            mask &= mask - 1;
-                            let mut child = path;
-                            child.push_unchecked(nibble);
-                            children.push(child);
-                        }
-                        children
+                        stack.push((child, depth + 1));
                     }
                 }
-            };
+                SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
+                    if depth == max_depth {
+                        let mut blinded_mask = *blinded_mask;
+                        let mut blinded_hashes = blinded_hashes.clone();
+                        for nibble in state_mask.iter() {
+                            if blinded_mask.is_bit_set(nibble) {
+                                continue;
+                            }
+                            let mut child = path;
+                            child.push_unchecked(nibble);
 
-            // Process children - either continue traversal or prune
-            for child in children {
-                if depth == max_depth {
-                    let path_to_prune = if is_extension {
-                        // If this is a child of extension node, we want to prune the extension node
-                        // itself to preserve invariant of both extension and branch nodes being
-                        // revealed.
-                        path
+                            let Entry::Occupied(entry) = self
+                                .subtrie_for_path_mut_untracked(&child)
+                                .unwrap()
+                                .nodes
+                                .entry(child)
+                            else {
+                                panic!("expected node at path {child:?}");
+                            };
+
+                            let Some(hash) = entry.get().cached_hash() else {
+                                continue;
+                            };
+                            entry.remove();
+                            blinded_mask.set_bit(nibble);
+                            blinded_hashes[nibble as usize] = hash;
+                            effective_pruned_roots.push(child);
+                        }
+
+                        let SparseNode::Branch {
+                            blinded_mask: old_blinded_mask,
+                            blinded_hashes: old_blinded_hashes,
+                            ..
+                        } = self
+                            .subtrie_for_path_mut_untracked(&path)
+                            .unwrap()
+                            .nodes
+                            .get_mut(&path)
+                            .unwrap()
+                        else {
+                            unreachable!("expected branch node at path {path:?}");
+                        };
+                        *old_blinded_mask = blinded_mask;
+                        *old_blinded_hashes = blinded_hashes;
                     } else {
-                        child
-                    };
-                    // Check if child has a computed hash and replace inline
-                    let hash = self
-                        .subtrie_for_path(&path_to_prune)
-                        .and_then(|s| s.nodes.get(&path_to_prune))
-                        .filter(|n| !n.is_hash())
-                        .and_then(|n| n.cached_hash());
-
-                    if let Some(hash) = hash {
-                        // Use untracked access to avoid marking subtrie as modified during pruning
-                        if let Some(subtrie) = self.subtrie_for_path_mut_untracked(&path_to_prune) {
-                            subtrie.nodes.insert(path_to_prune, SparseNode::Hash(hash));
-                            effective_pruned_roots.push(path_to_prune);
+                        for nibble in state_mask.iter() {
+                            if blinded_mask.is_bit_set(nibble) {
+                                continue;
+                            }
+                            let mut child = path;
+                            child.push_unchecked(nibble);
+                            stack.push((child, depth + 1));
                         }
                     }
-                } else {
-                    stack.push((child, depth + 1));
                 }
             }
         }
@@ -1221,9 +1351,9 @@ impl SparseTrie for ParallelSparseTrie {
 
         debug_assert!(
             {
-                let mut all_roots: Vec<_> = effective_pruned_roots.iter().collect();
+                let mut all_roots: Vec<_> = effective_pruned_roots.clone();
                 all_roots.sort_unstable();
-                all_roots.windows(2).all(|w| !w[1].starts_with(w[0]))
+                all_roots.windows(2).all(|w| !w[1].starts_with(&w[0]))
             },
             "prune roots must be prefix-free"
         );
@@ -1551,7 +1681,9 @@ impl ParallelSparseTrie {
             // If empty node is found it means the subtrie doesn't have any nodes in it, let alone
             // the target leaf.
             SparseNode::Empty => FindNextToLeafOutcome::NotFound,
-            SparseNode::Hash(rlp_node) => FindNextToLeafOutcome::BlindedNode(*rlp_node),
+            SparseNode::Hash(hash) => {
+                FindNextToLeafOutcome::BlindedNode { path: *from_path, hash: *hash }
+            }
             SparseNode::Leaf { key, .. } => {
                 let mut found_full_path = *from_path;
                 found_full_path.extend(key);
@@ -1574,7 +1706,7 @@ impl ParallelSparseTrie {
                 }
                 FindNextToLeafOutcome::ContinueFrom(child_path)
             }
-            SparseNode::Branch { state_mask, .. } => {
+            SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
                 if leaf_full_path.len() == from_path.len() {
                     return FindNextToLeafOutcome::NotFound
                 }
@@ -1586,6 +1718,13 @@ impl ParallelSparseTrie {
 
                 let mut child_path = *from_path;
                 child_path.push_unchecked(nibble);
+
+                if blinded_mask.is_bit_set(nibble) {
+                    return FindNextToLeafOutcome::BlindedNode {
+                        path: child_path,
+                        hash: blinded_hashes[nibble as usize],
+                    };
+                }
 
                 FindNextToLeafOutcome::ContinueFrom(child_path)
             }
@@ -1754,112 +1893,6 @@ impl ParallelSparseTrie {
             // For a branch node, we just leave the extension node as-is.
             SparseNode::Branch { .. } => None,
         }
-    }
-
-    /// Pre-validates reveal chain accessibility before mutations.
-    ///
-    /// Walks the trie path checking that all nodes can be revealed. This is called before
-    /// any mutations to ensure the operation will succeed atomically.
-    ///
-    /// Returns `BlindedNode` error if any node in the chain cannot be revealed by the provider.
-    fn pre_validate_reveal_chain<P: TrieNodeProvider>(
-        &self,
-        path: &Nibbles,
-        provider: &P,
-    ) -> SparseTrieResult<()> {
-        // Find the subtrie containing this path, or return Ok if path doesn't exist
-        let subtrie = match self.subtrie_for_path(path) {
-            Some(s) => s,
-            None => return Ok(()),
-        };
-
-        match subtrie.nodes.get(path) {
-            // Hash node: attempt to reveal from provider
-            Some(SparseNode::Hash(hash)) => match provider.trie_node(path)? {
-                Some(RevealedNode { node, .. }) => {
-                    let decoded = TrieNode::decode(&mut &node[..])?;
-                    // Extension nodes have children that also need validation
-                    if let TrieNode::Extension(ext) = decoded {
-                        let mut grandchild_path = *path;
-                        grandchild_path.extend(&ext.key);
-
-                        return self.pre_validate_reveal_chain(&grandchild_path, provider);
-                    }
-
-                    Ok(())
-                }
-                // Provider cannot reveal this node - operation would fail
-                None => Err(SparseTrieErrorKind::BlindedNode { path: *path, hash: *hash }.into()),
-            },
-            // Leaf, Extension, Branch, Empty, or missing: no further validation needed
-            _ => Ok(()),
-        }
-    }
-
-    /// Called when a leaf is removed on a branch which has only one other remaining child. That
-    /// child must be revealed in order to properly collapse the branch.
-    ///
-    /// If `recurse_into_extension` is true, and the remaining child is an extension node, then its
-    /// child will be ensured to be revealed as well.
-    ///
-    /// ## Returns
-    ///
-    /// The node of the remaining child, whether it was already revealed or not.
-    fn reveal_remaining_child_on_leaf_removal<P: TrieNodeProvider>(
-        &mut self,
-        provider: P,
-        full_path: &Nibbles, // only needed for logs
-        remaining_child_path: &Nibbles,
-    ) -> SparseTrieResult<SparseNode> {
-        let remaining_child_subtrie = self.subtrie_for_path_mut(remaining_child_path);
-
-        let (remaining_child_node, remaining_child_masks) = match remaining_child_subtrie
-            .nodes
-            .get(remaining_child_path)
-            .unwrap()
-        {
-            SparseNode::Hash(_) => {
-                debug!(
-                    target: "trie::parallel_sparse",
-                    child_path = ?remaining_child_path,
-                    leaf_full_path = ?full_path,
-                    "Node child not revealed in remove_leaf, falling back to db",
-                );
-                if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                    provider.trie_node(remaining_child_path)?
-                {
-                    let decoded = TrieNodeV2::decode(&mut &node[..])?;
-                    trace!(
-                        target: "trie::parallel_sparse",
-                        ?remaining_child_path,
-                        ?decoded,
-                        ?tree_mask,
-                        ?hash_mask,
-                        "Revealing remaining blinded branch child"
-                    );
-                    let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
-                    remaining_child_subtrie.reveal_node(*remaining_child_path, &decoded, masks)?;
-                    (
-                        remaining_child_subtrie.nodes.get(remaining_child_path).unwrap().clone(),
-                        masks,
-                    )
-                } else {
-                    return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
-                        path: *remaining_child_path,
-                    }
-                    .into())
-                }
-            }
-            // The node is already revealed so we don't need to return its masks here, as they don't
-            // need to be inserted.
-            node => (node.clone(), None),
-        };
-
-        if let Some(masks) = remaining_child_masks {
-            self.branch_node_masks.insert(*remaining_child_path, masks);
-        }
-
-        Ok(remaining_child_node)
     }
 
     /// Drains any [`SparseTrieUpdatesAction`]s from the given subtrie, and applies each action to
@@ -2135,9 +2168,15 @@ impl ParallelSparseTrie {
                     for (stack_ptr, idx) in branch.state_mask.iter().enumerate() {
                         let mut child_path = branch_path;
                         child_path.push_unchecked(idx);
-                        self.lower_subtrie_for_path_mut(&child_path)
-                            .expect("child_path must have a lower subtrie")
-                            .reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+                        let child = &branch.stack[stack_ptr];
+
+                        // Only reveal children that are not hashes. Hashes are stored on branch
+                        // nodes directly.
+                        if !child.is_hash() {
+                            self.lower_subtrie_for_path_mut(&child_path)
+                                .expect("child_path must have a lower subtrie")
+                                .reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+                        }
                     }
                 }
             }
@@ -2420,7 +2459,7 @@ enum FindNextToLeafOutcome {
     NotFound,
     /// `BlindedNode` indicates that the node is blinded with the contained hash and cannot be
     /// traversed.
-    BlindedNode(B256),
+    BlindedNode { path: Nibbles, hash: B256 },
 }
 
 impl SparseSubtrie {
@@ -2662,7 +2701,7 @@ impl SparseSubtrie {
 
                 Ok(LeafUpdateStep::continue_with(current))
             }
-            SparseNode::Branch { state_mask, .. } => {
+            SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
                 let nibble = path.get_unchecked(current.len());
                 current.push_unchecked(nibble);
                 if !state_mask.is_bit_set(nibble) {
@@ -2670,6 +2709,14 @@ impl SparseSubtrie {
                     let new_leaf = SparseNode::new_leaf(path.slice(current.len()..));
                     self.nodes.insert(current, new_leaf);
                     return Ok(LeafUpdateStep::complete_with_insertions(vec![current]))
+                }
+
+                if blinded_mask.is_bit_set(nibble) {
+                    return Err(SparseTrieErrorKind::BlindedNode {
+                        path: current,
+                        hash: blinded_hashes[nibble as usize],
+                    }
+                    .into());
                 }
 
                 // If the nibble is set, we can continue traversing the branch.
@@ -2687,6 +2734,20 @@ impl SparseSubtrie {
         masks: Option<BranchNodeMasks>,
         rlp_node: Option<RlpNode>,
     ) -> SparseTrieResult<()> {
+        let mut blinded_mask = TrieMask::default();
+        let mut blinded_hashes = Box::new([B256::ZERO; 16]);
+
+        for (stack_ptr, idx) in state_mask.iter().enumerate() {
+            let mut child_path = path;
+            child_path.push_unchecked(idx);
+            let child = &children[stack_ptr];
+
+            if let Some(hash) = child.as_hash() {
+                blinded_mask.set_bit(idx);
+                blinded_hashes[idx as usize] = hash;
+            }
+        }
+
         match self.nodes.entry(path) {
             Entry::Occupied(mut entry) => {
                 match entry.get() {
@@ -2702,6 +2763,8 @@ impl SparseSubtrie {
                                     !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
                                 })),
                             },
+                            blinded_mask,
+                            blinded_hashes,
                         });
                     }
                     // Branch already revealed, do nothing
@@ -2719,7 +2782,12 @@ impl SparseSubtrie {
                         },
                         None => SparseNodeState::Dirty,
                     };
-                entry.insert(SparseNode::Branch { state_mask, state });
+                entry.insert(SparseNode::Branch {
+                    state_mask,
+                    state,
+                    blinded_mask,
+                    blinded_hashes,
+                });
             }
         }
 
@@ -2728,10 +2796,11 @@ impl SparseSubtrie {
         for (stack_ptr, idx) in state_mask.iter().enumerate() {
             let mut child_path = path;
             child_path.push_unchecked(idx);
-            if Self::is_child_same_level(&path, &child_path) {
+            let child = &children[stack_ptr];
+            if !child.is_hash() && Self::is_child_same_level(&path, &child_path) {
                 // Reveal each child node or hash it has, but only if the child is on
                 // the same level as the parent.
-                self.reveal_node_or_hash(child_path, &children[stack_ptr])?;
+                self.reveal_node_or_hash(child_path, child)?;
             }
         }
 
@@ -2775,6 +2844,26 @@ impl SparseSubtrie {
             }
         }
 
+        let parent = (!path.is_empty()).then(|| path.slice(0..path.len() - 1));
+        let mut hash = None;
+        if let Some(parent) = parent &&
+            Self::is_child_same_level(&parent, &path)
+        {
+            let Some(SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. }) =
+                self.nodes.get_mut(&parent)
+            else {
+                return Ok(false);
+            };
+            let nibble = path.get_unchecked(parent.len());
+            if !state_mask.is_bit_set(nibble) {
+                return Ok(false);
+            }
+            if blinded_mask.is_bit_set(nibble) {
+                blinded_mask.unset_bit(nibble);
+                hash = Some(blinded_hashes[nibble as usize]);
+            }
+        }
+
         trace!(
             target: "trie::parallel_sparse",
             ?path,
@@ -2797,7 +2886,7 @@ impl SparseSubtrie {
                         branch.state_mask,
                         &branch.stack,
                         masks,
-                        branch.branch_rlp_node.clone(),
+                        hash.as_ref().map(RlpNode::word_rlp),
                     )?;
                     return Ok(true);
                 }
@@ -2825,7 +2914,21 @@ impl SparseSubtrie {
                             _ => unreachable!("checked that node is either a hash or non-existent"),
                         },
                         Entry::Vacant(entry) => {
-                            entry.insert(SparseNode::new_ext(branch.key));
+                            entry.insert(SparseNode::Extension {
+                                key: branch.key,
+                                state: hash
+                                    .as_ref()
+                                    .map(|hash| SparseNodeState::Cached {
+                                        rlp_node: RlpNode::word_rlp(hash),
+                                        // Inherit `store_in_db_trie` from the child branch
+                                        // node masks so that the memoized hash can be used
+                                        // without needing to fetch the child branch.
+                                        store_in_db_trie: Some(masks.is_some_and(|m| {
+                                            !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
+                                        })),
+                                    })
+                                    .unwrap_or(SparseNodeState::Dirty),
+                            });
                         }
                     }
                 }
@@ -2927,7 +3030,16 @@ impl SparseSubtrie {
                         _ => unreachable!("checked that node is either a hash or non-existent"),
                     },
                     Entry::Vacant(entry) => {
-                        entry.insert(SparseNode::new_leaf(leaf.key));
+                        entry.insert(SparseNode::Leaf {
+                            key: leaf.key,
+                            state: hash
+                                .as_ref()
+                                .map(|hash| SparseNodeState::Cached {
+                                    rlp_node: RlpNode::word_rlp(hash),
+                                    store_in_db_trie: Some(false),
+                                })
+                                .unwrap_or(SparseNodeState::Dirty),
+                        });
                     }
                 }
             }
@@ -2954,9 +3066,8 @@ impl SparseSubtrie {
     ///
     /// Will error if there's a conflict between a new hash node and an existing one
     /// at the same path
-    fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
-        if child.len() == B256::len_bytes() + 1 {
-            let hash = B256::from_slice(&child[1..]);
+    fn reveal_node_or_hash(&mut self, path: Nibbles, child: &RlpNode) -> SparseTrieResult<()> {
+        if let Some(hash) = child.as_hash() {
             match self.nodes.entry(path) {
                 Entry::Occupied(entry) => match entry.get() {
                     // Hash node with a different hash can't be handled.
@@ -3246,7 +3357,7 @@ impl SparseSubtrieInner {
                     return
                 }
             }
-            SparseNode::Branch { state_mask, state } => {
+            SparseNode::Branch { state_mask, state, blinded_mask, blinded_hashes } => {
                 if let Some((rlp_node, store_in_db_trie)) = state
                     .cached_rlp_node()
                     .zip(state.store_in_db_trie())
@@ -3281,13 +3392,13 @@ impl SparseSubtrieInner {
                 for bit in state_mask.iter().rev() {
                     let mut child = path;
                     child.push_unchecked(bit);
-                    self.buffers.branch_child_buf.push(child);
+
+                    if !blinded_mask.is_bit_set(bit) {
+                        self.buffers.branch_child_buf.push(child);
+                    }
                 }
 
-                self.buffers
-                    .branch_value_stack_buf
-                    .resize(self.buffers.branch_child_buf.len(), Default::default());
-                let mut added_children = false;
+                self.buffers.branch_value_stack_buf.resize(state_mask.len(), Default::default());
 
                 let mut tree_mask = TrieMask::default();
                 let mut hash_mask = TrieMask::default();
@@ -3298,62 +3409,28 @@ impl SparseSubtrieInner {
                 let mut path_masks =
                     || *path_masks_storage.get_or_insert_with(|| branch_node_masks.get(&path));
 
-                for (i, child_path) in self.buffers.branch_child_buf.iter().enumerate() {
-                    if self.buffers.rlp_node_stack.last().is_some_and(|e| &e.path == child_path) {
-                        let RlpNodeStackItem {
-                            path: _,
-                            rlp_node: child,
-                            node_type: child_node_type,
-                        } = self.buffers.rlp_node_stack.pop().unwrap();
+                for (i, child_nibble) in state_mask.iter().enumerate().rev() {
+                    let mut child_path = path;
+                    child_path.push_unchecked(child_nibble);
 
-                        // Update the masks only if we need to retain trie updates
-                        if retain_updates {
-                            // SAFETY: it's a child, so it's never empty
-                            let last_child_nibble = child_path.last().unwrap();
+                    let (child, child_node_type) = if blinded_mask.is_bit_set(child_nibble) {
+                        (
+                            RlpNode::word_rlp(&blinded_hashes[child_nibble as usize]),
+                            SparseNodeType::Hash,
+                        )
+                    } else if self
+                        .buffers
+                        .rlp_node_stack
+                        .last()
+                        .is_some_and(|e| e.path == child_path)
+                    {
+                        let RlpNodeStackItem { path: _, rlp_node, node_type } =
+                            self.buffers.rlp_node_stack.pop().unwrap();
 
-                            // Determine whether we need to set trie mask bit.
-                            let should_set_tree_mask_bit = if let Some(store_in_db_trie) =
-                                child_node_type.store_in_db_trie()
-                            {
-                                // A branch or an extension node explicitly set the
-                                // `store_in_db_trie` flag
-                                store_in_db_trie
-                            } else {
-                                // A blinded node has the tree mask bit set
-                                child_node_type.is_hash() &&
-                                    path_masks().is_some_and(|masks| {
-                                        masks.tree_mask.is_bit_set(last_child_nibble)
-                                    })
-                            };
-                            if should_set_tree_mask_bit {
-                                tree_mask.set_bit(last_child_nibble);
-                            }
-                            // Set the hash mask. If a child node is a revealed branch node OR
-                            // is a blinded node that has its hash mask bit set according to the
-                            // database, set the hash mask bit and save the hash.
-                            let hash = child.as_hash().filter(|_| {
-                                child_node_type.is_branch() ||
-                                    (child_node_type.is_hash() &&
-                                        path_masks().is_some_and(|masks| {
-                                            masks.hash_mask.is_bit_set(last_child_nibble)
-                                        }))
-                            });
-                            if let Some(hash) = hash {
-                                hash_mask.set_bit(last_child_nibble);
-                                hashes.push(hash);
-                            }
-                        }
-
-                        // Insert children in the resulting buffer in a normal order,
-                        // because initially we iterated in reverse.
-                        // SAFETY: i < len and len is never 0
-                        let original_idx = self.buffers.branch_child_buf.len() - i - 1;
-                        self.buffers.branch_value_stack_buf[original_idx] = child;
-                        added_children = true;
+                        (rlp_node, node_type)
                     } else {
                         // Need to defer processing until children are computed, on the next
                         // invocation update the node's hash.
-                        debug_assert!(!added_children);
                         self.buffers.path_stack.push(RlpNodePathStackItem {
                             path,
                             is_in_prefix_set: Some(prefix_set_contains(&path)),
@@ -3365,7 +3442,46 @@ impl SparseSubtrieInner {
                                 .map(|path| RlpNodePathStackItem { path, is_in_prefix_set: None }),
                         );
                         return
+                    };
+
+                    // Update the masks only if we need to retain trie updates
+                    if retain_updates {
+                        // Determine whether we need to set trie mask bit.
+                        let should_set_tree_mask_bit =
+                            if let Some(store_in_db_trie) = child_node_type.store_in_db_trie() {
+                                // A branch or an extension node explicitly set the
+                                // `store_in_db_trie` flag
+                                store_in_db_trie
+                            } else {
+                                // A blinded node has the tree mask bit set
+                                child_node_type.is_hash() &&
+                                    path_masks().is_some_and(|masks| {
+                                        masks.tree_mask.is_bit_set(child_nibble)
+                                    })
+                            };
+                        if should_set_tree_mask_bit {
+                            tree_mask.set_bit(child_nibble);
+                        }
+                        // Set the hash mask. If a child node is a revealed branch node OR
+                        // is a blinded node that has its hash mask bit set according to the
+                        // database, set the hash mask bit and save the hash.
+                        let hash = child.as_hash().filter(|_| {
+                            child_node_type.is_branch() ||
+                                (child_node_type.is_hash() &&
+                                    path_masks().is_some_and(|masks| {
+                                        masks.hash_mask.is_bit_set(child_nibble)
+                                    }))
+                        });
+                        if let Some(hash) = hash {
+                            hash_mask.set_bit(child_nibble);
+                            hashes.push(hash);
+                        }
                     }
+
+                    // Insert children in the resulting buffer in a normal order,
+                    // because initially we iterated in reverse.
+                    // SAFETY: i < len and len is never 0
+                    self.buffers.branch_value_stack_buf[i] = child;
                 }
 
                 trace!(
