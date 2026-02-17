@@ -279,9 +279,12 @@ jobs:
 
       - name: Generate charts
         if: success()
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
           CHART_ARGS="/tmp/bench-results-branch/combined_latency.csv --output-dir /tmp/bench-charts"
           CHART_ARGS="$CHART_ARGS --baseline /tmp/bench-results-baseline/combined_latency.csv"
+          CHART_ARGS="$CHART_ARGS --branch-name ${BRANCH_NAME}"
           # shellcheck disable=SC2086
           uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
