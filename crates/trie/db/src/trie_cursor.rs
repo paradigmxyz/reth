@@ -38,6 +38,10 @@ pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
 }
 
 /// Trait for storage trie entry types that carry a subkey and node.
+///
+/// Needed because [`StorageTrieEntry`] and [`PackedStorageTrieEntry`] are separate structs
+/// with different field types, but `DatabaseStorageTrieCursor` must access `.nibbles()` and
+/// `.node()` generically through `A::StorageValue`.
 pub trait StorageTrieEntryLike: Sized {
     /// The subkey type.
     type SubKey: Clone;
