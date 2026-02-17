@@ -253,6 +253,7 @@ jobs:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
           BRANCH_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
+          git fetch origin main --quiet
           MERGE_BASE=$(git merge-base HEAD origin/main 2>/dev/null || echo "${{ github.sha }}")
           MAIN_HEAD=$(git rev-parse origin/main 2>/dev/null || echo "")
           BEHIND_MAIN=0
@@ -380,3 +381,7 @@ jobs:
           path: |
             /tmp/reth-bench-node-baseline.log
             /tmp/reth-bench-node-branch.log
+
+      - name: Stop sccache
+        if: always()
+        run: sccache --stop-server || true
