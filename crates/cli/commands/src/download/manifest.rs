@@ -23,8 +23,8 @@ pub struct SnapshotManifest {
     pub block: u64,
     /// Chain ID.
     pub chain_id: u64,
-    /// Storage version (e.g. "v2").
-    pub storage_version: String,
+    /// Storage version (1 = legacy, 2 = current).
+    pub storage_version: u64,
     /// Timestamp when the snapshot was created (unix seconds).
     pub timestamp: u64,
     /// Base URL for archive downloads. Component archive URLs are relative to this.
@@ -273,7 +273,7 @@ pub fn generate_manifest(
     Ok(SnapshotManifest {
         block,
         chain_id,
-        storage_version: "v2".to_string(),
+        storage_version: 2,
         timestamp,
         base_url: base_url.to_string(),
         components,
