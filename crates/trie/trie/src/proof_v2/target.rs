@@ -98,9 +98,9 @@ impl<'a> SubTrieTargets<'a> {
 
 /// Given a set of [`Target`]s, returns an iterator over those same [`Target`]s chunked by the
 /// sub-tries they apply to within the overall trie.
-pub(crate) fn iter_sub_trie_targets<'a>(
-    targets: &'a mut [Target],
-) -> impl Iterator<Item = SubTrieTargets<'a>> {
+pub(crate) fn iter_sub_trie_targets(
+    targets: &mut [Target],
+) -> impl Iterator<Item = SubTrieTargets<'_>> {
     // First sort by the sub-trie prefix of each target, falling back to the `min_len` in cases
     // where the sub-trie prefixes are equal (to differentiate targets which match the root node and
     // those which don't).

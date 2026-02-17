@@ -10,6 +10,7 @@ use reth_db::models::{AccountBeforeTx, StorageBeforeTx};
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_static_file_types::{
     ChangesetOffset, ChangesetOffsetReader, ChangesetOffsetWriter, SegmentHeader,
     SegmentRangeInclusive, StaticFileSegment,
@@ -21,7 +22,6 @@ use std::{
     fmt::Debug,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
-    time::Instant,
 };
 use tracing::{debug, instrument};
 

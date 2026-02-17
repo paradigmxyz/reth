@@ -1,8 +1,9 @@
 use crate::Tables;
 use metrics::Histogram;
+use quanta::Instant;
 use reth_metrics::{metrics::Counter, Metrics};
 use rustc_hash::FxHashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use strum::{EnumCount, EnumIter, IntoEnumIterator};
 
 const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;

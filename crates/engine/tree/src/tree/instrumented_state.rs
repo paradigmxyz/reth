@@ -3,7 +3,7 @@ use alloy_primitives::{Address, StorageKey, StorageValue, B256};
 use metrics::{Gauge, Histogram};
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode, FastInstant as Instant};
 use reth_provider::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
     StateProvider, StateRootProvider, StorageRootProvider,
@@ -14,7 +14,7 @@ use reth_trie::{
 };
 use std::{
     sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 /// Nanoseconds per second

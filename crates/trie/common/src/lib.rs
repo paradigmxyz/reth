@@ -38,7 +38,8 @@ pub use key::{KeccakKeyHasher, KeyHasher};
 
 mod nibbles;
 pub use nibbles::{
-    Nibbles, PackedStoredNibbles, PackedStoredNibblesSubKey, StoredNibbles, StoredNibblesSubKey,
+    depth_first_cmp, Nibbles, PackedStoredNibbles, PackedStoredNibblesSubKey, StoredNibbles,
+    StoredNibblesSubKey,
 };
 
 mod storage;
@@ -49,6 +50,9 @@ pub use subnode::StoredSubNode;
 
 mod trie;
 pub use trie::{BranchNodeMasks, BranchNodeMasksMap, ProofTrieNode};
+
+mod trie_node_v2;
+pub use trie_node_v2::*;
 
 /// The implementation of a container for storing intermediate changes to a trie.
 /// The container indicates when the trie has been modified.

@@ -83,7 +83,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         /// provided command.
         macro_rules! db_exec {
             ($env:expr, $tool:ident, $N:ident, $access_rights:expr, $command:block) => {
-                let Environment { provider_factory, .. } = $env.init::<$N>($access_rights)?;
+                let Environment { provider_factory, .. } =
+                    $env.init::<$N>($access_rights, ctx.task_executor.clone())?;
 
                 let $tool = DbTool::new(provider_factory)?;
                 $command;

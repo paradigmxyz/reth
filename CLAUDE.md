@@ -313,6 +313,74 @@ GLOBAL_COUNTER.fetch_add(1, Ordering::SeqCst);
 Before adding a comment, ask: Would someone reading just the current code (no PR, no history) find this helpful?
 
 
+#### Rust Style Guides
+
+##### Type Ordering in Files
+
+When defining structs, traits, and functions in a file, follow this ordering convention. The file's primary type (matching the file name) comes first, followed by supporting public types, then private types and helpers.
+
+```rust
+use ...;
+
+/// The primary type of this file (matches filename).
+pub struct PayloadProcessor { ... }
+
+impl PayloadProcessor { ... }
+
+// Followed by public auxiliary types that support the primary type
+
+/// Configuration for the processor.
+pub struct PayloadProcessorConfig { ... }
+
+/// Result type returned by processor operations.
+pub struct ProcessorResult { ... }
+
+// Followed by public traits related to the primary type
+
+pub trait ProcessorExt { ... }
+
+// Followed by private helper types
+
+struct InternalState { ... }
+
+// Followed by private helper functions
+
+fn validate_input() { ... }
+```
+
+❌ **Bad**: Adding new traits and auxiliary types **above** the file's primary type (see [#22133](https://github.com/paradigmxyz/reth/pull/22133)):
+
+```rust
+use ...;
+
+// ❌ BAD - new auxiliary struct added before the file's main type
+pub struct CacheWaitDurations { ... }
+
+// ❌ BAD - new trait added before the file's main type  
+pub trait WaitForCaches { ... }
+
+// The file's primary type is buried below unrelated additions
+pub struct PayloadProcessor { ... }
+```
+
+✅ **Good**: New types go **after** the primary type:
+
+```rust
+use ...;
+
+// ✅ The file's primary type stays at the top
+pub struct PayloadProcessor { ... }
+
+impl PayloadProcessor { ... }
+
+// ✅ Auxiliary types follow the primary type
+pub struct CacheWaitDurations { ... }
+
+pub trait WaitForCaches { ... }
+
+impl WaitForCaches for PayloadProcessor { ... }
+```
+
 ### Example Contribution Workflow
 
 Let's say you want to fix a bug where external IP resolution fails on startup:

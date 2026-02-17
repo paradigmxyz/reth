@@ -1,11 +1,25 @@
 # Runs benchmarks.
+#
+# The reth-bench job replays real blocks via the Engine API against a reth node
+# backed by a local snapshot managed with schelk.
+#
+# It runs the main (baseline) binary and the branch (candidate) binary on the
+# same block range (snapshot recovered between runs) to compare performance.
 
 on:
-  pull_request:
   # TODO: Disabled temporarily for https://github.com/CodSpeedHQ/runner/issues/55
   # merge_group:
   push:
     branches: [main]
+  issue_comment:
+    types: [created, edited]
+  workflow_dispatch:
+    inputs:
+      blocks:
+        description: "Number of blocks to benchmark"
+        required: false
+        default: "50"
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -14,8 +28,18 @@ env:
   RUSTC_WRAPPER: "sccache"
 
 name: bench
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bench-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   codspeed:
+    if: github.event_name != 'issue_comment'
     runs-on: depot-ubuntu-latest
     strategy:
       matrix:
@@ -31,6 +55,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: true
+          ref: ${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/merge', github.event.issue.number) || '' }}
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
@@ -49,3 +74,345 @@ jobs:
           run: cargo codspeed run ${{ matrix.crates }}
           mode: instrumentation
           token: ${{ secrets.CODSPEED_TOKEN }}
+
+  reth-bench:
+    if: github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, 'derek bench')
+    name: reth-bench
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 120
+    env:
+      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
+      SCHELK_MOUNT: /reth-bench
+    steps:
+      - name: Check org membership
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const user = context.payload.comment.user.login;
+            try {
+              const { status } = await github.rest.orgs.checkMembershipForUser({
+                org: 'paradigmxyz',
+                username: user,
+              });
+              if (status !== 204 && status !== 302) {
+                core.setFailed(`@${user} is not a member of paradigmxyz`);
+              }
+            } catch (e) {
+              core.setFailed(`@${user} is not a member of paradigmxyz`);
+            }
+
+      - name: Parse arguments
+        id: args
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.comment.body.trim();
+            const known = new Set(['blocks', 'warmup']);
+            const defaults = { blocks: '500', warmup: '100' };
+            const unknown = [];
+            const invalid = [];
+            const args = body.replace(/^derek bench\s*/, '');
+            for (const part of args.split(/\s+/).filter(Boolean)) {
+              const eq = part.indexOf('=');
+              if (eq === -1) {
+                unknown.push(part);
+                continue;
+              }
+              const key = part.slice(0, eq);
+              const value = part.slice(eq + 1);
+              if (!known.has(key)) {
+                unknown.push(key);
+              } else if (!/^\d+$/.test(value)) {
+                invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
+              } else {
+                defaults[key] = value;
+              }
+            }
+            const errors = [];
+            if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
+            if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
+            if (errors.length) {
+              const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`derek bench [blocks=N] [warmup=N]\``;
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: msg,
+              });
+              core.setFailed(msg);
+              return;
+            }
+            core.setOutput('blocks', defaults.blocks);
+            core.setOutput('warmup', defaults.warmup);
+            core.exportVariable('BENCH_BLOCKS', defaults.blocks);
+            core.exportVariable('BENCH_WARMUP_BLOCKS', defaults.warmup);
+
+      - name: Acknowledge request
+        id: ack
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes',
+            });
+
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const blocks = '${{ steps.args.outputs.blocks }}';
+            const warmup = '${{ steps.args.outputs.warmup }}';
+            const { data: comment } = await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🚀 Benchmark started! [View run](${runUrl})\n\n⏳ **Status:** Building binaries...\n\n**Config:** ${blocks} blocks, ${warmup} warmup blocks`,
+            });
+            core.setOutput('comment-id', comment.id);
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          fetch-depth: 0
+          ref: ${{ format('refs/pull/{0}/merge', github.event.issue.number) }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+        continue-on-error: true
+
+      # Verify all required tools are available
+      - name: Check dependencies
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          missing=()
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv; do
+            command -v "$cmd" &>/dev/null || missing+=("$cmd")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required tools: ${missing[*]}"
+            exit 1
+          fi
+          echo "All dependencies found"
+
+      # Build binaries
+      - name: Fetch or build main binaries
+        run: |
+          MERGE_BASE=$(git merge-base HEAD origin/main 2>/dev/null || echo "${{ github.sha }}")
+          .github/scripts/bench-reth-build.sh main "$MERGE_BASE"
+      - name: Fetch or build branch binaries
+        run: |
+          BRANCH_SHA="${{ github.sha }}"
+          .github/scripts/bench-reth-build.sh branch "$BRANCH_SHA"
+
+      # System tuning for reproducible benchmarks
+      - name: System setup
+        run: |
+          sudo cpupower frequency-set -g performance || true
+          # Disable turbo boost (Intel and AMD paths)
+          echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || true
+          echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
+          sudo swapoff -a || true
+          echo 0 | sudo tee /proc/sys/kernel/randomize_va_space || true
+          # Disable SMT (hyperthreading)
+          for cpu in /sys/devices/system/cpu/cpu*/topology/thread_siblings_list; do
+            first=$(cut -d, -f1 < "$cpu" | cut -d- -f1)
+            current=$(echo "$cpu" | grep -o 'cpu[0-9]*' | grep -o '[0-9]*')
+            if [ "$current" != "$first" ]; then
+              echo 0 | sudo tee "/sys/devices/system/cpu/cpu${current}/online" || true
+            fi
+          done
+          echo "Online CPUs: $(nproc)"
+          # Disable transparent huge pages (compaction causes latency spikes)
+          for p in /sys/kernel/mm/transparent_hugepage /sys/kernel/mm/transparent_hugepages; do
+            [ -d "$p" ] && echo never | sudo tee "$p/enabled" && echo never | sudo tee "$p/defrag" && break
+          done || true
+          # Prevent deep C-states (avoids wake-up latency jitter)
+          sudo sh -c 'exec 3<>/dev/cpu_dma_latency; echo -ne "\x00\x00\x00\x00" >&3; sleep infinity' &
+          # Move all IRQs to core 0 (housekeeping core)
+          for irq in /proc/irq/*/smp_affinity_list; do
+            echo 0 | sudo tee "$irq" 2>/dev/null || true
+          done
+          # Stop noisy background services
+          sudo systemctl stop irqbalance cron atd unattended-upgrades snapd 2>/dev/null || true
+          # Log environment for reproducibility
+          echo "=== Benchmark environment ==="
+          uname -r
+          lscpu | grep -E 'Model name|CPU\(s\)|MHz|NUMA'
+          cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+          cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+          cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || cat /sys/kernel/mm/transparent_hugepages/enabled 2>/dev/null || echo "THP: unknown"
+          free -h
+
+      # Clean up any leftover state
+      - name: Pre-flight cleanup
+        run: |
+          pkill -9 reth || true
+          mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+
+      - name: Update status (running benchmarks)
+        if: steps.ack.outputs.comment-id
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: ${{ steps.ack.outputs.comment-id || 0 }},
+              body: `🚀 Benchmark started! [View run](${runUrl})\n\n⏳ **Status:** Running benchmarks (2 runs)...`,
+            });
+
+      - name: "Run benchmark: baseline"
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline target/profiling-baseline/reth /tmp/bench-results-baseline
+
+      - name: "Run benchmark: branch"
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh branch target/profiling/reth /tmp/bench-results-branch
+
+      # Results & charts
+      - name: Parse results
+        id: results
+        if: success()
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+          BRANCH_SHA: ${{ github.sha }}
+        run: |
+          git fetch origin main --quiet
+          # Use the actual PR head commit, not HEAD (which is the merge commit
+          # refs/pull/N/merge and always has origin/main as a parent).
+          MERGE_BASE=$(git merge-base "${BRANCH_SHA}" origin/main 2>/dev/null || echo "${{ github.sha }}")
+          MAIN_HEAD=$(git rev-parse origin/main 2>/dev/null || echo "")
+          BEHIND_MAIN=0
+          if [ -n "$MAIN_HEAD" ] && [ "$MERGE_BASE" != "$MAIN_HEAD" ]; then
+            BEHIND_MAIN=$(git rev-list --count "${MERGE_BASE}..${MAIN_HEAD}" 2>/dev/null || echo "0")
+          fi
+
+          SUMMARY_ARGS="--output-summary /tmp/bench-summary.json"
+          SUMMARY_ARGS="$SUMMARY_ARGS --output-markdown /tmp/bench-comment.md"
+          SUMMARY_ARGS="$SUMMARY_ARGS --repo ${{ github.repository }}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-ref ${MERGE_BASE}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --branch-name ${BRANCH_NAME}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --branch-sha ${BRANCH_SHA}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv /tmp/bench-results-baseline/combined_latency.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --branch-csv /tmp/bench-results-branch/combined_latency.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv /tmp/bench-results-branch/total_gas.csv"
+          if [ "$BEHIND_MAIN" -gt 0 ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --behind-main $BEHIND_MAIN"
+          fi
+          # shellcheck disable=SC2086
+          python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
+
+      - name: Generate charts
+        if: success()
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        run: |
+          CHART_ARGS="/tmp/bench-results-branch/combined_latency.csv --output-dir /tmp/bench-charts"
+          CHART_ARGS="$CHART_ARGS --baseline /tmp/bench-results-baseline/combined_latency.csv"
+          CHART_ARGS="$CHART_ARGS --branch-name ${BRANCH_NAME}"
+          # shellcheck disable=SC2086
+          uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
+
+      - name: Upload results
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-reth-results
+          path: |
+            /tmp/bench-results-baseline/
+            /tmp/bench-results-branch/
+            /tmp/bench-summary.json
+            /tmp/bench-charts/
+
+      - name: Push charts
+        id: push-charts
+        if: success()
+        run: |
+          PR_NUMBER=${{ github.event.issue.number }}
+          RUN_ID=${{ github.run_id }}
+          CHART_DIR="pr/${PR_NUMBER}/${RUN_ID}"
+
+          if git fetch origin bench-charts 2>/dev/null; then
+            git checkout bench-charts
+          else
+            git checkout --orphan bench-charts
+            git rm -rf . 2>/dev/null || true
+          fi
+
+          mkdir -p "${CHART_DIR}"
+          cp /tmp/bench-charts/*.png "${CHART_DIR}/"
+          git add "${CHART_DIR}"
+          git -c user.name="github-actions" -c user.email="github-actions@github.com" \
+            commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
+          git push origin bench-charts
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Compare & comment
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let comment = '';
+            try {
+              comment = fs.readFileSync('/tmp/bench-comment.md', 'utf8');
+            } catch (e) {
+              comment = '⚠️ Engine benchmark completed but failed to generate comparison.';
+            }
+
+            const sha = '${{ steps.push-charts.outputs.sha }}';
+            const prNumber = context.issue.number;
+            const runId = '${{ github.run_id }}';
+            const baseUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${sha}/pr/${prNumber}/${runId}`;
+
+            const charts = [
+              { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
+              { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
+              { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
+            ];
+
+            let chartMarkdown = '\n\n### Charts\n\n';
+            for (const chart of charts) {
+              chartMarkdown += `<details><summary>${chart.label}</summary>\n\n`;
+              chartMarkdown += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
+              chartMarkdown += `</details>\n\n`;
+            }
+
+            comment += chartMarkdown;
+
+            const requestedBy = '${{ github.event.comment.user.login }}';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `cc @${requestedBy}\n\n✅ Benchmark complete! [View run](${runUrl})\n\n${comment}`;
+            const ackCommentId = '${{ steps.ack.outputs.comment-id }}';
+
+            if (ackCommentId) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: parseInt(ackCommentId),
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Upload node log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reth-node-log
+          path: |
+            /tmp/reth-bench-node-baseline.log
+            /tmp/reth-bench-node-branch.log
+
+      - name: Restore system settings
+        if: always()
+        run: |
+          sudo systemctl start irqbalance cron atd 2>/dev/null || true
