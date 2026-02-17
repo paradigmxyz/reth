@@ -14,6 +14,13 @@ pub trait ForEachOrdered: IndexedParallelIterator {
     /// as it (and all preceding items) are ready.
     ///
     /// `f` does **not** need to be [`Send`] — it runs exclusively on the calling thread.
+    ///
+    /// # Blocking
+    ///
+    /// The calling thread blocks (via [`Condvar`]) while waiting for the next item to become
+    /// ready. It does **not** participate in rayon's work-stealing while blocked. Callers
+    /// should invoke this from a dedicated blocking thread (e.g. via
+    /// [`tokio::task::spawn_blocking`]) rather than from within the rayon thread pool.
     fn for_each_ordered<F>(self, f: F)
     where
         Self::Item: Send,
@@ -37,7 +44,7 @@ struct Slot<T> {
 }
 
 impl<T> Slot<T> {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self { value: Mutex::new(None), notify: Condvar::new() }
     }
 }
@@ -97,19 +104,22 @@ where
     }
 
     let shared = Shared::<I::Item>::new(n);
+    let shared_ref = &shared;
 
     rayon::in_place_scope(|s| {
         // Producer: compute items in parallel and write them into their slots.
         s.spawn(|_| {
             let res = catch_unwind(AssertUnwindSafe(|| {
                 iter.enumerate().for_each(|(i, item)| {
-                    shared.write(i, item);
+                    shared_ref.write(i, item);
                 });
             }));
             if let Err(payload) = res {
-                shared.panicked.store(true, Ordering::Release);
-                // Wake all slots so the consumer doesn't hang.
-                for slot in &*shared.slots {
+                shared_ref.panicked.store(true, Ordering::Release);
+                // Wake all slots so the consumer doesn't hang. Lock each slot's mutex
+                // first to serialize with the consumer's panicked check → wait sequence.
+                for slot in &*shared_ref.slots {
+                    let _guard = slot.value.lock();
                     slot.notify.notify_one();
                 }
                 std::panic::resume_unwind(payload);
@@ -118,7 +128,7 @@ where
 
         // Consumer: sequential, ordered, on the calling thread.
         for i in 0..n {
-            let Some(value) = shared.take(i) else {
+            let Some(value) = shared_ref.take(i) else {
                 return;
             };
             f(value);
@@ -239,5 +249,136 @@ mod tests {
             counter.set(counter.get() + x);
         });
         assert_eq!(counter.get(), (0..100u64).sum::<u64>());
+    }
+
+    #[test]
+    fn panic_does_not_deadlock_consumer() {
+        // Regression test: producer panics while consumer is waiting on a condvar.
+        // Without the lock-before-notify fix, the consumer could miss the wakeup
+        // and deadlock.
+        for _ in 0..100 {
+            let result = std::panic::catch_unwind(|| {
+                let input: Vec<usize> = (0..256).collect();
+                input
+                    .par_iter()
+                    .map(|&i| {
+                        if i == 128 {
+                            // Yield to increase the chance of the consumer being
+                            // between the panicked check and condvar wait.
+                            std::thread::yield_now();
+                            panic!("intentional");
+                        }
+                        i
+                    })
+                    .for_each_ordered(|_| {});
+            });
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
+    fn early_panic_at_item_zero() {
+        let result = std::panic::catch_unwind(|| {
+            let input: Vec<u64> = (0..10).collect();
+            input
+                .par_iter()
+                .map(|&i| {
+                    if i == 0 {
+                        panic!("boom at zero");
+                    }
+                    i
+                })
+                .for_each_ordered(|_| {});
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn late_panic_at_last_item() {
+        let n = 100usize;
+        let result = std::panic::catch_unwind(|| {
+            let input: Vec<usize> = (0..n).collect();
+            input
+                .par_iter()
+                .map(|&i| {
+                    if i == n - 1 {
+                        panic!("boom at last");
+                    }
+                    i
+                })
+                .for_each_ordered(|_| {});
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn large_items() {
+        let n = 500usize;
+        let input: Vec<usize> = (0..n).collect();
+        let mut output = Vec::with_capacity(n);
+        input
+            .par_iter()
+            .map(|&i| {
+                // Return a heap-allocated value to stress drop semantics.
+                vec![i; 64]
+            })
+            .for_each_ordered(|v| output.push(v[0]));
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn consumer_slower_than_producer() {
+        // Producer is fast, consumer is slow. All items should still arrive in order.
+        let n = 64usize;
+        let input: Vec<usize> = (0..n).collect();
+        let mut output = Vec::with_capacity(n);
+        input.par_iter().map(|&i| i).for_each_ordered(|x| {
+            if x % 8 == 0 {
+                std::thread::yield_now();
+            }
+            output.push(x);
+        });
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn concurrent_panic_and_drop_no_leak() {
+        // Ensure items produced before a panic are all dropped.
+        static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+        static PRODUCED: AtomicUsize = AtomicUsize::new(0);
+
+        struct Tracked;
+        impl Drop for Tracked {
+            fn drop(&mut self) {
+                DROP_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        DROP_COUNT.store(0, Ordering::Relaxed);
+        PRODUCED.store(0, Ordering::Relaxed);
+
+        let barrier = Barrier::new(2);
+        let result = std::panic::catch_unwind(|| {
+            let input: Vec<usize> = (0..64).collect();
+            input
+                .par_iter()
+                .map(|&i| {
+                    if i == 32 {
+                        barrier.wait();
+                        panic!("intentional");
+                    }
+                    if i == 0 {
+                        barrier.wait();
+                    }
+                    PRODUCED.fetch_add(1, Ordering::Relaxed);
+                    Tracked
+                })
+                .for_each_ordered(|_| {});
+        });
+
+        assert!(result.is_err());
+        let produced = PRODUCED.load(Ordering::Relaxed);
+        let dropped = DROP_COUNT.load(Ordering::Relaxed);
+        assert_eq!(dropped, produced, "all produced items must be dropped");
     }
 }
