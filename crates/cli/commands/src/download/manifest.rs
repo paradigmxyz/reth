@@ -1,8 +1,7 @@
 use eyre::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, io::Read, path::Path};
+use std::{collections::BTreeMap, path::Path};
 use tracing::info;
 
 /// A snapshot manifest describes available components for a snapshot at a given block height.
@@ -235,13 +234,13 @@ pub fn generate_manifest(
     // State: single archive
     let state_path = archive_dir.join("state.tar.zst");
     if state_path.exists() {
-        let (size, checksum) = file_size_and_checksum(&state_path)?;
+        let size = std::fs::metadata(&state_path)?.len();
         components.insert(
             SnapshotComponentType::State.key().to_string(),
             ComponentManifest::Single(SingleArchive {
                 file: "state.tar.zst".to_string(),
                 size,
-                checksum: Some(checksum),
+                checksum: None,
             }),
         );
         info!(target: "reth::cli", size = %super::DownloadProgress::format_size(size), "Found state archive");
@@ -250,13 +249,13 @@ pub fn generate_manifest(
     // Indexes (rocksdb): single archive, optional
     let indexes_path = archive_dir.join("indexes.tar.zst");
     if indexes_path.exists() {
-        let (size, checksum) = file_size_and_checksum(&indexes_path)?;
+        let size = std::fs::metadata(&indexes_path)?.len();
         components.insert(
             SnapshotComponentType::Indexes.key().to_string(),
             ComponentManifest::Single(SingleArchive {
                 file: "indexes.tar.zst".to_string(),
                 size,
-                checksum: Some(checksum),
+                checksum: None,
             }),
         );
         info!(target: "reth::cli", size = %super::DownloadProgress::format_size(size), "Found indexes archive");
@@ -320,32 +319,12 @@ fn discover_chunks(
         let path = dir.join(&filename);
 
         if path.exists() {
-            let (size, checksum) = file_size_and_checksum(&path)?;
-            chunks.push(ChunkMetadata { start, end, size, checksum: Some(checksum) });
+            let size = std::fs::metadata(&path)?.len();
+            chunks.push(ChunkMetadata { start, end, size, checksum: None });
         }
     }
 
     Ok(chunks)
-}
-
-/// Returns (file_size, sha256_hex) for a file.
-fn file_size_and_checksum(path: &Path) -> Result<(u64, String)> {
-    let metadata = std::fs::metadata(path)?;
-    let size = metadata.len();
-
-    let mut file = std::fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 8 * 1024 * 1024]; // 8MB buffer
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    let hash = format!("sha256:{:x}", hasher.finalize());
-
-    Ok((size, hash))
 }
 
 /// Resolves an archive file path from a component key and naming convention.
