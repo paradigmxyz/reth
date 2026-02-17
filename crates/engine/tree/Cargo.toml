@@ -54,7 +54,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 fixed-cache.workspace = true
 moka = { workspace = true, features = ["sync"] }
-smallvec.workspace = true
 
 # metrics
 metrics.workspace = true
