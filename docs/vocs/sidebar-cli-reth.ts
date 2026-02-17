@@ -171,6 +171,10 @@ export const rethCliSidebar: SidebarItem = {
             link: "/cli/reth/download"
         },
         {
+            text: "reth snapshot-manifest",
+            link: "/cli/reth/snapshot-manifest"
+        },
+        {
             text: "reth stage",
             link: "/cli/reth/stage",
             collapsed: true,
