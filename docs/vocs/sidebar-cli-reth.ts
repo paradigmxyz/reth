@@ -58,10 +58,6 @@ export const rethCliSidebar: SidebarItem = {
                         {
                             text: "reth db checksum static-file",
                             link: "/cli/reth/db/checksum/static-file"
-                        },
-                        {
-                            text: "reth db checksum rocksdb",
-                            link: "/cli/reth/db/checksum/rocksdb"
                         }
                     ]
                 },
@@ -153,6 +149,21 @@ export const rethCliSidebar: SidebarItem = {
                                     link: "/cli/reth/db/settings/set/v2"
                                 }
                             ]
+                        }
+                    ]
+                },
+                {
+                    text: "reth db prune-checkpoints",
+                    link: "/cli/reth/db/prune-checkpoints",
+                    collapsed: true,
+                    items: [
+                        {
+                            text: "reth db prune-checkpoints get",
+                            link: "/cli/reth/db/prune-checkpoints/get"
+                        },
+                        {
+                            text: "reth db prune-checkpoints set",
+                            link: "/cli/reth/db/prune-checkpoints/set"
                         }
                     ]
                 },

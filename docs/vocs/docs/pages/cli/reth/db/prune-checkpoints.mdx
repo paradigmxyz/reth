@@ -1,17 +1,17 @@
-# reth db checksum
+# reth db prune-checkpoints
 
-Calculates the content checksum of a table or static file segment
+View or set prune checkpoints
 
 ```bash
-$ reth db checksum --help
+$ reth db prune-checkpoints --help
 ```
 ```txt
-Usage: reth db checksum [OPTIONS] <COMMAND>
+Usage: reth db prune-checkpoints [OPTIONS] <COMMAND>
 
 Commands:
-  mdbx         Calculates the checksum of a database table
-  static-file  Calculates the checksum of a static file segment
-  help         Print this message or the help of the given subcommand(s)
+  get   Get prune checkpoint(s) from database
+  set   Set a prune checkpoint for a segment
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
