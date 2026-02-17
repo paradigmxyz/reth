@@ -5,11 +5,11 @@ mod tui;
 
 use crate::common::EnvironmentArgs;
 use clap::Parser;
-use config_gen::{config_for_components, write_config, write_prune_checkpoints};
+use config_gen::{config_for_selections, write_config, write_prune_checkpoints};
 use eyre::Result;
 use futures::stream::{self, StreamExt};
 use lz4::Decoder;
-use manifest::{SnapshotComponentType, SnapshotManifest};
+use manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest};
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -17,6 +17,7 @@ use reth_db::init_db;
 use reth_fs_util as fs;
 use std::{
     borrow::Cow,
+    collections::BTreeMap,
     fs::OpenOptions,
     io::{self, BufWriter, Read, Write},
     path::{Path, PathBuf},
@@ -236,21 +237,25 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             "Loaded snapshot manifest"
         );
 
-        let selected = self.resolve_components(&manifest)?;
+        let selections = self.resolve_components(&manifest)?;
 
         // Collect all archive URLs across all selected components
         let target_dir = data_dir.data_dir();
         let mut all_downloads: Vec<(String, String)> = Vec::new();
-        for ty in &selected {
-            let urls = manifest.archive_urls(*ty);
+        for (ty, sel) in &selections {
+            let distance = match sel {
+                ComponentSelection::All => None,
+                ComponentSelection::Distance(d) => Some(*d),
+                ComponentSelection::None => continue,
+            };
+            let urls = manifest.archive_urls_for_distance(*ty, distance);
             let name = ty.display_name().to_string();
-            let component_size = manifest.component(*ty).map(|c| c.total_size()).unwrap_or(0);
 
             if !urls.is_empty() {
                 info!(target: "reth::cli",
                     component = %name,
                     archives = urls.len(),
-                    size = %DownloadProgress::format_size(component_size),
+                    selection = %sel,
                     "Queued component for download"
                 );
             }
@@ -288,10 +293,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         // Generate reth.toml and set prune checkpoints
-        let config = config_for_components(&selected);
+        let config = config_for_selections(&selections);
         if !self.no_config {
             if write_config(&config, target_dir)? {
-                let desc = config_gen::describe_prune_config(&selected);
+                let desc = config_gen::describe_prune_config_from_selections(&selections);
                 for line in &desc {
                     info!(target: "reth::cli", "{}", line);
                 }
@@ -315,56 +320,75 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
     fn resolve_components(
         &self,
         manifest: &SnapshotManifest,
-    ) -> Result<Vec<SnapshotComponentType>> {
-        // --all: download everything available in the manifest
+    ) -> Result<BTreeMap<SnapshotComponentType, ComponentSelection>> {
+        let available = |ty: SnapshotComponentType| manifest.component(ty).is_some();
+
+        // --all: everything available as All
         if self.all {
             return Ok(SnapshotComponentType::ALL
                 .iter()
                 .copied()
-                .filter(|ty| manifest.component(*ty).is_some())
+                .filter(|ty| available(*ty))
+                .map(|ty| (ty, ComponentSelection::All))
                 .collect());
         }
 
         let has_explicit_flags = self.with_txs || self.with_receipts || self.with_changesets;
-        let available = |ty: SnapshotComponentType| manifest.component(ty).is_some();
 
         if has_explicit_flags {
-            // Explicit --with-* flags: state + headers (always) + specified components
-            let mut selected = vec![SnapshotComponentType::State];
-
+            let mut selections = BTreeMap::new();
+            // Required components always All
+            selections.insert(SnapshotComponentType::State, ComponentSelection::All);
             if available(SnapshotComponentType::Headers) {
-                selected.push(SnapshotComponentType::Headers);
+                selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
             }
             if self.with_txs && available(SnapshotComponentType::Transactions) {
-                selected.push(SnapshotComponentType::Transactions);
+                selections.insert(SnapshotComponentType::Transactions, ComponentSelection::All);
             }
             if self.with_receipts && available(SnapshotComponentType::Receipts) {
-                selected.push(SnapshotComponentType::Receipts);
+                selections.insert(SnapshotComponentType::Receipts, ComponentSelection::All);
             }
             if self.with_changesets {
                 if available(SnapshotComponentType::AccountChangesets) {
-                    selected.push(SnapshotComponentType::AccountChangesets);
+                    selections
+                        .insert(SnapshotComponentType::AccountChangesets, ComponentSelection::All);
                 }
                 if available(SnapshotComponentType::StorageChangesets) {
-                    selected.push(SnapshotComponentType::StorageChangesets);
+                    selections
+                        .insert(SnapshotComponentType::StorageChangesets, ComponentSelection::All);
                 }
             }
-
-            return Ok(selected);
+            return Ok(selections);
         }
 
         if self.non_interactive {
-            // No explicit flags: download the minimal set for a working node
-            return Ok(SnapshotComponentType::ALL
-                .iter()
-                .copied()
-                .filter(|ty| ty.is_minimal() && available(*ty))
-                .collect());
+            // Minimal defaults
+            let mut selections = BTreeMap::new();
+            for ty in SnapshotComponentType::ALL.iter().copied().filter(|ty| available(*ty)) {
+                let sel = if ty.is_required() {
+                    ComponentSelection::All
+                } else if ty.is_minimal() {
+                    ComponentSelection::Distance(10_064)
+                } else {
+                    ComponentSelection::None
+                };
+                // Only include components that are not None
+                if sel != ComponentSelection::None {
+                    selections.insert(ty, sel);
+                }
+            }
+            return Ok(selections);
         }
 
-        // Interactive TUI selection
+        // Interactive TUI
         match run_selector(manifest.clone())? {
-            SelectionResult::Selected(selected) => Ok(selected),
+            SelectionResult::Selected(selections) => {
+                // Filter out None selections
+                Ok(selections
+                    .into_iter()
+                    .filter(|(_, sel)| *sel != ComponentSelection::None)
+                    .collect())
+            }
             SelectionResult::Cancelled => {
                 eyre::bail!("Download cancelled by user");
             }
