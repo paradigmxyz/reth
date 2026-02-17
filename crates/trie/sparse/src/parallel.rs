@@ -1,3 +1,5 @@
+#[cfg(feature = "trie-debug")]
+use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
 use crate::{
     lower::LowerSparseSubtrie,
     provider::{RevealedNode, TrieNodeProvider},
@@ -131,6 +133,9 @@ pub struct ParallelSparseTrie {
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
+    /// Debug recorder for tracking mutating operations.
+    #[cfg(feature = "trie-debug")]
+    debug_recorder: TrieDebugRecorder,
 }
 
 impl Default for ParallelSparseTrie {
@@ -151,6 +156,8 @@ impl Default for ParallelSparseTrie {
             subtrie_heat: SubtrieModifications::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
+            #[cfg(feature = "trie-debug")]
+            debug_recorder: Default::default(),
         }
     }
 }
@@ -181,6 +188,11 @@ impl SparseTrie for ParallelSparseTrie {
         if nodes.is_empty() {
             return Ok(())
         }
+
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.record(RecordedOp::RevealNodes {
+            nodes: nodes.iter().map(ProofTrieNodeRecord::from_proof_trie_node_v2).collect(),
+        });
 
         // Sort nodes first by their subtrie, and secondarily by their path. This allows for
         // grouping nodes by their subtrie using `chunk_by`.
@@ -812,6 +824,9 @@ impl SparseTrie for ParallelSparseTrie {
     fn root(&mut self) -> B256 {
         trace!(target: "trie::parallel_sparse", "Calculating trie root hash");
 
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.record(RecordedOp::Root);
+
         if self.prefix_set.is_empty() &&
             let Some(hash) =
                 self.upper_subtrie.nodes.get(&Nibbles::default()).and_then(|node| node.hash())
@@ -842,6 +857,9 @@ impl SparseTrie for ParallelSparseTrie {
     #[instrument(level = "trace", target = "trie::sparse::parallel", skip(self))]
     fn update_subtrie_hashes(&mut self) {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
+
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.record(RecordedOp::UpdateSubtrieHashes);
 
         // Take changed subtries according to the prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
@@ -959,6 +977,8 @@ impl SparseTrie for ParallelSparseTrie {
         self.updates = None;
         self.branch_node_masks.clear();
         self.subtrie_heat.clear();
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.reset();
         // `update_actions_buffers` doesn't need to be cleared; we want to reuse the Vecs it has
         // buffered, and all of those are already inherently cleared when they get used.
     }
@@ -1073,6 +1093,9 @@ impl SparseTrie for ParallelSparseTrie {
     }
 
     fn prune(&mut self, max_depth: usize) -> usize {
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.reset();
+
         // Decay heat for subtries not modified this cycle
         self.subtrie_heat.decay_and_reset();
 
@@ -1243,6 +1266,12 @@ impl SparseTrie for ParallelSparseTrie {
     ) -> SparseTrieResult<()> {
         use crate::{provider::NoRevealProvider, LeafUpdate};
 
+        #[cfg(feature = "trie-debug")]
+        let recorded_updates: Vec<_> =
+            updates.iter().map(|(k, v)| (*k, LeafUpdateRecord::from(v))).collect();
+        #[cfg(feature = "trie-debug")]
+        let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
+
         // Drain updates to avoid cloning keys while preserving the map's allocation.
         // On success, entries remain removed; on blinded node failure, they're re-inserted.
         let drained: Vec<_> = updates.drain().collect();
@@ -1262,6 +1291,8 @@ impl SparseTrie for ParallelSparseTrie {
                                     let (target_key, min_len) =
                                         Self::proof_target_for_path(key, &full_path, &path);
                                     proof_required_fn(target_key, min_len);
+                                    #[cfg(feature = "trie-debug")]
+                                    recorded_proof_targets.push((target_key, min_len));
                                     updates.insert(key, LeafUpdate::Changed(value));
                                 } else {
                                     return Err(e);
@@ -1276,6 +1307,8 @@ impl SparseTrie for ParallelSparseTrie {
                                 let (target_key, min_len) =
                                     Self::proof_target_for_path(key, &full_path, &path);
                                 proof_required_fn(target_key, min_len);
+                                #[cfg(feature = "trie-debug")]
+                                recorded_proof_targets.push((target_key, min_len));
                                 updates.insert(key, LeafUpdate::Changed(value));
                             } else {
                                 return Err(e);
@@ -1290,6 +1323,8 @@ impl SparseTrie for ParallelSparseTrie {
                             let (target_key, min_len) =
                                 Self::proof_target_for_path(key, &full_path, &path);
                             proof_required_fn(target_key, min_len);
+                            #[cfg(feature = "trie-debug")]
+                            recorded_proof_targets.push((target_key, min_len));
                             updates.insert(key, LeafUpdate::Touched);
                         }
                         // Path is fully revealed (exists or proven non-existent), no action needed.
@@ -1299,7 +1334,19 @@ impl SparseTrie for ParallelSparseTrie {
             }
         }
 
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.record(RecordedOp::UpdateLeaves {
+            updates: recorded_updates,
+            remaining_keys: updates.keys().copied().collect(),
+            proof_targets: recorded_proof_targets,
+        });
+
         Ok(())
+    }
+
+    #[cfg(feature = "trie-debug")]
+    fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
+        core::mem::take(&mut self.debug_recorder)
     }
 }
 
