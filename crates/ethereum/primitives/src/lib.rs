@@ -9,7 +9,18 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(test)]
 extern crate alloc;
+
+// Suppress unused-crate-dependencies warnings for feature-gated optional deps.
+#[cfg(feature = "serde")]
+use alloy_serde as _;
+#[cfg(feature = "arbitrary")]
+use arbitrary as _;
+#[cfg(feature = "reth-codec")]
+use reth_codecs as _;
+#[cfg(feature = "serde-bincode-compat")]
+use serde_with as _;
 
 mod receipt;
 pub use receipt::*;
@@ -35,8 +46,7 @@ pub type PooledTransactionVariant =
 /// Bincode-compatible serde implementations.
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {
-    pub use super::receipt::serde_bincode_compat::*;
-    pub use alloy_consensus::serde_bincode_compat::transaction::*;
+    pub use alloy_consensus::serde_bincode_compat::{transaction::*, EthereumReceipt as Receipt};
 }
 
 /// Type alias for the ethereum block

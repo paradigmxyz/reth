@@ -6,7 +6,7 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use reth_chainspec::EthChainSpec;
-use reth_ethereum_primitives::Receipt;
+use reth_ethereum_primitives::{Receipt, ReceiptExt};
 use reth_primitives_traits::{NodePrimitives, TransactionMeta};
 use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
 use std::sync::Arc;
