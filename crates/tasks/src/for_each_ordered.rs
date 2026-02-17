@@ -1,6 +1,6 @@
 use crossbeam_utils::CachePadded;
-use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use parking_lot::{Condvar, Mutex};
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Extension trait for [`IndexedParallelIterator`]
@@ -331,15 +331,12 @@ mod tests {
         let n = 64usize;
         let input: Vec<usize> = (0..n).collect();
         let mut output = Vec::with_capacity(n);
-        input
-            .par_iter()
-            .map(|&i| i)
-            .for_each_ordered(|x| {
-                if x % 8 == 0 {
-                    std::thread::yield_now();
-                }
-                output.push(x);
-            });
+        input.par_iter().map(|&i| i).for_each_ordered(|x| {
+            if x % 8 == 0 {
+                std::thread::yield_now();
+            }
+            output.push(x);
+        });
         assert_eq!(output, input);
     }
 
