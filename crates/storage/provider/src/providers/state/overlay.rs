@@ -458,9 +458,6 @@ where
 
         // Get a read-only provider
         let provider = {
-            let _guard =
-                debug_span!(target: "providers::state::overlay", "Creating db provider").entered();
-
             let start = Instant::now();
             let res = self.factory.database_provider_ro()?;
             self.metrics.create_provider_duration.record(start.elapsed());

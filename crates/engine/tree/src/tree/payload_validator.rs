@@ -327,9 +327,41 @@ where
         mut ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N, InsertPayloadError<N::Block>>
     where
-        V: PayloadValidator<T, Block = N::Block>,
+        V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        // Spawn block conversion on a background thread so it runs concurrently with the
+        // rest of the function (setup + execution). For payloads this overlaps the cost of
+        // RLP decoding + header hashing; for already-converted blocks this is a no-op.
+        let convert_to_block = match &input {
+            BlockOrPayload::Payload(_) => {
+                let payload_clone = input.clone();
+                let validator = self.validator.clone();
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                self.payload_processor.executor().spawn_blocking(move || {
+                    let BlockOrPayload::Payload(payload) = payload_clone else { unreachable!() };
+                    let _ = tx.send(validator.convert_payload_to_block(payload));
+                });
+                Either::Left(rx)
+            }
+            BlockOrPayload::Block(_) => Either::Right(()),
+        };
+
+        // Returns the sealed block, either by awaiting the background conversion task (for
+        // payloads) or by extracting the already-converted block directly.
+        let convert_to_block =
+            move |input: BlockOrPayload<T>| -> Result<SealedBlock<N::Block>, NewPayloadError> {
+                match convert_to_block {
+                    Either::Left(rx) => rx.blocking_recv().map_err(|_| {
+                        NewPayloadError::Other("block conversion task panicked".into())
+                    })?,
+                    Either::Right(()) => {
+                        let BlockOrPayload::Block(block) = input else { unreachable!() };
+                        Ok(block)
+                    }
+                }
+            };
+
         /// A helper macro that returns the block in case there was an error
         /// This macro is used for early returns before block conversion
         macro_rules! ensure_ok {
@@ -337,7 +369,7 @@ where
                 match $expr {
                     Ok(val) => val,
                     Err(e) => {
-                        let block = self.convert_to_block(input)?;
+                        let block = convert_to_block(input)?;
                         return Err(InsertBlockError::new(block, e.into()).into())
                     }
                 }
@@ -368,7 +400,7 @@ where
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                self.convert_to_block(input)?,
+                convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -381,7 +413,7 @@ where
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
-                self.convert_to_block(input)?,
+                convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -474,7 +506,7 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
-        let block = self.convert_to_block(input)?.with_senders(senders);
+        let block = convert_to_block(input)?.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = receipt_root_rx
@@ -1586,7 +1618,7 @@ where
         + Clone
         + 'static,
     N: NodePrimitives,
-    V: PayloadValidator<Types, Block = N::Block>,
+    V: PayloadValidator<Types, Block = N::Block> + Clone,
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
@@ -1640,7 +1672,7 @@ where
 }
 
 /// Enum representing either block or payload being validated.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BlockOrPayload<T: PayloadTypes> {
     /// Payload.
     Payload(T::ExecutionData),
