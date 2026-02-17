@@ -286,7 +286,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.27.2"
-source = "git+https://github.com/Soubhik-10/evm?branch=test-fix#88fe8af918e88e9d44025df1cd37ef349851476c"
+source = "git+https://github.com/Soubhik-10/evm?branch=test-fix#79000c199a4af656d7aedfccf5468799a540f3e5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -302,6 +302,7 @@ dependencies = [
  "op-revm",
  "revm",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
