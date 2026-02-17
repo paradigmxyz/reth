@@ -20,6 +20,7 @@ use reth_trie::{
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, LegacyKeyAdapter,
+    TrieTableAdapter,
 };
 use std::{
     sync::Arc,
@@ -482,13 +483,14 @@ where
 /// on top of a database provider, implementing [`TrieCursorFactory`] and [`HashedCursorFactory`]
 /// using the in-memory overlay factories.
 #[derive(Debug)]
-pub struct OverlayStateProvider<Provider: DBProvider> {
+pub struct OverlayStateProvider<Provider: DBProvider, A: TrieTableAdapter = LegacyKeyAdapter> {
     provider: Provider,
     trie_updates: Arc<TrieUpdatesSorted>,
     hashed_post_state: Arc<HashedPostStateSorted>,
+    _adapter: std::marker::PhantomData<A>,
 }
 
-impl<Provider> OverlayStateProvider<Provider>
+impl<Provider, A: TrieTableAdapter> OverlayStateProvider<Provider, A>
 where
     Provider: DBProvider,
 {
@@ -499,17 +501,18 @@ where
         trie_updates: Arc<TrieUpdatesSorted>,
         hashed_post_state: Arc<HashedPostStateSorted>,
     ) -> Self {
-        Self { provider, trie_updates, hashed_post_state }
+        Self { provider, trie_updates, hashed_post_state, _adapter: std::marker::PhantomData }
     }
 }
 
-impl<Provider> TrieCursorFactory for OverlayStateProvider<Provider>
+impl<Provider, A> TrieCursorFactory for OverlayStateProvider<Provider, A>
 where
     Provider: DBProvider,
+    A: TrieTableAdapter,
 {
     type AccountTrieCursor<'a>
         = <InMemoryTrieCursorFactory<
-        DatabaseTrieCursorFactory<&'a Provider::Tx>,
+        DatabaseTrieCursorFactory<&'a Provider::Tx, A>,
         &'a TrieUpdatesSorted,
     > as TrieCursorFactory>::AccountTrieCursor<'a>
     where
@@ -517,7 +520,7 @@ where
 
     type StorageTrieCursor<'a>
         = <InMemoryTrieCursorFactory<
-        DatabaseTrieCursorFactory<&'a Provider::Tx>,
+        DatabaseTrieCursorFactory<&'a Provider::Tx, A>,
         &'a TrieUpdatesSorted,
     > as TrieCursorFactory>::StorageTrieCursor<'a>
     where
@@ -525,7 +528,7 @@ where
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         let db_trie_cursor_factory =
-            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(self.provider.tx_ref());
+            DatabaseTrieCursorFactory::<_, A>::new(self.provider.tx_ref());
         let trie_cursor_factory =
             InMemoryTrieCursorFactory::new(db_trie_cursor_factory, self.trie_updates.as_ref());
         trie_cursor_factory.account_trie_cursor()
@@ -536,16 +539,17 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let db_trie_cursor_factory =
-            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(self.provider.tx_ref());
+            DatabaseTrieCursorFactory::<_, A>::new(self.provider.tx_ref());
         let trie_cursor_factory =
             InMemoryTrieCursorFactory::new(db_trie_cursor_factory, self.trie_updates.as_ref());
         trie_cursor_factory.storage_trie_cursor(hashed_address)
     }
 }
 
-impl<Provider> HashedCursorFactory for OverlayStateProvider<Provider>
+impl<Provider, A> HashedCursorFactory for OverlayStateProvider<Provider, A>
 where
     Provider: DBProvider,
+    A: TrieTableAdapter,
 {
     type AccountCursor<'a>
         = <HashedPostStateCursorFactory<

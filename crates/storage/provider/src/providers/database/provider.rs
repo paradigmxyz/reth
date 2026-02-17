@@ -69,7 +69,7 @@ use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, StoredNibbles,
 };
-use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, LegacyKeyAdapter};
+use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
@@ -3092,16 +3092,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         let mut num_entries = 0;
         let mut storage_tries = storage_tries.collect::<Vec<_>>();
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
-        let mut cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
-        for (hashed_address, storage_trie_updates) in storage_tries {
-            let mut db_storage_trie_cursor: DatabaseStorageTrieCursor<_, LegacyKeyAdapter> =
-                DatabaseStorageTrieCursor::new(cursor, *hashed_address);
-            num_entries +=
-                db_storage_trie_cursor.write_storage_trie_updates_sorted(storage_trie_updates)?;
-            cursor = db_storage_trie_cursor.cursor;
-        }
-
-        Ok(num_entries)
+        let is_v2 = self.cached_storage_settings().is_v2();
+        reth_trie_db::dispatch_trie_adapter!(is_v2, |A| {
+            let mut cursor = self.tx_ref().cursor_dup_write::<<A as TrieTableAdapter>::StorageTrieTable>()?;
+            for (hashed_address, storage_trie_updates) in storage_tries {
+                let mut db_storage_trie_cursor: DatabaseStorageTrieCursor<_, A> =
+                    DatabaseStorageTrieCursor::new(cursor, *hashed_address);
+                num_entries +=
+                    db_storage_trie_cursor.write_storage_trie_updates_sorted(storage_trie_updates)?;
+                cursor = db_storage_trie_cursor.cursor;
+            }
+            Ok(num_entries)
+        })
     }
 }
 

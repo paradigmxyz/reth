@@ -35,7 +35,7 @@ use reth_trie::{
     prefix_set::{TriePrefixSets, TriePrefixSetsMut},
     IntermediateStateRootState, Nibbles, StateRoot as StateRootComputer, StateRootProgress,
 };
-use reth_trie_db::DatabaseStateRoot;
+
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
 use tracing::{debug, error, info, trace, warn};
@@ -833,8 +833,11 @@ where
     let mut total_flushed_updates = 0;
 
     loop {
-        let mut state_root =
-            StateRootComputer::from_tx(tx).with_intermediate_state(intermediate_state);
+        let mut state_root = <StateRootComputer<
+            reth_trie_db::DatabaseTrieCursorFactory<_, reth_trie_db::LegacyKeyAdapter>,
+            reth_trie_db::DatabaseHashedCursorFactory<_>,
+        > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(tx)
+            .with_intermediate_state(intermediate_state);
 
         if let Some(sets) = prefix_sets.clone() {
             state_root = state_root.with_prefix_sets(sets);

@@ -10,7 +10,7 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_types::NodeTypesWithDBAdapter;
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_trie::StateRoot;
-use reth_trie_db::DatabaseStateRoot;
+
 use std::sync::Arc;
 
 pub mod blocks;
@@ -100,7 +100,11 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
 
-    let (root, updates) = StateRoot::from_tx(provider.tx_ref()).root_with_updates()?;
+    let (root, updates) = <StateRoot<
+        reth_trie_db::DatabaseTrieCursorFactory<_, reth_trie_db::LegacyKeyAdapter>,
+        reth_trie_db::DatabaseHashedCursorFactory<_>,
+    > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(provider.tx_ref())
+        .root_with_updates()?;
     provider.write_trie_updates(updates).unwrap();
 
     provider.commit()?;

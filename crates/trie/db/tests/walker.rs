@@ -7,7 +7,7 @@ use reth_trie::{
     prefix_set::PrefixSetMut, trie_cursor::TrieCursor, walker::TrieWalker, BranchNodeCompact,
     Nibbles, StorageTrieEntry,
 };
-use reth_trie_db::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor};
+use reth_trie_db::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, LegacyKeyAdapter};
 
 #[test]
 fn walk_nodes_with_common_prefix() {
@@ -39,7 +39,7 @@ fn walk_nodes_with_common_prefix() {
     for (k, v) in &inputs {
         account_cursor.upsert(k.clone().into(), &v.clone()).unwrap();
     }
-    let account_trie = DatabaseAccountTrieCursor::new(account_cursor);
+    let account_trie = DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(account_cursor);
     test_cursor(account_trie, &expected);
 
     let hashed_address = B256::random();
@@ -52,7 +52,7 @@ fn walk_nodes_with_common_prefix() {
             )
             .unwrap();
     }
-    let storage_trie = DatabaseStorageTrieCursor::new(storage_cursor, hashed_address);
+    let storage_trie = DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(storage_cursor, hashed_address);
     test_cursor(storage_trie, &expected);
 }
 
@@ -111,7 +111,7 @@ fn cursor_rootnode_with_changesets() {
         cursor.upsert(hashed_address, &StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
     }
 
-    let mut trie = DatabaseStorageTrieCursor::new(cursor, hashed_address);
+    let mut trie = DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(cursor, hashed_address);
 
     // No changes
     let mut cursor = TrieWalker::<_>::state_trie(&mut trie, Default::default());

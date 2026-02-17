@@ -396,6 +396,34 @@ where
     }
 }
 
+/// Dispatch between [`LegacyKeyAdapter`] and [`PackedKeyAdapter`] based on a runtime boolean.
+///
+/// The body is monomorphized for each adapter — no dynamic dispatch involved.
+/// Both branches must return the same type.
+///
+/// # Usage
+///
+/// ```ignore
+/// dispatch_trie_adapter!(provider.cached_storage_settings().is_v2(), |A| {
+///     DatabaseTrieCursorFactory::<_, A>::new(tx)
+/// })
+/// ```
+#[macro_export]
+macro_rules! dispatch_trie_adapter {
+    ($is_v2:expr, |$A:ident| $body:block) => {{
+        if $is_v2 {
+            type $A = $crate::PackedKeyAdapter;
+            $body
+        } else {
+            type $A = $crate::LegacyKeyAdapter;
+            $body
+        }
+    }};
+    ($is_v2:expr, |$A:ident| $body:expr) => {
+        $crate::dispatch_trie_adapter!($is_v2, |$A| { $body })
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

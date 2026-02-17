@@ -15,7 +15,23 @@ use reth_trie::{
     proof::Proof, witness::TrieWitness, HashedPostState, HashedStorage, MultiProofTargets,
     StateRoot,
 };
-use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness};
+use reth_trie_db::{
+    DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot, DatabaseTrieCursorFactory,
+    DatabaseTrieWitness, LegacyKeyAdapter,
+};
+
+type DbStateRoot<'a, TX> = StateRoot<
+    DatabaseTrieCursorFactory<&'a TX, LegacyKeyAdapter>,
+    DatabaseHashedCursorFactory<&'a TX>,
+>;
+type DbProof<'a, TX> = Proof<
+    DatabaseTrieCursorFactory<&'a TX, LegacyKeyAdapter>,
+    DatabaseHashedCursorFactory<&'a TX>,
+>;
+type DbTrieWitness<'a, TX> = TrieWitness<
+    DatabaseTrieCursorFactory<&'a TX, LegacyKeyAdapter>,
+    DatabaseHashedCursorFactory<&'a TX>,
+>;
 
 #[test]
 fn includes_empty_node_preimage() {
@@ -28,7 +44,7 @@ fn includes_empty_node_preimage() {
 
     // witness includes empty state trie root node
     assert_eq!(
-        TrieWitness::from_tx(provider.tx_ref())
+        DbTrieWitness::from_tx(provider.tx_ref())
             .compute(HashedPostState {
                 accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
                 storages: HashMap::default(),
@@ -40,8 +56,8 @@ fn includes_empty_node_preimage() {
     // Insert account into database
     provider.insert_account_for_hashing([(address, Some(Account::default()))]).unwrap();
 
-    let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
-    let proof = <Proof<_, _> as DatabaseProof>::from_tx(provider.tx_ref());
+    let state_root = DbStateRoot::from_tx(provider.tx_ref()).root().unwrap();
+    let proof = <DbProof<'_, _> as DatabaseProof>::from_tx(provider.tx_ref());
     let multiproof = proof
         .multiproof(MultiProofTargets::from_iter([(
             hashed_address,
@@ -49,7 +65,7 @@ fn includes_empty_node_preimage() {
         )]))
         .unwrap();
 
-    let witness = TrieWitness::from_tx(provider.tx_ref())
+    let witness = DbTrieWitness::from_tx(provider.tx_ref())
         .compute(HashedPostState {
             accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
             storages: HashMap::from_iter([(
@@ -82,8 +98,8 @@ fn includes_nodes_for_destroyed_storage_nodes() {
         .insert_storage_for_hashing([(address, [StorageEntry { key: slot, value: U256::from(1) }])])
         .unwrap();
 
-    let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
-    let proof = <Proof<_, _> as DatabaseProof>::from_tx(provider.tx_ref());
+    let state_root = DbStateRoot::from_tx(provider.tx_ref()).root().unwrap();
+    let proof = <DbProof<'_, _> as DatabaseProof>::from_tx(provider.tx_ref());
     let multiproof = proof
         .multiproof(MultiProofTargets::from_iter([(
             hashed_address,
@@ -92,7 +108,7 @@ fn includes_nodes_for_destroyed_storage_nodes() {
         .unwrap();
 
     let witness =
-        TrieWitness::from_tx(provider.tx_ref())
+        DbTrieWitness::from_tx(provider.tx_ref())
             .compute(HashedPostState {
                 accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
                 storages: HashMap::from_iter([(
@@ -131,8 +147,8 @@ fn correctly_decodes_branch_node_values() {
         .upsert(hashed_address, &StorageEntry { key: hashed_slot2, value: U256::from(1) })
         .unwrap();
 
-    let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
-    let proof = <Proof<_, _> as DatabaseProof>::from_tx(provider.tx_ref());
+    let state_root = DbStateRoot::from_tx(provider.tx_ref()).root().unwrap();
+    let proof = <DbProof<'_, _> as DatabaseProof>::from_tx(provider.tx_ref());
     let multiproof = proof
         .multiproof(MultiProofTargets::from_iter([(
             hashed_address,
@@ -140,7 +156,7 @@ fn correctly_decodes_branch_node_values() {
         )]))
         .unwrap();
 
-    let witness = TrieWitness::from_tx(provider.tx_ref())
+    let witness = DbTrieWitness::from_tx(provider.tx_ref())
         .compute(HashedPostState {
             accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
             storages: HashMap::from_iter([(

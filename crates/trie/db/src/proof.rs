@@ -1,4 +1,4 @@
-use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, LegacyKeyAdapter};
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, TrieTableAdapter};
 use alloy_primitives::{keccak256, map::HashMap, Address, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
@@ -34,14 +34,14 @@ pub trait DatabaseProof<'a> {
     ) -> Result<MultiProof, StateProofError>;
 }
 
-impl<'a, TX: DbTx> DatabaseProof<'a>
-    for Proof<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
+impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
+    for Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
 {
     type Tx = TX;
 
     fn from_tx(tx: &'a Self::Tx) -> Self {
         Self::new(
-            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
+            DatabaseTrieCursorFactory::<_, A>::new(tx),
             DatabaseHashedCursorFactory::new(tx),
         )
     }
@@ -99,16 +99,16 @@ pub trait DatabaseStorageProof<'a, TX> {
     ) -> Result<StorageMultiProof, StateProofError>;
 }
 
-impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
+impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
     for StorageProof<
         'static,
-        DatabaseTrieCursorFactory<&'a TX>,
+        DatabaseTrieCursorFactory<&'a TX, A>,
         DatabaseHashedCursorFactory<&'a TX>,
     >
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
         Self::new(
-            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
+            DatabaseTrieCursorFactory::<_, A>::new(tx),
             DatabaseHashedCursorFactory::new(tx),
             address,
         )
@@ -127,7 +127,7 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
         StorageProof::new(
-            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
+            DatabaseTrieCursorFactory::<_, A>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
             address,
         )
@@ -149,7 +149,7 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
         StorageProof::new(
-            DatabaseTrieCursorFactory::<_, LegacyKeyAdapter>::new(tx),
+            DatabaseTrieCursorFactory::<_, A>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
             address,
         )
