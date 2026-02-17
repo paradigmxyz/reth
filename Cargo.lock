@@ -7792,7 +7792,6 @@ dependencies = [
  "secp256k1 0.30.0",
  "serde",
  "serde_json",
- "sha2",
  "tar",
  "tempfile",
  "tokio",
