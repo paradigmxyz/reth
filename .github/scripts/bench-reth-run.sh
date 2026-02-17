@@ -5,12 +5,13 @@
 #
 # Usage: bench-reth-run.sh <label> <binary> <output-dir>
 #
-# Required env: SCHELK_MOUNT, JWT_SECRET, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
+# Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
 set -euo pipefail
 
 LABEL="$1"
 BINARY="$2"
 OUTPUT_DIR="$3"
+DATADIR="$SCHELK_MOUNT/datadir"
 LOG="/tmp/reth-bench-node-${LABEL}.log"
 
 cleanup() {
@@ -48,8 +49,7 @@ else
   BENCH_CPUS="0-$(( ONLINE - 1 ))"
 fi
 sudo taskset -c "$RETH_CPUS" nice -n -20 "$BINARY" node \
-  --datadir "$SCHELK_MOUNT/datadir" \
-  --authrpc.jwtsecret "$JWT_SECRET" \
+  --datadir "$DATADIR" \
   --engine.accept-execution-requests-hash \
   --http \
   --http.port 8545 \
@@ -82,7 +82,7 @@ done
 sudo taskset -c "$BENCH_CPUS" nice -n -20 "$RETH_BENCH" new-payload-fcu \
   --rpc-url "$BENCH_RPC_URL" \
   --engine-rpc-url http://127.0.0.1:8551 \
-  --jwt-secret "$JWT_SECRET" \
+  --jwt-secret "$DATADIR/jwt.hex" \
   --advance "${BENCH_WARMUP_BLOCKS:-50}" \
   --reth-new-payload 2>&1 | sed -u "s/^/[bench] /"
 
@@ -90,7 +90,7 @@ sudo taskset -c "$BENCH_CPUS" nice -n -20 "$RETH_BENCH" new-payload-fcu \
 sudo taskset -c "$BENCH_CPUS" nice -n -20 "$RETH_BENCH" new-payload-fcu \
   --rpc-url "$BENCH_RPC_URL" \
   --engine-rpc-url http://127.0.0.1:8551 \
-  --jwt-secret "$JWT_SECRET" \
+  --jwt-secret "$DATADIR/jwt.hex" \
   --advance "$BENCH_BLOCKS" \
   --reth-new-payload \
   --output "$OUTPUT_DIR" 2>&1 | sed -u "s/^/[bench] /"

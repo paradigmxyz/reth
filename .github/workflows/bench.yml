@@ -8,7 +8,6 @@
 #
 # The self-hosted runner must have:
 #   - schelk initialised (virgin + scratch volumes, ramdisk)
-#   - A JWT secret at /reth-bench/jwt.hex
 #   - The BENCH_RPC_URL secret set to a reference RPC endpoint
 #
 # See docs/repo/ci.md for runner setup instructions.
@@ -93,7 +92,6 @@ jobs:
       BENCH_WARMUP_BLOCKS: '100'
       BENCH_RPC_URL: https://ethereum.reth.rs/rpc
       SCHELK_MOUNT: /reth-bench
-      JWT_SECRET: /reth-bench/jwt.hex
     steps:
       - name: Acknowledge request
         id: ack
