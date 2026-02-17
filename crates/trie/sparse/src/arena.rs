@@ -1,8 +1,11 @@
-use crate::{SparseTrieUpdates, SparseTrieUpdatesAction};
-use alloc::{boxed::Box, vec::Vec};
-use alloy_primitives::B256;
+use crate::{
+    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, SparseTrieUpdatesAction,
+};
+use alloc::{borrow::Cow, boxed::Box, vec::Vec};
+use alloy_primitives::{map::B256Map, B256};
 use alloy_trie::TrieMask;
-use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode};
+use reth_execution_errors::SparseTrieResult;
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
 use smallvec::SmallVec;
 use thunderdome::{Arena, Index};
 
@@ -23,6 +26,14 @@ enum ArenaSparseNodeState {
         /// Number of dirty (modified since last hash) leaves underneath this node.
         num_dirty_leaves: u64,
     },
+}
+
+impl ArenaSparseNodeState {
+    const fn num_leaves(&self) -> u64 {
+        match self {
+            Self::Cached { num_leaves, .. } | Self::Dirty { num_leaves, .. } => *num_leaves,
+        }
+    }
 }
 
 /// Represents a reference from a branch node to one of its children.
@@ -76,6 +87,16 @@ enum ArenaSparseNode {
     TakenSubtrie,
 }
 
+impl ArenaSparseNode {
+    fn num_leaves(&self) -> u64 {
+        match self {
+            Self::EmptyRoot | Self::TakenSubtrie => 0,
+            Self::Branch { state, .. } | Self::Leaf { state, .. } => state.num_leaves(),
+            Self::Subtrie(s) => s.arena[s.root].num_leaves(),
+        }
+    }
+}
+
 /// A subtrie within the arena-based parallel sparse trie.
 ///
 /// Each subtrie owns its own arena, allowing parallel mutations across subtries.
@@ -91,6 +112,15 @@ struct ArenaSparseSubtrie {
     update_actions: Vec<SparseTrieUpdatesAction>,
     /// Reusable buffer for collecting required proofs during leaf updates.
     required_proofs: Vec<ArenaRequiredProof>,
+}
+
+impl ArenaSparseSubtrie {
+    fn clear(&mut self) {
+        self.arena.clear();
+        self.stack.clear();
+        self.update_actions.clear();
+        self.required_proofs.clear();
+    }
 }
 
 /// A proof request generated during leaf updates when a blinded node is encountered.
@@ -159,8 +189,8 @@ struct ArenaRequiredProof {
 pub struct ArenaParallelSparseTrie {
     /// The arena allocating nodes in the upper trie.
     upper_arena: Arena<ArenaSparseNode>,
-    /// The root node of the upper trie, or `None` if the trie is empty/uninitialized.
-    root: Option<Index>,
+    /// The root node of the upper trie.
+    root: Index,
     /// Optional tracking of trie updates for database persistence.
     updates: Option<SparseTrieUpdates>,
     /// Reusable stack buffer for trie traversals.
@@ -169,4 +199,159 @@ pub struct ArenaParallelSparseTrie {
     update_actions: Vec<SparseTrieUpdatesAction>,
     /// Pool of cleared `ArenaSparseSubtrie`s available for reuse.
     cleared_subtries: Vec<ArenaSparseSubtrie>,
+}
+
+impl ArenaParallelSparseTrie {
+    /// Returns the arena indexes of all [`ArenaSparseNode::Subtrie`] nodes in the upper arena.
+    fn all_subtries(&self) -> SmallVec<[Index; 16]> {
+        self.upper_arena
+            .iter()
+            .filter_map(|(idx, node)| matches!(node, ArenaSparseNode::Subtrie(_)).then_some(idx))
+            .collect()
+    }
+}
+
+impl Default for ArenaParallelSparseTrie {
+    fn default() -> Self {
+        let mut upper_arena = Arena::new();
+        let root = upper_arena.insert(ArenaSparseNode::EmptyRoot);
+        Self {
+            upper_arena,
+            root,
+            updates: None,
+            stack: Vec::new(),
+            update_actions: Vec::new(),
+            cleared_subtries: Vec::new(),
+        }
+    }
+}
+
+impl SparseTrie for ArenaParallelSparseTrie {
+    fn set_root(
+        &mut self,
+        _root: TrieNodeV2,
+        _masks: Option<BranchNodeMasks>,
+        _retain_updates: bool,
+    ) -> SparseTrieResult<()> {
+        todo!()
+    }
+
+    fn set_updates(&mut self, retain_updates: bool) {
+        self.updates = retain_updates.then(Default::default);
+    }
+
+    fn reserve_nodes(&mut self, _additional: usize) {
+        // thunderdome::Arena does not support reserve; no-op.
+    }
+
+    fn reveal_nodes(&mut self, _nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()> {
+        todo!()
+    }
+
+    fn update_leaf<P: crate::provider::TrieNodeProvider>(
+        &mut self,
+        _full_path: Nibbles,
+        _value: Vec<u8>,
+        _provider: P,
+    ) -> SparseTrieResult<()> {
+        todo!()
+    }
+
+    fn remove_leaf<P: crate::provider::TrieNodeProvider>(
+        &mut self,
+        _full_path: &Nibbles,
+        _provider: P,
+    ) -> SparseTrieResult<()> {
+        todo!()
+    }
+
+    fn root(&mut self) -> B256 {
+        todo!()
+    }
+
+    fn is_root_cached(&self) -> bool {
+        matches!(
+            &self.upper_arena[self.root],
+            ArenaSparseNode::Branch { state: ArenaSparseNodeState::Cached { .. }, .. } |
+                ArenaSparseNode::Leaf { state: ArenaSparseNodeState::Cached { .. }, .. }
+        )
+    }
+
+    fn update_subtrie_hashes(&mut self) {
+        todo!()
+    }
+
+    fn get_leaf_value(&self, _full_path: &Nibbles) -> Option<&Vec<u8>> {
+        todo!()
+    }
+
+    fn find_leaf(
+        &self,
+        _full_path: &Nibbles,
+        _expected_value: Option<&Vec<u8>>,
+    ) -> Result<LeafLookup, LeafLookupError> {
+        todo!()
+    }
+
+    fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
+        self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
+    }
+
+    fn take_updates(&mut self) -> SparseTrieUpdates {
+        match self.updates.take() {
+            Some(updates) => {
+                self.updates = Some(SparseTrieUpdates::with_capacity(
+                    updates.updated_nodes.len(),
+                    updates.removed_nodes.len(),
+                ));
+                updates
+            }
+            None => SparseTrieUpdates::default(),
+        }
+    }
+
+    fn wipe(&mut self) {
+        self.clear();
+        self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
+    }
+
+    fn clear(&mut self) {
+        for idx in self.all_subtries() {
+            if let ArenaSparseNode::Subtrie(mut subtrie) = self.upper_arena.remove(idx).unwrap() {
+                subtrie.clear();
+                self.cleared_subtries.push(*subtrie);
+            }
+        }
+        self.upper_arena.clear();
+        self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
+        if let Some(updates) = self.updates.as_mut() {
+            updates.clear()
+        }
+        self.stack.clear();
+        self.update_actions.clear();
+    }
+
+    fn shrink_nodes_to(&mut self, _size: usize) {
+        // Arena does not support shrinking; no-op.
+    }
+
+    fn shrink_values_to(&mut self, _size: usize) {
+        // No separate value storage; no-op per spec.
+    }
+
+    fn size_hint(&self) -> usize {
+        self.upper_arena[self.root].num_leaves() as usize
+    }
+
+    fn prune(&mut self, _max_depth: usize) -> usize {
+        todo!()
+    }
+
+    fn update_leaves(
+        &mut self,
+        _updates: &mut B256Map<LeafUpdate>,
+        _proof_required_fn: impl FnMut(B256, u8),
+    ) -> SparseTrieResult<()> {
+        todo!()
+    }
 }
