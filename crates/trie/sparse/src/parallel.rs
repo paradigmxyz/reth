@@ -1,10 +1,8 @@
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
 use crate::{
-    lower::LowerSparseSubtrie,
-    provider::{TrieNodeProvider},
-    LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeState, SparseNodeType,
-    SparseTrie, SparseTrieUpdates,
+    lower::LowerSparseSubtrie, provider::TrieNodeProvider, LeafLookup, LeafLookupError,
+    RlpNodeStackItem, SparseNode, SparseNodeState, SparseNodeType, SparseTrie, SparseTrieUpdates,
 };
 use alloc::{borrow::Cow, boxed::Box, vec, vec::Vec};
 use alloy_primitives::{
@@ -751,7 +749,7 @@ impl SparseTrie for ParallelSparseTrie {
                             ext_grandparent_path = Some(curr_path);
                             ext_grandparent_node = Some(curr_node.clone());
                         }
-                        SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {
+                        SparseNode::Empty | SparseNode::Leaf { .. } => {
                             unreachable!(
                                 "find_next_to_leaf only continues to a branch or extension"
                             )
@@ -823,7 +821,7 @@ impl SparseTrie for ParallelSparseTrie {
                 SparseNode::Extension { state, .. } | SparseNode::Branch { state, .. } => {
                     *state = SparseNodeState::Dirty
                 }
-                SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {
+                SparseNode::Empty | SparseNode::Leaf { .. } => {
                     unreachable!(
                         "only branch and extension nodes can be marked dirty when removing a leaf"
                     )
@@ -850,6 +848,8 @@ impl SparseTrie for ParallelSparseTrie {
             state_mask.unset_bit(child_nibble);
 
             let new_branch_node = if state_mask.count_bits() == 1 {
+                // If only one child is left set in the branch node, we need to collapse it. Get
+                // full path of the only child node left.
                 let remaining_child_nibble =
                     state_mask.first_set_bit_index().expect("state mask is not empty");
                 let mut remaining_child_path = *branch_path;
@@ -863,6 +863,8 @@ impl SparseTrie for ParallelSparseTrie {
                     "Branch node has only one child",
                 );
 
+                // If the remaining child node is not yet revealed then we have to reveal it here,
+                // otherwise it's not possible to know how to collapse the branch.
                 if blinded_mask.is_bit_set(remaining_child_nibble) {
                     return Err(SparseTrieErrorKind::BlindedNode {
                         path: remaining_child_path,
@@ -1245,8 +1247,10 @@ impl SparseTrie for ParallelSparseTrie {
             let Some(node) = subtrie.nodes.get_mut(&path) else { continue };
 
             match node {
-                SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {}
+                SparseNode::Empty | SparseNode::Leaf { .. } => {}
                 SparseNode::Extension { key, state, .. } => {
+                    // For extension nodes at max depth, collapse both extension and its child
+                    // branch to preserve invariant of all extension nodes children being revealed.
                     if depth == max_depth {
                         let Some(hash) = state.cached_hash() else { continue };
                         subtrie.nodes.remove(&path);
@@ -1270,6 +1274,7 @@ impl SparseTrie for ParallelSparseTrie {
                     }
                 }
                 SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
+                    // For branch nodes at max depth, collapse all children onto them,
                     if depth == max_depth {
                         let mut blinded_mask = *blinded_mask;
                         let mut blinded_hashes = blinded_hashes.clone();
@@ -1681,9 +1686,6 @@ impl ParallelSparseTrie {
             // If empty node is found it means the subtrie doesn't have any nodes in it, let alone
             // the target leaf.
             SparseNode::Empty => FindNextToLeafOutcome::NotFound,
-            SparseNode::Hash(hash) => {
-                FindNextToLeafOutcome::BlindedNode { path: *from_path, hash: *hash }
-            }
             SparseNode::Leaf { key, .. } => {
                 let mut found_full_path = *from_path;
                 found_full_path.extend(key);
@@ -1822,7 +1824,7 @@ impl ParallelSparseTrie {
         // If we swap the branch node out either an extension or leaf, depending on
         // what its remaining child is.
         match remaining_child_node {
-            SparseNode::Empty | SparseNode::Hash(_) => {
+            SparseNode::Empty => {
                 panic!("remaining child must have been revealed already")
             }
             // If the only child is a leaf node, we downgrade the branch node into a
@@ -1870,7 +1872,7 @@ impl ParallelSparseTrie {
         // If the parent node is an extension node, we need to look at its child to see
         // if we need to merge it.
         match child {
-            SparseNode::Empty | SparseNode::Hash(_) => {
+            SparseNode::Empty => {
                 panic!("child must be revealed")
             }
             // For a leaf node, we collapse the extension node into a leaf node,
@@ -2175,7 +2177,11 @@ impl ParallelSparseTrie {
                         if !child.is_hash() {
                             self.lower_subtrie_for_path_mut(&child_path)
                                 .expect("child_path must have a lower subtrie")
-                                .reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+                                .reveal_node(
+                                    child_path,
+                                    &TrieNodeV2::decode(&mut branch.stack[stack_ptr].as_ref())?,
+                                    None,
+                                )?;
                         }
                     }
                 }
@@ -2184,7 +2190,11 @@ impl ParallelSparseTrie {
                 let mut child_path = path;
                 child_path.extend(&ext.key);
                 if let Some(subtrie) = self.lower_subtrie_for_path_mut(&child_path) {
-                    subtrie.reveal_node_or_hash(child_path, &ext.child)?;
+                    subtrie.reveal_node(
+                        child_path,
+                        &TrieNodeV2::decode(&mut ext.child.as_ref())?,
+                        None,
+                    )?;
                 }
             }
             TrieNodeV2::EmptyRoot | TrieNodeV2::Leaf(_) => (),
@@ -2277,7 +2287,7 @@ impl ParallelSparseTrie {
                     }
                     current.extend(key);
                 }
-                SparseNode::Hash(_) | SparseNode::Empty | SparseNode::Leaf { .. } => return false,
+                SparseNode::Empty | SparseNode::Leaf { .. } => return false,
             }
         }
         true
@@ -2339,7 +2349,7 @@ impl ParallelSparseTrie {
                         stack.push(next);
                     }
                 }
-                SparseNode::Hash(_) | SparseNode::Empty | SparseNode::Leaf { .. } => {}
+                SparseNode::Empty | SparseNode::Leaf { .. } => {}
             };
         }
 
@@ -2620,9 +2630,6 @@ impl SparseSubtrie {
                 *node = SparseNode::new_leaf(path);
                 Ok(LeafUpdateStep::complete_with_insertions(vec![current]))
             }
-            SparseNode::Hash(hash) => {
-                Err(SparseTrieErrorKind::BlindedNode { path: current, hash: *hash }.into())
-            }
             SparseNode::Leaf { key: current_key, .. } => {
                 current.extend(current_key);
 
@@ -2749,27 +2756,9 @@ impl SparseSubtrie {
         }
 
         match self.nodes.entry(path) {
-            Entry::Occupied(mut entry) => {
-                match entry.get() {
-                    SparseNode::Hash(hash) => {
-                        // Replace a hash node with a fully revealed branch node.
-                        entry.insert(SparseNode::Branch {
-                            state_mask,
-                            // Memoize the hash of a previously blinded node in a new branch
-                            // node.
-                            state: SparseNodeState::Cached {
-                                rlp_node: RlpNode::word_rlp(hash),
-                                store_in_db_trie: Some(masks.is_some_and(|m| {
-                                    !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
-                                })),
-                            },
-                            blinded_mask,
-                            blinded_hashes,
-                        });
-                    }
-                    // Branch already revealed, do nothing
-                    _ => return Ok(()),
-                }
+            Entry::Occupied(_) => {
+                // Branch already revealed, do nothing
+                return Ok(());
             }
             Entry::Vacant(entry) => {
                 let state =
@@ -2800,7 +2789,7 @@ impl SparseSubtrie {
             if !child.is_hash() && Self::is_child_same_level(&path, &child_path) {
                 // Reveal each child node or hash it has, but only if the child is on
                 // the same level as the parent.
-                self.reveal_node_or_hash(child_path, child)?;
+                self.reveal_node(child_path, &TrieNodeV2::decode(&mut child.as_ref())?, None)?;
             }
         }
 
@@ -2816,32 +2805,9 @@ impl SparseSubtrie {
     ) -> SparseTrieResult<bool> {
         debug_assert!(path.starts_with(&self.path));
 
-        let mut skip_extension_reveal = false;
-
-        // If the node is already revealed and it's not a hash node, do nothing.
-        if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
-            // Make sure that we reveal branch nodes properly even when extension was already
-            // revealed.
-            if let TrieNodeV2::Branch(branch) = node &&
-                !branch.key.is_empty()
-            {
-                let mut branch_path = path;
-                branch_path.extend(&branch.key);
-
-                // If branch does not belong to this subtrie, we can exit.
-                if !Self::is_child_same_level(&path, &branch_path) {
-                    return Ok(false);
-                }
-
-                // If branch is already revealed, we can exit.
-                if self.nodes.get(&branch_path).is_some_and(|node| !node.is_hash()) {
-                    return Ok(false);
-                }
-
-                skip_extension_reveal = true;
-            } else {
-                return Ok(false)
-            }
+        // If the node is already revealed, do nothing.
+        if self.nodes.contains_key(&path) {
+            return Ok(false);
         }
 
         let parent = (!path.is_empty()).then(|| path.slice(0..path.len() - 1));
@@ -2891,47 +2857,24 @@ impl SparseSubtrie {
                     return Ok(true);
                 }
 
-                if !skip_extension_reveal {
-                    match self.nodes.entry(path) {
-                        Entry::Occupied(mut entry) => match entry.get() {
-                            SparseNode::Hash(hash) => {
-                                // Replace a hash node with a revealed extension node.
-                                entry.insert(SparseNode::Extension {
-                                    key: branch.key,
-                                    state: SparseNodeState::Cached {
-                                        // Memoize the hash of a previously blinded node in a new
-                                        // extension node.
-                                        rlp_node: RlpNode::word_rlp(hash),
-                                        // Inherit `store_in_db_trie` from the child branch
-                                        // node masks so that the memoized hash can be used
-                                        // without needing to fetch the child branch.
-                                        store_in_db_trie: Some(masks.is_some_and(|m| {
-                                            !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
-                                        })),
-                                    },
-                                });
-                            }
-                            _ => unreachable!("checked that node is either a hash or non-existent"),
-                        },
-                        Entry::Vacant(entry) => {
-                            entry.insert(SparseNode::Extension {
-                                key: branch.key,
-                                state: hash
-                                    .as_ref()
-                                    .map(|hash| SparseNodeState::Cached {
-                                        rlp_node: RlpNode::word_rlp(hash),
-                                        // Inherit `store_in_db_trie` from the child branch
-                                        // node masks so that the memoized hash can be used
-                                        // without needing to fetch the child branch.
-                                        store_in_db_trie: Some(masks.is_some_and(|m| {
-                                            !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
-                                        })),
-                                    })
-                                    .unwrap_or(SparseNodeState::Dirty),
-                            });
-                        }
-                    }
-                }
+                self.nodes.insert(
+                    path,
+                    SparseNode::Extension {
+                        key: branch.key,
+                        state: hash
+                            .as_ref()
+                            .map(|hash| SparseNodeState::Cached {
+                                rlp_node: RlpNode::word_rlp(hash),
+                                // Inherit `store_in_db_trie` from the child branch
+                                // node masks so that the memoized hash can be used
+                                // without needing to fetch the child branch.
+                                store_in_db_trie: Some(masks.is_some_and(|m| {
+                                    !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
+                                })),
+                            })
+                            .unwrap_or(SparseNodeState::Dirty),
+                    },
+                );
 
                 let mut branch_path = path;
                 branch_path.extend(&branch.key);
@@ -2950,36 +2893,7 @@ impl SparseSubtrie {
                     branch.branch_rlp_node.clone(),
                 )?;
             }
-            TrieNodeV2::Extension(ext) => match self.nodes.entry(path) {
-                Entry::Occupied(mut entry) => match entry.get() {
-                    // Replace a hash node with a revealed extension node.
-                    SparseNode::Hash(hash) => {
-                        let mut child_path = *entry.key();
-                        child_path.extend(&ext.key);
-                        entry.insert(SparseNode::Extension {
-                            key: ext.key,
-                            state: SparseNodeState::Cached {
-                                // Memoize the hash of a previously blinded node in the new
-                                // extension node.
-                                rlp_node: RlpNode::word_rlp(hash),
-                                store_in_db_trie: None,
-                            },
-                        });
-                        if Self::is_child_same_level(&path, &child_path) {
-                            self.reveal_node_or_hash(child_path, &ext.child)?;
-                        }
-                    }
-                    _ => unreachable!("checked that node is either a hash or non-existent"),
-                },
-                Entry::Vacant(entry) => {
-                    let mut child_path = *entry.key();
-                    child_path.extend(&ext.key);
-                    entry.insert(SparseNode::new_ext(ext.key));
-                    if Self::is_child_same_level(&path, &child_path) {
-                        self.reveal_node_or_hash(child_path, &ext.child)?;
-                    }
-                }
-            },
+            TrieNodeV2::Extension(_) => unreachable!(),
             TrieNodeV2::Leaf(leaf) => {
                 // Skip the reachability check when path.len() == UPPER_TRIE_MAX_DEPTH because
                 // at that boundary the leaf is in the lower subtrie but its parent branch is in
@@ -3013,83 +2927,23 @@ impl SparseSubtrie {
                     }
                 }
 
-                match self.nodes.entry(path) {
-                    Entry::Occupied(mut entry) => match entry.get() {
-                        // Replace a hash node with a revealed leaf node and store leaf node value.
-                        SparseNode::Hash(hash) => {
-                            entry.insert(SparseNode::Leaf {
-                                key: leaf.key,
-                                state: SparseNodeState::Cached {
-                                    // Memoize the hash of a previously blinded node in the new leaf
-                                    // node.
-                                    rlp_node: RlpNode::word_rlp(hash),
-                                    store_in_db_trie: Some(false),
-                                },
-                            });
-                        }
-                        _ => unreachable!("checked that node is either a hash or non-existent"),
+                self.nodes.insert(
+                    path,
+                    SparseNode::Leaf {
+                        key: leaf.key,
+                        state: hash
+                            .as_ref()
+                            .map(|hash| SparseNodeState::Cached {
+                                rlp_node: RlpNode::word_rlp(hash),
+                                store_in_db_trie: Some(false),
+                            })
+                            .unwrap_or(SparseNodeState::Dirty),
                     },
-                    Entry::Vacant(entry) => {
-                        entry.insert(SparseNode::Leaf {
-                            key: leaf.key,
-                            state: hash
-                                .as_ref()
-                                .map(|hash| SparseNodeState::Cached {
-                                    rlp_node: RlpNode::word_rlp(hash),
-                                    store_in_db_trie: Some(false),
-                                })
-                                .unwrap_or(SparseNodeState::Dirty),
-                        });
-                    }
-                }
+                );
             }
         }
 
         Ok(true)
-    }
-
-    /// Reveals either a node or its hash placeholder based on the provided child data.
-    ///
-    /// When traversing the trie, we often encounter references to child nodes that
-    /// are either directly embedded or represented by their hash. This method
-    /// handles both cases:
-    ///
-    /// 1. If the child data represents a hash (32+1=33 bytes), store it as a hash node
-    /// 2. Otherwise, decode the data as a [`TrieNode`] and recursively reveal it using
-    ///    `reveal_node`
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if successful, or an error if the node cannot be revealed.
-    ///
-    /// # Error Handling
-    ///
-    /// Will error if there's a conflict between a new hash node and an existing one
-    /// at the same path
-    fn reveal_node_or_hash(&mut self, path: Nibbles, child: &RlpNode) -> SparseTrieResult<()> {
-        if let Some(hash) = child.as_hash() {
-            match self.nodes.entry(path) {
-                Entry::Occupied(entry) => match entry.get() {
-                    // Hash node with a different hash can't be handled.
-                    SparseNode::Hash(previous_hash) if previous_hash != &hash => {
-                        return Err(SparseTrieErrorKind::Reveal {
-                            path: *entry.key(),
-                            node: Box::new(SparseNode::Hash(hash)),
-                        }
-                        .into())
-                    }
-                    _ => {}
-                },
-                Entry::Vacant(entry) => {
-                    entry.insert(SparseNode::Hash(hash));
-                }
-            }
-            return Ok(())
-        }
-
-        self.reveal_node(path, &TrieNodeV2::decode(&mut &child[..])?, None)?;
-
-        Ok(())
     }
 
     /// Recalculates and updates the RLP hashes for the changed nodes in this subtrie.
@@ -3258,10 +3112,6 @@ impl SparseSubtrieInner {
 
         let (rlp_node, node_type) = match node {
             SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), SparseNodeType::Empty),
-            SparseNode::Hash(hash) => {
-                // Return pre-computed hash of a blinded node immediately
-                (RlpNode::word_rlp(hash), SparseNodeType::Hash)
-            }
             SparseNode::Leaf { key, state } => {
                 let mut path = path;
                 path.extend(key);

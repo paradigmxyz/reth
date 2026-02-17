@@ -335,8 +335,6 @@ impl SparseNodeType {
 pub enum SparseNode {
     /// Empty trie node.
     Empty,
-    /// The hash of the node that was not revealed.
-    Hash(B256),
     /// Sparse leaf node with remaining key suffix.
     Leaf {
         /// Remaining key suffix for the leaf node.
@@ -395,16 +393,10 @@ impl SparseNode {
         Self::Leaf { key, state: SparseNodeState::Dirty }
     }
 
-    /// Returns `true` if the node is a hash node.
-    pub const fn is_hash(&self) -> bool {
-        matches!(self, Self::Hash(_))
-    }
-
     /// Returns the cached [`RlpNode`] of the node, if it's available.
     pub fn cached_rlp_node(&self) -> Option<Cow<'_, RlpNode>> {
         match &self {
             Self::Empty => None,
-            Self::Hash(hash) => Some(Cow::Owned(RlpNode::word_rlp(hash))),
             Self::Leaf { state, .. } |
             Self::Extension { state, .. } |
             Self::Branch { state, .. } => state.cached_rlp_node().map(Cow::Borrowed),
@@ -415,7 +407,6 @@ impl SparseNode {
     pub fn cached_hash(&self) -> Option<B256> {
         match &self {
             Self::Empty => None,
-            Self::Hash(hash) => Some(*hash),
             Self::Leaf { state, .. } |
             Self::Extension { state, .. } |
             Self::Branch { state, .. } => state.cached_hash(),
@@ -442,7 +433,7 @@ impl SparseNode {
     /// Returns the memory size of this node in bytes.
     pub const fn memory_size(&self) -> usize {
         match self {
-            Self::Empty | Self::Hash(_) | Self::Branch { .. } => core::mem::size_of::<Self>(),
+            Self::Empty | Self::Branch { .. } => core::mem::size_of::<Self>(),
             Self::Leaf { key, .. } | Self::Extension { key, .. } => {
                 core::mem::size_of::<Self>() + key.len()
             }
@@ -492,18 +483,6 @@ impl SparseNodeState {
         match self {
             Self::Cached { store_in_db_trie, .. } => *store_in_db_trie,
             Self::Dirty => None,
-        }
-    }
-
-    /// Sets the cached hash of the node.
-    pub fn set_cached_hash(&mut self, hash: B256) {
-        match self {
-            Self::Cached { rlp_node, .. } => {
-                *rlp_node = RlpNode::word_rlp(&hash);
-            }
-            Self::Dirty => {
-                *self = Self::Cached { rlp_node: RlpNode::word_rlp(&hash), store_in_db_trie: None };
-            }
         }
     }
 }
