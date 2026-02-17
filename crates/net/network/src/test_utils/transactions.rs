@@ -20,6 +20,7 @@ use reth_eth_wire_types::EthNetworkPrimitives;
 use reth_network_api::{PeerKind, PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
 use reth_storage_api::noop::NoopProvider;
+use reth_tasks::Runtime;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use secp256k1::SecretKey;
 use std::sync::Arc;
@@ -36,6 +37,7 @@ pub async fn new_tx_manager(
         // let OS choose port
         .listener_port(0)
         .disable_discovery()
+        .with_task_executor(Runtime::test())
         .build(client);
 
     let pool = testing_pool();

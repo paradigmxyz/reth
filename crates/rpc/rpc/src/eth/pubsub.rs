@@ -42,14 +42,7 @@ pub struct EthPubSub<Eth> {
 
 impl<Eth> EthPubSub<Eth> {
     /// Creates a new, shareable instance.
-    ///
-    /// Subscription tasks are spawned via [`tokio::task::spawn`]
-    pub fn new(eth_api: Eth) -> Self {
-        Self::with_spawner(eth_api, Runtime::test())
-    }
-
-    /// Creates a new, shareable instance.
-    pub fn with_spawner(eth_api: Eth, subscription_task_spawner: Runtime) -> Self {
+    pub fn new(eth_api: Eth, subscription_task_spawner: Runtime) -> Self {
         let inner = EthPubSubInner { eth_api, subscription_task_spawner };
         Self { inner: Arc::new(inner) }
     }

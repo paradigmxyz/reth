@@ -691,7 +691,8 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             chain_id,
             block_import: block_import.unwrap_or_else(|| Box::<ProofOfStakeBlockImport>::default()),
             network_mode,
-            executor: executor.unwrap_or_else(Runtime::test),
+            executor: executor
+                .expect("NetworkConfigBuilder requires a Runtime to be set via .executor()"),
             status,
             hello_message,
             extra_protocols,
@@ -745,7 +746,7 @@ mod tests {
 
     fn builder() -> NetworkConfigBuilder {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        NetworkConfigBuilder::new(secret_key)
+        NetworkConfigBuilder::new(secret_key).with_task_executor(Runtime::test())
     }
 
     #[test]

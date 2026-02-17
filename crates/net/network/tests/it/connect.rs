@@ -21,6 +21,7 @@ use reth_network_p2p::{
 use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
 use reth_provider::test_utils::MockEthProvider;
 use reth_storage_api::noop::NoopProvider;
+use reth_tasks::Runtime;
 use reth_tracing::init_test_tracing;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
@@ -647,6 +648,7 @@ async fn new_random_peer(
         .listener_port(0)
         .disable_discovery()
         .peer_config(peers_config)
+        .with_task_executor(Runtime::test())
         .build_with_noop_provider(MAINNET.clone());
 
     NetworkManager::new(config).await.unwrap()

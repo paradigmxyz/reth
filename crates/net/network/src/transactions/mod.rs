@@ -2167,6 +2167,7 @@ mod tests {
         sync::{NetworkSyncUpdater, SyncState},
     };
     use reth_storage_api::noop::NoopProvider;
+    use reth_tasks::Runtime;
     use reth_transaction_pool::test_utils::{
         testing_pool, MockTransaction, MockTransactionFactory, TestPool,
     };
@@ -2269,6 +2270,7 @@ mod tests {
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
+            .with_task_executor(Runtime::test())
             .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
@@ -2336,6 +2338,7 @@ mod tests {
             // let OS choose port
             .listener_port(0)
             .disable_discovery()
+            .with_task_executor(Runtime::test())
             .build(client);
 
         let pool = testing_pool();
@@ -2443,6 +2446,7 @@ mod tests {
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
+            .with_task_executor(Runtime::test())
             .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
@@ -2521,6 +2525,7 @@ mod tests {
         let config = NetworkConfigBuilder::new(secret_key)
             .disable_discovery()
             .listener_port(0)
+            .with_task_executor(Runtime::test())
             .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
@@ -2939,6 +2944,7 @@ mod tests {
         let network_config = NetworkConfigBuilder::new(secret_key)
             .listener_port(0)
             .disable_discovery()
+            .with_task_executor(Runtime::test())
             .build(client.clone());
 
         let mut network_manager = NetworkManager::new(network_config).await.unwrap();

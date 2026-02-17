@@ -258,15 +258,16 @@ pub async fn test_exex_context_with_chain_spec(
     let genesis_hash = init_genesis(&provider_factory)?;
     let provider = BlockchainProvider::new(provider_factory.clone())?;
 
+    let runtime = Runtime::test();
     let network_manager = NetworkManager::new(
         NetworkConfigBuilder::new(rng_secret_key())
             .with_unused_discovery_port()
             .with_unused_listener_port()
+            .with_task_executor(runtime.clone())
             .build(provider_factory.clone()),
     )
     .await?;
     let network = network_manager.handle().clone();
-    let runtime = Runtime::test();
     let task_executor = runtime.clone();
     runtime.spawn_task(network_manager);
 

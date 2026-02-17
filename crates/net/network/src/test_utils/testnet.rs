@@ -719,6 +719,7 @@ where
             .disable_dns_discovery()
             .disable_discv4_discovery()
             .peer_config(PeersConfig::test())
+            .with_task_executor(Runtime::test())
     }
 }
 

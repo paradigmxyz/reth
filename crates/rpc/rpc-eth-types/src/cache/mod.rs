@@ -105,17 +105,6 @@ impl<N: NodePrimitives> EthStateCache<N> {
         (cache, service)
     }
 
-    /// Creates a new async LRU backed cache service task and spawns it to a new task via
-    /// [`tokio::spawn`].
-    ///
-    /// See also [`Self::spawn_with`]
-    pub fn spawn<Provider>(provider: Provider, config: EthStateCacheConfig) -> Self
-    where
-        Provider: BlockReader<Block = N::Block, Receipt = N::Receipt> + Clone + Unpin + 'static,
-    {
-        Self::spawn_with(provider, config, Runtime::test())
-    }
-
     /// Creates a new async LRU backed cache service task and spawns it to a new task via the given
     /// spawner.
     ///
