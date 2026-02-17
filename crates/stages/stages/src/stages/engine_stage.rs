@@ -66,7 +66,7 @@ where
         + HistoryWriter,
 {
     fn id(&self) -> StageId {
-        StageId::Other("Engine")
+        StageId::Execution
     }
 
     fn execute(
