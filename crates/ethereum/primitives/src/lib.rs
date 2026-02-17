@@ -6,10 +6,16 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(test)]
 extern crate alloc;
+
+#[cfg(all(not(test), feature = "arbitrary"))]
+use arbitrary as _;
+#[cfg(all(not(test), feature = "reth-codec"))]
+use reth_codecs as _;
 
 mod receipt;
 pub use receipt::*;
