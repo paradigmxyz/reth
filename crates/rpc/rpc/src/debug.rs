@@ -37,10 +37,20 @@ use reth_storage_api::{
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::DatabaseCommit;
+use revm::{
+    interpreter::{Interpreter, InterpreterTypes},
+    DatabaseCommit, Inspector,
+};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{
+    collections::VecDeque,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
@@ -113,6 +123,25 @@ fn parse_go_duration(s: &str) -> Option<Duration> {
     Some(Duration::from_nanos(total_nanos as u64))
 }
 
+/// An inspector that halts EVM execution when a shared cancellation flag is set.
+///
+/// Designed to be composed with [`DebugInspector`] via tuple `(TimeoutInspector, DebugInspector)`
+/// so both inspectors' hooks are invoked on each opcode. When the flag is set (by a timer task),
+/// [`Interpreter::halt_fatal`] is called in `step()`, which stops the interpreter loop.
+struct TimeoutInspector {
+    /// Shared flag set to `true` by the timeout timer task.
+    cancelled: Arc<AtomicBool>,
+}
+
+impl<CTX, INTR: InterpreterTypes> Inspector<CTX, INTR> for TimeoutInspector {
+    #[inline]
+    fn step(&mut self, interp: &mut Interpreter<INTR>, _context: &mut CTX) {
+        if self.cancelled.load(Ordering::Relaxed) {
+            interp.halt_fatal();
+        }
+    }
+}
+
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
@@ -183,6 +212,8 @@ where
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         let timeout = opts.timeout.as_deref().and_then(parse_go_duration);
+        let cancel = timeout.as_ref().map(|_| Arc::new(AtomicBool::new(false)));
+        let cancel_for_closure = cancel.clone();
 
         let trace_fut = self.eth_api().spawn_with_state_at_block(
             block.parent_hash(),
@@ -197,12 +228,17 @@ where
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
 
-                    let res = eth_api.inspect(
-                        &mut db,
-                        evm_env.clone(),
-                        tx_env.clone(),
-                        &mut inspector,
-                    )?;
+                    let res = if let Some(ref cancel) = cancel_for_closure {
+                        let mut timeout_insp = TimeoutInspector { cancelled: cancel.clone() };
+                        eth_api.inspect(
+                            &mut db,
+                            evm_env.clone(),
+                            tx_env.clone(),
+                            &mut (&mut timeout_insp, &mut inspector),
+                        )?
+                    } else {
+                        eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?
+                    };
                     let result = inspector
                         .get_result(
                             Some(TransactionContext {
@@ -231,8 +267,16 @@ where
         );
 
         if let Some(timeout_duration) = timeout {
+            let cancel = cancel.unwrap();
+            let timer = tokio::spawn(async move {
+                tokio::time::sleep(timeout_duration).await;
+                cancel.store(true, Ordering::Relaxed);
+            });
             match tokio::time::timeout(timeout_duration, trace_fut).await {
-                Ok(result) => result,
+                Ok(result) => {
+                    timer.abort();
+                    result
+                }
                 Err(_) => Err(EthApiError::ExecutionTimedOut(timeout_duration).into()),
             }
         } else {
@@ -310,6 +354,8 @@ where
         let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
 
         let timeout = opts.timeout.as_deref().and_then(parse_go_duration);
+        let cancel = timeout.as_ref().map(|_| Arc::new(AtomicBool::new(false)));
+        let cancel_for_closure = cancel.clone();
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
@@ -319,13 +365,10 @@ where
         let trace_fut =
             self.eth_api().spawn_with_state_at_block(state_at, move |eth_api, mut db| {
                 let block_txs = block.transactions_recovered();
-
-                // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
                 eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
-                // replay all transactions prior to the targeted transaction
                 let index = eth_api.replay_transactions_until(
                     &mut db,
                     evm_env.clone(),
@@ -336,8 +379,17 @@ where
                 let tx_env = eth_api.evm_config().tx_env(&tx);
 
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let res =
-                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                let res = if let Some(ref cancel) = cancel_for_closure {
+                    let mut timeout_insp = TimeoutInspector { cancelled: cancel.clone() };
+                    eth_api.inspect(
+                        &mut db,
+                        evm_env.clone(),
+                        tx_env.clone(),
+                        &mut (&mut timeout_insp, &mut inspector),
+                    )?
+                } else {
+                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?
+                };
                 let trace = inspector
                     .get_result(
                         Some(TransactionContext {
@@ -356,8 +408,16 @@ where
             });
 
         if let Some(timeout_duration) = timeout {
+            let cancel = cancel.unwrap();
+            let timer = tokio::spawn(async move {
+                tokio::time::sleep(timeout_duration).await;
+                cancel.store(true, Ordering::Relaxed);
+            });
             match tokio::time::timeout(timeout_duration, trace_fut).await {
-                Ok(result) => result,
+                Ok(result) => {
+                    timer.abort();
+                    result
+                }
                 Err(_) => Err(EthApiError::ExecutionTimedOut(timeout_duration).into()),
             }
         } else {
@@ -389,10 +449,11 @@ where
         } = opts;
 
         let timeout = tracing_options.timeout.as_deref().and_then(parse_go_duration);
+        let cancel = timeout.as_ref().map(|_| Arc::new(AtomicBool::new(false)));
+        let cancel_for_timer = cancel.clone();
         let overrides = EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
 
         let trace_fut = async {
-            // Check if we need to replay transactions for a specific tx_index
             if let Some(tx_idx) = tx_index {
                 return self
                     .debug_trace_call_at_tx_index(
@@ -400,22 +461,34 @@ where
                         at,
                         tx_idx as usize,
                         tracing_options,
+                        cancel.clone(),
                         overrides,
                     )
                     .await;
             }
 
+            let cancel_for_closure = cancel.clone();
             let this = self.clone();
             self.eth_api()
                 .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
                     let mut inspector =
                         DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
-                    let res = this.eth_api().inspect(
-                        &mut *db,
-                        evm_env.clone(),
-                        tx_env.clone(),
-                        &mut inspector,
-                    )?;
+                    let res = if let Some(ref cancel) = cancel_for_closure {
+                        let mut timeout_insp = TimeoutInspector { cancelled: cancel.clone() };
+                        this.eth_api().inspect(
+                            &mut *db,
+                            evm_env.clone(),
+                            tx_env.clone(),
+                            &mut (&mut timeout_insp, &mut inspector),
+                        )?
+                    } else {
+                        this.eth_api().inspect(
+                            &mut *db,
+                            evm_env.clone(),
+                            tx_env.clone(),
+                            &mut inspector,
+                        )?
+                    };
                     let trace = inspector
                         .get_result(None, &tx_env, &evm_env.block_env, &res, db)
                         .map_err(Eth::Error::from_eth_err)?;
@@ -425,8 +498,16 @@ where
         };
 
         if let Some(timeout_duration) = timeout {
+            let cancel = cancel_for_timer.unwrap();
+            let timer = tokio::spawn(async move {
+                tokio::time::sleep(timeout_duration).await;
+                cancel.store(true, Ordering::Relaxed);
+            });
             match tokio::time::timeout(timeout_duration, trace_fut).await {
-                Ok(result) => result,
+                Ok(result) => {
+                    timer.abort();
+                    result
+                }
                 Err(_) => Err(EthApiError::ExecutionTimedOut(timeout_duration).into()),
             }
         } else {
@@ -443,6 +524,7 @@ where
         block_id: BlockId,
         tx_index: usize,
         tracing_options: GethDebugTracingOptions,
+        cancel: Option<Arc<AtomicBool>>,
         overrides: EvmOverrides,
     ) -> Result<GethTrace, Eth::Error> {
         // Get the target block to check transaction count
@@ -453,7 +535,6 @@ where
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         if tx_index >= block.transaction_count() {
-            // tx_index out of bounds
             return Err(EthApiError::InvalidParams(format!(
                 "tx_index {} out of bounds for block with {} transactions",
                 tx_index,
@@ -464,29 +545,34 @@ where
 
         let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
 
-        // execute after the parent block, replaying `tx_index` transactions
         let state_at = block.parent_hash();
 
         self.eth_api()
             .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
-                // 1. apply pre-execution changes
                 eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
-                // 2. replay the required number of transactions
                 for tx in block.transactions_recovered().take(tx_index) {
                     let tx_env = eth_api.evm_config().tx_env(tx);
                     let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                     db.commit(res.state);
                 }
 
-                // 3. now execute the trace call on this state
                 let (evm_env, tx_env) =
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
                 let mut inspector =
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
-                let res =
-                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                let res = if let Some(ref cancel) = cancel {
+                    let mut timeout_insp = TimeoutInspector { cancelled: cancel.clone() };
+                    eth_api.inspect(
+                        &mut db,
+                        evm_env.clone(),
+                        tx_env.clone(),
+                        &mut (&mut timeout_insp, &mut inspector),
+                    )?
+                } else {
+                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?
+                };
                 let trace = inspector
                     .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
                     .map_err(Eth::Error::from_eth_err)?;
@@ -523,6 +609,8 @@ where
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
 
         let timeout = tracing_options.timeout.as_deref().and_then(parse_go_duration);
+        let cancel = timeout.as_ref().map(|_| Arc::new(AtomicBool::new(false)));
+        let cancel_for_closure = cancel.clone();
 
         // we're essentially replaying the transactions in the block here, hence we need the state
         // that points to the beginning of the block, which is the state at the parent block
@@ -541,15 +629,10 @@ where
         }
 
         let trace_fut = self.eth_api().spawn_with_state_at_block(at, move |eth_api, mut db| {
-            // the outer vec for the bundles
             let mut all_bundles = Vec::with_capacity(bundles.len());
 
             if replay_block_txs {
-                // only need to replay the transactions in the block if not all transactions are
-                // to be replayed
                 let transactions = block.transactions_recovered().take(num_txs);
-
-                // Execute all transactions until index
                 for tx in transactions {
                     let tx_env = eth_api.evm_config().tx_env(tx);
                     let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
@@ -557,7 +640,6 @@ where
                 }
             }
 
-            // Trace all bundles
             let mut bundles = bundles.into_iter().peekable();
             let mut inspector =
                 DebugInspector::new(tracing_options.clone()).map_err(Eth::Error::from_eth_err)?;
@@ -569,33 +651,33 @@ where
 
                 let mut transactions = transactions.into_iter().peekable();
                 while let Some(tx) = transactions.next() {
-                    // apply state overrides only once, before the first transaction
                     let state_overrides = state_overrides.take();
                     let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
                     let (evm_env, tx_env) =
                         eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
 
-                    let res = eth_api.inspect(
-                        &mut db,
-                        evm_env.clone(),
-                        tx_env.clone(),
-                        &mut inspector,
-                    )?;
+                    let res = if let Some(ref cancel) = cancel_for_closure {
+                        let mut timeout_insp = TimeoutInspector { cancelled: cancel.clone() };
+                        eth_api.inspect(
+                            &mut db,
+                            evm_env.clone(),
+                            tx_env.clone(),
+                            &mut (&mut timeout_insp, &mut inspector),
+                        )?
+                    } else {
+                        eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?
+                    };
                     let trace = inspector
                         .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
                         .map_err(Eth::Error::from_eth_err)?;
 
-                    // If there is more transactions, commit the database
-                    // If there is no transactions, but more bundles, commit to the database
-                    // too
                     if transactions.peek().is_some() || bundles.peek().is_some() {
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         db.commit(res.state);
                     }
                     results.push(trace);
                 }
-                // Increment block_env number and timestamp for the next bundle
                 evm_env.block_env.inner_mut().number += uint!(1_U256);
                 evm_env.block_env.inner_mut().timestamp += uint!(12_U256);
 
@@ -605,8 +687,16 @@ where
         });
 
         if let Some(timeout_duration) = timeout {
+            let cancel = cancel.unwrap();
+            let timer = tokio::spawn(async move {
+                tokio::time::sleep(timeout_duration).await;
+                cancel.store(true, Ordering::Relaxed);
+            });
             match tokio::time::timeout(timeout_duration, trace_fut).await {
-                Ok(result) => result,
+                Ok(result) => {
+                    timer.abort();
+                    result
+                }
                 Err(_) => Err(EthApiError::ExecutionTimedOut(timeout_duration).into()),
             }
         } else {
@@ -1372,11 +1462,49 @@ mod tests {
         assert_eq!(parsed, None);
     }
 
-    /// Verifies that `tokio::time::timeout` correctly aborts a slow future, matching
-    /// the pattern used in the debug trace methods.
+    /// Verifies that `TimeoutInspector` halts the interpreter when the cancel flag is set.
+    #[test]
+    fn timeout_inspector_halts_on_cancel() {
+        use revm::interpreter::{interpreter::EthInterpreter, Interpreter, InterpreterAction};
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut inspector = TimeoutInspector { cancelled: cancelled.clone() };
+        let mut interp: Interpreter<EthInterpreter> = Interpreter::default_ext();
+
+        // Before cancellation, step should not halt
+        Inspector::<(), _>::step(&mut inspector, &mut interp, &mut ());
+        assert!(interp.bytecode.action.is_none(), "should not halt before cancel");
+
+        // Set the cancel flag
+        cancelled.store(true, Ordering::Relaxed);
+
+        // After cancellation, step should halt the interpreter
+        Inspector::<(), _>::step(&mut inspector, &mut interp, &mut ());
+        match &interp.bytecode.action {
+            Some(InterpreterAction::Return(result)) => {
+                assert_eq!(
+                    result.result,
+                    revm::interpreter::InstructionResult::FatalExternalError,
+                    "should halt with FatalExternalError"
+                );
+            }
+            other => panic!("expected InterpreterAction::Return, got {other:?}"),
+        }
+    }
+
+    /// Verifies that the timer task sets the cancel flag and `tokio::time::timeout` returns
+    /// the timeout error to the caller.
     #[tokio::test]
-    async fn timeout_aborts_slow_operation() {
+    async fn timeout_sets_cancel_flag_and_fires() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_timer = cancel.clone();
         let timeout_duration = Duration::from_millis(50);
+
+        let timer = tokio::spawn(async move {
+            tokio::time::sleep(timeout_duration).await;
+            cancel_for_timer.store(true, Ordering::Relaxed);
+        });
+
         let slow_future = async {
             tokio::time::sleep(Duration::from_secs(60)).await;
             Ok::<i32, String>(42)
@@ -1384,5 +1512,9 @@ mod tests {
 
         let result = tokio::time::timeout(timeout_duration, slow_future).await;
         assert!(result.is_err(), "expected timeout to fire");
+
+        // Give the timer task time to complete
+        let _ = timer.await;
+        assert!(cancel.load(Ordering::Relaxed), "cancel flag should be set after timeout");
     }
 }
