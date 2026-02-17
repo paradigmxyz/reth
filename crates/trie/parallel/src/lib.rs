@@ -20,11 +20,11 @@ pub mod root;
 /// Implementation of parallel proof computation.
 pub mod proof_task;
 
-/// Async value encoder for V2 proofs.
+/// Async value encoder for proofs.
 pub(crate) mod value_encoder;
 
-/// V2 multiproof targets and chunking.
-pub mod targets_v2;
+/// Multiproof targets and chunking.
+pub mod targets;
 
 /// Parallel state root metrics.
 #[cfg(feature = "metrics")]

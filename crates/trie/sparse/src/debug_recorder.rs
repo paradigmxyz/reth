@@ -89,8 +89,8 @@ pub struct ProofTrieNodeRecord {
 }
 
 impl ProofTrieNodeRecord {
-    /// Creates a record from a [`reth_trie_common::ProofTrieNode`].
-    pub fn from_proof_trie_node(node: &reth_trie_common::ProofTrieNode) -> Self {
+    /// Creates a record from a [`reth_trie_common::LegacyProofTrieNode`].
+    pub fn from_legacy_proof_trie_node(node: &reth_trie_common::LegacyProofTrieNode) -> Self {
         Self {
             path: node.path,
             node: TrieNodeRecord(node.node.clone()),
@@ -98,8 +98,8 @@ impl ProofTrieNodeRecord {
         }
     }
 
-    /// Creates a record from a [`reth_trie_common::ProofTrieNodeV2`].
-    pub fn from_proof_trie_node_v2(node: &reth_trie_common::ProofTrieNodeV2) -> Self {
+    /// Creates a record from a [`reth_trie_common::ProofTrieNode`].
+    pub fn from_proof_trie_node(node: &reth_trie_common::ProofTrieNode) -> Self {
         use reth_trie_common::TrieNodeV2;
         let trie_node = match &node.node {
             TrieNodeV2::EmptyRoot => TrieNode::EmptyRoot,

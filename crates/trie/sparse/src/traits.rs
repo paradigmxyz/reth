@@ -9,7 +9,7 @@ use alloy_primitives::{
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNodeV2};
 
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
@@ -116,7 +116,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         node: TrieNodeV2,
         masks: Option<BranchNodeMasks>,
     ) -> SparseTrieResult<()> {
-        self.reveal_nodes(&mut [ProofTrieNodeV2 { path, node, masks }])
+        self.reveal_nodes(&mut [ProofTrieNode { path, node, masks }])
     }
 
     /// Reveals one or more trie nodes if they have not been revealed before.
@@ -138,7 +138,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// The implementation may modify the input nodes. A common thing to do is [`std::mem::replace`]
     /// each node with [`TrieNodeV2::EmptyRoot`] to avoid cloning.
-    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()>;
+    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()>;
 
     /// Updates the value of a leaf node at the specified path.
     ///

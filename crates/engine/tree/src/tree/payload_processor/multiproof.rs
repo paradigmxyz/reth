@@ -8,7 +8,7 @@ use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_revm::state::EvmState;
 use reth_trie::{HashedPostState, HashedStorage};
-use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+use reth_trie_parallel::targets::MultiProofTargets;
 use std::sync::Arc;
 use tracing::trace;
 
@@ -44,7 +44,7 @@ pub(crate) const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 #[derive(Debug)]
 pub enum MultiProofMessage {
     /// Prefetch proof targets
-    PrefetchProofs(MultiProofTargetsV2),
+    PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution with its source
     StateUpdate(Source, EvmState),
     /// State update that can be applied to the sparse trie without any new proofs.

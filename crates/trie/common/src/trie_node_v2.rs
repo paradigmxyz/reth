@@ -1,4 +1,4 @@
-//! Version 2 types related to representing nodes in an MPT.
+//! Types related to representing nodes in an MPT with merged extension and branch nodes.
 
 use crate::BranchNodeMasks;
 use alloc::vec::Vec;
@@ -12,7 +12,7 @@ use core::fmt;
 
 /// Carries all information needed by a sparse trie to reveal a particular node.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProofTrieNodeV2 {
+pub struct ProofTrieNode {
     /// Path of the node.
     pub path: Nibbles,
     /// The node itself.
@@ -22,8 +22,8 @@ pub struct ProofTrieNodeV2 {
     pub masks: Option<BranchNodeMasks>,
 }
 
-impl ProofTrieNodeV2 {
-    /// Converts an iterator of `(path, TrieNode, masks)` tuples into `Vec<ProofTrieNodeV2>`,
+impl ProofTrieNode {
+    /// Converts an iterator of `(path, TrieNode, masks)` tuples into `Vec<ProofTrieNode>`,
     /// merging extension nodes into their child branch nodes.
     ///
     /// The input **must** be sorted in depth-first order (children before parents) for extension
@@ -91,8 +91,8 @@ impl ProofTrieNodeV2 {
 
 /// Enum representing an MPT trie node.
 ///
-/// This is a V2 representiation, differing from [`TrieNode`] in that branch and extension nodes are
-/// compressed into a single node.
+/// This differs from [`TrieNode`] in that branch and extension nodes are compressed into a single
+/// node.
 #[derive(PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TrieNodeV2 {

@@ -1,6 +1,6 @@
 //! Merkle trie proofs.
 
-use crate::{BranchNodeMasksMap, Nibbles, ProofTrieNodeV2, TrieAccount};
+use crate::{BranchNodeMasksMap, Nibbles, ProofTrieNode, TrieAccount};
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
@@ -297,10 +297,12 @@ impl MultiProof {
     }
 }
 
-/// This is a type of [`MultiProof`] that uses decoded proofs, meaning these proofs are stored as a
+/// Legacy type of [`MultiProof`] that uses decoded proofs, meaning these proofs are stored as a
 /// collection of [`TrieNode`]s instead of RLP-encoded bytes.
+///
+/// Prefer [`DecodedMultiProof`] which uses [`ProofTrieNode`] with merged extension/branch nodes.
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
-pub struct DecodedMultiProof {
+pub struct LegacyDecodedMultiProof {
     /// State trie multiproof for requested accounts.
     pub account_subtree: DecodedProofNodes,
     /// Consolidated branch node masks (`hash_mask`, `tree_mask`) for each path in the account
@@ -310,7 +312,7 @@ pub struct DecodedMultiProof {
     pub storages: B256Map<DecodedStorageMultiProof>,
 }
 
-impl DecodedMultiProof {
+impl LegacyDecodedMultiProof {
     /// Returns true if the multiproof is empty.
     pub fn is_empty(&self) -> bool {
         self.account_subtree.is_empty() &&
@@ -417,7 +419,7 @@ impl DecodedMultiProof {
         }
     }
 
-    /// Create a [`DecodedMultiProof`] from a [`DecodedStorageMultiProof`].
+    /// Create a [`LegacyDecodedMultiProof`] from a [`DecodedStorageMultiProof`].
     pub fn from_storage_proof(
         hashed_address: B256,
         storage_proof: DecodedStorageMultiProof,
@@ -429,7 +431,7 @@ impl DecodedMultiProof {
     }
 }
 
-impl TryFrom<MultiProof> for DecodedMultiProof {
+impl TryFrom<MultiProof> for LegacyDecodedMultiProof {
     type Error = alloy_rlp::Error;
 
     fn try_from(multi_proof: MultiProof) -> Result<Self, Self::Error> {
@@ -443,17 +445,18 @@ impl TryFrom<MultiProof> for DecodedMultiProof {
     }
 }
 
-/// V2 decoded multiproof which contains the results of both account and storage V2 proof
-/// calculations.
+/// Decoded multiproof which contains the results of both account and storage proof calculations.
+///
+/// Uses [`ProofTrieNode`] which merges extension nodes into their child branch nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct DecodedMultiProofV2 {
+pub struct DecodedMultiProof {
     /// Account trie proof nodes
-    pub account_proofs: Vec<ProofTrieNodeV2>,
+    pub account_proofs: Vec<ProofTrieNode>,
     /// Storage trie proof nodes indexed by account
-    pub storage_proofs: B256Map<Vec<ProofTrieNodeV2>>,
+    pub storage_proofs: B256Map<Vec<ProofTrieNode>>,
 }
 
-impl DecodedMultiProofV2 {
+impl DecodedMultiProof {
     /// Returns true if there are no proofs
     pub fn is_empty(&self) -> bool {
         self.account_proofs.is_empty() && self.storage_proofs.is_empty()
@@ -477,30 +480,38 @@ impl DecodedMultiProofV2 {
     }
 }
 
-impl From<DecodedMultiProof> for DecodedMultiProofV2 {
-    fn from(proof: DecodedMultiProof) -> Self {
-        let account_proofs =
-            decoded_proof_nodes_to_v2(proof.account_subtree, &proof.branch_node_masks);
+impl From<LegacyDecodedMultiProof> for DecodedMultiProof {
+    fn from(proof: LegacyDecodedMultiProof) -> Self {
+        let account_proofs = decoded_proof_nodes_to_proof_trie_nodes(
+            proof.account_subtree,
+            &proof.branch_node_masks,
+        );
         let storage_proofs = proof
             .storages
             .into_iter()
             .map(|(address, storage)| {
-                (address, decoded_proof_nodes_to_v2(storage.subtree, &storage.branch_node_masks))
+                (
+                    address,
+                    decoded_proof_nodes_to_proof_trie_nodes(
+                        storage.subtree,
+                        &storage.branch_node_masks,
+                    ),
+                )
             })
             .collect();
         Self { account_proofs, storage_proofs }
     }
 }
 
-/// Converts a [`DecodedProofNodes`] (path → [`TrieNode`] map) into a `Vec<ProofTrieNodeV2>`,
+/// Converts a [`DecodedProofNodes`] (path → [`TrieNode`] map) into a `Vec<ProofTrieNode>`,
 /// merging extension nodes into their child branch nodes.
-fn decoded_proof_nodes_to_v2(
+fn decoded_proof_nodes_to_proof_trie_nodes(
     nodes: DecodedProofNodes,
     masks: &BranchNodeMasksMap,
-) -> Vec<ProofTrieNodeV2> {
+) -> Vec<ProofTrieNode> {
     let mut sorted: Vec<_> = nodes.into_inner().into_iter().collect();
     sorted.sort_unstable_by(|a, b| crate::depth_first_cmp(&a.0, &b.0));
-    ProofTrieNodeV2::from_sorted_trie_nodes(
+    ProofTrieNode::from_sorted_trie_nodes(
         sorted.into_iter().map(|(path, node)| (path, node, masks.get(&path).copied())),
     )
 }
