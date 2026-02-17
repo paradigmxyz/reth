@@ -4,7 +4,8 @@
 //! through a single executor instance backed by a single DB state provider.
 //! Sender recovery is read from the DB (written by SenderRecoveryStage).
 //! Hashed state is computed once from the accumulated BundleState.
-//! State root is verified via overlay_root_with_updates.
+//! State root is verified via overlay trie computation with prefix sets
+//! (same overlay approach used by the engine's serial state root path).
 //! Persistence writes use the same methods that `save_blocks` calls internally.
 
 use alloy_consensus::BlockHeader as _;
@@ -40,10 +41,12 @@ pub struct EngineStage<E: ConfigureEvm, N: ProviderNodeTypes> {
 }
 
 impl<E: ConfigureEvm, N: ProviderNodeTypes> EngineStage<E, N> {
+    /// Create new instance of [`EngineStage`].
     pub fn new(evm_config: E, provider_factory: ProviderFactory<N>, batch_size: u64) -> Self {
         Self { batch_size, evm_config, provider_factory }
     }
 
+    /// Create new instance with default batch size.
     pub fn with_defaults(evm_config: E, provider_factory: ProviderFactory<N>) -> Self {
         Self::new(evm_config, provider_factory, ENGINE_STAGE_DEFAULT_BATCH_SIZE)
     }
@@ -121,12 +124,14 @@ where
             StateWriteConfig::default(),
         ).map_err(|e| StageError::Fatal(Box::new(e)))?;
 
-        // Write hashed state (must be written before state root computation
-        // so the overlay cursor can read from DB)
+        // Write hashed state
         provider.write_hashed_state(&sorted_hashed_state)
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
-        // Compute state root via overlay and verify against expected
+        // Compute state root via overlay — uses prefix sets from hashed state to
+        // determine which trie nodes need recomputation, then walks the trie with
+        // an overlay cursor that combines DB state with in-memory hashed state.
+        // This is the same approach as the engine's serial state root path.
         let (state_root, trie_updates) =
             reth_trie::StateRoot::overlay_root_with_updates(
                 provider.tx_ref(),
