@@ -26,7 +26,8 @@ pub struct BenchmarkArgs {
     /// This will perform JWT authentication for all requests to the given engine RPC url.
     ///
     /// If no path is provided, a secret will be generated and stored in the datadir under
-    /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
+    /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex`
+    /// by default.
     #[arg(
         long = "jwt-secret",
         alias = "jwtsecret",
