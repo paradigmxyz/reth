@@ -26,17 +26,13 @@ alloy-rpc-types-eth = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
-alloy-serde.workspace = true
-derive_more.workspace = true
 arbitrary.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-rand_08.workspace = true
 rand.workspace = true
 alloy-rlp.workspace = true
 reth-codecs = { workspace = true, features = ["test-utils"] }
 reth-zstd-compressors.workspace = true
-secp256k1 = { workspace = true, features = ["rand"] }
 alloy-consensus = { workspace = true, features = ["serde", "arbitrary"] }
 serde_json.workspace = true
 serde_with.workspace = true
@@ -55,10 +51,7 @@ std = [
     "alloy-eips/std",
     "alloy-rpc-types-eth?/std",
     "alloy-rlp/std",
-    "alloy-serde/std",
-    "derive_more/std",
     "reth-zstd-compressors/std",
-    "secp256k1/std",
     "serde_json/std",
     "serde_with/std",
 ]
@@ -75,7 +68,6 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
-    "alloy-serde/arbitrary",
 ]
 serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",
@@ -91,8 +83,6 @@ serde = [
     "reth-codecs?/serde",
     "reth-primitives-traits/serde",
     "alloy-rpc-types-eth?/serde",
-    "rand_08/serde",
     "rand/serde",
-    "secp256k1/serde",
 ]
 rpc = ["dep:alloy-rpc-types-eth"]
