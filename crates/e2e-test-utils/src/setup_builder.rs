@@ -112,7 +112,7 @@ where
         Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
         Wallet,
     )> {
-        let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
+        let runtime = Runtime::test();
 
         let network_config = NetworkArgs {
             discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },

@@ -211,8 +211,7 @@
 //!     Evm: ConfigureEvm<Primitives: reth_primitives_traits::NodePrimitives<BlockHeader = Header>> + 'static,
 //! {
 //!     let blob_store = InMemoryBlobStore::default();
-//!     let rt = tokio::runtime::Runtime::new().unwrap();
-//!     let runtime = Runtime::with_existing_handle(rt.handle().clone()).unwrap();
+//!     let runtime = Runtime::test();
 //!     let pool = Pool::eth_pool(
 //!         TransactionValidationTaskExecutor::eth(client, evm_config, blob_store.clone(), runtime),
 //!         blob_store,
@@ -251,8 +250,7 @@
 //!     Evm: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 //!     {
 //!     let blob_store = InMemoryBlobStore::default();
-//!     let rt = tokio::runtime::Runtime::new().unwrap();
-//!     let runtime = Runtime::with_existing_handle(rt.handle().clone()).unwrap();
+//!     let runtime = Runtime::test();
 //!     let pool = Pool::eth_pool(
 //!         TransactionValidationTaskExecutor::eth(client.clone(), evm_config, blob_store.clone(), runtime.clone()),
 //!         blob_store,
