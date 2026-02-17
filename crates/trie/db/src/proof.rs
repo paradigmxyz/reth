@@ -40,10 +40,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
     type Tx = TX;
 
     fn from_tx(tx: &'a Self::Tx) -> Self {
-        Self::new(
-            DatabaseTrieCursorFactory::<_, A>::new(tx),
-            DatabaseHashedCursorFactory::new(tx),
-        )
+        Self::new(DatabaseTrieCursorFactory::<_, A>::new(tx), DatabaseHashedCursorFactory::new(tx))
     }
     fn overlay_account_proof(
         &self,

@@ -67,7 +67,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    HashedPostStateSorted, StoredNibbles,
+    HashedPostStateSorted,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm_database::states::{
@@ -3050,27 +3050,32 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         // Track the number of inserted entries.
         let mut num_entries = 0;
 
-        let tx = self.tx_ref();
-        let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+        let is_v2 = self.cached_storage_settings().is_v2();
+        reth_trie_db::dispatch_trie_adapter!(is_v2, |A| {
+            let tx = self.tx_ref();
+            let mut account_trie_cursor =
+                tx.cursor_write::<<A as TrieTableAdapter>::AccountTrieTable>()?;
 
-        // Process sorted account nodes
-        for (key, updated_node) in trie_updates.account_nodes_ref() {
-            let nibbles = StoredNibbles(*key);
-            match updated_node {
-                Some(node) => {
-                    if !nibbles.0.is_empty() {
-                        num_entries += 1;
-                        account_trie_cursor.upsert(nibbles, node)?;
+            // Process sorted account nodes
+            for (key, updated_node) in trie_updates.account_nodes_ref() {
+                let nibbles = <A as reth_trie_db::TrieKeyAdapter>::AccountKey::from(*key);
+                match updated_node {
+                    Some(node) => {
+                        if !key.is_empty() {
+                            num_entries += 1;
+                            account_trie_cursor.upsert(nibbles, node)?;
+                        }
                     }
-                }
-                None => {
-                    num_entries += 1;
-                    if account_trie_cursor.seek_exact(nibbles)?.is_some() {
-                        account_trie_cursor.delete_current()?;
+                    None => {
+                        num_entries += 1;
+                        if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                            account_trie_cursor.delete_current()?;
+                        }
                     }
                 }
             }
-        }
+            Ok::<_, reth_storage_errors::provider::ProviderError>(())
+        })?;
 
         num_entries +=
             self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
@@ -3094,12 +3099,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
         let is_v2 = self.cached_storage_settings().is_v2();
         reth_trie_db::dispatch_trie_adapter!(is_v2, |A| {
-            let mut cursor = self.tx_ref().cursor_dup_write::<<A as TrieTableAdapter>::StorageTrieTable>()?;
+            let mut cursor =
+                self.tx_ref().cursor_dup_write::<<A as TrieTableAdapter>::StorageTrieTable>()?;
             for (hashed_address, storage_trie_updates) in storage_tries {
                 let mut db_storage_trie_cursor: DatabaseStorageTrieCursor<_, A> =
                     DatabaseStorageTrieCursor::new(cursor, *hashed_address);
-                num_entries +=
-                    db_storage_trie_cursor.write_storage_trie_updates_sorted(storage_trie_updates)?;
+                num_entries += db_storage_trie_cursor
+                    .write_storage_trie_updates_sorted(storage_trie_updates)?;
                 cursor = db_storage_trie_cursor.cursor;
             }
             Ok(num_entries)
@@ -3907,7 +3913,9 @@ mod tests {
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
-    use reth_trie::{HashedPostState, KeccakKeyHasher, Nibbles, StoredNibblesSubKey};
+    use reth_trie::{
+        HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
+    };
     use revm_database::BundleState;
     use revm_state::AccountInfo;
 

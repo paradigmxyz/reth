@@ -90,8 +90,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StateRootProvider
                 reth_trie_db::DatabaseTrieCursorFactory<_, A>,
                 reth_trie_db::DatabaseHashedCursorFactory<_>,
             > as DatabaseStateRoot<_>>::overlay_root(
-                self.tx(),
-                &hashed_state.into_sorted(),
+                self.tx(), &hashed_state.into_sorted()
             )?)
         })
     }
@@ -175,7 +174,10 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
                 reth_trie_db::DatabaseTrieCursorFactory<_, A>,
                 reth_trie_db::DatabaseHashedCursorFactory<_>,
             > as DatabaseStorageProof<_>>::overlay_storage_proof(
-                self.tx(), address, slot, hashed_storage
+                self.tx(),
+                address,
+                slot,
+                hashed_storage,
             )
             .map_err(ProviderError::from)
         })
@@ -194,7 +196,10 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
                 reth_trie_db::DatabaseTrieCursorFactory<_, A>,
                 reth_trie_db::DatabaseHashedCursorFactory<_>,
             > as DatabaseStorageProof<_>>::overlay_storage_multiproof(
-                self.tx(), address, slots, hashed_storage
+                self.tx(),
+                address,
+                slots,
+                hashed_storage,
             )
             .map_err(ProviderError::from)
         })
@@ -241,9 +246,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
             Ok(<TrieWitness<
                 reth_trie_db::DatabaseTrieCursorFactory<_, A>,
                 reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseTrieWitness<_>>::overlay_witness(
-                self.tx(), input, target
-            )?
+            > as DatabaseTrieWitness<_>>::overlay_witness(self.tx(), input, target)?
             .into_values()
             .collect())
         })

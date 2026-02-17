@@ -160,10 +160,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStateRoot<'a, TX>
     for StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
-        Self::new(
-            DatabaseTrieCursorFactory::<_, A>::new(tx),
-            DatabaseHashedCursorFactory::new(tx),
-        )
+        Self::new(DatabaseTrieCursorFactory::<_, A>::new(tx), DatabaseHashedCursorFactory::new(tx))
     }
 
     fn incremental_root_calculator(

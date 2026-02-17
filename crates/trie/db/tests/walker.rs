@@ -52,7 +52,8 @@ fn walk_nodes_with_common_prefix() {
             )
             .unwrap();
     }
-    let storage_trie = DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(storage_cursor, hashed_address);
+    let storage_trie =
+        DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(storage_cursor, hashed_address);
     test_cursor(storage_trie, &expected);
 }
 

@@ -527,8 +527,7 @@ where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        let db_trie_cursor_factory =
-            DatabaseTrieCursorFactory::<_, A>::new(self.provider.tx_ref());
+        let db_trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(self.provider.tx_ref());
         let trie_cursor_factory =
             InMemoryTrieCursorFactory::new(db_trie_cursor_factory, self.trie_updates.as_ref());
         trie_cursor_factory.account_trie_cursor()
@@ -538,8 +537,7 @@ where
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        let db_trie_cursor_factory =
-            DatabaseTrieCursorFactory::<_, A>::new(self.provider.tx_ref());
+        let db_trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(self.provider.tx_ref());
         let trie_cursor_factory =
             InMemoryTrieCursorFactory::new(db_trie_cursor_factory, self.trie_updates.as_ref());
         trie_cursor_factory.storage_trie_cursor(hashed_address)

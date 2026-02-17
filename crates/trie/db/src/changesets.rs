@@ -148,9 +148,8 @@ where
         let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
         let overlay_factory =
             InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
-        let changesets =
-            compute_trie_changesets(&overlay_factory, &trie_updates)
-                .map_err(ProviderError::other)?;
+        let changesets = compute_trie_changesets(&overlay_factory, &trie_updates)
+            .map_err(ProviderError::other)?;
 
         debug!(
             target: "trie::changeset_cache",
@@ -269,7 +268,10 @@ where
 
             storage_tries.insert(
                 *hashed_address,
-                StorageTrieUpdatesSorted { storage_nodes, is_deleted: storage_changeset.is_deleted },
+                StorageTrieUpdatesSorted {
+                    storage_nodes,
+                    is_deleted: storage_changeset.is_deleted,
+                },
             );
         }
 

@@ -321,8 +321,9 @@ where
                     "Processing chunk"
                 );
                 let (root, updates) = reth_trie_db::dispatch_trie_adapter!(
-                    provider.cached_storage_settings().is_v2(), |A| {
-                    <StateRoot<
+                    provider.cached_storage_settings().is_v2(),
+                    |A| {
+                        <StateRoot<
                         reth_trie_db::DatabaseTrieCursorFactory<_, A>,
                         reth_trie_db::DatabaseHashedCursorFactory<_>,
                     > as reth_trie_db::DatabaseStateRoot<_>>::incremental_root_with_updates(provider, chunk_range)
@@ -330,7 +331,8 @@ where
                         error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                         StageError::Fatal(Box::new(e))
                     })
-                })?;
+                    }
+                )?;
                 provider.write_trie_updates(updates)?;
                 final_root = Some(root);
             }
@@ -404,13 +406,17 @@ where
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
             let (block_root, updates) = reth_trie_db::dispatch_trie_adapter!(
-                provider.cached_storage_settings().is_v2(), |A| {
-                <StateRoot<
-                    reth_trie_db::DatabaseTrieCursorFactory<_, A>,
-                    reth_trie_db::DatabaseHashedCursorFactory<_>,
-                > as reth_trie_db::DatabaseStateRoot<_>>::incremental_root_with_updates(provider, range)
-                .map_err(|e| StageError::Fatal(Box::new(e)))
-            })?;
+                provider.cached_storage_settings().is_v2(),
+                |A| {
+                    <StateRoot<
+                        reth_trie_db::DatabaseTrieCursorFactory<_, A>,
+                        reth_trie_db::DatabaseHashedCursorFactory<_>,
+                    > as reth_trie_db::DatabaseStateRoot<_>>::incremental_root_with_updates(
+                        provider, range,
+                    )
+                    .map_err(|e| StageError::Fatal(Box::new(e)))
+                }
+            )?;
 
             // Validate the calculated state root
             let target = provider

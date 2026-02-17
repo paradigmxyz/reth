@@ -391,7 +391,10 @@ impl<
             Ok(<StateRoot<
                 reth_trie_db::DatabaseTrieCursorFactory<_, A>,
                 reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseStateRoot<_>>::overlay_root_from_nodes(self.tx(), TrieInputSorted::from_unsorted(input))?)
+            > as DatabaseStateRoot<_>>::overlay_root_from_nodes(
+                self.tx(),
+                TrieInputSorted::from_unsorted(input),
+            )?)
         })
     }
 
@@ -406,7 +409,9 @@ impl<
             Ok(<StateRoot<
                 reth_trie_db::DatabaseTrieCursorFactory<_, A>,
                 reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseStateRoot<_>>::overlay_root_with_updates(self.tx(), &revert_state)?)
+            > as DatabaseStateRoot<_>>::overlay_root_with_updates(
+                self.tx(), &revert_state
+            )?)
         })
     }
 
@@ -446,8 +451,10 @@ impl<
             <StorageRoot<
                 reth_trie_db::DatabaseTrieCursorFactory<_, A>,
                 reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseStorageRoot<_>>::overlay_root(self.tx(), address, revert_storage)
-                .map_err(|err| ProviderError::Database(err.into()))
+            > as DatabaseStorageRoot<_>>::overlay_root(
+                self.tx(), address, revert_storage
+            )
+            .map_err(|err| ProviderError::Database(err.into()))
         })
     }
 
@@ -464,8 +471,13 @@ impl<
                 'static,
                 reth_trie_db::DatabaseTrieCursorFactory<_, A>,
                 reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseStorageProof<_>>::overlay_storage_proof(self.tx(), address, slot, revert_storage)
-                .map_err(ProviderError::from)
+            > as DatabaseStorageProof<_>>::overlay_storage_proof(
+                self.tx(),
+                address,
+                slot,
+                revert_storage,
+            )
+            .map_err(ProviderError::from)
         })
     }
 
@@ -482,8 +494,13 @@ impl<
                 'static,
                 reth_trie_db::DatabaseTrieCursorFactory<_, A>,
                 reth_trie_db::DatabaseHashedCursorFactory<_>,
-            > as DatabaseStorageProof<_>>::overlay_storage_multiproof(self.tx(), address, slots, revert_storage)
-                .map_err(ProviderError::from)
+            > as DatabaseStorageProof<_>>::overlay_storage_multiproof(
+                self.tx(),
+                address,
+                slots,
+                revert_storage,
+            )
+            .map_err(ProviderError::from)
         })
     }
 }
@@ -535,8 +552,8 @@ impl<
                 reth_trie_db::DatabaseTrieCursorFactory<_, A>,
                 reth_trie_db::DatabaseHashedCursorFactory<_>,
             > as DatabaseTrieWitness<_>>::overlay_witness(self.tx(), input, target)
-                .map_err(ProviderError::from)
-                .map(|hm| hm.into_values().collect())
+            .map_err(ProviderError::from)
+            .map(|hm| hm.into_values().collect())
         })
     }
 }

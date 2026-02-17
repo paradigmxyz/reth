@@ -24,10 +24,8 @@ type DbStateRoot<'a, TX> = StateRoot<
     DatabaseTrieCursorFactory<&'a TX, LegacyKeyAdapter>,
     DatabaseHashedCursorFactory<&'a TX>,
 >;
-type DbProof<'a, TX> = Proof<
-    DatabaseTrieCursorFactory<&'a TX, LegacyKeyAdapter>,
-    DatabaseHashedCursorFactory<&'a TX>,
->;
+type DbProof<'a, TX> =
+    Proof<DatabaseTrieCursorFactory<&'a TX, LegacyKeyAdapter>, DatabaseHashedCursorFactory<&'a TX>>;
 type DbTrieWitness<'a, TX> = TrieWitness<
     DatabaseTrieCursorFactory<&'a TX, LegacyKeyAdapter>,
     DatabaseHashedCursorFactory<&'a TX>,

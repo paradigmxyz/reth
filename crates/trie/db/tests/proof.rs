@@ -11,10 +11,8 @@ use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory, LegacyKeyAdapter,
 };
 
-type DbProof<'a, TX> = Proof<
-    DatabaseTrieCursorFactory<&'a TX, LegacyKeyAdapter>,
-    DatabaseHashedCursorFactory<&'a TX>,
->;
+type DbProof<'a, TX> =
+    Proof<DatabaseTrieCursorFactory<&'a TX, LegacyKeyAdapter>, DatabaseHashedCursorFactory<&'a TX>>;
 use std::{
     str::FromStr,
     sync::{Arc, LazyLock},
