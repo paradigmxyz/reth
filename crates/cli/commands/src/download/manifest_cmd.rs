@@ -7,8 +7,8 @@ use tracing::info;
 
 /// Generate a snapshot manifest from local archive files.
 ///
-/// Scans a directory for archive files matching the naming convention, computes sizes and
-/// SHA-256 checksums, and writes a `manifest.json` file.
+/// Scans a directory for archive files matching the naming convention, computes sizes,
+/// and writes a `manifest.json` file.
 ///
 /// Archive naming convention:
 ///   - State: `state.tar.zst`
@@ -44,7 +44,7 @@ impl SnapshotManifestCommand {
     pub fn execute(self) -> Result<()> {
         info!(target: "reth::cli",
             dir = ?self.archive_dir,
-            "Scanning archives and computing checksums (this may take a while for large files)"
+            "Scanning archive directory"
         );
         let start = Instant::now();
         let manifest = generate_manifest(
