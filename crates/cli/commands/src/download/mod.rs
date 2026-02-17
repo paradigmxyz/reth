@@ -517,7 +517,19 @@ fn extract_archive<R: Read>(
 fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) -> Result<()> {
     let file = std::fs::File::open(path)?;
     let total_size = file.metadata()?.len();
-    extract_archive(file, total_size, format, target_dir)
+    info!(target: "reth::cli",
+        file = %path.display(),
+        size = %DownloadProgress::format_size(total_size),
+        "Extracting local archive"
+    );
+    let start = Instant::now();
+    extract_archive(file, total_size, format, target_dir)?;
+    info!(target: "reth::cli",
+        file = %path.display(),
+        elapsed = %DownloadProgress::format_duration(start.elapsed()),
+        "Local extraction complete"
+    );
+    Ok(())
 }
 
 const MAX_DOWNLOAD_RETRIES: u32 = 10;
@@ -554,6 +566,7 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
     let final_path = target_dir.join(&file_name);
     let part_path = target_dir.join(format!("{file_name}.part"));
 
+    info!(target: "reth::cli", file = %file_name, "Connecting to download server");
     let client = BlockingClient::builder().timeout(Duration::from_secs(30)).build()?;
 
     let mut total_size: Option<u64> = None;
@@ -618,6 +631,13 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
 
         if total_size.is_none() {
             total_size = size;
+            if let Some(s) = size {
+                info!(target: "reth::cli",
+                    file = %file_name,
+                    size = %DownloadProgress::format_size(s),
+                    "Downloading"
+                );
+            }
         }
 
         let current_total = total_size.ok_or_else(|| {
@@ -666,12 +686,27 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
 fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path) -> Result<()> {
     let (downloaded_path, total_size) = resumable_download(url, target_dir)?;
 
-    info!(target: "reth::cli", "Extracting snapshot...");
+    let file_name = downloaded_path
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    info!(target: "reth::cli",
+        file = %file_name,
+        size = %DownloadProgress::format_size(total_size),
+        "Extracting archive"
+    );
+    let extract_start = Instant::now();
     let file = fs::open(&downloaded_path)?;
     extract_archive(file, total_size, format, target_dir)?;
 
+    info!(target: "reth::cli",
+        file = %file_name,
+        elapsed = %DownloadProgress::format_duration(extract_start.elapsed()),
+        "Extraction complete"
+    );
+
     fs::remove_file(&downloaded_path)?;
-    info!(target: "reth::cli", "Removed downloaded archive");
 
     Ok(())
 }

@@ -2,7 +2,7 @@ use crate::download::manifest::generate_manifest;
 use clap::Parser;
 use eyre::Result;
 use reth_static_file_types::DEFAULT_BLOCKS_PER_STATIC_FILE;
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Instant};
 use tracing::info;
 
 /// Generate a snapshot manifest from local archive files.
@@ -42,6 +42,11 @@ pub struct SnapshotManifestCommand {
 
 impl SnapshotManifestCommand {
     pub fn execute(self) -> Result<()> {
+        info!(target: "reth::cli",
+            dir = ?self.archive_dir,
+            "Scanning archives and computing checksums (this may take a while for large files)"
+        );
+        let start = Instant::now();
         let manifest = generate_manifest(
             &self.archive_dir,
             &self.base_url,
@@ -64,6 +69,7 @@ impl SnapshotManifestCommand {
             path = ?output,
             components = num_components,
             block = manifest.block,
+            elapsed = ?start.elapsed(),
             "Manifest written"
         );
 
