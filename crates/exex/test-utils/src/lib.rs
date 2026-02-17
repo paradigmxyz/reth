@@ -260,10 +260,9 @@ pub async fn test_exex_context_with_chain_spec(
 
     let runtime = Runtime::test();
     let network_manager = NetworkManager::new(
-        NetworkConfigBuilder::new(rng_secret_key())
+        NetworkConfigBuilder::new(rng_secret_key(), runtime.clone())
             .with_unused_discovery_port()
             .with_unused_listener_port()
-            .with_task_executor(runtime.clone())
             .build(provider_factory.clone()),
     )
     .await?;

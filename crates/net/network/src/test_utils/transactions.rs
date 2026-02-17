@@ -33,11 +33,10 @@ pub async fn new_tx_manager(
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let client = NoopProvider::default();
 
-    let config = NetworkConfigBuilder::new(secret_key)
+    let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
         // let OS choose port
         .listener_port(0)
         .disable_discovery()
-        .with_task_executor(Runtime::test())
         .build(client);
 
     let pool = testing_pool();

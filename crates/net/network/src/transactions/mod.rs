@@ -2197,7 +2197,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::eth(secret_key)
+        let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -2267,10 +2267,9 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
-            .with_task_executor(Runtime::test())
             .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
@@ -2334,11 +2333,10 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let client = NoopProvider::default();
 
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             // let OS choose port
             .listener_port(0)
             .disable_discovery()
-            .with_task_executor(Runtime::test())
             .build(client);
 
         let pool = testing_pool();
@@ -2443,10 +2441,9 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
-            .with_task_executor(Runtime::test())
             .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
@@ -2522,10 +2519,9 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
-            .with_task_executor(Runtime::test())
             .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
@@ -2941,10 +2937,9 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let client = NoopProvider::default();
 
-        let network_config = NetworkConfigBuilder::new(secret_key)
+        let network_config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             .listener_port(0)
             .disable_discovery()
-            .with_task_executor(Runtime::test())
             .build(client.clone());
 
         let mut network_manager = NetworkManager::new(network_config).await.unwrap();

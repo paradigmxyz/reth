@@ -713,13 +713,12 @@ where
     }
 
     fn network_config_builder(secret_key: SecretKey) -> NetworkConfigBuilder {
-        NetworkConfigBuilder::new(secret_key)
+        NetworkConfigBuilder::new(secret_key, Runtime::test())
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .disable_dns_discovery()
             .disable_discv4_discovery()
             .peer_config(PeersConfig::test())
-            .with_task_executor(Runtime::test())
     }
 }
 
