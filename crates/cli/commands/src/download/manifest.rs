@@ -86,7 +86,7 @@ pub struct ChunkMetadata {
 /// The types of snapshot components that can be downloaded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SnapshotComponentType {
-    /// State database (mdbx + rocksdb). Always required. Single archive.
+    /// State database (mdbx). Always required. Single archive.
     State,
     /// Block headers static files. Chunked.
     Headers,
@@ -126,7 +126,7 @@ impl SnapshotComponentType {
     /// Human-readable display name.
     pub const fn display_name(&self) -> &'static str {
         match self {
-            Self::State => "State (mdbx + rocksdb)",
+            Self::State => "State (mdbx)",
             Self::Headers => "Headers",
             Self::Transactions => "Transactions",
             Self::Receipts => "Receipts",
