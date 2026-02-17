@@ -9844,6 +9844,7 @@ dependencies = [
  "reth-network-peers",
  "reth-rpc-eth-api",
  "reth-trie-common",
+ "serde",
  "serde_json",
  "tokio",
 ]
@@ -10353,6 +10354,7 @@ dependencies = [
  "crossbeam-utils",
  "futures-util",
  "metrics",
+ "parking_lot",
  "pin-project",
  "quanta",
  "rayon",

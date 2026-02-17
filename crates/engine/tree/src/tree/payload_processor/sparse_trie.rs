@@ -342,7 +342,7 @@ where
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
                 MultiProofMessage::StateUpdate(_, state) => {
-                    let _span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing state update", update_len = state.len()).entered();
+                    let _span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing state update", n = state.len()).entered();
                     let hashed = evm_state_to_hashed_post_state(state);
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
@@ -670,7 +670,7 @@ where
             })
             .par_bridge_buffered()
             .map(|(address, updates, mut fetched, mut trie)| {
-                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie leaf updates", ?address).entered();
+                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie leaf updates", a=%address).entered();
                 let mut targets = Vec::new();
 
                 trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {

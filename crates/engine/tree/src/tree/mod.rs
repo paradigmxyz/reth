@@ -19,7 +19,7 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
-    ForkchoiceStateTracker, OnForkChoiceUpdated,
+    ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
@@ -42,7 +42,7 @@ use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
-use std::{fmt::Debug, ops, sync::Arc};
+use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
@@ -323,7 +323,7 @@ where
         + StorageSettingsCache,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineValidator<T>,
+    V: EngineValidator<T> + WaitForCaches,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[expect(clippy::too_many_arguments)]
@@ -1553,6 +1553,94 @@ where
                                 }
 
                                 // handle the event if any
+                                self.on_maybe_tree_event(maybe_event)?;
+                            }
+                            BeaconEngineMessage::RethNewPayload { payload, tx } => {
+                                // Before processing the new payload, we wait for persistence and
+                                // cache updates to complete. We do it in parallel, spawning
+                                // persistence and cache update wait tasks with Tokio, so that we
+                                // can get an unbiased breakdown on how long did every step take.
+                                //
+                                // If we first wait for persistence, and only then for cache
+                                // updates, we will offset the cache update waits by the duration of
+                                // persistence, which is incorrect.
+                                debug!(target: "engine::tree", "Waiting for persistence and caches in parallel before processing reth_newPayload");
+
+                                let pending_persistence = self.persistence_state.rx.take();
+                                let persistence_rx = if let Some((rx, start_time, _action)) =
+                                    pending_persistence
+                                {
+                                    let (persistence_tx, persistence_rx) =
+                                        std::sync::mpsc::channel();
+                                    tokio::task::spawn_blocking(move || {
+                                        let start = Instant::now();
+                                        let result =
+                                            rx.recv().expect("persistence state channel closed");
+                                        let _ = persistence_tx.send((
+                                            result,
+                                            start_time,
+                                            start.elapsed(),
+                                        ));
+                                    });
+                                    Some(persistence_rx)
+                                } else {
+                                    None
+                                };
+
+                                let cache_wait = self.payload_validator.wait_for_caches();
+
+                                let persistence_wait = if let Some(persistence_rx) = persistence_rx
+                                {
+                                    let (result, start_time, wait_duration) = persistence_rx
+                                        .recv()
+                                        .expect("persistence result channel closed");
+                                    let _ = self.on_persistence_complete(result, start_time);
+                                    Some(wait_duration)
+                                } else {
+                                    None
+                                };
+
+                                debug!(
+                                    target: "engine::tree",
+                                    ?persistence_wait,
+                                    execution_cache_wait = ?cache_wait.execution_cache,
+                                    sparse_trie_wait = ?cache_wait.sparse_trie,
+                                    "Persistence finished and caches updated for reth_newPayload"
+                                );
+
+                                let start = Instant::now();
+                                let gas_used = payload.gas_used();
+                                let num_hash = payload.num_hash();
+                                let mut output = self.on_new_payload(payload);
+                                let latency = start.elapsed();
+                                self.metrics.engine.new_payload.update_response_metrics(
+                                    start,
+                                    &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
+                                    &output,
+                                    gas_used,
+                                );
+
+                                let maybe_event =
+                                    output.as_mut().ok().and_then(|out| out.event.take());
+
+                                let timings = NewPayloadTimings {
+                                    latency,
+                                    persistence_wait,
+                                    execution_cache_wait: cache_wait.execution_cache,
+                                    sparse_trie_wait: cache_wait.sparse_trie,
+                                };
+                                if let Err(err) =
+                                    tx.send(output.map(|o| (o.outcome, timings)).map_err(|e| {
+                                        BeaconOnNewPayloadError::Internal(Box::new(e))
+                                    }))
+                                {
+                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    self.metrics
+                                        .engine
+                                        .failed_new_payload_response_deliveries
+                                        .increment(1);
+                                }
+
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
                         }
@@ -3047,4 +3135,24 @@ enum PersistTarget {
     Threshold,
     /// Persist all blocks up to and including the canonical head.
     Head,
+}
+
+/// Result of waiting for caches to become available.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CacheWaitDurations {
+    /// Time spent waiting for the execution cache lock.
+    pub execution_cache: Duration,
+    /// Time spent waiting for the sparse trie lock.
+    pub sparse_trie: Duration,
+}
+
+/// Trait for types that can wait for caches to become available.
+///
+/// This is used by `reth_newPayload` endpoint to ensure that payload processing
+/// waits for any ongoing operations to complete before starting.
+pub trait WaitForCaches {
+    /// Waits for cache updates to complete.
+    ///
+    /// Returns the time spent waiting for each cache separately.
+    fn wait_for_caches(&self) -> CacheWaitDurations;
 }

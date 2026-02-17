@@ -7,7 +7,7 @@
 //! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
 
 #[cfg(feature = "rayon")]
-use crate::pool::{BlockingTaskGuard, BlockingTaskPool};
+use crate::pool::{BlockingTaskGuard, BlockingTaskPool, WorkerPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
@@ -263,13 +263,13 @@ struct RuntimeInner {
     blocking_guard: BlockingTaskGuard,
     /// Proof storage worker pool (trie storage proof computation).
     #[cfg(feature = "rayon")]
-    proof_storage_worker_pool: rayon::ThreadPool,
+    proof_storage_worker_pool: WorkerPool,
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
-    proof_account_worker_pool: rayon::ThreadPool,
+    proof_account_worker_pool: WorkerPool,
     /// Prewarming pool (execution prewarming workers).
     #[cfg(feature = "rayon")]
-    prewarming_pool: rayon::ThreadPool,
+    prewarming_pool: WorkerPool,
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
@@ -349,19 +349,19 @@ impl Runtime {
 
     /// Get the proof storage worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_storage_worker_pool(&self) -> &rayon::ThreadPool {
+    pub fn proof_storage_worker_pool(&self) -> &WorkerPool {
         &self.0.proof_storage_worker_pool
     }
 
     /// Get the proof account worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_account_worker_pool(&self) -> &rayon::ThreadPool {
+    pub fn proof_account_worker_pool(&self) -> &WorkerPool {
         &self.0.proof_account_worker_pool
     }
 
     /// Get the prewarming pool.
     #[cfg(feature = "rayon")]
-    pub fn prewarming_pool(&self) -> &rayon::ThreadPool {
+    pub fn prewarming_pool(&self) -> &WorkerPool {
         &self.0.prewarming_pool
     }
 }
@@ -809,23 +809,26 @@ impl RuntimeBuilder {
 
             let proof_storage_worker_threads =
                 config.rayon.proof_storage_worker_threads.unwrap_or(default_threads);
-            let proof_storage_worker_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(proof_storage_worker_threads)
-                .thread_name(|i| format!("proof-strg-{i:02}"))
-                .build()?;
+            let proof_storage_worker_pool = WorkerPool::from_builder(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(proof_storage_worker_threads)
+                    .thread_name(|i| format!("proof-strg-{i:02}")),
+            )?;
 
             let proof_account_worker_threads =
                 config.rayon.proof_account_worker_threads.unwrap_or(default_threads);
-            let proof_account_worker_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(proof_account_worker_threads)
-                .thread_name(|i| format!("proof-acct-{i:02}"))
-                .build()?;
+            let proof_account_worker_pool = WorkerPool::from_builder(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(proof_account_worker_threads)
+                    .thread_name(|i| format!("proof-acct-{i:02}")),
+            )?;
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
-            let prewarming_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(prewarming_threads)
-                .thread_name(|i| format!("prewarm-{i:02}"))
-                .build()?;
+            let prewarming_pool = WorkerPool::from_builder(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(prewarming_threads)
+                    .thread_name(|i| format!("prewarm-{i:02}")),
+            )?;
 
             debug!(
                 default_threads,
