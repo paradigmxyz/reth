@@ -62,6 +62,10 @@ pub struct ChunkedArchive {
     pub blocks_per_file: u64,
     /// Total number of blocks covered by this component.
     pub total_blocks: u64,
+    /// Total compressed size of all chunks in bytes.
+    /// Computed during manifest generation. Older manifests may omit this.
+    #[serde(default)]
+    pub total_size: u64,
 }
 
 /// How much of a component to download.
@@ -250,6 +254,34 @@ impl SnapshotManifest {
         }
     }
 
+    /// Estimates the download size for a component given a distance selection.
+    ///
+    /// For single archives, returns the full size. For chunked archives, estimates
+    /// proportionally based on the fraction of chunks selected.
+    pub fn size_for_distance(&self, ty: SnapshotComponentType, distance: Option<u64>) -> u64 {
+        let Some(component) = self.component(ty) else {
+            return 0;
+        };
+        match component {
+            ComponentManifest::Single(s) => s.size,
+            ComponentManifest::Chunked(chunked) => {
+                let total_chunks = chunked.num_chunks();
+                if total_chunks == 0 {
+                    return 0;
+                }
+                let selected_chunks = match distance {
+                    Some(dist) => {
+                        let needed = dist.min(chunked.total_blocks);
+                        needed.div_ceil(chunked.blocks_per_file)
+                    }
+                    None => total_chunks,
+                };
+                // Proportional estimate
+                chunked.total_size * selected_chunks / total_chunks
+            }
+        }
+    }
+
     /// Returns the number of chunks that would be downloaded for a given distance.
     pub fn chunks_for_distance(&self, ty: SnapshotComponentType, distance: Option<u64>) -> u64 {
         let Some(ComponentManifest::Chunked(chunked)) = self.component(ty) else {
@@ -270,8 +302,7 @@ impl ComponentManifest {
     pub fn total_size(&self) -> u64 {
         match self {
             Self::Single(s) => s.size,
-            // Individual chunk sizes are discovered at download time
-            Self::Chunked(_) => 0,
+            Self::Chunked(c) => c.total_size,
         }
     }
 }
@@ -334,8 +365,7 @@ pub fn generate_manifest(
         info!(target: "reth::cli", size = %super::DownloadProgress::format_size(size), "Found indexes archive");
     }
 
-    // Chunked components — just record blocks_per_file + total_blocks,
-    // the client derives chunk URLs from the naming convention.
+    // Chunked components — record blocks_per_file, total_blocks, and sum chunk sizes.
     for ty in &[
         SnapshotComponentType::Headers,
         SnapshotComponentType::Transactions,
@@ -344,20 +374,36 @@ pub fn generate_manifest(
         SnapshotComponentType::StorageChangesets,
     ] {
         let key = ty.key();
-        // Check if at least the first chunk exists
         let first_end = blocks_per_file.min(block) - 1;
         let first_chunk = archive_dir.join(format!("{key}-0-{first_end}.tar.zst"));
         if first_chunk.exists() {
             let num_chunks = block.div_ceil(blocks_per_file);
+
+            // Sum sizes of all chunk files
+            let mut total_size = 0u64;
+            for i in 0..num_chunks {
+                let start = i * blocks_per_file;
+                let end = ((i + 1) * blocks_per_file).min(block) - 1;
+                let chunk_path = archive_dir.join(format!("{key}-{start}-{end}.tar.zst"));
+                if let Ok(meta) = std::fs::metadata(&chunk_path) {
+                    total_size += meta.len();
+                }
+            }
+
             info!(target: "reth::cli",
                 component = ty.display_name(),
                 chunks = num_chunks,
                 total_blocks = block,
+                size = %super::DownloadProgress::format_size(total_size),
                 "Found chunked component"
             );
             components.insert(
                 key.to_string(),
-                ComponentManifest::Chunked(ChunkedArchive { blocks_per_file, total_blocks: block }),
+                ComponentManifest::Chunked(ChunkedArchive {
+                    blocks_per_file,
+                    total_blocks: block,
+                    total_size,
+                }),
             );
         }
     }
@@ -398,6 +444,7 @@ mod tests {
             ComponentManifest::Chunked(ChunkedArchive {
                 blocks_per_file: 500_000,
                 total_blocks: 1_500_000,
+                total_size: 300_000,
             }),
         );
         components.insert(
@@ -405,6 +452,7 @@ mod tests {
             ComponentManifest::Chunked(ChunkedArchive {
                 blocks_per_file: 500_000,
                 total_blocks: 1_500_000,
+                total_size: 150_000,
             }),
         );
         SnapshotManifest {
