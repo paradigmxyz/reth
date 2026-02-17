@@ -1551,7 +1551,7 @@ impl ParallelSparseTrie {
             // If empty node is found it means the subtrie doesn't have any nodes in it, let alone
             // the target leaf.
             SparseNode::Empty => FindNextToLeafOutcome::NotFound,
-            SparseNode::Hash(rlp_node) => FindNextToLeafOutcome::BlindedNode(*rlp_node),
+            SparseNode::Hash(hash) => FindNextToLeafOutcome::BlindedNode(*hash),
             SparseNode::Leaf { key, .. } => {
                 let mut found_full_path = *from_path;
                 found_full_path.extend(key);
