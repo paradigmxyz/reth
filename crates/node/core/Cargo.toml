@@ -91,6 +91,9 @@ min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
+# Debug recording for sparse trie mutations
+trie-debug = []
+
 # Route supported tables to RocksDB instead of MDBX
 rocksdb = ["reth-storage-api/rocksdb"]
 

@@ -13,11 +13,7 @@
 
 use crate::tree::{
     cached_state::{CachedStateProvider, SavedCache},
-    payload_processor::{
-        bal,
-        multiproof::{MultiProofMessage, VersionedMultiProofTargets},
-        PayloadExecutionCache,
-    },
+    payload_processor::{bal, multiproof::MultiProofMessage, PayloadExecutionCache},
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
@@ -25,7 +21,7 @@ use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::Database;
-use alloy_primitives::{keccak256, map::B256Set, StorageKey, B256};
+use alloy_primitives::{keccak256, StorageKey, B256};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -38,7 +34,7 @@ use reth_provider::{
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::Runtime;
-use reth_trie::MultiProofTargets;
+use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, channel, Receiver, Sender, SyncSender},
@@ -187,9 +183,9 @@ where
                 && let Some(withdrawals) = &ctx.env.withdrawals
                 && !withdrawals.is_empty()
             {
-                let targets =
-                    multiproof_targets_from_withdrawals(withdrawals, ctx.v2_proofs_enabled);
-                let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
+                let targets = multiproof_targets_from_withdrawals(withdrawals);
+                let _ = to_multi_proof
+                    .send(MultiProofMessage::PrefetchProofs(targets));
             }
 
             // drop sender and wait for all tasks to finish
@@ -456,8 +452,6 @@ where
     pub precompile_cache_disabled: bool,
     /// The precompile cache map.
     pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// Whether V2 proof calculation is enabled.
-    pub v2_proofs_enabled: bool,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -466,12 +460,9 @@ where
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
-    /// Splits this context into an evm, an evm config, metrics, the atomic bool for terminating
-    /// execution, and whether V2 proofs are enabled.
+    /// Splits this context into an evm, metrics, and the atomic bool for terminating execution.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn evm_for_ctx(
-        self,
-    ) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>, bool)> {
+    fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>)> {
         let Self {
             env,
             evm_config,
@@ -481,7 +472,6 @@ where
             terminate_execution,
             precompile_cache_disabled,
             precompile_cache_map,
-            v2_proofs_enabled,
         } = self;
 
         let mut state_provider = match provider.build() {
@@ -532,7 +522,7 @@ where
             });
         }
 
-        Some((evm, metrics, terminate_execution, v2_proofs_enabled))
+        Some((evm, metrics, terminate_execution))
     }
 
     /// Accepts a [`CrossbeamReceiver`] of transactions and a handle to prewarm task. Executes
@@ -553,10 +543,7 @@ where
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
-        let Some((mut evm, metrics, terminate_execution, v2_proofs_enabled)) = self.evm_for_ctx()
-        else {
-            return
-        };
+        let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
         while let Ok(IndexedTransaction { index, tx }) = txs.recv() {
             let _enter = debug_span!(
@@ -601,8 +588,7 @@ where
             // Only send outcome for transactions after the first txn
             // as the main execution will be just as fast
             if index > 0 {
-                let (targets, storage_targets) =
-                    multiproof_targets_from_state(res.state, v2_proofs_enabled);
+                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
                 metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_multi_proof) = &to_multi_proof {
                     let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(targets));
@@ -694,59 +680,10 @@ where
     }
 }
 
-/// Returns a set of [`VersionedMultiProofTargets`] and the total amount of storage targets, based
-/// on the given state.
-fn multiproof_targets_from_state(
-    state: EvmState,
-    v2_enabled: bool,
-) -> (VersionedMultiProofTargets, usize) {
-    if v2_enabled {
-        multiproof_targets_v2_from_state(state)
-    } else {
-        multiproof_targets_legacy_from_state(state)
-    }
-}
-
-/// Returns legacy [`MultiProofTargets`] and the total amount of storage targets, based on the
+/// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
 /// given state.
-fn multiproof_targets_legacy_from_state(state: EvmState) -> (VersionedMultiProofTargets, usize) {
-    let mut targets = MultiProofTargets::with_capacity(state.len());
-    let mut storage_targets = 0;
-    for (addr, account) in state {
-        // if the account was not touched, or if the account was selfdestructed, do not
-        // fetch proofs for it
-        //
-        // Since selfdestruct can only happen in the same transaction, we can skip
-        // prefetching proofs for selfdestructed accounts
-        //
-        // See: https://eips.ethereum.org/EIPS/eip-6780
-        if !account.is_touched() || account.is_selfdestructed() {
-            continue
-        }
-
-        let mut storage_set =
-            B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
-        for (key, slot) in account.storage {
-            // do nothing if unchanged
-            if !slot.is_changed() {
-                continue
-            }
-
-            storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
-        }
-
-        storage_targets += storage_set.len();
-        targets.insert(keccak256(addr), storage_set);
-    }
-
-    (VersionedMultiProofTargets::Legacy(targets), storage_targets)
-}
-
-/// Returns V2 [`reth_trie_parallel::targets_v2::MultiProofTargetsV2`] and the total amount of
-/// storage targets, based on the given state.
-fn multiproof_targets_v2_from_state(state: EvmState) -> (VersionedMultiProofTargets, usize) {
+fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize) {
     use reth_trie::proof_v2;
-    use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
 
     let mut targets = MultiProofTargetsV2::default();
     let mut storage_target_count = 0;
@@ -782,27 +719,17 @@ fn multiproof_targets_v2_from_state(state: EvmState) -> (VersionedMultiProofTarg
         }
     }
 
-    (VersionedMultiProofTargets::V2(targets), storage_target_count)
+    (targets, storage_target_count)
 }
 
-/// Returns [`VersionedMultiProofTargets`] for withdrawal addresses.
+/// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
 ///
 /// Withdrawals only modify account balances (no storage), so the targets contain
 /// only account-level entries with empty storage sets.
-fn multiproof_targets_from_withdrawals(
-    withdrawals: &[Withdrawal],
-    v2_enabled: bool,
-) -> VersionedMultiProofTargets {
-    use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
-    if v2_enabled {
-        VersionedMultiProofTargets::V2(MultiProofTargetsV2 {
-            account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
-            ..Default::default()
-        })
-    } else {
-        VersionedMultiProofTargets::Legacy(
-            withdrawals.iter().map(|w| (keccak256(w.address), Default::default())).collect(),
-        )
+fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProofTargetsV2 {
+    MultiProofTargetsV2 {
+        account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
+        ..Default::default()
     }
 }
 
