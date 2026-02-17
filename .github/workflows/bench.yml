@@ -122,6 +122,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
+        continue-on-error: true
 
       # Verify all required tools are available
       - name: Check dependencies
@@ -382,6 +383,4 @@ jobs:
             /tmp/reth-bench-node-baseline.log
             /tmp/reth-bench-node-branch.log
 
-      - name: Stop sccache
-        if: always()
-        run: sccache --stop-server || true
+
