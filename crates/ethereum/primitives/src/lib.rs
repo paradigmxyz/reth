@@ -16,10 +16,6 @@ use reth_codecs as _;
 mod receipt;
 pub use receipt::*;
 
-/// Kept for consistency tests
-#[cfg(test)]
-mod transaction;
-
 pub use alloy_consensus::{transaction::PooledTransaction, TxType};
 use alloy_consensus::{TxEip4844, TxEip4844WithSidecar};
 use alloy_eips::eip7594::BlobTransactionSidecarVariant;
