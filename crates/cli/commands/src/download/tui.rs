@@ -12,7 +12,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame, Terminal,
 };
 use std::{
@@ -38,14 +38,78 @@ const DISTANCE_PRESETS: [ComponentSelection; 5] = [
     ComponentSelection::All,
 ];
 
-/// Presets for non-chunked optional components (Indexes).
-const SIMPLE_PRESETS: [ComponentSelection; 2] = [ComponentSelection::None, ComponentSelection::All];
+/// A display group bundles one or more component types into a single TUI row.
+struct DisplayGroup {
+    /// Display name shown in the TUI.
+    name: &'static str,
+    /// Underlying component types this group controls.
+    types: Vec<SnapshotComponentType>,
+    /// Whether this group is required and locked to All.
+    required: bool,
+}
+
+/// Build the display groups from available components in the manifest.
+fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
+    let has = |ty: SnapshotComponentType| manifest.component(ty).is_some();
+
+    let mut groups = Vec::new();
+
+    if has(SnapshotComponentType::State) {
+        groups.push(DisplayGroup {
+            name: "State (mdbx)",
+            types: vec![SnapshotComponentType::State],
+            required: true,
+        });
+    }
+
+    if has(SnapshotComponentType::Headers) {
+        groups.push(DisplayGroup {
+            name: "Headers",
+            types: vec![SnapshotComponentType::Headers],
+            required: true,
+        });
+    }
+
+    if has(SnapshotComponentType::Transactions) {
+        groups.push(DisplayGroup {
+            name: "Transactions",
+            types: vec![SnapshotComponentType::Transactions],
+            required: false,
+        });
+    }
+
+    if has(SnapshotComponentType::Receipts) {
+        groups.push(DisplayGroup {
+            name: "Receipts",
+            types: vec![SnapshotComponentType::Receipts],
+            required: false,
+        });
+    }
+
+    // Bundle account + storage changesets as "State History"
+    let has_acc = has(SnapshotComponentType::AccountChangesets);
+    let has_stor = has(SnapshotComponentType::StorageChangesets);
+    if has_acc || has_stor {
+        let mut types = Vec::new();
+        if has_acc {
+            types.push(SnapshotComponentType::AccountChangesets);
+        }
+        if has_stor {
+            types.push(SnapshotComponentType::StorageChangesets);
+        }
+        groups.push(DisplayGroup { name: "State History", types, required: false });
+    }
+
+    // Indexes (rocksdb) intentionally excluded from TUI
+
+    groups
+}
 
 struct SelectorApp {
     manifest: SnapshotManifest,
-    /// Which component types are available in the manifest.
-    available: Vec<SnapshotComponentType>,
-    /// Current selection for each available component.
+    /// Display groups shown in the TUI.
+    groups: Vec<DisplayGroup>,
+    /// Current selection for each group.
     selections: Vec<ComponentSelection>,
     /// Current cursor position.
     cursor: usize,
@@ -55,19 +119,15 @@ struct SelectorApp {
 
 impl SelectorApp {
     fn new(manifest: SnapshotManifest) -> Self {
-        let available: Vec<SnapshotComponentType> = SnapshotComponentType::ALL
-            .iter()
-            .copied()
-            .filter(|ty| manifest.component(*ty).is_some())
-            .collect();
+        let groups = build_groups(&manifest);
 
-        // Default to minimal: required=All, txs+changesets=Distance(10064), rest=None
-        let selections = available
+        // Default selections: required=All, minimal groups=Distance(10064), rest=None
+        let selections = groups
             .iter()
-            .map(|ty| {
-                if ty.is_required() {
+            .map(|g| {
+                if g.required {
                     ComponentSelection::All
-                } else if ty.is_minimal() {
+                } else if g.types.iter().any(|ty| ty.is_minimal()) {
                     ComponentSelection::Distance(10_064)
                 } else {
                     ComponentSelection::None
@@ -78,44 +138,43 @@ impl SelectorApp {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
 
-        Self { manifest, available, selections, cursor: 0, list_state }
+        Self { manifest, groups, selections, cursor: 0, list_state }
     }
 
     fn cycle_right(&mut self) {
-        if let Some(ty) = self.available.get(self.cursor) {
-            if ty.is_required() {
+        if let Some(group) = self.groups.get(self.cursor) {
+            if group.required {
                 return;
             }
-            let presets = if ty.is_chunked() { &DISTANCE_PRESETS[..] } else { &SIMPLE_PRESETS[..] };
             let current = self.selections[self.cursor];
-            let idx = presets.iter().position(|p| *p == current).unwrap_or(0);
-            self.selections[self.cursor] = presets[(idx + 1) % presets.len()];
+            let idx = DISTANCE_PRESETS.iter().position(|p| *p == current).unwrap_or(0);
+            self.selections[self.cursor] = DISTANCE_PRESETS[(idx + 1) % DISTANCE_PRESETS.len()];
         }
     }
 
     fn cycle_left(&mut self) {
-        if let Some(ty) = self.available.get(self.cursor) {
-            if ty.is_required() {
+        if let Some(group) = self.groups.get(self.cursor) {
+            if group.required {
                 return;
             }
-            let presets = if ty.is_chunked() { &DISTANCE_PRESETS[..] } else { &SIMPLE_PRESETS[..] };
             let current = self.selections[self.cursor];
-            let idx = presets.iter().position(|p| *p == current).unwrap_or(0);
-            self.selections[self.cursor] = presets[(idx + presets.len() - 1) % presets.len()];
+            let idx = DISTANCE_PRESETS.iter().position(|p| *p == current).unwrap_or(0);
+            self.selections[self.cursor] =
+                DISTANCE_PRESETS[(idx + DISTANCE_PRESETS.len() - 1) % DISTANCE_PRESETS.len()];
         }
     }
 
     fn select_all(&mut self) {
-        for (i, _) in self.available.iter().enumerate() {
-            self.selections[i] = ComponentSelection::All;
+        for sel in &mut self.selections {
+            *sel = ComponentSelection::All;
         }
     }
 
     fn select_minimal(&mut self) {
-        for (i, ty) in self.available.iter().enumerate() {
-            if ty.is_required() {
+        for (i, group) in self.groups.iter().enumerate() {
+            if group.required {
                 self.selections[i] = ComponentSelection::All;
-            } else if ty.is_minimal() {
+            } else if group.types.iter().any(|ty| ty.is_minimal()) {
                 self.selections[i] = ComponentSelection::Distance(10_064);
             } else {
                 self.selections[i] = ComponentSelection::None;
@@ -127,13 +186,13 @@ impl SelectorApp {
         if self.cursor > 0 {
             self.cursor -= 1;
         } else {
-            self.cursor = self.available.len().saturating_sub(1);
+            self.cursor = self.groups.len().saturating_sub(1);
         }
         self.list_state.select(Some(self.cursor));
     }
 
     fn move_down(&mut self) {
-        if self.cursor < self.available.len() - 1 {
+        if self.cursor < self.groups.len() - 1 {
             self.cursor += 1;
         } else {
             self.cursor = 0;
@@ -141,27 +200,38 @@ impl SelectorApp {
         self.list_state.select(Some(self.cursor));
     }
 
+    /// Build the flat component→selection map from grouped selections.
     fn selection_map(&self) -> BTreeMap<SnapshotComponentType, ComponentSelection> {
-        self.available.iter().copied().zip(self.selections.iter().copied()).collect()
+        let mut map = BTreeMap::new();
+        for (group, sel) in self.groups.iter().zip(&self.selections) {
+            for ty in &group.types {
+                map.insert(*ty, *sel);
+            }
+        }
+        map
+    }
+
+    /// Size for a single group, summing all component types in the group.
+    fn group_size(&self, group_idx: usize) -> u64 {
+        let sel = self.selections[group_idx];
+        let distance = match sel {
+            ComponentSelection::None => return 0,
+            ComponentSelection::All => None,
+            ComponentSelection::Distance(d) => Some(d),
+        };
+        self.groups[group_idx]
+            .types
+            .iter()
+            .map(|ty| self.manifest.size_for_distance(*ty, distance))
+            .sum()
     }
 
     fn total_selected_size(&self) -> u64 {
-        self.available
-            .iter()
-            .zip(&self.selections)
-            .map(|(ty, sel)| match sel {
-                ComponentSelection::None => 0,
-                ComponentSelection::All => self.manifest.size_for_distance(*ty, None),
-                ComponentSelection::Distance(d) => self.manifest.size_for_distance(*ty, Some(*d)),
-            })
-            .sum()
+        (0..self.groups.len()).map(|i| self.group_size(i)).sum()
     }
 }
 
 /// Runs the interactive component selector TUI.
-///
-/// Shows available snapshot components with range selectors, chunk counts, and a preview
-/// of the pruning config that will be generated.
 pub fn run_selector(manifest: SnapshotManifest) -> eyre::Result<SelectionResult> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -232,8 +302,7 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Header
-            Constraint::Min(10),   // Component list
-            Constraint::Length(8), // Config preview
+            Constraint::Min(8),    // Component list
             Constraint::Length(3), // Footer
         ])
         .split(f.area());
@@ -251,25 +320,20 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
 
     // Component list
     let items: Vec<ListItem<'_>> = app
-        .available
+        .groups
         .iter()
         .enumerate()
-        .map(|(i, ty)| {
+        .map(|(i, group)| {
             let sel = &app.selections[i];
             let sel_str = format_selection(sel);
 
-            let size = match sel {
-                ComponentSelection::None => 0,
-                ComponentSelection::All => app.manifest.size_for_distance(*ty, None),
-                ComponentSelection::Distance(d) => app.manifest.size_for_distance(*ty, Some(*d)),
-            };
-
+            let size = app.group_size(i);
             let size_str =
                 if size > 0 { DownloadProgress::format_size(size) } else { String::new() };
 
-            let required = if ty.is_required() { " (required)" } else { "" };
+            let required = if group.required { " (required)" } else { "" };
 
-            let arrows = if ty.is_required() {
+            let arrows = if group.required {
                 "   "
             } else if matches!(sel, ComponentSelection::All) {
                 "◂  "
@@ -279,7 +343,7 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
                 "◂ ▸"
             };
 
-            let style = if ty.is_required() {
+            let style = if group.required {
                 Style::default().fg(Color::DarkGray)
             } else if matches!(sel, ComponentSelection::None) {
                 Style::default().fg(Color::White)
@@ -288,7 +352,7 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
             };
 
             ListItem::new(Line::from(vec![
-                Span::styled(format!(" {:<30}", ty.display_name()), style),
+                Span::styled(format!(" {:<22}", group.name), style),
                 Span::styled(
                     format!("{arrows} {:<12}", sel_str),
                     style.add_modifier(Modifier::BOLD),
@@ -310,20 +374,10 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
         .highlight_symbol("▸ ");
     f.render_stateful_widget(list, chunks[1], &mut app.list_state);
 
-    // Config preview — use describe_prune_config_from_selections
-    let config_lines =
-        crate::download::config_gen::describe_prune_config_from_selections(&app.selection_map());
-    let config_text = config_lines.join("\n");
-    let config_preview = Paragraph::new(config_text)
-        .block(Block::default().borders(Borders::ALL).title("Generated reth.toml preview"))
-        .style(Style::default().fg(Color::Yellow))
-        .wrap(Wrap { trim: false });
-    f.render_widget(config_preview, chunks[2]);
-
     // Footer
     let footer =
         Paragraph::new(" [←/→] adjust  [m] minimal  [a] all  [Enter] confirm  [Esc] cancel")
             .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
             .block(Block::default().borders(Borders::ALL));
-    f.render_widget(footer, chunks[3]);
+    f.render_widget(footer, chunks[2]);
 }

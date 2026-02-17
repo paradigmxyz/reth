@@ -178,12 +178,12 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long)]
     with_receipts: bool,
 
-    /// Include account and storage changeset static files.
-    #[arg(long)]
-    with_changesets: bool,
+    /// Include account and storage history static files.
+    #[arg(long, alias = "with-changesets")]
+    with_state_history: bool,
 
     /// Download all available components (full archive).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_changesets"])]
+    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history"])]
     all: bool,
 
     /// Skip interactive component selection. Downloads the minimal set
@@ -342,7 +342,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 .collect());
         }
 
-        let has_explicit_flags = self.with_txs || self.with_receipts || self.with_changesets;
+        let has_explicit_flags = self.with_txs || self.with_receipts || self.with_state_history;
 
         if has_explicit_flags {
             let mut selections = BTreeMap::new();
@@ -357,7 +357,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             if self.with_receipts && available(SnapshotComponentType::Receipts) {
                 selections.insert(SnapshotComponentType::Receipts, ComponentSelection::All);
             }
-            if self.with_changesets {
+            if self.with_state_history {
                 if available(SnapshotComponentType::AccountChangesets) {
                     selections
                         .insert(SnapshotComponentType::AccountChangesets, ComponentSelection::All);
