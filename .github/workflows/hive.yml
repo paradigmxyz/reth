@@ -1,4 +1,4 @@
-# Runs `ethereum/hive` tests.
+# Runs `Soubhik-10/hive` tests.
 
 name: hive
 
@@ -18,24 +18,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-reth-stable:
-    uses: ./.github/workflows/docker-test.yml
+  prepare-reth-stable:
+    uses: ./.github/workflows/prepare-reth.yml
     with:
-      hive_target: hive-stable
+      image_tag: ghcr.io/paradigmxyz/reth:latest
+      binary_name: reth
+      cargo_features: "asm-keccak"
       artifact_name: "reth-stable"
-    secrets: inherit
 
-  build-reth-edge:
-    uses: ./.github/workflows/docker-test.yml
+  prepare-reth-edge:
+    uses: ./.github/workflows/prepare-reth.yml
     with:
-      hive_target: hive-edge
+      image_tag: ghcr.io/paradigmxyz/reth:latest
+      binary_name: reth
+      cargo_features: "asm-keccak edge"
       artifact_name: "reth-edge"
-    secrets: inherit
 
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    runs-on:
+      group: Reth
     steps:
       - uses: actions/checkout@v6
       - name: Checkout hive tests
@@ -188,11 +191,12 @@ jobs:
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/frontier.*
     needs:
-      - build-reth-stable
-      - build-reth-edge
+      - prepare-reth-stable
+      - prepare-reth-edge
       - prepare-hive
     name: ${{ matrix.storage }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    runs-on:
+      group: Reth
     permissions:
       issues: write
     steps:
