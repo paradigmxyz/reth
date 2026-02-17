@@ -123,6 +123,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
 
+      # Verify all required tools are available
+      - name: Check dependencies
+        run: |
+          missing=()
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make; do
+            command -v "$cmd" &>/dev/null || missing+=("$cmd")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required tools: ${missing[*]}"
+            exit 1
+          fi
+          echo "All dependencies found"
+
       # Build binaries
       - name: Fetch or build main binaries
         run: |
