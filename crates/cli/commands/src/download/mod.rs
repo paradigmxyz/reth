@@ -266,9 +266,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         let total_archives = all_downloads.len();
+        let total_size: u64 = selections
+            .iter()
+            .map(|(ty, sel)| match sel {
+                ComponentSelection::All => manifest.size_for_distance(*ty, None),
+                ComponentSelection::Distance(d) => manifest.size_for_distance(*ty, Some(*d)),
+                ComponentSelection::None => 0,
+            })
+            .sum();
         info!(target: "reth::cli",
             archives = total_archives,
-            "Downloading all archives in parallel"
+            total = %DownloadProgress::format_size(total_size),
+            "Downloading all archives"
         );
 
         // Download and extract all archives in parallel (up to 4 concurrent)
