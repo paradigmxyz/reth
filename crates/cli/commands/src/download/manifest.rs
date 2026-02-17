@@ -88,6 +88,8 @@ pub struct ChunkMetadata {
 pub enum SnapshotComponentType {
     /// State database (mdbx). Always required. Single archive.
     State,
+    /// Static file indices (rocksdb). Optional — included in archive snapshots. Single archive.
+    StaticFiles,
     /// Block headers static files. Chunked.
     Headers,
     /// Transaction static files. Chunked.
@@ -102,8 +104,9 @@ pub enum SnapshotComponentType {
 
 impl SnapshotComponentType {
     /// All component types in display order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::State,
+        Self::StaticFiles,
         Self::Headers,
         Self::Transactions,
         Self::Receipts,
@@ -115,6 +118,7 @@ impl SnapshotComponentType {
     pub const fn key(&self) -> &'static str {
         match self {
             Self::State => "state",
+            Self::StaticFiles => "static_files",
             Self::Headers => "headers",
             Self::Transactions => "transactions",
             Self::Receipts => "receipts",
@@ -127,6 +131,7 @@ impl SnapshotComponentType {
     pub const fn display_name(&self) -> &'static str {
         match self {
             Self::State => "State (mdbx)",
+            Self::StaticFiles => "Static Files (rocksdb)",
             Self::Headers => "Headers",
             Self::Transactions => "Transactions",
             Self::Receipts => "Receipts",
@@ -142,7 +147,7 @@ impl SnapshotComponentType {
 
     /// Whether this component type uses chunked archives.
     pub const fn is_chunked(&self) -> bool {
-        !matches!(self, Self::State)
+        !matches!(self, Self::State | Self::StaticFiles)
     }
 }
 
@@ -240,6 +245,21 @@ pub fn generate_manifest(
             }),
         );
         info!(target: "reth::cli", size = %super::DownloadProgress::format_size(size), "Found state archive");
+    }
+
+    // Static files (rocksdb): single archive, optional
+    let static_files_path = archive_dir.join("static_files.tar.zst");
+    if static_files_path.exists() {
+        let (size, checksum) = file_size_and_checksum(&static_files_path)?;
+        components.insert(
+            SnapshotComponentType::StaticFiles.key().to_string(),
+            ComponentManifest::Single(SingleArchive {
+                file: "static_files.tar.zst".to_string(),
+                size,
+                checksum: Some(checksum),
+            }),
+        );
+        info!(target: "reth::cli", size = %super::DownloadProgress::format_size(size), "Found static files archive");
     }
 
     // Chunked components
