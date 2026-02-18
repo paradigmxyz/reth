@@ -62,8 +62,10 @@ sudo mkdir -p "$DATADIR"
 update_comment() {
   local pct="$1"
   [ -z "${BENCH_COMMENT_ID:-}" ] && return 0
-  local status="Building binaries \\& downloading snapshot… ${pct}%"
-  local body="cc @${BENCH_ACTOR}\n\n🚀 Benchmark started! [View job](${BENCH_JOB_URL})\n\n⏳ **Status:** ${status}\n\n${BENCH_CONFIG}"
+  local status="Building binaries & downloading snapshot… ${pct}%"
+  local body
+  body="$(printf 'cc @%s\n\n🚀 Benchmark started! [View job](%s)\n\n⏳ **Status:** %s\n\n%s' \
+    "$BENCH_ACTOR" "$BENCH_JOB_URL" "$status" "$BENCH_CONFIG")"
   curl -sf -X PATCH \
     -H "Authorization: token ${GITHUB_TOKEN}" \
     -H "Accept: application/vnd.github.v3+json" \
