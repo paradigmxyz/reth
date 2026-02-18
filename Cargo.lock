@@ -121,15 +121,41 @@ dependencies = [
 
 [[package]]
 name = "alloy-consensus"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-serde",
+ "alloy-serde 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
  "alloy-trie",
- "alloy-tx-macros",
+ "alloy-tx-macros 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "auto_impl",
+ "borsh",
+ "c-kzg",
+ "derive_more",
+ "either",
+ "k256",
+ "once_cell",
+ "rand 0.8.5",
+ "secp256k1 0.30.0",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "alloy-consensus"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
+dependencies = [
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-trie",
+ "alloy-tx-macros 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "arbitrary",
  "auto_impl",
  "borsh",
@@ -148,33 +174,46 @@ dependencies = [
 
 [[package]]
 name = "alloy-consensus-any"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-eips 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-serde",
+ "alloy-serde 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "serde",
+]
+
+[[package]]
+name = "alloy-consensus-any"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
+dependencies = [
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "arbitrary",
  "serde",
 ]
 
 [[package]]
 name = "alloy-contract"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
  "alloy-dyn-abi",
  "alloy-json-abi",
- "alloy-network",
- "alloy-network-primitives",
+ "alloy-network 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-network-primitives 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
  "alloy-primitives",
- "alloy-provider",
- "alloy-rpc-types-eth",
+ "alloy-provider 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
  "alloy-sol-types",
- "alloy-transport",
+ "alloy-transport 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
  "futures",
  "futures-util",
  "serde_json",
@@ -259,8 +298,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-eips"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -268,7 +307,30 @@ dependencies = [
  "alloy-eip7928",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-serde",
+ "alloy-serde 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "auto_impl",
+ "borsh",
+ "c-kzg",
+ "derive_more",
+ "either",
+ "serde",
+ "serde_with",
+ "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "alloy-eips"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
+dependencies = [
+ "alloy-eip2124",
+ "alloy-eip2930",
+ "alloy-eip7702",
+ "alloy-eip7928",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "arbitrary",
  "auto_impl",
  "borsh",
@@ -286,15 +348,15 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.27.2"
-source = "git+https://github.com/alloy-rs/evm?branch=bal-devnet2#96831a28f1883ee4eacbb785c6b6f9719b081f26"
+source = "git+https://github.com/Soubhik-10/evm?branch=devnet-fix#00fcd57c66c85951d59f82f899d115bb32e4b6ac"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-hardforks 0.4.7",
  "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-sol-types",
  "auto_impl",
  "derive_more",
@@ -306,12 +368,12 @@ dependencies = [
 
 [[package]]
 name = "alloy-genesis"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-serde",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-trie",
  "borsh",
  "serde",
@@ -359,8 +421,22 @@ dependencies = [
 
 [[package]]
 name = "alloy-json-rpc"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "http",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "alloy-json-rpc"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -373,19 +449,44 @@ dependencies = [
 
 [[package]]
 name = "alloy-network"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
 dependencies = [
- "alloy-consensus",
- "alloy-consensus-any",
- "alloy-eips",
- "alloy-json-rpc",
- "alloy-network-primitives",
+ "alloy-consensus 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-consensus-any 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-eips 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-network-primitives 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
  "alloy-primitives",
- "alloy-rpc-types-any",
- "alloy-rpc-types-eth",
- "alloy-serde",
- "alloy-signer",
+ "alloy-rpc-types-any 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-serde 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-signer 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-sol-types",
+ "async-trait",
+ "auto_impl",
+ "derive_more",
+ "futures-utils-wasm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "alloy-network"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
+dependencies = [
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-consensus-any 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network-primitives 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-primitives",
+ "alloy-rpc-types-any 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-signer 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-sol-types",
  "async-trait",
  "auto_impl",
@@ -398,26 +499,38 @@ dependencies = [
 
 [[package]]
 name = "alloy-network-primitives"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-eips 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
  "alloy-primitives",
- "alloy-serde",
+ "alloy-serde 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "serde",
+]
+
+[[package]]
+name = "alloy-network-primitives"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
+dependencies = [
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-primitives",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "serde",
 ]
 
 [[package]]
 name = "alloy-node-bindings"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
  "alloy-genesis",
  "alloy-hardforks 0.2.13",
- "alloy-network",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-signer",
+ "alloy-signer 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-signer-local",
  "k256",
  "libc",
@@ -474,25 +587,60 @@ dependencies = [
 
 [[package]]
 name = "alloy-provider"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
 dependencies = [
  "alloy-chains",
- "alloy-consensus",
- "alloy-eips",
- "alloy-json-rpc",
- "alloy-network",
- "alloy-network-primitives",
+ "alloy-consensus 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-eips 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-network 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-network-primitives 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-primitives",
+ "alloy-rpc-client 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-signer 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-sol-types",
+ "alloy-transport 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "async-stream",
+ "async-trait",
+ "auto_impl",
+ "dashmap",
+ "either",
+ "futures",
+ "futures-utils-wasm",
+ "lru 0.16.3",
+ "parking_lot",
+ "pin-project",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "wasmtimer",
+]
+
+[[package]]
+name = "alloy-provider"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
+dependencies = [
+ "alloy-chains",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network-primitives 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-pubsub",
- "alloy-rpc-client",
+ "alloy-rpc-client 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-trace",
- "alloy-signer",
+ "alloy-signer 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-sol-types",
- "alloy-transport",
+ "alloy-transport 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-transport-http",
  "alloy-transport-ipc",
  "alloy-transport-ws",
@@ -518,12 +666,12 @@ dependencies = [
 
 [[package]]
 name = "alloy-pubsub"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
- "alloy-json-rpc",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-transport",
+ "alloy-transport 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "auto_impl",
  "bimap",
  "futures",
@@ -561,13 +709,32 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-client"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
 dependencies = [
- "alloy-json-rpc",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-primitives",
+ "alloy-transport 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "futures",
+ "pin-project",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tracing",
+ "wasmtimer",
+]
+
+[[package]]
+name = "alloy-rpc-client"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
+dependencies = [
+ "alloy-json-rpc 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-pubsub",
- "alloy-transport",
+ "alloy-transport 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-transport-http",
  "alloy-transport-ipc",
  "alloy-transport-ws",
@@ -586,20 +753,20 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "serde",
 ]
 
 [[package]]
 name = "alloy-rpc-types-admin"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -609,31 +776,41 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-anvil"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
  "alloy-primitives",
- "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "serde",
 ]
 
 [[package]]
 name = "alloy-rpc-types-any"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
 dependencies = [
- "alloy-consensus-any",
- "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-consensus-any 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-serde 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+]
+
+[[package]]
+name = "alloy-rpc-types-any"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
+dependencies = [
+ "alloy-consensus-any 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
 ]
 
 [[package]]
 name = "alloy-rpc-types-beacon"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "derive_more",
@@ -649,8 +826,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-debug"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
  "alloy-primitives",
  "derive_more",
@@ -660,14 +837,14 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-engine"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-serde",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "arbitrary",
  "derive_more",
  "ethereum_ssz 0.9.1",
@@ -680,16 +857,36 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-eth"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
 dependencies = [
- "alloy-consensus",
- "alloy-consensus-any",
- "alloy-eips",
- "alloy-network-primitives",
+ "alloy-consensus 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-consensus-any 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-eips 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-network-primitives 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-serde",
+ "alloy-serde 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "alloy-sol-types",
+ "itertools 0.14.0",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "alloy-rpc-types-eth"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
+dependencies = [
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-consensus-any 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network-primitives 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-sol-types",
  "arbitrary",
  "itertools 0.14.0",
@@ -701,26 +898,26 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-mev"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "alloy-rpc-types-trace"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
  "alloy-primitives",
- "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -728,19 +925,29 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-txpool"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
  "alloy-primitives",
- "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "serde",
 ]
 
 [[package]]
 name = "alloy-serde"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
+dependencies = [
+ "alloy-primitives",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "alloy-serde"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -750,8 +957,22 @@ dependencies = [
 
 [[package]]
 name = "alloy-signer"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
+dependencies = [
+ "alloy-primitives",
+ "async-trait",
+ "auto_impl",
+ "either",
+ "elliptic-curve",
+ "k256",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "alloy-signer"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -764,13 +985,13 @@ dependencies = [
 
 [[package]]
 name = "alloy-signer-local"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
- "alloy-consensus",
- "alloy-network",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-signer",
+ "alloy-signer 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "async-trait",
  "coins-bip32",
  "coins-bip39",
@@ -852,10 +1073,32 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
 dependencies = [
- "alloy-json-rpc",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/alloy-rs/alloy?branch=bal-devnet2)",
+ "auto_impl",
+ "base64 0.22.1",
+ "derive_more",
+ "futures",
+ "futures-utils-wasm",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "tracing",
+ "url",
+ "wasmtimer",
+]
+
+[[package]]
+name = "alloy-transport"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
+dependencies = [
+ "alloy-json-rpc 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "auto_impl",
  "base64 0.22.1",
  "derive_more",
@@ -874,11 +1117,11 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport-http"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
- "alloy-json-rpc",
- "alloy-transport",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-transport 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "itertools 0.14.0",
  "reqwest",
  "serde_json",
@@ -889,12 +1132,12 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport-ipc"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
- "alloy-json-rpc",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-pubsub",
- "alloy-transport",
+ "alloy-transport 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "bytes",
  "futures",
  "interprocess",
@@ -908,11 +1151,11 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport-ws"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
  "alloy-pubsub",
- "alloy-transport",
+ "alloy-transport 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "futures",
  "http",
  "serde_json",
@@ -945,8 +1188,19 @@ dependencies = [
 
 [[package]]
 name = "alloy-tx-macros"
-version = "1.6.3"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
+version = "1.7.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#583aada5aafedad100b528172f24d4d1029fd7e7"
+dependencies = [
+ "darling 0.21.3",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.116",
+]
+
+[[package]]
+name = "alloy-tx-macros"
+version = "1.7.3"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix#c667e553ccdce22c287b06cdf45768910e7a658d"
 dependencies = [
  "darling 0.21.3",
  "proc-macro2",
@@ -1387,9 +1641,9 @@ dependencies = [
 
 [[package]]
 name = "async-compression"
-version = "0.4.39"
+version = "0.4.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68650b7df54f0293fd061972a0fb05aaf4fc0879d3b3d21a638a182c5c543b9f"
+checksum = "7d67d43201f4d20c78bcda740c142ca52482d81da80681533d33bf3f0596c8e2"
 dependencies = [
  "compression-codecs",
  "compression-core",
@@ -2419,9 +2673,9 @@ dependencies = [
 
 [[package]]
 name = "compression-codecs"
-version = "0.4.36"
+version = "0.4.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00828ba6fd27b45a448e57dbfe84f1029d4c9f26b368157e9a448a5f49a2ec2a"
+checksum = "eb7b51a7d9c967fc26773061ba86150f19c50c0d65c887cb1fbe295fd16619b7"
 dependencies = [
  "brotli",
  "compression-core",
@@ -2762,8 +3016,8 @@ dependencies = [
 name = "custom-hardforks"
 version = "0.1.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "reth-chainspec",
@@ -3278,8 +3532,8 @@ dependencies = [
 name = "ef-tests"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
@@ -3517,8 +3771,8 @@ checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 name = "example-beacon-api-sidecar-fetcher"
 version = "0.1.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types-beacon",
  "clap",
@@ -3582,7 +3836,7 @@ dependencies = [
 name = "example-custom-beacon-withdrawals"
 version = "0.0.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-evm",
  "alloy-sol-types",
  "eyre",
@@ -3606,7 +3860,7 @@ dependencies = [
 name = "example-custom-engine-types"
 version = "0.0.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types",
@@ -3638,10 +3892,10 @@ dependencies = [
 name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-evm",
  "alloy-primitives",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "clap",
  "futures-util",
  "reth-ethereum",
@@ -3660,7 +3914,7 @@ dependencies = [
 name = "example-custom-payload-builder"
 version = "0.0.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "eyre",
  "futures-util",
  "reth-basic-payload-builder",
@@ -3728,7 +3982,7 @@ dependencies = [
 name = "example-manual-p2p"
 version = "0.0.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "eyre",
  "futures",
  "reth-discv4",
@@ -3838,7 +4092,7 @@ dependencies = [
 name = "example-txpool-tracing"
 version = "0.0.0"
 dependencies = [
- "alloy-network",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types-trace",
  "clap",
@@ -6300,15 +6554,15 @@ dependencies = [
 [[package]]
 name = "op-alloy-consensus"
 version = "0.23.1"
-source = "git+https://github.com/alloy-rs/op-alloy?branch=bal-devnet2#9f0bc169503302ea02e97f07c9bda9a6f002eeef"
+source = "git+https://github.com/Soubhik-10/op-alloy?branch=devnet-fix#43d60ed753be997eefb09011395492d549d80ae7"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-network",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "arbitrary",
  "derive_more",
  "serde",
@@ -6319,14 +6573,14 @@ dependencies = [
 [[package]]
 name = "op-alloy-network"
 version = "0.23.1"
-source = "git+https://github.com/alloy-rs/op-alloy?branch=bal-devnet2#9f0bc169503302ea02e97f07c9bda9a6f002eeef"
+source = "git+https://github.com/Soubhik-10/op-alloy?branch=devnet-fix#43d60ed753be997eefb09011395492d549d80ae7"
 dependencies = [
- "alloy-consensus",
- "alloy-network",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-provider",
- "alloy-rpc-types-eth",
- "alloy-signer",
+ "alloy-provider 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-signer 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "op-alloy-consensus",
  "op-alloy-rpc-types",
 ]
@@ -6337,11 +6591,11 @@ version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6753d90efbaa8ea8bcb89c1737408ca85fa60d7adb875049d3f382c063666f86"
 dependencies = [
- "alloy-network",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-provider",
+ "alloy-provider 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-engine",
- "alloy-transport",
+ "alloy-transport 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "async-trait",
  "op-alloy-rpc-types-engine",
 ]
@@ -6349,14 +6603,14 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types"
 version = "0.23.1"
-source = "git+https://github.com/alloy-rs/op-alloy?branch=bal-devnet2#9f0bc169503302ea02e97f07c9bda9a6f002eeef"
+source = "git+https://github.com/Soubhik-10/op-alloy?branch=devnet-fix#43d60ed753be997eefb09011395492d549d80ae7"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-network-primitives",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network-primitives 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "derive_more",
  "op-alloy-consensus",
  "serde",
@@ -6367,14 +6621,14 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types-engine"
 version = "0.23.1"
-source = "git+https://github.com/alloy-rs/op-alloy?branch=bal-devnet2#9f0bc169503302ea02e97f07c9bda9a6f002eeef"
+source = "git+https://github.com/Soubhik-10/op-alloy?branch=devnet-fix#43d60ed753be997eefb09011395492d549d80ae7"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
- "alloy-serde",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "derive_more",
  "ethereum_ssz 0.9.1",
  "ethereum_ssz_derive 0.9.1",
@@ -7499,9 +7753,9 @@ version = "1.11.0"
 dependencies = [
  "alloy-node-bindings",
  "alloy-primitives",
- "alloy-provider",
+ "alloy-provider 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "aquamarine",
  "backon",
  "clap",
@@ -7544,8 +7798,8 @@ dependencies = [
 name = "reth-basic-payload-builder"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "futures-core",
  "futures-util",
@@ -7567,16 +7821,16 @@ dependencies = [
 name = "reth-bench"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-json-rpc",
- "alloy-network",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-provider",
+ "alloy-provider 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-pubsub",
- "alloy-rpc-client",
+ "alloy-rpc-client 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-engine",
- "alloy-transport",
+ "alloy-transport 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-transport-http",
  "alloy-transport-ipc",
  "alloy-transport-ws",
@@ -7615,9 +7869,9 @@ name = "reth-bench-compare"
 version = "1.11.0"
 dependencies = [
  "alloy-primitives",
- "alloy-provider",
- "alloy-rpc-client",
- "alloy-rpc-types-eth",
+ "alloy-provider 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-rpc-client 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-transport-ws",
  "chrono",
  "clap",
@@ -7642,10 +7896,10 @@ dependencies = [
 name = "reth-chain-state"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-signer",
+ "alloy-signer 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-signer-local",
  "codspeed-criterion-compat",
  "derive_more",
@@ -7676,8 +7930,8 @@ name = "reth-chainspec"
 version = "1.11.0"
 dependencies = [
  "alloy-chains",
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
@@ -7709,8 +7963,8 @@ name = "reth-cli-commands"
 version = "1.11.0"
 dependencies = [
  "alloy-chains",
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
@@ -7804,7 +8058,7 @@ dependencies = [
 name = "reth-cli-util"
 version = "1.11.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "cfg-if",
  "eyre",
@@ -7825,8 +8079,8 @@ dependencies = [
 name = "reth-codecs"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-trie",
@@ -7877,7 +8131,7 @@ dependencies = [
 name = "reth-consensus"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "auto_impl",
  "reth-execution-types",
@@ -7889,8 +8143,8 @@ dependencies = [
 name = "reth-consensus-common"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "rand 0.9.2",
  "reth-chainspec",
@@ -7903,13 +8157,13 @@ dependencies = [
 name = "reth-consensus-debug-client"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-json-rpc",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-provider",
+ "alloy-provider 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-engine",
- "alloy-transport",
+ "alloy-transport 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "auto_impl",
  "derive_more",
  "eyre",
@@ -7928,7 +8182,7 @@ dependencies = [
 name = "reth-db"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "arbitrary",
  "assert_matches",
@@ -7964,7 +8218,7 @@ dependencies = [
 name = "reth-db-api"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "arbitrary",
@@ -7995,7 +8249,7 @@ dependencies = [
 name = "reth-db-common"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "boyer-moore-magiclen",
@@ -8026,7 +8280,7 @@ dependencies = [
 name = "reth-db-models"
 version = "1.11.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "arbitrary",
  "bytes",
@@ -8121,8 +8375,8 @@ dependencies = [
 name = "reth-downloaders"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
@@ -8159,15 +8413,15 @@ dependencies = [
 name = "reth-e2e-test-utils"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-network",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-provider",
+ "alloy-provider 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rlp",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
- "alloy-signer",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-signer 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-signer-local",
  "derive_more",
  "eyre",
@@ -8243,7 +8497,7 @@ dependencies = [
 name = "reth-engine-local"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",
@@ -8266,8 +8520,8 @@ dependencies = [
 name = "reth-engine-primitives"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "auto_impl",
@@ -8290,9 +8544,9 @@ dependencies = [
 name = "reth-engine-tree"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-eip7928",
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
@@ -8362,7 +8616,7 @@ dependencies = [
 name = "reth-engine-util"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-engine",
  "eyre",
  "futures",
@@ -8389,8 +8643,8 @@ dependencies = [
 name = "reth-era"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "ethereum_ssz 0.10.1",
@@ -8429,7 +8683,7 @@ dependencies = [
 name = "reth-era-utils"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "bytes",
  "eyre",
@@ -8466,8 +8720,8 @@ name = "reth-eth-wire"
 version = "1.11.0"
 dependencies = [
  "alloy-chains",
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
@@ -8504,8 +8758,8 @@ name = "reth-eth-wire-types"
 version = "1.11.0"
 dependencies = [
  "alloy-chains",
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-hardforks 0.4.7",
  "alloy-primitives",
@@ -8529,7 +8783,7 @@ name = "reth-ethereum"
 version = "1.11.0"
 dependencies = [
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "reth-chainspec",
  "reth-cli-util",
  "reth-codecs",
@@ -8591,8 +8845,8 @@ dependencies = [
 name = "reth-ethereum-consensus"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "reth-chainspec",
  "reth-consensus",
@@ -8607,7 +8861,7 @@ dependencies = [
 name = "reth-ethereum-engine-primitives"
 version = "1.11.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
@@ -8638,8 +8892,8 @@ dependencies = [
 name = "reth-ethereum-payload-builder"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
@@ -8666,11 +8920,11 @@ dependencies = [
 name = "reth-ethereum-primitives"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "arbitrary",
  "proptest",
  "proptest-arbitrary-interop",
@@ -8697,8 +8951,8 @@ dependencies = [
 name = "reth-evm"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-evm",
  "alloy-primitives",
  "auto_impl",
@@ -8721,8 +8975,8 @@ dependencies = [
 name = "reth-evm-ethereum"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
@@ -8757,8 +9011,8 @@ dependencies = [
 name = "reth-execution-types"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-evm",
  "alloy-primitives",
  "arbitrary",
@@ -8777,8 +9031,8 @@ dependencies = [
 name = "reth-exex"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -8822,7 +9076,7 @@ dependencies = [
 name = "reth-exex-test-utils"
 version = "1.11.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "eyre",
  "futures-util",
  "reth-chainspec",
@@ -8853,7 +9107,7 @@ dependencies = [
 name = "reth-exex-types"
 version = "1.11.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "arbitrary",
  "bincode 1.3.3",
@@ -8879,8 +9133,8 @@ dependencies = [
 name = "reth-invalid-block-hooks"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-debug",
@@ -8993,8 +9247,8 @@ dependencies = [
 name = "reth-network"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
@@ -9055,10 +9309,10 @@ dependencies = [
 name = "reth-network-api"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types-admin",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "auto_impl",
  "derive_more",
  "enr",
@@ -9079,8 +9333,8 @@ dependencies = [
 name = "reth-network-p2p"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "auto_impl",
  "derive_more",
@@ -9172,10 +9426,10 @@ dependencies = [
 name = "reth-node-builder"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-provider",
+ "alloy-provider 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "aquamarine",
@@ -9243,8 +9497,8 @@ dependencies = [
 name = "reth-node-core"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "clap",
@@ -9300,18 +9554,18 @@ dependencies = [
 name = "reth-node-ethereum"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-contract",
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
- "alloy-network",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-provider",
+ "alloy-provider 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-beacon",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-trace",
- "alloy-signer",
+ "alloy-signer 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-sol-types",
  "eyre",
  "futures",
@@ -9360,7 +9614,7 @@ dependencies = [
 name = "reth-node-ethstats"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "chrono",
  "futures-util",
@@ -9383,8 +9637,8 @@ dependencies = [
 name = "reth-node-events"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "derive_more",
@@ -9446,7 +9700,7 @@ dependencies = [
 name = "reth-payload-builder"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types",
  "futures-util",
@@ -9477,8 +9731,8 @@ dependencies = [
 name = "reth-payload-primitives"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "assert_matches",
@@ -9500,7 +9754,7 @@ dependencies = [
 name = "reth-payload-util"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "reth-transaction-pool",
 ]
@@ -9509,7 +9763,7 @@ dependencies = [
 name = "reth-payload-validator"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-engine",
  "reth-primitives-traits",
 ]
@@ -9518,8 +9772,8 @@ dependencies = [
 name = "reth-primitives"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
@@ -9540,12 +9794,12 @@ dependencies = [
 name = "reth-primitives-traits"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-trie",
  "arbitrary",
  "auto_impl",
@@ -9579,8 +9833,8 @@ dependencies = [
 name = "reth-provider"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "assert_matches",
@@ -9629,8 +9883,8 @@ dependencies = [
 name = "reth-prune"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "assert_matches",
  "itertools 0.14.0",
@@ -9686,7 +9940,7 @@ dependencies = [
 name = "reth-revm"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "reth-ethereum-forks",
  "reth-primitives-traits",
@@ -9700,27 +9954,27 @@ dependencies = [
 name = "reth-rpc"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-dyn-abi",
  "alloy-eip7928",
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-evm",
  "alloy-genesis",
- "alloy-network",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-client",
+ "alloy-rpc-client 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types",
  "alloy-rpc-types-admin",
  "alloy-rpc-types-beacon",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-mev",
  "alloy-rpc-types-trace",
  "alloy-rpc-types-txpool",
- "alloy-serde",
- "alloy-signer",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-signer 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-signer-local",
  "async-trait",
  "derive_more",
@@ -9781,9 +10035,9 @@ name = "reth-rpc-api"
 version = "1.11.0"
 dependencies = [
  "alloy-eip7928",
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
- "alloy-json-rpc",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-rpc-types-admin",
@@ -9791,11 +10045,11 @@ dependencies = [
  "alloy-rpc-types-beacon",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-mev",
  "alloy-rpc-types-trace",
  "alloy-rpc-types-txpool",
- "alloy-serde",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "jsonrpsee",
  "reth-chain-state",
  "reth-engine-primitives",
@@ -9811,9 +10065,9 @@ dependencies = [
 name = "reth-rpc-api-testing-util"
 version = "1.11.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-trace",
  "futures",
  "jsonrpsee",
@@ -9830,12 +10084,12 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "1.11.0"
 dependencies = [
- "alloy-eips",
- "alloy-network",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-provider",
+ "alloy-provider 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-trace",
  "clap",
  "dyn-clone",
@@ -9886,13 +10140,13 @@ dependencies = [
 name = "reth-rpc-convert"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-evm",
- "alloy-json-rpc",
- "alloy-network",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-rpc-types-eth",
- "alloy-signer",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-signer 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "auto_impl",
  "dyn-clone",
  "jsonrpsee-types",
@@ -9930,7 +10184,7 @@ dependencies = [
 name = "reth-rpc-engine-api"
 version = "1.11.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
@@ -9966,17 +10220,17 @@ dependencies = [
 name = "reth-rpc-eth-api"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-dyn-abi",
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-evm",
- "alloy-json-rpc",
- "alloy-network",
+ "alloy-json-rpc 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-mev",
- "alloy-serde",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "async-trait",
  "auto_impl",
  "dyn-clone",
@@ -10009,15 +10263,15 @@ dependencies = [
 name = "reth-rpc-eth-types"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-evm",
- "alloy-network",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-rpc-client",
- "alloy-rpc-types-eth",
+ "alloy-rpc-client 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-sol-types",
- "alloy-transport",
+ "alloy-transport 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "derive_more",
  "futures",
  "itertools 0.14.0",
@@ -10074,7 +10328,7 @@ dependencies = [
 name = "reth-rpc-server-types"
 version = "1.11.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "jsonrpsee-core",
@@ -10089,8 +10343,8 @@ dependencies = [
 name = "reth-stages"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
@@ -10151,7 +10405,7 @@ dependencies = [
 name = "reth-stages-api"
 version = "1.11.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "aquamarine",
  "assert_matches",
@@ -10241,8 +10495,8 @@ dependencies = [
 name = "reth-storage-api"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "auto_impl",
@@ -10264,7 +10518,7 @@ dependencies = [
 name = "reth-storage-errors"
 version = "1.11.0"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "derive_more",
@@ -10280,11 +10534,11 @@ dependencies = [
 name = "reth-storage-rpc-provider"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-network",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-network 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
- "alloy-provider",
+ "alloy-provider 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "dashmap",
@@ -10327,8 +10581,8 @@ dependencies = [
 name = "reth-testing-utils"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
@@ -10387,8 +10641,8 @@ dependencies = [
 name = "reth-transaction-pool"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "aquamarine",
@@ -10438,8 +10692,8 @@ dependencies = [
 name = "reth-trie"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
@@ -10472,12 +10726,12 @@ dependencies = [
 name = "reth-trie-common"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
+ "alloy-serde 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-trie",
  "arbitrary",
  "arrayvec",
@@ -10505,7 +10759,7 @@ dependencies = [
 name = "reth-trie-db"
 version = "1.11.0"
 dependencies = [
- "alloy-consensus",
+ "alloy-consensus 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-primitives",
  "alloy-rlp",
  "metrics",
@@ -10666,7 +10920,7 @@ name = "revm-database"
 version = "10.0.0"
 source = "git+https://github.com/bluealloy/revm?branch=main#3bccc9755b6c22e15f095aad1de91cc7be8250c1"
 dependencies = [
- "alloy-eips",
+ "alloy-eips 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "revm-bytecode",
  "revm-database-interface",
  "revm-primitives",
@@ -10728,7 +10982,7 @@ version = "0.34.2"
 source = "git+https://github.com/paradigmxyz/revm-inspectors?branch=staging#e80e2eab72dfa18011e6a99abd37027290a46e83"
 dependencies = [
  "alloy-primitives",
- "alloy-rpc-types-eth",
+ "alloy-rpc-types-eth 1.7.3 (git+https://github.com/Rimeeeeee/alloy?branch=devnet-fix)",
  "alloy-rpc-types-trace",
  "alloy-sol-types",
  "anstyle",

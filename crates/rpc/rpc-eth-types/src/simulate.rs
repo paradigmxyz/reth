@@ -386,13 +386,13 @@ where
                     ..Default::default()
                 }
             }
-            ExecutionResult::Success { output, gas_used, logs, .. } =>
+            ExecutionResult::Success { output, gas, logs, .. } =>
             {
                 #[allow(clippy::needless_update)]
                 SimCallResult {
                     return_data: output.into_data(),
                     error: None,
-                    gas_used,
+                    gas_used: gas.used(),
                     logs: logs
                         .into_iter()
                         .map(|log| {
