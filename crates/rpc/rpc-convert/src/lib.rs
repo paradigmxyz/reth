@@ -10,17 +10,14 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-pub mod block;
-pub mod receipt;
 mod rpc;
+pub mod rpc_response;
 pub mod transaction;
 
-pub use block::TryFromBlockResponse;
-pub use receipt::TryFromReceiptResponse;
 pub use rpc::*;
+pub use rpc_response::{EthRpcConverter, RpcResponseConverter, RpcResponseConverterError};
 pub use transaction::{
-    RpcConvert, RpcConverter, TransactionConversionError, TryFromTransactionResponse, TryIntoSimTx,
-    TxInfoMapper,
+    RpcConvert, RpcConverter, TransactionConversionError, TryIntoSimTx, TxInfoMapper,
 };
 
 pub use alloy_evm::rpc::{CallFees, CallFeesError, EthTxEnvError, TryIntoTxEnv};
