@@ -122,7 +122,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -149,7 +149,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -163,7 +163,7 @@ dependencies = [
 [[package]]
 name = "alloy-contract"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -260,7 +260,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -286,7 +286,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.27.2"
-source = "git+https://github.com/Soubhik-10/evm?branch=test-fix#5c2f943bd2b7a511bf4f50449caac129e48d266d"
+source = "git+https://github.com/alloy-rs/evm?branch=bal-devnet2#96831a28f1883ee4eacbb785c6b6f9719b081f26"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -302,13 +302,12 @@ dependencies = [
  "op-revm",
  "revm",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
 name = "alloy-genesis"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -361,7 +360,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -375,7 +374,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -400,7 +399,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -412,7 +411,7 @@ dependencies = [
 [[package]]
 name = "alloy-node-bindings"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-genesis",
  "alloy-hardforks 0.2.13",
@@ -476,7 +475,7 @@ dependencies = [
 [[package]]
 name = "alloy-provider"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -520,7 +519,7 @@ dependencies = [
 [[package]]
 name = "alloy-pubsub"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -563,7 +562,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-client"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -588,7 +587,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -600,7 +599,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-admin"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -611,7 +610,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-anvil"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -622,7 +621,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -632,7 +631,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -651,7 +650,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-debug"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-primitives",
  "derive_more",
@@ -662,7 +661,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -682,7 +681,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -703,7 +702,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-mev"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -717,7 +716,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-trace"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -730,7 +729,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-txpool"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -741,7 +740,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -752,7 +751,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -766,7 +765,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -854,7 +853,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-json-rpc",
  "auto_impl",
@@ -876,7 +875,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-http"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -891,7 +890,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ipc"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -910,7 +909,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ws"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
@@ -947,7 +946,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "1.6.3"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=test-fix#7424c45775cf790d7377e7f58a988af9670c4901"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#686c1c0cb659a6908868486857bb4269f57162bd"
 dependencies = [
  "darling 0.21.3",
  "proc-macro2",
@@ -8620,7 +8619,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]

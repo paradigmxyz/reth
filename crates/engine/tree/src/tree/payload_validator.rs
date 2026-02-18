@@ -807,9 +807,9 @@ where
             // Get the expected BAL from input and the built BAL from execution
             let expected_bal =
                 input.block_access_list().transpose().map_err(BlockExecutionError::other)?;
-            info!("Got bal {:?}", expected_bal);
+
             let built_bal = &result.block_access_list;
-            info!("Built bal {:?}", built_bal);
+
             // Compute hashes and compare
             let expected_hash = expected_bal
                 .as_ref()

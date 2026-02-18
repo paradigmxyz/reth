@@ -781,41 +781,41 @@ op-revm = { git = "https://github.com/bluealloy/revm", branch = "main" }
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", branch = "staging" }
 
 # alloy-evm bal-devnet2 patches
-alloy-evm = { git = "https://github.com/Soubhik-10/evm", branch = "test-fix" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "bal-devnet2" }
 # alloy-op-evm = { git = "https://github.com/Soubhik-10/evm", branch = "test-fix" }
 
 # alloy bal-devnet2 patches
-alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-consensus-any = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-contract = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-eips = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-genesis = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-json-rpc = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-network = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-node-bindings = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-network-primitives = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-provider = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-pubsub = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-rpc-client = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-rpc-types = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-rpc-types-admin = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-rpc-types-anvil = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-rpc-types-beacon = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-rpc-types-debug = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-rpc-types-engine = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-rpc-types-any = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-rpc-types-eth = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-rpc-types-mev = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-rpc-types-trace = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-rpc-types-txpool = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-serde = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-signer = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-signer-local = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-transport = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-transport-http = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-transport-ipc = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-transport-ws = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
-alloy-tx-macros = { git = "https://github.com/Rimeeeeee/alloy", branch = "test-fix" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-consensus-any = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-contract = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-any = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-serde = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-transport = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-tx-macros = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
 
 # op-alloy bal-devnet2 patches
 op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", branch = "bal-devnet2" }
