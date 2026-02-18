@@ -1,11 +1,10 @@
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
 use crate::{
-    LeafValue,
     lower::LowerSparseSubtrie,
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeState, SparseNodeType,
-    SparseTrie, SparseTrieUpdates,
+    LeafLookup, LeafLookupError, LeafValue, RlpNodeStackItem, SparseNode, SparseNodeState,
+    SparseNodeType, SparseTrie, SparseTrieUpdates,
 };
 use alloc::{borrow::Cow, boxed::Box, vec, vec::Vec};
 use alloy_primitives::{
@@ -1031,8 +1030,8 @@ impl SparseTrie for ParallelSparseTrie {
                 .then_some(LeafLookup::Exists)
                 .ok_or_else(|| LeafLookupError::ValueMismatch {
                     path: *full_path,
-                    expected: expected_value.cloned(),
-                    actual: actual_value.clone(),
+                    expected: Box::new(expected_value.cloned()),
+                    actual: Box::new(actual_value.clone()),
                 })
         }
 
@@ -3852,7 +3851,11 @@ mod tests {
         }
 
         /// Create a single test leaf with the given path and value nonce
-        fn create_test_leaf(&self, path: impl AsRef<[u8]>, value_nonce: u64) -> (Nibbles, LeafValue) {
+        fn create_test_leaf(
+            &self,
+            path: impl AsRef<[u8]>,
+            value_nonce: u64,
+        ) -> (Nibbles, LeafValue) {
             (pad_nibbles_right(Nibbles::from_nibbles(path)), encode_account_value(value_nonce))
         }
 
@@ -4326,10 +4329,7 @@ mod tests {
 
             let full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
             let expected_value = encode_account_value(42);
-            assert_eq!(
-                trie.upper_subtrie.inner.values.get(&full_path),
-                Some(&expected_value)
-            );
+            assert_eq!(trie.upper_subtrie.inner.values.get(&full_path), Some(&expected_value));
         }
 
         // Reveal leaf in a lower trie. A separate trie is needed because the structure at
@@ -5992,7 +5992,13 @@ mod tests {
                         let account = account.into_trie_account(EMPTY_ROOT_HASH);
                         let mut account_rlp = Vec::new();
                         account.encode(&mut account_rlp);
-                        sparse.update_leaf(key, LeafValue::from_slice(&account_rlp), &default_provider).unwrap();
+                        sparse
+                            .update_leaf(
+                                key,
+                                LeafValue::from_slice(&account_rlp),
+                                &default_provider,
+                            )
+                            .unwrap();
                     }
                     // We need to clone the sparse trie, so that all updated branch nodes are
                     // preserved, and not only those that were changed after the last call to
@@ -7398,7 +7404,8 @@ mod tests {
             190, 199, 5, 215, 108, 202, 22, 138, 70, 196, 178, 193, 208, 18, 96, 95, 63, 238, 160,
             245, 122, 205, 64, 37, 152, 114, 96, 109, 118, 25, 126, 240, 82, 243, 211, 85, 136,
             218, 223, 145, 158, 225, 240, 227, 203, 155, 98, 211, 244, 176, 44,
-        ].into();
+        ]
+        .into();
 
         trie.update_leaf(leaf_full_path, leaf_new_value.clone(), DefaultTrieNodeProvider).unwrap();
 
@@ -7449,7 +7456,7 @@ mod tests {
         let result = sparse.find_leaf(&path, Some(&wrong_value));
         assert_matches!(
             result,
-            Err(LeafLookupError::ValueMismatch { path: p, expected: Some(e), actual: _a }) if p == path && e == wrong_value
+            Err(LeafLookupError::ValueMismatch { path: p, expected, actual: _a }) if p == path && *expected == Some(wrong_value.clone())
         );
     }
 

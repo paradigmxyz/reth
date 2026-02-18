@@ -171,7 +171,7 @@ pub enum LeafUpdateRecord {
 impl From<&crate::LeafUpdate> for LeafUpdateRecord {
     fn from(update: &crate::LeafUpdate) -> Self {
         match update {
-            crate::LeafUpdate::Changed(value) => Self::Changed(value.clone().into()),
+            crate::LeafUpdate::Changed(value) => Self::Changed(value.to_vec().into()),
             crate::LeafUpdate::Touched => Self::Touched,
         }
     }

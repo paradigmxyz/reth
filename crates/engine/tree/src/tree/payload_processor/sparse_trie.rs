@@ -27,8 +27,8 @@ use reth_trie_parallel::{
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use reth_trie_sparse::{
-    errors::SparseTrieResult, DeferredDrops, LeafUpdate, LeafValue, ParallelSparseTrie, SparseStateTrie,
-    SparseTrie,
+    errors::SparseTrieResult, DeferredDrops, LeafUpdate, LeafValue, ParallelSparseTrie,
+    SparseStateTrie, SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument};
