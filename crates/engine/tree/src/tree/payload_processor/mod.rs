@@ -352,19 +352,19 @@ where
     /// produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
 
-    /// Transaction count threshold below which sequential signature recovery is used.
+    /// Transaction count threshold below which sequential conversion is used.
     ///
     /// For blocks with fewer than this many transactions, the rayon parallel iterator overhead
-    /// (work-stealing setup, channel-based reorder) exceeds the cost of sequential ECDSA
-    /// recovery. Inspired by Nethermind's `RecoverSignature` which uses sequential `foreach`
-    /// for small blocks.
+    /// (work-stealing setup, channel-based reorder) exceeds the cost of sequential conversion.
+    /// Inspired by Nethermind's `RecoverSignature` which uses sequential `foreach` for small
+    /// blocks.
     const SMALL_BLOCK_TX_THRESHOLD: usize = 30;
 
-    /// Number of leading transactions to recover sequentially before entering the rayon
+    /// Number of leading transactions to convert sequentially before entering the rayon
     /// parallel path.
     ///
     /// Rayon's work-stealing does not guarantee that index 0 is processed first, so the
-    /// ordered consumer can block for up to ~1ms waiting for the first slot. By recovering
+    /// ordered consumer can block for up to ~1ms waiting for the first slot. By converting
     /// a small head sequentially and sending it immediately, execution can start without
     /// waiting for rayon scheduling.
     const PARALLEL_PREFETCH_COUNT: usize = 4;
@@ -391,7 +391,7 @@ where
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
     /// sequential iteration to avoid rayon overhead. For larger blocks, uses rayon parallel
-    /// iteration with [`ForEachOrdered`] to recover signatures in parallel while streaming
+    /// iteration with [`ForEachOrdered`] to convert transactions in parallel while streaming
     /// results to execution in the original transaction order.
     #[expect(clippy::type_complexity)]
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
@@ -410,7 +410,7 @@ where
             // Empty block — nothing to do.
         } else if transaction_count < Self::SMALL_BLOCK_TX_THRESHOLD {
             // Sequential path for small blocks — avoids rayon work-stealing setup and
-            // channel-based reorder overhead when it costs more than the ECDSA recovery itself.
+            // channel-based reorder overhead when it costs more than sequential conversion.
             debug!(
                 target: "engine::tree::payload_processor",
                 transaction_count,
@@ -719,7 +719,7 @@ where
     }
 }
 
-/// Recovers transactions sequentially and sends them to the prewarm and execute channels.
+/// Converts transactions sequentially and sends them to the prewarm and execute channels.
 fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
