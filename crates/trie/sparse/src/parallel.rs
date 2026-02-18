@@ -1,6 +1,7 @@
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
 use crate::{
+    LeafValue,
     lower::LowerSparseSubtrie,
     provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeState, SparseNodeType,
@@ -389,7 +390,7 @@ impl SparseTrie for ParallelSparseTrie {
     fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
-        value: Vec<u8>,
+        value: LeafValue,
         _provider: P,
     ) -> SparseTrieResult<()> {
         debug_assert_eq!(
@@ -929,7 +930,7 @@ impl SparseTrie for ParallelSparseTrie {
         }
     }
 
-    fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
+    fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&LeafValue> {
         // `subtrie_for_path` is intended for a node path, but here we are using a full key path. So
         // we need to check if the subtrie that the key might belong to has any nodes; if not then
         // the key's portion of the trie doesn't have enough depth to reach into the subtrie, and
@@ -1003,7 +1004,7 @@ impl SparseTrie for ParallelSparseTrie {
     fn find_leaf(
         &self,
         full_path: &Nibbles,
-        expected_value: Option<&Vec<u8>>,
+        expected_value: Option<&LeafValue>,
     ) -> Result<LeafLookup, LeafLookupError> {
         // Inclusion proof
         //
@@ -2478,7 +2479,7 @@ impl SparseSubtrie {
     ///
     /// This method is atomic: if an error occurs during structural changes, all modifications
     /// are rolled back and the trie state is unchanged.
-    pub fn update_leaf(&mut self, full_path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
+    pub fn update_leaf(&mut self, full_path: Nibbles, value: LeafValue) -> SparseTrieResult<()> {
         debug_assert!(full_path.starts_with(&self.path));
 
         // Check if value already exists - if so, just update it (no structural changes needed)
@@ -2906,7 +2907,7 @@ impl SparseSubtrie {
                         return Ok(false)
                     }
                     Entry::Vacant(entry) => {
-                        entry.insert(leaf.value.clone());
+                        entry.insert(LeafValue::from_slice(&leaf.value));
                     }
                 }
 
@@ -3071,7 +3072,7 @@ impl SparseSubtrie {
         for (path, value) in &self.inner.values {
             size += core::mem::size_of::<Nibbles>();
             size += path.len(); // Nibbles heap allocation
-            size += core::mem::size_of::<Vec<u8>>() + value.capacity();
+            size += core::mem::size_of::<LeafValue>() + value.capacity();
         }
 
         // Buffers
@@ -3087,7 +3088,7 @@ impl SparseSubtrie {
 struct SparseSubtrieInner {
     /// Map from leaf key paths to their values.
     /// All values are stored here instead of directly in leaf nodes.
-    values: HashMap<Nibbles, Vec<u8>>,
+    values: HashMap<Nibbles, LeafValue>,
     /// Reusable buffers for [`SparseSubtrie::update_hashes`].
     buffers: SparseSubtrieBuffers,
 }
@@ -3676,7 +3677,7 @@ mod tests {
         parallel::ChangedSubtrie,
         provider::{DefaultTrieNodeProvider, RevealedNode, TrieNodeProvider},
         trie::SparseNodeState,
-        LeafLookup, LeafLookupError, SparseNode, SparseTrie, SparseTrieUpdates,
+        LeafLookup, LeafLookupError, LeafValue, SparseNode, SparseTrie, SparseTrieUpdates,
     };
     use alloy_primitives::{
         b256, hex,
@@ -3759,7 +3760,7 @@ mod tests {
         Account { nonce, ..Default::default() }
     }
 
-    fn large_account_value() -> Vec<u8> {
+    fn large_account_value() -> LeafValue {
         let account = Account {
             nonce: 0x123456789abcdef,
             balance: U256::from(0x123456789abcdef0123456789abcdef_u128),
@@ -3767,15 +3768,15 @@ mod tests {
         };
         let mut buf = Vec::new();
         account.into_trie_account(EMPTY_ROOT_HASH).encode(&mut buf);
-        buf
+        LeafValue::from_vec(buf)
     }
 
-    fn encode_account_value(nonce: u64) -> Vec<u8> {
+    fn encode_account_value(nonce: u64) -> LeafValue {
         let account = Account { nonce, ..Default::default() };
         let trie_account = account.into_trie_account(EMPTY_ROOT_HASH);
         let mut buf = Vec::new();
         trie_account.encode(&mut buf);
-        buf
+        LeafValue::from_slice(&buf)
     }
 
     /// Test context that provides helper methods for trie testing
@@ -3827,7 +3828,7 @@ mod tests {
         }
 
         /// Create test leaves with consecutive account values
-        fn create_test_leaves(&self, paths: &[&[u8]]) -> Vec<(Nibbles, Vec<u8>)> {
+        fn create_test_leaves(&self, paths: &[&[u8]]) -> Vec<(Nibbles, LeafValue)> {
             paths
                 .iter()
                 .enumerate()
@@ -3841,7 +3842,7 @@ mod tests {
         }
 
         /// Create a single test leaf with the given path and value nonce
-        fn create_test_leaf(&self, path: impl AsRef<[u8]>, value_nonce: u64) -> (Nibbles, Vec<u8>) {
+        fn create_test_leaf(&self, path: impl AsRef<[u8]>, value_nonce: u64) -> (Nibbles, LeafValue) {
             (pad_nibbles_right(Nibbles::from_nibbles(path)), encode_account_value(value_nonce))
         }
 
@@ -3849,7 +3850,7 @@ mod tests {
         fn update_leaves(
             &self,
             trie: &mut ParallelSparseTrie,
-            leaves: impl IntoIterator<Item = (Nibbles, Vec<u8>)>,
+            leaves: impl IntoIterator<Item = (Nibbles, LeafValue)>,
         ) {
             for (path, value) in leaves {
                 trie.update_leaf(path, value, DefaultTrieNodeProvider).unwrap();
@@ -3960,7 +3961,7 @@ mod tests {
     fn create_leaf_node(key: impl AsRef<[u8]>, value_nonce: u64) -> TrieNodeV2 {
         TrieNodeV2::Leaf(LeafNode::new(
             Nibbles::from_nibbles(key),
-            encode_account_value(value_nonce),
+            encode_account_value(value_nonce).to_vec(),
         ))
     }
 
@@ -4072,7 +4073,7 @@ mod tests {
             if let SparseNode::Leaf { key, .. } = &node {
                 let mut full_key = path;
                 full_key.extend(key);
-                subtrie.inner.values.insert(full_key, "LEAF VALUE".into());
+                subtrie.inner.values.insert(full_key, LeafValue::from_slice(b"LEAF VALUE"));
             }
             subtrie.nodes.insert(path, node);
         }
@@ -4314,9 +4315,10 @@ mod tests {
             );
 
             let full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+            let expected_value = encode_account_value(42);
             assert_eq!(
                 trie.upper_subtrie.inner.values.get(&full_path),
-                Some(&encode_account_value(42))
+                Some(&expected_value)
             );
         }
 
@@ -5355,7 +5357,7 @@ mod tests {
         let value_encoded = || {
             let mut account_rlp = Vec::new();
             value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
-            account_rlp
+            LeafValue::from_vec(account_rlp)
         };
 
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
@@ -5367,7 +5369,7 @@ mod tests {
             );
 
         let mut sparse = ParallelSparseTrie::default().with_updates(true);
-        ctx.update_leaves(&mut sparse, [(key, value_encoded())]);
+        ctx.update_leaves(&mut sparse, [(key, value_encoded().into())]);
         ctx.assert_with_hash_builder(
             &mut sparse,
             hash_builder_root,
@@ -5385,7 +5387,7 @@ mod tests {
         let value_encoded = || {
             let mut account_rlp = Vec::new();
             value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
-            account_rlp
+            LeafValue::from_vec(account_rlp)
         };
 
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
@@ -5417,7 +5419,7 @@ mod tests {
         let value_encoded = || {
             let mut account_rlp = Vec::new();
             value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
-            account_rlp
+            LeafValue::from_vec(account_rlp)
         };
 
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
@@ -5431,7 +5433,7 @@ mod tests {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default().with_updates(true);
         for path in &paths {
-            sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
+            sparse.update_leaf(*path, value_encoded().into(), &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
@@ -5458,7 +5460,7 @@ mod tests {
         let value_encoded = || {
             let mut account_rlp = Vec::new();
             value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
-            account_rlp
+            LeafValue::from_vec(account_rlp)
         };
 
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
@@ -5491,13 +5493,13 @@ mod tests {
         let old_value_encoded = {
             let mut account_rlp = Vec::new();
             old_value.into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
-            account_rlp
+            LeafValue::from_vec(account_rlp)
         };
         let new_value = Account { nonce: 2, ..Default::default() };
         let new_value_encoded = {
             let mut account_rlp = Vec::new();
             new_value.into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
-            account_rlp
+            LeafValue::from_vec(account_rlp)
         };
 
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
@@ -5546,7 +5548,7 @@ mod tests {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
 
-        let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
+        let value = LeafValue::from_slice(&alloy_rlp::encode_fixed_size(&U256::ZERO));
 
         ctx.update_leaves(
             &mut sparse,
@@ -5980,7 +5982,7 @@ mod tests {
                         let account = account.into_trie_account(EMPTY_ROOT_HASH);
                         let mut account_rlp = Vec::new();
                         account.encode(&mut account_rlp);
-                        sparse.update_leaf(key, account_rlp, &default_provider).unwrap();
+                        sparse.update_leaf(key, LeafValue::from_slice(&account_rlp), &default_provider).unwrap();
                     }
                     // We need to clone the sparse trie, so that all updated branch nodes are
                     // preserved, and not only those that were changed after the last call to
@@ -6127,11 +6129,11 @@ mod tests {
         account.encode(&mut account_rlp);
 
         // Add a leaf and calculate the root.
-        trie.update_leaf(key_50, account_rlp.clone(), &provider).unwrap();
+        trie.update_leaf(key_50, LeafValue::from_slice(&account_rlp), &provider).unwrap();
         trie.root();
 
         // Add a second leaf and assert that the root is the expected value.
-        trie.update_leaf(key_51, account_rlp.clone(), &provider).unwrap();
+        trie.update_leaf(key_51, LeafValue::from_slice(&account_rlp), &provider).unwrap();
 
         let expected_root =
             hex!("0xdaf0ef9f91a2f179bb74501209effdb5301db1697bcab041eca2234b126e25de");
@@ -6160,7 +6162,7 @@ mod tests {
         let value_encoded = || {
             let mut account_rlp = Vec::new();
             value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
-            account_rlp
+            LeafValue::from_vec(account_rlp)
         };
 
         // Generate the proof for the root node and initialize the sparse trie with it
@@ -6220,7 +6222,7 @@ mod tests {
         );
 
         // Insert the leaf for the second key
-        sparse.update_leaf(key2(), value_encoded(), &provider).unwrap();
+        sparse.update_leaf(key2(), value_encoded().into(), &provider).unwrap();
 
         // Check that the branch node was updated and another nibble was set
         assert_eq!(
@@ -6393,7 +6395,7 @@ mod tests {
         let value_encoded = || {
             let mut account_rlp = Vec::new();
             value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
-            account_rlp
+            LeafValue::from_vec(account_rlp)
         };
 
         // Generate the proof for the root node and initialize the sparse trie with it
@@ -6433,7 +6435,7 @@ mod tests {
         );
 
         // Insert the leaf with a different prefix
-        sparse.update_leaf(key3(), value_encoded(), &provider).unwrap();
+        sparse.update_leaf(key3(), value_encoded().into(), &provider).unwrap();
 
         // Check that the extension node was turned into a branch node
         assert_matches!(
@@ -7358,9 +7360,9 @@ mod tests {
         let leaf_key = Nibbles::unpack(
             &hex!("d65eaa92c6bc4c13a5ec45527f0c18ea8932588728769ec7aecfe6d9f32e42")[..],
         );
-        let leaf_value = hex!("f8440180a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0f57acd40259872606d76197ef052f3d35588dadf919ee1f0e3cb9b62d3f4b02c").to_vec();
+        let leaf_value = LeafValue::from_slice(&hex!("f8440180a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0f57acd40259872606d76197ef052f3d35588dadf919ee1f0e3cb9b62d3f4b02c"));
 
-        let leaf_node = LeafNode::new(leaf_key, leaf_value);
+        let leaf_node = LeafNode::new(leaf_key, leaf_value.to_vec());
         let leaf_masks = None;
 
         trie.reveal_nodes(&mut [
@@ -7381,12 +7383,12 @@ mod tests {
         let mut leaf_full_path = leaf_path;
         leaf_full_path.extend(&leaf_key);
 
-        let leaf_new_value = vec![
+        let leaf_new_value: LeafValue = vec![
             248, 68, 1, 128, 160, 224, 163, 152, 169, 122, 160, 155, 102, 53, 41, 0, 47, 28, 205,
             190, 199, 5, 215, 108, 202, 22, 138, 70, 196, 178, 193, 208, 18, 96, 95, 63, 238, 160,
             245, 122, 205, 64, 37, 152, 114, 96, 109, 118, 25, 126, 240, 82, 243, 211, 85, 136,
             218, 223, 145, 158, 225, 240, 227, 203, 155, 98, 211, 244, 176, 44,
-        ];
+        ].into();
 
         trie.update_leaf(leaf_full_path, leaf_new_value.clone(), DefaultTrieNodeProvider).unwrap();
 
@@ -7409,7 +7411,7 @@ mod tests {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
         let path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3]));
-        let value = b"test_value".to_vec();
+        let value: LeafValue = LeafValue::from_slice(b"test_value");
 
         sparse.update_leaf(path, value.clone(), &provider).unwrap();
 
@@ -7428,8 +7430,8 @@ mod tests {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
         let path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3]));
-        let value = b"test_value".to_vec();
-        let wrong_value = b"wrong_value".to_vec();
+        let value: LeafValue = LeafValue::from_slice(b"test_value");
+        let wrong_value: LeafValue = LeafValue::from_slice(b"wrong_value");
 
         sparse.update_leaf(path, value, &provider).unwrap();
 
@@ -7650,7 +7652,7 @@ mod tests {
         // Reveal leaf at 0x31b0b645a6c4a0a1bb3d2f0c1d31c39f4aba2e3b015928a8eef7161e28388b81
         let leaf_path = hex!("31b0b645a6c4a0a1bb3d2f0c1d31c39f4aba2e3b015928a8eef7161e28388b81");
         let leaf_nibbles = Nibbles::unpack(leaf_path.as_slice());
-        let leaf_value = hex!("0009ae8ce8245bff").to_vec();
+        let leaf_value = LeafValue::from_slice(&hex!("0009ae8ce8245bff"));
 
         // Reveal branch at 0x31c
         let branch_0x31c_hashes = vec![
@@ -7866,7 +7868,7 @@ mod tests {
 
         // Single storage slot - leaf will be at root (depth 0)
         let slot_path = pad_nibbles_right(Nibbles::from_nibbles([0x2, 0x9]));
-        let slot_value = alloy_rlp::encode(U256::from(12345));
+        let slot_value: LeafValue = alloy_rlp::encode(U256::from(12345)).into();
         trie.update_leaf(slot_path, slot_value.clone(), &provider).unwrap();
 
         // Value should be retrievable
@@ -7901,7 +7903,7 @@ mod tests {
             parallel
                 .update_leaf(
                     pad_nibbles_right(Nibbles::from_nibbles([i, 0x1, 0x2, 0x3, 0x4, 0x5])),
-                    value.clone(),
+                    LeafValue::from_slice(&value),
                     &provider,
                 )
                 .unwrap();
@@ -8117,7 +8119,7 @@ mod tests {
         let mut trie = ParallelSparseTrie::default();
 
         let large_value = large_account_value();
-        let small_value = vec![0x80];
+        let small_value: LeafValue = vec![0x80].into();
 
         for i in 0..8u8 {
             let value = if i < 4 { large_value.clone() } else { small_value.clone() };
@@ -8417,7 +8419,7 @@ mod tests {
 
         // Create an update to remove key1 (empty value = removal)
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
-        updates.insert(b256_key1, LeafUpdate::Changed(vec![])); // empty = removal
+        updates.insert(b256_key1, LeafUpdate::Changed(vec![].into())); // empty = removal
 
         let proof_targets = RefCell::new(Vec::new());
         trie.update_leaves(&mut updates, |path, min_len| {
@@ -8482,7 +8484,7 @@ mod tests {
         trie.upper_subtrie.inner.values.insert(full_path, old_value.clone());
 
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
-        updates.insert(b256_key, LeafUpdate::Changed(vec![])); // empty = removal
+        updates.insert(b256_key, LeafUpdate::Changed(vec![].into())); // empty = removal
 
         let proof_targets = RefCell::new(Vec::new());
         let prefix_set_len_before = trie.prefix_set.len();
@@ -8575,7 +8577,7 @@ mod tests {
                 .sum::<usize>();
 
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
-        updates.insert(b256_key, LeafUpdate::Changed(vec![])); // removal
+        updates.insert(b256_key, LeafUpdate::Changed(vec![].into())); // removal
 
         let proof_targets = RefCell::new(Vec::new());
         trie.update_leaves(&mut updates, |path, min_len| {
@@ -9047,8 +9049,8 @@ mod tests {
 
         // Create an empty trie and update with two leaves
         let mut trie = ParallelSparseTrie::default();
-        trie.update_leaf(leaf1_path, vec![0x1], DefaultTrieNodeProvider).unwrap();
-        trie.update_leaf(leaf2_path, vec![0x2], DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(leaf1_path, vec![0x1].into(), DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(leaf2_path, vec![0x2].into(), DefaultTrieNodeProvider).unwrap();
 
         // Call root() to compute the trie root hash
         let _root = trie.root();

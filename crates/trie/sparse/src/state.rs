@@ -1,6 +1,7 @@
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
 use crate::{
+    LeafValue,
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     traits::SparseTrie as SparseTrieTrait,
     ParallelSparseTrie, RevealableSparseTrie,
@@ -217,12 +218,12 @@ where
     }
 
     /// Returns reference to bytes representing leaf value for the target account.
-    pub fn get_account_value(&self, account: &B256) -> Option<&Vec<u8>> {
+    pub fn get_account_value(&self, account: &B256) -> Option<&LeafValue> {
         self.state.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(account))
     }
 
     /// Returns reference to bytes representing leaf value for the target account and storage slot.
-    pub fn get_storage_slot_value(&self, account: &B256, slot: &B256) -> Option<&Vec<u8>> {
+    pub fn get_storage_slot_value(&self, account: &B256, slot: &B256) -> Option<&LeafValue> {
         self.storage.tries.get(account)?.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(slot))
     }
 
@@ -650,7 +651,7 @@ where
     pub fn update_account_leaf(
         &mut self,
         path: Nibbles,
-        value: Vec<u8>,
+        value: LeafValue,
         provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<()> {
         if !self.revealed_account_paths.contains(&path) {
@@ -667,7 +668,7 @@ where
         &mut self,
         address: B256,
         slot: Nibbles,
-        value: Vec<u8>,
+        value: LeafValue,
         provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<()> {
         let provider = provider_factory.storage_node_provider(address);
@@ -717,7 +718,7 @@ where
         let nibbles = Nibbles::unpack(address);
         self.account_rlp_buf.clear();
         account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+        self.update_account_leaf(nibbles, LeafValue::from_slice(&self.account_rlp_buf), provider_factory)?;
 
         Ok(true)
     }
@@ -770,7 +771,7 @@ where
         let nibbles = Nibbles::unpack(address);
         self.account_rlp_buf.clear();
         trie_account.encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+        self.update_account_leaf(nibbles, LeafValue::from_slice(&self.account_rlp_buf), provider_factory)?;
 
         Ok(true)
     }
@@ -1339,15 +1340,15 @@ mod tests {
         let full_path_0 = leaf_key([0x0], 64);
         let _full_path_1 = leaf_key([0x1], 64);
 
-        let leaf_value = alloy_rlp::encode(TrieAccount::default());
+        let leaf_value: LeafValue = LeafValue::from_vec(alloy_rlp::encode(TrieAccount::default()));
         // Leaf key is 63 nibbles (suffix after 1-nibble node path)
         let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
             leaf_key([], 63),
-            leaf_value.clone(),
+            leaf_value.to_vec(),
         )));
         let leaf_2 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
             leaf_key([], 63),
-            leaf_value.clone(),
+            leaf_value.to_vec(),
         )));
 
         let multiproof = MultiProof {
@@ -1406,14 +1407,14 @@ mod tests {
         // Full 64-nibble path
         let full_path_0 = leaf_key([0x0], 64);
 
-        let leaf_value = alloy_rlp::encode(TrieAccount::default());
+        let leaf_value: LeafValue = LeafValue::from_vec(alloy_rlp::encode(TrieAccount::default()));
         let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
             leaf_key([], 63),
-            leaf_value.clone(),
+            leaf_value.to_vec(),
         )));
         let leaf_2 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
             leaf_key([], 63),
-            leaf_value.clone(),
+            leaf_value.to_vec(),
         )));
 
         let multiproof = MultiProof {
@@ -1487,9 +1488,9 @@ mod tests {
         // Full 64-nibble path
         let full_path_0 = leaf_key([0x0], 64);
 
-        let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
-        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
+        let leaf_value: LeafValue = LeafValue::from_vec(alloy_rlp::encode(TrieAccount::default()));
+        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.to_vec()));
+        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.to_vec()));
 
         let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
             key: Nibbles::default(),
@@ -1545,9 +1546,9 @@ mod tests {
         // Full 64-nibble path
         let full_path_0 = leaf_key([0x0], 64);
 
-        let storage_value: Vec<u8> = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
-        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.clone()));
-        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.clone()));
+        let storage_value: LeafValue = LeafValue::from_slice(&alloy_rlp::encode_fixed_size(&U256::from(42)));
+        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.to_vec()));
+        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.to_vec()));
 
         let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
             key: Nibbles::default(),
@@ -1697,7 +1698,7 @@ mod tests {
         sparse
             .update_account_leaf(
                 address_path_3,
-                alloy_rlp::encode(trie_account_3),
+                LeafValue::from_vec(alloy_rlp::encode(trie_account_3)),
                 &provider_factory,
             )
             .unwrap();
@@ -1706,7 +1707,7 @@ mod tests {
             .update_storage_leaf(
                 address_1,
                 slot_path_3,
-                alloy_rlp::encode(value_3),
+                LeafValue::from_vec(alloy_rlp::encode(value_3)),
                 &provider_factory,
             )
             .unwrap();
@@ -1714,7 +1715,7 @@ mod tests {
         sparse
             .update_account_leaf(
                 address_path_1,
-                alloy_rlp::encode(trie_account_1),
+                LeafValue::from_vec(alloy_rlp::encode(trie_account_1)),
                 &provider_factory,
             )
             .unwrap();
@@ -1724,7 +1725,7 @@ mod tests {
         sparse
             .update_account_leaf(
                 address_path_2,
-                alloy_rlp::encode(trie_account_2),
+                LeafValue::from_vec(alloy_rlp::encode(trie_account_2)),
                 &provider_factory,
             )
             .unwrap();
