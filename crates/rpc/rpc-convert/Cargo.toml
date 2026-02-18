@@ -29,7 +29,6 @@ alloy-evm = { workspace = true, features = ["rpc"] }
 # optimism
 op-alloy-consensus = { workspace = true, optional = true }
 op-alloy-rpc-types = { workspace = true, optional = true }
-op-alloy-network = { workspace = true, optional = true }
 
 # io
 jsonrpsee-types.workspace = true
@@ -48,7 +47,6 @@ default = []
 op = [
     "dep:op-alloy-consensus",
     "dep:op-alloy-rpc-types",
-    "dep:op-alloy-network",
     "reth-evm/op",
     "reth-primitives-traits/op",
     "alloy-evm/op",
