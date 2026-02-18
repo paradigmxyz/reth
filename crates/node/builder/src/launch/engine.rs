@@ -2,6 +2,7 @@
 
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
+    deferred_indexer::StageDeferredHistoryIndexer,
     hooks::NodeHooks,
     rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
@@ -174,16 +175,6 @@ impl EngineNodeLauncher {
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config(), "Pruner initialized");
 
-        // Spawn background indexer if history indexing was deferred from the pipeline
-        if ctx.toml_config().stages.deferred_history_indexing {
-            let _indexer_handle = crate::background_indexer::spawn_background_indexer(
-                ctx.provider_factory().clone(),
-                ctx.prune_config().segments,
-                ctx.toml_config().stages.etl.clone(),
-            );
-            info!(target: "reth::cli", "Background history indexer spawned");
-        }
-
         let event_sender = EventSender::default();
 
         let beacon_engine_handle = ConsensusEngineHandle::new(consensus_engine_tx.clone());
@@ -251,6 +242,24 @@ impl EngineNodeLauncher {
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
             changeset_cache,
+            {
+                // Create deferred history indexer if enabled in config
+                #[allow(clippy::if_then_some_else_none)]
+                let deferred_indexer: Option<
+                    Box<dyn reth_engine_tree::persistence::DeferredHistoryIndexer>,
+                > = if ctx.toml_config().stages.deferred_history_indexing {
+                    info!(target: "reth::cli", "Deferred history indexing enabled, embedding indexer in persistence service");
+                    let indexer = StageDeferredHistoryIndexer::new(
+                        ctx.provider_factory().clone(),
+                        &ctx.toml_config().stages,
+                        &ctx.prune_config().segments,
+                    );
+                    Some(Box::new(indexer))
+                } else {
+                    None
+                };
+                deferred_indexer
+            },
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");

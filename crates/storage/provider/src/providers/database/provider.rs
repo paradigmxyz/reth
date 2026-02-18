@@ -164,18 +164,27 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
 /// Mode for [`DatabaseProvider::save_blocks`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveBlocksMode {
-    /// Full mode: write block structure + receipts + state + trie.
+    /// Full mode: write block structure + receipts + state + trie + history indices.
     /// Used by engine/production code.
     Full,
     /// Blocks only: write block structure (headers, txs, senders, indices).
     /// Receipts/state/trie are skipped - they may come later via separate calls.
     /// Used by `insert_block`.
     BlocksOnly,
+    /// Like `Full`, but skips tx-hash lookup and history index writes.
+    /// Used when deferred history indexing is active and the background indexer
+    /// hasn't caught up yet.
+    FullNoHistoryIndexing,
 }
 
 impl SaveBlocksMode {
-    /// Returns `true` if this is [`SaveBlocksMode::Full`].
+    /// Returns `true` if this mode writes state (receipts, changesets, trie).
     pub const fn with_state(self) -> bool {
+        matches!(self, Self::Full | Self::FullNoHistoryIndexing)
+    }
+
+    /// Returns `true` if this mode writes history indices (tx lookup + account/storage history).
+    pub const fn with_history_indexing(self) -> bool {
         matches!(self, Self::Full)
     }
 }
@@ -594,7 +603,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if !self.cached_storage_settings().storage_v2 &&
+            if save_mode.with_history_indexing() &&
+                !self.cached_storage_settings().storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
@@ -679,8 +689,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 timings.write_trie_updates += start.elapsed();
             }
 
-            // Full mode: update history indices
-            if save_mode.with_state() {
+            // Full mode: update history indices (skipped when deferred indexing is catching up)
+            if save_mode.with_history_indexing() {
                 let start = Instant::now();
                 self.update_history_indices(first_number..=last_block_number)?;
                 timings.update_history_indices = start.elapsed();
