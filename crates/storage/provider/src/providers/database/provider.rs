@@ -3597,7 +3597,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
             })?;
         }
 
-        EitherWriter::new_senders(self, last_block_number)?.prune_senders(unwind_tx_from, block)?;
+        // Skip sender pruning when sender_recovery is fully pruned, since no sender data
+        // exists in static files or the database.
+        if self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()) {
+            EitherWriter::new_senders(self, last_block_number)?
+                .prune_senders(unwind_tx_from, block)?;
+        }
 
         self.remove_bodies_above(block)?;
 
