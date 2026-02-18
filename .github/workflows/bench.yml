@@ -102,6 +102,8 @@ jobs:
       warmup: ${{ steps.args.outputs.warmup }}
       baseline: ${{ steps.args.outputs.baseline }}
       feature: ${{ steps.args.outputs.feature }}
+      baseline-name: ${{ steps.args.outputs.baseline-name }}
+      feature-name: ${{ steps.args.outputs.feature-name }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
       - name: Check org membership
@@ -205,12 +207,30 @@ jobs:
               feature = defaults.feature;
             }
 
+            // Resolve display names for baseline/feature
+            let baselineName = baseline || 'main';
+            let featureName = feature;
+            if (!featureName) {
+              if (pr) {
+                const { data: prData } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: parseInt(pr),
+                });
+                featureName = prData.head.ref;
+              } else {
+                featureName = '${{ github.ref_name }}';
+              }
+            }
+
             core.setOutput('pr', pr || '');
             core.setOutput('actor', actor);
             core.setOutput('blocks', blocks);
             core.setOutput('warmup', warmup);
             core.setOutput('baseline', baseline);
             core.setOutput('feature', feature);
+            core.setOutput('baseline-name', baselineName);
+            core.setOutput('feature-name', featureName);
 
       - name: Acknowledge request
         id: ack
@@ -263,8 +283,8 @@ jobs:
             const actor = '${{ steps.args.outputs.actor }}';
             const blocks = '${{ steps.args.outputs.blocks }}';
             const warmup = '${{ steps.args.outputs.warmup }}';
-            const baseline = '${{ steps.args.outputs.baseline }}' || 'merge-base';
-            const feature = '${{ steps.args.outputs.feature }}' || 'branch head';
+            const baseline = '${{ steps.args.outputs.baseline-name }}';
+            const feature = '${{ steps.args.outputs.feature-name }}';
             const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``;
 
             const { data: comment } = await github.rest.issues.createComment({
@@ -286,8 +306,8 @@ jobs:
             const actor = '${{ steps.args.outputs.actor }}';
             const blocks = '${{ steps.args.outputs.blocks }}';
             const warmup = '${{ steps.args.outputs.warmup }}';
-            const baseline = '${{ steps.args.outputs.baseline }}' || 'merge-base';
-            const feature = '${{ steps.args.outputs.feature }}' || 'branch head';
+            const baseline = '${{ steps.args.outputs.baseline-name }}';
+            const feature = '${{ steps.args.outputs.feature-name }}';
             const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
@@ -374,8 +394,8 @@ jobs:
 
             const blocks = process.env.BENCH_BLOCKS;
             const warmup = process.env.BENCH_WARMUP_BLOCKS;
-            const baseline = '${{ needs.reth-bench-ack.outputs.baseline }}' || 'merge-base';
-            const feature = '${{ needs.reth-bench-ack.outputs.feature }}' || 'branch head';
+            const baseline = '${{ needs.reth-bench-ack.outputs.baseline-name }}';
+            const feature = '${{ needs.reth-bench-ack.outputs.feature-name }}';
             core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
