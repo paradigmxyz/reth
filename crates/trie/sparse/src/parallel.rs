@@ -3,8 +3,8 @@ use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, T
 use crate::{
     lower::LowerSparseSubtrie,
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrie,
-    SparseTrieUpdates,
+    LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeState, SparseNodeType,
+    SparseTrie, SparseTrieUpdates,
 };
 use alloc::{borrow::Cow, boxed::Box, vec, vec::Vec};
 use alloy_primitives::{
@@ -392,6 +392,13 @@ impl SparseTrie for ParallelSparseTrie {
         value: Vec<u8>,
         _provider: P,
     ) -> SparseTrieResult<()> {
+        debug_assert_eq!(
+            full_path.len(),
+            B256::len_bytes() * 2,
+            "update_leaf full_path must be 64 nibbles (32 bytes), got {} nibbles",
+            full_path.len()
+        );
+
         trace!(
             target: "trie::parallel_sparse",
             ?full_path,
@@ -553,6 +560,13 @@ impl SparseTrie for ParallelSparseTrie {
         full_path: &Nibbles,
         provider: P,
     ) -> SparseTrieResult<()> {
+        debug_assert_eq!(
+            full_path.len(),
+            B256::len_bytes() * 2,
+            "remove_leaf full_path must be 64 nibbles (32 bytes), got {} nibbles",
+            full_path.len()
+        );
+
         trace!(
             target: "trie::parallel_sparse",
             ?full_path,
@@ -586,8 +600,8 @@ impl SparseTrie for ParallelSparseTrie {
         let mut curr_path = Nibbles::new(); // start traversal from root
         let mut curr_subtrie_type = SparseSubtrieType::Upper;
 
-        // List of node paths which need to have their hashes reset
-        let mut paths_to_reset_hashes = Vec::new();
+        // List of node paths which need to be marked dirty
+        let mut paths_to_mark_dirty = Vec::new();
 
         loop {
             let curr_subtrie = match curr_subtrie_type {
@@ -613,11 +627,9 @@ impl SparseTrie for ParallelSparseTrie {
                     // Any branches/extensions along the path to the leaf will have their `hash`
                     // field unset, as it will no longer be valid once the leaf is removed.
                     match curr_node {
-                        SparseNode::Branch { hash, .. } => {
-                            if hash.is_some() {
-                                paths_to_reset_hashes
-                                    .push((SparseSubtrieType::from_path(&curr_path), curr_path));
-                            }
+                        SparseNode::Branch { .. } => {
+                            paths_to_mark_dirty
+                                .push((SparseSubtrieType::from_path(&curr_path), curr_path));
 
                             // If there is already an extension leading into a branch, then that
                             // extension is no longer relevant.
@@ -631,11 +643,9 @@ impl SparseTrie for ParallelSparseTrie {
                             branch_parent_path = Some(curr_path);
                             branch_parent_node = Some(curr_node.clone());
                         }
-                        SparseNode::Extension { hash, .. } => {
-                            if hash.is_some() {
-                                paths_to_reset_hashes
-                                    .push((SparseSubtrieType::from_path(&curr_path), curr_path));
-                            }
+                        SparseNode::Extension { .. } => {
+                            paths_to_mark_dirty
+                                .push((SparseSubtrieType::from_path(&curr_path), curr_path));
 
                             // We can assume a new branch node will be found after the extension, so
                             // there's no need to modify branch_parent_path/node even if it's
@@ -700,7 +710,7 @@ impl SparseTrie for ParallelSparseTrie {
             }
         };
         leaf_subtrie.inner.values.remove(full_path);
-        for (subtrie_type, path) in paths_to_reset_hashes {
+        for (subtrie_type, path) in paths_to_mark_dirty {
             let node = match subtrie_type {
                 SparseSubtrieType::Upper => self.upper_subtrie.nodes.get_mut(&path),
                 SparseSubtrieType::Lower(idx) => self.lower_subtries[idx]
@@ -712,11 +722,13 @@ impl SparseTrie for ParallelSparseTrie {
             .expect("node exists");
 
             match node {
-                SparseNode::Extension { hash, .. } | SparseNode::Branch { hash, .. } => {
-                    *hash = None
+                SparseNode::Extension { state, .. } | SparseNode::Branch { state, .. } => {
+                    *state = SparseNodeState::Dirty
                 }
                 SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {
-                    unreachable!("only branch and extension node hashes can be reset")
+                    unreachable!(
+                        "only branch and extension nodes can be marked dirty when removing a leaf"
+                    )
                 }
             }
         }
@@ -828,10 +840,15 @@ impl SparseTrie for ParallelSparseTrie {
         self.debug_recorder.record(RecordedOp::Root);
 
         if self.prefix_set.is_empty() &&
-            let Some(hash) =
-                self.upper_subtrie.nodes.get(&Nibbles::default()).and_then(|node| node.hash())
+            let Some(rlp_node) = self
+                .upper_subtrie
+                .nodes
+                .get(&Nibbles::default())
+                .and_then(|node| node.cached_rlp_node())
         {
-            return hash;
+            return rlp_node
+                .as_hash()
+                .expect("RLP-encoding of the root node cannot be less than 32 bytes")
         }
 
         // Update all lower subtrie hashes
@@ -851,7 +868,7 @@ impl SparseTrie for ParallelSparseTrie {
             self.upper_subtrie
                 .nodes
                 .get(&Nibbles::default())
-                .is_some_and(|node| node.hash().is_some())
+                .is_some_and(|node| node.cached_rlp_node().is_some())
     }
 
     #[instrument(level = "trace", target = "trie::sparse::parallel", skip(self))]
@@ -1102,7 +1119,7 @@ impl SparseTrie for ParallelSparseTrie {
         // DFS traversal to find nodes at max_depth that can be pruned.
         // Collects "effective pruned roots" - children of nodes at max_depth with computed hashes.
         // We replace nodes with Hash stubs inline during traversal.
-        let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::new();
+        let mut effective_pruned_roots = Vec::<Nibbles>::new();
         let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
         stack.push((Nibbles::default(), 0));
 
@@ -1165,13 +1182,13 @@ impl SparseTrie for ParallelSparseTrie {
                         .subtrie_for_path(&path_to_prune)
                         .and_then(|s| s.nodes.get(&path_to_prune))
                         .filter(|n| !n.is_hash())
-                        .and_then(|n| n.hash());
+                        .and_then(|n| n.cached_hash());
 
                     if let Some(hash) = hash {
                         // Use untracked access to avoid marking subtrie as modified during pruning
                         if let Some(subtrie) = self.subtrie_for_path_mut_untracked(&path_to_prune) {
                             subtrie.nodes.insert(path_to_prune, SparseNode::Hash(hash));
-                            effective_pruned_roots.push((path_to_prune, hash));
+                            effective_pruned_roots.push(path_to_prune);
                         }
                     }
                 } else {
@@ -1187,7 +1204,7 @@ impl SparseTrie for ParallelSparseTrie {
         let nodes_converted = effective_pruned_roots.len();
 
         // Sort roots by subtrie type (upper first), then by path for efficient partitioning.
-        effective_pruned_roots.sort_unstable_by(|(path_a, _), (path_b, _)| {
+        effective_pruned_roots.sort_unstable_by(|path_a, path_b| {
             let subtrie_type_a = SparseSubtrieType::from_path(path_a);
             let subtrie_type_b = SparseSubtrieType::from_path(path_b);
             subtrie_type_a.cmp(&subtrie_type_b).then(path_a.cmp(path_b))
@@ -1196,7 +1213,7 @@ impl SparseTrie for ParallelSparseTrie {
         // Split off upper subtrie roots (they come first due to sorting)
         let num_upper_roots = effective_pruned_roots
             .iter()
-            .position(|(p, _)| !SparseSubtrieType::path_len_is_upper(p.len()))
+            .position(|p| !SparseSubtrieType::path_len_is_upper(p.len()))
             .unwrap_or(effective_pruned_roots.len());
 
         let roots_upper = &effective_pruned_roots[..num_upper_roots];
@@ -1204,7 +1221,7 @@ impl SparseTrie for ParallelSparseTrie {
 
         debug_assert!(
             {
-                let mut all_roots: Vec<_> = effective_pruned_roots.iter().map(|(p, _)| p).collect();
+                let mut all_roots: Vec<_> = effective_pruned_roots.iter().collect();
                 all_roots.sort_unstable();
                 all_roots.windows(2).all(|w| !w[1].starts_with(w[0]))
             },
@@ -1216,8 +1233,8 @@ impl SparseTrie for ParallelSparseTrie {
         if !roots_upper.is_empty() {
             for subtrie in &mut *self.lower_subtries {
                 let should_clear = subtrie.as_revealed_ref().is_some_and(|s| {
-                    let search_idx = roots_upper.partition_point(|(root, _)| root <= &s.path);
-                    search_idx > 0 && s.path.starts_with(&roots_upper[search_idx - 1].0)
+                    let search_idx = roots_upper.partition_point(|root| root <= &s.path);
+                    search_idx > 0 && s.path.starts_with(&roots_upper[search_idx - 1])
                 });
                 if should_clear {
                     subtrie.clear();
@@ -1232,10 +1249,10 @@ impl SparseTrie for ParallelSparseTrie {
         });
 
         // Process lower subtries using chunk_by to group roots by subtrie
-        for roots_group in roots_lower.chunk_by(|(path_a, _), (path_b, _)| {
+        for roots_group in roots_lower.chunk_by(|path_a, path_b| {
             SparseSubtrieType::from_path(path_a) == SparseSubtrieType::from_path(path_b)
         }) {
-            let subtrie_idx = path_subtrie_index_unchecked(&roots_group[0].0);
+            let subtrie_idx = path_subtrie_index_unchecked(&roots_group[0]);
 
             // Skip unrevealed/blinded subtries - nothing to prune
             let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() else {
@@ -1534,7 +1551,7 @@ impl ParallelSparseTrie {
             // If empty node is found it means the subtrie doesn't have any nodes in it, let alone
             // the target leaf.
             SparseNode::Empty => FindNextToLeafOutcome::NotFound,
-            SparseNode::Hash(hash) => FindNextToLeafOutcome::BlindedNode(*hash),
+            SparseNode::Hash(rlp_node) => FindNextToLeafOutcome::BlindedNode(*rlp_node),
             SparseNode::Leaf { key, .. } => {
                 let mut found_full_path = *from_path;
                 found_full_path.extend(key);
@@ -1899,11 +1916,11 @@ impl ParallelSparseTrie {
                     .nodes
                     .get_mut(&path)
                     .expect("lower subtrie node must exist");
-                // Lower subtrie root node hashes must be computed before updating upper subtrie
+                // Lower subtrie root node RLP nodes must be computed before updating upper subtrie
                 // hashes
                 debug_assert!(
-                    node.hash().is_some(),
-                    "Lower subtrie root node at path {path:?} has no hash"
+                    node.cached_rlp_node().is_some(),
+                    "Lower subtrie root node {node:?} at path {path:?} has no cached RLP node"
                 );
                 node
             };
@@ -1969,7 +1986,10 @@ impl ParallelSparseTrie {
         for (index, subtrie) in self.lower_subtries.iter_mut().enumerate() {
             if let Some(subtrie) = subtrie.take_revealed_if(|subtrie| {
                 prefix_set.contains(&subtrie.path) ||
-                    subtrie.nodes.get(&subtrie.path).is_some_and(|n| n.hash().is_none())
+                    subtrie
+                        .nodes
+                        .get(&subtrie.path)
+                        .is_some_and(|n| n.cached_rlp_node().is_none())
             }) {
                 let prefix_set = if prefix_set.all() {
                     unchanged_prefix_set = PrefixSetMut::all();
@@ -2676,10 +2696,12 @@ impl SparseSubtrie {
                             state_mask,
                             // Memoize the hash of a previously blinded node in a new branch
                             // node.
-                            hash: Some(*hash),
-                            store_in_db_trie: Some(masks.is_some_and(|m| {
-                                !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
-                            })),
+                            state: SparseNodeState::Cached {
+                                rlp_node: RlpNode::word_rlp(hash),
+                                store_in_db_trie: Some(masks.is_some_and(|m| {
+                                    !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
+                                })),
+                            },
                         });
                     }
                     // Branch already revealed, do nothing
@@ -2687,13 +2709,17 @@ impl SparseSubtrie {
                 }
             }
             Entry::Vacant(entry) => {
-                entry.insert(SparseNode::Branch {
-                    state_mask,
-                    hash: rlp_node.as_ref().and_then(|n| n.as_hash()),
-                    store_in_db_trie: Some(
-                        masks.is_some_and(|m| !m.hash_mask.is_empty() || !m.tree_mask.is_empty()),
-                    ),
-                });
+                let state =
+                    match rlp_node.as_ref() {
+                        Some(rlp_node) => SparseNodeState::Cached {
+                            rlp_node: rlp_node.clone(),
+                            store_in_db_trie: Some(masks.is_some_and(|m| {
+                                !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
+                            })),
+                        },
+                        None => SparseNodeState::Dirty,
+                    };
+                entry.insert(SparseNode::Branch { state_mask, state });
             }
         }
 
@@ -2783,30 +2809,23 @@ impl SparseSubtrie {
                                 // Replace a hash node with a revealed extension node.
                                 entry.insert(SparseNode::Extension {
                                     key: branch.key,
-                                    // Memoize the hash of a previously blinded node in a new
-                                    // extension node.
-                                    hash: Some(*hash),
-                                    // Inherit `store_in_db_trie` from the child branch
-                                    // node masks so that the memoized hash can be used
-                                    // without needing to fetch the child branch.
-                                    store_in_db_trie: Some(masks.is_some_and(|m| {
-                                        !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
-                                    })),
+                                    state: SparseNodeState::Cached {
+                                        // Memoize the hash of a previously blinded node in a new
+                                        // extension node.
+                                        rlp_node: RlpNode::word_rlp(hash),
+                                        // Inherit `store_in_db_trie` from the child branch
+                                        // node masks so that the memoized hash can be used
+                                        // without needing to fetch the child branch.
+                                        store_in_db_trie: Some(masks.is_some_and(|m| {
+                                            !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
+                                        })),
+                                    },
                                 });
                             }
                             _ => unreachable!("checked that node is either a hash or non-existent"),
                         },
                         Entry::Vacant(entry) => {
-                            entry.insert(SparseNode::Extension {
-                                key: branch.key,
-                                hash: None,
-                                // Inherit `store_in_db_trie` from the child branch
-                                // node masks so that the memoized hash can be used
-                                // without needing to fetch the child branch.
-                                store_in_db_trie: Some(masks.is_some_and(|m| {
-                                    !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
-                                })),
-                            });
+                            entry.insert(SparseNode::new_ext(branch.key));
                         }
                     }
                 }
@@ -2836,10 +2855,12 @@ impl SparseSubtrie {
                         child_path.extend(&ext.key);
                         entry.insert(SparseNode::Extension {
                             key: ext.key,
-                            // Memoize the hash of a previously blinded node in a new extension
-                            // node.
-                            hash: Some(*hash),
-                            store_in_db_trie: None,
+                            state: SparseNodeState::Cached {
+                                // Memoize the hash of a previously blinded node in the new
+                                // extension node.
+                                rlp_node: RlpNode::word_rlp(hash),
+                                store_in_db_trie: None,
+                            },
                         });
                         if Self::is_child_same_level(&path, &child_path) {
                             self.reveal_node_or_hash(child_path, &ext.child)?;
@@ -2895,9 +2916,12 @@ impl SparseSubtrie {
                         SparseNode::Hash(hash) => {
                             entry.insert(SparseNode::Leaf {
                                 key: leaf.key,
-                                // Memoize the hash of a previously blinded node in a new leaf
-                                // node.
-                                hash: Some(*hash),
+                                state: SparseNodeState::Cached {
+                                    // Memoize the hash of a previously blinded node in the new leaf
+                                    // node.
+                                    rlp_node: RlpNode::word_rlp(hash),
+                                    store_in_db_trie: Some(false),
+                                },
                             });
                         }
                         _ => unreachable!("checked that node is either a hash or non-existent"),
@@ -3127,43 +3151,54 @@ impl SparseSubtrieInner {
                 // Return pre-computed hash of a blinded node immediately
                 (RlpNode::word_rlp(hash), SparseNodeType::Hash)
             }
-            SparseNode::Leaf { key, hash } => {
+            SparseNode::Leaf { key, state } => {
                 let mut path = path;
                 path.extend(key);
                 let value = self.values.get(&path);
-                if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path) || value.is_none())
-                {
-                    // If the node hash is already computed, and either the node path is not in
-                    // the prefix set or the leaf doesn't belong to the current trie (its value is
-                    // absent), return the pre-computed hash
-                    (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
+
+                // Check if we should use cached RLP:
+                // - If there's a cached RLP and the path is not in prefix_set, use cached
+                // - If the value is not in this subtrie's values (e.g., lower subtrie leaf being
+                //   processed via upper subtrie), we must use cached RLP
+                let cached_rlp_node = state.cached_rlp_node();
+                let use_cached =
+                    cached_rlp_node.is_some() && (!prefix_set_contains(&path) || value.is_none());
+
+                if let Some(rlp_node) = use_cached.then(|| cached_rlp_node.unwrap()) {
+                    // Return the cached RLP
+                    (rlp_node.clone(), SparseNodeType::Leaf)
                 } else {
-                    // Encode the leaf node and update its hash
-                    let value = self.values.get(&path).unwrap();
+                    // Encode the leaf node and update its RlpNode
+                    let value = value.expect("leaf value must exist in subtrie");
                     self.buffers.rlp_buf.clear();
                     let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.buffers.rlp_buf);
-                    *hash = rlp_node.as_hash();
+                    *state = SparseNodeState::Cached {
+                        rlp_node: rlp_node.clone(),
+                        store_in_db_trie: Some(false),
+                    };
                     trace!(
                         target: "trie::parallel_sparse",
                         ?path,
                         ?key,
                         value = %alloy_primitives::hex::encode(value),
-                        ?hash,
-                        "Calculated leaf hash",
+                        ?rlp_node,
+                        "Calculated leaf RLP node",
                     );
                     (rlp_node, SparseNodeType::Leaf)
                 }
             }
-            SparseNode::Extension { key, hash, store_in_db_trie } => {
+            SparseNode::Extension { key, state } => {
                 let mut child_path = path;
                 child_path.extend(key);
-                if let Some((hash, store_in_db_trie)) =
-                    hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
+                if let Some((rlp_node, store_in_db_trie)) = state
+                    .cached_rlp_node()
+                    .zip(state.store_in_db_trie())
+                    .filter(|_| !prefix_set_contains(&path))
                 {
-                    // If the node hash is already computed, and the node path is not in
-                    // the prefix set, return the pre-computed hash
+                    // If the node is already computed, and the node path is not in
+                    // the prefix set, return the pre-computed node
                     (
-                        RlpNode::word_rlp(&hash),
+                        rlp_node.clone(),
                         SparseNodeType::Extension { store_in_db_trie: Some(store_in_db_trie) },
                     )
                 } else if self.buffers.rlp_node_stack.last().is_some_and(|e| e.path == child_path) {
@@ -3174,7 +3209,6 @@ impl SparseSubtrieInner {
                     self.buffers.rlp_buf.clear();
                     let rlp_node =
                         ExtensionNodeRef::new(key, &child).rlp(&mut self.buffers.rlp_buf);
-                    *hash = rlp_node.as_hash();
 
                     let store_in_db_trie_value = child_node_type.store_in_db_trie();
 
@@ -3186,7 +3220,10 @@ impl SparseSubtrieInner {
                         "Extension node"
                     );
 
-                    *store_in_db_trie = store_in_db_trie_value;
+                    *state = SparseNodeState::Cached {
+                        rlp_node: rlp_node.clone(),
+                        store_in_db_trie: store_in_db_trie_value,
+                    };
 
                     (
                         rlp_node,
@@ -3209,11 +3246,12 @@ impl SparseSubtrieInner {
                     return
                 }
             }
-            SparseNode::Branch { state_mask, hash, store_in_db_trie } => {
-                if let Some((hash, store_in_db_trie)) =
-                    hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
+            SparseNode::Branch { state_mask, state } => {
+                if let Some((rlp_node, store_in_db_trie)) = state
+                    .cached_rlp_node()
+                    .zip(state.store_in_db_trie())
+                    .filter(|_| !prefix_set_contains(&path))
                 {
-                    let rlp_node = RlpNode::word_rlp(&hash);
                     let node_type =
                         SparseNodeType::Branch { store_in_db_trie: Some(store_in_db_trie) };
 
@@ -3229,7 +3267,7 @@ impl SparseSubtrieInner {
                     // the prefix set, return the pre-computed hash
                     self.buffers.rlp_node_stack.push(RlpNodeStackItem {
                         path,
-                        rlp_node,
+                        rlp_node: rlp_node.clone(),
                         node_type,
                     });
                     return
@@ -3344,7 +3382,6 @@ impl SparseSubtrieInner {
                 let branch_node_ref =
                     BranchNodeRef::new(&self.buffers.branch_value_stack_buf, *state_mask);
                 let rlp_node = branch_node_ref.rlp(&mut self.buffers.rlp_buf);
-                *hash = rlp_node.as_hash();
 
                 // Save a branch node update only if it's not a root node, and we need to
                 // persist updates.
@@ -3356,13 +3393,8 @@ impl SparseSubtrieInner {
                         // Store in DB trie if there are either any children that are stored in
                         // the DB trie, or any children represent hashed values
                         hashes.reverse();
-                        let branch_node = BranchNodeCompact::new(
-                            *state_mask,
-                            tree_mask,
-                            hash_mask,
-                            hashes,
-                            hash.filter(|_| path.is_empty()),
-                        );
+                        let branch_node =
+                            BranchNodeCompact::new(*state_mask, tree_mask, hash_mask, hashes, None);
                         update_actions
                             .push(SparseTrieUpdatesAction::InsertUpdated(path, branch_node));
                     } else {
@@ -3382,7 +3414,11 @@ impl SparseSubtrieInner {
                 } else {
                     false
                 };
-                *store_in_db_trie = Some(store_in_db_trie_value);
+
+                *state = SparseNodeState::Cached {
+                    rlp_node: rlp_node.clone(),
+                    store_in_db_trie: Some(store_in_db_trie_value),
+                };
 
                 (
                     rlp_node,
@@ -3584,14 +3620,14 @@ fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
 ///
 /// Uses binary search to find the candidate root that could be an ancestor.
 /// Returns `true` if `path` starts with a root and is longer (strict descendant).
-fn is_strict_descendant_in(roots: &[(Nibbles, B256)], path: &Nibbles) -> bool {
+fn is_strict_descendant_in(roots: &[Nibbles], path: &Nibbles) -> bool {
     if roots.is_empty() {
         return false;
     }
-    debug_assert!(roots.windows(2).all(|w| w[0].0 <= w[1].0), "roots must be sorted by path");
-    let idx = roots.partition_point(|(root, _)| root <= path);
+    debug_assert!(roots.windows(2).all(|w| w[0] <= w[1]), "roots must be sorted by path");
+    let idx = roots.partition_point(|root| root <= path);
     if idx > 0 {
-        let candidate = &roots[idx - 1].0;
+        let candidate = &roots[idx - 1];
         if path.starts_with(candidate) && path.len() > candidate.len() {
             return true;
         }
@@ -3603,14 +3639,14 @@ fn is_strict_descendant_in(roots: &[(Nibbles, B256)], path: &Nibbles) -> bool {
 ///
 /// Uses binary search to find the candidate root that could be a prefix.
 /// Returns `true` if `path` starts with a root (including exact match).
-fn starts_with_pruned_in(roots: &[(Nibbles, B256)], path: &Nibbles) -> bool {
+fn starts_with_pruned_in(roots: &[Nibbles], path: &Nibbles) -> bool {
     if roots.is_empty() {
         return false;
     }
-    debug_assert!(roots.windows(2).all(|w| w[0].0 <= w[1].0), "roots must be sorted by path");
-    let idx = roots.partition_point(|(root, _)| root <= path);
+    debug_assert!(roots.windows(2).all(|w| w[0] <= w[1]), "roots must be sorted by path");
+    let idx = roots.partition_point(|root| root <= path);
     if idx > 0 {
-        let candidate = &roots[idx - 1].0;
+        let candidate = &roots[idx - 1];
         if path.starts_with(candidate) {
             return true;
         }
@@ -3639,6 +3675,7 @@ mod tests {
     use crate::{
         parallel::ChangedSubtrie,
         provider::{DefaultTrieNodeProvider, RevealedNode, TrieNodeProvider},
+        trie::SparseNodeState,
         LeafLookup, LeafLookupError, SparseNode, SparseTrie, SparseTrieUpdates,
     };
     use alloy_primitives::{
@@ -3678,6 +3715,15 @@ mod tests {
             0;
             B256::len_bytes() * 2 - nibbles.len()
         ]));
+        nibbles
+    }
+
+    /// Create a leaf key (suffix) for a leaf at a given position depth.
+    /// `suffix` contains the non-zero nibbles, padded with zeros to reach `total_len`.
+    fn leaf_key(suffix: impl AsRef<[u8]>, total_len: usize) -> Nibbles {
+        let suffix = suffix.as_ref();
+        let mut nibbles = Nibbles::from_nibbles(suffix);
+        nibbles.extend(&Nibbles::from_nibbles_unchecked(vec![0; total_len - suffix.len()]));
         nibbles
     }
 
@@ -3785,13 +3831,18 @@ mod tests {
             paths
                 .iter()
                 .enumerate()
-                .map(|(i, path)| (Nibbles::from_nibbles(path), encode_account_value(i as u64 + 1)))
+                .map(|(i, path)| {
+                    (
+                        pad_nibbles_right(Nibbles::from_nibbles(path)),
+                        encode_account_value(i as u64 + 1),
+                    )
+                })
                 .collect()
         }
 
         /// Create a single test leaf with the given path and value nonce
         fn create_test_leaf(&self, path: impl AsRef<[u8]>, value_nonce: u64) -> (Nibbles, Vec<u8>) {
-            (Nibbles::from_nibbles(path), encode_account_value(value_nonce))
+            (pad_nibbles_right(Nibbles::from_nibbles(path)), encode_account_value(value_nonce))
         }
 
         /// Update multiple leaves in the trie
@@ -4258,7 +4309,7 @@ mod tests {
 
             assert_matches!(
                 trie.upper_subtrie.nodes.get(&path),
-                Some(SparseNode::Leaf { key, hash: Some(_) })
+                Some(SparseNode::Leaf { key, state: SparseNodeState::Cached { .. } })
                 if key == &Nibbles::from_nibbles([0x2, 0x3])
             );
 
@@ -4302,7 +4353,7 @@ mod tests {
 
             assert_matches!(
                 lower_subtrie.nodes.get(&path),
-                Some(SparseNode::Leaf { key, hash: Some(_) })
+                Some(SparseNode::Leaf { key, state: SparseNodeState::Cached { .. } })
                 if key == &Nibbles::from_nibbles([0x3, 0x4])
             );
         }
@@ -4333,7 +4384,7 @@ mod tests {
 
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
-            Some(SparseNode::Extension { key, hash: None, .. })
+            Some(SparseNode::Extension { key, state: SparseNodeState::Dirty, .. })
             if key == &Nibbles::from_nibbles([0x1])
         );
 
@@ -4353,7 +4404,7 @@ mod tests {
         // Extension node should be in upper trie
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
-            Some(SparseNode::Extension { key, hash: None, .. })
+            Some(SparseNode::Extension { key, state: SparseNodeState::Dirty, .. })
             if key == &Nibbles::from_nibbles([0x1, 0x2, 0x3])
         );
 
@@ -4384,7 +4435,7 @@ mod tests {
         // Extension node should be in upper trie, hash is memoized from the previous Hash node
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
-            Some(SparseNode::Extension { key, hash: Some(_), .. })
+            Some(SparseNode::Extension { key, state: SparseNodeState::Cached { .. }, .. })
             if key == &Nibbles::from_nibbles([0x2])
         );
 
@@ -4412,7 +4463,7 @@ mod tests {
         // Branch node should be in upper trie
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
-            Some(SparseNode::Branch { state_mask, hash: None, .. })
+            Some(SparseNode::Branch { state_mask, state: SparseNodeState::Dirty, .. })
             if *state_mask == 0b0000000000100001.into()
         );
 
@@ -4450,7 +4501,7 @@ mod tests {
         // Branch node should be in upper trie, hash is memoized from the previous Hash node
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
-            Some(SparseNode::Branch { state_mask, hash: Some(_), .. })
+            Some(SparseNode::Branch { state_mask, state: SparseNodeState::Cached { .. }, .. })
             if *state_mask == 0b1000000010000001.into()
         );
 
@@ -4646,34 +4697,37 @@ mod tests {
         // Compare hashes between hash builder and subtrie
         let hash_builder_branch_1_hash =
             RlpNode::from_rlp(proof_nodes.get(&branch_1_path).unwrap().as_ref()).as_hash().unwrap();
-        let subtrie_branch_1_hash = subtrie.nodes.get(&branch_1_path).unwrap().hash().unwrap();
+        let subtrie_branch_1_hash =
+            subtrie.nodes.get(&branch_1_path).unwrap().cached_hash().unwrap();
         assert_eq!(hash_builder_branch_1_hash, subtrie_branch_1_hash);
 
         let hash_builder_extension_hash =
             RlpNode::from_rlp(proof_nodes.get(&extension_path).unwrap().as_ref())
                 .as_hash()
                 .unwrap();
-        let subtrie_extension_hash = subtrie.nodes.get(&extension_path).unwrap().hash().unwrap();
+        let subtrie_extension_hash =
+            subtrie.nodes.get(&extension_path).unwrap().cached_hash().unwrap();
         assert_eq!(hash_builder_extension_hash, subtrie_extension_hash);
 
         let hash_builder_branch_2_hash =
             RlpNode::from_rlp(proof_nodes.get(&branch_2_path).unwrap().as_ref()).as_hash().unwrap();
-        let subtrie_branch_2_hash = subtrie.nodes.get(&branch_2_path).unwrap().hash().unwrap();
+        let subtrie_branch_2_hash =
+            subtrie.nodes.get(&branch_2_path).unwrap().cached_hash().unwrap();
         assert_eq!(hash_builder_branch_2_hash, subtrie_branch_2_hash);
 
-        let subtrie_leaf_1_hash = subtrie.nodes.get(&leaf_1_path).unwrap().hash().unwrap();
+        let subtrie_leaf_1_hash = subtrie.nodes.get(&leaf_1_path).unwrap().cached_hash().unwrap();
         let hash_builder_leaf_1_hash =
             RlpNode::from_rlp(proof_nodes.get(&leaf_1_path).unwrap().as_ref()).as_hash().unwrap();
         assert_eq!(hash_builder_leaf_1_hash, subtrie_leaf_1_hash);
 
         let hash_builder_leaf_2_hash =
             RlpNode::from_rlp(proof_nodes.get(&leaf_2_path).unwrap().as_ref()).as_hash().unwrap();
-        let subtrie_leaf_2_hash = subtrie.nodes.get(&leaf_2_path).unwrap().hash().unwrap();
+        let subtrie_leaf_2_hash = subtrie.nodes.get(&leaf_2_path).unwrap().cached_hash().unwrap();
         assert_eq!(hash_builder_leaf_2_hash, subtrie_leaf_2_hash);
 
         let hash_builder_leaf_3_hash =
             RlpNode::from_rlp(proof_nodes.get(&leaf_3_path).unwrap().as_ref()).as_hash().unwrap();
-        let subtrie_leaf_3_hash = subtrie.nodes.get(&leaf_3_path).unwrap().hash().unwrap();
+        let subtrie_leaf_3_hash = subtrie.nodes.get(&leaf_3_path).unwrap().cached_hash().unwrap();
         assert_eq!(hash_builder_leaf_3_hash, subtrie_leaf_3_hash);
     }
 
@@ -4704,16 +4758,13 @@ mod tests {
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
-                    SparseNode::new_leaf(Nibbles::new()),
+                    SparseNode::new_leaf(leaf_key([], 59)),
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]),
-                    SparseNode::new_leaf(Nibbles::new()),
+                    SparseNode::new_leaf(leaf_key([], 59)),
                 ),
-                (
-                    Nibbles::from_nibbles([0x5, 0x3]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x7])),
-                ),
+                (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_leaf(leaf_key([0x7], 62))),
             ]
             .into_iter(),
         );
@@ -4721,7 +4772,7 @@ mod tests {
         let provider = MockTrieNodeProvider::new();
 
         // Remove the leaf with a full path of 0x537
-        let leaf_full_path = Nibbles::from_nibbles([0x5, 0x3, 0x7]);
+        let leaf_full_path = pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x3, 0x7]));
         trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
@@ -4759,14 +4810,8 @@ mod tests {
         let mut trie = new_test_trie(
             [
                 (Nibbles::default(), SparseNode::new_branch(TrieMask::new(0b0011))),
-                (
-                    Nibbles::from_nibbles([0x0]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x1, 0x2])),
-                ),
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x3, 0x4])),
-                ),
+                (Nibbles::from_nibbles([0x0]), SparseNode::new_leaf(leaf_key([0x1, 0x2], 63))),
+                (Nibbles::from_nibbles([0x1]), SparseNode::new_leaf(leaf_key([0x3, 0x4], 63))),
             ]
             .into_iter(),
         );
@@ -4781,7 +4826,7 @@ mod tests {
         let provider = MockTrieNodeProvider::new();
 
         // Remove the leaf with a full path of 0x012
-        let leaf_full_path = Nibbles::from_nibbles([0x0, 0x1, 0x2]);
+        let leaf_full_path = pad_nibbles_right(Nibbles::from_nibbles([0x0, 0x1, 0x2]));
         trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
@@ -4793,7 +4838,7 @@ mod tests {
         assert_matches!(
             upper_subtrie.nodes.get(&Nibbles::default()),
             Some(SparseNode::Leaf{ key, ..})
-            if key == &Nibbles::from_nibbles([0x1, 0x3, 0x4])
+            if key == &pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x3, 0x4]))
         );
 
         // Check that the remaining child node was removed
@@ -4825,14 +4870,8 @@ mod tests {
             [
                 (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
                 (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(TrieMask::new(0b0011))),
-                (
-                    Nibbles::from_nibbles([0x5, 0x0]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x1, 0x2])),
-                ),
-                (
-                    Nibbles::from_nibbles([0x5, 0x1]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x3, 0x4])),
-                ),
+                (Nibbles::from_nibbles([0x5, 0x0]), SparseNode::new_leaf(leaf_key([0x1, 0x2], 62))),
+                (Nibbles::from_nibbles([0x5, 0x1]), SparseNode::new_leaf(leaf_key([0x3, 0x4], 62))),
             ]
             .into_iter(),
         );
@@ -4840,7 +4879,7 @@ mod tests {
         let provider = MockTrieNodeProvider::new();
 
         // Remove the leaf with a full path of 0x5012
-        let leaf_full_path = Nibbles::from_nibbles([0x5, 0x0, 0x1, 0x2]);
+        let leaf_full_path = pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x0, 0x1, 0x2]));
         trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
@@ -4852,14 +4891,14 @@ mod tests {
         assert_matches!(trie.lower_subtries[0x51].as_revealed_ref(), None);
 
         // Check that the other leaf's value was moved to the upper trie
-        let other_leaf_full_value = Nibbles::from_nibbles([0x5, 0x1, 0x3, 0x4]);
+        let other_leaf_full_value = pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x1, 0x3, 0x4]));
         assert_matches!(upper_subtrie.inner.values.get(&other_leaf_full_value), Some(_));
 
         // Check that the extension node collapsed into a leaf node
         assert_matches!(
             upper_subtrie.nodes.get(&Nibbles::default()),
             Some(SparseNode::Leaf{ key, ..})
-            if key == &Nibbles::from_nibbles([0x5, 0x1, 0x3, 0x4])
+            if key == &pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x1, 0x3, 0x4]))
         );
 
         // Check that intermediate nodes were removed
@@ -4880,19 +4919,10 @@ mod tests {
         let mut trie = new_test_trie(
             [
                 (Nibbles::default(), SparseNode::new_branch(TrieMask::new(0b0101))),
-                (
-                    Nibbles::from_nibbles([0x0]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x1, 0x2])),
-                ),
+                (Nibbles::from_nibbles([0x0]), SparseNode::new_leaf(leaf_key([0x1, 0x2], 63))),
                 (Nibbles::from_nibbles([0x2]), SparseNode::new_branch(TrieMask::new(0b0011))),
-                (
-                    Nibbles::from_nibbles([0x2, 0x0]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x3, 0x4])),
-                ),
-                (
-                    Nibbles::from_nibbles([0x2, 0x1]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x5, 0x6])),
-                ),
+                (Nibbles::from_nibbles([0x2, 0x0]), SparseNode::new_leaf(leaf_key([0x3, 0x4], 62))),
+                (Nibbles::from_nibbles([0x2, 0x1]), SparseNode::new_leaf(leaf_key([0x5, 0x6], 62))),
             ]
             .into_iter(),
         );
@@ -4900,7 +4930,7 @@ mod tests {
         let provider = MockTrieNodeProvider::new();
 
         // Remove the leaf with a full path of 0x2034
-        let leaf_full_path = Nibbles::from_nibbles([0x2, 0x0, 0x3, 0x4]);
+        let leaf_full_path = pad_nibbles_right(Nibbles::from_nibbles([0x2, 0x0, 0x3, 0x4]));
         trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
@@ -4912,7 +4942,7 @@ mod tests {
         assert_matches!(trie.lower_subtries[0x21].as_revealed_ref(), None);
 
         // Check that the other leaf's value was moved to the upper trie
-        let other_leaf_full_value = Nibbles::from_nibbles([0x2, 0x1, 0x5, 0x6]);
+        let other_leaf_full_value = pad_nibbles_right(Nibbles::from_nibbles([0x2, 0x1, 0x5, 0x6]));
         assert_matches!(upper_subtrie.inner.values.get(&other_leaf_full_value), Some(_));
 
         // Check that the root branch still exists unchanged
@@ -4926,7 +4956,7 @@ mod tests {
         assert_matches!(
             upper_subtrie.nodes.get(&Nibbles::from_nibbles([0x2])),
             Some(SparseNode::Leaf{ key, ..})
-            if key == &Nibbles::from_nibbles([0x1, 0x5, 0x6])
+            if key == &leaf_key([0x1, 0x5, 0x6], 63)
         );
     }
 
@@ -4954,7 +4984,7 @@ mod tests {
                 ),
                 (
                     Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x3]),
-                    SparseNode::new_leaf(Nibbles::default()),
+                    SparseNode::new_leaf(leaf_key([], 60)),
                 ),
                 (
                     Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]),
@@ -4966,11 +4996,11 @@ mod tests {
                 ),
                 (
                     Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x0]),
-                    SparseNode::new_leaf(Nibbles::default()),
+                    SparseNode::new_leaf(leaf_key([], 58)),
                 ),
                 (
                     Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x1]),
-                    SparseNode::new_leaf(Nibbles::default()),
+                    SparseNode::new_leaf(leaf_key([], 58)),
                 ),
             ]
             .into_iter(),
@@ -4987,7 +5017,7 @@ mod tests {
         );
 
         // Remove the leaf at 0x1233
-        let leaf_full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x3]);
+        let leaf_full_path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x3]));
         trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         // After removal:
@@ -5024,10 +5054,7 @@ mod tests {
         let mut trie = new_test_trie(
             [
                 (Nibbles::default(), SparseNode::new_branch(TrieMask::new(0b0011))),
-                (
-                    Nibbles::from_nibbles([0x0]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x1, 0x2])),
-                ),
+                (Nibbles::from_nibbles([0x0]), SparseNode::new_leaf(leaf_key([0x1, 0x2], 63))),
                 (Nibbles::from_nibbles([0x1]), SparseNode::Hash(B256::repeat_byte(0xab))),
             ]
             .into_iter(),
@@ -5035,7 +5062,7 @@ mod tests {
 
         // Create a mock provider that will reveal the blinded leaf
         let mut provider = MockTrieNodeProvider::new();
-        let revealed_leaf = create_leaf_node([0x3, 0x4], 42);
+        let revealed_leaf = create_leaf_node(leaf_key([0x3, 0x4], 63).to_vec(), 42);
         let mut encoded = Vec::new();
         revealed_leaf.encode(&mut encoded);
         provider.add_revealed_node(
@@ -5044,7 +5071,7 @@ mod tests {
         );
 
         // Remove the leaf with a full path of 0x012
-        let leaf_full_path = Nibbles::from_nibbles([0x0, 0x1, 0x2]);
+        let leaf_full_path = pad_nibbles_right(Nibbles::from_nibbles([0x0, 0x1, 0x2]));
         trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
@@ -5056,7 +5083,7 @@ mod tests {
         assert_matches!(
             upper_subtrie.nodes.get(&Nibbles::default()),
             Some(SparseNode::Leaf{ key, ..})
-            if key == &Nibbles::from_nibbles([0x1, 0x3, 0x4])
+            if key == &pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x3, 0x4]))
         );
 
         // Check that the remaining child node was removed (since it was merged)
@@ -5072,13 +5099,13 @@ mod tests {
         //
         let mut trie = new_test_trie(core::iter::once((
             Nibbles::default(),
-            SparseNode::new_leaf(Nibbles::from_nibbles([0x1, 0x2, 0x3])),
+            SparseNode::new_leaf(pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3]))),
         )));
 
         let provider = MockTrieNodeProvider::new();
 
         // Remove the leaf with a full key of 0x123
-        let leaf_full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        let leaf_full_path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3]));
         trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
@@ -5106,58 +5133,59 @@ mod tests {
         // extension at 0x0, branch at 0x01) should have their hash field unset
         //
 
+        let make_revealed = |hash: B256| SparseNodeState::Cached {
+            rlp_node: RlpNode::word_rlp(&hash),
+            store_in_db_trie: None,
+        };
         let mut trie = new_test_trie(
             [
                 (
                     Nibbles::default(),
                     SparseNode::Branch {
                         state_mask: TrieMask::new(0b0011),
-                        hash: Some(B256::repeat_byte(0x10)),
-                        store_in_db_trie: None,
+                        state: make_revealed(B256::repeat_byte(0x10)),
                     },
                 ),
                 (
                     Nibbles::from_nibbles([0x0]),
                     SparseNode::Extension {
                         key: Nibbles::from_nibbles([0x1]),
-                        hash: Some(B256::repeat_byte(0x20)),
-                        store_in_db_trie: None,
+                        state: make_revealed(B256::repeat_byte(0x20)),
                     },
                 ),
                 (
                     Nibbles::from_nibbles([0x0, 0x1]),
                     SparseNode::Branch {
                         state_mask: TrieMask::new(0b11100),
-                        hash: Some(B256::repeat_byte(0x30)),
-                        store_in_db_trie: None,
+                        state: make_revealed(B256::repeat_byte(0x30)),
                     },
                 ),
                 (
                     Nibbles::from_nibbles([0x0, 0x1, 0x2]),
                     SparseNode::Leaf {
-                        key: Nibbles::from_nibbles([0x3, 0x4]),
-                        hash: Some(B256::repeat_byte(0x40)),
+                        key: leaf_key([0x3, 0x4], 61),
+                        state: make_revealed(B256::repeat_byte(0x40)),
                     },
                 ),
                 (
                     Nibbles::from_nibbles([0x0, 0x1, 0x3]),
                     SparseNode::Leaf {
-                        key: Nibbles::from_nibbles([0x5, 0x6]),
-                        hash: Some(B256::repeat_byte(0x50)),
+                        key: leaf_key([0x5, 0x6], 61),
+                        state: make_revealed(B256::repeat_byte(0x50)),
                     },
                 ),
                 (
                     Nibbles::from_nibbles([0x0, 0x1, 0x4]),
                     SparseNode::Leaf {
-                        key: Nibbles::from_nibbles([0x6, 0x7]),
-                        hash: Some(B256::repeat_byte(0x60)),
+                        key: leaf_key([0x6, 0x7], 61),
+                        state: make_revealed(B256::repeat_byte(0x60)),
                     },
                 ),
                 (
                     Nibbles::from_nibbles([0x1]),
                     SparseNode::Leaf {
-                        key: Nibbles::from_nibbles([0x7, 0x8]),
-                        hash: Some(B256::repeat_byte(0x70)),
+                        key: leaf_key([0x7, 0x8], 63),
+                        state: make_revealed(B256::repeat_byte(0x70)),
                     },
                 ),
             ]
@@ -5167,14 +5195,17 @@ mod tests {
         let provider = MockTrieNodeProvider::new();
 
         // Remove a leaf which does not exist; this should have no effect.
-        trie.remove_leaf(&Nibbles::from_nibbles([0x0, 0x1, 0x2, 0x3, 0x4, 0xF]), &provider)
-            .unwrap();
+        trie.remove_leaf(
+            &pad_nibbles_right(Nibbles::from_nibbles([0x0, 0x1, 0x2, 0x3, 0x4, 0xF])),
+            &provider,
+        )
+        .unwrap();
         for (path, node) in trie.all_nodes() {
-            assert!(node.hash().is_some(), "path {path:?} should still have a hash");
+            assert!(node.cached_hash().is_some(), "path {path:?} should still have a hash");
         }
 
         // Remove the leaf at path 0x01234
-        let leaf_full_path = Nibbles::from_nibbles([0x0, 0x1, 0x2, 0x3, 0x4]);
+        let leaf_full_path = pad_nibbles_right(Nibbles::from_nibbles([0x0, 0x1, 0x2, 0x3, 0x4]));
         trie.remove_leaf(&leaf_full_path, &provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
@@ -5183,29 +5214,29 @@ mod tests {
         // Verify that hash fields are unset for all nodes along the path to the removed leaf
         assert_matches!(
             upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { hash: None, .. })
+            Some(SparseNode::Branch { state: SparseNodeState::Dirty, .. })
         );
         assert_matches!(
             upper_subtrie.nodes.get(&Nibbles::from_nibbles([0x0])),
-            Some(SparseNode::Extension { hash: None, .. })
+            Some(SparseNode::Extension { state: SparseNodeState::Dirty, .. })
         );
         assert_matches!(
             lower_subtrie_10.nodes.get(&Nibbles::from_nibbles([0x0, 0x1])),
-            Some(SparseNode::Branch { hash: None, .. })
+            Some(SparseNode::Branch { state: SparseNodeState::Dirty, .. })
         );
 
         // Verify that nodes not on the path still have their hashes
         assert_matches!(
             upper_subtrie.nodes.get(&Nibbles::from_nibbles([0x1])),
-            Some(SparseNode::Leaf { hash: Some(_), .. })
+            Some(SparseNode::Leaf { state: SparseNodeState::Cached { .. }, .. })
         );
         assert_matches!(
             lower_subtrie_10.nodes.get(&Nibbles::from_nibbles([0x0, 0x1, 0x3])),
-            Some(SparseNode::Leaf { hash: Some(_), .. })
+            Some(SparseNode::Leaf { state: SparseNodeState::Cached { .. }, .. })
         );
         assert_matches!(
             lower_subtrie_10.nodes.get(&Nibbles::from_nibbles([0x0, 0x1, 0x4])),
-            Some(SparseNode::Leaf { hash: Some(_), .. })
+            Some(SparseNode::Leaf { state: SparseNodeState::Cached { .. }, .. })
         );
     }
 
@@ -5262,8 +5293,12 @@ mod tests {
 
         // Step 3: Reset hashes for all revealed nodes to test actual hash calculation
         // Reset upper subtrie node hashes
-        trie.upper_subtrie.nodes.get_mut(&extension_path).unwrap().set_hash(None);
-        trie.upper_subtrie.nodes.get_mut(&branch_path).unwrap().set_hash(None);
+        trie.upper_subtrie
+            .nodes
+            .get_mut(&extension_path)
+            .unwrap()
+            .set_state(SparseNodeState::Dirty);
+        trie.upper_subtrie.nodes.get_mut(&branch_path).unwrap().set_state(SparseNodeState::Dirty);
 
         // Reset lower subtrie node hashes
         let leaf_1_subtrie_idx = path_subtrie_index_unchecked(&leaf_1_path);
@@ -5275,14 +5310,14 @@ mod tests {
             .nodes
             .get_mut(&leaf_1_path)
             .unwrap()
-            .set_hash(None);
+            .set_state(SparseNodeState::Dirty);
         trie.lower_subtries[leaf_2_subtrie_idx]
             .as_revealed_mut()
             .unwrap()
             .nodes
             .get_mut(&leaf_2_path)
             .unwrap()
-            .set_hash(None);
+            .set_state(SparseNodeState::Dirty);
 
         // Step 4: Add changed leaf node paths to prefix set
         trie.prefix_set.insert(leaf_1_full_path);
@@ -5305,10 +5340,10 @@ mod tests {
         // Verify hashes were computed
         let leaf_1_subtrie = trie.lower_subtries[leaf_1_subtrie_idx].as_revealed_ref().unwrap();
         let leaf_2_subtrie = trie.lower_subtries[leaf_2_subtrie_idx].as_revealed_ref().unwrap();
-        assert!(trie.upper_subtrie.nodes.get(&extension_path).unwrap().hash().is_some());
-        assert!(trie.upper_subtrie.nodes.get(&branch_path).unwrap().hash().is_some());
-        assert!(leaf_1_subtrie.nodes.get(&leaf_1_path).unwrap().hash().is_some());
-        assert!(leaf_2_subtrie.nodes.get(&leaf_2_path).unwrap().hash().is_some());
+        assert!(trie.upper_subtrie.nodes.get(&extension_path).unwrap().cached_hash().is_some());
+        assert!(trie.upper_subtrie.nodes.get(&branch_path).unwrap().cached_hash().is_some());
+        assert!(leaf_1_subtrie.nodes.get(&leaf_1_path).unwrap().cached_hash().is_some());
+        assert!(leaf_2_subtrie.nodes.get(&leaf_2_path).unwrap().cached_hash().is_some());
     }
 
     #[test]
@@ -5516,12 +5551,27 @@ mod tests {
         ctx.update_leaves(
             &mut sparse,
             [
-                (Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone()),
-                (Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone()),
-                (Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone()),
-                (Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone()),
-                (Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone()),
-                (Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value),
+                (
+                    pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1])),
+                    value.clone(),
+                ),
+                (
+                    pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3])),
+                    value.clone(),
+                ),
+                (
+                    pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3])),
+                    value.clone(),
+                ),
+                (
+                    pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2])),
+                    value.clone(),
+                ),
+                (
+                    pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2])),
+                    value.clone(),
+                ),
+                (pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0])), value),
             ],
         );
 
@@ -5555,46 +5605,51 @@ mod tests {
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
-                    SparseNode::new_leaf(Nibbles::default())
+                    SparseNode::new_leaf(leaf_key([], 59))
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]),
-                    SparseNode::new_leaf(Nibbles::default())
+                    SparseNode::new_leaf(leaf_key([], 59))
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x2]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x1, 0x3]))
+                    SparseNode::new_leaf(leaf_key([0x0, 0x1, 0x3], 62))
                 ),
                 (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x1]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x2]))
+                    SparseNode::new_leaf(leaf_key([0x0, 0x2], 61))
                 ),
                 (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
+                    SparseNode::new_leaf(leaf_key([0x2], 60))
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
+                    SparseNode::new_leaf(leaf_key([0x0], 60))
                 )
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), &provider).unwrap();
+        sparse
+            .remove_leaf(
+                &pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3])),
+                &provider,
+            )
+            .unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
         //     ├── 0 -> Extension (Key = 23)
         //     │        └── Branch (Mask = 0101)
-        //     │              ├── 1 -> Leaf (Key = 0231, Path = 50231)
-        //     │              └── 3 -> Leaf (Key = 0233, Path = 50233)
+        //     │              ├── 1 -> Leaf (Path = 50231...)
+        //     │              └── 3 -> Leaf (Path = 50233...)
         //     └── 3 -> Branch (Mask = 0101)
-        //                ├── 1 -> Leaf (Key = 3102, Path = 53102)
+        //                ├── 1 -> Leaf (Path = 53102...)
         //                └── 3 -> Branch (Mask = 1010)
-        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302)
-        //                       └── 2 -> Leaf (Key = 3320, Path = 53320)
+        //                       ├── 0 -> Leaf (Path = 53302...)
+        //                       └── 2 -> Leaf (Path = 53320...)
         pretty_assertions::assert_eq!(
             parallel_sparse_trie_nodes(&sparse)
                 .into_iter()
@@ -5613,39 +5668,44 @@ mod tests {
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
-                    SparseNode::new_leaf(Nibbles::default())
+                    SparseNode::new_leaf(leaf_key([], 59))
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]),
-                    SparseNode::new_leaf(Nibbles::default())
+                    SparseNode::new_leaf(leaf_key([], 59))
                 ),
                 (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x1]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x2]))
+                    SparseNode::new_leaf(leaf_key([0x0, 0x2], 61))
                 ),
                 (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
+                    SparseNode::new_leaf(leaf_key([0x2], 60))
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
+                    SparseNode::new_leaf(leaf_key([0x0], 60))
                 )
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), &provider).unwrap();
+        sparse
+            .remove_leaf(
+                &pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1])),
+                &provider,
+            )
+            .unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
-        //     ├── 0 -> Leaf (Key = 0233, Path = 50233)
+        //     ├── 0 -> Leaf (Path = 50233...)
         //     └── 3 -> Branch (Mask = 0101)
-        //                ├── 1 -> Leaf (Key = 3102, Path = 53102)
+        //                ├── 1 -> Leaf (Path = 53102...)
         //                └── 3 -> Branch (Mask = 1010)
-        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302)
-        //                       └── 2 -> Leaf (Key = 3320, Path = 53320)
+        //                       ├── 0 -> Leaf (Path = 53302...)
+        //                       └── 2 -> Leaf (Path = 53320...)
         pretty_assertions::assert_eq!(
             parallel_sparse_trie_nodes(&sparse)
                 .into_iter()
@@ -5656,33 +5716,38 @@ mod tests {
                 (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2, 0x3, 0x3]))
+                    SparseNode::new_leaf(leaf_key([0x2, 0x3, 0x3], 62))
                 ),
                 (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x1]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x2]))
+                    SparseNode::new_leaf(leaf_key([0x0, 0x2], 61))
                 ),
                 (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
+                    SparseNode::new_leaf(leaf_key([0x2], 60))
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
+                    SparseNode::new_leaf(leaf_key([0x0], 60))
                 )
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), &provider).unwrap();
+        sparse
+            .remove_leaf(
+                &pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2])),
+                &provider,
+            )
+            .unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
-        //     ├── 0 -> Leaf (Key = 0233, Path = 50233)
+        //     ├── 0 -> Leaf (Path = 50233...)
         //     └── 3 -> Branch (Mask = 1010)
-        //                ├── 0 -> Leaf (Key = 3302, Path = 53302)
-        //                └── 2 -> Leaf (Key = 3320, Path = 53320)
+        //                ├── 0 -> Leaf (Path = 53302...)
+        //                └── 2 -> Leaf (Path = 53320...)
         pretty_assertions::assert_eq!(
             parallel_sparse_trie_nodes(&sparse)
                 .into_iter()
@@ -5693,7 +5758,7 @@ mod tests {
                 (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2, 0x3, 0x3]))
+                    SparseNode::new_leaf(leaf_key([0x2, 0x3, 0x3], 62))
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3]),
@@ -5702,21 +5767,26 @@ mod tests {
                 (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
+                    SparseNode::new_leaf(leaf_key([0x2], 60))
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
+                    SparseNode::new_leaf(leaf_key([0x0], 60))
                 )
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), &provider).unwrap();
+        sparse
+            .remove_leaf(
+                &pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0])),
+                &provider,
+            )
+            .unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
-        //     ├── 0 -> Leaf (Key = 0233, Path = 50233)
-        //     └── 3 -> Leaf (Key = 3302, Path = 53302)
+        //     ├── 0 -> Leaf (Path = 50233...)
+        //     └── 3 -> Leaf (Path = 53302...)
         pretty_assertions::assert_eq!(
             parallel_sparse_trie_nodes(&sparse)
                 .into_iter()
@@ -5727,18 +5797,23 @@ mod tests {
                 (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
                 (
                     Nibbles::from_nibbles([0x5, 0x0]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2, 0x3, 0x3]))
+                    SparseNode::new_leaf(leaf_key([0x2, 0x3, 0x3], 62))
                 ),
                 (
                     Nibbles::from_nibbles([0x5, 0x3]),
-                    SparseNode::new_leaf(Nibbles::from_nibbles([0x3, 0x0, 0x2]))
+                    SparseNode::new_leaf(leaf_key([0x3, 0x0, 0x2], 62))
                 ),
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), &provider).unwrap();
+        sparse
+            .remove_leaf(
+                &pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3])),
+                &provider,
+            )
+            .unwrap();
 
-        // Leaf (Key = 53302)
+        // Leaf (Path = 53302...)
         pretty_assertions::assert_eq!(
             parallel_sparse_trie_nodes(&sparse)
                 .into_iter()
@@ -5746,11 +5821,18 @@ mod tests {
                 .collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([(
                 Nibbles::default(),
-                SparseNode::new_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]))
+                SparseNode::new_leaf(pad_nibbles_right(Nibbles::from_nibbles([
+                    0x5, 0x3, 0x3, 0x0, 0x2
+                ])))
             ),])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), &provider).unwrap();
+        sparse
+            .remove_leaf(
+                &pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2])),
+                &provider,
+            )
+            .unwrap();
 
         // Empty
         pretty_assertions::assert_eq!(
@@ -5814,7 +5896,7 @@ mod tests {
 
         // Removing a blinded leaf should result in an error
         assert_matches!(
-            sparse.remove_leaf(&Nibbles::from_nibbles([0x0]), &provider).map_err(|e| e.into_kind()),
+            sparse.remove_leaf(&pad_nibbles_right(Nibbles::from_nibbles([0x0])), &provider).map_err(|e| e.into_kind()),
             Err(SparseTrieErrorKind::BlindedNode { path, hash }) if path == Nibbles::from_nibbles([0x0]) && hash == B256::repeat_byte(1)
         );
     }
@@ -5871,7 +5953,10 @@ mod tests {
 
         // Removing a non-existent leaf should be a noop
         let sparse_old = sparse.clone();
-        assert_matches!(sparse.remove_leaf(&Nibbles::from_nibbles([0x2]), &provider), Ok(()));
+        assert_matches!(
+            sparse.remove_leaf(&pad_nibbles_right(Nibbles::from_nibbles([0x2])), &provider),
+            Ok(())
+        );
         assert_eq!(sparse, sparse_old);
     }
 
@@ -6131,11 +6216,7 @@ mod tests {
         // Check that the branch node exists with only two nibbles set
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::Branch {
-                state_mask: 0b101.into(),
-                hash: None,
-                store_in_db_trie: Some(false)
-            })
+            Some(&SparseNode::Branch { state_mask: 0b101.into(), state: SparseNodeState::Dirty })
         );
 
         // Insert the leaf for the second key
@@ -6144,11 +6225,7 @@ mod tests {
         // Check that the branch node was updated and another nibble was set
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::Branch {
-                state_mask: 0b111.into(),
-                hash: None,
-                store_in_db_trie: Some(false)
-            })
+            Some(&SparseNode::Branch { state_mask: 0b111.into(), state: SparseNodeState::Dirty })
         );
 
         // Generate the proof for the third key and reveal it in the sparse trie
@@ -6174,11 +6251,7 @@ mod tests {
         // Check that nothing changed in the branch node
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::Branch {
-                state_mask: 0b111.into(),
-                hash: None,
-                store_in_db_trie: Some(false)
-            })
+            Some(&SparseNode::Branch { state_mask: 0b111.into(), state: SparseNodeState::Dirty })
         );
 
         // Generate the nodes for the full trie with all three key using the hash builder, and
@@ -6264,11 +6337,7 @@ mod tests {
         // Check that the branch node exists
         assert_eq!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::Branch {
-                state_mask: 0b11.into(),
-                hash: None,
-                store_in_db_trie: Some(true)
-            })
+            Some(&SparseNode::Branch { state_mask: 0b11.into(), state: SparseNodeState::Dirty })
         );
 
         // Remove the leaf for the first key
@@ -6360,7 +6429,7 @@ mod tests {
         // Check that the root extension node exists
         assert_matches!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Extension { key, hash: None, store_in_db_trie: None }) if *key == Nibbles::from_nibbles([0x00])
+            Some(SparseNode::Extension { key, state: SparseNodeState::Dirty }) if *key == Nibbles::from_nibbles([0x00])
         );
 
         // Insert the leaf with a different prefix
@@ -6369,7 +6438,7 @@ mod tests {
         // Check that the extension node was turned into a branch node
         assert_matches!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
+            Some(SparseNode::Branch { state_mask, state: SparseNodeState::Dirty }) if *state_mask == TrieMask::new(0b11)
         );
 
         // Generate the proof for the first key and reveal it in the sparse trie
@@ -6395,7 +6464,7 @@ mod tests {
         // Check that the branch node wasn't overwritten by the extension node in the proof
         assert_matches!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
+            Some(SparseNode::Branch { state_mask, state: SparseNodeState::Dirty }) if *state_mask == TrieMask::new(0b11)
         );
     }
 
@@ -6430,7 +6499,10 @@ mod tests {
 
         // Verify upper trie has a leaf at the root with key 1345
         ctx.assert_upper_subtrie(&trie)
-            .has_leaf(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x3, 0x4, 0x5]))
+            .has_leaf(
+                &Nibbles::default(),
+                &pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x3, 0x4, 0x5])),
+            )
             .has_value(&leaf1_path, &value1);
 
         // Add leaf 0x1234 - this should go first in the upper subtrie
@@ -6450,8 +6522,8 @@ mod tests {
         // Verify lower subtrie at 0x12 exists with correct structure
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2]), &[0x3, 0x4])
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &Nibbles::from_nibbles([0x4]))
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x4]), &Nibbles::from_nibbles([0x5]))
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &leaf_key([0x4], 61))
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x4]), &leaf_key([0x5], 61))
             .has_value(&leaf2_path, &value2)
             .has_value(&leaf3_path, &value3);
 
@@ -6504,7 +6576,10 @@ mod tests {
 
         // In an empty trie, the first leaf becomes the root, regardless of path length
         ctx.assert_upper_subtrie(&trie)
-            .has_leaf(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2, 0x2, 0x4]))
+            .has_leaf(
+                &Nibbles::default(),
+                &pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x2, 0x4])),
+            )
             .has_value(&first_leaf_path, &first_value);
 
         // Now insert another leaf that shares the same 2-nibble prefix
@@ -6515,8 +6590,8 @@ mod tests {
         // Now both leaves should be in a lower subtrie at index [0x1, 0x2]
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2]), &[0x2, 0x3])
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x2]), &Nibbles::from_nibbles([0x4]))
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &Nibbles::from_nibbles([0x4]))
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x2]), &leaf_key([0x4], 61))
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &leaf_key([0x4], 61))
             .has_value(&first_leaf_path, &first_value)
             .has_value(&second_leaf_path, &second_value);
 
@@ -6569,7 +6644,7 @@ mod tests {
             .has_value(&leaves[3].0, &leaves[3].1);
 
         // Now update one of the leaves with a new value
-        let updated_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
+        let updated_path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]));
         let (_, updated_value) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4], 100);
 
         trie.update_leaf(updated_path, updated_value.clone(), DefaultTrieNodeProvider).unwrap();
@@ -6649,8 +6724,8 @@ mod tests {
         // Verify the lower subtrie structure
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2]), &[0x3, 0x4])
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &Nibbles::from_nibbles([0x4]))
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x4]), &Nibbles::from_nibbles([0x5]))
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &leaf_key([0x4], 61))
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x4]), &leaf_key([0x5], 61))
             .has_value(&leaves[0].0, &leaves[0].1)
             .has_value(&leaves[1].0, &leaves[1].1);
     }
@@ -6689,10 +6764,10 @@ mod tests {
         // Verify upper trie has a branch at root with 4 children
         ctx.assert_upper_subtrie(&trie)
             .has_branch(&Nibbles::default(), &[0x0, 0x1, 0x2, 0x3])
-            .has_leaf(&Nibbles::from_nibbles([0x0]), &Nibbles::default())
-            .has_leaf(&Nibbles::from_nibbles([0x1]), &Nibbles::default())
-            .has_leaf(&Nibbles::from_nibbles([0x2]), &Nibbles::default())
-            .has_leaf(&Nibbles::from_nibbles([0x3]), &Nibbles::default())
+            .has_leaf(&Nibbles::from_nibbles([0x0]), &leaf_key([], 63))
+            .has_leaf(&Nibbles::from_nibbles([0x1]), &leaf_key([], 63))
+            .has_leaf(&Nibbles::from_nibbles([0x2]), &leaf_key([], 63))
+            .has_leaf(&Nibbles::from_nibbles([0x3]), &leaf_key([], 63))
             .has_value(&leaf1_path, &value1)
             .has_value(&leaf2_path, &value2)
             .has_value(&leaf3_path, &value3)
@@ -6733,11 +6808,11 @@ mod tests {
             .has_branch(&Nibbles::from_nibbles([0x1, 0x1, 0x1, 0x1, 0x1, 0x1]), &[0x0, 0x1])
             .has_leaf(
                 &Nibbles::from_nibbles([0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x0]),
-                &Nibbles::default(),
+                &leaf_key([], 57),
             )
             .has_leaf(
                 &Nibbles::from_nibbles([0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x1]),
-                &Nibbles::default(),
+                &leaf_key([], 57),
             )
             .has_value(&leaf1_path, &value1)
             .has_value(&leaf2_path, &value2);
@@ -6787,7 +6862,7 @@ mod tests {
         // Verify all leaves exist
         for (i, (path, value)) in leaves.iter().enumerate() {
             subtrie_assert = subtrie_assert
-                .has_leaf(&Nibbles::from_nibbles([0xA, 0x0, i as u8]), &Nibbles::default())
+                .has_leaf(&Nibbles::from_nibbles([0xA, 0x0, i as u8]), &leaf_key([], 61))
                 .has_value(path, value);
         }
     }
@@ -6830,17 +6905,15 @@ mod tests {
         // Verify each subtrie exists and contains its leaf
         for (i, (leaf_path, leaf_value)) in leaves.iter().enumerate() {
             let subtrie_path = Nibbles::from_nibbles([0x0, i as u8]);
+            let full_path: [u8; 4] = match i {
+                0 => [0x0, 0x0, 0x1, 0x2],
+                1 => [0x0, 0x1, 0x3, 0x4],
+                2 => [0x0, 0x2, 0x5, 0x6],
+                3 => [0x0, 0x3, 0x7, 0x8],
+                _ => unreachable!(),
+            };
             ctx.assert_subtrie(&trie, subtrie_path)
-                .has_leaf(
-                    &subtrie_path,
-                    &Nibbles::from_nibbles(match i {
-                        0 => vec![0x1, 0x2],
-                        1 => vec![0x3, 0x4],
-                        2 => vec![0x5, 0x6],
-                        3 => vec![0x7, 0x8],
-                        _ => unreachable!(),
-                    }),
-                )
+                .has_leaf(&subtrie_path, &leaf_key(&full_path[2..], 62))
                 .has_value(leaf_path, leaf_value);
         }
     }
@@ -6886,13 +6959,13 @@ mod tests {
         // Verify subtries
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0xF, 0xF]))
             .has_branch(&Nibbles::from_nibbles([0xF, 0xF, 0x0]), &[0x1, 0x2])
-            .has_leaf(&Nibbles::from_nibbles([0xF, 0xF, 0x0, 0x1]), &Nibbles::default())
-            .has_leaf(&Nibbles::from_nibbles([0xF, 0xF, 0x0, 0x2]), &Nibbles::default())
+            .has_leaf(&Nibbles::from_nibbles([0xF, 0xF, 0x0, 0x1]), &leaf_key([], 60))
+            .has_leaf(&Nibbles::from_nibbles([0xF, 0xF, 0x0, 0x2]), &leaf_key([], 60))
             .has_value(&leaf1_path, &value1)
             .has_value(&leaf2_path, &value2);
 
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0xF, 0x0]))
-            .has_leaf(&Nibbles::from_nibbles([0xF, 0x0]), &Nibbles::from_nibbles([0x0, 0x3]))
+            .has_leaf(&Nibbles::from_nibbles([0xF, 0x0]), &leaf_key([0x0, 0x3], 62))
             .has_value(&leaf3_path, &value3);
     }
 
@@ -6927,14 +7000,8 @@ mod tests {
         // Verify lower subtrie structure
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0xA, 0xB]))
             .has_branch(&Nibbles::from_nibbles([0xA, 0xB]), &[0xC, 0xD])
-            .has_leaf(
-                &Nibbles::from_nibbles([0xA, 0xB, 0xC]),
-                &Nibbles::from_nibbles([0xD, 0xE, 0xF]),
-            )
-            .has_leaf(
-                &Nibbles::from_nibbles([0xA, 0xB, 0xD]),
-                &Nibbles::from_nibbles([0xE, 0xF, 0x0]),
-            )
+            .has_leaf(&Nibbles::from_nibbles([0xA, 0xB, 0xC]), &leaf_key([0xD, 0xE, 0xF], 61))
+            .has_leaf(&Nibbles::from_nibbles([0xA, 0xB, 0xD]), &leaf_key([0xE, 0xF, 0x0], 61))
             .has_value(&leaf1_path, &value1)
             .has_value(&leaf2_path, &value2);
     }
@@ -7002,9 +7069,9 @@ mod tests {
         // Verify lower subtrie - all three leaves should be properly inserted
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &[0x4, 0x5, 0x6]) // All three children
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), &Nibbles::default())
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x5]), &Nibbles::default())
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x6]), &Nibbles::default())
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), &leaf_key([], 60))
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x5]), &leaf_key([], 60))
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x6]), &leaf_key([], 60))
             .has_value(&new_leaf1_path, &new_value1)
             .has_value(&new_leaf2_path, &new_value2)
             .has_value(&new_leaf3_path, &new_value3);
@@ -7041,14 +7108,14 @@ mod tests {
         // Verify upper trie structure
         ctx.assert_upper_subtrie(&trie)
             .has_branch(&Nibbles::default(), &[0x1, 0x2])
-            .has_leaf(&Nibbles::from_nibbles([0x1]), &Nibbles::from_nibbles([0x2, 0x3, 0x4]))
+            .has_leaf(&Nibbles::from_nibbles([0x1]), &leaf_key([0x2, 0x3, 0x4], 63))
             .has_extension(&Nibbles::from_nibbles([0x2]), &Nibbles::from_nibbles([0x3]));
 
         // Verify lower subtrie structure
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x2, 0x3]))
             .has_branch(&Nibbles::from_nibbles([0x2, 0x3]), &[0x4, 0x5])
-            .has_leaf(&Nibbles::from_nibbles([0x2, 0x3, 0x4]), &Nibbles::from_nibbles([0x5]))
-            .has_leaf(&Nibbles::from_nibbles([0x2, 0x3, 0x5]), &Nibbles::from_nibbles([0x6]))
+            .has_leaf(&Nibbles::from_nibbles([0x2, 0x3, 0x4]), &leaf_key([0x5], 61))
+            .has_leaf(&Nibbles::from_nibbles([0x2, 0x3, 0x5]), &leaf_key([0x6], 61))
             .has_value(&leaf2_path, &value2)
             .has_value(&leaf3_path, &value3);
     }
@@ -7098,7 +7165,10 @@ mod tests {
 
         // Verify leaf node in upper trie (optimized single-leaf case)
         ctx.assert_upper_subtrie(&trie)
-            .has_leaf(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5]))
+            .has_leaf(
+                &Nibbles::default(),
+                &pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5])),
+            )
             .has_value(&leaf1_path, &value1);
 
         // Step 2: Add leaf at 0x12346 - creates branch at 0x1234
@@ -7114,8 +7184,8 @@ mod tests {
 
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), &[0x5, 0x6])
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5]), &Nibbles::default())
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x6]), &Nibbles::default())
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5]), &leaf_key([], 59))
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x6]), &leaf_key([], 59))
             .has_value(&leaf1_path, &value1)
             .has_value(&leaf2_path, &value2);
 
@@ -7133,7 +7203,7 @@ mod tests {
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &[0x4, 0x5])
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), &[0x5, 0x6])
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x5]), &Nibbles::default())
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x5]), &leaf_key([], 60))
             .has_value(&leaf1_path, &value1)
             .has_value(&leaf2_path, &value2)
             .has_value(&leaf3_path, &value3);
@@ -7154,7 +7224,7 @@ mod tests {
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2]), &[0x3, 0x4])
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &[0x4, 0x5])
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), &[0x5, 0x6])
-            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x4]), &Nibbles::default())
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x4]), &leaf_key([], 61))
             .has_value(&leaf1_path, &value1)
             .has_value(&leaf2_path, &value2)
             .has_value(&leaf3_path, &value3)
@@ -7338,7 +7408,7 @@ mod tests {
         // Create a simple trie with one leaf
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
-        let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        let path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3]));
         let value = b"test_value".to_vec();
 
         sparse.update_leaf(path, value.clone(), &provider).unwrap();
@@ -7357,7 +7427,7 @@ mod tests {
         // Create a simple trie with one leaf
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
-        let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        let path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3]));
         let value = b"test_value".to_vec();
         let wrong_value = b"wrong_value".to_vec();
 
@@ -7395,7 +7465,7 @@ mod tests {
     fn find_leaf_exists_no_value_check() {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
-        let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
+        let path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]));
         sparse.update_leaf(path, encode_account_value(0), &provider).unwrap();
 
         let result = sparse.find_leaf(&path, None);
@@ -7406,7 +7476,7 @@ mod tests {
     fn find_leaf_exists_with_value_check_ok() {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
-        let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
+        let path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]));
         let value = encode_account_value(0);
         sparse.update_leaf(path, value.clone(), &provider).unwrap();
 
@@ -7418,9 +7488,9 @@ mod tests {
     fn find_leaf_exclusion_branch_divergence() {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
-        let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Creates branch at 0x12
-        let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]); // Belongs to same branch
-        let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x7, 0x8]); // Diverges at nibble 7
+        let path1 = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4])); // Creates branch at 0x12
+        let path2 = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x5, 0x6])); // Belongs to same branch
+        let search_path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x7, 0x8])); // Diverges at nibble 7
 
         sparse.update_leaf(path1, encode_account_value(0), &provider).unwrap();
         sparse.update_leaf(path2, encode_account_value(1), &provider).unwrap();
@@ -7434,9 +7504,9 @@ mod tests {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
         // This will create an extension node at root with key 0x12
-        let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
+        let path1 = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]));
         // This path diverges from the extension key
-        let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x7, 0x8]);
+        let search_path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x7, 0x8]));
 
         sparse.update_leaf(path1, encode_account_value(0), &provider).unwrap();
 
@@ -7448,8 +7518,8 @@ mod tests {
     fn find_leaf_exclusion_leaf_divergence() {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
-        let existing_leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
-        let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
+        let existing_leaf_path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]));
+        let search_path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]));
 
         sparse.update_leaf(existing_leaf_path, encode_account_value(0), &provider).unwrap();
 
@@ -7461,9 +7531,9 @@ mod tests {
     fn find_leaf_exclusion_path_ends_at_branch() {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
-        let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Creates branch at 0x12
-        let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]);
-        let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2]); // Path of the branch itself
+        let path1 = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4])); // Creates branch at 0x12
+        let path2 = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x5, 0x6]));
+        let search_path = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2])); // Path of the branch itself
 
         sparse.update_leaf(path1, encode_account_value(0), &provider).unwrap();
         sparse.update_leaf(path2, encode_account_value(1), &provider).unwrap();
@@ -7830,7 +7900,7 @@ mod tests {
         for i in 0..16u8 {
             parallel
                 .update_leaf(
-                    Nibbles::from_nibbles([i, 0x1, 0x2, 0x3, 0x4, 0x5]),
+                    pad_nibbles_right(Nibbles::from_nibbles([i, 0x1, 0x2, 0x3, 0x4, 0x5])),
                     value.clone(),
                     &provider,
                 )
@@ -7849,7 +7919,7 @@ mod tests {
         // Key assertion: values under pruned paths must be removed
         // With the bug, values at pruned_root paths (not strict descendants) would remain
         for i in 0..16u8 {
-            let path = Nibbles::from_nibbles([i, 0x1, 0x2, 0x3, 0x4, 0x5]);
+            let path = pad_nibbles_right(Nibbles::from_nibbles([i, 0x1, 0x2, 0x3, 0x4, 0x5]));
             assert!(
                 parallel.get_leaf_value(&path).is_none(),
                 "value at {:?} should be removed after prune",
@@ -7874,7 +7944,7 @@ mod tests {
                 for j in 0..4u8 {
                     for k in 0..4u8 {
                         trie.update_leaf(
-                            Nibbles::from_nibbles([i, j, k, 0x1, 0x2, 0x3]),
+                            pad_nibbles_right(Nibbles::from_nibbles([i, j, k, 0x1, 0x2, 0x3])),
                             value.clone(),
                             &provider,
                         )
@@ -7927,7 +7997,7 @@ mod tests {
         for i in 0..8u8 {
             for j in 0..4u8 {
                 trie.update_leaf(
-                    Nibbles::from_nibbles([i, j, 0x3, 0x4, 0x5, 0x6]),
+                    pad_nibbles_right(Nibbles::from_nibbles([i, j, 0x3, 0x4, 0x5, 0x6])),
                     value.clone(),
                     &provider,
                 )
@@ -7947,7 +8017,12 @@ mod tests {
         let mut trie = ParallelSparseTrie::default();
 
         let value = large_account_value();
-        trie.update_leaf(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), value, &provider).unwrap();
+        trie.update_leaf(
+            pad_nibbles_right(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4])),
+            value,
+            &provider,
+        )
+        .unwrap();
 
         let root_before = trie.root();
         let nodes_before = trie.size_hint();
@@ -7967,8 +8042,12 @@ mod tests {
         let value = large_account_value();
 
         for i in 0..4u8 {
-            trie.update_leaf(Nibbles::from_nibbles([i, 0x2, 0x3, 0x4]), value.clone(), &provider)
-                .unwrap();
+            trie.update_leaf(
+                pad_nibbles_right(Nibbles::from_nibbles([i, 0x2, 0x3, 0x4])),
+                value.clone(),
+                &provider,
+            )
+            .unwrap();
         }
 
         trie.root();
@@ -7986,10 +8065,18 @@ mod tests {
 
         let value = large_account_value();
 
-        trie.update_leaf(Nibbles::from_nibbles([0, 1, 2, 3, 0, 5, 6, 7]), value.clone(), &provider)
-            .unwrap();
-        trie.update_leaf(Nibbles::from_nibbles([0, 1, 2, 3, 1, 5, 6, 7]), value, &provider)
-            .unwrap();
+        trie.update_leaf(
+            pad_nibbles_right(Nibbles::from_nibbles([0, 1, 2, 3, 0, 5, 6, 7])),
+            value.clone(),
+            &provider,
+        )
+        .unwrap();
+        trie.update_leaf(
+            pad_nibbles_right(Nibbles::from_nibbles([0, 1, 2, 3, 1, 5, 6, 7])),
+            value,
+            &provider,
+        )
+        .unwrap();
 
         let root_before = trie.root();
         // Prune multiple times to allow heat to fully decay.
@@ -8005,25 +8092,23 @@ mod tests {
     }
 
     #[test]
-    fn test_prune_embedded_node_preserved() {
+    fn test_prune_root_hash_preserved() {
         let provider = DefaultTrieNodeProvider;
         let mut trie = ParallelSparseTrie::default();
 
-        let small_value = vec![0x80];
-        trie.update_leaf(Nibbles::from_nibbles([0x0]), small_value.clone(), &provider).unwrap();
-        trie.update_leaf(Nibbles::from_nibbles([0x1]), small_value, &provider).unwrap();
+        // Create two 64-nibble paths that differ only in the first nibble
+        let key1 = Nibbles::unpack(B256::repeat_byte(0x00));
+        let key2 = Nibbles::unpack(B256::repeat_byte(0x11));
+
+        let large_value = large_account_value();
+        trie.update_leaf(key1, large_value.clone(), &provider).unwrap();
+        trie.update_leaf(key2, large_value, &provider).unwrap();
 
         let root_before = trie.root();
-        let nodes_before = trie.size_hint();
 
         trie.prune(0);
 
-        assert_eq!(root_before, trie.root(), "root hash must be preserved");
-
-        if trie.size_hint() == nodes_before {
-            assert!(trie.get_leaf_value(&Nibbles::from_nibbles([0x0])).is_some());
-            assert!(trie.get_leaf_value(&Nibbles::from_nibbles([0x1])).is_some());
-        }
+        assert_eq!(root_before, trie.root(), "root hash must be preserved after pruning");
     }
 
     #[test]
@@ -8036,7 +8121,12 @@ mod tests {
 
         for i in 0..8u8 {
             let value = if i < 4 { large_value.clone() } else { small_value.clone() };
-            trie.update_leaf(Nibbles::from_nibbles([i, 0x1, 0x2, 0x3]), value, &provider).unwrap();
+            trie.update_leaf(
+                pad_nibbles_right(Nibbles::from_nibbles([i, 0x1, 0x2, 0x3])),
+                value,
+                &provider,
+            )
+            .unwrap();
         }
 
         let root_before = trie.root();
@@ -8053,7 +8143,9 @@ mod tests {
         let mut keys = Vec::new();
         for first in 0..16u8 {
             for second in 0..16u8 {
-                keys.push(Nibbles::from_nibbles([first, second, 0x1, 0x2, 0x3, 0x4]));
+                keys.push(pad_nibbles_right(Nibbles::from_nibbles([
+                    first, second, 0x1, 0x2, 0x3, 0x4,
+                ])));
             }
         }
 
@@ -8089,8 +8181,12 @@ mod tests {
         let value = large_account_value();
 
         for i in 0..4u8 {
-            trie.update_leaf(Nibbles::from_nibbles([i, 0x1, 0x2, 0x3]), value.clone(), &provider)
-                .unwrap();
+            trie.update_leaf(
+                pad_nibbles_right(Nibbles::from_nibbles([i, 0x1, 0x2, 0x3])),
+                value.clone(),
+                &provider,
+            )
+            .unwrap();
         }
 
         trie.root();
@@ -8120,7 +8216,9 @@ mod tests {
         for first in 0..4u8 {
             for second in 0..4u8 {
                 trie.update_leaf(
-                    Nibbles::from_nibbles([first, second, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6]),
+                    pad_nibbles_right(Nibbles::from_nibbles([
+                        first, second, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6,
+                    ])),
                     value.clone(),
                     &provider,
                 )
@@ -8138,7 +8236,8 @@ mod tests {
 
         // Now try to update a leaf - this should not panic even though lower subtries
         // were replaced with Blind(None)
-        let new_path = Nibbles::from_nibbles([0x5, 0x5, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
+        let new_path =
+            pad_nibbles_right(Nibbles::from_nibbles([0x5, 0x5, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6]));
         trie.update_leaf(new_path, value, &provider).unwrap();
 
         // The trie should still be functional
@@ -8845,5 +8944,113 @@ mod tests {
 
         // Populated trie should use more memory than an empty one
         assert!(populated_size > empty_size);
+    }
+
+    #[test]
+    fn test_reveal_extension_branch_leaves_then_root() {
+        // Test structure:
+        // - 0x (root): extension node with key of 63 zeroes
+        // - 0x000...000 (63 zeroes): branch node with children at 1 and 2
+        // - 0x000...0001 (62 zeroes + 01): leaf with value 1
+        // - 0x000...0002 (62 zeroes + 02): leaf with value 2
+        //
+        // The leaves and branch are small enough to be embedded (< 32 bytes),
+        // so we manually RLP encode them and use those encodings in parent nodes.
+
+        // Create the extension key (63 zero nibbles)
+        let ext_key: [u8; 63] = [0; 63];
+
+        // The branch is at the end of the extension (63 zeroes)
+        let branch_path = Nibbles::from_nibbles(ext_key);
+
+        // Leaf paths: 63 zeroes + 1, 63 zeroes + 2
+        let mut leaf1_path_bytes = [0u8; 64];
+        leaf1_path_bytes[63] = 1;
+        let leaf1_path = Nibbles::from_nibbles(leaf1_path_bytes);
+
+        let mut leaf2_path_bytes = [0u8; 64];
+        leaf2_path_bytes[63] = 2;
+        let leaf2_path = Nibbles::from_nibbles(leaf2_path_bytes);
+
+        // Create leaves with empty keys (full path consumed by extension + branch)
+        // and simple values
+        let leaf1_node = LeafNode::new(Nibbles::default(), vec![0x1]);
+        let leaf2_node = LeafNode::new(Nibbles::default(), vec![0x2]);
+
+        // RLP encode the leaves to get their RlpNode representations
+        let leaf1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(TrieNodeV2::Leaf(leaf1_node.clone())));
+        let leaf2_rlp = RlpNode::from_rlp(&alloy_rlp::encode(TrieNodeV2::Leaf(leaf2_node.clone())));
+
+        // Create the branch node with children at indices 1 and 2, using the RLP-encoded leaves.
+        // In V2, branch and extension are combined: the key holds the extension prefix.
+        let state_mask = TrieMask::new(0b0000_0110); // bits 1 and 2 set
+        let stack = vec![leaf1_rlp, leaf2_rlp];
+
+        // First encode the bare branch (empty key) to get its RlpNode
+        let bare_branch = BranchNodeV2::new(Nibbles::new(), stack.clone(), state_mask, None);
+        let branch_rlp = RlpNode::from_rlp(&alloy_rlp::encode(&bare_branch));
+
+        // Create the combined extension+branch node as the root.
+        let root_node = TrieNodeV2::Branch(BranchNodeV2::new(
+            Nibbles::from_nibbles(ext_key),
+            stack.clone(),
+            state_mask,
+            Some(branch_rlp),
+        ));
+
+        // Initialize trie with the extension+branch as root
+        let mut trie = ParallelSparseTrie::from_root(root_node, None, false).unwrap();
+
+        // Reveal the branch and leaves
+        let mut nodes = vec![
+            ProofTrieNodeV2 {
+                path: branch_path,
+                node: TrieNodeV2::Branch(BranchNodeV2::new(
+                    Nibbles::new(),
+                    stack,
+                    state_mask,
+                    None,
+                )),
+                masks: None,
+            },
+            ProofTrieNodeV2 { path: leaf1_path, node: TrieNodeV2::Leaf(leaf1_node), masks: None },
+            ProofTrieNodeV2 { path: leaf2_path, node: TrieNodeV2::Leaf(leaf2_node), masks: None },
+        ];
+        trie.reveal_nodes(&mut nodes).unwrap();
+
+        // Add the leaf paths to prefix_set so that root() will update their hashes
+        trie.prefix_set.insert(leaf1_path);
+        trie.prefix_set.insert(leaf2_path);
+
+        // Call root() to compute the trie root hash
+        let _root = trie.root();
+    }
+
+    #[test]
+    fn test_update_leaf_creates_embedded_nodes_then_root() {
+        // Similar structure to test_reveal_extension_branch_leaves_then_root, but created
+        // via update_leaf calls on an empty trie instead of revealing pre-built nodes.
+        //
+        // Two leaves with paths that share a long common prefix will create:
+        // - Extension node at root with the shared prefix
+        // - Branch node where the paths diverge
+        // - Two leaf nodes (embedded in the branch since they're small)
+
+        // Create two paths that share 63 nibbles and differ only at the 64th
+        let mut leaf1_path_bytes = [0u8; 64];
+        leaf1_path_bytes[63] = 1;
+        let leaf1_path = Nibbles::from_nibbles(leaf1_path_bytes);
+
+        let mut leaf2_path_bytes = [0u8; 64];
+        leaf2_path_bytes[63] = 2;
+        let leaf2_path = Nibbles::from_nibbles(leaf2_path_bytes);
+
+        // Create an empty trie and update with two leaves
+        let mut trie = ParallelSparseTrie::default();
+        trie.update_leaf(leaf1_path, vec![0x1], DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(leaf2_path, vec![0x2], DefaultTrieNodeProvider).unwrap();
+
+        // Call root() to compute the trie root hash
+        let _root = trie.root();
     }
 }

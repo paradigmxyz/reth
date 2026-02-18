@@ -24,7 +24,7 @@ where
     pub fn bootstrap(config: EthConfig, executor: Runtime, eth_api: EthApi) -> Self {
         let filter = EthFilter::new(eth_api.clone(), config.filter_config(), executor.clone());
 
-        let pubsub = EthPubSub::with_spawner(eth_api.clone(), executor);
+        let pubsub = EthPubSub::new(eth_api.clone(), executor);
 
         Self { api: eth_api, filter, pubsub }
     }

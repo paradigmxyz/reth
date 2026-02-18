@@ -146,9 +146,24 @@ impl Layers {
 
     #[cfg(feature = "tracy")]
     pub(crate) fn tracy(&mut self, config: LayerInfo) -> eyre::Result<()> {
-        struct Config(tracing_subscriber::fmt::format::DefaultFields);
+        // Newtype wrapper around `DefaultFields` so that `FormattedFields<TracyFields>` uses a
+        // distinct extension key from the fmt layer's `FormattedFields<DefaultFields>`. Without
+        // this, when both layers are active the fmt layer may insert ANSI-colored fields first,
+        // and the Tracy layer reuses them — leaking escape codes into Tracy zone text.
+        struct TracyFields(tracing_subscriber::fmt::format::DefaultFields);
+        impl<'writer> tracing_subscriber::fmt::FormatFields<'writer> for TracyFields {
+            fn format_fields<R: tracing_subscriber::field::RecordFields>(
+                &self,
+                writer: tracing_subscriber::fmt::format::Writer<'writer>,
+                fields: R,
+            ) -> core::fmt::Result {
+                self.0.format_fields(writer, fields)
+            }
+        }
+
+        struct Config(TracyFields);
         impl tracing_tracy::Config for Config {
-            type Formatter = tracing_subscriber::fmt::format::DefaultFields;
+            type Formatter = TracyFields;
             fn formatter(&self) -> &Self::Formatter {
                 &self.0
             }
@@ -157,9 +172,11 @@ impl Layers {
             }
         }
 
-        self.add_layer(tracing_tracy::TracyLayer::new(Config(Default::default())).with_filter(
-            build_env_filter(Some(config.default_directive.parse()?), &config.filters)?,
-        ));
+        self.add_layer(
+            tracing_tracy::TracyLayer::new(Config(TracyFields(Default::default()))).with_filter(
+                build_env_filter(Some(config.default_directive.parse()?), &config.filters)?,
+            ),
+        );
         Ok(())
     }
 
