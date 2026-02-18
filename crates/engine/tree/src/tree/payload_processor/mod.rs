@@ -409,7 +409,7 @@ where
             );
             self.executor.spawn_blocking(move || {
                 let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
+                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
                 let (transactions, convert) = transactions.into_parts();
                 for (idx, tx) in transactions.into_iter().enumerate() {
                     let tx = convert.convert(tx);
@@ -428,7 +428,7 @@ where
             // to execution in order via `for_each_ordered`.
             self.executor.spawn_blocking(move || {
                 let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
+                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
                 let (transactions, convert) = transactions.into_parts();
                 transactions
                     .into_par_iter()
