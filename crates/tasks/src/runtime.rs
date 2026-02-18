@@ -199,16 +199,6 @@ pub struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
-    /// Create a config that attaches to an existing tokio runtime handle.
-    #[cfg_attr(not(feature = "rayon"), allow(clippy::missing_const_for_fn))]
-    pub fn with_existing_handle(handle: Handle) -> Self {
-        Self {
-            tokio: TokioConfig::ExistingHandle(handle),
-            #[cfg(feature = "rayon")]
-            rayon: RayonConfig::default(),
-        }
-    }
-
     /// Set the tokio configuration.
     pub fn with_tokio(mut self, tokio: TokioConfig) -> Self {
         self.tokio = tokio;
@@ -301,15 +291,6 @@ impl std::fmt::Debug for Runtime {
     }
 }
 
-// ── Constructors ──────────────────────────────────────────────────────
-
-impl Runtime {
-    /// Creates a [`Runtime`] that attaches to an existing tokio runtime handle.
-    pub fn with_existing_handle(handle: Handle) -> Result<Self, RuntimeBuildError> {
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(handle)).build()
-    }
-}
-
 // ── Pool accessors ────────────────────────────────────────────────────
 
 impl Runtime {
@@ -382,12 +363,6 @@ impl Runtime {
             Ok(handle) => Self::test_config().with_tokio(TokioConfig::existing_handle(handle)),
             Err(_) => Self::test_config(),
         };
-        RuntimeBuilder::new(config).build().expect("failed to build test Runtime")
-    }
-
-    /// Creates a lightweight [`Runtime`] for tests, attaching to the given tokio handle.
-    pub fn test_with_handle(handle: Handle) -> Self {
-        let config = Self::test_config().with_tokio(TokioConfig::existing_handle(handle));
         RuntimeBuilder::new(config).build().expect("failed to build test Runtime")
     }
 
@@ -771,7 +746,7 @@ impl RuntimeBuilder {
     /// The [`TaskManager`] is automatically spawned as a background task that monitors
     /// critical tasks for panics. Use [`Runtime::take_task_manager_handle`] to extract
     /// the join handle if you need to poll for panic errors.
-    #[tracing::instrument(level = "debug", skip_all)]
+    #[tracing::instrument(name = "RuntimeBuilder::build", level = "debug", skip_all)]
     pub fn build(self) -> Result<Runtime, RuntimeBuildError> {
         debug!(?self.config, "Building runtime");
         let config = self.config;
@@ -929,7 +904,8 @@ mod tests {
     #[test]
     fn test_runtime_config_existing_handle() {
         let rt = TokioRuntime::new().unwrap();
-        let config = RuntimeConfig::with_existing_handle(rt.handle().clone());
+        let config =
+            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
         assert!(matches!(config.tokio, TokioConfig::ExistingHandle(_)));
     }
 
@@ -944,7 +920,8 @@ mod tests {
     #[test]
     fn test_runtime_builder() {
         let rt = TokioRuntime::new().unwrap();
-        let config = RuntimeConfig::with_existing_handle(rt.handle().clone());
+        let config =
+            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
         let runtime = RuntimeBuilder::new(config).build().unwrap();
         let _ = runtime.handle();
     }

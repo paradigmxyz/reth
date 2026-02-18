@@ -138,13 +138,10 @@ impl Decode for StoredNibbles {
 }
 
 impl Encode for StoredNibblesSubKey {
-    type Encoded = Vec<u8>;
+    type Encoded = [u8; 65];
 
-    // Delegate to the Compact implementation
     fn encode(self) -> Self::Encoded {
-        let mut buf = Vec::with_capacity(65);
-        self.to_compact(&mut buf);
-        buf
+        self.to_compact_array()
     }
 }
 
@@ -343,7 +340,6 @@ mod tests {
         assert_eq!(PruneCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(PruneMode::bitflag_encoded_bytes(), 1);
         assert_eq!(PruneSegment::bitflag_encoded_bytes(), 1);
-        assert_eq!(Receipt::bitflag_encoded_bytes(), 1);
         assert_eq!(StageCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(StageUnitCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(StoredBlockBodyIndices::bitflag_encoded_bytes(), 1);
@@ -363,7 +359,6 @@ mod tests {
         validate_bitflag_backwards_compat!(PruneCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(PruneMode, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(PruneSegment, UnusedBits::Zero);
-        validate_bitflag_backwards_compat!(Receipt, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StageCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(StageUnitCheckpoint, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StoredBlockBodyIndices, UnusedBits::Zero);

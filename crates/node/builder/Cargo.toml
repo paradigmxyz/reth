@@ -121,6 +121,7 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-tasks/test-utils",
 ]
+trie-debug = ["reth-engine-tree/trie-debug"]
 op = [
     "reth-db/op",
     "reth-db-api/op",
