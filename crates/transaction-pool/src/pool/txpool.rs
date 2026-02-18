@@ -354,7 +354,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This will also apply updates to the pool based on the new base fee and blob fee.
     ///
     /// Returns the outcome containing any transactions that were promoted due to fee changes.
-    pub(crate) fn set_block_info(&mut self, info: BlockInfo) -> UpdateOutcome<T::Transaction> {
+    pub fn set_block_info(&mut self, info: BlockInfo) -> UpdateOutcome<T::Transaction> {
         let mut outcome = UpdateOutcome::default();
 
         // first update the subpools based on the new values, collecting promoted transactions
