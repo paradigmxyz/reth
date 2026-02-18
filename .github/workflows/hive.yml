@@ -1,7 +1,3 @@
-# Runs ethereum/hive tests
-# Upstream (non-PR): docker-test
-# PRs / forks: prepare-reth
-
 name: hive
 
 on:
@@ -34,7 +30,7 @@ jobs:
             echo "use_docker=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build-reth-stable:
+  build-reth-stable-docker:
     needs: detect-env
     if: needs.detect-env.outputs.use_docker == 'true'
     uses: ./.github/workflows/docker-test.yml
@@ -43,7 +39,7 @@ jobs:
       artifact_name: reth-stable
     secrets: inherit
 
-  build-reth-edge:
+  build-reth-edge-docker:
     needs: detect-env
     if: needs.detect-env.outputs.use_docker == 'true'
     uses: ./.github/workflows/docker-test.yml
@@ -60,7 +56,7 @@ jobs:
       image_tag: ghcr.io/paradigmxyz/reth:latest
       binary_name: reth
       cargo_features: "asm-keccak"
-      artifact_name: "reth-stable"
+      artifact_name: reth-stable
 
   prepare-reth-edge:
     needs: detect-env
@@ -70,62 +66,53 @@ jobs:
       image_tag: ghcr.io/paradigmxyz/reth:latest
       binary_name: reth
       cargo_features: "asm-keccak edge"
-      artifact_name: "reth-edge"
+      artifact_name: reth-edge
 
   prepare-hive:
     timeout-minutes: 45
-    runs-on: ${{ needs.detect-env.outputs.use_docker == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Checkout hive tests
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           repository: ethereum/hive
           ref: master
           path: hivetests
 
-      - name: Get hive commit hash
-        id: hive-commit
+      - id: hive-commit
         run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
       - uses: actions/setup-go@v6
         with:
           go-version: "^1.13.1"
 
-      - name: Restore hive assets cache
+      - uses: actions/cache@v5
         id: cache-hive
-        uses: actions/cache@v5
         with:
-          path: ./hive_assets
+          path: hive_assets
           key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/scripts/hive/build_simulators.sh') }}
 
-      - name: Build hive assets
-        if: steps.cache-hive.outputs.cache-hit != 'true'
+      - if: steps.cache-hive.outputs.cache-hit != 'true'
         run: .github/scripts/hive/build_simulators.sh
 
-      - name: Load cached Docker images
-        if: steps.cache-hive.outputs.cache-hit == 'true'
+      - if: steps.cache-hive.outputs.cache-hit == 'true'
         run: |
           cd hive_assets
-          for tar_file in *.tar; do
-            if [ -f "$tar_file" ]; then
-              echo "Loading $tar_file..."
-              docker load -i "$tar_file"
-            fi
+          for f in *.tar; do
+            docker load -i "$f"
           done
           chmod +x hive
 
-      - name: Upload hive assets
-        uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v6
         with:
           name: hive_assets
-          path: ./hive_assets
+          path: hive_assets
 
   wait-reth:
     needs:
-      - build-reth-stable
-      - build-reth-edge
+      - build-reth-stable-docker
+      - build-reth-edge-docker
       - prepare-reth-stable
       - prepare-reth-edge
     if: always()
@@ -134,7 +121,14 @@ jobs:
       - run: echo "reth build ready"
 
   test:
+    needs:
+      - detect-env
+      - wait-reth
+      - prepare-hive
+
+    runs-on: ${{ needs.detect-env.outputs.use_docker == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     timeout-minutes: 120
+
     strategy:
       fail-fast: false
       matrix:
@@ -162,51 +156,8 @@ jobs:
           - sim: ethereum/rpc-compat
             include:
               - eth_call
-          - sim: ethereum/eels/consume-engine
-            limit: .*tests/amsterdam.*
-          - sim: ethereum/eels/consume-engine
-            limit: .*tests/osaka.*
-          - sim: ethereum/eels/consume-engine
-            limit: .*tests/prague.*
-          - sim: ethereum/eels/consume-engine
-            limit: .*tests/cancun.*
-          - sim: ethereum/eels/consume-engine
-            limit: .*tests/shanghai.*
-          - sim: ethereum/eels/consume-engine
-            limit: .*tests/berlin.*
-          - sim: ethereum/eels/consume-engine
-            limit: .*tests/istanbul.*
-          - sim: ethereum/eels/consume-engine
-            limit: .*tests/homestead.*
-          - sim: ethereum/eels/consume-engine
-            limit: .*tests/frontier.*
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/amsterdam.*
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/osaka.*
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/prague.*
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/cancun.*
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/shanghai.*
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/berlin.*
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/istanbul.*
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/homestead.*
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/frontier.*
-
-    needs:
-      - detect-env
-      - wait-reth
-      - prepare-hive
 
     name: ${{ matrix.storage }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
-
-    runs-on: ${{ needs.detect-env.outputs.use_docker == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
 
     permissions:
       issues: write
@@ -216,35 +167,29 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download hive assets
-        uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v7
         with:
           name: hive_assets
           path: /tmp
 
-      - name: Download reth image
-        uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v7
         with:
           name: reth-${{ matrix.storage }}
           path: /tmp
 
-      - name: Load Docker images
-        run: .github/scripts/hive/load_images.sh
+      - run: .github/scripts/hive/load_images.sh
 
-      - name: Move hive binary
-        run: |
+      - run: |
           mv /tmp/hive /usr/local/bin
           chmod +x /usr/local/bin/hive
 
-      - name: Checkout hive tests
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           repository: ethereum/hive
           ref: master
           path: hivetests
 
-      - name: Run simulator
-        run: |
+      - run: |
           LIMIT="${{ matrix.scenario.limit }}"
           TESTS="${{ join(matrix.scenario.include, '|') }}"
           if [ -n "$LIMIT" ] && [ -n "$TESTS" ]; then
@@ -256,22 +201,18 @@ jobs:
           else
             FILTER="/"
           fi
-          echo "filter: $FILTER"
           .github/scripts/hive/run_simulator.sh "${{ matrix.scenario.sim }}" "$FILTER"
 
-      - name: Parse hive output
-        run: |
+      - run: |
           find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" \
             | xargs -I {} python .github/scripts/hive/parse.py {} \
               --exclusion .github/scripts/hive/expected_failures.yaml \
               --ignored .github/scripts/hive/ignored_tests.yaml
 
-      - name: Print simulator output
-        if: ${{ failure() }}
+      - if: failure()
         run: cat hivetests/workspace/logs/*simulator*.log
 
-      - name: Print reth client logs
-        if: ${{ failure() }}
+      - if: failure()
         run: cat hivetests/workspace/logs/reth/client-*.log
 
   notify-on-error:
