@@ -12,8 +12,8 @@ use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
 use reth_trie::{
-    added_removed_keys::MultiAddedRemovedKeys, proof_v2, HashedPostState, HashedStorage,
-    MultiProofTargets,
+    added_removed_keys::{default_added_removed_keys, MultiAddedRemovedKeys},
+    proof_v2, HashedPostState, HashedStorage, MultiProofTargets,
 };
 #[cfg(test)]
 use reth_trie_parallel::stats::ParallelTrieTracker;
@@ -919,7 +919,7 @@ impl MultiProofTask {
                                 .storages
                                 .get(account)
                                 .cloned()
-                                .unwrap_or_default(),
+                                .unwrap_or_else(default_added_removed_keys),
                         );
                     }
                 }

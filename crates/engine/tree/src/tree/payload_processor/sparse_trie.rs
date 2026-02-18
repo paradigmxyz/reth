@@ -25,6 +25,8 @@ use reth_trie_parallel::{
     root::ParallelStateRootError,
     targets_v2::MultiProofTargetsV2,
 };
+#[cfg(feature = "trie-debug")]
+use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
@@ -183,11 +185,19 @@ where
                 ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
             })?;
 
+        #[cfg(feature = "trie-debug")]
+        let debug_recorders = self.trie.take_debug_recorders();
+
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
-        Ok(StateRootComputeOutcome { state_root, trie_updates })
+        Ok(StateRootComputeOutcome {
+            state_root,
+            trie_updates,
+            #[cfg(feature = "trie-debug")]
+            debug_recorders,
+        })
     }
 
     /// Clears and shrinks the trie, discarding all state.
@@ -475,11 +485,19 @@ where
                 ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
             })?;
 
+        #[cfg(feature = "trie-debug")]
+        let debug_recorders = self.trie.take_debug_recorders();
+
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
-        Ok(StateRootComputeOutcome { state_root, trie_updates })
+        Ok(StateRootComputeOutcome {
+            state_root,
+            trie_updates,
+            #[cfg(feature = "trie-debug")]
+            debug_recorders,
+        })
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
@@ -891,6 +909,10 @@ pub struct StateRootComputeOutcome {
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: TrieUpdates,
+    /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
+    /// and `Some(address)` for storage tries.
+    #[cfg(feature = "trie-debug")]
+    pub debug_recorders: Vec<(Option<B256>, TrieDebugRecorder)>,
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
