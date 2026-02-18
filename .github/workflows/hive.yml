@@ -23,30 +23,33 @@ concurrency:
 # ENV DETECTION (CRITICAL)
 # --------------------------------------------------
 jobs:
-  detect-env:
-    runs-on: ubuntu-latest
-    outputs:
-      is_upstream: ${{ steps.detect.outputs.is_upstream }}
-    steps:
-      - id: detect
-        run: |
-          if [ "${{ github.repository }}" = "paradigmxyz/reth" ]; then
-            echo "is_upstream=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_upstream=false" >> "$GITHUB_OUTPUT"
-          fi
+ detect-env:
+  runs-on: ubuntu-latest
+  outputs:
+    use_docker: ${{ steps.detect.outputs.use_docker }}
+  steps:
+    - id: detect
+      run: |
+        if [ "${{ github.repository }}" = "paradigmxyz/reth" ] && \
+           [ "${{ github.event_name }}" != "pull_request" ]; then
+          echo "use_docker=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "use_docker=false" >> "$GITHUB_OUTPUT"
+        fi
+
 
   # --------------------------------------------------
   # UPSTREAM ONLY (docker-test)
   # --------------------------------------------------
   build-reth-stable:
-    needs: detect-env
-    if: needs.detect-env.outputs.is_upstream == 'true'
-    uses: ./.github/workflows/docker-test.yml
-    with:
-      hive_target: hive-stable
-      artifact_name: reth-stable
-    secrets: inherit
+  needs: detect-env
+  if: needs.detect-env.outputs.use_docker == 'true'
+  uses: ./.github/workflows/docker-test.yml
+  with:
+    hive_target: hive-stable
+    artifact_name: reth-stable
+  secrets: inherit
+
 
   build-reth-edge:
     needs: detect-env
@@ -61,14 +64,15 @@ jobs:
   # FORKS / PRS ONLY (prepare-reth)
   # --------------------------------------------------
   prepare-reth-stable:
-    needs: detect-env
-    if: needs.detect-env.outputs.is_upstream == 'false'
-    uses: ./.github/workflows/prepare-reth.yml
-    with:
-      image_tag: ghcr.io/paradigmxyz/reth:latest
-      binary_name: reth
-      cargo_features: asm-keccak
-      artifact_name: reth-stable
+  needs: detect-env
+  if: needs.detect-env.outputs.use_docker == 'false'
+  uses: ./.github/workflows/prepare-reth.yml
+  with:
+    image_tag: ghcr.io/paradigmxyz/reth:latest
+    binary_name: reth
+    cargo_features: asm-keccak
+    artifact_name: reth-stable
+
 
   prepare-reth-edge:
     needs: detect-env
@@ -85,7 +89,7 @@ jobs:
   # --------------------------------------------------
   prepare-hive:
     needs: detect-env
-    if: needs.detect-env.outputs.is_upstream == 'true'
+    if: needs.detect-env.outputs.use_docker == 'true'
     timeout-minutes: 45
     runs-on: depot-ubuntu-latest-4
     steps:
