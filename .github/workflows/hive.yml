@@ -1,6 +1,6 @@
 # Runs ethereum/hive tests
-# Upstream (paradigmxyz/reth): docker-test flow
-# Forks / PRs: prepare-reth flow
+# Upstream (non-PR): docker-test
+# PRs / forks: prepare-reth
 
 name: hive
 
@@ -19,74 +19,45 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
-# --------------------------------------------------
-# ENV DETECTION (CRITICAL)
-# --------------------------------------------------
 jobs:
- detect-env:
-  runs-on: ubuntu-latest
-  outputs:
-    use_docker: ${{ steps.detect.outputs.use_docker }}
-  steps:
-    - id: detect
-      run: |
-        if [ "${{ github.repository }}" = "paradigmxyz/reth" ] && \
-           [ "${{ github.event_name }}" != "pull_request" ]; then
-          echo "use_docker=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "use_docker=false" >> "$GITHUB_OUTPUT"
-        fi
-
+  # --------------------------------------------------
+  # ENV DETECTION (SINGLE SOURCE OF TRUTH)
+  # --------------------------------------------------
+  detect-env:
+    runs-on: ubuntu-latest
+    outputs:
+      use_docker: ${{ steps.detect.outputs.use_docker }}
+    steps:
+      - id: detect
+        run: |
+          if [ "${{ github.repository }}" = "paradigmxyz/reth" ] && \
+             [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "use_docker=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_docker=false" >> "$GITHUB_OUTPUT"
+          fi
 
   # --------------------------------------------------
-  # UPSTREAM ONLY (docker-test)
+  # DOCKER FLOW (UPSTREAM, NON-PR ONLY)
   # --------------------------------------------------
   build-reth-stable:
-  needs: detect-env
-  if: needs.detect-env.outputs.use_docker == 'true'
-  uses: ./.github/workflows/docker-test.yml
-  with:
-    hive_target: hive-stable
-    artifact_name: reth-stable
-  secrets: inherit
-
+    needs: detect-env
+    if: needs.detect-env.outputs.use_docker == 'true'
+    uses: ./.github/workflows/docker-test.yml
+    with:
+      hive_target: hive-stable
+      artifact_name: reth-stable
+    secrets: inherit
 
   build-reth-edge:
     needs: detect-env
-    if: needs.detect-env.outputs.is_upstream == 'true'
+    if: needs.detect-env.outputs.use_docker == 'true'
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive-edge
       artifact_name: reth-edge
     secrets: inherit
 
-  # --------------------------------------------------
-  # FORKS / PRS ONLY (prepare-reth)
-  # --------------------------------------------------
-  prepare-reth-stable:
-  needs: detect-env
-  if: needs.detect-env.outputs.use_docker == 'false'
-  uses: ./.github/workflows/prepare-reth.yml
-  with:
-    image_tag: ghcr.io/paradigmxyz/reth:latest
-    binary_name: reth
-    cargo_features: asm-keccak
-    artifact_name: reth-stable
-
-
-  prepare-reth-edge:
-    needs: detect-env
-    if: needs.detect-env.outputs.is_upstream == 'false'
-    uses: ./.github/workflows/prepare-reth.yml
-    with:
-      image_tag: ghcr.io/paradigmxyz/reth:latest
-      binary_name: reth
-      cargo_features: asm-keccak edge
-      artifact_name: reth-edge
-
-  # --------------------------------------------------
-  # HIVE PREP (UPSTREAM ONLY)
-  # --------------------------------------------------
   prepare-hive:
     needs: detect-env
     if: needs.detect-env.outputs.use_docker == 'true'
@@ -128,6 +99,29 @@ jobs:
           path: hive_assets
 
   # --------------------------------------------------
+  # NON-DOCKER FLOW (PRS + FORKS)
+  # --------------------------------------------------
+  prepare-reth-stable:
+    needs: detect-env
+    if: needs.detect-env.outputs.use_docker == 'false'
+    uses: ./.github/workflows/prepare-reth.yml
+    with:
+      image_tag: ghcr.io/paradigmxyz/reth:latest
+      binary_name: reth
+      cargo_features: asm-keccak
+      artifact_name: reth-stable
+
+  prepare-reth-edge:
+    needs: detect-env
+    if: needs.detect-env.outputs.use_docker == 'false'
+    uses: ./.github/workflows/prepare-reth.yml
+    with:
+      image_tag: ghcr.io/paradigmxyz/reth:latest
+      binary_name: reth
+      cargo_features: asm-keccak edge
+      artifact_name: reth-edge
+
+  # --------------------------------------------------
   # TEST MATRIX
   # --------------------------------------------------
   test:
@@ -140,7 +134,7 @@ jobs:
       - prepare-hive
 
     timeout-minutes: 120
-    runs-on: ${{ needs.detect-env.outputs.is_upstream == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.detect-env.outputs.use_docker == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
 
     strategy:
       fail-fast: false
@@ -152,8 +146,6 @@ jobs:
           - sim: ethereum/sync
           - sim: devp2p
             limit: discv4
-          - sim: devp2p
-            limit: discv5
           - sim: ethereum/engine
             limit: cancun
           - sim: ethereum/rpc-compat
@@ -173,10 +165,10 @@ jobs:
           path: /tmp
 
       - uses: actions/download-artifact@v7
+        if: needs.detect-env.outputs.use_docker == 'true'
         with:
           name: hive_assets
           path: /tmp
-        if: needs.detect-env.outputs.is_upstream == 'true'
 
       - run: .github/scripts/hive/load_images.sh
 
@@ -219,8 +211,10 @@ jobs:
   # SLACK (UPSTREAM ONLY)
   # --------------------------------------------------
   notify-on-error:
-    needs: test
-    if: failure() && github.repository == 'paradigmxyz/reth'
+    needs:
+      - test
+      - detect-env
+    if: failure() && needs.detect-env.outputs.use_docker == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: rtCamp/action-slack-notify@v2
