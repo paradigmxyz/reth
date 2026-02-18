@@ -65,7 +65,7 @@ pub struct ParallelismThresholds {
 /// ## Node Revealing
 ///
 /// The trie uses lazy loading to efficiently handle large state tries. Nodes can be:
-/// - **Blind nodes**: Stored as hashes ([`SparseNode::Hash`]), representing unloaded trie parts
+/// - **Blind nodes**: Stored as hashes on [`SparseNode::Branch::blinded_hashes`]
 /// - **Revealed nodes**: Fully loaded nodes (Branch, Extension, Leaf) with complete structure
 ///
 /// Note: An empty trie contains an `EmptyRoot` node at the root path, rather than no nodes at all.
@@ -4401,16 +4401,16 @@ mod tests {
             Nibbles::from_nibbles([0x1, 0xf]),
         ];
 
-        let children = child_paths
+        let mut children = child_paths
             .iter()
             .map(|path| ProofTrieNodeV2 {
-                path: path.clone(),
+                path: *path,
                 node: create_leaf_node([0x0], 1),
                 masks: None,
             })
             .collect::<Vec<_>>();
 
-        trie.reveal_nodes(&mut children.clone()).unwrap();
+        trie.reveal_nodes(&mut children).unwrap();
 
         // Branch node should still be in upper trie but without any blinded children
         assert_matches!(
