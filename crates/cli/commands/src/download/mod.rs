@@ -313,9 +313,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let config = config_for_selections(&selections);
         if !self.no_config && write_config(&config, target_dir)? {
             let desc = config_gen::describe_prune_config_from_selections(&selections);
-            for line in &desc {
-                info!(target: "reth::cli", "{}", line);
-            }
+            info!(target: "reth::cli", "{}", desc.join(", "));
         }
 
         // Write prune checkpoints to the DB so the pruner knows data before the
@@ -533,9 +531,6 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
         let started_at = Instant::now();
         let mut interval = tokio::time::interval(Duration::from_secs(3));
         interval.tick().await; // first tick is immediate, skip it
-        let mut last_downloaded = 0u64;
-        let mut last_done = 0u64;
-
         loop {
             interval.tick().await;
 
@@ -551,14 +546,6 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
 
             let done = progress.archives_done.load(Ordering::Relaxed);
             let all = progress.total_archives;
-
-            // Don't repeat the same line
-            if downloaded == last_downloaded && done == last_done {
-                continue;
-            }
-            last_downloaded = downloaded;
-            last_done = done;
-
             let pct = (downloaded as f64 / total as f64) * 100.0;
             let dl = DownloadProgress::format_size(downloaded);
             let tot = DownloadProgress::format_size(total);

@@ -157,18 +157,13 @@ impl SnapshotComponentType {
 
     /// Whether this component is part of the minimal download set.
     ///
-    /// The minimal set mirrors `--minimal` prune settings: state + headers + transactions +
-    /// account/storage changesets. This is the smallest download that produces a working node.
-    /// Receipts and indexes are excluded since `--minimal` prunes receipts to only the last
-    /// 64 blocks and doesn't need indexes.
+    /// The minimal set is state + headers + account/storage changesets. Transactions, receipts,
+    /// and indexes are excluded — the generated prune config fully prunes tx_lookup,
+    /// sender_recovery, and receipts.
     pub const fn is_minimal(&self) -> bool {
         matches!(
             self,
-            Self::State |
-                Self::Headers |
-                Self::Transactions |
-                Self::AccountChangesets |
-                Self::StorageChangesets
+            Self::State | Self::Headers | Self::AccountChangesets | Self::StorageChangesets
         )
     }
 
