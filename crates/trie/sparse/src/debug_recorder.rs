@@ -70,6 +70,11 @@ pub enum RecordedOp {
     UpdateSubtrieHashes,
     /// Records a `root()` call.
     Root,
+    /// Records a `set_root` call with the root node that was set.
+    SetRoot {
+        /// The root trie node that was set.
+        node: ProofTrieNodeRecord,
+    },
 }
 
 /// A serializable record of a proof trie node.
