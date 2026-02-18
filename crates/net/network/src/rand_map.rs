@@ -323,16 +323,6 @@ impl<K, V> RandMap<K, V> {
 }
 
 impl<K, V, S> RandMap<K, V, S> {
-    /// Creates an empty `RandMap` with the given hasher.
-    pub const fn with_hasher(hash_builder: S) -> Self {
-        Self { inner: IndexMap::with_hasher(hash_builder) }
-    }
-
-    /// Creates an empty `RandMap` with the given capacity and hasher.
-    pub fn with_capacity_and_hasher(n: usize, hash_builder: S) -> Self {
-        Self { inner: IndexMap::with_capacity_and_hasher(n, hash_builder) }
-    }
-
     /// Returns the number of elements in the map.
     pub fn len(&self) -> usize {
         self.inner.len()
@@ -346,11 +336,6 @@ impl<K, V, S> RandMap<K, V, S> {
     /// Returns a reference to the underlying [`IndexMap`].
     pub const fn inner(&self) -> &IndexMap<K, V, S> {
         &self.inner
-    }
-
-    /// Returns a mutable reference to the underlying [`IndexMap`].
-    pub fn inner_mut(&mut self) -> &mut IndexMap<K, V, S> {
-        &mut self.inner
     }
 
     /// Consumes the wrapper, returning the underlying [`IndexMap`].
@@ -462,11 +447,6 @@ where
         self.inner.insert(key, value)
     }
 
-    /// Inserts a key-value pair, returning the full result.
-    pub fn insert_full(&mut self, key: K, value: V) -> (usize, Option<V>) {
-        self.inner.insert_full(key, value)
-    }
-
     /// Gets the entry for the given key for in-place manipulation.
     pub fn entry(&mut self, key: K) -> indexmap::map::Entry<'_, K, V> {
         self.inner.entry(key)
@@ -507,23 +487,6 @@ where
         Q: ?Sized + Hash + indexmap::Equivalent<K>,
     {
         self.inner.swap_remove_entry(key)
-    }
-
-    /// Removes a key from the map using shift-remove (preserves insertion order at cost of
-    /// O(n)).
-    pub fn shift_remove<Q>(&mut self, key: &Q) -> Option<V>
-    where
-        Q: ?Sized + Hash + indexmap::Equivalent<K>,
-    {
-        self.inner.shift_remove(key)
-    }
-
-    /// Removes a key from the map using shift-remove, returning both key and value.
-    pub fn shift_remove_entry<Q>(&mut self, key: &Q) -> Option<(K, V)>
-    where
-        Q: ?Sized + Hash + indexmap::Equivalent<K>,
-    {
-        self.inner.shift_remove_entry(key)
     }
 }
 
@@ -659,16 +622,6 @@ impl<T> RandSet<T> {
 }
 
 impl<T, S> RandSet<T, S> {
-    /// Creates an empty `RandSet` with the given hasher.
-    pub const fn with_hasher(hash_builder: S) -> Self {
-        Self { inner: IndexSet::with_hasher(hash_builder) }
-    }
-
-    /// Creates an empty `RandSet` with the given capacity and hasher.
-    pub fn with_capacity_and_hasher(n: usize, hash_builder: S) -> Self {
-        Self { inner: IndexSet::with_capacity_and_hasher(n, hash_builder) }
-    }
-
     /// Returns the number of elements in the set.
     pub fn len(&self) -> usize {
         self.inner.len()
@@ -682,11 +635,6 @@ impl<T, S> RandSet<T, S> {
     /// Returns a reference to the underlying [`IndexSet`].
     pub const fn inner(&self) -> &IndexSet<T, S> {
         &self.inner
-    }
-
-    /// Returns a mutable reference to the underlying [`IndexSet`].
-    pub fn inner_mut(&mut self) -> &mut IndexSet<T, S> {
-        &mut self.inner
     }
 
     /// Consumes the wrapper, returning the underlying [`IndexSet`].
@@ -746,11 +694,6 @@ where
         self.inner.insert(value)
     }
 
-    /// Inserts a value, returning the index and whether it was newly inserted.
-    pub fn insert_full(&mut self, value: T) -> (usize, bool) {
-        self.inner.insert_full(value)
-    }
-
     /// Removes a value from the set. Returns `true` if the value was present.
     ///
     /// This is equivalent to [`swap_remove`](Self::swap_remove). Because iteration order
@@ -768,15 +711,6 @@ where
         Q: ?Sized + Hash + indexmap::Equivalent<T>,
     {
         self.inner.swap_remove(value)
-    }
-
-    /// Removes a value from the set using shift-remove (preserves insertion order at cost
-    /// of O(n)).
-    pub fn shift_remove<Q>(&mut self, value: &Q) -> bool
-    where
-        Q: ?Sized + Hash + indexmap::Equivalent<T>,
-    {
-        self.inner.shift_remove(value)
     }
 
     /// Returns a reference to the value in the set, if any, that is equal to the given
@@ -1201,48 +1135,5 @@ mod tests {
 
         map.entry("a").or_insert(99);
         assert_eq!(map["a"], 42);
-    }
-
-    #[test]
-    fn map_shift_remove() {
-        let mut map: RandMap<i32, i32> = (0..5).map(|i| (i, i * 10)).collect();
-
-        assert_eq!(map.shift_remove(&2), Some(20));
-        assert_eq!(map.len(), 4);
-        assert!(!map.contains_key(&2));
-
-        assert_eq!(map.shift_remove(&2), None);
-        assert_eq!(map.len(), 4);
-
-        for i in [0, 1, 3, 4] {
-            assert_eq!(map.get(&i), Some(&(i * 10)));
-        }
-    }
-
-    #[test]
-    fn map_shift_remove_entry() {
-        let mut map: RandMap<&str, i32> = [("a", 1), ("b", 2), ("c", 3)].into_iter().collect();
-
-        assert_eq!(map.shift_remove_entry("b"), Some(("b", 2)));
-        assert_eq!(map.len(), 2);
-        assert!(!map.contains_key("b"));
-
-        assert_eq!(map.shift_remove_entry("b"), None);
-    }
-
-    #[test]
-    fn set_shift_remove() {
-        let mut set: RandSet<i32> = (0..5).collect();
-
-        assert!(set.shift_remove(&3));
-        assert_eq!(set.len(), 4);
-        assert!(!set.contains(&3));
-
-        assert!(!set.shift_remove(&3));
-        assert_eq!(set.len(), 4);
-
-        for i in [0, 1, 2, 4] {
-            assert!(set.contains(&i));
-        }
     }
 }
