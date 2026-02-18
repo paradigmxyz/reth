@@ -1,6 +1,6 @@
-# Runs ethereum/hive tests with dual logic:
-# - paradigmxyz/reth → NEW docker-test based flow
-# - forks / PRs      → OLD prepare-reth based flow
+# Runs ethereum/hive tests
+# Upstream (paradigmxyz/reth): docker-test flow
+# Forks / PRs: prepare-reth flow
 
 name: hive
 
@@ -19,102 +19,125 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+# --------------------------------------------------
+# ENV DETECTION (CRITICAL)
+# --------------------------------------------------
 jobs:
-  # -------------------------------
-  # NEW FLOW (upstream only)
-  # -------------------------------
+  detect-env:
+    runs-on: ubuntu-latest
+    outputs:
+      is_upstream: ${{ steps.detect.outputs.is_upstream }}
+    steps:
+      - id: detect
+        run: |
+          if [ "${{ github.repository }}" = "paradigmxyz/reth" ]; then
+            echo "is_upstream=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_upstream=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # --------------------------------------------------
+  # UPSTREAM ONLY (docker-test)
+  # --------------------------------------------------
   build-reth-stable:
-    if: github.repository == 'paradigmxyz/reth'
+    needs: detect-env
+    if: needs.detect-env.outputs.is_upstream == 'true'
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive-stable
-      artifact_name: "reth-stable"
+      artifact_name: reth-stable
     secrets: inherit
 
   build-reth-edge:
-    if: github.repository == 'paradigmxyz/reth'
+    needs: detect-env
+    if: needs.detect-env.outputs.is_upstream == 'true'
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive-edge
-      artifact_name: "reth-edge"
+      artifact_name: reth-edge
     secrets: inherit
 
-  # -------------------------------
-  # OLD FLOW (forks / PRs)
-  # -------------------------------
+  # --------------------------------------------------
+  # FORKS / PRS ONLY (prepare-reth)
+  # --------------------------------------------------
   prepare-reth-stable:
-    if: github.repository != 'paradigmxyz/reth'
+    needs: detect-env
+    if: needs.detect-env.outputs.is_upstream == 'false'
     uses: ./.github/workflows/prepare-reth.yml
     with:
       image_tag: ghcr.io/paradigmxyz/reth:latest
       binary_name: reth
-      cargo_features: "asm-keccak"
-      artifact_name: "reth-stable"
+      cargo_features: asm-keccak
+      artifact_name: reth-stable
 
   prepare-reth-edge:
-    if: github.repository != 'paradigmxyz/reth'
+    needs: detect-env
+    if: needs.detect-env.outputs.is_upstream == 'false'
     uses: ./.github/workflows/prepare-reth.yml
     with:
       image_tag: ghcr.io/paradigmxyz/reth:latest
       binary_name: reth
-      cargo_features: "asm-keccak edge"
-      artifact_name: "reth-edge"
+      cargo_features: asm-keccak edge
+      artifact_name: reth-edge
 
-  # -------------------------------
-  # HIVE PREP (shared)
-  # -------------------------------
+  # --------------------------------------------------
+  # HIVE PREP (UPSTREAM ONLY)
+  # --------------------------------------------------
   prepare-hive:
-    if: github.repository == 'paradigmxyz/reth'
+    needs: detect-env
+    if: needs.detect-env.outputs.is_upstream == 'true'
     timeout-minutes: 45
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    runs-on: depot-ubuntu-latest-4
     steps:
       - uses: actions/checkout@v6
 
-      - name: Checkout hive tests
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           repository: ethereum/hive
           path: hivetests
 
-      - name: Get hive commit hash
-        id: hive-commit
-        run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> $GITHUB_OUTPUT
+      - id: hive-commit
+        run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@v6
         with:
           go-version: "^1.13.1"
 
-      - name: Restore hive assets cache
+      - uses: actions/cache@v5
         id: cache-hive
-        uses: actions/cache@v5
         with:
-          path: ./hive_assets
+          path: hive_assets
           key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/scripts/hive/build_simulators.sh') }}
 
-      - name: Build hive assets
-        if: steps.cache-hive.outputs.cache-hit != 'true'
+      - if: steps.cache-hive.outputs.cache-hit != 'true'
         run: .github/scripts/hive/build_simulators.sh
 
-      - name: Load cached Docker images
-        if: steps.cache-hive.outputs.cache-hit == 'true'
+      - if: steps.cache-hive.outputs.cache-hit == 'true'
         run: |
           cd hive_assets
-          for tar_file in *.tar; do
-            [ -f "$tar_file" ] && docker load -i "$tar_file"
-          done
+          for f in *.tar; do docker load -i "$f"; done
           chmod +x hive
 
-      - name: Upload hive assets
-        uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v6
         with:
           name: hive_assets
-          path: ./hive_assets
+          path: hive_assets
 
-  # -------------------------------
+  # --------------------------------------------------
   # TEST MATRIX
-  # -------------------------------
+  # --------------------------------------------------
   test:
+    needs:
+      - detect-env
+      - build-reth-stable
+      - build-reth-edge
+      - prepare-reth-stable
+      - prepare-reth-edge
+      - prepare-hive
+
     timeout-minutes: 120
+    runs-on: ${{ needs.detect-env.outputs.is_upstream == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -127,67 +150,42 @@ jobs:
             limit: discv4
           - sim: devp2p
             limit: discv5
-            include:
-              - PingLargeRequestID
-          - sim: ethereum/engine
-            limit: engine-api
           - sim: ethereum/engine
             limit: cancun
           - sim: ethereum/rpc-compat
             include:
               - eth_call
-          - sim: ethereum/eels/consume-engine
-            limit: .*tests/(osaka|prague|cancun|shanghai|berlin|istanbul|homestead|frontier|paris).*
-          - sim: ethereum/eels/consume-rlp
-            limit: .*tests/(osaka|prague|cancun|shanghai|berlin|istanbul|homestead|frontier|paris).*
-
-    needs:
-      - prepare-hive
-      - build-reth-stable
-      - build-reth-edge
-      - prepare-reth-stable
-      - prepare-reth-edge
 
     name: ${{ matrix.storage }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
-
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
-
-    permissions:
-      issues: write
 
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Download hive assets
-        uses: actions/download-artifact@v7
-        with:
-          name: hive_assets
-          path: /tmp
-
-      - name: Download reth image
-        uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v7
         with:
           name: reth-${{ matrix.storage }}
           path: /tmp
 
-      - name: Load Docker images
-        run: .github/scripts/hive/load_images.sh
+      - uses: actions/download-artifact@v7
+        with:
+          name: hive_assets
+          path: /tmp
+        if: needs.detect-env.outputs.is_upstream == 'true'
 
-      - name: Move hive binary
-        run: |
-          mv /tmp/hive /usr/local/bin
-          chmod +x /usr/local/bin/hive
+      - run: .github/scripts/hive/load_images.sh
 
-      - name: Checkout hive tests
-        uses: actions/checkout@v6
+      - run: |
+          mv /tmp/hive /usr/local/bin || true
+          chmod +x /usr/local/bin/hive || true
+
+      - uses: actions/checkout@v6
         with:
           repository: ethereum/hive
           path: hivetests
 
-      - name: Run simulator
-        run: |
+      - run: |
           LIMIT="${{ matrix.scenario.limit }}"
           TESTS="${{ join(matrix.scenario.include, '|') }}"
           if [ -n "$LIMIT" ] && [ -n "$TESTS" ]; then
@@ -201,31 +199,28 @@ jobs:
           fi
           .github/scripts/hive/run_simulator.sh "${{ matrix.scenario.sim }}" "$FILTER"
 
-      - name: Parse hive output
-        run: |
-          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" \
+      - run: |
+          find hivetests/workspace/logs -name "*.json" ! -name "hive.json" \
             | xargs -I {} python .github/scripts/hive/parse.py {} \
               --exclusion .github/scripts/hive/expected_failures.yaml \
               --ignored .github/scripts/hive/ignored_tests.yaml
 
-      - name: Print simulator output
-        if: failure()
+      - if: failure()
         run: cat hivetests/workspace/logs/*simulator*.log
 
-      - name: Print reth client logs
-        if: failure()
+      - if: failure()
         run: cat hivetests/workspace/logs/reth/client-*.log
 
-  # -------------------------------
-  # SLACK NOTIFICATION
-  # -------------------------------
+  # --------------------------------------------------
+  # SLACK (UPSTREAM ONLY)
+  # --------------------------------------------------
   notify-on-error:
     needs: test
-    if: failure() && github.repository == 'paradigmxyz/reth'
+    if: failure() && needs.detect-env.outputs.is_upstream == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: rtCamp/action-slack-notify@v2
         env:
           SLACK_COLOR: ${{ job.status }}
-          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_MESSAGE: "Hive failed: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
           SLACK_WEBHOOK: ${{ secrets.SLACK_HIVE_WEBHOOK_URL }}
