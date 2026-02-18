@@ -476,12 +476,13 @@ jobs:
 
       - name: Prepare source dirs
         run: |
+          BASELINE_REF="${{ steps.refs.outputs.baseline-ref }}"
           if [ -d ../reth-baseline ]; then
-            git -C ../reth-baseline fetch origin
+            git -C ../reth-baseline fetch origin "$BASELINE_REF"
           else
             git clone . ../reth-baseline
           fi
-          git -C ../reth-baseline checkout "${{ steps.refs.outputs.baseline-ref }}"
+          git -C ../reth-baseline checkout "$BASELINE_REF"
           ln -sfn "$(pwd)" ../reth-feature
 
       - name: Build baseline and feature binaries in parallel
@@ -713,12 +714,12 @@ jobs:
               ['running feature benchmark', '${{ steps.run-feature.outcome }}'],
             ];
             const failed = steps_status.find(([, o]) => o === 'failure');
-            const detail = failed ? ` while ${failed[0]}` : '';
+            const failedStep = failed ? failed[0] : 'unknown step';
 
             await github.rest.issues.updateComment({
               owner: context.repo.owner, repo: context.repo.repo,
               comment_id: parseInt(process.env.BENCH_COMMENT_ID),
-              body: `cc @${process.env.BENCH_ACTOR}\n\n❌ Benchmark failed${detail}. [View logs](${process.env.BENCH_JOB_URL})`,
+              body: `cc @${process.env.BENCH_ACTOR}\n\n❌ Benchmark failed while ${failedStep}. [View logs](${process.env.BENCH_JOB_URL})`,
             });
 
       - name: Upload node log
