@@ -18,7 +18,22 @@ on:
       blocks:
         description: "Number of blocks to benchmark"
         required: false
-        default: "50"
+        default: "500"
+        type: string
+      warmup:
+        description: "Number of warmup blocks"
+        required: false
+        default: "100"
+        type: string
+      baseline:
+        description: "Baseline git ref (default: merge-base)"
+        required: false
+        default: ""
+        type: string
+      feature:
+        description: "Feature git ref (default: branch head)"
+        required: false
+        default: ""
         type: string
 
 env:
@@ -39,7 +54,7 @@ concurrency:
 
 jobs:
   codspeed:
-    if: github.event_name != 'issue_comment'
+    if: github.event_name == 'push'
     runs-on: depot-ubuntu-latest
     strategy:
       matrix:
@@ -76,7 +91,9 @@ jobs:
           token: ${{ secrets.CODSPEED_TOKEN }}
 
   reth-bench:
-    if: github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, 'derek bench')
+    if: |
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, 'derek bench')) ||
+      github.event_name == 'workflow_dispatch'
     name: reth-bench
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 120
@@ -85,6 +102,7 @@ jobs:
       SCHELK_MOUNT: /reth-bench
     steps:
       - name: Check org membership
+        if: github.event_name == 'issue_comment'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -107,87 +125,124 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const body = context.payload.comment.body.trim();
-            const intArgs = new Set(['blocks', 'warmup']);
-            const refArgs = new Set(['baseline', 'feature']);
-            const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '' };
-            const unknown = [];
-            const invalid = [];
-            const args = body.replace(/^derek bench\s*/, '');
-            for (const part of args.split(/\s+/).filter(Boolean)) {
-              const eq = part.indexOf('=');
-              if (eq === -1) {
-                unknown.push(part);
-                continue;
-              }
-              const key = part.slice(0, eq);
-              const value = part.slice(eq + 1);
-              if (intArgs.has(key)) {
-                if (!/^\d+$/.test(value)) {
-                  invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
-                } else {
-                  defaults[key] = value;
-                }
-              } else if (refArgs.has(key)) {
-                if (!value) {
-                  invalid.push(`\`${key}=\` (must be a git ref)`);
-                } else {
-                  defaults[key] = value;
-                }
-              } else {
-                unknown.push(key);
-              }
-            }
-            const errors = [];
-            if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
-            if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
-            if (errors.length) {
-              const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`derek bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF]\``;
-              await github.rest.issues.createComment({
+            let pr, actor, blocks, warmup, baseline, feature;
+
+            if (context.eventName === 'workflow_dispatch') {
+              actor = '${{ github.actor }}';
+              blocks = '${{ github.event.inputs.blocks }}' || '500';
+              warmup = '${{ github.event.inputs.warmup }}' || '100';
+              baseline = '${{ github.event.inputs.baseline }}';
+              feature = '${{ github.event.inputs.feature }}';
+
+              // Find PR for the selected branch
+              const branch = '${{ github.ref_name }}';
+              const { data: prs } = await github.rest.pulls.list({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: msg,
+                head: `${context.repo.owner}:${branch}`,
+                state: 'open',
+                per_page: 1,
               });
-              core.setFailed(msg);
-              return;
+              pr = prs.length ? String(prs[0].number) : '';
+              if (!pr) {
+                core.info(`No open PR found for branch '${branch}', results will be in job summary`);
+              }
+            } else {
+              pr = String(context.issue.number);
+              actor = context.payload.comment.user.login;
+
+              const body = context.payload.comment.body.trim();
+              const intArgs = new Set(['blocks', 'warmup']);
+              const refArgs = new Set(['baseline', 'feature']);
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '' };
+              const unknown = [];
+              const invalid = [];
+              const args = body.replace(/^derek bench\s*/, '');
+              for (const part of args.split(/\s+/).filter(Boolean)) {
+                const eq = part.indexOf('=');
+                if (eq === -1) {
+                  unknown.push(part);
+                  continue;
+                }
+                const key = part.slice(0, eq);
+                const value = part.slice(eq + 1);
+                if (intArgs.has(key)) {
+                  if (!/^\d+$/.test(value)) {
+                    invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
+                  } else {
+                    defaults[key] = value;
+                  }
+                } else if (refArgs.has(key)) {
+                  if (!value) {
+                    invalid.push(`\`${key}=\` (must be a git ref)`);
+                  } else {
+                    defaults[key] = value;
+                  }
+                } else {
+                  unknown.push(key);
+                }
+              }
+              const errors = [];
+              if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
+              if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
+              if (errors.length) {
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`derek bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF]\``;
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: msg,
+                });
+                core.setFailed(msg);
+                return;
+              }
+              blocks = defaults.blocks;
+              warmup = defaults.warmup;
+              baseline = defaults.baseline;
+              feature = defaults.feature;
             }
-            core.setOutput('blocks', defaults.blocks);
-            core.setOutput('warmup', defaults.warmup);
-            core.setOutput('baseline', defaults.baseline);
-            core.setOutput('feature', defaults.feature);
-            core.exportVariable('BENCH_BLOCKS', defaults.blocks);
-            core.exportVariable('BENCH_WARMUP_BLOCKS', defaults.warmup);
+
+            core.exportVariable('BENCH_PR', pr);
+            core.exportVariable('BENCH_ACTOR', actor);
+            core.exportVariable('BENCH_BLOCKS', blocks);
+            core.exportVariable('BENCH_WARMUP_BLOCKS', warmup);
+            core.setOutput('baseline', baseline);
+            core.setOutput('feature', feature);
 
       - name: Acknowledge request
         id: ack
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.reactions.createForIssueComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: context.payload.comment.id,
-              content: 'eyes',
-            });
+            if (context.eventName === 'issue_comment') {
+              await github.rest.reactions.createForIssueComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: context.payload.comment.id,
+                content: 'eyes',
+              });
+            }
+
+            const pr = process.env.BENCH_PR;
+            if (!pr) return;
 
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const blocks = '${{ steps.args.outputs.blocks }}';
-            const warmup = '${{ steps.args.outputs.warmup }}';
+            const blocks = process.env.BENCH_BLOCKS;
+            const warmup = process.env.BENCH_WARMUP_BLOCKS;
             const baseline = '${{ steps.args.outputs.baseline }}' || 'merge-base';
-            const feature = '${{ steps.args.outputs.feature }}' || 'PR head';
+            const feature = '${{ steps.args.outputs.feature }}' || 'branch head';
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `🚀 Benchmark started! [View run](${runUrl})\n\n⏳ **Status:** Building binaries...\n\n**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``,
+              issue_number: parseInt(pr),
+              body: `cc @${process.env.BENCH_ACTOR}\n\n🚀 Benchmark started! [View run](${runUrl})\n\n⏳ **Status:** Building binaries...\n\n**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``,
             });
             core.setOutput('comment-id', comment.id);
       - uses: actions/checkout@v6
         with:
           submodules: true
           fetch-depth: 0
-          ref: ${{ format('refs/pull/{0}/merge', github.event.issue.number) }}
+          ref: ${{ env.BENCH_PR && format('refs/pull/{0}/merge', env.BENCH_PR) || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
@@ -215,13 +270,18 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-            });
-            core.setOutput('head-ref', pr.head.ref);
-            core.setOutput('head-sha', pr.head.sha);
+            if (process.env.BENCH_PR) {
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: parseInt(process.env.BENCH_PR),
+              });
+              core.setOutput('head-ref', pr.head.ref);
+              core.setOutput('head-sha', pr.head.sha);
+            } else {
+              core.setOutput('head-ref', '${{ github.ref_name }}');
+              core.setOutput('head-sha', '${{ github.sha }}');
+            }
 
       - name: Resolve refs
         id: refs
@@ -380,9 +440,9 @@ jobs:
 
       - name: Push charts
         id: push-charts
-        if: success()
+        if: success() && env.BENCH_PR
         run: |
-          PR_NUMBER=${{ github.event.issue.number }}
+          PR_NUMBER=${{ env.BENCH_PR }}
           RUN_ID=${{ github.run_id }}
           CHART_DIR="pr/${PR_NUMBER}/${RUN_ID}"
 
@@ -416,28 +476,27 @@ jobs:
             }
 
             const sha = '${{ steps.push-charts.outputs.sha }}';
-            const prNumber = context.issue.number;
+            const prNumber = process.env.BENCH_PR;
             const runId = '${{ github.run_id }}';
-            const baseUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${sha}/pr/${prNumber}/${runId}`;
 
-            const charts = [
-              { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
-              { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
-              { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
-            ];
-
-            let chartMarkdown = '\n\n### Charts\n\n';
-            for (const chart of charts) {
-              chartMarkdown += `<details><summary>${chart.label}</summary>\n\n`;
-              chartMarkdown += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
-              chartMarkdown += `</details>\n\n`;
+            if (sha && prNumber) {
+              const baseUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${sha}/pr/${prNumber}/${runId}`;
+              const charts = [
+                { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
+                { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
+                { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
+              ];
+              let chartMarkdown = '\n\n### Charts\n\n';
+              for (const chart of charts) {
+                chartMarkdown += `<details><summary>${chart.label}</summary>\n\n`;
+                chartMarkdown += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
+                chartMarkdown += `</details>\n\n`;
+              }
+              comment += chartMarkdown;
             }
 
-            comment += chartMarkdown;
-
-            const requestedBy = '${{ github.event.comment.user.login }}';
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = `cc @${requestedBy}\n\n✅ Benchmark complete! [View run](${runUrl})\n\n${comment}`;
+            const body = `cc @${process.env.BENCH_ACTOR}\n\n✅ Benchmark complete! [View run](${runUrl})\n\n${comment}`;
             const ackCommentId = '${{ steps.ack.outputs.comment-id }}';
 
             if (ackCommentId) {
@@ -448,12 +507,8 @@ jobs:
                 body,
               });
             } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
+              // No PR — write results to job summary
+              await core.summary.addRaw(body).write();
             }
 
       - name: Upload node log
