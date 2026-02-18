@@ -674,7 +674,11 @@ fn extract_archive<R: Read>(
 }
 
 /// Extracts a compressed tar archive without progress tracking.
-fn extract_archive_raw<R: Read>(reader: R, format: CompressionFormat, target_dir: &Path) -> Result<()> {
+fn extract_archive_raw<R: Read>(
+    reader: R,
+    format: CompressionFormat,
+    target_dir: &Path,
+) -> Result<()> {
     match format {
         CompressionFormat::Lz4 => {
             Archive::new(Decoder::new(reader)?).unpack(target_dir)?;
