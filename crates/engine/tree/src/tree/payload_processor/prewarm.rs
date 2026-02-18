@@ -624,7 +624,7 @@ where
             let to_multi_proof = to_multi_proof.clone();
             let done_tx = done_tx.clone();
             let rx = tx_receiver.clone();
-            let span = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: &span, "prewarm worker", idx);
+            let span = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: &span, "prewarm_worker", idx);
             task_executor.prewarming_pool().spawn(move || {
                 let _enter = span.entered();
                 ctx.transact_batch(rx, to_multi_proof, done_tx);
