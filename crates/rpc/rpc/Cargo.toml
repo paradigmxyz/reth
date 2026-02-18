@@ -76,7 +76,7 @@ jsonrpsee-types.workspace = true
 
 # async
 async-trait.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 tokio-stream.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true
@@ -100,6 +100,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
 
 rand.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 jsonrpsee = { workspace = true, features = ["client"] }
 
