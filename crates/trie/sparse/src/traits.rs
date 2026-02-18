@@ -13,7 +13,6 @@ use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2};
 
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
-use crate::provider::TrieNodeProvider;
 
 /// Describes an update to a leaf in the sparse trie.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,46 +138,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// The implementation may modify the input nodes. A common thing to do is [`std::mem::replace`]
     /// each node with [`TrieNodeV2::EmptyRoot`] to avoid cloning.
     fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()>;
-
-    /// Updates the value of a leaf node at the specified path.
-    ///
-    /// If the leaf doesn't exist, it will be created.
-    /// If it does exist, its value will be updated.
-    ///
-    /// # Arguments
-    ///
-    /// * `full_path` - The full path to the leaf
-    /// * `value` - The new value for the leaf
-    /// * `provider` - The trie provider for resolving missing nodes
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if successful, or an error if the update failed.
-    fn update_leaf<P: TrieNodeProvider>(
-        &mut self,
-        full_path: Nibbles,
-        value: Vec<u8>,
-        provider: P,
-    ) -> SparseTrieResult<()>;
-
-    /// Removes a leaf node at the specified path.
-    ///
-    /// This will also handle collapsing the trie structure as needed
-    /// (e.g., removing branch nodes that become unnecessary).
-    ///
-    /// # Arguments
-    ///
-    /// * `full_path` - The full path to the leaf to remove
-    /// * `provider` - The trie node provider for resolving missing nodes
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if successful, or an error if the removal failed.
-    fn remove_leaf<P: TrieNodeProvider>(
-        &mut self,
-        full_path: &Nibbles,
-        provider: P,
-    ) -> SparseTrieResult<()>;
 
     /// Calculates and returns the root hash of the trie.
     ///

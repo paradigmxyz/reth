@@ -12,13 +12,12 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
-use reth_primitives_traits::Account;
 #[cfg(feature = "std")]
 use reth_primitives_traits::FastInstant as Instant;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    BranchNodeMasks, DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount,
-    TrieNodeV2, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    BranchNodeMasks, DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieNodeV2,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 #[cfg(feature = "std")]
 use tracing::debug;
@@ -645,162 +644,6 @@ where
             }
         })
     }
-
-    /// Update the account leaf node.
-    pub fn update_account_leaf(
-        &mut self,
-        path: Nibbles,
-        value: Vec<u8>,
-        provider_factory: impl TrieNodeProviderFactory,
-    ) -> SparseStateTrieResult<()> {
-        if !self.revealed_account_paths.contains(&path) {
-            self.revealed_account_paths.insert(path);
-        }
-
-        let provider = provider_factory.account_node_provider();
-        self.state.update_leaf(path, value, provider)?;
-        Ok(())
-    }
-
-    /// Update the leaf node of a revealed storage trie at the provided address.
-    pub fn update_storage_leaf(
-        &mut self,
-        address: B256,
-        slot: Nibbles,
-        value: Vec<u8>,
-        provider_factory: impl TrieNodeProviderFactory,
-    ) -> SparseStateTrieResult<()> {
-        let provider = provider_factory.storage_node_provider(address);
-        self.storage
-            .tries
-            .get_mut(&address)
-            .ok_or(SparseTrieErrorKind::Blind)?
-            .update_leaf(slot, value, provider)?;
-        self.storage.get_revealed_paths_mut(address).insert(slot);
-        Ok(())
-    }
-
-    /// Update or remove trie account based on new account info. This method will either recompute
-    /// the storage root based on update storage trie or look it up from existing leaf value.
-    ///
-    /// Returns false if the new account info and storage trie are empty, indicating the account
-    /// leaf should be removed.
-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn update_account(
-        &mut self,
-        address: B256,
-        account: Account,
-        provider_factory: impl TrieNodeProviderFactory,
-    ) -> SparseStateTrieResult<bool> {
-        let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
-            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
-            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
-        } else if self.is_account_revealed(address) {
-            trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
-            // The account was revealed, either...
-            if let Some(value) = self.get_account_value(&address) {
-                // ..it exists and we should take its current storage root or...
-                TrieAccount::decode(&mut &value[..])?.storage_root
-            } else {
-                // ...the account is newly created and the storage trie is empty.
-                EMPTY_ROOT_HASH
-            }
-        } else {
-            return Err(SparseTrieErrorKind::Blind.into())
-        };
-
-        if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
-            return Ok(false);
-        }
-
-        trace!(target: "trie::sparse", ?address, "Updating account");
-        let nibbles = Nibbles::unpack(address);
-        self.account_rlp_buf.clear();
-        account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
-
-        Ok(true)
-    }
-
-    /// Update the storage root of a revealed account.
-    ///
-    /// If the account doesn't exist in the trie, the function is a no-op.
-    ///
-    /// Returns false if the new storage root is empty, and the account info was already empty,
-    /// indicating the account leaf should be removed.
-    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
-    pub fn update_account_storage_root(
-        &mut self,
-        address: B256,
-        provider_factory: impl TrieNodeProviderFactory,
-    ) -> SparseStateTrieResult<bool> {
-        if !self.is_account_revealed(address) {
-            return Err(SparseTrieErrorKind::Blind.into())
-        }
-
-        // Nothing to update if the account doesn't exist in the trie.
-        let Some(mut trie_account) = self
-            .get_account_value(&address)
-            .map(|v| TrieAccount::decode(&mut &v[..]))
-            .transpose()?
-        else {
-            trace!(target: "trie::sparse", ?address, "Account not found in trie, skipping storage root update");
-            return Ok(true)
-        };
-
-        // Calculate the new storage root. If the storage trie doesn't exist, the storage root will
-        // be empty.
-        let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
-            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
-            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
-        } else {
-            EMPTY_ROOT_HASH
-        };
-
-        // Update the account with the new storage root.
-        trie_account.storage_root = storage_root;
-
-        // If the account is empty, indicate that it should be removed.
-        if trie_account == TrieAccount::default() {
-            return Ok(false)
-        }
-
-        // Otherwise, update the account leaf.
-        trace!(target: "trie::sparse", ?address, "Updating account with the new storage root");
-        let nibbles = Nibbles::unpack(address);
-        self.account_rlp_buf.clear();
-        trie_account.encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
-
-        Ok(true)
-    }
-
-    /// Remove the account leaf node.
-    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
-    pub fn remove_account_leaf(
-        &mut self,
-        path: &Nibbles,
-        provider_factory: impl TrieNodeProviderFactory,
-    ) -> SparseStateTrieResult<()> {
-        let provider = provider_factory.account_node_provider();
-        self.state.remove_leaf(path, provider)?;
-        Ok(())
-    }
-
-    /// Update the leaf node of a storage trie at the provided address.
-    pub fn remove_storage_leaf(
-        &mut self,
-        address: B256,
-        slot: &Nibbles,
-        provider_factory: impl TrieNodeProviderFactory,
-    ) -> SparseStateTrieResult<()> {
-        let storage_trie =
-            self.storage.tries.get_mut(&address).ok_or(SparseTrieErrorKind::Blind)?;
-
-        let provider = provider_factory.storage_node_provider(address);
-        storage_trie.remove_leaf(slot, provider)?;
-        Ok(())
-    }
 }
 
 impl<A, S> SparseStateTrie<A, S>
@@ -1306,10 +1149,12 @@ fn filter_revealed_v2_proof_nodes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{provider::DefaultTrieNodeProviderFactory, LeafLookup, ParallelSparseTrie};
+    use crate::{
+        provider::DefaultTrieNodeProviderFactory, LeafLookup, LeafUpdate, ParallelSparseTrie,
+    };
     use alloy_primitives::{
         b256,
-        map::{HashMap, HashSet},
+        map::{B256Map, HashMap, HashSet},
         U256,
     };
     use arbitrary::Arbitrary;
@@ -1319,7 +1164,7 @@ mod tests {
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
         BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
-        TrieMask,
+        TrieAccount, TrieMask,
     };
 
     /// Create a leaf key (suffix) with given nibbles padded with zeros to reach `total_len`.
@@ -1332,7 +1177,6 @@ mod tests {
 
     #[test]
     fn reveal_account_path_twice() {
-        let provider_factory = DefaultTrieNodeProviderFactory;
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
         // Full 64-nibble paths
@@ -1381,7 +1225,10 @@ mod tests {
 
         // Remove the leaf node and check that the state trie does not contain the leaf node and
         // value
-        sparse.remove_account_leaf(&full_path_0, &provider_factory).unwrap();
+        let key_0 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
+        let mut updates = B256Map::default();
+        updates.insert(key_0, LeafUpdate::Changed(Vec::new()));
+        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::NonExistent)
@@ -1400,7 +1247,6 @@ mod tests {
 
     #[test]
     fn reveal_storage_path_twice() {
-        let provider_factory = DefaultTrieNodeProviderFactory;
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
         // Full 64-nibble path
@@ -1454,7 +1300,14 @@ mod tests {
 
         // Remove the leaf node and check that the storage trie does not contain the leaf node and
         // value
-        sparse.remove_storage_leaf(B256::ZERO, &full_path_0, &provider_factory).unwrap();
+        let key_0 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
+        let mut updates = B256Map::default();
+        updates.insert(key_0, LeafUpdate::Changed(Vec::new()));
+        sparse
+            .storage_trie_mut(&B256::ZERO)
+            .unwrap()
+            .update_leaves(&mut updates, |_, _| {})
+            .unwrap();
         assert!(matches!(
             sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::NonExistent)
@@ -1481,7 +1334,6 @@ mod tests {
 
     #[test]
     fn reveal_v2_proof_nodes() {
-        let provider_factory = DefaultTrieNodeProviderFactory;
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
         // Full 64-nibble path
@@ -1529,7 +1381,10 @@ mod tests {
         );
 
         // Remove the leaf node
-        sparse.remove_account_leaf(&full_path_0, &provider_factory).unwrap();
+        let key_0 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
+        let mut updates = B256Map::default();
+        updates.insert(key_0, LeafUpdate::Changed(Vec::new()));
+        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
         assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
 
         // Reveal again - should skip already revealed paths
@@ -1539,7 +1394,6 @@ mod tests {
 
     #[test]
     fn reveal_storage_v2_proof_nodes() {
-        let provider_factory = DefaultTrieNodeProviderFactory;
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
         // Full 64-nibble path
@@ -1579,7 +1433,14 @@ mod tests {
         );
 
         // Remove the leaf node
-        sparse.remove_storage_leaf(B256::ZERO, &full_path_0, &provider_factory).unwrap();
+        let key_0 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
+        let mut updates = B256Map::default();
+        updates.insert(key_0, LeafUpdate::Changed(Vec::new()));
+        sparse
+            .storage_trie_mut(&B256::ZERO)
+            .unwrap()
+            .update_leaves(&mut updates, |_, _| {})
+            .unwrap();
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
@@ -1612,7 +1473,6 @@ mod tests {
         let slot_path_2 = Nibbles::unpack(slot_2);
         let value_2 = U256::from(rng.random::<u64>());
         let slot_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
-        let slot_path_3 = Nibbles::unpack(slot_3);
         let value_3 = U256::from(rng.random::<u64>());
 
         let mut storage_hash_builder = HashBuilder::default()
@@ -1690,44 +1550,30 @@ mod tests {
         assert_eq!(sparse.root(&provider_factory).unwrap(), root);
 
         let address_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
-        let address_path_3 = Nibbles::unpack(address_3);
         let account_3 = Account { nonce: account_1.nonce + 1, ..account_1 };
         let trie_account_3 = account_3.into_trie_account(EMPTY_ROOT_HASH);
 
-        sparse
-            .update_account_leaf(
-                address_path_3,
-                alloy_rlp::encode(trie_account_3),
-                &provider_factory,
-            )
-            .unwrap();
+        let mut updates = B256Map::default();
+        updates.insert(address_3, LeafUpdate::Changed(alloy_rlp::encode(trie_account_3)));
+        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
 
+        let mut updates = B256Map::default();
+        updates.insert(slot_3, LeafUpdate::Changed(alloy_rlp::encode(value_3)));
         sparse
-            .update_storage_leaf(
-                address_1,
-                slot_path_3,
-                alloy_rlp::encode(value_3),
-                &provider_factory,
-            )
+            .storage_trie_mut(&address_1)
+            .unwrap()
+            .update_leaves(&mut updates, |_, _| {})
             .unwrap();
         trie_account_1.storage_root = sparse.storage_root(&address_1).unwrap();
-        sparse
-            .update_account_leaf(
-                address_path_1,
-                alloy_rlp::encode(trie_account_1),
-                &provider_factory,
-            )
-            .unwrap();
+        let mut updates = B256Map::default();
+        updates.insert(address_1, LeafUpdate::Changed(alloy_rlp::encode(trie_account_1)));
+        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
 
         sparse.wipe_storage(address_2).unwrap();
         trie_account_2.storage_root = sparse.storage_root(&address_2).unwrap();
-        sparse
-            .update_account_leaf(
-                address_path_2,
-                alloy_rlp::encode(trie_account_2),
-                &provider_factory,
-            )
-            .unwrap();
+        let mut updates = B256Map::default();
+        updates.insert(address_2, LeafUpdate::Changed(alloy_rlp::encode(trie_account_2)));
+        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
 
         sparse.root(&provider_factory).unwrap();
 

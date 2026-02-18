@@ -1,13 +1,13 @@
 use crate::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     prefix_set::TriePrefixSetsMut,
-    proof::{Proof, ProofTrieNodeProviderFactory},
+    proof::Proof,
     trie_cursor::TrieCursorFactory,
 };
 use alloy_rlp::EMPTY_STRING_CODE;
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie_common::HashedPostState;
-use reth_trie_sparse::SparseTrie;
+use reth_trie_sparse::{LeafUpdate, SparseTrie};
 
 use alloy_primitives::{
     keccak256,
@@ -16,15 +16,10 @@ use alloy_primitives::{
 };
 use itertools::Itertools;
 use reth_execution_errors::{
-    SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind, StateProofError,
-    TrieWitnessError,
+    SparseStateTrieErrorKind, SparseTrieErrorKind, StateProofError, TrieWitnessError,
 };
 use reth_trie_common::{MultiProofTargets, Nibbles};
-use reth_trie_sparse::{
-    provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
-    SparseStateTrie,
-};
-use std::sync::mpsc;
+use reth_trie_sparse::SparseStateTrie;
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -146,11 +141,6 @@ where
             }
         }
 
-        let (tx, rx) = mpsc::channel();
-        let blinded_provider_factory = WitnessTrieNodeProviderFactory::new(
-            ProofTrieNodeProviderFactory::new(self.trie_cursor_factory, self.hashed_cursor_factory),
-            tx,
-        );
         let mut sparse_trie = SparseStateTrie::new();
         sparse_trie.reveal_multiproof(multiproof)?;
 
@@ -159,7 +149,6 @@ where
             proof_targets.into_iter().sorted_unstable_by_key(|(ha, _)| *ha)
         {
             // Update storage trie first.
-            let provider = blinded_provider_factory.storage_node_provider(hashed_address);
             let storage = state.storages.get(&hashed_address);
             let storage_trie = sparse_trie.storage_trie_mut(&hashed_address).ok_or(
                 SparseStateTrieErrorKind::SparseStorageTrie(
@@ -167,23 +156,22 @@ where
                     SparseTrieErrorKind::Blind,
                 ),
             )?;
+
+            // Collect storage updates into a B256Map for batch update.
+            let mut storage_updates = B256Map::default();
             for hashed_slot in hashed_slots.into_iter().sorted_unstable() {
-                let storage_nibbles = Nibbles::unpack(hashed_slot);
                 let maybe_leaf_value = storage
                     .and_then(|s| s.storage.get(&hashed_slot))
                     .filter(|v| !v.is_zero())
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
 
-                if let Some(value) = maybe_leaf_value {
-                    storage_trie.update_leaf(storage_nibbles, value, &provider).map_err(|err| {
-                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
-                    })?;
-                } else {
-                    storage_trie.remove_leaf(&storage_nibbles, &provider).map_err(|err| {
-                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
-                    })?;
-                }
+                let value = maybe_leaf_value.unwrap_or_default();
+                storage_updates.insert(hashed_slot, LeafUpdate::Changed(value));
             }
+
+            storage_trie.update_leaves(&mut storage_updates, |_, _| {}).map_err(|err| {
+                SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
+            })?;
 
             let account = state
                 .accounts
@@ -191,13 +179,34 @@ where
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
                 .unwrap_or_default();
 
-            if !sparse_trie.update_account(hashed_address, account, &blinded_provider_factory)? {
-                let nibbles = Nibbles::unpack(hashed_address);
-                sparse_trie.remove_account_leaf(&nibbles, &blinded_provider_factory)?;
-            }
+            // Update account leaf via update_leaves.
+            let storage_root =
+                if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
+                    storage_trie.root()
+                } else {
+                    EMPTY_ROOT_HASH
+                };
 
-            while let Ok(node) = rx.try_recv() {
-                self.witness.insert(keccak256(&node), node);
+            if !account.is_empty() || storage_root != EMPTY_ROOT_HASH {
+                let mut account_rlp = Vec::new();
+                alloy_rlp::Encodable::encode(
+                    &account.into_trie_account(storage_root),
+                    &mut account_rlp,
+                );
+                let mut account_updates = B256Map::default();
+                account_updates.insert(hashed_address, LeafUpdate::Changed(account_rlp));
+                sparse_trie
+                    .trie_mut()
+                    .update_leaves(&mut account_updates, |_, _| {})
+                    .map_err(SparseStateTrieErrorKind::from)?;
+            } else {
+                // Account is empty - remove it.
+                let mut account_updates = B256Map::default();
+                account_updates.insert(hashed_address, LeafUpdate::Changed(Vec::new()));
+                sparse_trie
+                    .trie_mut()
+                    .update_leaves(&mut account_updates, |_, _| {})
+                    .map_err(SparseStateTrieErrorKind::from)?;
             }
         }
 
@@ -231,65 +240,5 @@ where
             proof_targets.insert(*hashed_address, storage_keys);
         }
         Ok(proof_targets)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct WitnessTrieNodeProviderFactory<F> {
-    /// Trie node provider factory.
-    provider_factory: F,
-    /// Sender for forwarding fetched trie node.
-    tx: mpsc::Sender<Bytes>,
-}
-
-impl<F> WitnessTrieNodeProviderFactory<F> {
-    const fn new(provider_factory: F, tx: mpsc::Sender<Bytes>) -> Self {
-        Self { provider_factory, tx }
-    }
-}
-
-impl<F> TrieNodeProviderFactory for WitnessTrieNodeProviderFactory<F>
-where
-    F: TrieNodeProviderFactory,
-    F::AccountNodeProvider: TrieNodeProvider,
-    F::StorageNodeProvider: TrieNodeProvider,
-{
-    type AccountNodeProvider = WitnessTrieNodeProvider<F::AccountNodeProvider>;
-    type StorageNodeProvider = WitnessTrieNodeProvider<F::StorageNodeProvider>;
-
-    fn account_node_provider(&self) -> Self::AccountNodeProvider {
-        let provider = self.provider_factory.account_node_provider();
-        WitnessTrieNodeProvider::new(provider, self.tx.clone())
-    }
-
-    fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider {
-        let provider = self.provider_factory.storage_node_provider(account);
-        WitnessTrieNodeProvider::new(provider, self.tx.clone())
-    }
-}
-
-#[derive(Debug)]
-struct WitnessTrieNodeProvider<P> {
-    /// Proof-based blinded.
-    provider: P,
-    /// Sender for forwarding fetched blinded node.
-    tx: mpsc::Sender<Bytes>,
-}
-
-impl<P> WitnessTrieNodeProvider<P> {
-    const fn new(provider: P, tx: mpsc::Sender<Bytes>) -> Self {
-        Self { provider, tx }
-    }
-}
-
-impl<P: TrieNodeProvider> TrieNodeProvider for WitnessTrieNodeProvider<P> {
-    fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
-        let maybe_node = self.provider.trie_node(path)?;
-        if let Some(node) = &maybe_node {
-            self.tx
-                .send(node.node.clone())
-                .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
-        }
-        Ok(maybe_node)
     }
 }
