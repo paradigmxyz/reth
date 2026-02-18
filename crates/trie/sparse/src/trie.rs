@@ -363,10 +363,17 @@ pub enum SparseNode {
 }
 
 impl SparseNode {
-    /// Create new [`SparseNode::Branch`] from state mask.
+    /// Create new [`SparseNode::Branch`] from state mask and blinded nodes.
     #[cfg(test)]
-    pub const fn new_branch(state_mask: TrieMask) -> Self {
-        Self::Branch { state_mask, state: SparseNodeState::Dirty }
+    pub fn new_branch(state_mask: TrieMask, blinded_children: &[(u8, B256)]) -> Self {
+        let mut blinded_mask = TrieMask::default();
+        let mut blinded_hashes = Box::new([B256::ZERO; 16]);
+
+        for (nibble, hash) in blinded_children {
+            blinded_mask.set_bit(*nibble);
+            blinded_hashes[*nibble as usize] = *hash;
+        }
+        Self::Branch { state_mask, state: SparseNodeState::Dirty, blinded_mask, blinded_hashes }
     }
 
     /// Create new [`SparseNode::Branch`] with two bits set.
@@ -415,11 +422,11 @@ impl SparseNode {
 
     /// Sets the hash of the node for testing purposes.
     ///
-    /// For [`SparseNode::Empty`] and [`SparseNode::Hash`] nodes, this method panics.
+    /// For [`SparseNode::Empty`] nodes, this method panics.
     #[cfg(any(test, feature = "test-utils"))]
     pub fn set_state(&mut self, new_state: SparseNodeState) {
         match self {
-            Self::Empty | Self::Hash(_) => {
+            Self::Empty => {
                 panic!("Cannot set hash for Empty or Hash nodes")
             }
             Self::Leaf { state, .. } |
@@ -428,6 +435,13 @@ impl SparseNode {
                 *state = new_state;
             }
         }
+    }
+
+    /// Sets the state of the node and returns a new node with the same state.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_state(mut self, state: SparseNodeState) -> Self {
+        self.set_state(state);
+        self
     }
 
     /// Returns the memory size of this node in bytes.
