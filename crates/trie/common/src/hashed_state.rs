@@ -95,6 +95,63 @@ impl HashedPostState {
             .collect()
     }
 
+    /// Initialize [`HashedPostState`] from a bundle state whose storage keys are
+    /// already keccak256-hashed (produced by `--storage.v2` / hashed-state mode).
+    ///
+    /// Account addresses are still hashed via `KH`, but storage slot keys are
+    /// passed through as-is to avoid double-hashing.
+    #[inline]
+    #[cfg(feature = "rayon")]
+    pub fn from_bundle_state_hashed_storage<'a, KH: KeyHasher>(
+        state: impl IntoParallelIterator<Item = (&'a Address, &'a BundleAccount)>,
+    ) -> Self {
+        state
+            .into_par_iter()
+            .map(|(address, account)| {
+                let hashed_address = KH::hash_key(address);
+                let hashed_account = account.info.as_ref().map(Into::into);
+                let hashed_storage = HashedStorage::from_hashed_storage(
+                    account.status,
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                );
+
+                (
+                    hashed_address,
+                    hashed_account,
+                    (!hashed_storage.is_empty()).then_some(hashed_storage),
+                )
+            })
+            .collect()
+    }
+
+    /// Initialize [`HashedPostState`] from a bundle state whose storage keys are
+    /// already keccak256-hashed (produced by `--storage.v2` / hashed-state mode).
+    ///
+    /// Account addresses are still hashed via `KH`, but storage slot keys are
+    /// passed through as-is to avoid double-hashing.
+    #[cfg(not(feature = "rayon"))]
+    pub fn from_bundle_state_hashed_storage<'a, KH: KeyHasher>(
+        state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
+    ) -> Self {
+        state
+            .into_iter()
+            .map(|(address, account)| {
+                let hashed_address = KH::hash_key(address);
+                let hashed_account = account.info.as_ref().map(Into::into);
+                let hashed_storage = HashedStorage::from_hashed_storage(
+                    account.status,
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                );
+
+                (
+                    hashed_address,
+                    hashed_account,
+                    (!hashed_storage.is_empty()).then_some(hashed_storage),
+                )
+            })
+            .collect()
+    }
+
     /// Construct [`HashedPostState`] from a single [`HashedStorage`].
     pub fn from_hashed_storage(hashed_address: B256, storage: HashedStorage) -> Self {
         Self {
@@ -478,6 +535,20 @@ impl HashedStorage {
         Self::from_iter(
             status.was_destroyed(),
             storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
+        )
+    }
+
+    /// Create new hashed storage from account status and storage whose keys are
+    /// already keccak256-hashed (e.g. from `--storage.v2` / hashed-state mode).
+    ///
+    /// Unlike [`Self::from_plain_storage`], this does **not** hash the keys again.
+    pub fn from_hashed_storage<'a>(
+        status: AccountStatus,
+        storage: impl IntoIterator<Item = (&'a U256, &'a U256)>,
+    ) -> Self {
+        Self::from_iter(
+            status.was_destroyed(),
+            storage.into_iter().map(|(key, value)| (B256::from(*key), *value)),
         )
     }
 
