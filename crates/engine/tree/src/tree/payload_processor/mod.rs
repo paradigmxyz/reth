@@ -440,23 +440,21 @@ where
                 recover_serial(head.into_iter(), &convert, 0, &prewarm_tx, &execute_tx);
 
                 // Recover the remaining transactions in parallel.
-                if !rest.is_empty() {
-                    rest.into_par_iter()
-                        .enumerate()
-                        .map(|(i, tx)| {
-                            let idx = i + prefetch;
-                            let tx = convert.convert(tx);
-                            tx.map(|tx| {
-                                let (tx_env, tx) = tx.into_parts();
-                                let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
-                                let _ = prewarm_tx.send((idx, tx.clone()));
-                                tx
-                            })
+                rest.into_par_iter()
+                    .enumerate()
+                    .map(|(i, tx)| {
+                        let idx = i + prefetch;
+                        let tx = convert.convert(tx);
+                        tx.map(|tx| {
+                            let (tx_env, tx) = tx.into_parts();
+                            let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
+                            let _ = prewarm_tx.send((idx, tx.clone()));
+                            tx
                         })
-                        .for_each_ordered(|tx| {
-                            let _ = execute_tx.send(tx);
-                        });
-                }
+                    })
+                    .for_each_ordered(|tx| {
+                        let _ = execute_tx.send(tx);
+                    });
             });
         }
 

@@ -95,41 +95,35 @@ pub trait ExecutableTxTuple: Send + 'static {
     fn into_parts(self) -> (Self::IntoIter, Self::Convert);
 
     /// Splits off the first `n` raw transactions and returns them together with the remaining
-    /// transactions and converter.
+    /// iterator and converter.
     ///
     /// Used by the engine to recover a small prefix sequentially before handing the tail to
     /// rayon, avoiding a full `collect()` of the remaining items.
-    fn split_prefix(self, n: usize) -> (Vec<Self::RawTx>, Vec<Self::RawTx>, Self::Convert)
-    where
-        Self: Sized,
-    {
-        let (iter, convert) = self.into_parts();
-        let mut head: Vec<Self::RawTx> = iter.into_iter().collect();
-        let tail = head.split_off(n.min(head.len()));
-        (head, tail, convert)
-    }
+    fn split_prefix(self, n: usize) -> (Vec<Self::RawTx>, Self::IntoIter, Self::Convert);
 }
 
-impl<RawTx, Tx, Err, I, F> ExecutableTxTuple for (I, F)
+impl<RawTx, Tx, Err, F> ExecutableTxTuple for (Vec<RawTx>, F)
 where
     RawTx: Send + Sync + 'static,
     Tx: Clone + Send + Sync + 'static,
     Err: core::error::Error + Send + Sync + 'static,
-    I: IntoParallelIterator<Item = RawTx, Iter: IndexedParallelIterator>
-        + IntoIterator<Item = RawTx>
-        + Send
-        + 'static,
     F: Fn(RawTx) -> Result<Tx, Err> + Send + Sync + 'static,
 {
     type RawTx = RawTx;
     type Tx = Tx;
     type Error = Err;
 
-    type IntoIter = I;
+    type IntoIter = Vec<RawTx>;
     type Convert = F;
 
-    fn into_parts(self) -> (I, F) {
+    fn into_parts(self) -> (Vec<RawTx>, F) {
         self
+    }
+
+    fn split_prefix(self, n: usize) -> (Vec<RawTx>, Vec<RawTx>, F) {
+        let (mut all, convert) = self;
+        let tail = all.split_off(n.min(all.len()));
+        (all, tail, convert)
     }
 }
 
@@ -217,13 +211,13 @@ impl<A: ExecutableTxTuple, B: ExecutableTxTuple> ExecutableTxTuple for Either<A,
         }
     }
 
-    fn split_prefix(self, n: usize) -> (Vec<Self::RawTx>, Vec<Self::RawTx>, Self::Convert) {
+    fn split_prefix(self, n: usize) -> (Vec<Self::RawTx>, Self::IntoIter, Self::Convert) {
         match self {
             Self::Left(a) => {
                 let (head, tail, convert) = a.split_prefix(n);
                 (
                     head.into_iter().map(Either::Left).collect(),
-                    tail.into_iter().map(Either::Left).collect(),
+                    EitherIter(Either::Left(tail)),
                     Either::Left(convert),
                 )
             }
@@ -231,7 +225,7 @@ impl<A: ExecutableTxTuple, B: ExecutableTxTuple> ExecutableTxTuple for Either<A,
                 let (head, tail, convert) = b.split_prefix(n);
                 (
                     head.into_iter().map(Either::Right).collect(),
-                    tail.into_iter().map(Either::Right).collect(),
+                    EitherIter(Either::Right(tail)),
                     Either::Right(convert),
                 )
             }
