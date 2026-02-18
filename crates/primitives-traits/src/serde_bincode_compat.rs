@@ -346,7 +346,6 @@ mod block_bincode {
         }
     }
 
-
     #[cfg(feature = "op")]
     impl super::SerdeBincodeCompat for op_alloy_consensus::OpReceipt {
         type BincodeRepr<'a> = op_alloy_consensus::serde_bincode_compat::OpReceipt<'a>;
