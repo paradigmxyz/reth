@@ -474,16 +474,17 @@ jobs:
           echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
           echo "feature-name=$FEATURE_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare baseline source dir
+      - name: Prepare source dirs
         run: |
           git clone . ../reth-baseline
           git -C ../reth-baseline checkout "${{ steps.refs.outputs.baseline-ref }}"
+          ln -s "$(pwd)" ../reth-feature
 
       - name: Build baseline and feature binaries in parallel
         id: build
         run: |
           BASELINE_DIR="$(cd ../reth-baseline && pwd)"
-          FEATURE_DIR="$(pwd)"
+          FEATURE_DIR="$(cd ../reth-feature && pwd)"
 
           .github/scripts/bench-reth-build.sh baseline "${BASELINE_DIR}" "${{ steps.refs.outputs.baseline-ref }}" &
           PID_BASELINE=$!
@@ -565,7 +566,7 @@ jobs:
 
       - name: "Run benchmark: feature"
         id: run-feature
-        run: taskset -c 0 .github/scripts/bench-reth-run.sh feature target/profiling/reth /tmp/bench-results-feature
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth /tmp/bench-results-feature
 
       # Results & charts
       - name: Parse results
