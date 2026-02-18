@@ -17,13 +17,13 @@
 
 use std::{
     collections::hash_map::RandomState,
-    fmt,
+    fmt::{Debug, Formatter, Result},
     hash::{BuildHasher, Hash},
     iter::FusedIterator,
     ops::{Index, IndexMut},
 };
 
-use indexmap::IndexMap;
+use indexmap::{map::Entry, Equivalent, IndexMap};
 use rand::Rng;
 
 /// Greatest common divisor (Euclid's algorithm).
@@ -67,8 +67,8 @@ pub struct RandIter<'a, K, V, S = RandomState> {
     remaining: usize,
 }
 
-impl<K: fmt::Debug, V: fmt::Debug, S> fmt::Debug for RandIter<'_, K, V, S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl<K: Debug, V: Debug, S> Debug for RandIter<'_, K, V, S> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_struct("RandIter").field("remaining", &self.remaining).finish_non_exhaustive()
     }
 }
@@ -101,8 +101,8 @@ pub struct RandKeys<'a, K, V, S = RandomState> {
     inner: RandIter<'a, K, V, S>,
 }
 
-impl<K: fmt::Debug, V: fmt::Debug, S> fmt::Debug for RandKeys<'_, K, V, S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl<K: Debug, V: Debug, S> Debug for RandKeys<'_, K, V, S> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_struct("RandKeys").finish_non_exhaustive()
     }
 }
@@ -129,8 +129,8 @@ pub struct RandValues<'a, K, V, S = RandomState> {
     inner: RandIter<'a, K, V, S>,
 }
 
-impl<K: fmt::Debug, V: fmt::Debug, S> fmt::Debug for RandValues<'_, K, V, S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl<K: Debug, V: Debug, S> Debug for RandValues<'_, K, V, S> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_struct("RandValues").finish_non_exhaustive()
     }
 }
@@ -161,8 +161,8 @@ pub struct RandIntoIter<K, V, S = RandomState> {
     inner: IndexMap<K, V, S>,
 }
 
-impl<K: fmt::Debug, V: fmt::Debug, S> fmt::Debug for RandIntoIter<K, V, S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl<K: Debug, V: Debug, S> Debug for RandIntoIter<K, V, S> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_struct("RandIntoIter").field("remaining", &self.inner.len()).finish_non_exhaustive()
     }
 }
@@ -205,8 +205,8 @@ pub struct RandMap<K, V, S = RandomState> {
     inner: IndexMap<K, V, S>,
 }
 
-impl<K: fmt::Debug, V: fmt::Debug, S> fmt::Debug for RandMap<K, V, S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl<K: Debug, V: Debug, S> Debug for RandMap<K, V, S> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_map().entries(self.inner.iter()).finish()
     }
 }
@@ -305,7 +305,7 @@ where
     /// Returns a reference to the value corresponding to the key.
     pub fn get<Q>(&self, key: &Q) -> Option<&V>
     where
-        Q: ?Sized + Hash + indexmap::Equivalent<K>,
+        Q: ?Sized + Hash + Equivalent<K>,
     {
         self.inner.get(key)
     }
@@ -313,7 +313,7 @@ where
     /// Returns a mutable reference to the value corresponding to the key.
     pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
     where
-        Q: ?Sized + Hash + indexmap::Equivalent<K>,
+        Q: ?Sized + Hash + Equivalent<K>,
     {
         self.inner.get_mut(key)
     }
@@ -321,7 +321,7 @@ where
     /// Returns the key-value pair corresponding to the supplied key.
     pub fn get_key_value<Q>(&self, key: &Q) -> Option<(&K, &V)>
     where
-        Q: ?Sized + Hash + indexmap::Equivalent<K>,
+        Q: ?Sized + Hash + Equivalent<K>,
     {
         self.inner.get_key_value(key)
     }
@@ -329,7 +329,7 @@ where
     /// Returns `true` if the map contains a value for the specified key.
     pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
-        Q: ?Sized + Hash + indexmap::Equivalent<K>,
+        Q: ?Sized + Hash + Equivalent<K>,
     {
         self.inner.contains_key(key)
     }
@@ -340,7 +340,7 @@ where
     }
 
     /// Gets the entry for the given key for in-place manipulation.
-    pub fn entry(&mut self, key: K) -> indexmap::map::Entry<'_, K, V> {
+    pub fn entry(&mut self, key: K) -> Entry<'_, K, V> {
         self.inner.entry(key)
     }
 
@@ -351,7 +351,7 @@ where
     /// is randomized, the swap-remove reordering is unobservable.
     pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
     where
-        Q: ?Sized + Hash + indexmap::Equivalent<K>,
+        Q: ?Sized + Hash + Equivalent<K>,
     {
         self.swap_remove(key)
     }
@@ -360,7 +360,7 @@ where
     /// key was previously in the map.
     pub fn remove_entry<Q>(&mut self, key: &Q) -> Option<(K, V)>
     where
-        Q: ?Sized + Hash + indexmap::Equivalent<K>,
+        Q: ?Sized + Hash + Equivalent<K>,
     {
         self.swap_remove_entry(key)
     }
@@ -368,7 +368,7 @@ where
     /// Removes a key from the map using swap-remove.
     pub fn swap_remove<Q>(&mut self, key: &Q) -> Option<V>
     where
-        Q: ?Sized + Hash + indexmap::Equivalent<K>,
+        Q: ?Sized + Hash + Equivalent<K>,
     {
         self.inner.swap_remove(key)
     }
@@ -376,7 +376,7 @@ where
     /// Removes a key from the map using swap-remove, returning both key and value.
     pub fn swap_remove_entry<Q>(&mut self, key: &Q) -> Option<(K, V)>
     where
-        Q: ?Sized + Hash + indexmap::Equivalent<K>,
+        Q: ?Sized + Hash + Equivalent<K>,
     {
         self.inner.swap_remove_entry(key)
     }
@@ -396,7 +396,7 @@ impl<K, V, S> From<RandMap<K, V, S>> for IndexMap<K, V, S> {
 
 impl<K, V, Q, S> Index<&Q> for RandMap<K, V, S>
 where
-    Q: ?Sized + Hash + indexmap::Equivalent<K>,
+    Q: ?Sized + Hash + Equivalent<K>,
     K: Hash + Eq,
     S: BuildHasher,
 {
@@ -409,7 +409,7 @@ where
 
 impl<K, V, Q, S> IndexMut<&Q> for RandMap<K, V, S>
 where
-    Q: ?Sized + Hash + indexmap::Equivalent<K>,
+    Q: ?Sized + Hash + Equivalent<K>,
     K: Hash + Eq,
     S: BuildHasher,
 {
