@@ -1,3 +1,4 @@
+
 name: Build test Docker image
 
 on:
@@ -20,12 +21,9 @@ jobs:
     permissions:
       id-token: write
       contents: read
-
     steps:
       - uses: actions/checkout@v6
-
-      - name: Create artifacts directory
-        run: mkdir -p artifacts
+      - run: mkdir -p artifacts
 
       - name: Get git info
         id: git
@@ -36,16 +34,13 @@ jobs:
       - name: Detect fork
         id: fork
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] && \
-             [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
             echo "is_fork=true" >> "$GITHUB_OUTPUT"
           else
             echo "is_fork=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # -------------------------------
       # Depot build (upstream only)
-      # -------------------------------
       - name: Set up Depot CLI
         if: steps.fork.outputs.is_fork == 'false'
         uses: depot/setup-action@v1
@@ -62,12 +57,8 @@ jobs:
           files: docker-bake.hcl
           targets: ${{ inputs.hive_target }}
           push: false
-          outputs: |
-            type=docker,dest=artifacts/reth_image.tar
 
-      # -------------------------------
       # Docker build (forks)
-      # -------------------------------
       - name: Set up Docker Buildx
         if: steps.fork.outputs.is_fork == 'true'
         uses: docker/setup-buildx-action@v3
@@ -84,12 +75,7 @@ jobs:
           push: false
           set: |
             *.dockerfile=Dockerfile
-          outputs: |
-            type=docker,dest=artifacts/reth_image.tar
 
-      # -------------------------------
-      # Upload artifact
-      # -------------------------------
       - name: Upload reth image
         uses: actions/upload-artifact@v6
         with:
