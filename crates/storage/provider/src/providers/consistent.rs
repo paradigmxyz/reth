@@ -2169,6 +2169,107 @@ mod tests {
         Ok(())
     }
 
+    /// Regression test: in v2/hashed-state mode, `get_state()` produces a
+    /// `BundleState` whose storage keys are already keccak256-hashed. If
+    /// `hashed_post_state()` hashes them *again*, the resulting `HashedPostState`
+    /// will contain double-hashed keys that don't match any trie leaf, causing
+    /// invalid state roots and payload rejections.
+    #[test]
+    fn test_hashed_post_state_no_double_hashing_in_v2() -> eyre::Result<()> {
+        use alloy_primitives::{keccak256, U256};
+        use reth_db_api::{models::StorageSettings, tables, transaction::DbTxMut};
+        use reth_primitives_traits::StorageEntry;
+        use reth_storage_api::{HashedPostStateProvider, StorageSettingsCache};
+        use std::collections::HashMap;
+
+        let address = alloy_primitives::Address::with_last_byte(1);
+        let account = reth_primitives_traits::Account {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: None,
+        };
+        let slot = U256::from(0x42);
+        let slot_b256 = B256::from(slot);
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(slot_b256);
+
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let blocks = random_block_range(
+            &mut rng,
+            0..=1,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.append_blocks_with_state(
+            blocks
+                .into_iter()
+                .map(|b| b.try_recover().expect("failed to seal block with senders"))
+                .collect(),
+            &ExecutionOutcome {
+                bundle: BundleState::new(
+                    [(address, None, Some(account.into()), {
+                        let mut s = HashMap::default();
+                        s.insert(slot, (U256::ZERO, U256::from(100)));
+                        s
+                    })],
+                    [
+                        Vec::new(),
+                        vec![(address, Some(Some(account.into())), vec![(slot, U256::ZERO)])],
+                    ],
+                    [],
+                ),
+                first_block: 0,
+                ..Default::default()
+            },
+            Default::default(),
+        )?;
+
+        provider_rw.tx_ref().put::<tables::HashedStorages>(
+            hashed_address,
+            StorageEntry { key: hashed_slot, value: U256::from(100) },
+        )?;
+        provider_rw.tx_ref().put::<tables::HashedAccounts>(hashed_address, account)?;
+
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+        let consistent_provider = provider.consistent_provider()?;
+
+        // Reconstruct BundleState from changesets (this is what canonical_block_by_hash does)
+        let outcome =
+            consistent_provider.get_state(1..=1)?.expect("should return execution outcome");
+
+        // Now convert to HashedPostState — the operation that was double-hashing
+        let hashed_state = provider.hashed_post_state(outcome.state());
+
+        // The HashedPostState must contain the *single*-hashed slot key.
+        // Before the fix, this would contain keccak256(hashed_slot) — a double hash.
+        let account_storage = hashed_state
+            .storages
+            .get(&hashed_address)
+            .expect("should have storage for hashed address");
+
+        assert!(
+            account_storage.storage.contains_key(&hashed_slot),
+            "HashedPostState should contain the single-hashed slot key ({hashed_slot}), \
+             not a double-hashed key. Found keys: {:?}",
+            account_storage.storage.keys().collect::<Vec<_>>()
+        );
+
+        // Verify the double-hashed key is NOT present
+        let double_hashed = keccak256(hashed_slot);
+        assert!(
+            !account_storage.storage.contains_key(&double_hashed),
+            "HashedPostState must NOT contain the double-hashed key ({double_hashed})"
+        );
+
+        Ok(())
+    }
+
     #[test]
     #[cfg(all(unix, feature = "rocksdb"))]
     fn test_get_state_storage_value_hashed_state_historical() -> eyre::Result<()> {
