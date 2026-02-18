@@ -128,10 +128,6 @@ jobs:
   test:
     needs:
       - detect-env
-      - build-reth-stable
-      - build-reth-edge
-      - prepare-reth-stable
-      - prepare-reth-edge
       - prepare-hive
 
     timeout-minutes: 120
