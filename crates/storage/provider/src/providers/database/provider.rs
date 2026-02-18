@@ -48,7 +48,10 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, PlainAccountState, PlainStorageState,
 };
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
+use reth_execution_types::{
+    BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome, HashedExecutionOutcome,
+    TakenState,
+};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, FastInstant as Instant, RecoveredBlock,
@@ -70,8 +73,9 @@ use reth_trie::{
     HashedPostStateSorted, StoredNibbles,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor};
-use revm_database::states::{
-    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
+use revm_database::{
+    states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
+    BundleState,
 };
 use std::{
     cmp::Ordering,
@@ -2866,14 +2870,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    fn take_state_above(
-        &self,
-        block: BlockNumber,
-    ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
+    fn take_state_above(&self, block: BlockNumber) -> ProviderResult<TakenState<Self::Receipt>> {
         let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
-            return Ok(ExecutionOutcome::default())
+            return Ok(TakenState::Plain(ExecutionOutcome::default()))
         }
         let start_block_number = *range.start();
 
@@ -2926,7 +2927,45 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             self.take::<tables::AccountChangeSets>(range)?
         };
 
-        let (state, reverts) = if self.cached_storage_settings().use_hashed_state() {
+        // Collect receipts (shared between both paths).
+        let collect_receipts =
+            |block_bodies: &[StoredBlockBodyIndices]| -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+                let mut receipts_iter = self
+                    .static_file_provider
+                    .get_range_with_static_file_or_database(
+                        StaticFileSegment::Receipts,
+                        from_transaction_num..to_transaction_num + 1,
+                        |static_file, range, _| {
+                            static_file
+                                .receipts_by_tx_range(range.clone())
+                                .map(|r| range.into_iter().zip(r).collect())
+                        },
+                        |range, _| {
+                            self.tx
+                                .cursor_read::<tables::Receipts<Self::Receipt>>()?
+                                .walk_range(range)?
+                                .map(|r| r.map_err(Into::into))
+                                .collect()
+                        },
+                        |_| true,
+                    )?
+                    .into_iter()
+                    .peekable();
+
+                let mut receipts = Vec::with_capacity(block_bodies.len());
+                for block_body in block_bodies {
+                    let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
+                    for num in block_body.tx_num_range() {
+                        if receipts_iter.peek().is_some_and(|(n, _)| *n == num) {
+                            block_receipts.push(receipts_iter.next().unwrap().1);
+                        }
+                    }
+                    receipts.push(block_receipts);
+                }
+                Ok(receipts)
+            };
+
+        if self.cached_storage_settings().use_hashed_state() {
             let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
@@ -2966,7 +3005,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 }
             }
 
-            (state, reverts)
+            let receipts = collect_receipts(&block_bodies)?;
+            self.remove_receipts_from(from_transaction_num, block)?;
+
+            Ok(TakenState::Hashed(HashedExecutionOutcome::new_init(
+                state,
+                reverts,
+                Vec::new(),
+                receipts,
+                start_block_number,
+                Vec::new(),
+            )))
         } else {
             // This is not working for blocks that are not at tip. as plain state is not the last
             // state of end range. We should rename the functions or add support to access
@@ -3010,54 +3059,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 }
             }
 
-            (state, reverts)
-        };
+            let receipts = collect_receipts(&block_bodies)?;
+            self.remove_receipts_from(from_transaction_num, block)?;
 
-        // Collect receipts into tuples (tx_num, receipt) to correctly handle pruned receipts
-        let mut receipts_iter = self
-            .static_file_provider
-            .get_range_with_static_file_or_database(
-                StaticFileSegment::Receipts,
-                from_transaction_num..to_transaction_num + 1,
-                |static_file, range, _| {
-                    static_file
-                        .receipts_by_tx_range(range.clone())
-                        .map(|r| range.into_iter().zip(r).collect())
-                },
-                |range, _| {
-                    self.tx
-                        .cursor_read::<tables::Receipts<Self::Receipt>>()?
-                        .walk_range(range)?
-                        .map(|r| r.map_err(Into::into))
-                        .collect()
-                },
-                |_| true,
-            )?
-            .into_iter()
-            .peekable();
-
-        let mut receipts = Vec::with_capacity(block_bodies.len());
-        // loop break if we are at the end of the blocks.
-        for block_body in block_bodies {
-            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
-            for num in block_body.tx_num_range() {
-                if receipts_iter.peek().is_some_and(|(n, _)| *n == num) {
-                    block_receipts.push(receipts_iter.next().unwrap().1);
-                }
-            }
-            receipts.push(block_receipts);
+            Ok(TakenState::Plain(ExecutionOutcome::new_init(
+                state,
+                reverts,
+                Vec::new(),
+                receipts,
+                start_block_number,
+                Vec::new(),
+            )))
         }
-
-        self.remove_receipts_from(from_transaction_num, block)?;
-
-        Ok(ExecutionOutcome::new_init(
-            state,
-            reverts,
-            Vec::new(),
-            receipts,
-            start_block_number,
-            Vec::new(),
-        ))
     }
 }
 
@@ -3429,7 +3442,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         self.unwind_trie_state_from(block + 1)?;
 
         // get execution res
-        let execution_state = self.take_state_above(block)?;
+        let taken_state = self.take_state_above(block)?;
 
         let blocks = self.recovered_block_range(range)?;
 
@@ -3440,7 +3453,28 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         // Update pipeline progress
         self.update_pipeline_stages(block, true)?;
 
-        Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
+        match taken_state {
+            TakenState::Plain(execution_state) => {
+                Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
+            }
+            TakenState::Hashed(hashed_outcome) => {
+                // When using hashed storage, the DB unwind has already been applied inline
+                // by `take_state_above`. The bundle state is empty because hashed storage
+                // keys (keccak256 of slot) cannot be represented in a plain `BundleState`
+                // without mixing key formats.
+                //
+                // NOTE: ExExes receiving this `Chain` will see an empty bundle state.
+                // Receipts and requests are preserved. If ExExes need access to state
+                // changes, `Chain` should be extended to carry `TakenState` directly.
+                let execution_state = ExecutionOutcome::new(
+                    BundleState::default(),
+                    hashed_outcome.receipts,
+                    hashed_outcome.first_block,
+                    hashed_outcome.requests,
+                );
+                Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
+            }
+        }
     }
 
     fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()> {

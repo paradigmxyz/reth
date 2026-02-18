@@ -13,7 +13,7 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
+    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TakenState, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -522,15 +522,32 @@ where
         // Unwind account and storage changesets, as well as receipts.
         //
         // This also updates `PlainStorageState` and `PlainAccountState`.
-        let bundle_state_with_receipts = provider.take_state_above(unwind_to)?;
+        let taken_state = provider.take_state_above(unwind_to)?;
 
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
             // Get the blocks for the unwound range.
             let blocks = provider.recovered_block_range(range.clone())?;
+
+            let execution_outcome = match taken_state {
+                TakenState::Plain(outcome) => outcome,
+                TakenState::Hashed(hashed_outcome) => {
+                    // When using hashed storage, the DB unwind has already been applied.
+                    // Construct an ExecutionOutcome with receipts/requests only (empty
+                    // bundle state) since hashed keys cannot be represented in a plain
+                    // BundleState.
+                    ExecutionOutcome::new(
+                        Default::default(),
+                        hashed_outcome.receipts,
+                        hashed_outcome.first_block,
+                        hashed_outcome.requests,
+                    )
+                }
+            };
+
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
-                bundle_state_with_receipts,
+                execution_outcome,
                 BTreeMap::new(),
             ));
 

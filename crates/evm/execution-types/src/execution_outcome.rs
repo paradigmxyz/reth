@@ -9,7 +9,7 @@ use alloy_primitives::{
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::{
-    database::{states::BundleState, BundleAccount},
+    database::{states::BundleState, AccountStatus, BundleAccount},
     state::AccountInfo,
 };
 
@@ -413,6 +413,157 @@ impl ExecutionOutcome {
             block_number,
             reth_ethereum_primitives::calculate_receipt_root_no_memo,
         )
+    }
+}
+
+/// Like revm's [`BundleAccount`] but with hashed `B256` storage keys instead of plain `U256` keys.
+///
+/// This ensures hashed storage slots are never mixed into a plain [`BundleState`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HashedStorageBundleAccount {
+    /// Account info, `None` if destroyed.
+    pub info: Option<AccountInfo>,
+    /// The original account info before any changes in this bundle.
+    pub original_info: Option<AccountInfo>,
+    /// Storage with hashed keys.
+    pub storage: B256Map<(U256, U256)>,
+    /// Account status.
+    pub status: AccountStatus,
+}
+
+/// Like revm's [`BundleState`] but storage slots are keyed by their keccak256 hash (`B256`)
+/// instead of the plain slot index (`U256`).
+///
+/// Constructed from [`HashedBundleStateInit`] during state reconstruction from hashed database
+/// tables. This type prevents hashed storage keys from being silently stuffed into a plain
+/// [`BundleState`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HashedStorageBundleState {
+    /// Account state with hashed storage keys.
+    pub state: AddressMap<HashedStorageBundleAccount>,
+    /// All created contracts in this bundle.
+    pub contracts: B256Map<Bytecode>,
+}
+
+/// Like [`BundleStateInit`] but explicitly for state reconstructed from hashed storage tables.
+///
+/// The `B256Map` storage keys are keccak256-hashed slot indices, NOT plain slot indices.
+pub type HashedBundleStateInit =
+    AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
+
+/// Like [`RevertsInit`] but for state reconstructed from hashed storage tables.
+pub type HashedRevertsInit = HashMap<BlockNumber, AddressMap<AccountRevertInit>>;
+
+/// Like [`ExecutionOutcome`] but with hashed storage keys in the bundle state.
+///
+/// Used when state is reconstructed from hashed database tables. The storage keys in the
+/// bundle are keccak256 hashes, not plain slot indices. This type prevents those hashed keys
+/// from being silently converted to `U256` and stuffed into a plain [`BundleState`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HashedExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
+    /// Bundle state with hashed storage keys.
+    pub bundle: HashedStorageBundleState,
+    /// The collection of receipts.
+    pub receipts: Vec<Vec<T>>,
+    /// First block of bundle state.
+    pub first_block: BlockNumber,
+    /// The collection of EIP-7685 requests.
+    pub requests: Vec<Requests>,
+}
+
+impl<T> HashedExecutionOutcome<T> {
+    /// Creates a new `HashedExecutionOutcome` from hashed state initialization parameters.
+    pub fn new_init(
+        state_init: HashedBundleStateInit,
+        _revert_init: HashedRevertsInit,
+        contracts_init: impl IntoIterator<Item = (B256, Bytecode)>,
+        receipts: Vec<Vec<T>>,
+        first_block: BlockNumber,
+        requests: Vec<Requests>,
+    ) -> Self {
+        let state = state_init
+            .into_iter()
+            .map(|(address, (original_info, present_info, storage))| {
+                let account_info = present_info.map(Into::into);
+                let original_info = original_info.map(Into::into);
+                (
+                    address,
+                    HashedStorageBundleAccount {
+                        info: account_info,
+                        original_info,
+                        storage,
+                        status: AccountStatus::Changed,
+                    },
+                )
+            })
+            .collect();
+
+        let contracts =
+            contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode)).collect();
+
+        Self {
+            bundle: HashedStorageBundleState { state, contracts },
+            receipts,
+            first_block,
+            requests,
+        }
+    }
+
+    /// Return the hashed storage bundle state.
+    pub const fn state(&self) -> &HashedStorageBundleState {
+        &self.bundle
+    }
+
+    /// Returns the receipts.
+    pub fn receipts(&self) -> &[Vec<T>] {
+        &self.receipts
+    }
+
+    /// Returns the first block number.
+    pub const fn first_block(&self) -> BlockNumber {
+        self.first_block
+    }
+}
+
+/// Result of taking state above a given block.
+///
+/// When the database uses plain storage keys, returns [`ExecutionOutcome`] with a standard
+/// [`BundleState`]. When hashed storage is enabled, returns [`HashedExecutionOutcome`] whose
+/// storage keys are keccak256 hashes. This enum prevents hashed keys from silently entering a
+/// plain [`BundleState`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TakenState<T = reth_ethereum_primitives::Receipt> {
+    /// State with plain storage keys.
+    Plain(ExecutionOutcome<T>),
+    /// State with hashed storage keys.
+    Hashed(HashedExecutionOutcome<T>),
+}
+
+impl<T> TakenState<T> {
+    /// Returns the plain [`ExecutionOutcome`] if this is the [`Plain`](Self::Plain) variant.
+    pub fn into_plain(self) -> Option<ExecutionOutcome<T>> {
+        match self {
+            Self::Plain(outcome) => Some(outcome),
+            Self::Hashed(_) => None,
+        }
+    }
+
+    /// Returns a reference to the plain [`ExecutionOutcome`] if this is the
+    /// [`Plain`](Self::Plain) variant.
+    pub const fn as_plain(&self) -> Option<&ExecutionOutcome<T>> {
+        match self {
+            Self::Plain(outcome) => Some(outcome),
+            Self::Hashed(_) => None,
+        }
+    }
+
+    /// Returns the hashed [`HashedExecutionOutcome`] if this is the [`Hashed`](Self::Hashed)
+    /// variant.
+    pub fn into_hashed(self) -> Option<HashedExecutionOutcome<T>> {
+        match self {
+            Self::Plain(_) => None,
+            Self::Hashed(outcome) => Some(outcome),
+        }
     }
 }
 

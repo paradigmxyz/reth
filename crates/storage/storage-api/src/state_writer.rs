@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::transaction::Either;
 use alloy_primitives::BlockNumber;
-use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
+use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome, TakenState};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostStateSorted;
 use revm_database::{
@@ -119,12 +119,12 @@ pub trait StateWriter {
     /// removed.
     fn remove_state_above(&self, block: BlockNumber) -> ProviderResult<()>;
 
-    /// Take the block range of state, recreating the [`ExecutionOutcome`]. The state of the passed
-    /// block is not removed.
-    fn take_state_above(
-        &self,
-        block: BlockNumber,
-    ) -> ProviderResult<ExecutionOutcome<Self::Receipt>>;
+    /// Take the block range of state, recreating the execution outcome.
+    ///
+    /// Returns [`TakenState::Plain`] with a standard [`ExecutionOutcome`] when using plain storage
+    /// keys, or [`TakenState::Hashed`] when the database uses hashed storage keys.
+    /// The state of the passed block is not removed.
+    fn take_state_above(&self, block: BlockNumber) -> ProviderResult<TakenState<Self::Receipt>>;
 }
 
 /// Configuration for what to write to the database (MDBX) when calling
