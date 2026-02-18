@@ -800,13 +800,13 @@ where
 
         // Spawn background task to compute receipt root and logs bloom incrementally.
         // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
-        let (receipts_len, transaction_count) =
-            (input.transaction_count(), input.transaction_count());
+        let receipts_len = input.transaction_count();
         let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
         self.payload_processor.executor().spawn_blocking(move || task_handle.run(receipts_len));
 
+        let transaction_count = input.transaction_count();
         let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));
 
         let execution_start = Instant::now();
