@@ -311,10 +311,9 @@ jobs:
             }
 
             let lastPosition = parseInt('${{ steps.ack.outputs.queue-position }}');
-            const deadline = Date.now() + 10 * 60 * 1000; // 10 minute timeout
             const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-            while (Date.now() < deadline) {
+            while (true) {
               await sleep(10_000);
               try {
                 const ahead = await getQueuePosition();
