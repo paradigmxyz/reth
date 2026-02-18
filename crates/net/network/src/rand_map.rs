@@ -96,6 +96,49 @@ impl<'a, K, V, S> Iterator for RandIter<'a, K, V, S> {
 impl<K, V, S> ExactSizeIterator for RandIter<'_, K, V, S> {}
 impl<K, V, S> FusedIterator for RandIter<'_, K, V, S> {}
 
+/// A mutable iterator that visits every entry of an [`IndexMap`] exactly once in a
+/// pseudorandom order determined by a coprime-stride permutation.
+///
+/// Keys are yielded by shared reference since they are part of the map's index structure.
+/// Values are yielded by mutable reference.
+pub struct RandIterMut<'a, K, V, S = RandomState> {
+    map: &'a mut IndexMap<K, V, S>,
+    indices: Vec<usize>,
+    pos: usize,
+}
+
+impl<K: Debug, V: Debug, S> Debug for RandIterMut<'_, K, V, S> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        f.debug_struct("RandIterMut")
+            .field("remaining", &(self.indices.len() - self.pos))
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a, K, V, S> Iterator for RandIterMut<'a, K, V, S> {
+    type Item = (&'a K, &'a mut V);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let &idx = self.indices.get(self.pos)?;
+        self.pos += 1;
+        // SAFETY: Each index in the coprime-stride walk appears exactly once, so we
+        // never yield two mutable references to the same entry. We reborrow through
+        // raw pointers to decouple the returned lifetime from `&mut self`.
+        let (k, v) = self.map.get_index_mut(idx)?;
+        unsafe { Some((&*(k as *const K), &mut *(v as *mut V))) }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.indices.len() - self.pos;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<K, V, S> ExactSizeIterator for RandIterMut<'_, K, V, S> {}
+impl<K, V, S> FusedIterator for RandIterMut<'_, K, V, S> {}
+
 /// An iterator that visits every key of an [`IndexMap`] exactly once in random order.
 pub struct RandKeys<'a, K, V, S = RandomState> {
     inner: RandIter<'a, K, V, S>,
@@ -261,6 +304,25 @@ impl<K, V, S> RandMap<K, V, S> {
         }
         let (current, stride) = rand_start_stride(len);
         RandIter { map: &self.inner, current, stride, remaining: len }
+    }
+
+    /// Returns a mutable iterator visiting all key-value pairs in **random order**.
+    ///
+    /// Keys are yielded by shared reference; values by mutable reference.
+    /// Each call produces a different permutation.
+    pub fn iter_mut(&mut self) -> RandIterMut<'_, K, V, S> {
+        let len = self.inner.len();
+        if len == 0 {
+            return RandIterMut { map: &mut self.inner, indices: Vec::new(), pos: 0 };
+        }
+        let (start, stride) = rand_start_stride(len);
+        let mut indices = Vec::with_capacity(len);
+        let mut current = start;
+        for _ in 0..len {
+            indices.push(current);
+            current = (current + stride) % len;
+        }
+        RandIterMut { map: &mut self.inner, indices, pos: 0 }
     }
 
     /// Returns an iterator visiting all keys in **random order**.
@@ -433,6 +495,15 @@ impl<'a, K, V, S> IntoIterator for &'a RandMap<K, V, S> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+impl<'a, K, V, S> IntoIterator for &'a mut RandMap<K, V, S> {
+    type Item = (&'a K, &'a mut V);
+    type IntoIter = RandIterMut<'a, K, V, S>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
     }
 }
 
@@ -732,6 +803,76 @@ mod tests {
         }
         for i in 5..10 {
             assert_eq!(map[&i], i * 10);
+        }
+    }
+
+    #[test]
+    fn iter_mut_visits_all_elements() {
+        let mut map: RandMap<i32, i32> = (0..100).map(|i| (i, i * 10)).collect();
+        let keys: BTreeSet<i32> = map.iter_mut().map(|(k, _)| *k).collect();
+        let expected: BTreeSet<i32> = (0..100).collect();
+        assert_eq!(keys, expected);
+    }
+
+    #[test]
+    fn iter_mut_can_mutate_values() {
+        let mut map: RandMap<i32, i32> = (0..10).map(|i| (i, i)).collect();
+
+        for (_, v) in map.iter_mut() {
+            *v *= 2;
+        }
+
+        for i in 0..10 {
+            assert_eq!(map[&i], i * 2);
+        }
+    }
+
+    #[test]
+    fn iter_mut_randomized() {
+        let mut map: RandMap<i32, i32> = (0..20).map(|i| (i, i)).collect();
+
+        let order1: Vec<i32> = map.iter_mut().map(|(k, _)| *k).collect();
+        let mut any_differ = false;
+        for _ in 0..10 {
+            let order_n: Vec<i32> = map.iter_mut().map(|(k, _)| *k).collect();
+            if order_n != order1 {
+                any_differ = true;
+                break;
+            }
+        }
+        assert!(any_differ, "iter_mut order should differ between calls");
+    }
+
+    #[test]
+    fn iter_mut_exact_size() {
+        let mut map: RandMap<i32, i32> = (0..10).map(|i| (i, i)).collect();
+        let mut iter = map.iter_mut();
+        assert_eq!(iter.len(), 10);
+        iter.next();
+        assert_eq!(iter.len(), 9);
+    }
+
+    #[test]
+    fn iter_mut_empty() {
+        let mut map = RandMap::<i32, i32>::default();
+        assert_eq!(map.iter_mut().count(), 0);
+    }
+
+    #[test]
+    fn iter_mut_single_element() {
+        let mut map: RandMap<i32, i32> = once((42, 100)).collect();
+        let items: Vec<_> = map.iter_mut().map(|(k, v)| (*k, *v)).collect();
+        assert_eq!(items, [(42, 100)]);
+    }
+
+    #[test]
+    fn into_iter_mut_ref() {
+        let mut map: RandMap<i32, i32> = (0..10).map(|i| (i, i)).collect();
+        for (_, v) in &mut map {
+            *v += 100;
+        }
+        for i in 0..10 {
+            assert_eq!(map[&i], i + 100);
         }
     }
 }
