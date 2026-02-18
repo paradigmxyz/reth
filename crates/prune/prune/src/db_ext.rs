@@ -91,17 +91,20 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
                 break false
             }
 
-            let done = self.prune_table_with_range_step(
+            let (step_done, was_deleted) = self.prune_table_with_range_step(
                 &mut walker,
                 limiter,
                 &mut skip_filter,
                 &mut delete_callback,
             )?;
 
-            if done {
+            if was_deleted {
+                deleted_entries += 1;
+            }
+
+            if step_done {
                 break true
             }
-            deleted_entries += 1;
         };
 
         Ok((deleted_entries, done))
@@ -109,7 +112,9 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
 
     /// Steps once with the given walker and prunes the entry in the table.
     ///
-    /// Returns `true` if the walker is finished, `false` if it may have more data to prune.
+    /// Returns a tuple of `(done, was_deleted)`:
+    /// - `done`: `true` if the walker is finished, `false` if it may have more data to prune.
+    /// - `was_deleted`: `true` if the current entry was deleted, `false` if it was skipped.
     ///
     /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune run that's
     /// pruning different tables concurrently, by letting them step to the same height before
@@ -120,18 +125,19 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
         limiter: &mut PruneLimiter,
         skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
         delete_callback: &mut impl FnMut(TableRow<T>),
-    ) -> Result<bool, DatabaseError> {
-        let Some(res) = walker.next() else { return Ok(true) };
+    ) -> Result<(bool, bool), DatabaseError> {
+        let Some(res) = walker.next() else { return Ok((true, false)) };
 
         let row = res?;
 
-        if !skip_filter(&row) {
+        if skip_filter(&row) {
+            Ok((false, false))
+        } else {
             walker.delete_current()?;
             limiter.increment_deleted_entries_count();
             delete_callback(row);
+            Ok((false, true))
         }
-
-        Ok(false)
     }
 
     /// Prune a DUPSORT table for the specified key range.
