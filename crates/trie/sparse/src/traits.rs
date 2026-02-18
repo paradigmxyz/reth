@@ -2,8 +2,7 @@
 
 use core::fmt::Debug;
 
-use alloc::borrow::Cow;
-use smallvec::SmallVec;
+use alloc::{borrow::Cow, boxed::Box};
 use alloy_primitives::{
     map::{B256Map, HashMap, HashSet},
     B256,
@@ -11,6 +10,7 @@ use alloy_primitives::{
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2};
+use smallvec::SmallVec;
 
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
@@ -389,9 +389,9 @@ pub enum LeafLookupError {
         /// Path to the leaf.
         path: Nibbles,
         /// Expected value.
-        expected: Option<LeafValue>,
+        expected: Box<Option<LeafValue>>,
         /// Actual value found.
-        actual: LeafValue,
+        actual: Box<LeafValue>,
     },
 }
 

@@ -1,10 +1,9 @@
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
 use crate::{
-    LeafValue,
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     traits::SparseTrie as SparseTrieTrait,
-    ParallelSparseTrie, RevealableSparseTrie,
+    LeafValue, ParallelSparseTrie, RevealableSparseTrie,
 };
 use alloc::vec::Vec;
 use alloy_primitives::{
@@ -718,7 +717,11 @@ where
         let nibbles = Nibbles::unpack(address);
         self.account_rlp_buf.clear();
         account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, LeafValue::from_slice(&self.account_rlp_buf), provider_factory)?;
+        self.update_account_leaf(
+            nibbles,
+            LeafValue::from_slice(&self.account_rlp_buf),
+            provider_factory,
+        )?;
 
         Ok(true)
     }
@@ -771,7 +774,11 @@ where
         let nibbles = Nibbles::unpack(address);
         self.account_rlp_buf.clear();
         trie_account.encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, LeafValue::from_slice(&self.account_rlp_buf), provider_factory)?;
+        self.update_account_leaf(
+            nibbles,
+            LeafValue::from_slice(&self.account_rlp_buf),
+            provider_factory,
+        )?;
 
         Ok(true)
     }
@@ -1546,7 +1553,8 @@ mod tests {
         // Full 64-nibble path
         let full_path_0 = leaf_key([0x0], 64);
 
-        let storage_value: LeafValue = LeafValue::from_slice(&alloy_rlp::encode_fixed_size(&U256::from(42)));
+        let storage_value: LeafValue =
+            LeafValue::from_slice(&alloy_rlp::encode_fixed_size(&U256::from(42)));
         let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.to_vec()));
         let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.to_vec()));
 
