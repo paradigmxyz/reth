@@ -575,15 +575,22 @@ mod tests {
     #[test]
     fn from_iterator_and_extend() {
         let mut map: RandMap<i32, i32> = [(1, 10), (2, 20)].into_iter().collect();
+        assert_eq!(map.get(&1), Some(&10));
+        assert_eq!(map.get(&2), Some(&20));
+
         map.extend([(3, 30), (4, 40)]);
         assert_eq!(map.len(), 4);
+        assert_eq!(map.get(&3), Some(&30));
+        assert_eq!(map.get(&4), Some(&40));
     }
 
     #[test]
     fn exact_size_iterator() {
         let map: RandMap<i32, i32> = (0..10).map(|i| (i, i)).collect();
-        let iter = map.iter();
+        let mut iter = map.iter();
         assert_eq!(iter.len(), 10);
+        iter.next();
+        assert_eq!(iter.len(), 9);
     }
 
     #[test]
@@ -703,5 +710,28 @@ mod tests {
 
         map.entry("a").or_insert(99);
         assert_eq!(map["a"], 42);
+    }
+
+    #[test]
+    fn get_mut() {
+        let mut map: RandMap<&str, i32> = [("a", 1), ("b", 2)].into_iter().collect();
+
+        *map.get_mut("a").unwrap() = 10;
+        assert_eq!(map["a"], 10);
+        assert!(map.get_mut("z").is_none());
+    }
+
+    #[test]
+    fn retain() {
+        let mut map: RandMap<i32, i32> = (0..10).map(|i| (i, i * 10)).collect();
+
+        map.retain(|_, v| *v >= 50);
+        assert_eq!(map.len(), 5);
+        for i in 0..5 {
+            assert!(!map.contains_key(&i));
+        }
+        for i in 5..10 {
+            assert_eq!(map[&i], i * 10);
+        }
     }
 }
