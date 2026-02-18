@@ -12,7 +12,9 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
     TrieInput,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
+use reth_trie_db::{
+    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, LegacyKeyAdapter,
+};
 use reth_trie_parallel::root::ParallelStateRoot;
 use std::collections::HashMap;
 
@@ -32,8 +34,12 @@ pub fn calculate_state_root(c: &mut Criterion) {
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
             provider_rw.write_hashed_state(&db_state.into_sorted()).unwrap();
-            let (_, updates) =
-                StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
+            let (_, updates) = <StateRoot<
+                DatabaseTrieCursorFactory<_, LegacyKeyAdapter>,
+                DatabaseHashedCursorFactory<_>,
+            > as DatabaseStateRoot<_>>::from_tx(provider_rw.tx_ref())
+            .root_with_updates()
+            .unwrap();
             provider_rw.write_trie_updates(updates).unwrap();
             provider_rw.commit().unwrap();
         }
@@ -55,10 +61,13 @@ pub fn calculate_state_root(c: &mut Criterion) {
                         DatabaseHashedCursorFactory::new(provider.tx_ref()),
                         &sorted_state,
                     );
-                    StateRoot::from_tx(provider.tx_ref())
-                        .with_hashed_cursor_factory(hashed_cursor_factory)
-                        .with_prefix_sets(prefix_sets)
-                        .root()
+                    <StateRoot<
+                        DatabaseTrieCursorFactory<_, LegacyKeyAdapter>,
+                        DatabaseHashedCursorFactory<_>,
+                    > as DatabaseStateRoot<_>>::from_tx(provider.tx_ref())
+                    .with_hashed_cursor_factory(hashed_cursor_factory)
+                    .with_prefix_sets(prefix_sets)
+                    .root()
                 },
             )
         });

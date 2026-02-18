@@ -24,7 +24,6 @@ mod constants;
 mod account_hashing;
 pub use account_hashing::*;
 use reth_stages_api::{ExecInput, Stage, UnwindInput};
-use reth_trie_db::DatabaseStateRoot;
 
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 
@@ -183,7 +182,13 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         // make last block have valid state root
         let root = {
             let tx_mut = db.factory.provider_rw().unwrap();
-            let root = StateRoot::from_tx(tx_mut.tx_ref()).root().unwrap();
+            let root =
+                <StateRoot<
+                    reth_trie_db::DatabaseTrieCursorFactory<_, reth_trie_db::LegacyKeyAdapter>,
+                    reth_trie_db::DatabaseHashedCursorFactory<_>,
+                > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(tx_mut.tx_ref())
+                .root()
+                .unwrap();
             tx_mut.commit().unwrap();
             root
         };
