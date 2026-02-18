@@ -900,14 +900,6 @@ impl<S: SparseTrieTrait> StorageTries<S> {
 }
 
 impl<S: SparseTrieTrait + Clone> StorageTries<S> {
-    /// Returns the set of already revealed trie node paths for an account's storage, creating the
-    /// set if it didn't previously exist.
-    fn get_revealed_paths_mut(&mut self, account: B256) -> &mut HashSet<Nibbles> {
-        self.revealed_paths
-            .entry(account)
-            .or_insert_with(|| self.cleared_revealed_paths.pop().unwrap_or_default())
-    }
-
     /// Returns the `RevealableSparseTrie` and the set of already revealed trie node paths for an
     /// account's storage, creating them if they didn't previously exist.
     fn get_trie_and_revealed_paths_mut(
