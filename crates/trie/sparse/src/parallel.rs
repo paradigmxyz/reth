@@ -248,6 +248,29 @@ impl SparseTrie for ParallelSparseTrie {
 
         let reachable_subtries = self.reachable_subtries();
 
+        // For boundary nodes that are blinded in upper subtrie, unset the blinded bit and remember
+        // the hash to pass into `reveal_node`.
+        let hashes_from_upper = nodes
+            .iter()
+            .filter_map(|node| {
+                if node.path.len() == UPPER_TRIE_MAX_DEPTH &&
+                    let SparseNode::Branch { blinded_mask, blinded_hashes, .. } = self
+                        .upper_subtrie
+                        .nodes
+                        .get_mut(&node.path.slice(0..UPPER_TRIE_MAX_DEPTH - 1))
+                        .unwrap()
+                {
+                    let nibble = node.path.last().unwrap();
+                    blinded_mask.is_bit_set(nibble).then(|| {
+                        blinded_mask.unset_bit(nibble);
+                        (node.path, blinded_hashes[nibble as usize])
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect::<HashMap<_, _>>();
+
         if !self.is_reveal_parallelism_enabled(lower_nodes.len()) {
             for node in lower_nodes {
                 let idx = path_subtrie_index_unchecked(&node.path);
@@ -276,52 +299,12 @@ impl SparseTrie for ParallelSparseTrie {
                 }
                 self.lower_subtries[idx].reveal(&node.path);
                 self.subtrie_heat.mark_modified(idx);
-                let subtrie = self.lower_subtries[idx].as_revealed_mut().expect("just revealed");
-
-                if subtrie.reveal_node(node.path, &node.node, node.masks)? &&
-                    node.path.len() == UPPER_TRIE_MAX_DEPTH &&
-                    let SparseNode::Branch { blinded_mask, blinded_hashes, .. } = self
-                        .upper_subtrie
-                        .nodes
-                        .get_mut(&node.path.slice(0..UPPER_TRIE_MAX_DEPTH - 1))
-                        .unwrap()
-                {
-                    let nibble = node.path.get_unchecked(UPPER_TRIE_MAX_DEPTH - 1);
-                    blinded_mask.unset_bit(nibble);
-                    if let Some(trie_node) = subtrie.nodes.get_mut(&node.path) {
-                        let hash = blinded_hashes[nibble as usize];
-                        match trie_node {
-                            SparseNode::Branch { state, .. } => {
-                                let masks = self.branch_node_masks.get(&node.path);
-                                *state = SparseNodeState::Cached {
-                                    rlp_node: RlpNode::word_rlp(&hash),
-                                    store_in_db_trie: masks.map(|m| {
-                                        !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
-                                    }),
-                                }
-                            }
-                            SparseNode::Extension { state, key } => {
-                                let mut branch_path = node.path;
-                                branch_path.extend(key);
-
-                                let masks = self.branch_node_masks.get(&branch_path);
-                                *state = SparseNodeState::Cached {
-                                    rlp_node: RlpNode::word_rlp(&hash),
-                                    store_in_db_trie: masks.map(|m| {
-                                        !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
-                                    }),
-                                }
-                            }
-                            SparseNode::Leaf { state, .. } => {
-                                *state = SparseNodeState::Cached {
-                                    rlp_node: RlpNode::word_rlp(&hash),
-                                    store_in_db_trie: Some(false),
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
+                self.lower_subtries[idx].as_revealed_mut().expect("just revealed").reveal_node(
+                    node.path,
+                    &node.node,
+                    node.masks,
+                    hashes_from_upper.get(&node.path).copied(),
+                )?;
             }
             return Ok(())
         }
@@ -395,8 +378,6 @@ impl SparseTrie for ParallelSparseTrie {
                     // can cause multiple re-allocations as the hashmap grows.
                     subtrie.nodes.reserve(nodes.len());
 
-                    let mut revealed_root = None;
-
                     for node in nodes {
                         // For boundary leaves, check reachability from upper subtrie's parent
                         // branch
@@ -415,73 +396,24 @@ impl SparseTrie for ParallelSparseTrie {
                             continue;
                         }
                         // Reveal each node in the subtrie, returning early on any errors
-                        let res = subtrie.reveal_node(node.path, &node.node, node.masks);
+                        let res = subtrie.reveal_node(
+                            node.path,
+                            &node.node,
+                            node.masks,
+                            hashes_from_upper.get(&node.path).copied(),
+                        );
                         if res.is_err() {
-                            return (subtrie_idx, subtrie, res.map(|_| ()), revealed_root)
-                        }
-
-                        if res.is_ok_and(|revealed| revealed) && subtrie.path == node.path {
-                            revealed_root = Some(node.path);
+                            return (subtrie_idx, subtrie, res.map(|_| ()))
                         }
                     }
-                    (subtrie_idx, subtrie, Ok(()), revealed_root)
+                    (subtrie_idx, subtrie, Ok(()))
                 })
                 .collect();
 
             // Put subtries back which were processed in the rayon pool, collecting the last
             // seen error in the process and returning that.
             let mut any_err = Ok(());
-            for (subtrie_idx, mut subtrie, res, revealed_root) in results {
-                // For all updated lower subtries, unset the blinded bits
-                if let Some(revealed_root) = revealed_root &&
-                    revealed_root.len() == UPPER_TRIE_MAX_DEPTH
-                {
-                    let nibble = subtrie.path.get_unchecked(UPPER_TRIE_MAX_DEPTH - 1);
-                    let upper_branch_path = subtrie.path.slice(0..UPPER_TRIE_MAX_DEPTH - 1);
-
-                    if let SparseNode::Branch { blinded_mask, blinded_hashes, .. } =
-                        self.upper_subtrie.nodes.get_mut(&upper_branch_path).unwrap()
-                    {
-                        blinded_mask
-                            .unset_bit(subtrie.path.get_unchecked(UPPER_TRIE_MAX_DEPTH - 1));
-
-                        if let Some(node) = subtrie.nodes.get_mut(&subtrie.path) {
-                            let hash = blinded_hashes[nibble as usize];
-
-                            match node {
-                                SparseNode::Branch { state, .. } => {
-                                    let masks = self.branch_node_masks.get(&subtrie.path);
-                                    *state = SparseNodeState::Cached {
-                                        rlp_node: RlpNode::word_rlp(&hash),
-                                        store_in_db_trie: masks.map(|m| {
-                                            !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
-                                        }),
-                                    }
-                                }
-                                SparseNode::Extension { state, key } => {
-                                    let mut branch_path = subtrie.path;
-                                    branch_path.extend(key);
-
-                                    let masks = self.branch_node_masks.get(&branch_path);
-                                    *state = SparseNodeState::Cached {
-                                        rlp_node: RlpNode::word_rlp(&hash),
-                                        store_in_db_trie: masks.map(|m| {
-                                            !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
-                                        }),
-                                    }
-                                }
-                                SparseNode::Leaf { state, .. } => {
-                                    *state = SparseNodeState::Cached {
-                                        rlp_node: RlpNode::word_rlp(&hash),
-                                        store_in_db_trie: Some(false),
-                                    }
-                                }
-                                _ => {}
-                            };
-                        }
-                    }
-                }
-
+            for (subtrie_idx, subtrie, res) in results {
                 self.lower_subtries[subtrie_idx] = LowerSparseSubtrie::Revealed(subtrie);
                 if res.is_err() {
                     any_err = res;
@@ -2135,7 +2067,7 @@ impl ParallelSparseTrie {
         }
 
         // Exit early if the node was already revealed before.
-        if !self.upper_subtrie.reveal_node(path, node, masks)? {
+        if !self.upper_subtrie.reveal_node(path, node, masks, None)? {
             if let TrieNodeV2::Branch(branch) = node {
                 if branch.key.is_empty() {
                     return Ok(());
@@ -2191,6 +2123,7 @@ impl ParallelSparseTrie {
                                     child_path,
                                     &TrieNodeV2::decode(&mut branch.stack[stack_ptr].as_ref())?,
                                     None,
+                                    None,
                                 )?;
                         }
                     }
@@ -2203,6 +2136,7 @@ impl ParallelSparseTrie {
                     subtrie.reveal_node(
                         child_path,
                         &TrieNodeV2::decode(&mut ext.child.as_ref())?,
+                        None,
                         None,
                     )?;
                 }
@@ -2799,7 +2733,12 @@ impl SparseSubtrie {
             if !child.is_hash() && Self::is_child_same_level(&path, &child_path) {
                 // Reveal each child node or hash it has, but only if the child is on
                 // the same level as the parent.
-                self.reveal_node(child_path, &TrieNodeV2::decode(&mut child.as_ref())?, None)?;
+                self.reveal_node(
+                    child_path,
+                    &TrieNodeV2::decode(&mut child.as_ref())?,
+                    None,
+                    None,
+                )?;
             }
         }
 
@@ -2807,11 +2746,15 @@ impl SparseSubtrie {
     }
 
     /// Internal implementation of the method of the same name on `ParallelSparseTrie`.
+    ///
+    /// This accepts `hash_from_upper` to handle cases when boundary nodes revealed in lower subtrie
+    /// but its blinded hash is known from the upper subtrie.
     fn reveal_node(
         &mut self,
         path: Nibbles,
         node: &TrieNodeV2,
         masks: Option<BranchNodeMasks>,
+        hash_from_upper: Option<B256>,
     ) -> SparseTrieResult<bool> {
         debug_assert!(path.starts_with(&self.path));
 
@@ -2820,25 +2763,28 @@ impl SparseSubtrie {
             return Ok(false);
         }
 
-        let parent = (!path.is_empty()).then(|| path.slice(0..path.len() - 1));
-        let mut hash = None;
-        if let Some(parent) = parent &&
-            Self::is_child_same_level(&parent, &path)
-        {
+        // If the hash is provided from the upper subtrie, use it. Otherwise, find the parent branch
+        // node, unset its blinded bit and use the hash.
+        let hash = if let Some(hash) = hash_from_upper {
+            Some(hash)
+        } else if path.len() != UPPER_TRIE_MAX_DEPTH && !path.is_empty() {
             let Some(SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. }) =
-                self.nodes.get_mut(&parent)
+                self.nodes.get_mut(&path.slice(0..path.len() - 1))
             else {
                 return Ok(false);
             };
-            let nibble = path.get_unchecked(parent.len());
+            let nibble = path.last().unwrap();
             if !state_mask.is_bit_set(nibble) {
                 return Ok(false);
             }
-            if blinded_mask.is_bit_set(nibble) {
+
+            blinded_mask.is_bit_set(nibble).then(|| {
                 blinded_mask.unset_bit(nibble);
-                hash = Some(blinded_hashes[nibble as usize]);
-            }
-        }
+                blinded_hashes[nibble as usize]
+            })
+        } else {
+            None
+        };
 
         trace!(
             target: "trie::parallel_sparse",
@@ -4571,11 +4517,11 @@ mod tests {
         );
 
         // Reveal nodes
-        subtrie.reveal_node(branch_2_path, &branch_2, None).unwrap();
-        subtrie.reveal_node(extension_path, &branch_1, None).unwrap();
-        subtrie.reveal_node(leaf_1_path, &leaf_1, None).unwrap();
-        subtrie.reveal_node(leaf_2_path, &leaf_2, None).unwrap();
-        subtrie.reveal_node(leaf_3_path, &leaf_3, None).unwrap();
+        subtrie.reveal_node(branch_2_path, &branch_2, None, None).unwrap();
+        subtrie.reveal_node(extension_path, &branch_1, None, None).unwrap();
+        subtrie.reveal_node(leaf_1_path, &leaf_1, None, None).unwrap();
+        subtrie.reveal_node(leaf_2_path, &leaf_2, None, None).unwrap();
+        subtrie.reveal_node(leaf_3_path, &leaf_3, None, None).unwrap();
 
         // Run hash builder for two leaf nodes
         let (_, _, proof_nodes, _, _) = run_hash_builder(
