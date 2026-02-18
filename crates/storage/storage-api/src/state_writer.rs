@@ -130,9 +130,9 @@ pub trait StateWriter {
 /// Configuration for what to write to the database (MDBX) when calling
 /// [`StateWriter::write_state`].
 ///
-/// During pipeline execution, some data types (receipts, changesets) may be written directly to
-/// static files instead of the database. This config allows skipping those data types in the
-/// database write to avoid duplication.
+/// Some types (receipts, changesets) may be written directly to
+/// static files instead of the database depending on the storage settings. This config allows
+/// skipping those types in the database write to avoid duplication.
 #[derive(Debug, Clone, Copy)]
 pub struct StateWriteConfig {
     /// Whether to write receipts to the database.
