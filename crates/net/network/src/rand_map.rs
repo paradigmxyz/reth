@@ -818,7 +818,7 @@ mod tests {
     fn iter_mut_can_mutate_values() {
         let mut map: RandMap<i32, i32> = (0..10).map(|i| (i, i)).collect();
 
-        for (_, v) in map.iter_mut() {
+        for (_, v) in &mut map {
             *v *= 2;
         }
 
