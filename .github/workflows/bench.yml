@@ -417,7 +417,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
-          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv; do
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv pzstd jq; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -474,6 +474,23 @@ jobs:
           echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
           echo "feature-name=$FEATURE_NAME" >> "$GITHUB_OUTPUT"
 
+      - name: Check if snapshot needs update
+        id: snapshot-check
+        run: |
+          if .github/scripts/bench-reth-snapshot.sh --check; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update status (snapshot needed)
+        if: env.BENCH_COMMENT_ID && steps.snapshot-check.outputs.needed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const s = require('./.github/scripts/bench-update-status.js');
+            await s({github, context, status: 'Building binaries & downloading snapshot...'});
+
       - name: Prepare source dirs
         run: |
           BASELINE_REF="${{ steps.refs.outputs.baseline-ref }}"
@@ -485,8 +502,12 @@ jobs:
           git -C ../reth-baseline checkout "$BASELINE_REF"
           ln -sfn "$(pwd)" ../reth-feature
 
-      - name: Build baseline and feature binaries in parallel
+      - name: Build binaries and download snapshot in parallel
         id: build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCH_REPO: ${{ github.repository }}
+          SNAPSHOT_NEEDED: ${{ steps.snapshot-check.outputs.needed }}
         run: |
           BASELINE_DIR="$(cd ../reth-baseline && pwd)"
           FEATURE_DIR="$(cd ../reth-feature && pwd)"
@@ -496,11 +517,18 @@ jobs:
           .github/scripts/bench-reth-build.sh feature "${FEATURE_DIR}" "${{ steps.refs.outputs.feature-ref }}" &
           PID_FEATURE=$!
 
+          PID_SNAPSHOT=
+          if [ "$SNAPSHOT_NEEDED" = "true" ]; then
+            .github/scripts/bench-reth-snapshot.sh &
+            PID_SNAPSHOT=$!
+          fi
+
           FAIL=0
           wait $PID_BASELINE || FAIL=1
           wait $PID_FEATURE || FAIL=1
+          [ -n "$PID_SNAPSHOT" ] && { wait $PID_SNAPSHOT || FAIL=1; }
           if [ $FAIL -ne 0 ]; then
-            echo "::error::One or both builds failed"
+            echo "::error::One or more parallel tasks failed (builds / snapshot download)"
             exit 1
           fi
 
@@ -710,7 +738,7 @@ jobs:
         with:
           script: |
             const steps_status = [
-              ['building binaries', '${{ steps.build.outcome }}'],
+              ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
               ['running baseline benchmark', '${{ steps.run-baseline.outcome }}'],
               ['running feature benchmark', '${{ steps.run-feature.outcome }}'],
             ];
