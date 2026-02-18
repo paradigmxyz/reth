@@ -612,8 +612,9 @@ jobs:
           BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
           FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
         run: |
-          CHART_ARGS="/tmp/bench-results-feature/combined_latency.csv --output-dir /tmp/bench-charts"
-          CHART_ARGS="$CHART_ARGS --baseline /tmp/bench-results-baseline/combined_latency.csv"
+          CHART_ARGS="--output-dir /tmp/bench-charts"
+          CHART_ARGS="$CHART_ARGS --feature /tmp/bench-results-feature-1/combined_latency.csv /tmp/bench-results-feature-2/combined_latency.csv"
+          CHART_ARGS="$CHART_ARGS --baseline /tmp/bench-results-baseline-1/combined_latency.csv /tmp/bench-results-baseline-2/combined_latency.csv"
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
