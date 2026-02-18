@@ -5,7 +5,9 @@ mod tui;
 
 use crate::common::EnvironmentArgs;
 use clap::Parser;
-use config_gen::{config_for_selections, write_config, write_prune_checkpoints};
+use config_gen::{
+    config_for_selections, reset_index_stage_checkpoints, write_config, write_prune_checkpoints,
+};
 use eyre::Result;
 use futures::stream::{self, StreamExt};
 use lz4::Decoder;
@@ -316,13 +318,21 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             info!(target: "reth::cli", "{}", desc.join(", "));
         }
 
+        // Open the DB to write checkpoints
+        let db_path = data_dir.db();
+        let db = init_db(&db_path, self.env.db.database_args())?;
+
         // Write prune checkpoints to the DB so the pruner knows data before the
         // snapshot block is already in the expected pruned state
         if config.prune.segments != Default::default() {
-            let db_path = data_dir.db();
-            let db = init_db(&db_path, self.env.db.database_args())?;
             write_prune_checkpoints(&db, &config, manifest.block)?;
         }
+
+        // Reset stage checkpoints for history indexing stages. The snapshot mdbx
+        // comes from a fully synced node with these at the tip, but we don't
+        // distribute the rocksdb indices. Resetting to block 0 ensures the
+        // pipeline or background indexer rebuilds them.
+        reset_index_stage_checkpoints(&db)?;
 
         info!(target: "reth::cli", "Snapshot download complete. Run `reth node` to start syncing.");
 
