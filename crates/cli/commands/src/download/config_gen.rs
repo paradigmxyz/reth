@@ -306,8 +306,8 @@ mod tests {
         // Indexes always full
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
-        // Minimal doesn't include txs → bodies pruned full
-        assert_eq!(config.prune.segments.bodies_history, Some(PruneMode::Full));
+        // Minimal includes txs → bodies kept
+        assert_eq!(config.prune.segments.bodies_history, None);
         assert_eq!(
             config.prune.segments.receipts,
             Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE))
