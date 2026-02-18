@@ -48,14 +48,13 @@ permissions:
   contents: write
   pull-requests: write
 
-concurrency:
-  group: bench-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
-
 jobs:
   codspeed:
     if: github.event_name == 'push'
     runs-on: depot-ubuntu-latest
+    concurrency:
+      group: bench-codspeed-${{ github.head_ref || github.run_id }}
+      cancel-in-progress: true
     strategy:
       matrix:
         partition: [1, 2]
@@ -90,16 +89,20 @@ jobs:
           mode: instrumentation
           token: ${{ secrets.CODSPEED_TOKEN }}
 
-  reth-bench:
+  reth-bench-ack:
     if: |
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, 'derek bench')) ||
       github.event_name == 'workflow_dispatch'
-    name: reth-bench
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 120
-    env:
-      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
-      SCHELK_MOUNT: /reth-bench
+    name: reth-bench-ack
+    runs-on: ubuntu-latest
+    outputs:
+      pr: ${{ steps.args.outputs.pr }}
+      actor: ${{ steps.args.outputs.actor }}
+      blocks: ${{ steps.args.outputs.blocks }}
+      warmup: ${{ steps.args.outputs.warmup }}
+      baseline: ${{ steps.args.outputs.baseline }}
+      feature: ${{ steps.args.outputs.feature }}
+      comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
       - name: Check org membership
         if: github.event_name == 'issue_comment'
@@ -202,18 +205,12 @@ jobs:
               feature = defaults.feature;
             }
 
-            core.exportVariable('BENCH_PR', pr);
-            core.exportVariable('BENCH_ACTOR', actor);
-            core.exportVariable('BENCH_BLOCKS', blocks);
-            core.exportVariable('BENCH_WARMUP_BLOCKS', warmup);
+            core.setOutput('pr', pr || '');
+            core.setOutput('actor', actor);
+            core.setOutput('blocks', blocks);
+            core.setOutput('warmup', warmup);
             core.setOutput('baseline', baseline);
             core.setOutput('feature', feature);
-
-      - uses: actions/checkout@v6
-        with:
-          submodules: true
-          fetch-depth: 0
-          ref: ${{ env.BENCH_PR && format('refs/pull/{0}/merge', env.BENCH_PR) || github.ref }}
 
       - name: Acknowledge request
         id: ack
@@ -229,10 +226,141 @@ jobs:
               });
             }
 
-            const pr = process.env.BENCH_PR;
+            const pr = '${{ steps.args.outputs.pr }}';
             if (!pr) return;
 
-            // Resolve job URL for direct linking to logs
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // Count queued/waiting bench runs ahead of this one
+            let queueMsg = '';
+            let ahead = 0;
+            try {
+              const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
+              const allRuns = [];
+              for (const status of statuses) {
+                const { data: { workflow_runs: r } } = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'bench.yml',
+                  status,
+                  per_page: 100,
+                });
+                allRuns.push(...r);
+              }
+              const thisRun = allRuns.find(r => r.id === context.runId);
+              const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
+              ahead = allRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              if (ahead > 0) {
+                queueMsg = `\n🔢 **Queue position:** #${ahead + 1} (${ahead} job(s) ahead)`;
+              }
+            } catch (e) {
+              // Non-fatal — queue info is best-effort
+              core.info(`Could not fetch queue info: ${e.message}`);
+            }
+
+            const actor = '${{ steps.args.outputs.actor }}';
+            const blocks = '${{ steps.args.outputs.blocks }}';
+            const warmup = '${{ steps.args.outputs.warmup }}';
+            const baseline = '${{ steps.args.outputs.baseline }}' || 'merge-base';
+            const feature = '${{ steps.args.outputs.feature }}' || 'branch head';
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``;
+
+            const { data: comment } = await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt(pr),
+              body: `cc @${actor}\n\n🚀 Benchmark queued! [View run](${runUrl})\n\n⏳ **Status:** Waiting for runner...${queueMsg}\n\n${config}`,
+            });
+            core.setOutput('comment-id', String(comment.id));
+            core.setOutput('queue-position', String(ahead || 0));
+
+      - name: Poll queue position
+        if: steps.ack.outputs.comment-id && steps.ack.outputs.queue-position != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = '${{ steps.args.outputs.pr }}';
+            const commentId = parseInt('${{ steps.ack.outputs.comment-id }}');
+            const actor = '${{ steps.args.outputs.actor }}';
+            const blocks = '${{ steps.args.outputs.blocks }}';
+            const warmup = '${{ steps.args.outputs.warmup }}';
+            const baseline = '${{ steps.args.outputs.baseline }}' || 'merge-base';
+            const feature = '${{ steps.args.outputs.feature }}' || 'branch head';
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            async function getQueuePosition() {
+              const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
+              const allRuns = [];
+              for (const status of statuses) {
+                const { data: { workflow_runs: r } } = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'bench.yml',
+                  status,
+                  per_page: 100,
+                });
+                allRuns.push(...r);
+              }
+              const thisRun = allRuns.find(r => r.id === context.runId);
+              const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
+              return allRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+            }
+
+            let lastPosition = parseInt('${{ steps.ack.outputs.queue-position }}');
+            const deadline = Date.now() + 10 * 60 * 1000; // 10 minute timeout
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+            while (Date.now() < deadline) {
+              await sleep(10_000);
+              try {
+                const ahead = await getQueuePosition();
+                if (ahead !== lastPosition) {
+                  lastPosition = ahead;
+                  const queueMsg = ahead > 0
+                    ? `\n🔢 **Queue position:** #${ahead + 1} (${ahead} job(s) ahead)`
+                    : '';
+                  await github.rest.issues.updateComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: commentId,
+                    body: `cc @${actor}\n\n🚀 Benchmark queued! [View run](${runUrl})\n\n⏳ **Status:** Waiting for runner...${queueMsg}\n\n${config}`,
+                  });
+                }
+                if (ahead === 0) break;
+              } catch (e) {
+                core.info(`Queue poll error: ${e.message}`);
+              }
+            }
+
+  reth-bench:
+    needs: reth-bench-ack
+    name: reth-bench
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 120
+    concurrency:
+      group: reth-bench-queue
+      cancel-in-progress: false
+    env:
+      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
+      SCHELK_MOUNT: /reth-bench
+      BENCH_PR: ${{ needs.reth-bench-ack.outputs.pr }}
+      BENCH_ACTOR: ${{ needs.reth-bench-ack.outputs.actor }}
+      BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
+      BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
+      BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          fetch-depth: 0
+          ref: ${{ env.BENCH_PR && format('refs/pull/{0}/merge', env.BENCH_PR) || github.ref }}
+
+      - name: Resolve job URL and update status
+        if: env.BENCH_COMMENT_ID
+        uses: actions/github-script@v7
+        with:
+          script: |
             const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -240,24 +368,21 @@ jobs:
             });
             const job = jobs.jobs.find(j => j.name === 'reth-bench');
             const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            core.exportVariable('BENCH_JOB_URL', jobUrl);
 
             const blocks = process.env.BENCH_BLOCKS;
             const warmup = process.env.BENCH_WARMUP_BLOCKS;
-            const baseline = '${{ steps.args.outputs.baseline }}' || 'merge-base';
-            const feature = '${{ steps.args.outputs.feature }}' || 'branch head';
-
-            core.exportVariable('BENCH_JOB_URL', jobUrl);
+            const baseline = '${{ needs.reth-bench-ack.outputs.baseline }}' || 'merge-base';
+            const feature = '${{ needs.reth-bench-ack.outputs.feature }}' || 'branch head';
             core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
-            const { data: comment } = await github.rest.issues.createComment({
+            await github.rest.issues.updateComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: parseInt(pr),
+              comment_id: parseInt(process.env.BENCH_COMMENT_ID),
               body: buildBody('Building baseline binary...'),
             });
-
-            core.exportVariable('BENCH_COMMENT_ID', comment.id);
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
@@ -301,8 +426,8 @@ jobs:
       - name: Resolve refs
         id: refs
         run: |
-          BASELINE_ARG="${{ steps.args.outputs.baseline }}"
-          FEATURE_ARG="${{ steps.args.outputs.feature }}"
+          BASELINE_ARG="${{ needs.reth-bench-ack.outputs.baseline }}"
+          FEATURE_ARG="${{ needs.reth-bench-ack.outputs.feature }}"
 
           if [ -n "$BASELINE_ARG" ]; then
             git fetch origin "$BASELINE_ARG" --quiet 2>/dev/null || true
