@@ -2,13 +2,14 @@ use crate::common::EnvironmentArgs;
 use clap::Parser;
 use eyre::Result;
 use lz4::Decoder;
-use reqwest::{blocking::Client as BlockingClient, Client};
+use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_fs_util as fs;
 use std::{
     borrow::Cow,
-    io::{self, Read, Write},
+    fs::OpenOptions,
+    io::{self, BufWriter, Read, Write},
     path::Path,
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
@@ -148,6 +149,15 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     /// Custom URL to download the snapshot from
     #[arg(long, short, long_help = DownloadDefaults::get_global().long_help())]
     url: Option<String>,
+
+    /// Download the archive to disk before extracting, enabling resume on failure.
+    ///
+    /// By default, the download is streamed directly through the decompressor into
+    /// tar extraction for lower disk usage and better throughput. With this flag,
+    /// the archive is saved to a `.part` file first, allowing the download to resume
+    /// from where it left off if the connection drops.
+    #[arg(long)]
+    resumable: bool,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
@@ -171,7 +181,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             "Starting snapshot download and extraction"
         );
 
-        stream_and_extract(&url, data_dir.data_dir()).await?;
+        stream_and_extract(&url, data_dir.data_dir(), self.resumable).await?;
         info!(target: "reth::cli", "Snapshot downloaded and extracted successfully");
 
         Ok(())
@@ -346,7 +356,11 @@ fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) 
 
 /// Streams a snapshot from a remote URL directly through decompression into tar
 /// extraction, avoiding intermediate disk writes and halving peak disk usage.
-fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path) -> Result<()> {
+fn streaming_download_and_extract(
+    url: &str,
+    format: CompressionFormat,
+    target_dir: &Path,
+) -> Result<()> {
     let file_name = Url::parse(url)
         .ok()
         .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
@@ -366,10 +380,162 @@ fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path)
     extract_archive(response, total_size, format, target_dir)
 }
 
+const MAX_DOWNLOAD_RETRIES: u32 = 10;
+const RETRY_BACKOFF_SECS: u64 = 5;
+
+/// Wrapper that tracks download progress while writing data.
+struct ProgressWriter<W> {
+    inner: W,
+    progress: DownloadProgress,
+}
+
+impl<W: Write> Write for ProgressWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        let _ = self.progress.update(n as u64);
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// Downloads to a `.part` file with resume support, then extracts.
+/// Uses ~2x disk but survives connection drops on large archives.
+fn resumable_download_and_extract(
+    url: &str,
+    format: CompressionFormat,
+    target_dir: &Path,
+) -> Result<()> {
+    let file_name = Url::parse(url)
+        .ok()
+        .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
+        .unwrap_or_else(|| "snapshot.tar".to_string());
+
+    let final_path = target_dir.join(&file_name);
+    let part_path = target_dir.join(format!("{file_name}.part"));
+
+    let client = BlockingClient::builder().timeout(Duration::from_secs(30)).build()?;
+
+    let mut total_size: Option<u64> = None;
+    let mut last_error: Option<eyre::Error> = None;
+
+    for attempt in 1..=MAX_DOWNLOAD_RETRIES {
+        let existing_size = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
+
+        if let Some(total) = total_size &&
+            existing_size >= total
+        {
+            break;
+        }
+
+        if attempt > 1 {
+            info!(target: "reth::cli",
+                "Retry attempt {}/{} - resuming from {} bytes",
+                attempt, MAX_DOWNLOAD_RETRIES, existing_size
+            );
+        }
+
+        let mut request = client.get(url);
+        if existing_size > 0 {
+            request = request.header(RANGE, format!("bytes={existing_size}-"));
+            if attempt == 1 {
+                info!(target: "reth::cli", "Resuming download from {} bytes", existing_size);
+            }
+        }
+
+        let response = match request.send().and_then(|r| r.error_for_status()) {
+            Ok(r) => r,
+            Err(e) => {
+                last_error = Some(e.into());
+                if attempt < MAX_DOWNLOAD_RETRIES {
+                    info!(target: "reth::cli",
+                        "Download failed, retrying in {RETRY_BACKOFF_SECS}s..."
+                    );
+                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                }
+                continue;
+            }
+        };
+
+        let is_partial = response.status() == StatusCode::PARTIAL_CONTENT;
+
+        let size = if is_partial {
+            response
+                .headers()
+                .get("Content-Range")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.split('/').next_back())
+                .and_then(|v| v.parse().ok())
+        } else {
+            response.content_length()
+        };
+
+        if total_size.is_none() {
+            total_size = size;
+        }
+
+        let current_total = total_size.ok_or_else(|| {
+            eyre::eyre!("Server did not provide Content-Length or Content-Range header")
+        })?;
+
+        let file = if is_partial && existing_size > 0 {
+            OpenOptions::new()
+                .append(true)
+                .open(&part_path)
+                .map_err(|e| fs::FsPathError::open(e, &part_path))?
+        } else {
+            fs::create_file(&part_path)?
+        };
+
+        let start_offset = if is_partial { existing_size } else { 0 };
+        let mut progress = DownloadProgress::new(current_total);
+        progress.downloaded = start_offset;
+
+        let mut writer = ProgressWriter { inner: BufWriter::new(file), progress };
+        let mut reader = response;
+
+        let copy_result = io::copy(&mut reader, &mut writer);
+        let flush_result = writer.inner.flush();
+        println!();
+
+        if let Err(e) = copy_result.and(flush_result) {
+            last_error = Some(e.into());
+            if attempt < MAX_DOWNLOAD_RETRIES {
+                info!(target: "reth::cli",
+                    "Download interrupted, retrying in {RETRY_BACKOFF_SECS}s..."
+                );
+                std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+            }
+            continue;
+        }
+
+        // Download succeeded
+        last_error = None;
+        break;
+    }
+
+    if let Some(e) = last_error {
+        return Err(e);
+    }
+
+    fs::rename(&part_path, &final_path)?;
+    info!(target: "reth::cli", "Download complete, extracting...");
+
+    let file = fs::open(&final_path)?;
+    let total_size = total_size.unwrap_or(0);
+    extract_archive(file, total_size, format, target_dir)?;
+
+    fs::remove_file(&final_path)?;
+    Ok(())
+}
+
 /// Downloads and extracts a snapshot, blocking until finished.
 ///
 /// Supports both `file://` URLs for local files and HTTP(S) URLs for remote downloads.
-fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
+/// When `resumable` is true, downloads to disk first with retry/resume support.
+fn blocking_download_and_extract(url: &str, target_dir: &Path, resumable: bool) -> Result<()> {
     let format = CompressionFormat::from_url(url)?;
 
     if let Ok(parsed_url) = Url::parse(url) &&
@@ -379,15 +545,18 @@ fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
             .to_file_path()
             .map_err(|_| eyre::eyre!("Invalid file:// URL path: {}", url))?;
         extract_from_file(&file_path, format, target_dir)
+    } else if resumable {
+        resumable_download_and_extract(url, format, target_dir)
     } else {
-        download_and_extract(url, format, target_dir)
+        streaming_download_and_extract(url, format, target_dir)
     }
 }
 
-async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
+async fn stream_and_extract(url: &str, target_dir: &Path, resumable: bool) -> Result<()> {
     let target_dir = target_dir.to_path_buf();
     let url = url.to_string();
-    task::spawn_blocking(move || blocking_download_and_extract(&url, &target_dir)).await??;
+    task::spawn_blocking(move || blocking_download_and_extract(&url, &target_dir, resumable))
+        .await??;
 
     Ok(())
 }
