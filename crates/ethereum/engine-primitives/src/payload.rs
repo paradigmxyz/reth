@@ -177,7 +177,6 @@ impl EthBuiltPayload {
                 return Err(BuiltPayloadConversionError::UnexpectedEip4844Sidecars)
             }
         };
-
         Ok(ExecutionPayloadEnvelopeV6 {
             execution_payload: ExecutionPayloadV4::from_block_unchecked_with_bal(
                 block.hash(),

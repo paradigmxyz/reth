@@ -817,7 +817,6 @@ where
             transaction_count,
             handle.iter_transactions(),
             &receipt_tx,
-            has_bal,
         )?;
         drop(receipt_tx);
 
@@ -837,12 +836,14 @@ where
             // Get the expected BAL from input and the built BAL from execution
             let expected_bal =
                 input.block_access_list().transpose().map_err(BlockExecutionError::other)?;
-            let built_bal = db.take_built_alloy_bal();
+
+            let built_bal = &result.block_access_list;
 
             // Compute hashes and compare
             let expected_hash = expected_bal
                 .as_ref()
                 .map(|bal| alloy_eips::eip7928::compute_block_access_list_hash(bal));
+
             let built_hash = built_bal
                 .as_ref()
                 .map(|bal| alloy_eips::eip7928::compute_block_access_list_hash(bal));
@@ -882,7 +883,6 @@ where
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
-        has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
@@ -898,11 +898,6 @@ where
         debug_span!(target: "engine::tree", "pre execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
-
-        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
-        if has_bal {
-            executor.evm_mut().db_mut().bump_bal_index();
-        }
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
@@ -943,11 +938,6 @@ where
                     let tx_index = current_len - 1;
                     let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
                 }
-            }
-
-            // Bump BAL index after each transaction (EIP-7928)
-            if has_bal {
-                executor.evm_mut().db_mut().bump_bal_index();
             }
         }
         drop(exec_span);
