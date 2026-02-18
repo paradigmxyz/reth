@@ -498,7 +498,7 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         // extract the built block access list (EIP-7928, Amsterdam) and compute its hash
-        let block_access_list = db.take_built_alloy_bal();
+        let block_access_list = result.block_access_list.clone();
         let block_access_list_hash =
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal));
 

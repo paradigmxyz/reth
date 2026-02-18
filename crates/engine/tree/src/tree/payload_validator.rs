@@ -807,14 +807,14 @@ where
             // Get the expected BAL from input and the built BAL from execution
             let expected_bal =
                 input.block_access_list().transpose().map_err(BlockExecutionError::other)?;
-            info!(target: "engine::tree::payload_validator", "Expected BAL from payload: {expected_bal:?}");
-            let built_bal = db.take_built_alloy_bal();
-            info!(target: "engine::tree::payload_validator", "Built BAL from execution: {built_bal:?}");
+
+            let built_bal = &result.block_access_list;
 
             // Compute hashes and compare
             let expected_hash = expected_bal
                 .as_ref()
                 .map(|bal| alloy_eips::eip7928::compute_block_access_list_hash(bal));
+
             let built_hash = built_bal
                 .as_ref()
                 .map(|bal| alloy_eips::eip7928::compute_block_access_list_hash(bal));
