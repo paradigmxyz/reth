@@ -129,6 +129,7 @@ jobs:
         id: args
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.BENCH_BOT_PAT }}
           script: |
             let pr, actor, blocks, warmup, baseline, feature;
 
@@ -236,6 +237,7 @@ jobs:
         id: ack
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.BENCH_BOT_PAT }}
           script: |
             if (context.eventName === 'issue_comment') {
               await github.rest.reactions.createForIssueComment({
@@ -300,6 +302,7 @@ jobs:
         if: steps.ack.outputs.comment-id && steps.ack.outputs.queue-position != '0'
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.BENCH_BOT_PAT }}
           script: |
             const pr = '${{ steps.args.outputs.pr }}';
             const commentId = parseInt('${{ steps.ack.outputs.comment-id }}');
@@ -377,11 +380,13 @@ jobs:
           submodules: true
           fetch-depth: 0
           ref: ${{ env.BENCH_PR && format('refs/pull/{0}/merge', env.BENCH_PR) || github.ref }}
+          token: ${{ secrets.BENCH_BOT_PAT }}
 
       - name: Resolve job URL and update status
         if: env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.BENCH_BOT_PAT }}
           script: |
             const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
               owner: context.repo.owner,
@@ -487,6 +492,7 @@ jobs:
         if: env.BENCH_COMMENT_ID && steps.snapshot-check.outputs.needed == 'true'
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.BENCH_BOT_PAT }}
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
             await s({github, context, status: 'Building binaries & downloading snapshot...'});
@@ -581,6 +587,7 @@ jobs:
         if: success() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.BENCH_BOT_PAT }}
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
             await s({github, context, status: 'Running baseline benchmark...'});
@@ -593,6 +600,7 @@ jobs:
         if: success() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.BENCH_BOT_PAT }}
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
             await s({github, context, status: 'Running feature benchmark...'});
@@ -686,6 +694,7 @@ jobs:
         if: success()
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.BENCH_BOT_PAT }}
           script: |
             const fs = require('fs');
 
@@ -736,6 +745,7 @@ jobs:
         if: failure() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
         with:
+          github-token: ${{ secrets.BENCH_BOT_PAT }}
           script: |
             const steps_status = [
               ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
