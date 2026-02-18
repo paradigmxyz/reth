@@ -146,9 +146,9 @@ mod tests {
         let map = WorkerMap::new();
 
         let name = map
-            .spawn_on("my-custom-worker", || thread::current().name().unwrap().to_string())
+            .spawn_on("custom-worker", || thread::current().name().unwrap().to_string())
             .await
             .unwrap();
-        assert_eq!(name, "my-custom-worker");
+        assert_eq!(name, "custom-worker");
     }
 }

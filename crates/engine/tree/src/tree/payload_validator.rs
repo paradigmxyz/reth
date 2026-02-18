@@ -987,7 +987,7 @@ where
                 let seq_overlay = overlay_factory;
                 let seq_hashed_state = hashed_state.clone();
                 self.payload_processor.executor().spawn_blocking_named(
-                    "state-root-serial",
+                    "serial-root",
                     move || {
                         let result =
                             Self::compute_state_root_serial(seq_overlay, &seq_hashed_state);
