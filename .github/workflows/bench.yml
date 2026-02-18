@@ -480,6 +480,7 @@ jobs:
           git -C ../reth-baseline checkout "${{ steps.refs.outputs.baseline-ref }}"
 
       - name: Build baseline and feature binaries in parallel
+        id: build
         run: |
           BASELINE_DIR="$(cd ../reth-baseline && pwd)"
           FEATURE_DIR="$(pwd)"
@@ -702,8 +703,7 @@ jobs:
         with:
           script: |
             const steps_status = [
-              ['building baseline binary', '${{ steps.build-baseline.outcome }}'],
-              ['building feature binary', '${{ steps.build-feature.outcome }}'],
+              ['building binaries', '${{ steps.build.outcome }}'],
               ['running baseline benchmark', '${{ steps.run-baseline.outcome }}'],
               ['running feature benchmark', '${{ steps.run-feature.outcome }}'],
             ];
