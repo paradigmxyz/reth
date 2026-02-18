@@ -122,6 +122,18 @@ jobs:
       cargo_features: asm-keccak edge
       artifact_name: reth-edge
 
+    wait-reth:
+    needs:
+      - detect-env
+      - build-reth-stable
+      - build-reth-edge
+      - prepare-reth-stable
+      - prepare-reth-edge
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: echo "reth build is ready"
+
   # --------------------------------------------------
   # TEST MATRIX
   # --------------------------------------------------
@@ -129,6 +141,7 @@ jobs:
     needs:
       - detect-env
       - prepare-hive
+      - wait-reth
 
     timeout-minutes: 120
     runs-on: ${{ needs.detect-env.outputs.use_docker == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
