@@ -395,7 +395,7 @@ where
 
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
-            debug_span!(target: "engine::tree::payload_validator", "state provider").entered();
+            debug_span!(target: "engine::tree::payload_validator", "state_provider").entered();
         let Some(provider_builder) =
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
@@ -420,7 +420,7 @@ where
             .into())
         };
 
-        let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm env")
+        let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
@@ -821,7 +821,7 @@ where
         self.metrics.record_post_execution(post_exec_start.elapsed());
 
         // Merge transitions into bundle state
-        debug_span!(target: "engine::tree", "merge transitions")
+        debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
@@ -860,7 +860,7 @@ where
 
         // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
-        debug_span!(target: "engine::tree", "pre execution")
+        debug_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
