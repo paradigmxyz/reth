@@ -2170,16 +2170,22 @@ mod tests {
     }
 
     /// Regression test: in v2/hashed-state mode, `get_state()` produces a
-    /// `BundleState` whose storage keys are already keccak256-hashed. If
-    /// `hashed_post_state()` hashes them *again*, the resulting `HashedPostState`
-    /// will contain double-hashed keys that don't match any trie leaf, causing
-    /// invalid state roots and payload rejections.
+    /// `BundleState` whose storage keys are already keccak256-hashed (from hashed
+    /// changesets). The engine tree's `canonical_block_by_hash` must use
+    /// `from_bundle_state_hashed_storage` instead of the normal `hashed_post_state`
+    /// to avoid double-hashing, which would produce wrong trie keys and cause
+    /// invalid payload rejections.
+    ///
+    /// This test reproduces the exact call-site pattern from `canonical_block_by_hash`:
+    /// `get_state()` → `from_bundle_state_hashed_storage()` when `use_hashed_state`
+    /// is true.
     #[test]
     fn test_hashed_post_state_no_double_hashing_in_v2() -> eyre::Result<()> {
         use alloy_primitives::{keccak256, U256};
         use reth_db_api::{models::StorageSettings, tables, transaction::DbTxMut};
         use reth_primitives_traits::StorageEntry;
-        use reth_storage_api::{HashedPostStateProvider, StorageSettingsCache};
+        use reth_storage_api::StorageSettingsCache;
+        use reth_trie::{HashedPostState, KeccakKeyHasher};
         use std::collections::HashMap;
 
         let address = alloy_primitives::Address::with_last_byte(1);
@@ -2243,11 +2249,16 @@ mod tests {
         let outcome =
             consistent_provider.get_state(1..=1)?.expect("should return execution outcome");
 
-        // Now convert to HashedPostState — the operation that was double-hashing
-        let hashed_state = provider.hashed_post_state(outcome.state());
+        // Simulate what canonical_block_by_hash does in v2 mode: use
+        // from_bundle_state_hashed_storage to avoid double-hashing.
+        // The normal hashed_post_state() would keccak256 the already-hashed keys.
+        let hashed_state = HashedPostState::from_bundle_state_hashed_storage::<KeccakKeyHasher>(
+            outcome.state().state(),
+        );
 
         // The HashedPostState must contain the *single*-hashed slot key.
-        // Before the fix, this would contain keccak256(hashed_slot) — a double hash.
+        // Without the fix, using from_bundle_state (plain) would produce
+        // keccak256(hashed_slot) — a double hash that doesn't match any trie leaf.
         let account_storage = hashed_state
             .storages
             .get(&hashed_address)

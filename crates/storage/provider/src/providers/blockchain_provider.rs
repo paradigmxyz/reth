@@ -29,7 +29,6 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChangesetEntry, NodePrimitivesProvider, StorageChangeSetReader,
-    StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{HashedPostState, KeccakKeyHasher};
@@ -622,15 +621,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
 impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider<N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        if self.database.cached_storage_settings().use_hashed_state() {
-            // In v2 / hashed-state mode the BundleState already contains keccak256-hashed
-            // storage keys. Skip hashing them again to avoid double-hashing.
-            HashedPostState::from_bundle_state_hashed_storage::<KeccakKeyHasher>(
-                bundle_state.state(),
-            )
-        } else {
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
-        }
+        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
 }
 

@@ -719,13 +719,7 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
 
 impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        if self.cached_storage_settings().use_hashed_state() {
-            HashedPostState::from_bundle_state_hashed_storage::<KeccakKeyHasher>(
-                bundle_state.state(),
-            )
-        } else {
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
-        }
+        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
 }
 

@@ -39,6 +39,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::spawn_os_thread;
+use reth_trie::{HashedPostState, KeccakKeyHasher};
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
@@ -1993,7 +1994,19 @@ where
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
-        let hashed_state = self.provider.hashed_post_state(execution_output.state());
+
+        // In v2/hashed-state mode, get_state() reconstructs a BundleState whose storage
+        // keys are already keccak256-hashed (from hashed changesets). The normal
+        // hashed_post_state() path would hash them again. Use the non-hashing variant
+        // to avoid double-hashing, which would produce wrong trie keys and cause
+        // invalid payload rejections.
+        let hashed_state = if self.use_hashed_state {
+            HashedPostState::from_bundle_state_hashed_storage::<KeccakKeyHasher>(
+                execution_output.state().state(),
+            )
+        } else {
+            self.provider.hashed_post_state(execution_output.state())
+        };
 
         debug!(
             target: "engine::tree",
