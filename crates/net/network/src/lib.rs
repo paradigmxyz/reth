@@ -131,6 +131,7 @@ pub mod import;
 pub mod message;
 pub mod peers;
 pub mod protocol;
+pub mod rand_map;
 pub mod transactions;
 
 mod budget;
