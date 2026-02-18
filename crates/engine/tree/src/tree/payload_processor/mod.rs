@@ -420,17 +420,7 @@ where
                 let _enter =
                     debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
                 let (transactions, convert) = transactions.into_parts();
-                for (idx, tx) in transactions.into_iter().enumerate() {
-                    let tx = convert.convert(tx);
-                    let tx = tx.map(|tx| {
-                        let (tx_env, tx) = tx.into_parts();
-                        WithTxEnv { tx_env, tx: Arc::new(tx) }
-                    });
-                    if let Ok(tx) = &tx {
-                        let _ = prewarm_tx.send((idx, tx.clone()));
-                    }
-                    let _ = execute_tx.send(tx);
-                }
+                recover_serial(transactions.into_iter(), &convert, 0, &prewarm_tx, &execute_tx);
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
@@ -448,17 +438,7 @@ where
 
                 // Recover the first few transactions sequentially so execution can
                 // start immediately without waiting for rayon work-stealing.
-                for idx in 0..prefetch {
-                    let Some(raw_tx) = iter.next() else { break };
-                    let tx = convert.convert(raw_tx);
-                    let tx = tx.map(|tx| {
-                        let (tx_env, tx) = tx.into_parts();
-                        let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
-                        let _ = prewarm_tx.send((idx, tx.clone()));
-                        tx
-                    });
-                    let _ = execute_tx.send(tx);
-                }
+                recover_serial((&mut iter).take(prefetch), &convert, 0, &prewarm_tx, &execute_tx);
 
                 // Recover the remaining transactions in parallel.
                 let rest: Vec<_> = iter.collect();
@@ -738,6 +718,35 @@ where
             *cached = Some(new_cache);
             debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
         });
+    }
+}
+
+/// Recovers transactions sequentially and sends them to the prewarm and execute channels.
+///
+/// `start_idx` is added to the enumeration index so that the global transaction ordering is
+/// preserved when this is used for a prefix of a larger block.
+fn recover_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
+    iter: impl Iterator<Item = RawTx>,
+    convert: &C,
+    start_idx: usize,
+    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
+    execute_tx: &mpsc::SyncSender<Result<WithTxEnv<TxEnv, Recovered>, Err>>,
+) where
+    Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
+    TxEnv: Clone,
+    C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
+{
+    for (i, raw_tx) in iter.enumerate() {
+        let idx = start_idx + i;
+        let tx = convert.convert(raw_tx);
+        let tx = tx.map(|tx| {
+            let (tx_env, tx) = tx.into_parts();
+            WithTxEnv { tx_env, tx: Arc::new(tx) }
+        });
+        if let Ok(tx) = &tx {
+            let _ = prewarm_tx.send((idx, tx.clone()));
+        }
+        let _ = execute_tx.send(tx);
     }
 }
 
