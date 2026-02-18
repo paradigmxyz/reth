@@ -762,11 +762,15 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, state }) => {
+                // Process updates before adding the new transaction so that same-sender
+                // lower-nonce transactions are promoted to pending first. Updates are
+                // already in nonce-ascending order, so this guarantees live
+                // `BestTransactions` iterators receive transactions in correct nonce order.
+                let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
                 // replace the new tx and remove the replaced in the subpool(s)
                 self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
                 // Update inserted transactions metric
                 self.metrics.inserted_transactions.increment(1);
-                let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
                 let replaced = replaced_tx.map(|(tx, _)| tx);
 
@@ -4559,6 +4563,70 @@ mod tests {
         assert!(
             tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK),
             "Non-4844 tx should gain ENOUGH_FEE_CAP_BLOCK bit after basefee decrease"
+        );
+    }
+
+    /// Test for <https://github.com/paradigmxyz/reth/issues/17701>
+    ///
+    /// When a new transaction is added and its `updates` contain a same-sender transaction with
+    /// a lower nonce, the lower-nonce tx must be added to the pending subpool *before* the
+    /// higher-nonce tx. Otherwise, live `BestTransactions` iterators receive them out of order.
+    #[test]
+    fn best_transactions_nonce_order_on_promotion() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let sender = Address::random();
+        let on_chain_balance = U256::from(10_000);
+
+        // tx0: nonce 0, cheap — will go straight to pending
+        let tx0 = MockTransaction::eip1559().with_sender(sender).set_gas_price(100).inc_limit();
+        // tx1: nonce 1, very expensive — cumulative cost (tx0 + tx1) will exceed balance
+        let tx1 = tx0.next().inc_limit().with_value(U256::from(on_chain_balance));
+        // tx2: nonce 2
+        let tx2 = tx1.next().inc_limit().with_value(U256::ZERO);
+
+        let v0 = f.validated(tx0);
+        let v1 = f.validated(tx1);
+        let v2 = f.validated(tx2);
+
+        // Add tx0 with limited balance — goes to pending (tx0 cost is small: 1 * 100 = 100)
+        pool.add_transaction(v0, on_chain_balance, 0, None).unwrap();
+
+        // Create a live BestTransactions iterator that will receive new pending txs
+        let mut best = pool.best_transactions();
+
+        // Drain tx0 from the iterator
+        let first = best.next().expect("should yield tx0");
+        assert_eq!(first.id().nonce, 0);
+
+        // Add tx1 with the same limited balance — cumulative cost exceeds balance, goes to
+        // queued
+        pool.add_transaction(v1, on_chain_balance, 0, None).unwrap();
+
+        // tx1 should be queued, nothing new in best
+        assert!(best.next().is_none(), "tx1 should be queued, not pending");
+
+        // Now add tx2 with U256::MAX balance — tx2 goes to pending AND tx1 gets promoted.
+        // The bug: tx2 is added to pending *before* tx1, so BestTransactions yields tx2
+        // first, violating nonce ordering.
+        pool.add_transaction(v2, U256::MAX, 0, None).unwrap();
+
+        let t1 = best.next().expect("should yield a transaction");
+        let t2 = best.next().expect("should yield a transaction");
+
+        // Correct order: tx1 (nonce 1) before tx2 (nonce 2)
+        assert_eq!(
+            t1.id().nonce,
+            1,
+            "first yielded tx should be nonce 1, got nonce {}",
+            t1.id().nonce
+        );
+        assert_eq!(
+            t2.id().nonce,
+            2,
+            "second yielded tx should be nonce 2, got nonce {}",
+            t2.id().nonce
         );
     }
 }
