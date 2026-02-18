@@ -360,6 +360,15 @@ where
     /// for small blocks.
     const SMALL_BLOCK_TX_THRESHOLD: usize = 30;
 
+    /// Number of leading transactions to recover sequentially before entering the rayon
+    /// parallel path.
+    ///
+    /// Rayon's work-stealing does not guarantee that index 0 is processed first, so the
+    /// ordered consumer can block for up to ~1ms waiting for the first slot. By recovering
+    /// a small head sequentially and sending it immediately, execution can start without
+    /// waiting for rayon scheduling.
+    const PARALLEL_PREFETCH_COUNT: usize = 4;
+
     /// Returns the multiproof chunk size adapted to the block's gas usage.
     ///
     /// For blocks with ≤20M gas used, a smaller chunk size (30) yields better throughput.
@@ -426,26 +435,50 @@ where
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
             // to execution in order via `for_each_ordered`.
+            //
+            // To avoid a ~1ms stall waiting for rayon to schedule index 0, the first
+            // few transactions are recovered sequentially and sent immediately before
+            // entering the parallel iterator for the remainder.
+            let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
             self.executor.spawn_blocking(move || {
                 let _enter =
                     debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
                 let (transactions, convert) = transactions.into_parts();
-                transactions
-                    .into_par_iter()
-                    .enumerate()
-                    .map(|(idx, tx)| {
-                        let tx = convert.convert(tx);
-                        tx.map(|tx| {
-                            let (tx_env, tx) = tx.into_parts();
-                            let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
-                            // Send to prewarming out of order with the original index.
-                            let _ = prewarm_tx.send((idx, tx.clone()));
-                            tx
-                        })
-                    })
-                    .for_each_ordered(|tx| {
-                        let _ = execute_tx.send(tx);
+                let mut iter = transactions.into_iter();
+
+                // Recover the first few transactions sequentially so execution can
+                // start immediately without waiting for rayon work-stealing.
+                for idx in 0..prefetch {
+                    let Some(raw_tx) = iter.next() else { break };
+                    let tx = convert.convert(raw_tx);
+                    let tx = tx.map(|tx| {
+                        let (tx_env, tx) = tx.into_parts();
+                        let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
+                        let _ = prewarm_tx.send((idx, tx.clone()));
+                        tx
                     });
+                    let _ = execute_tx.send(tx);
+                }
+
+                // Recover the remaining transactions in parallel.
+                let rest: Vec<_> = iter.collect();
+                if !rest.is_empty() {
+                    rest.into_par_iter()
+                        .enumerate()
+                        .map(|(i, tx)| {
+                            let idx = i + prefetch;
+                            let tx = convert.convert(tx);
+                            tx.map(|tx| {
+                                let (tx_env, tx) = tx.into_parts();
+                                let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
+                                let _ = prewarm_tx.send((idx, tx.clone()));
+                                tx
+                            })
+                        })
+                        .for_each_ordered(|tx| {
+                            let _ = execute_tx.send(tx);
+                        });
+                }
             });
         }
 
