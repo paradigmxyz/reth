@@ -100,8 +100,6 @@ fn build_groups(manifest: &SnapshotManifest) -> Vec<DisplayGroup> {
         groups.push(DisplayGroup { name: "State History", types, required: false });
     }
 
-    // Indexes (rocksdb) intentionally excluded from TUI
-
     groups
 }
 

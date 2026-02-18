@@ -15,7 +15,7 @@ const MINIMUM_HISTORY_DISTANCE: u64 = 10064;
 
 /// Generates an appropriate [`Config`] based on which snapshot components were downloaded.
 ///
-/// `transaction_lookup` and `sender_recovery` are always pruned full (indexes only).
+/// `transaction_lookup` and `sender_recovery` are always pruned full.
 /// `bodies_history` is pruned when transactions weren't downloaded.
 pub fn config_for_components(selected: &[SnapshotComponentType]) -> Config {
     let has_txs = selected.contains(&SnapshotComponentType::Transactions);
@@ -26,7 +26,6 @@ pub fn config_for_components(selected: &[SnapshotComponentType]) -> Config {
     let mut config = Config::default();
     let mut prune = PruneConfig::default();
 
-    // Indexes — always prune full
     prune.segments.transaction_lookup = Some(PruneMode::Full);
     prune.segments.sender_recovery = Some(PruneMode::Full);
 
@@ -169,10 +168,9 @@ pub fn describe_prune_config(selected: &[SnapshotComponentType]) -> Vec<String> 
 /// Generates a [`Config`] from per-component range selections.
 ///
 /// Pruning mapping:
-/// - `transaction_lookup` and `sender_recovery` are always pruned full — they're just
-///   indexes (in rocksdb) that are rebuilt on demand.
-/// - The user's "Transactions" selection controls `bodies_history` (the actual tx data
-///   in static files).
+/// - `transaction_lookup` and `sender_recovery` are always pruned full — they're rebuilt on demand.
+/// - The user's "Transactions" selection controls `bodies_history` (the actual tx data in static
+///   files).
 /// - Receipts and changeset selections map directly to their prune segments.
 pub fn config_for_selections(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
@@ -197,7 +195,6 @@ pub fn config_for_selections(
     let mut config = Config::default();
     let mut prune = PruneConfig::default();
 
-    // Indexes — always prune full, they're rebuilt on demand
     prune.segments.sender_recovery = Some(PruneMode::Full);
     prune.segments.transaction_lookup = Some(PruneMode::Full);
 
@@ -278,7 +275,6 @@ mod tests {
         let selected = vec![SnapshotComponentType::State];
         let config = config_for_components(&selected);
 
-        // Indexes always full
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         // No txs downloaded → bodies pruned full
@@ -303,7 +299,6 @@ mod tests {
             SnapshotComponentType::ALL.iter().copied().filter(|ty| ty.is_minimal()).collect();
         let config = config_for_components(&selected);
 
-        // Indexes always full
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         // Minimal includes txs → bodies kept
@@ -317,11 +312,10 @@ mod tests {
     }
 
     #[test]
-    fn all_components_indexes_still_pruned() {
+    fn all_components_still_pruned() {
         let selected = SnapshotComponentType::ALL.to_vec();
         let config = config_for_components(&selected);
 
-        // Indexes always pruned full even with all components
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         // Bodies kept since txs downloaded
@@ -336,7 +330,6 @@ mod tests {
         let selected = vec![SnapshotComponentType::State, SnapshotComponentType::Transactions];
         let config = config_for_components(&selected);
 
-        // Indexes always full
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         // Bodies kept since txs downloaded
@@ -367,9 +360,7 @@ mod tests {
         let selected = vec![SnapshotComponentType::State];
         let desc = describe_prune_config(&selected);
         assert!(desc.contains(&"transaction_lookup = \"full\"".to_string()));
-        assert!(desc.contains(&format!(
-            "receipts = {{ distance = {MINIMUM_RECEIPTS_DISTANCE} }}"
-        )));
+        assert!(desc.contains(&format!("receipts = {{ distance = {MINIMUM_RECEIPTS_DISTANCE} }}")));
     }
 
     #[test]
@@ -412,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn write_prune_checkpoints_always_sets_indexes() {
+    fn write_prune_checkpoints_always_sets_lookups() {
         let dir = tempfile::tempdir().unwrap();
         let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::default()).unwrap();
 
@@ -421,7 +412,6 @@ mod tests {
 
         write_prune_checkpoints(&db, &config, 21_000_000).unwrap();
 
-        // Indexes always have checkpoints (always pruned full)
         let tx = db.tx().unwrap();
         for segment in [PruneSegment::SenderRecovery, PruneSegment::TransactionLookup] {
             assert!(
@@ -438,7 +428,6 @@ mod tests {
             selections.insert(ty, ComponentSelection::All);
         }
         let config = config_for_selections(&selections);
-        // Indexes always pruned
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         // Bodies kept
@@ -476,7 +465,6 @@ mod tests {
             .insert(SnapshotComponentType::StorageChangesets, ComponentSelection::Distance(10_064));
         let config = config_for_selections(&selections);
 
-        // Indexes always full regardless of tx selection
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         // Bodies follows tx selection
@@ -487,13 +475,12 @@ mod tests {
     }
 
     #[test]
-    fn describe_selections_all_has_indexes() {
+    fn describe_selections_all_has_lookups() {
         let mut selections = BTreeMap::new();
         for ty in SnapshotComponentType::ALL {
             selections.insert(ty, ComponentSelection::All);
         }
         let desc = describe_prune_config_from_selections(&selections);
-        // Always includes index pruning
         assert!(desc.contains(&"sender_recovery=\"full\"".to_string()));
         assert!(desc.contains(&"transaction_lookup=\"full\"".to_string()));
     }
@@ -507,7 +494,6 @@ mod tests {
             .insert(SnapshotComponentType::Transactions, ComponentSelection::Distance(10_064));
         selections.insert(SnapshotComponentType::Receipts, ComponentSelection::None);
         let desc = describe_prune_config_from_selections(&selections);
-        // Indexes always full
         assert!(desc.contains(&"sender_recovery=\"full\"".to_string()));
         // Bodies follows tx selection
         assert!(desc.contains(&"bodies_history={ distance = 10064 }".to_string()));

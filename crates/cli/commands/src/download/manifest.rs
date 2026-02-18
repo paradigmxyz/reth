@@ -50,9 +50,6 @@ pub struct SingleArchive {
     pub file: String,
     /// Compressed archive size in bytes.
     pub size: u64,
-    /// Optional SHA-256 checksum.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checksum: Option<String>,
 }
 
 /// A chunked archive set where each chunk covers a fixed block range.
@@ -96,8 +93,6 @@ impl std::fmt::Display for ComponentSelection {
 pub enum SnapshotComponentType {
     /// State database (mdbx). Always required. Single archive.
     State,
-    /// Index database (rocksdb). Optional — present in archive snapshots. Single archive.
-    Indexes,
     /// Block headers static files. Chunked.
     Headers,
     /// Transaction static files. Chunked.
@@ -112,9 +107,8 @@ pub enum SnapshotComponentType {
 
 impl SnapshotComponentType {
     /// All component types in display order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 6] = [
         Self::State,
-        Self::Indexes,
         Self::Headers,
         Self::Transactions,
         Self::Receipts,
@@ -126,7 +120,6 @@ impl SnapshotComponentType {
     pub const fn key(&self) -> &'static str {
         match self {
             Self::State => "state",
-            Self::Indexes => "indexes",
             Self::Headers => "headers",
             Self::Transactions => "transactions",
             Self::Receipts => "receipts",
@@ -139,7 +132,6 @@ impl SnapshotComponentType {
     pub const fn display_name(&self) -> &'static str {
         match self {
             Self::State => "State (mdbx)",
-            Self::Indexes => "Indexes (rocksdb)",
             Self::Headers => "Headers",
             Self::Transactions => "Transactions",
             Self::Receipts => "Receipts",
@@ -159,8 +151,8 @@ impl SnapshotComponentType {
     ///
     /// The minimal set is state + headers + transactions + account/storage changesets.
     /// Transactions controls `bodies_history` pruning (the actual tx data in static files).
-    /// `tx_lookup` and `sender_recovery` are always pruned full regardless (just indexes).
-    /// Receipts and indexes are excluded.
+    /// `tx_lookup` and `sender_recovery` are always pruned full regardless.
+    /// Receipts are excluded.
     pub const fn is_minimal(&self) -> bool {
         matches!(
             self,
@@ -174,7 +166,7 @@ impl SnapshotComponentType {
 
     /// Whether this component type uses chunked archives.
     pub const fn is_chunked(&self) -> bool {
-        !matches!(self, Self::State | Self::Indexes)
+        !matches!(self, Self::State)
     }
 }
 
@@ -341,28 +333,9 @@ pub fn generate_manifest(
         let size = std::fs::metadata(&state_path)?.len();
         components.insert(
             SnapshotComponentType::State.key().to_string(),
-            ComponentManifest::Single(SingleArchive {
-                file: "state.tar.zst".to_string(),
-                size,
-                checksum: None,
-            }),
+            ComponentManifest::Single(SingleArchive { file: "state.tar.zst".to_string(), size }),
         );
         info!(target: "reth::cli", size = %super::DownloadProgress::format_size(size), "Found state archive");
-    }
-
-    // Indexes (rocksdb): single archive, optional
-    let indexes_path = archive_dir.join("indexes.tar.zst");
-    if indexes_path.exists() {
-        let size = std::fs::metadata(&indexes_path)?.len();
-        components.insert(
-            SnapshotComponentType::Indexes.key().to_string(),
-            ComponentManifest::Single(SingleArchive {
-                file: "indexes.tar.zst".to_string(),
-                size,
-                checksum: None,
-            }),
-        );
-        info!(target: "reth::cli", size = %super::DownloadProgress::format_size(size), "Found indexes archive");
     }
 
     // Chunked components — record blocks_per_file, total_blocks, and sum chunk sizes.
@@ -436,7 +409,6 @@ mod tests {
             ComponentManifest::Single(SingleArchive {
                 file: "state.tar.zst".to_string(),
                 size: 100,
-                checksum: None,
             }),
         );
         components.insert(
@@ -559,10 +531,7 @@ mod tests {
         // First chunk: 0-499999 (not 0-396821 or similar)
         assert_eq!(urls[0], "https://example.com/storage_changesets-0-499999.tar.zst");
         // Last chunk: 24000000-24499999 (not 24000000-24396821)
-        assert_eq!(
-            urls[48],
-            "https://example.com/storage_changesets-24000000-24499999.tar.zst"
-        );
+        assert_eq!(urls[48], "https://example.com/storage_changesets-24000000-24499999.tar.zst");
     }
 
     #[test]
