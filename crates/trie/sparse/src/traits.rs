@@ -9,8 +9,10 @@ use alloy_primitives::{
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2};
 
+#[cfg(feature = "trie-debug")]
+use crate::debug_recorder::TrieDebugRecorder;
 use crate::provider::TrieNodeProvider;
 
 /// Describes an update to a leaf in the sparse trie.
@@ -59,7 +61,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// May panic if the trie is not new/cleared, and has already revealed nodes.
     fn set_root(
         &mut self,
-        root: TrieNode,
+        root: TrieNodeV2,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
     ) -> SparseTrieResult<()>;
@@ -69,7 +71,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// See [`Self::set_root`] for more details.
     fn with_root(
         mut self,
-        root: TrieNode,
+        root: TrieNodeV2,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
     ) -> SparseTrieResult<Self> {
@@ -111,10 +113,10 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     fn reveal_node(
         &mut self,
         path: Nibbles,
-        node: TrieNode,
+        node: TrieNodeV2,
         masks: Option<BranchNodeMasks>,
     ) -> SparseTrieResult<()> {
-        self.reveal_nodes(&mut [ProofTrieNode { path, node, masks }])
+        self.reveal_nodes(&mut [ProofTrieNodeV2 { path, node, masks }])
     }
 
     /// Reveals one or more trie nodes if they have not been revealed before.
@@ -135,8 +137,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// # Note
     ///
     /// The implementation may modify the input nodes. A common thing to do is [`std::mem::replace`]
-    /// each node with [`TrieNode::EmptyRoot`] to avoid cloning.
-    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()>;
+    /// each node with [`TrieNodeV2::EmptyRoot`] to avoid cloning.
+    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()>;
 
     /// Updates the value of a leaf node at the specified path.
     ///
@@ -305,6 +307,15 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// The number of nodes converted to hash stubs.
     fn prune(&mut self, max_depth: usize) -> usize;
+
+    /// Takes the debug recorder out of this trie, replacing it with an empty one.
+    ///
+    /// Returns the recorder containing all recorded mutations since the last reset.
+    /// The default implementation returns an empty recorder.
+    #[cfg(feature = "trie-debug")]
+    fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
+        TrieDebugRecorder::default()
+    }
 
     /// Applies leaf updates to the sparse trie.
     ///

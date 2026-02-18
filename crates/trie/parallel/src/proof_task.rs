@@ -59,7 +59,7 @@ use reth_trie::{
     trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieCursorMetricsCache},
     walker::TrieWalker,
     DecodedMultiProof, DecodedMultiProofV2, DecodedStorageMultiProof, HashBuilder, HashedPostState,
-    MultiProofTargets, Nibbles, ProofTrieNode, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    MultiProofTargets, Nibbles, ProofTrieNodeV2, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
@@ -737,7 +737,7 @@ pub(crate) enum StorageProofResult {
     },
     V2 {
         /// The calculated V2 proof nodes
-        proof: Vec<ProofTrieNode>,
+        proof: Vec<ProofTrieNodeV2>,
         /// The storage root calculated by the V2 proof
         root: Option<B256>,
     },
@@ -749,23 +749,6 @@ impl StorageProofResult {
         match self {
             Self::Legacy { proof } => Some(proof.root),
             Self::V2 { root, .. } => *root,
-        }
-    }
-}
-
-impl From<StorageProofResult> for Option<DecodedStorageMultiProof> {
-    /// Returns None if the V2 proof result doesn't have a calculated root hash.
-    fn from(proof_result: StorageProofResult) -> Self {
-        match proof_result {
-            StorageProofResult::Legacy { proof } => Some(proof),
-            StorageProofResult::V2 { proof, root } => root.map(|root| {
-                let branch_node_masks = proof
-                    .iter()
-                    .filter_map(|node| node.masks.map(|masks| (node.path, masks)))
-                    .collect();
-                let subtree = proof.into_iter().map(|node| (node.path, node.node)).collect();
-                DecodedStorageMultiProof { root, subtree, branch_node_masks }
-            }),
         }
     }
 }
@@ -1649,17 +1632,10 @@ where
                             proof_msg.hashed_address, hashed_address,
                             "storage worker must return same address"
                         );
-                        let proof_result = proof_msg.result?;
-                        let Some(root) = proof_result.root() else {
-                            trace!(
-                                target: "trie::proof_task",
-                                ?proof_result,
-                                "Received proof_result without root",
-                            );
-                            panic!("Partial proofs are not yet supported");
+                        let StorageProofResult::Legacy { proof } = proof_msg.result? else {
+                            unreachable!("v2 result in legacy worker")
                         };
-                        let proof = Into::<Option<DecodedStorageMultiProof>>::into(proof_result)
-                            .expect("Partial proofs are not yet supported (into)");
+                        let root = proof.root;
                         collected_decoded_storages.insert(hashed_address, proof);
                         root
                     }
@@ -1735,9 +1711,9 @@ where
         let wait_start = Instant::now();
         if let Ok(proof_msg) = receiver.recv() {
             *storage_wait_time += wait_start.elapsed();
-            let proof_result = proof_msg.result?;
-            let proof = Into::<Option<DecodedStorageMultiProof>>::into(proof_result)
-                .expect("Partial proofs are not yet supported");
+            let StorageProofResult::Legacy { proof } = proof_msg.result? else {
+                unreachable!("v2 result in legacy worker")
+            };
             collected_decoded_storages.insert(hashed_address, proof);
         }
     }
