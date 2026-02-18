@@ -443,8 +443,18 @@ where
                             tx
                         })
                     })
-                    .for_each_ordered(|tx| {
-                        let _ = execute_tx.send(tx);
+                    .for_each_ordered({
+                        let mut idx = 0usize;
+                        move |tx| {
+                            debug!(
+                                target: "engine::tree::payload_processor",
+                                idx,
+                                ok = tx.is_ok(),
+                                "yielding tx to execution"
+                            );
+                            let _ = execute_tx.send(tx);
+                            idx += 1;
+                        }
                     });
             });
         }
