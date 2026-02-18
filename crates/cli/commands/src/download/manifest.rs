@@ -205,7 +205,7 @@ impl SnapshotManifest {
                 (0..num_chunks)
                     .map(|i| {
                         let start = i * chunked.blocks_per_file;
-                        let end = ((i + 1) * chunked.blocks_per_file).min(chunked.total_blocks) - 1;
+                        let end = (i + 1) * chunked.blocks_per_file - 1;
                         format!("{}/{key}-{start}-{end}.tar.zst", self.base_url)
                     })
                     .collect()
@@ -246,7 +246,7 @@ impl SnapshotManifest {
                 (start_chunk..num_chunks)
                     .map(|i| {
                         let start = i * chunked.blocks_per_file;
-                        let end = ((i + 1) * chunked.blocks_per_file).min(chunked.total_blocks) - 1;
+                        let end = (i + 1) * chunked.blocks_per_file - 1;
                         format!("{}/{key}-{start}-{end}.tar.zst", self.base_url)
                     })
                     .collect()
@@ -374,7 +374,7 @@ pub fn generate_manifest(
         SnapshotComponentType::StorageChangesets,
     ] {
         let key = ty.key();
-        let first_end = blocks_per_file.min(block) - 1;
+        let first_end = blocks_per_file - 1;
         let first_chunk = archive_dir.join(format!("{key}-0-{first_end}.tar.zst"));
         if first_chunk.exists() {
             let num_chunks = block.div_ceil(blocks_per_file);
@@ -383,7 +383,7 @@ pub fn generate_manifest(
             let mut chunk_sizes = Vec::with_capacity(num_chunks as usize);
             for i in 0..num_chunks {
                 let start = i * blocks_per_file;
-                let end = ((i + 1) * blocks_per_file).min(block) - 1;
+                let end = (i + 1) * blocks_per_file - 1;
                 let chunk_path = archive_dir.join(format!("{key}-{start}-{end}.tar.zst"));
                 let size = std::fs::metadata(&chunk_path).map(|m| m.len()).unwrap_or(0);
                 chunk_sizes.push(size);
@@ -531,6 +531,38 @@ mod tests {
         assert_eq!(ComponentSelection::All.to_string(), "All");
         assert_eq!(ComponentSelection::Distance(10_064).to_string(), "Last 10064 blocks");
         assert_eq!(ComponentSelection::None.to_string(), "None");
+    }
+
+    #[test]
+    fn archive_urls_aligned_to_blocks_per_file() {
+        // When total_blocks is not aligned to blocks_per_file, chunk boundaries
+        // must still align to blocks_per_file (not total_blocks).
+        let mut components = BTreeMap::new();
+        components.insert(
+            "storage_changesets".to_string(),
+            ComponentManifest::Chunked(ChunkedArchive {
+                blocks_per_file: 500_000,
+                total_blocks: 24_396_822,
+                chunk_sizes: vec![100; 49], // 49 chunks
+            }),
+        );
+        let m = SnapshotManifest {
+            block: 24_396_822,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: "https://example.com".to_string(),
+            components,
+        };
+        let urls = m.archive_urls(SnapshotComponentType::StorageChangesets);
+        assert_eq!(urls.len(), 49);
+        // First chunk: 0-499999 (not 0-396821 or similar)
+        assert_eq!(urls[0], "https://example.com/storage_changesets-0-499999.tar.zst");
+        // Last chunk: 24000000-24499999 (not 24000000-24396821)
+        assert_eq!(
+            urls[48],
+            "https://example.com/storage_changesets-24000000-24499999.tar.zst"
+        );
     }
 
     #[test]

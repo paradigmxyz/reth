@@ -21,7 +21,10 @@ use std::{
     fs::OpenOptions,
     io::{self, BufWriter, Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, OnceLock},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, OnceLock,
+    },
     time::{Duration, Instant},
 };
 use tar::Archive;
@@ -211,7 +214,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 "Starting snapshot download and extraction"
             );
 
-            stream_and_extract(&url, data_dir.data_dir()).await?;
+            stream_and_extract(&url, data_dir.data_dir(), None).await?;
             info!(target: "reth::cli", "Snapshot downloaded and extracted successfully");
 
             return Ok(());
@@ -281,20 +284,27 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         );
 
         // Download and extract all archives in parallel (up to 4 concurrent)
+        let shared = SharedProgress::new(total_size);
+        let progress_handle = spawn_progress_display(Arc::clone(&shared));
+
         let target = target_dir.to_path_buf();
         let results: Vec<Result<()>> = stream::iter(all_downloads)
             .map(|(url, component)| {
                 let dir = target.clone();
+                let sp = Arc::clone(&shared);
                 async move {
                     info!(target: "reth::cli", component, url = %url, "Starting archive download");
-                    stream_and_extract(&url, &dir).await?;
-                    info!(target: "reth::cli", component, url = %url, "Archive extracted");
+                    stream_and_extract(&url, &dir, Some(sp)).await?;
+                    info!(target: "reth::cli", component, "Archive complete");
                     Ok(())
                 }
             })
             .buffer_unordered(4)
             .collect()
             .await;
+
+        shared.done.store(true, Ordering::Relaxed);
+        let _ = progress_handle.await;
 
         // Check for errors
         for result in results {
@@ -303,12 +313,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         // Generate reth.toml and set prune checkpoints
         let config = config_for_selections(&selections);
-        if !self.no_config {
-            if write_config(&config, target_dir)? {
-                let desc = config_gen::describe_prune_config_from_selections(&selections);
-                for line in &desc {
-                    info!(target: "reth::cli", "{}", line);
-                }
+        if !self.no_config && write_config(&config, target_dir)? {
+            let desc = config_gen::describe_prune_config_from_selections(&selections);
+            for line in &desc {
+                info!(target: "reth::cli", "{}", line);
             }
         }
 
@@ -453,17 +461,15 @@ impl DownloadProgress {
         }
     }
 
-    /// Updates progress bar
+    /// Updates progress bar (for single-archive legacy downloads)
     fn update(&mut self, chunk_size: u64) -> Result<()> {
         self.downloaded += chunk_size;
 
-        // Only update display at most 10 times per second for efficiency
         if self.last_displayed.elapsed() >= Duration::from_millis(100) {
             let formatted_downloaded = Self::format_size(self.downloaded);
             let formatted_total = Self::format_size(self.total_size);
             let progress = (self.downloaded as f64 / self.total_size as f64) * 100.0;
 
-            // Calculate ETA based on current speed
             let elapsed = self.started_at.elapsed();
             let eta = if self.downloaded > 0 {
                 let remaining = self.total_size.saturating_sub(self.downloaded);
@@ -478,7 +484,6 @@ impl DownloadProgress {
             };
             let eta_str = Self::format_duration(eta);
 
-            // Pad with spaces to clear any previous longer line
             print!(
                 "\rDownloading and extracting... {progress:.2}% ({formatted_downloaded} / {formatted_total}) ETA: {eta_str}     ",
             );
@@ -490,7 +495,95 @@ impl DownloadProgress {
     }
 }
 
-/// Adapter to track progress while reading
+/// Shared progress counter for parallel downloads.
+///
+/// Each download thread atomically increments `downloaded`. A single display
+/// task on the main thread reads the counter periodically and prints one
+/// aggregated progress line.
+struct SharedProgress {
+    downloaded: AtomicU64,
+    total_size: u64,
+    done: AtomicBool,
+}
+
+impl SharedProgress {
+    fn new(total_size: u64) -> Arc<Self> {
+        Arc::new(Self {
+            downloaded: AtomicU64::new(0),
+            total_size,
+            done: AtomicBool::new(false),
+        })
+    }
+
+    fn add(&self, bytes: u64) {
+        self.downloaded.fetch_add(bytes, Ordering::Relaxed);
+    }
+}
+
+/// Spawns a background task that prints aggregated download progress.
+/// Returns a handle; drop it (or call `.abort()`) to stop.
+fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let started_at = Instant::now();
+        let mut interval = tokio::time::interval(Duration::from_secs(3));
+        interval.tick().await; // first tick is immediate, skip it
+
+        loop {
+            interval.tick().await;
+
+            if progress.done.load(Ordering::Relaxed) {
+                break;
+            }
+
+            let downloaded = progress.downloaded.load(Ordering::Relaxed);
+            let total = progress.total_size;
+            if total == 0 {
+                continue;
+            }
+
+            let pct = (downloaded as f64 / total as f64) * 100.0;
+            let dl = DownloadProgress::format_size(downloaded);
+            let tot = DownloadProgress::format_size(total);
+
+            let elapsed = started_at.elapsed();
+            let eta = if downloaded > 0 {
+                let remaining = total.saturating_sub(downloaded);
+                let speed = downloaded as f64 / elapsed.as_secs_f64();
+                if speed > 0.0 {
+                    DownloadProgress::format_duration(Duration::from_secs_f64(
+                        remaining as f64 / speed,
+                    ))
+                } else {
+                    "??".to_string()
+                }
+            } else {
+                "??".to_string()
+            };
+
+            info!(target: "reth::cli",
+                progress = format_args!("{pct:.1}%"),
+                downloaded = %dl,
+                total = %tot,
+                eta = %eta,
+                "Downloading"
+            );
+        }
+
+        // Final line
+        let downloaded = progress.downloaded.load(Ordering::Relaxed);
+        let dl = DownloadProgress::format_size(downloaded);
+        let tot = DownloadProgress::format_size(progress.total_size);
+        let elapsed = DownloadProgress::format_duration(started_at.elapsed());
+        info!(target: "reth::cli",
+            downloaded = %dl,
+            total = %tot,
+            elapsed = %elapsed,
+            "Download complete"
+        );
+    })
+}
+
+/// Adapter to track progress while reading (used for extraction in legacy path)
 struct ProgressReader<R> {
     reader: R,
     progress: DownloadProgress,
@@ -605,10 +698,36 @@ impl<W: Write> Write for ProgressWriter<W> {
     }
 }
 
+/// Wrapper that bumps a shared atomic counter while writing data.
+/// Used for parallel downloads where a single display task shows aggregated progress.
+struct SharedProgressWriter<W> {
+    inner: W,
+    progress: Arc<SharedProgress>,
+}
+
+impl<W: Write> Write for SharedProgressWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.progress.add(n as u64);
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 /// Downloads a file with resume support using HTTP Range requests.
 /// Automatically retries on failure, resuming from where it left off.
 /// Returns the path to the downloaded file and its total size.
-fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
+///
+/// When `shared` is provided, progress is reported to the shared counter
+/// (for parallel downloads). Otherwise uses a local progress bar.
+fn resumable_download(
+    url: &str,
+    target_dir: &Path,
+    shared: Option<&Arc<SharedProgress>>,
+) -> Result<(PathBuf, u64)> {
     let file_name = Url::parse(url)
         .ok()
         .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
@@ -625,7 +744,7 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
 
     let finalize_download = |size: u64| -> Result<(PathBuf, u64)> {
         fs::rename(&part_path, &final_path)?;
-        info!(target: "reth::cli", "Download complete: {}", final_path.display());
+        info!(target: "reth::cli", file = %file_name, "Download complete");
         Ok((final_path.clone(), size))
     };
 
@@ -640,6 +759,7 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
 
         if attempt > 1 {
             info!(target: "reth::cli",
+                file = %file_name,
                 "Retry attempt {}/{} - resuming from {} bytes",
                 attempt, MAX_DOWNLOAD_RETRIES, existing_size
             );
@@ -649,7 +769,7 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
         if existing_size > 0 {
             request = request.header(RANGE, format!("bytes={existing_size}-"));
             if attempt == 1 {
-                info!(target: "reth::cli", "Resuming download from {} bytes", existing_size);
+                info!(target: "reth::cli", file = %file_name, "Resuming from {} bytes", existing_size);
             }
         }
 
@@ -659,7 +779,8 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
                 last_error = Some(e.into());
                 if attempt < MAX_DOWNLOAD_RETRIES {
                     info!(target: "reth::cli",
-                        "Download failed, retrying in {} seconds...", RETRY_BACKOFF_SECS
+                        file = %file_name,
+                        "Download failed, retrying in {RETRY_BACKOFF_SECS}s..."
                     );
                     std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
                 }
@@ -705,21 +826,36 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
         };
 
         let start_offset = if is_partial { existing_size } else { 0 };
-        let mut progress = DownloadProgress::new(current_total);
-        progress.downloaded = start_offset;
-
-        let mut writer = ProgressWriter { inner: BufWriter::new(file), progress };
         let mut reader = response;
 
-        let copy_result = io::copy(&mut reader, &mut writer);
-        let flush_result = writer.inner.flush();
-        println!();
+        let copy_result;
+        let flush_result;
+
+        if let Some(sp) = shared {
+            // Parallel path: bump shared atomic counter
+            if start_offset > 0 {
+                sp.add(start_offset);
+            }
+            let mut writer =
+                SharedProgressWriter { inner: BufWriter::new(file), progress: Arc::clone(sp) };
+            copy_result = io::copy(&mut reader, &mut writer);
+            flush_result = writer.inner.flush();
+        } else {
+            // Legacy single-download path: local progress bar
+            let mut progress = DownloadProgress::new(current_total);
+            progress.downloaded = start_offset;
+            let mut writer = ProgressWriter { inner: BufWriter::new(file), progress };
+            copy_result = io::copy(&mut reader, &mut writer);
+            flush_result = writer.inner.flush();
+            println!();
+        }
 
         if let Err(e) = copy_result.and(flush_result) {
             last_error = Some(e.into());
             if attempt < MAX_DOWNLOAD_RETRIES {
                 info!(target: "reth::cli",
-                    "Download interrupted, retrying in {} seconds...", RETRY_BACKOFF_SECS
+                    file = %file_name,
+                    "Download interrupted, retrying in {RETRY_BACKOFF_SECS}s..."
                 );
                 std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
             }
@@ -734,8 +870,13 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
 }
 
 /// Fetches the snapshot from a remote URL with resume support, then extracts it.
-fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path) -> Result<()> {
-    let (downloaded_path, total_size) = resumable_download(url, target_dir)?;
+fn download_and_extract(
+    url: &str,
+    format: CompressionFormat,
+    target_dir: &Path,
+    shared: Option<&Arc<SharedProgress>>,
+) -> Result<()> {
+    let (downloaded_path, total_size) = resumable_download(url, target_dir, shared)?;
 
     let file_name =
         downloaded_path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
@@ -763,7 +904,11 @@ fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path)
 /// Downloads and extracts a snapshot, blocking until finished.
 ///
 /// Supports both `file://` URLs for local files and HTTP(S) URLs for remote downloads.
-fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
+fn blocking_download_and_extract(
+    url: &str,
+    target_dir: &Path,
+    shared: Option<Arc<SharedProgress>>,
+) -> Result<()> {
     let format = CompressionFormat::from_url(url)?;
 
     if let Ok(parsed_url) = Url::parse(url) &&
@@ -774,14 +919,23 @@ fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
             .map_err(|_| eyre::eyre!("Invalid file:// URL path: {}", url))?;
         extract_from_file(&file_path, format, target_dir)
     } else {
-        download_and_extract(url, format, target_dir)
+        download_and_extract(url, format, target_dir, shared.as_ref())
     }
 }
 
-async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
+/// Downloads and extracts a snapshot archive asynchronously.
+///
+/// When `shared` is provided, download progress is reported to the shared
+/// counter for aggregated display. Otherwise uses a local progress bar.
+async fn stream_and_extract(
+    url: &str,
+    target_dir: &Path,
+    shared: Option<Arc<SharedProgress>>,
+) -> Result<()> {
     let target_dir = target_dir.to_path_buf();
     let url = url.to_string();
-    task::spawn_blocking(move || blocking_download_and_extract(&url, &target_dir)).await??;
+    task::spawn_blocking(move || blocking_download_and_extract(&url, &target_dir, shared))
+        .await??;
 
     Ok(())
 }
