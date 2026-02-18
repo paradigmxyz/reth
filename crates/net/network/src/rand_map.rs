@@ -478,7 +478,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
+    use std::{collections::BTreeSet, iter::once};
 
     #[test]
     fn map_basic_operations() {
@@ -567,7 +567,7 @@ mod tests {
 
     #[test]
     fn single_element() {
-        let map: RandMap<i32, i32> = [(42, 100)].into_iter().collect();
+        let map: RandMap<i32, i32> = once((42, 100)).collect();
         let items: Vec<_> = map.iter().collect();
         assert_eq!(items, [(&42, &100)]);
     }
@@ -621,7 +621,7 @@ mod tests {
 
     #[test]
     fn index_map_roundtrip() {
-        let map: RandMap<i32, i32> = [(1, 10)].into_iter().collect();
+        let map: RandMap<i32, i32> = once((1, 10)).collect();
         let idx: IndexMap<i32, i32, _> = map.into();
         let map2: RandMap<i32, i32, _> = idx.into();
         assert_eq!(map2.get(&1), Some(&10));
