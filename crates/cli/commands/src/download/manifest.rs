@@ -157,13 +157,18 @@ impl SnapshotComponentType {
 
     /// Whether this component is part of the minimal download set.
     ///
-    /// The minimal set is state + headers + account/storage changesets. Transactions, receipts,
-    /// and indexes are excluded — the generated prune config fully prunes tx_lookup,
-    /// sender_recovery, and receipts.
+    /// The minimal set is state + headers + transactions + account/storage changesets.
+    /// Transactions controls `bodies_history` pruning (the actual tx data in static files).
+    /// `tx_lookup` and `sender_recovery` are always pruned full regardless (just indexes).
+    /// Receipts and indexes are excluded.
     pub const fn is_minimal(&self) -> bool {
         matches!(
             self,
-            Self::State | Self::Headers | Self::AccountChangesets | Self::StorageChangesets
+            Self::State |
+                Self::Headers |
+                Self::Transactions |
+                Self::AccountChangesets |
+                Self::StorageChangesets
         )
     }
 
