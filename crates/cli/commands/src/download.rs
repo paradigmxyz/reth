@@ -2,15 +2,14 @@ use crate::common::EnvironmentArgs;
 use clap::Parser;
 use eyre::Result;
 use lz4::Decoder;
-use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
+use reqwest::{blocking::Client as BlockingClient, Client};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_fs_util as fs;
 use std::{
     borrow::Cow,
-    fs::OpenOptions,
-    io::{self, BufWriter, Read, Write},
-    path::{Path, PathBuf},
+    io::{self, Read, Write},
+    path::Path,
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
@@ -345,160 +344,26 @@ fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) 
     extract_archive(file, total_size, format, target_dir)
 }
 
-const MAX_DOWNLOAD_RETRIES: u32 = 10;
-const RETRY_BACKOFF_SECS: u64 = 5;
-
-/// Wrapper that tracks download progress while writing data.
-/// Used with [`io::copy`] to display progress during downloads.
-struct ProgressWriter<W> {
-    inner: W,
-    progress: DownloadProgress,
-}
-
-impl<W: Write> Write for ProgressWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let n = self.inner.write(buf)?;
-        let _ = self.progress.update(n as u64);
-        Ok(n)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.inner.flush()
-    }
-}
-
-/// Downloads a file with resume support using HTTP Range requests.
-/// Automatically retries on failure, resuming from where it left off.
-/// Returns the path to the downloaded file and its total size.
-fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
+/// Streams a snapshot from a remote URL directly through decompression into tar
+/// extraction, avoiding intermediate disk writes and halving peak disk usage.
+fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path) -> Result<()> {
     let file_name = Url::parse(url)
         .ok()
         .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
-        .unwrap_or_else(|| "snapshot.tar".to_string());
+        .unwrap_or_else(|| "snapshot".to_string());
 
-    let final_path = target_dir.join(&file_name);
-    let part_path = target_dir.join(format!("{file_name}.part"));
-
+    info!(target: "reth::cli", file = %file_name, "Connecting to download server");
     let client = BlockingClient::builder().timeout(Duration::from_secs(30)).build()?;
+    let response = client.get(url).send()?.error_for_status()?;
+    let total_size = response.content_length().unwrap_or(0);
 
-    let mut total_size: Option<u64> = None;
-    let mut last_error: Option<eyre::Error> = None;
+    info!(target: "reth::cli",
+        file = %file_name,
+        size = %DownloadProgress::format_size(total_size),
+        "Downloading and extracting"
+    );
 
-    let finalize_download = |size: u64| -> Result<(PathBuf, u64)> {
-        fs::rename(&part_path, &final_path)?;
-        info!(target: "reth::cli", "Download complete: {}", final_path.display());
-        Ok((final_path.clone(), size))
-    };
-
-    for attempt in 1..=MAX_DOWNLOAD_RETRIES {
-        let existing_size = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
-
-        if let Some(total) = total_size &&
-            existing_size >= total
-        {
-            return finalize_download(total);
-        }
-
-        if attempt > 1 {
-            info!(target: "reth::cli",
-                "Retry attempt {}/{} - resuming from {} bytes",
-                attempt, MAX_DOWNLOAD_RETRIES, existing_size
-            );
-        }
-
-        let mut request = client.get(url);
-        if existing_size > 0 {
-            request = request.header(RANGE, format!("bytes={existing_size}-"));
-            if attempt == 1 {
-                info!(target: "reth::cli", "Resuming download from {} bytes", existing_size);
-            }
-        }
-
-        let response = match request.send().and_then(|r| r.error_for_status()) {
-            Ok(r) => r,
-            Err(e) => {
-                last_error = Some(e.into());
-                if attempt < MAX_DOWNLOAD_RETRIES {
-                    info!(target: "reth::cli",
-                        "Download failed, retrying in {} seconds...", RETRY_BACKOFF_SECS
-                    );
-                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
-                }
-                continue;
-            }
-        };
-
-        let is_partial = response.status() == StatusCode::PARTIAL_CONTENT;
-
-        let size = if is_partial {
-            response
-                .headers()
-                .get("Content-Range")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.split('/').next_back())
-                .and_then(|v| v.parse().ok())
-        } else {
-            response.content_length()
-        };
-
-        if total_size.is_none() {
-            total_size = size;
-        }
-
-        let current_total = total_size.ok_or_else(|| {
-            eyre::eyre!("Server did not provide Content-Length or Content-Range header")
-        })?;
-
-        let file = if is_partial && existing_size > 0 {
-            OpenOptions::new()
-                .append(true)
-                .open(&part_path)
-                .map_err(|e| fs::FsPathError::open(e, &part_path))?
-        } else {
-            fs::create_file(&part_path)?
-        };
-
-        let start_offset = if is_partial { existing_size } else { 0 };
-        let mut progress = DownloadProgress::new(current_total);
-        progress.downloaded = start_offset;
-
-        let mut writer = ProgressWriter { inner: BufWriter::new(file), progress };
-        let mut reader = response;
-
-        let copy_result = io::copy(&mut reader, &mut writer);
-        let flush_result = writer.inner.flush();
-        println!();
-
-        if let Err(e) = copy_result.and(flush_result) {
-            last_error = Some(e.into());
-            if attempt < MAX_DOWNLOAD_RETRIES {
-                info!(target: "reth::cli",
-                    "Download interrupted, retrying in {} seconds...", RETRY_BACKOFF_SECS
-                );
-                std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
-            }
-            continue;
-        }
-
-        return finalize_download(current_total);
-    }
-
-    Err(last_error
-        .unwrap_or_else(|| eyre::eyre!("Download failed after {} attempts", MAX_DOWNLOAD_RETRIES)))
-}
-
-/// Fetches the snapshot from a remote URL with resume support, then extracts it.
-fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path) -> Result<()> {
-    let (downloaded_path, total_size) = resumable_download(url, target_dir)?;
-
-    info!(target: "reth::cli", "Extracting snapshot...");
-    let file = fs::open(&downloaded_path)?;
-    extract_archive(file, total_size, format, target_dir)?;
-
-    fs::remove_file(&downloaded_path)?;
-    info!(target: "reth::cli", "Removed downloaded archive");
-
-    Ok(())
+    extract_archive(response, total_size, format, target_dir)
 }
 
 /// Downloads and extracts a snapshot, blocking until finished.
