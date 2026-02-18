@@ -127,6 +127,17 @@ export const rethCliSidebar: SidebarItem = {
                     ]
                 },
                 {
+                    text: "reth db static-files",
+                    link: "/cli/reth/db/static-files",
+                    collapsed: true,
+                    items: [
+                        {
+                            text: "reth db static-files split",
+                            link: "/cli/reth/db/static-files/split"
+                        }
+                    ]
+                },
+                {
                     text: "reth db version",
                     link: "/cli/reth/db/version"
                 },
