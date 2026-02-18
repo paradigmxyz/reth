@@ -127,7 +127,14 @@ impl Encode for StoredNibbles {
     type Encoded = arrayvec::ArrayVec<u8, 64>;
 
     fn encode(self) -> Self::Encoded {
-        self.0.iter().collect()
+        let mut buf = arrayvec::ArrayVec::new();
+        let len = self.0.len();
+        // SAFETY: len is at most 64, which is within ArrayVec capacity.
+        unsafe { buf.set_len(len) };
+        for (i, nibble) in self.0.iter().enumerate() {
+            buf[i] = nibble;
+        }
+        buf
     }
 }
 
@@ -142,7 +149,11 @@ impl Encode for StoredNibblesSubKey {
 
     fn encode(self) -> Self::Encoded {
         let mut buf = [0u8; 65];
-        self.to_compact(&mut buf.as_mut());
+        let len = self.0.len();
+        for (i, nibble) in self.0.iter().enumerate() {
+            buf[i] = nibble;
+        }
+        buf[64] = len as u8;
         buf
     }
 }
