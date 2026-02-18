@@ -158,11 +158,7 @@ impl Encode for PackedStoredNibbles {
     type Encoded = [u8; 33];
 
     fn encode(self) -> Self::Encoded {
-        let mut out = [0u8; 33];
-        let packed = self.0.pack();
-        out[..packed.len()].copy_from_slice(&packed);
-        out[32] = self.0.len() as u8;
-        out
+        self.to_compact_array()
     }
 }
 
@@ -173,12 +169,10 @@ impl Decode for PackedStoredNibbles {
 }
 
 impl Encode for PackedStoredNibblesSubKey {
-    type Encoded = Vec<u8>;
+    type Encoded = [u8; 33];
 
     fn encode(self) -> Self::Encoded {
-        let mut buf = Vec::with_capacity(33);
-        self.to_compact(&mut buf);
-        buf
+        self.to_compact_array()
     }
 }
 

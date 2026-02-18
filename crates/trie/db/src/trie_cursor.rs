@@ -2,7 +2,7 @@ use alloy_primitives::B256;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     table::{DupSort, Key, Table, Value},
-    tables,
+    tables::{self, PackedAccountsTrie, PackedStoragesTrie},
     transaction::DbTx,
     DatabaseError,
 };
@@ -122,32 +122,6 @@ impl TrieKeyAdapter for PackedKeyAdapter {
     fn subkey_to_nibbles(subkey: &Self::StorageSubKey) -> Nibbles {
         subkey.0
     }
-}
-
-/// Packed-encoding view of the `AccountsTrie` table.
-#[derive(Debug)]
-pub struct PackedAccountsTrie;
-
-impl Table for PackedAccountsTrie {
-    const NAME: &'static str = <tables::AccountsTrie as Table>::NAME;
-    const DUPSORT: bool = false;
-    type Key = PackedStoredNibbles;
-    type Value = BranchNodeCompact;
-}
-
-/// Packed-encoding view of the `StoragesTrie` table.
-#[derive(Debug)]
-pub struct PackedStoragesTrie;
-
-impl Table for PackedStoragesTrie {
-    const NAME: &'static str = <tables::StoragesTrie as Table>::NAME;
-    const DUPSORT: bool = true;
-    type Key = B256;
-    type Value = PackedStorageTrieEntry;
-}
-
-impl DupSort for PackedStoragesTrie {
-    type SubKey = PackedStoredNibblesSubKey;
 }
 
 /// Helper trait to map a [`TrieKeyAdapter`] to the correct table types.

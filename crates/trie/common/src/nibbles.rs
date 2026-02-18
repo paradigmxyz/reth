@@ -153,6 +153,20 @@ impl From<PackedStoredNibbles> for StoredNibbles {
     }
 }
 
+impl PackedStoredNibbles {
+    /// Encodes the nibbles into a fixed-size `[u8; 33]` array.
+    ///
+    /// The first 32 bytes contain the packed nibbles (2 per byte, right-padded with zeros),
+    /// and the 33rd byte stores the actual nibble count.
+    pub fn to_compact_array(&self) -> [u8; 33] {
+        assert!(self.0.len() <= 64);
+        let mut buf = [0u8; 33];
+        self.0.pack_to(&mut buf[..32]);
+        buf[32] = self.0.len() as u8;
+        buf
+    }
+}
+
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for PackedStoredNibbles {
     fn to_compact<B>(&self, buf: &mut B) -> usize
@@ -161,10 +175,9 @@ impl reth_codecs::Compact for PackedStoredNibbles {
     {
         assert!(self.0.len() <= 64);
 
-        let packed = self.0.pack();
+        let mut packed = [0u8; 32];
+        self.0.pack_to(&mut packed);
         buf.put_slice(&packed);
-        static ZERO: &[u8; 32] = &[0; 32];
-        buf.put_slice(&ZERO[packed.len()..]);
         buf.put_u8(self.0.len() as u8);
         33
     }
@@ -221,6 +234,20 @@ impl From<PackedStoredNibblesSubKey> for StoredNibblesSubKey {
     }
 }
 
+impl PackedStoredNibblesSubKey {
+    /// Encodes the nibbles into a fixed-size `[u8; 33]` array.
+    ///
+    /// The first 32 bytes contain the packed nibbles (2 per byte, right-padded with zeros),
+    /// and the 33rd byte stores the actual nibble count.
+    pub fn to_compact_array(&self) -> [u8; 33] {
+        assert!(self.0.len() <= 64);
+        let mut buf = [0u8; 33];
+        self.0.pack_to(&mut buf[..32]);
+        buf[32] = self.0.len() as u8;
+        buf
+    }
+}
+
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for PackedStoredNibblesSubKey {
     fn to_compact<B>(&self, buf: &mut B) -> usize
@@ -229,10 +256,9 @@ impl reth_codecs::Compact for PackedStoredNibblesSubKey {
     {
         assert!(self.0.len() <= 64);
 
-        let packed = self.0.pack();
+        let mut packed = [0u8; 32];
+        self.0.pack_to(&mut packed);
         buf.put_slice(&packed);
-        static ZERO: &[u8; 32] = &[0; 32];
-        buf.put_slice(&ZERO[packed.len()..]);
         buf.put_u8(self.0.len() as u8);
         33
     }
@@ -366,6 +392,91 @@ mod tests {
         let packed: PackedStoredNibblesSubKey = legacy.clone().into();
         let back: StoredNibblesSubKey = packed.into();
         assert_eq!(legacy, back);
+    }
+
+    #[test]
+    fn test_packed_stored_nibbles_compact_array_empty() {
+        let stored = PackedStoredNibbles::from(vec![]);
+        let arr = stored.to_compact_array();
+        assert_eq!(arr, [0u8; 33]);
+    }
+
+    #[test]
+    fn test_packed_stored_nibbles_compact_array_full() {
+        let nibbles: Vec<u8> = (0..64).map(|i| i % 16).collect();
+        let stored = PackedStoredNibbles::from(nibbles);
+        let arr = stored.to_compact_array();
+        assert_eq!(arr[32], 64);
+        let (recovered, rest) = PackedStoredNibbles::from_compact(&arr, 33);
+        assert_eq!(recovered, stored);
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn test_packed_stored_nibbles_compact_array_roundtrip() {
+        let stored = PackedStoredNibbles::from(vec![0x0A, 0x0B, 0x0C]);
+        let arr = stored.to_compact_array();
+        let (recovered, rest) = PackedStoredNibbles::from_compact(&arr, 33);
+        assert_eq!(recovered, stored);
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn test_packed_stored_nibbles_compact_array_matches_to_compact() {
+        for len in [0, 1, 2, 31, 32, 33, 63, 64] {
+            let nibbles: Vec<u8> = (0..len).map(|i| (i % 16) as u8).collect();
+            let stored = PackedStoredNibbles::from(nibbles);
+            let arr = stored.to_compact_array();
+            let mut compact_buf = BytesMut::with_capacity(33);
+            stored.to_compact(&mut compact_buf);
+            assert_eq!(&arr[..], &compact_buf[..], "mismatch at nibble length {len}");
+        }
+    }
+
+    #[test]
+    fn test_packed_stored_nibbles_subkey_compact_array_empty() {
+        let subkey = PackedStoredNibblesSubKey::from(vec![]);
+        let arr = subkey.to_compact_array();
+        assert_eq!(arr, [0u8; 33]);
+    }
+
+    #[test]
+    fn test_packed_stored_nibbles_subkey_compact_array_full() {
+        let nibbles: Vec<u8> = (0..64).map(|i| i % 16).collect();
+        let subkey = PackedStoredNibblesSubKey::from(nibbles);
+        let arr = subkey.to_compact_array();
+        assert_eq!(arr[32], 64);
+        let (recovered, rest) = PackedStoredNibblesSubKey::from_compact(&arr, 33);
+        assert_eq!(recovered, subkey);
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn test_packed_stored_nibbles_subkey_compact_array_roundtrip() {
+        let subkey = PackedStoredNibblesSubKey::from(vec![0x0A, 0x0B, 0x0C]);
+        let arr = subkey.to_compact_array();
+        let (recovered, rest) = PackedStoredNibblesSubKey::from_compact(&arr, 33);
+        assert_eq!(recovered, subkey);
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn test_packed_stored_nibbles_subkey_compact_array_matches_to_compact() {
+        for len in [0, 1, 2, 31, 32, 33, 63, 64] {
+            let nibbles: Vec<u8> = (0..len).map(|i| (i % 16) as u8).collect();
+            let subkey = PackedStoredNibblesSubKey::from(nibbles);
+            let arr = subkey.to_compact_array();
+            let mut compact_buf = BytesMut::with_capacity(33);
+            subkey.to_compact(&mut compact_buf);
+            assert_eq!(&arr[..], &compact_buf[..], "mismatch at nibble length {len}");
+        }
+    }
+
+    #[test]
+    fn test_packed_stored_nibbles_subkey_compact_array_padding_is_zero() {
+        let subkey = PackedStoredNibblesSubKey::from(vec![0x0F; 10]);
+        let arr = subkey.to_compact_array();
+        assert!(arr[5..32].iter().all(|&b| b == 0), "padding bytes must be zero");
     }
 
     #[test]
