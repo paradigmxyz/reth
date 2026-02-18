@@ -21,6 +21,7 @@ use reth_trie_common::{
     ProofTrieNodeV2, RlpNode, TrieNodeV2,
 };
 use smallvec::SmallVec;
+use std::collections::BTreeMap;
 use tracing::{instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
@@ -140,7 +141,7 @@ impl Default for ParallelSparseTrie {
     fn default() -> Self {
         Self {
             upper_subtrie: Box::new(SparseSubtrie {
-                nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
+                nodes: BTreeMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
                 ..Default::default()
             }),
             lower_subtries: Box::new(
@@ -241,7 +242,6 @@ impl SparseTrie for ParallelSparseTrie {
 
         // Reserve the capacity of the upper subtrie's `nodes` HashMap before iterating, so we don't
         // end up making many small capacity changes as we loop.
-        self.upper_subtrie.nodes.reserve(upper_nodes.len());
         for node in upper_nodes {
             self.reveal_upper_node(node.path, &node.node, node.masks)?;
         }
@@ -374,10 +374,6 @@ impl SparseTrie for ParallelSparseTrie {
                     // Enter the parent span to propagate context (e.g., hashed_address for storage
                     // tries) to the worker thread
                     let _guard = parent_span.enter();
-
-                    // reserve space in the HashMap ahead of time; doing it on a node-by-node basis
-                    // can cause multiple re-allocations as the hashmap grows.
-                    subtrie.nodes.reserve(nodes.len());
 
                     for node in nodes {
                         // For boundary leaves, check reachability from upper subtrie's parent
@@ -1077,37 +1073,140 @@ impl SparseTrie for ParallelSparseTrie {
                 })
         }
 
-        // If the value does not exist in the `values` map, then this means that the leaf either:
-        // - Does not exist in the trie
-        // - Is missing from the witness
-        // We traverse the trie to find the location where this leaf would have been, showing
-        // that it is not in the trie. Or we find a blinded node, showing that the witness is
-        // not complete.
-        let mut curr_path = Nibbles::new(); // start traversal from root
-        let mut curr_subtrie = self.upper_subtrie.as_ref();
-        let mut curr_subtrie_is_upper = true;
+        let (path, node) = self
+            .upper_subtrie
+            .nodes
+            .range(..=*full_path)
+            .next_back()
+            .expect("at least root node must exist");
 
-        loop {
-            let curr_node = curr_subtrie.nodes.get(&curr_path).unwrap();
-
-            match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
-                FindNextToLeafOutcome::NotFound => return Ok(LeafLookup::NonExistent),
-                FindNextToLeafOutcome::BlindedNode { path, hash } => {
-                    return Err(LeafLookupError::BlindedNode { path, hash });
+        if full_path.starts_with(path) {
+            match node {
+                SparseNode::Leaf { .. } | SparseNode::Empty => {
+                    // can't be our node
+                    return Ok(LeafLookup::NonExistent)
                 }
-                FindNextToLeafOutcome::Found => {
-                    panic!("target leaf {full_path:?} found at path {curr_path:?}, even though value wasn't in values hashmap");
-                }
-                FindNextToLeafOutcome::ContinueFrom(next_path) => {
-                    curr_path = next_path;
-                    // If we were previously looking at the upper trie, and the new path is in the
-                    // lower trie, we need to pull out a ref to the lower trie.
-                    if curr_subtrie_is_upper &&
-                        let Some(lower_subtrie) = self.lower_subtrie_for_path(&curr_path)
-                    {
-                        curr_subtrie = lower_subtrie;
-                        curr_subtrie_is_upper = false;
+                SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
+                    let next_nibble = full_path.get_unchecked(path.len());
+                    if !state_mask.is_bit_set(next_nibble) {
+                        return Ok(LeafLookup::NonExistent)
                     }
+                    if blinded_mask.is_bit_set(next_nibble) {
+                        let mut blinded_path = *path;
+                        blinded_path.push_unchecked(next_nibble);
+                        return Err(LeafLookupError::BlindedNode {
+                            path: blinded_path,
+                            hash: blinded_hashes[next_nibble as usize],
+                        })
+                    }
+                    // we should only end up here if the rest of the node we're interested it in in
+                    // the lower subtrie
+                    debug_assert_eq!(path.len(), UPPER_TRIE_MAX_DEPTH - 1);
+                }
+                SparseNode::Extension { key, .. } => {
+                    let mut child = *path;
+                    child.extend(key);
+
+                    if !full_path.starts_with(&child) {
+                        return Ok(LeafLookup::NonExistent)
+                    }
+
+                    // we should only end up here if the rest of the node we're interested it in in
+                    // the lower subtrie
+                    debug_assert!(child.len() >= UPPER_TRIE_MAX_DEPTH);
+                }
+            }
+        } else {
+            let common = path.slice(..path.common_prefix_length(full_path));
+            match self.upper_subtrie.nodes.get(&common) {
+                Some(SparseNode::Leaf { .. }) | Some(SparseNode::Empty) => {
+                    unreachable!("we know there is a node deeper than this one")
+                }
+                // both those cases mean that the node we've found is a descendant of an extension
+                // node that does lead to ours, meaing our leaf does not exist
+                Some(SparseNode::Extension { .. }) | None => {
+                    // this means that the node we've found is a child of an extension node but with
+                    // key that is not matching ours, this means our node does not exist
+                    return Ok(LeafLookup::NonExistent)
+                }
+                Some(SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. }) => {
+                    let next_nibble = full_path.get_unchecked(common.len());
+                    if !state_mask.is_bit_set(next_nibble) {
+                        return Ok(LeafLookup::NonExistent)
+                    }
+                    if blinded_mask.is_bit_set(next_nibble) {
+                        let mut blinded_path = common;
+                        blinded_path.push_unchecked(next_nibble);
+                        return Err(LeafLookupError::BlindedNode {
+                            path: blinded_path,
+                            hash: blinded_hashes[next_nibble as usize],
+                        })
+                    }
+                    // we should only end up here if the rest of the node we're interested in is in
+                    // the lower subtrie
+                    debug_assert_eq!(common.len(), UPPER_TRIE_MAX_DEPTH - 1);
+                }
+            }
+        }
+
+        let subtrie = self.lower_subtrie_for_path(full_path).expect("trie must have revealed root");
+
+        let (path, node) =
+            subtrie.nodes.range(..=*full_path).next_back().expect("at least root node must exist");
+
+        if full_path.starts_with(path) {
+            match node {
+                SparseNode::Leaf { .. } | SparseNode::Empty => {
+                    // can't be our node
+                    return Ok(LeafLookup::NonExistent)
+                }
+                SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
+                    let next_nibble = full_path.get_unchecked(path.len());
+                    if !state_mask.is_bit_set(next_nibble) {
+                        return Ok(LeafLookup::NonExistent)
+                    }
+                    if blinded_mask.is_bit_set(next_nibble) {
+                        let mut blinded_path = *path;
+                        blinded_path.push_unchecked(next_nibble);
+                        return Err(LeafLookupError::BlindedNode {
+                            path: blinded_path,
+                            hash: blinded_hashes[next_nibble as usize],
+                        })
+                    }
+                    unreachable!("if there is a node towards our, it must've been returned earlier")
+                }
+                SparseNode::Extension { key, .. } => {
+                    let mut child = *path;
+                    child.extend(key);
+
+                    if !full_path.starts_with(&child) {
+                        return Ok(LeafLookup::NonExistent)
+                    }
+
+                    unreachable!("if there is a node towards our, it must've been returned earlier")
+                }
+            }
+        } else {
+            let common = path.slice(..path.common_prefix_length(full_path));
+            match subtrie.nodes.get(&common) {
+                Some(SparseNode::Leaf { .. }) | Some(SparseNode::Empty) => {
+                    unreachable!("we know there is a node deeper than this one")
+                }
+                Some(SparseNode::Extension { .. }) | None => return Ok(LeafLookup::NonExistent),
+                Some(SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. }) => {
+                    let next_nibble = full_path.get_unchecked(common.len());
+                    if !state_mask.is_bit_set(next_nibble) {
+                        return Ok(LeafLookup::NonExistent)
+                    }
+                    if blinded_mask.is_bit_set(next_nibble) {
+                        let mut blinded_path = common;
+                        blinded_path.push_unchecked(next_nibble);
+                        return Err(LeafLookupError::BlindedNode {
+                            path: blinded_path,
+                            hash: blinded_hashes[next_nibble as usize],
+                        })
+                    }
+                    unreachable!("if there is a node towards our, it must've been returned earlier")
                 }
             }
         }
@@ -1228,7 +1327,7 @@ impl SparseTrie for ParallelSparseTrie {
                             let mut child = path;
                             child.push_unchecked(nibble);
 
-                            let Entry::Occupied(entry) = self
+                            let std::collections::btree_map::Entry::Occupied(entry) = self
                                 .subtrie_for_path_mut_untracked(&child)
                                 .unwrap()
                                 .nodes
@@ -1612,7 +1711,6 @@ impl ParallelSparseTrie {
 
     /// Returns the next node in the traversal path from the given path towards the leaf for the
     /// given full leaf path, or an error if any node along the traversal path is not revealed.
-    ///
     ///
     /// ## Panics
     ///
@@ -2244,7 +2342,7 @@ impl ParallelSparseTrie {
     /// This is used for leaves that sit at the upper/lower subtrie boundary, where the leaf is
     /// in a lower subtrie but its parent branch is in the upper subtrie.
     fn is_boundary_leaf_reachable(
-        upper_nodes: &HashMap<Nibbles, SparseNode>,
+        upper_nodes: &BTreeMap<Nibbles, SparseNode>,
         path: &Nibbles,
         node: &TrieNodeV2,
     ) -> bool {
@@ -2397,7 +2495,7 @@ pub struct SparseSubtrie {
     /// There should be a node for this path in `nodes` map.
     pub(crate) path: Nibbles,
     /// The map from paths to sparse trie nodes within this subtrie.
-    nodes: HashMap<Nibbles, SparseNode>,
+    nodes: BTreeMap<Nibbles, SparseNode>,
     /// Subset of fields for mutable access while `nodes` field is also being mutably borrowed.
     inner: SparseSubtrieInner,
 }
@@ -2592,7 +2690,6 @@ impl SparseSubtrie {
                 *node = SparseNode::new_ext(new_ext_key);
 
                 // create a branch node and corresponding leaves
-                self.nodes.reserve(3);
                 let branch_path = current.slice(..common);
                 let new_leaf_path = path.slice(..=common);
                 let existing_leaf_path = current.slice(..=common);
@@ -2624,7 +2721,6 @@ impl SparseSubtrie {
 
                     // create state mask for new branch node
                     // NOTE: this might overwrite the current extension node
-                    self.nodes.reserve(3);
                     let branch_path = current.slice(..common);
                     let new_leaf_path = path.slice(..=common);
                     let branch = SparseNode::new_split_branch(
@@ -2687,11 +2783,11 @@ impl SparseSubtrie {
         rlp_node: Option<RlpNode>,
     ) -> SparseTrieResult<()> {
         match self.nodes.entry(path) {
-            Entry::Occupied(_) => {
+            std::collections::btree_map::Entry::Occupied(_) => {
                 // Branch already revealed, do nothing
                 return Ok(());
             }
-            Entry::Vacant(entry) => {
+            std::collections::btree_map::Entry::Vacant(entry) => {
                 let state =
                     match rlp_node.as_ref() {
                         Some(rlp_node) => SparseNodeState::Cached {
@@ -2959,7 +3055,7 @@ impl SparseSubtrie {
     /// Removes all nodes and values from the subtrie, resetting it to a blank state
     /// with only an empty root node. This is used when a storage root is deleted.
     fn wipe(&mut self) {
-        self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
+        self.nodes = BTreeMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
         self.inner.clear();
     }
 
@@ -2970,9 +3066,7 @@ impl SparseSubtrie {
     }
 
     /// Shrinks the capacity of the subtrie's node storage.
-    pub(crate) fn shrink_nodes_to(&mut self, size: usize) {
-        self.nodes.shrink_to(size);
-    }
+    pub(crate) fn shrink_nodes_to(&mut self, size: usize) {}
 
     /// Shrinks the capacity of the subtrie's value storage.
     pub(crate) fn shrink_values_to(&mut self, size: usize) {
