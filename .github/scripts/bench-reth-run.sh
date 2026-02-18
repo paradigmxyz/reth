@@ -12,7 +12,8 @@ LABEL="$1"
 BINARY="$2"
 OUTPUT_DIR="$3"
 DATADIR="$SCHELK_MOUNT/datadir"
-LOG="/tmp/reth-bench-node-${LABEL}.log"
+mkdir -p "$OUTPUT_DIR"
+LOG="${OUTPUT_DIR}/node.log"
 
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
