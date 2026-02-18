@@ -533,6 +533,8 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
         let started_at = Instant::now();
         let mut interval = tokio::time::interval(Duration::from_secs(3));
         interval.tick().await; // first tick is immediate, skip it
+        let mut last_downloaded = 0u64;
+        let mut last_done = 0u64;
 
         loop {
             interval.tick().await;
@@ -549,33 +551,51 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
 
             let done = progress.archives_done.load(Ordering::Relaxed);
             let all = progress.total_archives;
+
+            // Don't repeat the same line
+            if downloaded == last_downloaded && done == last_done {
+                continue;
+            }
+            last_downloaded = downloaded;
+            last_done = done;
+
             let pct = (downloaded as f64 / total as f64) * 100.0;
             let dl = DownloadProgress::format_size(downloaded);
             let tot = DownloadProgress::format_size(total);
 
             let elapsed = started_at.elapsed();
-            let eta = if downloaded > 0 {
-                let remaining = total.saturating_sub(downloaded);
-                let speed = downloaded as f64 / elapsed.as_secs_f64();
-                if speed > 0.0 {
-                    DownloadProgress::format_duration(Duration::from_secs_f64(
-                        remaining as f64 / speed,
-                    ))
+            let remaining = total.saturating_sub(downloaded);
+
+            if remaining == 0 {
+                // Downloads done, waiting for extraction
+                info!(target: "reth::cli",
+                    archives = format_args!("{done}/{all}"),
+                    downloaded = %dl,
+                    "Extracting remaining archives"
+                );
+            } else {
+                let eta = if downloaded > 0 {
+                    let speed = downloaded as f64 / elapsed.as_secs_f64();
+                    if speed > 0.0 {
+                        DownloadProgress::format_duration(Duration::from_secs_f64(
+                            remaining as f64 / speed,
+                        ))
+                    } else {
+                        "??".to_string()
+                    }
                 } else {
                     "??".to_string()
-                }
-            } else {
-                "??".to_string()
-            };
+                };
 
-            info!(target: "reth::cli",
-                archives = format_args!("{done}/{all}"),
-                progress = format_args!("{pct:.1}%"),
-                downloaded = %dl,
-                total = %tot,
-                eta = %eta,
-                "Downloading"
-            );
+                info!(target: "reth::cli",
+                    archives = format_args!("{done}/{all}"),
+                    progress = format_args!("{pct:.1}%"),
+                    downloaded = %dl,
+                    total = %tot,
+                    eta = %eta,
+                    "Downloading"
+                );
+            }
         }
 
         // Final line
