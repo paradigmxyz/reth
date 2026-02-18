@@ -141,9 +141,7 @@ impl Encode for StoredNibblesSubKey {
     type Encoded = [u8; 65];
 
     fn encode(self) -> Self::Encoded {
-        let mut buf = [0u8; 65];
-        self.to_compact(&mut buf.as_mut());
-        buf
+        self.to_compact_array()
     }
 }
 
