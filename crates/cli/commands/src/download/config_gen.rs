@@ -257,25 +257,25 @@ pub fn describe_prune_config_from_selections(
         return vec!["Full archive node — no pruning configured".to_string()];
     }
 
-    let mut lines = vec!["[prune.segments]".to_string()];
+    let mut lines = Vec::new();
 
     if let Some(mode) = &segments.sender_recovery {
-        lines.push(format!("sender_recovery = {}", format_mode(mode)));
+        lines.push(format!("sender_recovery={}", format_mode(mode)));
     }
     if let Some(mode) = &segments.transaction_lookup {
-        lines.push(format!("transaction_lookup = {}", format_mode(mode)));
+        lines.push(format!("transaction_lookup={}", format_mode(mode)));
     }
     if let Some(mode) = &segments.bodies_history {
-        lines.push(format!("bodies_history = {}", format_mode(mode)));
+        lines.push(format!("bodies_history={}", format_mode(mode)));
     }
     if let Some(mode) = &segments.receipts {
-        lines.push(format!("receipts = {}", format_mode(mode)));
+        lines.push(format!("receipts={}", format_mode(mode)));
     }
     if let Some(mode) = &segments.account_history {
-        lines.push(format!("account_history = {}", format_mode(mode)));
+        lines.push(format!("account_history={}", format_mode(mode)));
     }
     if let Some(mode) = &segments.storage_history {
-        lines.push(format!("storage_history = {}", format_mode(mode)));
+        lines.push(format!("storage_history={}", format_mode(mode)));
     }
 
     lines
@@ -319,15 +319,18 @@ mod tests {
     }
 
     #[test]
-    fn minimal_components_mirrors_minimal_flag() {
+    fn minimal_components_prunes_txs_and_receipts() {
         let selected: Vec<_> =
             SnapshotComponentType::ALL.iter().copied().filter(|ty| ty.is_minimal()).collect();
         let config = config_for_components(&selected);
 
-        // Minimal downloads txs + changesets, so only receipts should be pruned
-        assert_eq!(config.prune.segments.transaction_lookup, None);
-        assert_eq!(config.prune.segments.sender_recovery, None);
-        assert_eq!(config.prune.segments.bodies_history, None);
+        // Minimal downloads state + headers + changesets, so txs and receipts are pruned
+        assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
+        assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
+        assert_eq!(
+            config.prune.segments.bodies_history,
+            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
+        );
         assert_eq!(
             config.prune.segments.receipts,
             Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE))
@@ -381,10 +384,9 @@ mod tests {
         let selected = vec![SnapshotComponentType::State];
         let desc = describe_prune_config(&selected);
         assert!(desc.contains(&"transaction_lookup = \"full\"".to_string()));
-        assert!(desc.contains(&format!("receipts = {{ distance = {MINIMUM_RECEIPTS_DISTANCE} }}")));
-        assert!(
-            desc.contains(&format!("bodies_history = {{ distance = {MINIMUM_HISTORY_DISTANCE} }}"))
-        );
+        assert!(desc.contains(&format!(
+            "receipts = {{ distance = {MINIMUM_RECEIPTS_DISTANCE} }}"
+        )));
     }
 
     #[test]
@@ -517,8 +519,7 @@ mod tests {
             .insert(SnapshotComponentType::Transactions, ComponentSelection::Distance(10_064));
         selections.insert(SnapshotComponentType::Receipts, ComponentSelection::None);
         let desc = describe_prune_config_from_selections(&selections);
-        assert!(desc.contains(&"[prune.segments]".to_string()));
-        assert!(desc.contains(&"sender_recovery = { distance = 10064 }".to_string()));
-        assert!(desc.contains(&"receipts = \"full\"".to_string()));
+        assert!(desc.contains(&"sender_recovery={ distance = 10064 }".to_string()));
+        assert!(desc.contains(&"receipts=\"full\"".to_string()));
     }
 }
