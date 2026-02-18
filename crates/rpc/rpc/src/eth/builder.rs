@@ -147,8 +147,7 @@ where
             blocking_task_pool: None,
             fee_history_cache_config: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
-            task_spawner: Runtime::with_existing_handle(tokio::runtime::Handle::current())
-                .expect("called outside tokio runtime"),
+            task_spawner: Runtime::test(),
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
@@ -479,7 +478,7 @@ where
 
     /// Builds the [`EthApiInner`] instance.
     ///
-    /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
+    /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn_with`].
     ///
     /// # Panics
     ///
@@ -516,8 +515,13 @@ where
 
         let provider = components.provider().clone();
 
-        let eth_cache = eth_cache
-            .unwrap_or_else(|| EthStateCache::spawn(provider.clone(), eth_state_cache_config));
+        let eth_cache = eth_cache.unwrap_or_else(|| {
+            EthStateCache::spawn_with(
+                provider.clone(),
+                eth_state_cache_config,
+                task_spawner.clone(),
+            )
+        });
         let gas_oracle = gas_oracle.unwrap_or_else(|| {
             GasPriceOracle::new(provider.clone(), gas_oracle_config, eth_cache.clone())
         });
@@ -564,7 +568,7 @@ where
 
     /// Builds the [`EthApi`] instance.
     ///
-    /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
+    /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn_with`].
     ///
     /// # Panics
     ///

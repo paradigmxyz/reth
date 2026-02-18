@@ -204,9 +204,15 @@ where
     pub fn block_info(&self) -> BlockInfo {
         self.get_pool_data().block_info()
     }
-    /// Sets the currently tracked block
+    /// Sets the currently tracked block.
+    ///
+    /// This will also notify subscribers about any transactions that were promoted to the pending
+    /// pool due to fee changes.
     pub fn set_block_info(&self, info: BlockInfo) {
-        self.pool.write().set_block_info(info)
+        let outcome = self.pool.write().set_block_info(info);
+
+        // Notify subscribers about promoted transactions due to fee changes
+        self.notify_on_transaction_updates(outcome.promoted, outcome.discarded);
     }
 
     /// Returns the internal [`SenderId`] for this address
