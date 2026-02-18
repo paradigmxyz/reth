@@ -476,9 +476,13 @@ jobs:
 
       - name: Prepare source dirs
         run: |
-          git clone . ../reth-baseline
+          if [ -d ../reth-baseline ]; then
+            git -C ../reth-baseline fetch origin
+          else
+            git clone . ../reth-baseline
+          fi
           git -C ../reth-baseline checkout "${{ steps.refs.outputs.baseline-ref }}"
-          ln -s "$(pwd)" ../reth-feature
+          ln -sfn "$(pwd)" ../reth-feature
 
       - name: Build baseline and feature binaries in parallel
         id: build
