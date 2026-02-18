@@ -102,28 +102,34 @@ pub trait ExecutableTxTuple: Send + 'static {
     fn split_prefix(self, n: usize) -> (Vec<Self::RawTx>, Self::IntoIter, Self::Convert);
 }
 
-impl<RawTx, Tx, Err, F> ExecutableTxTuple for (Vec<RawTx>, F)
+impl<RawTx, Tx, Err, I, F> ExecutableTxTuple for (I, F)
 where
     RawTx: Send + Sync + 'static,
     Tx: Clone + Send + Sync + 'static,
     Err: core::error::Error + Send + Sync + 'static,
+    I: IntoParallelIterator<Item = RawTx, Iter: IndexedParallelIterator>
+        + IntoIterator<Item = RawTx>
+        + FromIterator<RawTx>
+        + Send
+        + 'static,
     F: Fn(RawTx) -> Result<Tx, Err> + Send + Sync + 'static,
 {
     type RawTx = RawTx;
     type Tx = Tx;
     type Error = Err;
 
-    type IntoIter = Vec<RawTx>;
+    type IntoIter = I;
     type Convert = F;
 
-    fn into_parts(self) -> (Vec<RawTx>, F) {
+    fn into_parts(self) -> (I, F) {
         self
     }
 
-    fn split_prefix(self, n: usize) -> (Vec<RawTx>, Vec<RawTx>, F) {
-        let (mut all, convert) = self;
+    fn split_prefix(self, n: usize) -> (Vec<RawTx>, I, F) {
+        let (iter, convert) = self;
+        let mut all: Vec<RawTx> = iter.into_iter().collect();
         let tail = all.split_off(n.min(all.len()));
-        (all, tail, convert)
+        (all, tail.into_iter().collect(), convert)
     }
 }
 
