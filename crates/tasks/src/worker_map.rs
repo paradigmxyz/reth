@@ -80,16 +80,11 @@ impl WorkerMap {
 
 impl Drop for WorkerMap {
     fn drop(&mut self) {
-        // Remove all workers. Dropping the senders closes the channels so the worker
-        // threads will exit their recv loops, then join each thread.
-        let keys: Vec<_> = self.workers.iter().map(|e| *e.key()).collect();
-        for key in keys {
-            if let Some((_, mut w)) = self.workers.remove(key) {
-                // Drop sender so the thread's recv loop exits.
-                drop(w.tx);
-                if let Some(handle) = w.handle.take() {
-                    let _ = handle.join();
-                }
+        for (_, mut w) in std::mem::take(&mut self.workers) {
+            // Drop sender so the thread's recv loop exits, then join.
+            drop(w.tx);
+            if let Some(handle) = w.handle.take() {
+                let _ = handle.join();
             }
         }
     }
