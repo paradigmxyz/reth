@@ -49,7 +49,7 @@ fn main() -> Result<()> {
     let account_entries = {
         let mut cursor = tx.cursor_read::<tables::AccountsTrie>()?;
         let mut entries = Vec::new();
-        let mut walker = cursor.walk(None)?;
+        let walker = cursor.walk(None)?;
         for result in walker {
             let (key, value) = result?;
             entries.push((key, value));
@@ -83,7 +83,7 @@ fn main() -> Result<()> {
     let storage_entries = {
         let mut cursor = tx.cursor_read::<tables::StoragesTrie>()?;
         let mut entries = Vec::new();
-        let mut walker = cursor.walk(None)?;
+        let walker = cursor.walk(None)?;
         for result in walker {
             let (key, value) = result?;
             entries.push((key, value));
