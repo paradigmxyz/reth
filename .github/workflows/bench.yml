@@ -253,7 +253,7 @@ jobs:
               const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
               ahead = benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
               if (ahead > 0) {
-                queueMsg = `\n🔢 **Queue position:** #${ahead + 1} (${ahead} job(s) ahead)`;
+                queueMsg = `\n🔢 **Queue position:** \`#${ahead + 1}\` (${ahead} job(s) ahead)`;
               }
             } catch (e) {
               // Non-fatal — queue info is best-effort
@@ -321,7 +321,7 @@ jobs:
                 if (ahead !== lastPosition) {
                   lastPosition = ahead;
                   const queueMsg = ahead > 0
-                    ? `\n🔢 **Queue position:** #${ahead + 1} (${ahead} job(s) ahead)`
+                    ? `\n🔢 **Queue position:** \`#${ahead + 1}\` (${ahead} job(s) ahead)`
                     : '';
                   await github.rest.issues.updateComment({
                     owner: context.repo.owner,
