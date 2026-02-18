@@ -845,10 +845,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 
     /// Writes bytecodes to MDBX.
-    ///
-    /// Also used as a fast path in [`StateWriter::write_state`] for storage v2 where plain state
-    /// and changesets are written to static files, making the full
-    /// [`BundleState::to_plain_state_and_reverts`] conversion unnecessary.
     fn write_bytecodes(
         &self,
         bytecodes: impl IntoIterator<Item = (B256, Bytecode)>,
