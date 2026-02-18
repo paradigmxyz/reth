@@ -403,7 +403,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               comment_id: parseInt(process.env.BENCH_COMMENT_ID),
-              body: buildBody('Building baseline binary...'),
+              body: buildBody('Building binaries...'),
             });
 
       - uses: dtolnay/rust-toolchain@stable
@@ -474,21 +474,28 @@ jobs:
           echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
           echo "feature-name=$FEATURE_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch or build baseline binaries
-        id: build-baseline
-        run: .github/scripts/bench-reth-build.sh baseline "${{ steps.refs.outputs.baseline-ref }}"
+      - name: Prepare baseline source dir
+        run: |
+          git clone . ../reth-baseline
+          git -C ../reth-baseline checkout "${{ steps.refs.outputs.baseline-ref }}"
 
-      - name: Update status (baseline built)
-        if: success() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const s = require('./.github/scripts/bench-update-status.js');
-            await s({github, context, status: 'Building feature binary...'});
+      - name: Build baseline and feature binaries in parallel
+        run: |
+          BASELINE_DIR="$(cd ../reth-baseline && pwd)"
+          FEATURE_DIR="$(pwd)"
 
-      - name: Fetch or build feature binaries
-        id: build-feature
-        run: .github/scripts/bench-reth-build.sh feature "${{ steps.refs.outputs.feature-ref }}"
+          .github/scripts/bench-reth-build.sh baseline "${BASELINE_DIR}" "${{ steps.refs.outputs.baseline-ref }}" &
+          PID_BASELINE=$!
+          .github/scripts/bench-reth-build.sh feature "${FEATURE_DIR}" "${{ steps.refs.outputs.feature-ref }}" &
+          PID_FEATURE=$!
+
+          FAIL=0
+          wait $PID_BASELINE || FAIL=1
+          wait $PID_FEATURE || FAIL=1
+          if [ $FAIL -ne 0 ]; then
+            echo "::error::One or both builds failed"
+            exit 1
+          fi
 
       # System tuning for reproducible benchmarks
       - name: System setup
@@ -545,7 +552,7 @@ jobs:
 
       - name: "Run benchmark: baseline"
         id: run-baseline
-        run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline target/profiling-baseline/reth /tmp/bench-results-baseline
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth /tmp/bench-results-baseline
 
       - name: Update status (running feature benchmark)
         if: success() && env.BENCH_COMMENT_ID
