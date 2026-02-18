@@ -420,7 +420,7 @@ where
                 let _enter =
                     debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
                 let (transactions, convert) = transactions.into_parts();
-                recover_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
@@ -437,7 +437,7 @@ where
 
                 // Recover the first few transactions sequentially so execution can
                 // start immediately without waiting for rayon work-stealing.
-                recover_serial(head.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(head.into_iter(), &convert, &prewarm_tx, &execute_tx);
 
                 // Recover the remaining transactions in parallel.
                 rest.into_par_iter()
@@ -718,7 +718,7 @@ where
 }
 
 /// Recovers transactions sequentially and sends them to the prewarm and execute channels.
-fn recover_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
+fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
     prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
