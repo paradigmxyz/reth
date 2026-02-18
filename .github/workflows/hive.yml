@@ -7,7 +7,7 @@ name: hive
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 */6 * * *"
   pull_request:
     branches:
       - "**"
@@ -23,19 +23,20 @@ jobs:
   detect-env:
     runs-on: ubuntu-latest
     outputs:
-      use_depot: ${{ steps.detect.outputs.use_depot }}
+      use_docker: ${{ steps.detect.outputs.use_docker }}
     steps:
       - id: detect
         run: |
           if [ "${{ github.repository }}" = "paradigmxyz/reth" ] && \
              [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "use_depot=true" >> "$GITHUB_OUTPUT"
+            echo "use_docker=true" >> "$GITHUB_OUTPUT"
           else
-            echo "use_depot=false" >> "$GITHUB_OUTPUT"
+            echo "use_docker=false" >> "$GITHUB_OUTPUT"
           fi
 
   build-reth-stable:
     needs: detect-env
+    if: needs.detect-env.outputs.use_docker == 'true'
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive-stable
@@ -44,64 +45,96 @@ jobs:
 
   build-reth-edge:
     needs: detect-env
+    if: needs.detect-env.outputs.use_docker == 'true'
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive-edge
       artifact_name: reth-edge
     secrets: inherit
 
+  prepare-reth-stable:
+    needs: detect-env
+    if: needs.detect-env.outputs.use_docker == 'false'
+    uses: ./.github/workflows/prepare-reth.yml
+    with:
+      image_tag: ghcr.io/paradigmxyz/reth:latest
+      binary_name: reth
+      cargo_features: "asm-keccak"
+      artifact_name: "reth-stable"
+
+  prepare-reth-edge:
+    needs: detect-env
+    if: needs.detect-env.outputs.use_docker == 'false'
+    uses: ./.github/workflows/prepare-reth.yml
+    with:
+      image_tag: ghcr.io/paradigmxyz/reth:latest
+      binary_name: reth
+      cargo_features: "asm-keccak edge"
+      artifact_name: "reth-edge"
+
   prepare-hive:
     timeout-minutes: 45
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.detect-env.outputs.use_docker == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/checkout@v6
+      - name: Checkout hive tests
+        uses: actions/checkout@v6
         with:
           repository: ethereum/hive
+          ref: master
           path: hivetests
 
-      - id: hive-commit
-        run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Get hive commit hash
+        id: hive-commit
+        run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
       - uses: actions/setup-go@v6
         with:
           go-version: "^1.13.1"
 
-      - uses: actions/cache@v5
+      - name: Restore hive assets cache
         id: cache-hive
+        uses: actions/cache@v5
         with:
-          path: hive_assets
+          path: ./hive_assets
           key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/scripts/hive/build_simulators.sh') }}
 
-      - if: steps.cache-hive.outputs.cache-hit != 'true'
+      - name: Build hive assets
+        if: steps.cache-hive.outputs.cache-hit != 'true'
         run: .github/scripts/hive/build_simulators.sh
 
-      - if: steps.cache-hive.outputs.cache-hit == 'true'
+      - name: Load cached Docker images
+        if: steps.cache-hive.outputs.cache-hit == 'true'
         run: |
           cd hive_assets
-          for f in *.tar; do
-            if [ -f "$f" ]; then
-              docker load -i "$f"
+          for tar_file in *.tar; do
+            if [ -f "$tar_file" ]; then
+              echo "Loading $tar_file..."
+              docker load -i "$tar_file"
             fi
           done
           chmod +x hive
 
-      - uses: actions/upload-artifact@v6
+      - name: Upload hive assets
+        uses: actions/upload-artifact@v6
         with:
           name: hive_assets
-          path: hive_assets
+          path: ./hive_assets
 
-  test:
+  wait-reth:
     needs:
-      - detect-env
       - build-reth-stable
       - build-reth-edge
-      - prepare-hive
+      - prepare-reth-stable
+      - prepare-reth-edge
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "reth build ready"
 
+  test:
     timeout-minutes: 120
-    runs-on: ${{ needs.detect-env.outputs.use_depot == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
-
     strategy:
       fail-fast: false
       matrix:
@@ -112,41 +145,106 @@ jobs:
           - sim: ethereum/sync
           - sim: devp2p
             limit: discv4
+          - sim: devp2p
+            limit: discv5
+            include:
+              - PingLargeRequestID
+          - sim: ethereum/engine
+            limit: engine-exchange-capabilities
+          - sim: ethereum/engine
+            limit: engine-withdrawals
+          - sim: ethereum/engine
+            limit: engine-auth
+          - sim: ethereum/engine
+            limit: engine-api
           - sim: ethereum/engine
             limit: cancun
           - sim: ethereum/rpc-compat
             include:
               - eth_call
+          - sim: ethereum/eels/consume-engine
+            limit: .*tests/amsterdam.*
+          - sim: ethereum/eels/consume-engine
+            limit: .*tests/osaka.*
+          - sim: ethereum/eels/consume-engine
+            limit: .*tests/prague.*
+          - sim: ethereum/eels/consume-engine
+            limit: .*tests/cancun.*
+          - sim: ethereum/eels/consume-engine
+            limit: .*tests/shanghai.*
+          - sim: ethereum/eels/consume-engine
+            limit: .*tests/berlin.*
+          - sim: ethereum/eels/consume-engine
+            limit: .*tests/istanbul.*
+          - sim: ethereum/eels/consume-engine
+            limit: .*tests/homestead.*
+          - sim: ethereum/eels/consume-engine
+            limit: .*tests/frontier.*
+          - sim: ethereum/eels/consume-rlp
+            limit: .*tests/amsterdam.*
+          - sim: ethereum/eels/consume-rlp
+            limit: .*tests/osaka.*
+          - sim: ethereum/eels/consume-rlp
+            limit: .*tests/prague.*
+          - sim: ethereum/eels/consume-rlp
+            limit: .*tests/cancun.*
+          - sim: ethereum/eels/consume-rlp
+            limit: .*tests/shanghai.*
+          - sim: ethereum/eels/consume-rlp
+            limit: .*tests/berlin.*
+          - sim: ethereum/eels/consume-rlp
+            limit: .*tests/istanbul.*
+          - sim: ethereum/eels/consume-rlp
+            limit: .*tests/homestead.*
+          - sim: ethereum/eels/consume-rlp
+            limit: .*tests/frontier.*
+
+    needs:
+      - detect-env
+      - wait-reth
+      - prepare-hive
 
     name: ${{ matrix.storage }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
+
+    runs-on: ${{ needs.detect-env.outputs.use_docker == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+
+    permissions:
+      issues: write
 
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v7
-        with:
-          name: reth-${{ matrix.storage }}
-          path: /tmp
-
-      - uses: actions/download-artifact@v7
+      - name: Download hive assets
+        uses: actions/download-artifact@v7
         with:
           name: hive_assets
           path: /tmp
 
-      - run: .github/scripts/hive/load_images.sh
+      - name: Download reth image
+        uses: actions/download-artifact@v7
+        with:
+          name: reth-${{ matrix.storage }}
+          path: /tmp
 
-      - run: |
+      - name: Load Docker images
+        run: .github/scripts/hive/load_images.sh
+
+      - name: Move hive binary
+        run: |
           mv /tmp/hive /usr/local/bin
           chmod +x /usr/local/bin/hive
 
-      - uses: actions/checkout@v6
+      - name: Checkout hive tests
+        uses: actions/checkout@v6
         with:
           repository: ethereum/hive
+          ref: master
           path: hivetests
 
-      - run: |
+      - name: Run simulator
+        run: |
           LIMIT="${{ matrix.scenario.limit }}"
           TESTS="${{ join(matrix.scenario.include, '|') }}"
           if [ -n "$LIMIT" ] && [ -n "$TESTS" ]; then
@@ -158,29 +256,31 @@ jobs:
           else
             FILTER="/"
           fi
+          echo "filter: $FILTER"
           .github/scripts/hive/run_simulator.sh "${{ matrix.scenario.sim }}" "$FILTER"
 
-      - run: |
-          find hivetests/workspace/logs -name "*.json" ! -name "hive.json" \
+      - name: Parse hive output
+        run: |
+          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" \
             | xargs -I {} python .github/scripts/hive/parse.py {} \
               --exclusion .github/scripts/hive/expected_failures.yaml \
               --ignored .github/scripts/hive/ignored_tests.yaml
 
-      - if: failure()
-        run: cat hivetests/workspace/logs/simulator.log
+      - name: Print simulator output
+        if: ${{ failure() }}
+        run: cat hivetests/workspace/logs/*simulator*.log
 
-      - if: failure()
+      - name: Print reth client logs
+        if: ${{ failure() }}
         run: cat hivetests/workspace/logs/reth/client-*.log
 
   notify-on-error:
-    needs:
-      - test
-      - detect-env
-    if: failure() && needs.detect-env.outputs.use_depot == 'true'
+    needs: test
+    if: failure() && github.repository == 'paradigmxyz/reth'
     runs-on: ubuntu-latest
     steps:
       - uses: rtCamp/action-slack-notify@v2
         env:
           SLACK_COLOR: ${{ job.status }}
-          SLACK_MESSAGE: "Hive failed: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
           SLACK_WEBHOOK: ${{ secrets.SLACK_HIVE_WEBHOOK_URL }}
