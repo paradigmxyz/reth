@@ -108,7 +108,7 @@ jobs:
     steps:
       - name: Check org membership
         if: github.event_name == 'issue_comment'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -127,7 +127,7 @@ jobs:
 
       - name: Parse arguments
         id: args
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             let pr, actor, blocks, warmup, baseline, feature;
@@ -234,7 +234,7 @@ jobs:
 
       - name: Acknowledge request
         id: ack
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             if (context.eventName === 'issue_comment') {
@@ -298,7 +298,7 @@ jobs:
 
       - name: Poll queue position
         if: steps.ack.outputs.comment-id && steps.ack.outputs.queue-position != '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const pr = '${{ steps.args.outputs.pr }}';
@@ -380,7 +380,7 @@ jobs:
 
       - name: Resolve job URL and update status
         if: env.BENCH_COMMENT_ID
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
@@ -429,7 +429,7 @@ jobs:
       # Build binaries
       - name: Resolve PR head branch
         id: pr-info
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             if (process.env.BENCH_PR) {
@@ -485,7 +485,7 @@ jobs:
 
       - name: Update status (snapshot needed)
         if: env.BENCH_COMMENT_ID && steps.snapshot-check.outputs.needed == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
@@ -579,7 +579,7 @@ jobs:
 
       - name: Update status (running baseline benchmark)
         if: success() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
@@ -591,7 +591,7 @@ jobs:
 
       - name: Update status (running feature benchmark)
         if: success() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
@@ -684,7 +684,7 @@ jobs:
 
       - name: Compare & comment
         if: success()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
@@ -734,7 +734,7 @@ jobs:
 
       - name: Update status (failed)
         if: failure() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const steps_status = [
