@@ -3,6 +3,7 @@ use reth_config::config::{Config, PruneConfig};
 use reth_db::{tables, Database, DatabaseEnv};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
+use reth_stages_types::StageCheckpoint;
 use std::{collections::BTreeMap, path::Path};
 use tracing::info;
 
@@ -130,6 +131,47 @@ pub fn write_prune_checkpoints(
             mode = ?prune_mode,
             "Set prune checkpoint"
         );
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
+/// Stage IDs for history indexing stages whose data lives in rocksdb.
+///
+/// When downloading a snapshot without rocksdb indices, these stage checkpoints
+/// must be reset so the node knows to rebuild the indices.
+const INDEX_STAGE_IDS: [&str; 3] =
+    ["TransactionLookup", "IndexAccountHistory", "IndexStorageHistory"];
+
+/// Prune segments that correspond to the history indexing stages.
+const INDEX_PRUNE_SEGMENTS: [PruneSegment; 3] =
+    [PruneSegment::TransactionLookup, PruneSegment::AccountHistory, PruneSegment::StorageHistory];
+
+/// Resets stage and prune checkpoints for history indexing stages.
+///
+/// A snapshot's mdbx comes from a fully synced node, so it has stage checkpoints
+/// at the tip for `TransactionLookup`, `IndexAccountHistory`, and
+/// `IndexStorageHistory`. Since we don't distribute the rocksdb indices those
+/// stages produced, we must reset their checkpoints to block 0. Otherwise the
+/// pipeline (or background indexer) would see "already done" and skip rebuilding
+/// the indices entirely.
+pub fn reset_index_stage_checkpoints(db: &DatabaseEnv) -> eyre::Result<()> {
+    let tx = db.tx_mut()?;
+
+    for stage_id in INDEX_STAGE_IDS {
+        tx.put::<tables::StageCheckpoints>(stage_id.to_string(), StageCheckpoint::default())?;
+
+        // Also clear any stage-specific progress data
+        tx.delete::<tables::StageCheckpointProgresses>(stage_id.to_string(), None)?;
+
+        info!(target: "reth::cli", stage = stage_id, "Reset stage checkpoint to block 0");
+    }
+
+    // Clear corresponding prune checkpoints so the pruner doesn't inherit
+    // state from the source node
+    for segment in INDEX_PRUNE_SEGMENTS {
+        tx.delete::<tables::PruneCheckpoints>(segment, None)?;
     }
 
     tx.commit()?;
@@ -510,5 +552,53 @@ mod tests {
         // Bodies follows tx selection
         assert!(desc.contains(&"bodies_history={ distance = 10064 }".to_string()));
         assert!(desc.contains(&"receipts=\"full\"".to_string()));
+    }
+
+    #[test]
+    fn reset_index_stage_checkpoints_clears_stages() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::default()).unwrap();
+
+        // Simulate a fully synced node: set stage checkpoints at tip
+        let tip_checkpoint = StageCheckpoint::new(24_500_000);
+        {
+            let tx = db.tx_mut().unwrap();
+            for stage_id in INDEX_STAGE_IDS {
+                tx.put::<tables::StageCheckpoints>(stage_id.to_string(), tip_checkpoint).unwrap();
+            }
+            for segment in INDEX_PRUNE_SEGMENTS {
+                tx.put::<tables::PruneCheckpoints>(
+                    segment,
+                    PruneCheckpoint {
+                        block_number: Some(24_500_000),
+                        tx_number: None,
+                        prune_mode: PruneMode::Full,
+                    },
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+
+        // Reset
+        reset_index_stage_checkpoints(&db).unwrap();
+
+        // Verify stage checkpoints are at block 0
+        let tx = db.tx().unwrap();
+        for stage_id in INDEX_STAGE_IDS {
+            let checkpoint = tx
+                .get::<tables::StageCheckpoints>(stage_id.to_string())
+                .unwrap()
+                .expect("checkpoint should exist");
+            assert_eq!(checkpoint.block_number, 0, "stage {stage_id} should be reset to block 0");
+        }
+
+        // Verify prune checkpoints are deleted
+        for segment in INDEX_PRUNE_SEGMENTS {
+            assert!(
+                tx.get::<tables::PruneCheckpoints>(segment).unwrap().is_none(),
+                "prune checkpoint for {segment} should be deleted"
+            );
+        }
     }
 }

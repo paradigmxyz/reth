@@ -46,7 +46,7 @@ reth-prune.workspace = true
 reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-stages.workspace = true
-reth-stages-types = { workspace = true, optional = true }
+reth-stages-types.workspace = true
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
 reth-tasks.workspace = true
@@ -126,7 +126,7 @@ arbitrary = [
     "reth-trie-common/test-utils",
     "reth-codecs/arbitrary",
     "reth-prune-types/arbitrary",
-    "reth-stages-types?/arbitrary",
+    "reth-stages-types/arbitrary",
     "reth-trie-common/arbitrary",
     "alloy-consensus/arbitrary",
     "reth-primitives-traits/arbitrary",
