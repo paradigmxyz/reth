@@ -17,6 +17,11 @@ use std::{
     task::{ready, Context, Poll},
 };
 
+/// Maximum number of times we'll retry after receiving empty responses from different peers
+/// before giving up on a request. This prevents infinite retry loops when a block body is
+/// truly unservable (e.g. exceeds all peers' response size limits).
+const MAX_EMPTY_RESPONSE_RETRIES: usize = 5;
+
 /// Body request implemented as a [Future].
 ///
 /// The future will poll the underlying request until fulfilled.
@@ -50,6 +55,9 @@ pub(crate) struct BodiesRequestFuture<B: Block, C: BodiesClient<Body = B::Body>>
     fut: Option<C::Output>,
     /// Tracks how many bodies we requested in the last request.
     last_request_len: Option<usize>,
+    /// Tracks the number of consecutive empty responses received. This is used to detect when
+    /// a block body is too large for any peer to serve, preventing infinite retry loops.
+    empty_response_retries: usize,
 }
 
 impl<B, C> BodiesRequestFuture<B, C>
@@ -72,6 +80,7 @@ where
             buffer: Default::default(),
             last_request_len: None,
             fut: None,
+            empty_response_retries: 0,
         }
     }
 
@@ -89,8 +98,13 @@ where
     fn on_error(&mut self, error: DownloadError, peer_id: Option<PeerId>) {
         self.metrics.increment_errors(&error);
         tracing::debug!(target: "downloaders::bodies", ?peer_id, %error, "Error requesting bodies");
+        // Only penalize the peer for clearly malicious/invalid responses.
+        // Empty responses can legitimately occur when a block body exceeds the peer's soft
+        // response size limit (e.g. 2MB), so we should not penalize for those.
         if let Some(peer_id) = peer_id {
-            self.client.report_bad_message(peer_id);
+            if error.is_malicious_response() {
+                self.client.report_bad_message(peer_id);
+            }
         }
         self.submit_request(
             self.next_request().expect("existing hashes to resubmit"),
@@ -128,13 +142,20 @@ where
         // Increment total downloaded metric
         self.metrics.total_downloaded.increment(response_len as u64);
 
-        // TODO: Malicious peers often return a single block even if it does not exceed the soft
-        // response limit (2MB). This could be penalized by checking if this block and the
-        // next one exceed the soft response limit, if not then peer either does not have the next
-        // block or deliberately sent a single block.
         if bodies.is_empty() {
+            self.empty_response_retries += 1;
+            if self.empty_response_retries > MAX_EMPTY_RESPONSE_RETRIES {
+                tracing::warn!(
+                    target: "downloaders::bodies",
+                    retries = self.empty_response_retries,
+                    "Exceeded max empty response retries, block body may be too large for peers to serve"
+                );
+            }
             return Err(DownloadError::EmptyResponse)
         }
+
+        // Reset retry counter on successful (non-empty) response
+        self.empty_response_retries = 0;
 
         if response_len > request_len {
             return Err(DownloadError::TooManyBodies(GotExpected {

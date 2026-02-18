@@ -197,6 +197,23 @@ pub enum DownloadError {
     Provider(ProviderError),
 }
 
+impl DownloadError {
+    /// Returns `true` if this error indicates a clearly malicious or invalid peer response.
+    ///
+    /// Empty responses are NOT considered malicious because they can legitimately occur when a
+    /// block body exceeds the peer's soft response size limit (e.g. 2MB). Only responses that
+    /// violate protocol rules (too many bodies, validation failures) are treated as malicious.
+    pub const fn is_malicious_response(&self) -> bool {
+        matches!(
+            self,
+            Self::TooManyBodies(_)
+                | Self::BodyValidation { .. }
+                | Self::HeaderValidation { .. }
+                | Self::InvalidTip(_)
+        )
+    }
+}
+
 impl From<DatabaseError> for DownloadError {
     fn from(error: DatabaseError) -> Self {
         Self::Provider(ProviderError::Database(error))
