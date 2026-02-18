@@ -2685,20 +2685,6 @@ impl SparseSubtrie {
         masks: Option<BranchNodeMasks>,
         rlp_node: Option<RlpNode>,
     ) -> SparseTrieResult<()> {
-        let mut blinded_mask = TrieMask::default();
-        let mut blinded_hashes = Box::new([B256::ZERO; 16]);
-
-        for (stack_ptr, idx) in state_mask.iter().enumerate() {
-            let mut child_path = path;
-            child_path.push_unchecked(idx);
-            let child = &children[stack_ptr];
-
-            if let Some(hash) = child.as_hash() {
-                blinded_mask.set_bit(idx);
-                blinded_hashes[idx as usize] = hash;
-            }
-        }
-
         match self.nodes.entry(path) {
             Entry::Occupied(_) => {
                 // Branch already revealed, do nothing
@@ -2715,6 +2701,21 @@ impl SparseSubtrie {
                         },
                         None => SparseNodeState::Dirty,
                     };
+
+                let mut blinded_mask = TrieMask::default();
+                let mut blinded_hashes = Box::new([B256::ZERO; 16]);
+
+                for (stack_ptr, idx) in state_mask.iter().enumerate() {
+                    let mut child_path = path;
+                    child_path.push_unchecked(idx);
+                    let child = &children[stack_ptr];
+
+                    if let Some(hash) = child.as_hash() {
+                        blinded_mask.set_bit(idx);
+                        blinded_hashes[idx as usize] = hash;
+                    }
+                }
+
                 entry.insert(SparseNode::Branch {
                     state_mask,
                     state,
