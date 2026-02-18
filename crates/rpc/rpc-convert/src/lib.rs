@@ -11,11 +11,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod rpc;
-pub mod rpc_response;
 pub mod transaction;
 
 pub use rpc::*;
-pub use rpc_response::{EthRpcConverter, RpcResponseConverter, RpcResponseConverterError};
 pub use transaction::{
     RpcConvert, RpcConverter, TransactionConversionError, TryIntoSimTx, TxInfoMapper,
 };

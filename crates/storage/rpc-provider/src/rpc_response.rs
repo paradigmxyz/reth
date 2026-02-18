@@ -1,7 +1,9 @@
 //! Unified converter for RPC network responses to primitive types.
 
 use alloy_network::Network;
+use alloy_rpc_types::eth::{Block, Transaction, TransactionReceipt};
 use core::fmt::Debug;
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 
 /// Error type used by [`RpcResponseConverter`].
 #[derive(Debug)]
@@ -49,27 +51,24 @@ pub trait RpcResponseConverter<N: Network>: Send + Sync + Debug + 'static {
 pub struct EthRpcConverter;
 
 impl RpcResponseConverter<alloy_network::Ethereum> for EthRpcConverter {
-    type Block = alloy_consensus::Block<reth_ethereum_primitives::TransactionSigned>;
-    type Transaction = reth_ethereum_primitives::TransactionSigned;
-    type Receipt = reth_ethereum_primitives::Receipt;
+    type Block = alloy_consensus::Block<TransactionSigned>;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
 
-    fn block(
-        &self,
-        response: alloy_rpc_types_eth::Block,
-    ) -> Result<Self::Block, RpcResponseConverterError> {
+    fn block(&self, response: Block) -> Result<Self::Block, RpcResponseConverterError> {
         Ok(response.into())
     }
 
     fn transaction(
         &self,
-        response: alloy_rpc_types_eth::Transaction,
+        response: Transaction,
     ) -> Result<Self::Transaction, RpcResponseConverterError> {
         Ok(response.into_inner().into())
     }
 
     fn receipt(
         &self,
-        response: alloy_rpc_types_eth::TransactionReceipt,
+        response: TransactionReceipt,
     ) -> Result<Self::Receipt, RpcResponseConverterError> {
         Ok(response.into_inner().into())
     }

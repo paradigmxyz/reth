@@ -51,13 +51,14 @@ use reth_provider::{
     TransactionVariant, TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
-use reth_rpc_convert::{EthRpcConverter, RpcResponseConverter};
+pub mod rpc_response;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
     ReceiptProviderIdExt, StatsReader,
 };
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput};
+pub use rpc_response::{EthRpcConverter, RpcResponseConverter};
 use std::{
     collections::BTreeMap,
     future::{Future, IntoFuture},
