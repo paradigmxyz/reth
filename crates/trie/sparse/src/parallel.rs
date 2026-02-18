@@ -254,6 +254,7 @@ impl SparseTrie for ParallelSparseTrie {
             .iter()
             .filter_map(|node| {
                 if node.path.len() == UPPER_TRIE_MAX_DEPTH &&
+                    reachable_subtries.get(path_subtrie_index_unchecked(&node.path)) &&
                     let SparseNode::Branch { blinded_mask, blinded_hashes, .. } = self
                         .upper_subtrie
                         .nodes
