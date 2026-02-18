@@ -152,11 +152,15 @@ impl<N: NodePrimitives> ExExHandle<N> {
                         return Poll::Ready(Ok(()))
                     }
                 }
-                // Do not handle [ExExNotification::ChainReorged] and
-                // [ExExNotification::ChainReverted] cases and always send the
-                // notification, because the ExEx should be aware of the reorgs and reverts lower
-                // than its finished height
-                ExExNotification::ChainReorged { .. } | ExExNotification::ChainReverted { .. } => {}
+                // Always send reorg/revert notifications, and reset finished_height because the
+                // ExEx will revert its state to an earlier block. Without resetting, subsequent
+                // ChainCommitted notifications could be incorrectly skipped if the new chain's tip
+                // is at or below the stale finished_height from the old chain.
+                ExExNotification::ChainReorged { old: chain, .. } |
+                ExExNotification::ChainReverted { old: chain } => {
+                    let safe_height = chain.fork_block();
+                    self.finished_height = Some(safe_height);
+                }
             }
         }
 
@@ -700,6 +704,22 @@ mod tests {
         // Do not drop the sender, otherwise the receiver will always return an error
         std::mem::forget(tx);
         ForkChoiceStream::new(rx)
+    }
+
+    /// Helper function to generate a deterministic block hash from a block number.
+    /// Makes test hashes easy to identify and debug.
+    fn block_hash(block_number: u64) -> B256 {
+        let mut bytes = [0u8; 32];
+        bytes[24..32].copy_from_slice(&block_number.to_be_bytes());
+        B256::new(bytes)
+    }
+
+    /// Helper function to generate a deterministic block hash for a specific chain.
+    /// The chain_id helps distinguish between different chains in reorg scenarios.
+    fn block_hash_for_chain(block_number: u64, chain_id: u8) -> B256 {
+        let mut bytes = [chain_id; 32];
+        bytes[24..32].copy_from_slice(&block_number.to_be_bytes());
+        B256::new(bytes)
     }
 
     #[tokio::test]
@@ -1304,6 +1324,194 @@ mod tests {
 
         // Ensure the notification ID was incremented
         assert_eq!(exex_handle.next_notification_id, 23);
+    }
+
+    #[tokio::test]
+    async fn test_reorg_resets_finished_height_to_safe_height() {
+        let provider_factory = create_test_provider_factory();
+        init_genesis(&provider_factory).unwrap();
+        let provider = BlockchainProvider::new(provider_factory).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Default::default(),
+            provider,
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+
+        // Set up: ExEx has processed up to block 100 on chain A
+        const CHAIN_A: u8 = 0xA0;
+        exex_handle.finished_height = Some(BlockNumHash::new(100, block_hash_for_chain(100, CHAIN_A)));
+
+        // Create blocks for a reorg scenario:
+        // Old chain (A): blocks 95-100
+        // New chain (B): blocks 95-98 (shorter chain)
+        const CHAIN_B: u8 = 0xB0;
+        let mut old_blocks = Vec::new();
+        let mut new_blocks = Vec::new();
+
+        // Parent block (94) - the fork point (common to both chains)
+        let parent_hash = block_hash(94);
+
+        // Create old chain blocks 95-100 (chain A)
+        for i in 95..=100 {
+            let mut block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+            block.set_block_number(i);
+            block.set_hash(block_hash_for_chain(i, CHAIN_A));
+            block.set_parent_hash(if i == 95 { parent_hash } else { block_hash_for_chain(i - 1, CHAIN_A) });
+            old_blocks.push(block);
+        }
+
+        // Create new chain blocks 95-98 (chain B)
+        for i in 95..=98 {
+            let mut block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+            block.set_block_number(i);
+            block.set_hash(block_hash_for_chain(i, CHAIN_B));
+            block.set_parent_hash(if i == 95 { parent_hash } else { block_hash_for_chain(i - 1, CHAIN_B) });
+            new_blocks.push(block);
+        }
+
+        let old_chain = Chain::new(old_blocks, Default::default(), Default::default());
+        let new_chain = Chain::new(new_blocks, Default::default(), Default::default());
+
+        let reorg_notification = ExExNotification::ChainReorged {
+            old: Arc::new(old_chain),
+            new: Arc::new(new_chain.clone()),
+        };
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // Send the reorg notification
+        match exex_handle.send(&mut cx, &(0, reorg_notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received = notifications.next().await.unwrap().unwrap();
+                assert_eq!(received, reorg_notification);
+            }
+            Poll::Pending | Poll::Ready(Err(_)) => {
+                panic!("Reorg notification should be sent successfully")
+            }
+        }
+
+        // Critical assertion: finished_height should be reset to the fork block (block 94)
+        assert_eq!(
+            exex_handle.finished_height,
+            Some(BlockNumHash::new(94, parent_hash)),
+            "finished_height should be reset to the safe height (fork block)"
+        );
+
+        // Now send a ChainCommitted notification for block 99 (next block after the new chain)
+        let mut block99: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        block99.set_block_number(99);
+        block99.set_hash(block_hash_for_chain(99, CHAIN_B));
+        block99.set_parent_hash(block_hash_for_chain(98, CHAIN_B)); // Parent is block 98 from new chain B
+
+        let commit_notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![block99], Default::default(), Default::default())),
+        };
+
+        // This is the key test: the notification should NOT be skipped even though
+        // finished_height.number (94) < commit_tip (99), proving the race condition is fixed
+        match exex_handle.send(&mut cx, &(1, commit_notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received = notifications.next().await.unwrap().unwrap();
+                assert_eq!(received, commit_notification, "Block 99 notification should be received, not skipped");
+            }
+            Poll::Pending | Poll::Ready(Err(_)) => {
+                panic!("Block 99 notification should be sent successfully")
+            }
+        }
+
+        // Verify the notification ID was incremented correctly
+        assert_eq!(exex_handle.next_notification_id, 2);
+    }
+
+    #[tokio::test]
+    async fn test_revert_resets_finished_height_to_safe_height() {
+        let provider_factory = create_test_provider_factory();
+        init_genesis(&provider_factory).unwrap();
+        let provider = BlockchainProvider::new(provider_factory).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Default::default(),
+            provider,
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+
+        // Set up: ExEx has processed up to block 100 on the original chain
+        const ORIGINAL_CHAIN: u8 = 0xA0;
+        exex_handle.finished_height = Some(BlockNumHash::new(100, block_hash_for_chain(100, ORIGINAL_CHAIN)));
+
+        // Create blocks 95-100 that will be reverted
+        let parent_hash = block_hash(94); // Block 94 - before the reverted section
+        let mut blocks = Vec::new();
+
+        for i in 95..=100 {
+            let mut block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+            block.set_block_number(i);
+            block.set_hash(block_hash_for_chain(i, ORIGINAL_CHAIN));
+            block.set_parent_hash(if i == 95 { parent_hash } else { block_hash_for_chain(i - 1, ORIGINAL_CHAIN) });
+            blocks.push(block);
+        }
+
+        let old_chain = Chain::new(blocks, Default::default(), Default::default());
+        let revert_notification = ExExNotification::ChainReverted { old: Arc::new(old_chain) };
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // Send the revert notification
+        match exex_handle.send(&mut cx, &(0, revert_notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received = notifications.next().await.unwrap().unwrap();
+                assert_eq!(received, revert_notification);
+            }
+            Poll::Pending | Poll::Ready(Err(_)) => {
+                panic!("Revert notification should be sent successfully")
+            }
+        }
+
+        // Critical assertion: finished_height should be reset to block 94 (before the reverted chain)
+        assert_eq!(
+            exex_handle.finished_height,
+            Some(BlockNumHash::new(94, parent_hash)),
+            "finished_height should be reset to the safe height (block before revert)"
+        );
+
+        // Now send a ChainCommitted notification for blocks 95-97 (new blocks on a different chain)
+        const NEW_CHAIN: u8 = 0xC0;
+        let mut new_blocks = Vec::new();
+        for i in 95..=97 {
+            let mut block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+            block.set_block_number(i);
+            block.set_hash(block_hash_for_chain(i, NEW_CHAIN));
+            block.set_parent_hash(if i == 95 { parent_hash } else { block_hash_for_chain(i - 1, NEW_CHAIN) });
+            new_blocks.push(block);
+        }
+
+        let commit_notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(new_blocks, Default::default(), Default::default())),
+        };
+
+        // The notification should NOT be skipped
+        match exex_handle.send(&mut cx, &(1, commit_notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received = notifications.next().await.unwrap().unwrap();
+                assert_eq!(received, commit_notification, "New blocks notification should be received after revert");
+            }
+            Poll::Pending | Poll::Ready(Err(_)) => {
+                panic!("New blocks notification should be sent successfully")
+            }
+        }
+
+        assert_eq!(exex_handle.next_notification_id, 2);
     }
 
     #[tokio::test]
