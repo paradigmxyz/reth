@@ -25,6 +25,7 @@ reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-rpc-convert.workspace = true
 reth-transaction-pool.workspace = true
+reth-tasks.workspace = true
 reth-tracing.workspace = true
 reth-config = { workspace = true, features = ["serde"] }
 reth-discv4.workspace = true
@@ -89,6 +90,9 @@ min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
+
+# Debug recording for sparse trie mutations
+trie-debug = []
 
 # Route supported tables to RocksDB instead of MDBX
 rocksdb = ["reth-storage-api/rocksdb"]

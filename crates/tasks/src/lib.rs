@@ -12,9 +12,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use crate::shutdown::{signal, GracefulShutdown, Shutdown, Signal};
-use dyn_clone::DynClone;
-use futures_util::future::BoxFuture;
+use crate::shutdown::{signal, Shutdown, Signal};
 use std::{
     any::Any,
     fmt::{Display, Formatter},
@@ -29,7 +27,6 @@ use std::{
 use tokio::{
     runtime::Handle,
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    task::JoinHandle,
 };
 use tracing::debug;
 
@@ -39,6 +36,14 @@ pub mod shutdown;
 
 #[cfg(feature = "rayon")]
 pub mod pool;
+#[cfg(feature = "rayon")]
+pub use pool::{Worker, WorkerPool};
+
+/// Lock-free ordered parallel iterator extension trait.
+#[cfg(feature = "rayon")]
+pub mod for_each_ordered;
+#[cfg(feature = "rayon")]
+pub use for_each_ordered::ForEachOrdered;
 
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
@@ -92,108 +97,6 @@ where
         .unwrap_or_else(|e| panic!("failed to spawn scoped thread {name:?}: {e}"))
 }
 
-/// A type that can spawn tasks.
-///
-/// The main purpose of this type is to abstract over [`Runtime`] so it's more convenient to
-/// provide default impls for testing.
-///
-///
-/// # Examples
-///
-/// Use the [`TokioTaskExecutor`] that spawns with [`tokio::task::spawn`]
-///
-/// ```
-/// # async fn t() {
-/// use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-/// let executor = TokioTaskExecutor::default();
-///
-/// let task = executor.spawn_task(Box::pin(async {
-///     // -- snip --
-/// }));
-/// task.await.unwrap();
-/// # }
-/// ```
-///
-/// Use the [`Runtime`] that spawns task directly onto the tokio runtime via the [Handle].
-///
-/// ```
-/// # use reth_tasks::Runtime;
-/// fn t() {
-///  use reth_tasks::TaskSpawner;
-/// let rt = tokio::runtime::Runtime::new().unwrap();
-/// let runtime = Runtime::with_existing_handle(rt.handle().clone()).unwrap();
-/// let task = TaskSpawner::spawn_task(&runtime, Box::pin(async {
-///     // -- snip --
-/// }));
-/// rt.block_on(task).unwrap();
-/// # }
-/// ```
-///
-/// The [`TaskSpawner`] trait is [`DynClone`] so `Box<dyn TaskSpawner>` are also `Clone`.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait TaskSpawner: Send + Sync + Unpin + std::fmt::Debug + DynClone {
-    /// Spawns the task onto the runtime.
-    /// See also [`Handle::spawn`].
-    fn spawn_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
-
-    /// This spawns a critical task onto the runtime.
-    fn spawn_critical_task(
-        &self,
-        name: &'static str,
-        fut: BoxFuture<'static, ()>,
-    ) -> JoinHandle<()>;
-
-    /// Spawns a blocking task onto the runtime.
-    fn spawn_blocking_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
-
-    /// This spawns a critical blocking task onto the runtime.
-    fn spawn_critical_blocking_task(
-        &self,
-        name: &'static str,
-        fut: BoxFuture<'static, ()>,
-    ) -> JoinHandle<()>;
-}
-
-dyn_clone::clone_trait_object!(TaskSpawner);
-
-/// An [`TaskSpawner`] that uses [`tokio::task::spawn`] to execute tasks
-#[derive(Debug, Clone, Default)]
-#[non_exhaustive]
-pub struct TokioTaskExecutor;
-
-impl TokioTaskExecutor {
-    /// Converts the instance to a boxed [`TaskSpawner`].
-    pub fn boxed(self) -> Box<dyn TaskSpawner + 'static> {
-        Box::new(self)
-    }
-}
-
-impl TaskSpawner for TokioTaskExecutor {
-    fn spawn_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        tokio::task::spawn(fut)
-    }
-
-    fn spawn_critical_task(
-        &self,
-        _name: &'static str,
-        fut: BoxFuture<'static, ()>,
-    ) -> JoinHandle<()> {
-        tokio::task::spawn(fut)
-    }
-
-    fn spawn_blocking_task(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        tokio::task::spawn_blocking(move || tokio::runtime::Handle::current().block_on(fut))
-    }
-
-    fn spawn_critical_blocking_task(
-        &self,
-        _name: &'static str,
-        fut: BoxFuture<'static, ()>,
-    ) -> JoinHandle<()> {
-        tokio::task::spawn_blocking(move || tokio::runtime::Handle::current().block_on(fut))
-    }
-}
-
 /// Monitors critical tasks for panics and manages graceful shutdown.
 ///
 /// The main purpose of this type is to be able to monitor if a critical task panicked, for
@@ -212,7 +115,8 @@ pub struct TaskManager {
     ///
     /// This is fired when dropped.
     signal: Option<Signal>,
-    /// How many [`GracefulShutdown`] tasks are currently active.
+    /// How many [`GracefulShutdown`](crate::shutdown::GracefulShutdown) tasks are currently
+    /// active.
     graceful_tasks: Arc<AtomicUsize>,
 }
 
@@ -322,32 +226,6 @@ pub(crate) enum TaskEvent {
     GracefulShutdown,
 }
 
-/// `TaskSpawner` with extended behaviour
-#[auto_impl::auto_impl(&, Arc)]
-pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
-    /// This spawns a critical task onto the runtime.
-    ///
-    /// If this task panics, the [`TaskManager`] is notified.
-    /// The [`TaskManager`] will wait until the given future has completed before shutting down.
-    fn spawn_critical_with_graceful_shutdown_signal<F>(
-        &self,
-        name: &'static str,
-        f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
-    where
-        F: std::future::Future<Output = ()> + Send + 'static;
-
-    /// This spawns a regular task onto the runtime.
-    ///
-    /// The [`TaskManager`] will wait until the given future has completed before shutting down.
-    fn spawn_with_graceful_shutdown_signal<F>(
-        &self,
-        f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
-    where
-        F: std::future::Future<Output = ()> + Send + 'static;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,28 +235,13 @@ mod tests {
     };
 
     #[test]
-    fn test_cloneable() {
-        #[derive(Clone)]
-        struct ExecutorWrapper {
-            _e: Box<dyn TaskSpawner>,
-        }
-
-        let executor: Box<dyn TaskSpawner> = Box::<TokioTaskExecutor>::default();
-        let _e = dyn_clone::clone_box(&*executor);
-
-        let e = ExecutorWrapper { _e };
-        let _e2 = e;
-    }
-
-    #[test]
     fn test_critical() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
+        let rt = Runtime::test();
         let handle = rt.take_task_manager_handle().unwrap();
 
         rt.spawn_critical_task("this is a critical task", async { panic!("intentionally panic") });
 
-        runtime.block_on(async move {
+        rt.handle().block_on(async move {
             let err_result = handle.await.unwrap();
             assert!(err_result.is_err(), "Expected TaskManager to return an error due to panic");
             let panicked_err = err_result.unwrap_err();
@@ -390,8 +253,7 @@ mod tests {
 
     #[test]
     fn test_manager_shutdown_critical() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
+        let rt = Runtime::test();
 
         let (signal, shutdown) = signal();
 
@@ -402,13 +264,12 @@ mod tests {
 
         rt.graceful_shutdown();
 
-        runtime.block_on(shutdown);
+        rt.handle().block_on(shutdown);
     }
 
     #[test]
     fn test_manager_shutdown() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
+        let rt = Runtime::test();
 
         let (signal, shutdown) = signal();
 
@@ -419,13 +280,12 @@ mod tests {
 
         rt.graceful_shutdown();
 
-        runtime.block_on(shutdown);
+        rt.handle().block_on(shutdown);
     }
 
     #[test]
     fn test_manager_graceful_shutdown() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
+        let rt = Runtime::test();
 
         let val = Arc::new(AtomicBool::new(false));
         let c = val.clone();
@@ -441,8 +301,7 @@ mod tests {
 
     #[test]
     fn test_manager_graceful_shutdown_many() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
+        let rt = Runtime::test();
 
         let counter = Arc::new(AtomicUsize::new(0));
         let num = 10;
@@ -461,8 +320,7 @@ mod tests {
 
     #[test]
     fn test_manager_graceful_shutdown_timeout() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
+        let rt = Runtime::test();
 
         let timeout = Duration::from_millis(500);
         let val = Arc::new(AtomicBool::new(false));
@@ -480,15 +338,13 @@ mod tests {
 
     #[test]
     fn can_build_runtime() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
+        let rt = Runtime::test();
         let _handle = rt.handle();
     }
 
     #[test]
     fn test_graceful_shutdown_triggered_by_executor() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
+        let rt = Runtime::test();
         let task_manager_handle = rt.take_task_manager_handle().unwrap();
 
         let task_did_shutdown_flag = Arc::new(AtomicBool::new(false));
@@ -502,11 +358,11 @@ mod tests {
         let send_result = rt.initiate_graceful_shutdown();
         assert!(send_result.is_ok());
 
-        let manager_final_result = runtime.block_on(task_manager_handle);
+        let manager_final_result = rt.handle().block_on(task_manager_handle);
         assert!(manager_final_result.is_ok(), "TaskManager task should not panic");
         assert_eq!(manager_final_result.unwrap(), Ok(()));
 
-        let task_join_result = runtime.block_on(spawned_task_handle);
+        let task_join_result = rt.handle().block_on(spawned_task_handle);
         assert!(task_join_result.is_ok());
 
         assert!(task_did_shutdown_flag.load(Ordering::Relaxed));
