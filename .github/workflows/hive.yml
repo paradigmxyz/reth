@@ -58,45 +58,45 @@ jobs:
       artifact_name: reth-edge
     secrets: inherit
 
-prepare-hive:
-  needs: detect-env
-  timeout-minutes: 45
-  runs-on: ubuntu-latest   # IMPORTANT: works on forks
-  steps:
-    - uses: actions/checkout@v6
+  prepare-hive:
+    needs: detect-env
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
 
-    - uses: actions/checkout@v6
-      with:
-        repository: ethereum/hive
-        path: hivetests
+      - uses: actions/checkout@v6
+        with:
+          repository: ethereum/hive
+          path: hivetests
 
-    - id: hive-commit
-      run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - id: hive-commit
+        run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-    - uses: actions/setup-go@v6
-      with:
-        go-version: "^1.13.1"
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "^1.13.1"
 
-    - uses: actions/cache@v5
-      id: cache-hive
-      with:
-        path: hive_assets
-        key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/scripts/hive/build_simulators.sh') }}
+      - uses: actions/cache@v5
+        id: cache-hive
+        with:
+          path: hive_assets
+          key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/scripts/hive/build_simulators.sh') }}
 
-    - if: steps.cache-hive.outputs.cache-hit != 'true'
-      run: .github/scripts/hive/build_simulators.sh
+      - if: steps.cache-hive.outputs.cache-hit != 'true'
+        run: .github/scripts/hive/build_simulators.sh
 
-    - if: steps.cache-hive.outputs.cache-hit == 'true'
-      run: |
-        cd hive_assets
-        for f in *.tar; do docker load -i "$f"; done
-        chmod +x hive
+      - if: steps.cache-hive.outputs.cache-hit == 'true'
+        run: |
+          cd hive_assets
+          for f in *.tar; do docker load -i "$f"; done
+          chmod +x hive
 
-    - uses: actions/upload-artifact@v6
-      with:
-        name: hive_assets
-        path: hive_assets
- 
+      - uses: actions/upload-artifact@v6
+        with:
+          name: hive_assets
+          path: hive_assets
+
           
 
   # --------------------------------------------------
