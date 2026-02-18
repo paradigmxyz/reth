@@ -102,18 +102,26 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
 // === impl NetworkConfig ===
 
 impl<N: NetworkPrimitives> NetworkConfig<(), N> {
-    /// Convenience method for creating the corresponding builder type.
-    pub fn builder(secret_key: SecretKey, executor: Runtime) -> NetworkConfigBuilder<N> {
-        NetworkConfigBuilder::new(secret_key, executor)
+    /// Convenience method for creating the corresponding builder type
+    pub fn builder(secret_key: SecretKey) -> NetworkConfigBuilder<N> {
+        NetworkConfigBuilder::new(secret_key)
     }
 
     /// Convenience method for creating the corresponding builder type with a random secret key.
-    pub fn builder_with_rng_secret_key(executor: Runtime) -> NetworkConfigBuilder<N> {
-        NetworkConfigBuilder::with_rng_secret_key(executor)
+    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder<N> {
+        NetworkConfigBuilder::with_rng_secret_key()
     }
 }
 
 impl<C, N: NetworkPrimitives> NetworkConfig<C, N> {
+    /// Create a new instance with all mandatory fields set, rest is field with defaults.
+    pub fn new(client: C, secret_key: SecretKey) -> Self
+    where
+        C: ChainSpecProvider<ChainSpec: Hardforks>,
+    {
+        NetworkConfig::builder(secret_key).build(client)
+    }
+
     /// Apply a function to the config.
     pub fn apply<F>(self, f: F) -> Self
     where
@@ -198,7 +206,7 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The default mode of the network.
     network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
-    executor: Runtime,
+    executor: Option<Runtime>,
     /// Sets the hello message for the p2p handshake in `RLPx`
     hello_message: Option<HelloMessageWithProtocols>,
     /// The executor to use for spawning tasks.
@@ -224,8 +232,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
     /// Creates the `NetworkConfigBuilder` with [`EthNetworkPrimitives`] types.
-    pub fn eth(secret_key: SecretKey, executor: Runtime) -> Self {
-        Self::new(secret_key, executor)
+    pub fn eth(secret_key: SecretKey) -> Self {
+        Self::new(secret_key)
     }
 }
 
@@ -234,12 +242,12 @@ impl NetworkConfigBuilder<EthNetworkPrimitives> {
 #[expect(missing_docs)]
 impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// Create a new builder instance with a random secret key.
-    pub fn with_rng_secret_key(executor: Runtime) -> Self {
-        Self::new(rng_secret_key(), executor)
+    pub fn with_rng_secret_key() -> Self {
+        Self::new(rng_secret_key())
     }
 
     /// Create a new builder instance with the given secret key.
-    pub fn new(secret_key: SecretKey, executor: Runtime) -> Self {
+    pub fn new(secret_key: SecretKey) -> Self {
         Self {
             secret_key,
             dns_discovery_config: Some(Default::default()),
@@ -251,7 +259,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             peers_config: None,
             sessions_config: None,
             network_mode: Default::default(),
-            executor,
+            executor: None,
             hello_message: None,
             extra_protocols: Default::default(),
             head: None,
@@ -332,8 +340,10 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     }
 
     /// Sets the executor to use for spawning tasks.
+    ///
+    /// If `None`, then [`tokio::spawn`] is used for spawning tasks.
     pub fn with_task_executor(mut self, executor: Runtime) -> Self {
-        self.executor = executor;
+        self.executor = Some(executor);
         self
     }
 
@@ -681,7 +691,11 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             chain_id,
             block_import: block_import.unwrap_or_else(|| Box::<ProofOfStakeBlockImport>::default()),
             network_mode,
-            executor,
+            executor: executor.unwrap_or_else(|| match tokio::runtime::Handle::try_current() {
+                Ok(handle) => Runtime::with_existing_handle(handle)
+                    .expect("failed to create runtime with existing handle"),
+                Err(_) => Runtime::test(),
+            }),
             status,
             hello_message,
             extra_protocols,
@@ -735,7 +749,7 @@ mod tests {
 
     fn builder() -> NetworkConfigBuilder {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        NetworkConfigBuilder::new(secret_key, Runtime::test())
+        NetworkConfigBuilder::new(secret_key)
     }
 
     #[test]

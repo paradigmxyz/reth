@@ -39,7 +39,6 @@ use reth_network::{
     HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives,
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
-use reth_tasks::Runtime;
 use secp256k1::SecretKey;
 use std::str::FromStr;
 use tracing::error;
@@ -327,7 +326,6 @@ impl NetworkArgs {
         chain_spec: impl EthChainSpec,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
-        executor: Runtime,
     ) -> NetworkConfigBuilder<N> {
         let addr = self.resolved_addr();
         let chain_bootnodes = self
@@ -347,7 +345,7 @@ impl NetworkArgs {
             .with_enforce_enr_fork_id(self.enforce_enr_fork_id);
 
         // Configure basic network stack
-        NetworkConfigBuilder::<N>::new(secret_key, executor)
+        NetworkConfigBuilder::<N>::new(secret_key)
             .external_ip_resolver(self.nat.clone())
             .sessions_config(
                 config.sessions.clone().with_upscaled_event_buffer(peers_config.max_peers()),
@@ -1099,7 +1097,6 @@ mod tests {
             MAINNET.clone(),
             secret_key,
             peers_file.clone(),
-            Runtime::test(),
         );
 
         let net_cfg = builder.build_with_noop_provider(MAINNET.clone());

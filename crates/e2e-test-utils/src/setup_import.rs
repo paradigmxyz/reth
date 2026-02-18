@@ -15,6 +15,7 @@ use reth_provider::{
 };
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_stages_types::StageId;
+use reth_tasks::Runtime;
 use std::{path::Path, sync::Arc};
 use tempfile::TempDir;
 use tracing::{debug, info, span, Level};
@@ -65,7 +66,7 @@ pub async fn setup_engine_with_chain_import(
         + Copy
         + 'static,
 ) -> eyre::Result<ChainImportResult> {
-    let runtime = reth_tasks::Runtime::test();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
 
     let network_config = NetworkArgs {
         discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
@@ -148,7 +149,6 @@ pub async fn setup_engine_with_chain_import(
             &config,
             evm_config,
             consensus,
-            runtime.clone(),
         )
         .await?;
 
@@ -343,7 +343,6 @@ mod tests {
             let evm_config = reth_node_ethereum::EthEvmConfig::new(chain_spec.clone());
             // Use NoopConsensus to skip gas limit validation for test imports
             let consensus = reth_consensus::noop::NoopConsensus::arc();
-            let runtime = reth_tasks::Runtime::test();
 
             let result = import_blocks_from_file(
                 &rlp_path,
@@ -352,7 +351,6 @@ mod tests {
                 &config,
                 evm_config,
                 consensus,
-                runtime,
             )
             .await
             .unwrap();
@@ -511,7 +509,6 @@ mod tests {
         let evm_config = reth_node_ethereum::EthEvmConfig::new(chain_spec.clone());
         // Use NoopConsensus to skip gas limit validation for test imports
         let consensus = reth_consensus::noop::NoopConsensus::arc();
-        let runtime = reth_tasks::Runtime::test();
 
         let result = import_blocks_from_file(
             &rlp_path,
@@ -520,7 +517,6 @@ mod tests {
             &config,
             evm_config,
             consensus,
-            runtime,
         )
         .await
         .unwrap();

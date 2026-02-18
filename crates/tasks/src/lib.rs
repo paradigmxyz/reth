@@ -236,12 +236,13 @@ mod tests {
 
     #[test]
     fn test_critical() {
-        let rt = Runtime::test();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
         let handle = rt.take_task_manager_handle().unwrap();
 
         rt.spawn_critical_task("this is a critical task", async { panic!("intentionally panic") });
 
-        rt.handle().block_on(async move {
+        runtime.block_on(async move {
             let err_result = handle.await.unwrap();
             assert!(err_result.is_err(), "Expected TaskManager to return an error due to panic");
             let panicked_err = err_result.unwrap_err();
@@ -253,7 +254,8 @@ mod tests {
 
     #[test]
     fn test_manager_shutdown_critical() {
-        let rt = Runtime::test();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
 
         let (signal, shutdown) = signal();
 
@@ -264,12 +266,13 @@ mod tests {
 
         rt.graceful_shutdown();
 
-        rt.handle().block_on(shutdown);
+        runtime.block_on(shutdown);
     }
 
     #[test]
     fn test_manager_shutdown() {
-        let rt = Runtime::test();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
 
         let (signal, shutdown) = signal();
 
@@ -280,12 +283,13 @@ mod tests {
 
         rt.graceful_shutdown();
 
-        rt.handle().block_on(shutdown);
+        runtime.block_on(shutdown);
     }
 
     #[test]
     fn test_manager_graceful_shutdown() {
-        let rt = Runtime::test();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
 
         let val = Arc::new(AtomicBool::new(false));
         let c = val.clone();
@@ -301,7 +305,8 @@ mod tests {
 
     #[test]
     fn test_manager_graceful_shutdown_many() {
-        let rt = Runtime::test();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
 
         let counter = Arc::new(AtomicUsize::new(0));
         let num = 10;
@@ -320,7 +325,8 @@ mod tests {
 
     #[test]
     fn test_manager_graceful_shutdown_timeout() {
-        let rt = Runtime::test();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
 
         let timeout = Duration::from_millis(500);
         let val = Arc::new(AtomicBool::new(false));
@@ -338,13 +344,15 @@ mod tests {
 
     #[test]
     fn can_build_runtime() {
-        let rt = Runtime::test();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
         let _handle = rt.handle();
     }
 
     #[test]
     fn test_graceful_shutdown_triggered_by_executor() {
-        let rt = Runtime::test();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let rt = Runtime::with_existing_handle(runtime.handle().clone()).unwrap();
         let task_manager_handle = rt.take_task_manager_handle().unwrap();
 
         let task_did_shutdown_flag = Arc::new(AtomicBool::new(false));
@@ -358,11 +366,11 @@ mod tests {
         let send_result = rt.initiate_graceful_shutdown();
         assert!(send_result.is_ok());
 
-        let manager_final_result = rt.handle().block_on(task_manager_handle);
+        let manager_final_result = runtime.block_on(task_manager_handle);
         assert!(manager_final_result.is_ok(), "TaskManager task should not panic");
         assert_eq!(manager_final_result.unwrap(), Ok(()));
 
-        let task_join_result = rt.handle().block_on(spawned_task_handle);
+        let task_join_result = runtime.block_on(spawned_task_handle);
         assert!(task_join_result.is_ok());
 
         assert!(task_did_shutdown_flag.load(Ordering::Relaxed));

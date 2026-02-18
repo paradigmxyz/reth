@@ -24,7 +24,7 @@ use std::{sync::Arc, time::Duration};
 #[tokio::test]
 async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -97,7 +97,7 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
 #[tokio::test]
 async fn maintain_txpool_reorg() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -229,7 +229,7 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
 #[tokio::test]
 async fn maintain_txpool_commit() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
+    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
 
     let txpool = Pool::new(
         OkValidator::default(),

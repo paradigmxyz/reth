@@ -47,11 +47,6 @@ impl CliRunner {
         self
     }
 
-    /// Returns a clone of the underlying [`Runtime`](reth_tasks::Runtime).
-    pub fn runtime(&self) -> reth_tasks::Runtime {
-        self.runtime.clone()
-    }
-
     /// Executes an async block on the runtime and blocks until completion.
     pub fn block_on<F, T>(&self, fut: F) -> T
     where

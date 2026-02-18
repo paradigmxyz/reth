@@ -24,7 +24,6 @@ use reth_ethereum::{
         BlockDownloaderProvider, FetchClient, NetworkConfig, NetworkEventListenerProvider,
         NetworkHandle, NetworkInfo, NetworkManager, Peers,
     },
-    tasks::Runtime,
 };
 
 #[tokio::main]
@@ -35,8 +34,7 @@ async fn main() -> eyre::Result<()> {
     let local_key = rng_secret_key();
 
     // Configure the network
-    let config =
-        NetworkConfig::builder(local_key, Runtime::test()).build_with_noop_provider(DEV.clone());
+    let config = NetworkConfig::builder(local_key).build_with_noop_provider(DEV.clone());
 
     let (requests_tx, mut requests_rx) = tokio::sync::mpsc::channel(1000);
     let (transactions_tx, mut transactions_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -109,7 +107,7 @@ async fn main() -> eyre::Result<()> {
 /// first peer.
 async fn run_peer(handle: NetworkHandle) -> eyre::Result<()> {
     // create another peer
-    let config = NetworkConfig::builder(rng_secret_key(), Runtime::test())
+    let config = NetworkConfig::builder(rng_secret_key())
         // use random ports
         .with_unused_ports()
         .build_with_noop_provider(DEV.clone());

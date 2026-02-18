@@ -985,8 +985,8 @@ impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext
                 self.config().chain.clone(),
                 secret_key,
                 default_peers_path,
-                self.executor.clone(),
             )
+            .with_task_executor(self.executor.clone())
             .set_head(self.head);
 
         Ok(builder)

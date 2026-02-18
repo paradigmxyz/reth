@@ -351,25 +351,15 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Sets the current block info for the pool.
     ///
-    /// This will also apply updates to the pool based on the new base fee and blob fee.
-    ///
-    /// Returns the outcome containing any transactions that were promoted due to fee changes.
-    pub fn set_block_info(&mut self, info: BlockInfo) -> UpdateOutcome<T::Transaction> {
-        let mut outcome = UpdateOutcome::default();
-
-        // first update the subpools based on the new values, collecting promoted transactions
-        let basefee_ordering = self.update_basefee(info.pending_basefee, |tx| {
-            outcome.promoted.push(tx.clone());
-        });
+    /// This will also apply updates to the pool based on the new base fee and blob fee
+    pub fn set_block_info(&mut self, info: BlockInfo) {
+        // first update the subpools based on the new values
+        let basefee_ordering = self.update_basefee(info.pending_basefee, |_| {});
         if let Some(blob_fee) = info.pending_blob_fee {
-            self.update_blob_fee(blob_fee, basefee_ordering, |tx| {
-                outcome.promoted.push(tx.clone());
-            })
+            self.update_blob_fee(blob_fee, basefee_ordering, |_| {})
         }
         // then update tracked values
         self.all_transactions.set_block_info(info);
-
-        outcome
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with

@@ -271,15 +271,11 @@ where
                             .flatten();
                         logs_utils::get_filter_block_range(from, to, start_block, info)?
                     }
-                    FilterBlockOption::AtBlockHash(block_hash) => {
+                    FilterBlockOption::AtBlockHash(_) => {
                         // blockHash is equivalent to fromBlock = toBlock = the block number with
                         // hash blockHash
                         // get_logs_in_block_range is inclusive
-                        let block_number = self
-                            .provider()
-                            .block_number(block_hash)?
-                            .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
-                        (block_number, block_number)
+                        (start_block, best_number)
                     }
                 };
                 let logs = self
@@ -762,26 +758,6 @@ impl<T> ActiveFilters<T> {
     /// Returns an empty instance.
     pub fn new() -> Self {
         Self { inner: Arc::new(Mutex::new(HashMap::default())) }
-    }
-
-    /// Returns `true` if a filter with the given id exists.
-    pub async fn contains(&self, id: &FilterId) -> bool {
-        self.inner.lock().await.contains_key(id)
-    }
-
-    /// Returns the number of currently active filters.
-    pub async fn len(&self) -> usize {
-        self.inner.lock().await.len()
-    }
-
-    /// Returns `true` if there are no active filters.
-    pub async fn is_empty(&self) -> bool {
-        self.inner.lock().await.is_empty()
-    }
-
-    /// Returns all active filter ids.
-    pub async fn ids(&self) -> Vec<FilterId> {
-        self.inner.lock().await.keys().cloned().collect()
     }
 }
 

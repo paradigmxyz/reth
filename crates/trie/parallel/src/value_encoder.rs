@@ -1,4 +1,4 @@
-use crate::proof_task::StorageProofResultMessage;
+use crate::proof_task::{StorageProofResult, StorageProofResultMessage};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
@@ -109,7 +109,11 @@ impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
 
                 stats.borrow_mut().storage_wait_time += wait_start.elapsed();
 
-                storage_proof_results.borrow_mut().insert(*hashed_address, result.proof);
+                let StorageProofResult::V2 { proof, .. } = result else {
+                    panic!("StorageProofResult is not V2: {result:?}")
+                };
+
+                storage_proof_results.borrow_mut().insert(*hashed_address, proof);
                 Ok(())
             })()
         } else {
@@ -155,9 +159,13 @@ where
                     .result?;
                 stats.borrow_mut().storage_wait_time += wait_start.elapsed();
 
-                storage_proof_results.borrow_mut().insert(hashed_address, result.proof);
+                let StorageProofResult::V2 { root, proof } = result else {
+                    panic!("StorageProofResult is not V2: {result:?}")
+                };
 
-                let root = match result.root {
+                storage_proof_results.borrow_mut().insert(hashed_address, proof);
+
+                let root = match root {
                     Some(root) => root,
                     None => {
                         // In `compute_v2_account_multiproof` we ensure that all dispatched storage
@@ -282,7 +290,11 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
                 .result?;
             stats.storage_wait_time += wait_start.elapsed();
 
-            storage_proof_results.insert(*hashed_address, result.proof);
+            let StorageProofResult::V2 { proof, .. } = result else {
+                panic!("StorageProofResult is not V2: {result:?}")
+            };
+
+            storage_proof_results.insert(*hashed_address, proof);
         }
 
         Ok((storage_proof_results, stats))

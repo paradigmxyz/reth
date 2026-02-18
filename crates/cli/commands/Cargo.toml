@@ -43,7 +43,7 @@ reth-node-metrics.workspace = true
 reth-ethereum-primitives = { workspace = true, optional = true }
 reth-provider.workspace = true
 reth-prune.workspace = true
-reth-prune-types.workspace = true
+reth-prune-types = { workspace = true, optional = true }
 reth-revm.workspace = true
 reth-stages.workspace = true
 reth-stages-types = { workspace = true, optional = true }
@@ -125,7 +125,7 @@ arbitrary = [
     "reth-stages-types/test-utils",
     "reth-trie-common/test-utils",
     "reth-codecs/arbitrary",
-    "reth-prune-types/arbitrary",
+    "reth-prune-types?/arbitrary",
     "reth-stages-types?/arbitrary",
     "reth-trie-common/arbitrary",
     "alloy-consensus/arbitrary",

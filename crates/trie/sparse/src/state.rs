@@ -1322,31 +1322,18 @@ mod tests {
         TrieMask,
     };
 
-    /// Create a leaf key (suffix) with given nibbles padded with zeros to reach `total_len`.
-    fn leaf_key(suffix: impl AsRef<[u8]>, total_len: usize) -> Nibbles {
-        let suffix = suffix.as_ref();
-        let mut nibbles = Nibbles::from_nibbles(suffix);
-        nibbles.extend(&Nibbles::from_nibbles_unchecked(vec![0; total_len - suffix.len()]));
-        nibbles
-    }
-
     #[test]
     fn reveal_account_path_twice() {
         let provider_factory = DefaultTrieNodeProviderFactory;
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
-        // Full 64-nibble paths
-        let full_path_0 = leaf_key([0x0], 64);
-        let _full_path_1 = leaf_key([0x1], 64);
-
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        // Leaf key is 63 nibbles (suffix after 1-nibble node path)
         let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            leaf_key([], 63),
+            Nibbles::default(),
             leaf_value.clone(),
         )));
         let leaf_2 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            leaf_key([], 63),
+            Nibbles::default(),
             leaf_value.clone(),
         )));
 
@@ -1371,31 +1358,39 @@ mod tests {
         // Reveal multiproof and check that the state trie contains the leaf node and value
         sparse.reveal_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
         assert!(matches!(
-            sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
+            sparse.state_trie_ref().unwrap().find_leaf(&Nibbles::from_nibbles([0x0]), None),
             Ok(LeafLookup::Exists)
         ));
         assert_eq!(
-            sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0),
+            sparse.state_trie_ref().unwrap().get_leaf_value(&Nibbles::from_nibbles([0x0])),
             Some(&leaf_value)
         );
 
         // Remove the leaf node and check that the state trie does not contain the leaf node and
         // value
-        sparse.remove_account_leaf(&full_path_0, &provider_factory).unwrap();
+        sparse.remove_account_leaf(&Nibbles::from_nibbles([0x0]), &provider_factory).unwrap();
         assert!(matches!(
-            sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
+            sparse.state_trie_ref().unwrap().find_leaf(&Nibbles::from_nibbles([0x0]), None),
             Ok(LeafLookup::NonExistent)
         ));
-        assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
+        assert!(sparse
+            .state_trie_ref()
+            .unwrap()
+            .get_leaf_value(&Nibbles::from_nibbles([0x0]))
+            .is_none());
 
         // Reveal multiproof again and check that the state trie still does not contain the leaf
         // node and value, because they were already revealed before
         sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
         assert!(matches!(
-            sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
+            sparse.state_trie_ref().unwrap().find_leaf(&Nibbles::from_nibbles([0x0]), None),
             Ok(LeafLookup::NonExistent)
         ));
-        assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
+        assert!(sparse
+            .state_trie_ref()
+            .unwrap()
+            .get_leaf_value(&Nibbles::from_nibbles([0x0]))
+            .is_none());
     }
 
     #[test]
@@ -1403,16 +1398,13 @@ mod tests {
         let provider_factory = DefaultTrieNodeProviderFactory;
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
-        // Full 64-nibble path
-        let full_path_0 = leaf_key([0x0], 64);
-
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            leaf_key([], 63),
+            Nibbles::default(),
             leaf_value.clone(),
         )));
         let leaf_2 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            leaf_key([], 63),
+            Nibbles::default(),
             leaf_value.clone(),
         )));
 
@@ -1444,38 +1436,52 @@ mod tests {
         // Reveal multiproof and check that the storage trie contains the leaf node and value
         sparse.reveal_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
         assert!(matches!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
+            sparse
+                .storage_trie_ref(&B256::ZERO)
+                .unwrap()
+                .find_leaf(&Nibbles::from_nibbles([0x0]), None),
             Ok(LeafLookup::Exists)
         ));
         assert_eq!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf_value(&full_path_0),
+            sparse
+                .storage_trie_ref(&B256::ZERO)
+                .unwrap()
+                .get_leaf_value(&Nibbles::from_nibbles([0x0])),
             Some(&leaf_value)
         );
 
         // Remove the leaf node and check that the storage trie does not contain the leaf node and
         // value
-        sparse.remove_storage_leaf(B256::ZERO, &full_path_0, &provider_factory).unwrap();
+        sparse
+            .remove_storage_leaf(B256::ZERO, &Nibbles::from_nibbles([0x0]), &provider_factory)
+            .unwrap();
         assert!(matches!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
+            sparse
+                .storage_trie_ref(&B256::ZERO)
+                .unwrap()
+                .find_leaf(&Nibbles::from_nibbles([0x0]), None),
             Ok(LeafLookup::NonExistent)
         ));
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
-            .get_leaf_value(&full_path_0)
+            .get_leaf_value(&Nibbles::from_nibbles([0x0]))
             .is_none());
 
         // Reveal multiproof again and check that the storage trie still does not contain the leaf
         // node and value, because they were already revealed before
         sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
         assert!(matches!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
+            sparse
+                .storage_trie_ref(&B256::ZERO)
+                .unwrap()
+                .find_leaf(&Nibbles::from_nibbles([0x0]), None),
             Ok(LeafLookup::NonExistent)
         ));
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
-            .get_leaf_value(&full_path_0)
+            .get_leaf_value(&Nibbles::from_nibbles([0x0]))
             .is_none());
     }
 
@@ -1484,12 +1490,9 @@ mod tests {
         let provider_factory = DefaultTrieNodeProviderFactory;
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
-        // Full 64-nibble path
-        let full_path_0 = leaf_key([0x0], 64);
-
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
-        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
+        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), leaf_value.clone()));
+        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), leaf_value.clone()));
 
         let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
             key: Nibbles::default(),
@@ -1520,21 +1523,29 @@ mod tests {
 
         // Check that the state trie contains the leaf node and value
         assert!(matches!(
-            sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
+            sparse.state_trie_ref().unwrap().find_leaf(&Nibbles::from_nibbles([0x0]), None),
             Ok(LeafLookup::Exists)
         ));
         assert_eq!(
-            sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0),
+            sparse.state_trie_ref().unwrap().get_leaf_value(&Nibbles::from_nibbles([0x0])),
             Some(&leaf_value)
         );
 
         // Remove the leaf node
-        sparse.remove_account_leaf(&full_path_0, &provider_factory).unwrap();
-        assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
+        sparse.remove_account_leaf(&Nibbles::from_nibbles([0x0]), &provider_factory).unwrap();
+        assert!(sparse
+            .state_trie_ref()
+            .unwrap()
+            .get_leaf_value(&Nibbles::from_nibbles([0x0]))
+            .is_none());
 
         // Reveal again - should skip already revealed paths
         sparse.reveal_account_v2_proof_nodes(v2_proof_nodes).unwrap();
-        assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
+        assert!(sparse
+            .state_trie_ref()
+            .unwrap()
+            .get_leaf_value(&Nibbles::from_nibbles([0x0]))
+            .is_none());
     }
 
     #[test]
@@ -1542,12 +1553,11 @@ mod tests {
         let provider_factory = DefaultTrieNodeProviderFactory;
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
-        // Full 64-nibble path
-        let full_path_0 = leaf_key([0x0], 64);
-
         let storage_value: Vec<u8> = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
-        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.clone()));
-        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.clone()));
+        let leaf_1_node =
+            TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), storage_value.clone()));
+        let leaf_2_node =
+            TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), storage_value.clone()));
 
         let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
             key: Nibbles::default(),
@@ -1570,20 +1580,28 @@ mod tests {
 
         // Check that the storage trie contains the leaf node and value
         assert!(matches!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
+            sparse
+                .storage_trie_ref(&B256::ZERO)
+                .unwrap()
+                .find_leaf(&Nibbles::from_nibbles([0x0]), None),
             Ok(LeafLookup::Exists)
         ));
         assert_eq!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf_value(&full_path_0),
+            sparse
+                .storage_trie_ref(&B256::ZERO)
+                .unwrap()
+                .get_leaf_value(&Nibbles::from_nibbles([0x0])),
             Some(&storage_value)
         );
 
         // Remove the leaf node
-        sparse.remove_storage_leaf(B256::ZERO, &full_path_0, &provider_factory).unwrap();
+        sparse
+            .remove_storage_leaf(B256::ZERO, &Nibbles::from_nibbles([0x0]), &provider_factory)
+            .unwrap();
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
-            .get_leaf_value(&full_path_0)
+            .get_leaf_value(&Nibbles::from_nibbles([0x0]))
             .is_none());
 
         // Reveal again - should skip already revealed paths
@@ -1591,7 +1609,7 @@ mod tests {
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
-            .get_leaf_value(&full_path_0)
+            .get_leaf_value(&Nibbles::from_nibbles([0x0]))
             .is_none());
     }
 

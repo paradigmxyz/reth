@@ -133,7 +133,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::NodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(MessageError::Invalid(version, EthMessageID::NodeData))
+                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
                 }
                 EthMessage::NodeData(RequestPair::decode(buf)?)
             }

@@ -37,11 +37,11 @@ pub struct Command<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser> Command<C> {
     /// Execute `db` command
-    pub async fn execute<N: CliNodeTypes>(self, runtime: reth_tasks::Runtime) -> eyre::Result<()>
+    pub async fn execute<N: CliNodeTypes>(self) -> eyre::Result<()>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW, runtime)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let tool = DbTool::new(provider_factory)?;
 

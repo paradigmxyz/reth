@@ -44,11 +44,11 @@ pub struct ExportArgs {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraCommand<C> {
     /// Execute `export-era` command
-    pub async fn execute<N>(self, runtime: reth_tasks::Runtime) -> eyre::Result<()>
+    pub async fn execute<N>(self) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO, runtime)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
 
         // Either specified path or default to `<data-dir>/<chain>/era1-export/`
         let data_dir = match &self.export.path {

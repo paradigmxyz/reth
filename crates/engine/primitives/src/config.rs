@@ -39,6 +39,11 @@ pub const SMALL_BLOCK_MULTIPROOF_CHUNK_SIZE: usize = 30;
 /// Gas threshold below which the small block chunk size is used.
 pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
 
+/// The size of proof targets chunk to spawn in one multiproof calculation when V2 proofs are
+/// enabled. This is 4x the default chunk size to take advantage of more efficient V2 proof
+/// computation.
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2: usize = DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE * 4;
+
 /// Default number of reserved CPU cores for non-reth processes.
 ///
 /// This will be deducted from the thread count of main reth global threadpool.
@@ -157,8 +162,12 @@ pub struct TreeConfig {
     storage_worker_count: usize,
     /// Number of account proof worker threads.
     account_worker_count: usize,
+    /// Whether to disable V2 storage proofs.
+    disable_proof_v2: bool,
     /// Whether to disable cache metrics recording (can be expensive with large cached state).
     disable_cache_metrics: bool,
+    /// Whether to disable sparse trie cache.
+    disable_trie_cache: bool,
     /// Depth for sparse trie pruning after state root computation.
     sparse_trie_prune_depth: usize,
     /// Maximum number of storage tries to retain after pruning.
@@ -196,7 +205,9 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
+            disable_proof_v2: false,
             disable_cache_metrics: false,
+            disable_trie_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
             disable_sparse_trie_cache_pruning: false,
@@ -230,6 +241,7 @@ impl TreeConfig {
         allow_unwind_canonical_header: bool,
         storage_worker_count: usize,
         account_worker_count: usize,
+        disable_proof_v2: bool,
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
         sparse_trie_max_storage_tries: usize,
@@ -257,7 +269,9 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
+            disable_proof_v2,
             disable_cache_metrics,
+            disable_trie_cache: false,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
             disable_sparse_trie_cache_pruning: false,
@@ -300,9 +314,16 @@ impl TreeConfig {
         self.multiproof_chunk_size
     }
 
-    /// Return the effective multiproof task chunk size.
+    /// Return the multiproof task chunk size, using the V2 default if V2 proofs are enabled
+    /// and the chunk size is at the default value.
     pub const fn effective_multiproof_chunk_size(&self) -> usize {
-        self.multiproof_chunk_size
+        if !self.disable_proof_v2 &&
+            self.multiproof_chunk_size == DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE
+        {
+            DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2
+        } else {
+            self.multiproof_chunk_size
+        }
     }
 
     /// Return the number of reserved CPU cores for non-reth processes
@@ -538,6 +559,17 @@ impl TreeConfig {
         self
     }
 
+    /// Return whether V2 storage proofs are disabled.
+    pub const fn disable_proof_v2(&self) -> bool {
+        self.disable_proof_v2
+    }
+
+    /// Setter for whether to disable V2 storage proofs.
+    pub const fn with_disable_proof_v2(mut self, disable_proof_v2: bool) -> Self {
+        self.disable_proof_v2 = disable_proof_v2;
+        self
+    }
+
     /// Returns whether cache metrics recording is disabled.
     pub const fn disable_cache_metrics(&self) -> bool {
         self.disable_cache_metrics
@@ -546,6 +578,17 @@ impl TreeConfig {
     /// Setter for whether to disable cache metrics recording.
     pub const fn without_cache_metrics(mut self, disable_cache_metrics: bool) -> Self {
         self.disable_cache_metrics = disable_cache_metrics;
+        self
+    }
+
+    /// Returns whether sparse trie cache is disabled.
+    pub const fn disable_trie_cache(&self) -> bool {
+        self.disable_trie_cache
+    }
+
+    /// Setter for whether to disable sparse trie cache.
+    pub const fn with_disable_trie_cache(mut self, value: bool) -> Self {
+        self.disable_trie_cache = value;
         self
     }
 

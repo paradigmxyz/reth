@@ -904,7 +904,7 @@ mod tests {
 
         txpool.add_transaction(TransactionOrigin::Local, transaction.clone()).await.unwrap();
 
-        let rt = Runtime::test();
+        let rt = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
         let config = LocalTransactionBackupConfig::with_local_txs_backup(transactions_path.clone());
         rt.spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
             backup_local_transactions_task(shutdown, txpool.clone(), config)

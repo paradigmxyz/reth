@@ -20,7 +20,6 @@ reth-payload-primitives.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-tasks.workspace = true
 reth-tracing.workspace = true
 
 # alloy

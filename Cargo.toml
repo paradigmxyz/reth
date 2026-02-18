@@ -650,7 +650,7 @@ ethereum_ssz_derive = "0.10.1"
 jemalloc_pprof = { version = "0.8", default-features = false }
 tikv-jemalloc-ctl = "0.6"
 tikv-jemallocator = "0.6"
-tracy-client = { version = "0.18.0", features = ["demangle"] }
+tracy-client = "0.18.0"
 snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 
 aes = "0.8.1"

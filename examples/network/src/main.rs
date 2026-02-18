@@ -14,7 +14,6 @@ use reth_ethereum::{
         config::rng_secret_key, NetworkConfig, NetworkEventListenerProvider, NetworkManager,
     },
     provider::test_utils::NoopProvider,
-    tasks::Runtime,
 };
 
 #[tokio::main]
@@ -26,8 +25,7 @@ async fn main() -> eyre::Result<()> {
     let local_key = rng_secret_key();
 
     // Configure the network
-    let config =
-        NetworkConfig::builder(local_key, Runtime::test()).mainnet_boot_nodes().build(client);
+    let config = NetworkConfig::builder(local_key).mainnet_boot_nodes().build(client);
 
     // create the network instance
     let network = NetworkManager::eth(config).await?;

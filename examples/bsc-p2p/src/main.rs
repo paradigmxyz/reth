@@ -19,7 +19,6 @@ use reth_network::{
 };
 use reth_network_api::events::{PeerEvent, SessionInfo};
 use reth_provider::noop::NoopProvider;
-use reth_tasks::Runtime;
 use reth_tracing::{
     tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer, Tracer,
 };
@@ -54,7 +53,7 @@ async fn main() {
 
     let bsc_boot_nodes = boot_nodes();
 
-    let net_cfg = NetworkConfig::builder(secret_key, Runtime::test())
+    let net_cfg = NetworkConfig::builder(secret_key)
         .boot_nodes(bsc_boot_nodes.clone())
         .set_head(head())
         .with_pow()

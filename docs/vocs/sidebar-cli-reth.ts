@@ -157,21 +157,6 @@ export const rethCliSidebar: SidebarItem = {
                     ]
                 },
                 {
-                    text: "reth db prune-checkpoints",
-                    link: "/cli/reth/db/prune-checkpoints",
-                    collapsed: true,
-                    items: [
-                        {
-                            text: "reth db prune-checkpoints get",
-                            link: "/cli/reth/db/prune-checkpoints/get"
-                        },
-                        {
-                            text: "reth db prune-checkpoints set",
-                            link: "/cli/reth/db/prune-checkpoints/set"
-                        }
-                    ]
-                },
-                {
                     text: "reth db account-storage",
                     link: "/cli/reth/db/account-storage"
                 },

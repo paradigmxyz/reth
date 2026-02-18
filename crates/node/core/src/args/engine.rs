@@ -39,7 +39,9 @@ pub struct DefaultEngineValues {
     storage_worker_count: Option<usize>,
     account_worker_count: Option<usize>,
     prewarming_threads: Option<usize>,
+    disable_proof_v2: bool,
     cache_metrics_disabled: bool,
+    disable_trie_cache: bool,
     sparse_trie_prune_depth: usize,
     sparse_trie_max_storage_tries: usize,
     disable_sparse_trie_cache_pruning: bool,
@@ -174,9 +176,21 @@ impl DefaultEngineValues {
         self
     }
 
+    /// Set whether to disable proof V2 by default
+    pub const fn with_disable_proof_v2(mut self, v: bool) -> Self {
+        self.disable_proof_v2 = v;
+        self
+    }
+
     /// Set whether to disable cache metrics by default
     pub const fn with_cache_metrics_disabled(mut self, v: bool) -> Self {
         self.cache_metrics_disabled = v;
+        self
+    }
+
+    /// Set whether to disable sparse trie cache by default
+    pub const fn with_disable_trie_cache(mut self, v: bool) -> Self {
+        self.disable_trie_cache = v;
         self
     }
 
@@ -227,7 +241,9 @@ impl Default for DefaultEngineValues {
             storage_worker_count: None,
             account_worker_count: None,
             prewarming_threads: None,
+            disable_proof_v2: false,
             cache_metrics_disabled: false,
+            disable_trie_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
             disable_sparse_trie_cache_pruning: false,
@@ -357,9 +373,17 @@ pub struct EngineArgs {
     #[arg(long = "engine.prewarming-threads", default_value = Resettable::from(DefaultEngineValues::get_global().prewarming_threads.map(|v| v.to_string().into())))]
     pub prewarming_threads: Option<usize>,
 
+    /// Disable V2 storage proofs for state root calculations
+    #[arg(long = "engine.disable-proof-v2", default_value_t = DefaultEngineValues::get_global().disable_proof_v2)]
+    pub disable_proof_v2: bool,
+
     /// Disable cache metrics recording, which can take up to 50ms with large cached state.
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
+
+    /// Disable sparse trie cache.
+    #[arg(long = "engine.disable-trie-cache", default_value_t = DefaultEngineValues::get_global().disable_trie_cache, conflicts_with = "disable_proof_v2")]
+    pub disable_trie_cache: bool,
 
     /// Sparse trie prune depth.
     #[arg(long = "engine.sparse-trie-prune-depth", default_value_t = DefaultEngineValues::get_global().sparse_trie_prune_depth)]
@@ -414,7 +438,9 @@ impl Default for EngineArgs {
             storage_worker_count,
             account_worker_count,
             prewarming_threads,
+            disable_proof_v2,
             cache_metrics_disabled,
+            disable_trie_cache,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
             disable_sparse_trie_cache_pruning,
@@ -444,7 +470,9 @@ impl Default for EngineArgs {
             storage_worker_count,
             account_worker_count,
             prewarming_threads,
+            disable_proof_v2,
             cache_metrics_disabled,
+            disable_trie_cache,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
             disable_sparse_trie_cache_pruning,
@@ -478,7 +506,9 @@ impl EngineArgs {
             .with_unwind_canonical_header(self.allow_unwind_canonical_header)
             .with_storage_worker_count_opt(self.storage_worker_count)
             .with_account_worker_count_opt(self.account_worker_count)
+            .with_disable_proof_v2(self.disable_proof_v2)
             .without_cache_metrics(self.cache_metrics_disabled)
+            .with_disable_trie_cache(self.disable_trie_cache)
             .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
             .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
@@ -532,7 +562,9 @@ mod tests {
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
             prewarming_threads: Some(4),
+            disable_proof_v2: false,
             cache_metrics_disabled: true,
+            disable_trie_cache: true,
             sparse_trie_prune_depth: 10,
             sparse_trie_max_storage_tries: 100,
             disable_sparse_trie_cache_pruning: true,
@@ -569,6 +601,7 @@ mod tests {
             "--engine.prewarming-threads",
             "4",
             "--engine.disable-cache-metrics",
+            "--engine.disable-trie-cache",
             "--engine.sparse-trie-prune-depth",
             "10",
             "--engine.sparse-trie-max-storage-tries",

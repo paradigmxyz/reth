@@ -127,25 +127,16 @@ pub trait StateWriter {
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>>;
 }
 
-/// Configuration for what to write to the database (MDBX) when calling
-/// [`StateWriter::write_state`].
+/// Configuration for what to write when calling [`StateWriter::write_state`].
 ///
-/// Some types (receipts, changesets) may be written directly to
-/// static files instead of the database depending on the storage settings. This config allows
-/// skipping those types in the database write to avoid duplication.
+/// Used to skip writing certain data types, when they are being written separately.
 #[derive(Debug, Clone, Copy)]
 pub struct StateWriteConfig {
-    /// Whether to write receipts to the database.
-    ///
-    /// Set to `false` when receipts are being written to static files instead.
+    /// Whether to write receipts.
     pub write_receipts: bool,
-    /// Whether to write account changesets to the database.
-    ///
-    /// Set to `false` when account changesets are being written to static files instead.
+    /// Whether to write account changesets.
     pub write_account_changesets: bool,
-    /// Whether to write storage changesets to the database.
-    ///
-    /// Set to `false` when storage changesets are being written to static files instead.
+    /// Whether to write storage changesets.
     pub write_storage_changesets: bool,
 }
 

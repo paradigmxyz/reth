@@ -8,14 +8,15 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
-extern crate alloc;
 
-// Feature-only dep: activated by `reth-codec` feature for downstream consumers.
-#[cfg(feature = "reth-codec")]
-use reth_codecs as _;
+extern crate alloc;
 
 mod receipt;
 pub use receipt::*;
+
+/// Kept for consistency tests
+#[cfg(test)]
+mod transaction;
 
 pub use alloy_consensus::{transaction::PooledTransaction, TxType};
 use alloy_consensus::{TxEip4844, TxEip4844WithSidecar};

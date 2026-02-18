@@ -396,7 +396,7 @@ where
 
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
-            debug_span!(target: "engine::tree::payload_validator", "state_provider").entered();
+            debug_span!(target: "engine::tree::payload_validator", "state provider").entered();
         let Some(provider_builder) =
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
@@ -421,7 +421,7 @@ where
             .into())
         };
 
-        let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
+        let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm env")
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
@@ -768,28 +768,21 @@ where
 
         // Enable BAL builder if block access list is present in the payload
         let has_bal = input.block_access_list().is_some();
-        let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
-            State::builder()
-                .with_database(StateProviderDatabase::new(state_provider))
-                .with_bundle_update()
-                .without_state_clear()
-                .with_bal_builder_if(has_bal)
-                .build()
-        });
+        let mut db = State::builder()
+            .with_database(StateProviderDatabase::new(state_provider))
+            .with_bundle_update()
+            .without_state_clear()
+            .with_bal_builder_if(has_bal)
+            .build();
 
-        let (spec_id, mut executor) = {
-            let _span = debug_span!(target: "engine::tree", "create_evm").entered();
-            let spec_id = *env.evm_env.spec_id();
-            let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
-            let ctx = self
-                .execution_ctx_for(input)
-                .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-            let executor = self.evm_config.create_executor(evm, ctx);
-            (spec_id, executor)
-        };
+        let spec_id = *env.evm_env.spec_id();
+        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
+        let ctx =
+            self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+        let mut executor = self.evm_config.create_executor(evm, ctx);
 
         if !self.config.precompile_cache_disabled() {
-            let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
+            // Only cache pure precompiles to avoid issues with stateful precompiles
             executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
                 let metrics = self
                     .precompile_cache_metrics
@@ -835,7 +828,7 @@ where
         self.metrics.record_post_execution(post_exec_start.elapsed());
 
         // Merge transitions into bundle state
-        debug_span!(target: "engine::tree", "merge_transitions")
+        debug_span!(target: "engine::tree", "merge transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
         // Validate BAL hash if we executed with BAL tracking
@@ -902,7 +895,7 @@ where
 
         // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
-        debug_span!(target: "engine::tree", "pre_execution")
+        debug_span!(target: "engine::tree", "pre execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
