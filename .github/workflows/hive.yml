@@ -216,7 +216,7 @@ jobs:
   # --------------------------------------------------
   notify-on-error:
     needs: test
-    if: failure() && needs.detect-env.outputs.is_upstream == 'true'
+    if: failure() && github.repository == 'paradigmxyz/reth'
     runs-on: ubuntu-latest
     steps:
       - uses: rtCamp/action-slack-notify@v2
