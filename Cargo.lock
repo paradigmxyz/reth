@@ -9934,7 +9934,6 @@ dependencies = [
  "dyn-clone",
  "jsonrpsee-types",
  "op-alloy-consensus",
- "op-alloy-network",
  "op-alloy-rpc-types",
  "reth-ethereum-primitives",
  "reth-evm",
