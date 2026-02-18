@@ -21,7 +21,7 @@ use reth_chain_state::{
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
-use reth_execution_types::{ExecutionOutcome, TakenState};
+use reth_execution_types::TakenState;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -136,7 +136,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         Ok(state.state_provider(latest_historical))
     }
 
-    /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
+    /// Return the last N blocks of state, recreating the [`TakenState`].
     ///
     /// If the range is empty, or there are no blocks for the given range, then this returns `None`.
     pub fn get_state(
@@ -778,7 +778,7 @@ impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
 impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
     type Receipt = ReceiptTy<N>;
 
-    /// Re-constructs the [`ExecutionOutcome`] from in-memory and database state, if necessary.
+    /// Re-constructs the [`TakenState`] from in-memory and database state, if necessary.
     ///
     /// If data for the block does not exist, this will return [`None`].
     ///
@@ -787,10 +787,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
     /// inconsistent. Currently this can safely be called within the blockchain tree thread,
     /// because the tree thread is responsible for modifying the [`CanonicalInMemoryState`] in the
     /// first place.
-    fn get_state(
-        &self,
-        block: BlockNumber,
-    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
+    fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<TakenState<Self::Receipt>>> {
         StateReader::get_state(&self.consistent_provider()?, block)
     }
 }

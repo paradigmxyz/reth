@@ -1338,7 +1338,7 @@ where
     fn get_state(
         &self,
         _block: BlockNumber,
-    ) -> Result<Option<reth_execution_types::ExecutionOutcome<Self::Receipt>>, ProviderError> {
+    ) -> Result<Option<reth_execution_types::TakenState<Self::Receipt>>, ProviderError> {
         // RPC doesn't provide execution outcomes
         Err(ProviderError::UnsupportedProvider)
     }

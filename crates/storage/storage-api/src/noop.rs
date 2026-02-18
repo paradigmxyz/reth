@@ -27,7 +27,7 @@ use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::TakenState;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
@@ -522,10 +522,7 @@ impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider
 impl<C: Send + Sync, N: NodePrimitives> StateReader for NoopProvider<C, N> {
     type Receipt = N::Receipt;
 
-    fn get_state(
-        &self,
-        _block: BlockNumber,
-    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
+    fn get_state(&self, _block: BlockNumber) -> ProviderResult<Option<TakenState<Self::Receipt>>> {
         Ok(None)
     }
 }

@@ -32,15 +32,16 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TransactionVariant,
+    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TakenState, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::spawn_os_thread;
+use reth_trie_common::KeccakKeyHasher;
 use reth_trie_db::ChangesetCache;
-use revm::interpreter::debug_unreachable;
+use revm::{database::states::BundleState, interpreter::debug_unreachable};
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
@@ -1989,11 +1990,28 @@ where
             .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)?
             .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?
             .split_sealed();
-        let mut execution_output = self
+        let taken_state = self
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
-        let hashed_state = self.provider.hashed_post_state(execution_output.state());
+
+        let (hashed_state, mut execution_output) = match taken_state {
+            TakenState::Plain(execution_output) => {
+                let hashed_state = self.provider.hashed_post_state(execution_output.state());
+                (hashed_state, execution_output)
+            }
+            TakenState::Hashed(hashed_outcome) => {
+                let hashed_state =
+                    hashed_outcome.bundle.into_hashed_post_state::<KeccakKeyHasher>();
+                let execution_output = ExecutionOutcome::new(
+                    BundleState::default(),
+                    hashed_outcome.receipts,
+                    hashed_outcome.first_block,
+                    hashed_outcome.requests,
+                );
+                (hashed_state, execution_output)
+            }
+        };
 
         debug!(
             target: "engine::tree",

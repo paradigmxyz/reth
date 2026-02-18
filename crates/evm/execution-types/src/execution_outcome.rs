@@ -7,7 +7,7 @@ use alloy_primitives::{
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
-use reth_trie_common::{HashedPostState, KeyHasher};
+use reth_trie_common::{HashedPostState, HashedStorage, KeyHasher};
 use revm::{
     database::{states::BundleState, AccountStatus, BundleAccount},
     state::AccountInfo,
@@ -443,6 +443,32 @@ pub struct HashedStorageBundleState {
     pub state: AddressMap<HashedStorageBundleAccount>,
     /// All created contracts in this bundle.
     pub contracts: B256Map<Bytecode>,
+}
+
+impl HashedStorageBundleState {
+    /// Convert to [`HashedPostState`] without re-hashing storage keys.
+    ///
+    /// Storage keys are already keccak256-hashed `B256` values, so they are taken as-is.
+    /// Account addresses are hashed via `KH`.
+    pub fn into_hashed_post_state<KH: KeyHasher>(&self) -> HashedPostState {
+        let mut hps = HashedPostState::with_capacity(self.state.len());
+
+        for (address, account) in &self.state {
+            let hashed_address = KH::hash_key(address);
+            hps.accounts.insert(hashed_address, account.info.as_ref().map(Into::into));
+
+            if !account.storage.is_empty() {
+                let wiped = account.status.was_destroyed();
+                let hashed_storage = HashedStorage::from_iter(
+                    wiped,
+                    account.storage.iter().map(|(slot, (_old, new))| (*slot, *new)),
+                );
+                hps.storages.insert(hashed_address, hashed_storage);
+            }
+        }
+
+        hps
+    }
 }
 
 /// Like [`BundleStateInit`] but explicitly for state reconstructed from hashed storage tables.

@@ -1715,15 +1715,12 @@ impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
     /// inconsistent. Currently this can safely be called within the blockchain tree thread,
     /// because the tree thread is responsible for modifying the [`CanonicalInMemoryState`] in the
     /// first place.
-    fn get_state(
-        &self,
-        block: BlockNumber,
-    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
+    fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<TakenState<Self::Receipt>>> {
         if let Some(state) = self.head_block.as_ref().and_then(|b| b.block_on_chain(block.into())) {
             let state = state.block_ref().execution_outcome().clone();
-            Ok(Some(ExecutionOutcome::from((state, block))))
+            Ok(Some(TakenState::Plain(ExecutionOutcome::from((state, block)))))
         } else {
-            Ok(Self::get_state(self, block..=block)?.and_then(|s| s.into_plain()))
+            Self::get_state(self, block..=block)
         }
     }
 }

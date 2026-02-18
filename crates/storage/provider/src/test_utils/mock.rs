@@ -25,7 +25,7 @@ use reth_db_api::{
     models::{AccountBeforeTx, StorageSettings, StoredBlockBodyIndices},
 };
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::TakenState;
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
     SignerRecoverable,
@@ -1057,10 +1057,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<T, ChainSpec> {
     type Receipt = T::Receipt;
 
-    fn get_state(
-        &self,
-        _block: BlockNumber,
-    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
+    fn get_state(&self, _block: BlockNumber) -> ProviderResult<Option<TakenState<Self::Receipt>>> {
         Ok(None)
     }
 }
