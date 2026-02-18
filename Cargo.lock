@@ -302,7 +302,6 @@ dependencies = [
  "op-revm",
  "revm",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
