@@ -1331,10 +1331,11 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
-            let changesets = state
-                .block()
-                .execution_output
-                .state
+            let block = state.block();
+            let Some(plain_state) = block.execution_output.state.as_plain() else {
+                return Ok(Vec::new());
+            };
+            let changesets = plain_state
                 .reverts
                 .clone()
                 .to_plain_state_reverts()
@@ -1390,24 +1391,30 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .block_ref()
                 .execution_output
                 .state
-                .reverts
-                .clone()
-                .to_plain_state_reverts()
-                .storage
-                .into_iter()
-                .flatten()
-                .find_map(|revert: PlainStorageRevert| {
-                    if revert.address != address {
-                        return None
-                    }
-                    revert.storage_revert.into_iter().find_map(|(key, value)| {
-                        let tagged_key = StorageSlotKey::from_u256(key).to_changeset(use_hashed);
-                        (tagged_key.as_b256() == storage_key).then(|| ChangesetEntry {
-                            key: tagged_key,
-                            value: value.to_previous_value(),
+                .as_plain()
+                .map(|plain_state| {
+                    plain_state
+                        .reverts
+                        .clone()
+                        .to_plain_state_reverts()
+                        .storage
+                        .into_iter()
+                        .flatten()
+                        .find_map(|revert: PlainStorageRevert| {
+                            if revert.address != address {
+                                return None
+                            }
+                            revert.storage_revert.into_iter().find_map(|(key, value)| {
+                                let tagged_key =
+                                    StorageSlotKey::from_u256(key).to_changeset(use_hashed);
+                                (tagged_key.as_b256() == storage_key).then(|| ChangesetEntry {
+                                    key: tagged_key,
+                                    value: value.to_previous_value(),
+                                })
+                            })
                         })
-                    })
-                });
+                })
+                .flatten();
             Ok(changeset)
         } else {
             let storage_history_exists = self
@@ -1442,10 +1449,10 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
 
             let chain = head_block.chain().collect::<Vec<_>>();
             for state in chain {
-                let block_changesets = state
-                    .block_ref()
-                    .execution_output
-                    .state
+                let Some(plain_state) = state.block_ref().execution_output.state.as_plain() else {
+                    continue;
+                };
+                let block_changesets = plain_state
                     .reverts
                     .clone()
                     .to_plain_state_reverts()
@@ -1498,10 +1505,10 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         let mut count = 0;
         if let Some(head_block) = &self.head_block {
             for state in head_block.chain() {
-                count += state
-                    .block_ref()
-                    .execution_output
-                    .state
+                let Some(plain_state) = state.block_ref().execution_output.state.as_plain() else {
+                    continue;
+                };
+                count += plain_state
                     .reverts
                     .clone()
                     .to_plain_state_reverts()
@@ -1527,10 +1534,10 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
-            let changesets = state
-                .block_ref()
-                .execution_output
-                .state
+            let Some(plain_state) = state.block_ref().execution_output.state.as_plain() else {
+                return Ok(Vec::new());
+            };
+            let changesets = plain_state
                 .reverts
                 .clone()
                 .to_plain_state_reverts()
@@ -1573,18 +1580,21 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
             // Search in-memory state for the account changeset
-            let changeset = state
-                .block_ref()
-                .execution_output
-                .state
-                .reverts
-                .clone()
-                .to_plain_state_reverts()
-                .accounts
-                .into_iter()
-                .flatten()
-                .find(|(addr, _)| addr == &address)
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) });
+            let changeset =
+                state.block_ref().execution_output.state.as_plain().and_then(|plain_state| {
+                    plain_state
+                        .reverts
+                        .clone()
+                        .to_plain_state_reverts()
+                        .accounts
+                        .into_iter()
+                        .flatten()
+                        .find(|(addr, _)| addr == &address)
+                        .map(|(address, info)| AccountBeforeTx {
+                            address,
+                            info: info.map(Into::into),
+                        })
+                });
             Ok(changeset)
         } else {
             // Perform checks on whether or not changesets exist for the block.
@@ -1627,10 +1637,10 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             let chain = head_block.chain().collect::<Vec<_>>();
             for state in chain {
                 // found block in memory, collect its changesets
-                let block_changesets = state
-                    .block_ref()
-                    .execution_output
-                    .state
+                let Some(plain_state) = state.block_ref().execution_output.state.as_plain() else {
+                    continue;
+                };
+                let block_changesets = plain_state
                     .reverts
                     .clone()
                     .to_plain_state_reverts()
@@ -1675,15 +1685,10 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         let mut count = 0;
         if let Some(head_block) = &self.head_block {
             for state in head_block.chain() {
-                count += state
-                    .block_ref()
-                    .execution_output
-                    .state
-                    .reverts
-                    .clone()
-                    .to_plain_state_reverts()
-                    .accounts
-                    .len();
+                let Some(plain_state) = state.block_ref().execution_output.state.as_plain() else {
+                    continue;
+                };
+                count += plain_state.reverts.clone().to_plain_state_reverts().accounts.len();
             }
         }
 
@@ -2056,7 +2061,8 @@ mod tests {
                                     (*address, Some(Some((*account).into())), Vec::new())
                                 })],
                                 [],
-                            ),
+                            )
+                            .into(),
                             result: BlockExecutionResult {
                                 receipts: Default::default(),
                                 requests: Default::default(),
@@ -2414,7 +2420,8 @@ mod tests {
                         })],
                         [[(address, Some(Some(account.into())), vec![(slot, U256::from(100))])]],
                         [],
-                    ),
+                    )
+                    .into(),
                     result: BlockExecutionResult {
                         receipts: Default::default(),
                         requests: Default::default(),
@@ -2512,7 +2519,8 @@ mod tests {
                         })],
                         [[(address, Some(Some(account.into())), vec![(slot, U256::from(100))])]],
                         [],
-                    ),
+                    )
+                    .into(),
                     result: BlockExecutionResult {
                         receipts: Default::default(),
                         requests: Default::default(),
@@ -2614,7 +2622,8 @@ mod tests {
                         })],
                         [[(address, Some(Some(account.into())), vec![(slot, U256::from(100))])]],
                         [],
-                    ),
+                    )
+                    .into(),
                     result: BlockExecutionResult {
                         receipts: Default::default(),
                         requests: Default::default(),
@@ -2709,7 +2718,8 @@ mod tests {
                         })],
                         [[(address, Some(Some(account.into())), vec![(slot, U256::from(100))])]],
                         [],
-                    ),
+                    )
+                    .into(),
                     result: BlockExecutionResult {
                         receipts: Default::default(),
                         requests: Default::default(),

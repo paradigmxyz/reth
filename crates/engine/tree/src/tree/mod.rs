@@ -31,17 +31,17 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
-    StorageChangeSetReader, StorageSettingsCache, TakenState, TransactionVariant,
+    BlockExecutionOutput, BlockExecutionResult, BlockReader, BundleKind, ChangeSetReader,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
+    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
+    StorageSettingsCache, TakenState, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::spawn_os_thread;
 use reth_trie_common::KeccakKeyHasher;
 use reth_trie_db::ChangesetCache;
-use revm::{database::states::BundleState, interpreter::debug_unreachable};
+use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
@@ -1995,21 +1995,25 @@ where
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
 
-        let (hashed_state, mut execution_output) = match taken_state {
+        let (hashed_state, bundle_kind, receipts, requests) = match taken_state {
             TakenState::Plain(execution_output) => {
                 let hashed_state = self.provider.hashed_post_state(execution_output.state());
-                (hashed_state, execution_output)
+                (
+                    hashed_state,
+                    BundleKind::Plain(execution_output.bundle),
+                    execution_output.receipts,
+                    execution_output.requests,
+                )
             }
             TakenState::Hashed(hashed_outcome) => {
                 let hashed_state =
                     hashed_outcome.bundle.into_hashed_post_state::<KeccakKeyHasher>();
-                let execution_output = ExecutionOutcome::new(
-                    BundleState::default(),
+                (
+                    hashed_state,
+                    BundleKind::Hashed(hashed_outcome.bundle),
                     hashed_outcome.receipts,
-                    hashed_outcome.first_block,
                     hashed_outcome.requests,
-                );
-                (hashed_state, execution_output)
+                )
             }
         };
 
@@ -2032,10 +2036,10 @@ where
             ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
-            state: execution_output.bundle,
+            state: bundle_kind,
             result: BlockExecutionResult {
-                receipts: execution_output.receipts.pop().unwrap_or_default(),
-                requests: execution_output.requests.pop().unwrap_or_default(),
+                receipts: receipts.into_iter().next().unwrap_or_default(),
+                requests: requests.into_iter().next().unwrap_or_default(),
                 gas_used: block.gas_used(),
                 blob_gas_used: block.blob_gas_used().unwrap_or_default(),
             },

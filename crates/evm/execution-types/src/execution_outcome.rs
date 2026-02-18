@@ -132,9 +132,13 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Creates a new `ExecutionOutcome` from a single block execution result.
+    ///
+    /// If the state is [`BundleKind::Hashed`], the bundle is set to an empty [`BundleState`]
+    /// since hashed storage keys cannot be represented in a plain `BundleState`.
     pub fn single(block_number: u64, output: BlockExecutionOutput<T>) -> Self {
+        let bundle = output.state.into_plain().unwrap_or_default();
         Self {
-            bundle: output.state,
+            bundle,
             receipts: vec![output.result.receipts],
             first_block: block_number,
             requests: vec![output.result.requests],

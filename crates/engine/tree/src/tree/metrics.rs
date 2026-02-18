@@ -61,14 +61,16 @@ impl EngineApiMetrics {
         self.executor.execution_duration.set(execution_secs);
 
         // Update the metrics for the number of accounts, storage slots and bytecodes
-        let accounts = output.state.state.len();
-        let storage_slots =
-            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = output.state.contracts.len();
+        if let Some(plain_state) = output.state.as_plain() {
+            let accounts = plain_state.state.len();
+            let storage_slots =
+                plain_state.state.values().map(|account| account.storage.len()).sum::<usize>();
+            let bytecodes = plain_state.contracts.len();
 
-        self.executor.accounts_updated_histogram.record(accounts as f64);
-        self.executor.storage_slots_updated_histogram.record(storage_slots as f64);
-        self.executor.bytecodes_updated_histogram.record(bytecodes as f64);
+            self.executor.accounts_updated_histogram.record(accounts as f64);
+            self.executor.storage_slots_updated_histogram.record(storage_slots as f64);
+            self.executor.bytecodes_updated_histogram.record(bytecodes as f64);
+        }
     }
 
     /// Returns a reference to the executor metrics for use in state hooks.

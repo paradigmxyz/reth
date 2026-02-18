@@ -1296,7 +1296,10 @@ impl RocksDBProvider {
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let Some(plain_state) = block.execution_outcome().state.as_plain() else {
+                continue;
+            };
+            let reverts = plain_state.reverts.to_plain_state_reverts();
 
             // Iterate through account reverts - these are exactly the accounts that have
             // changesets written, ensuring history indices match changeset entries.
@@ -1329,7 +1332,10 @@ impl RocksDBProvider {
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let Some(plain_state) = block.execution_outcome().state.as_plain() else {
+                continue;
+            };
+            let reverts = plain_state.reverts.to_plain_state_reverts();
 
             // Iterate through storage reverts - these are exactly the slots that have
             // changesets written, ensuring history indices match changeset entries.

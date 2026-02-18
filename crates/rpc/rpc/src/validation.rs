@@ -206,8 +206,9 @@ where
 
         self.ensure_payment(&block, &output, &message)?;
 
-        let state_root =
-            state_provider.state_root(state_provider.hashed_post_state(&output.state))?;
+        let state_root = state_provider.state_root(state_provider.hashed_post_state(
+            output.state.as_plain().expect("execution output must have plain state"),
+        ))?;
 
         if state_root != block.header().state_root() {
             return Err(ConsensusError::BodyStateRootDiff(
@@ -289,7 +290,7 @@ where
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
         let (mut balance_before, balance_after) = if let Some(acc) =
-            output.state.state.get(&message.proposer_fee_recipient)
+            output.state.as_plain().and_then(|s| s.state.get(&message.proposer_fee_recipient))
         {
             let balance_before = acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
             let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();

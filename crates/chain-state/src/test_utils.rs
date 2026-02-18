@@ -213,7 +213,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     gas_used: 0,
                     blob_gas_used: 0,
                 },
-                state: BundleState::default(),
+                state: Default::default(),
             }),
             trie_data,
         )

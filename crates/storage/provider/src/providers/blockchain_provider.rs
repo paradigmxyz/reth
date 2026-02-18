@@ -942,7 +942,7 @@ mod tests {
                             gas_used: 0,
                             blob_gas_used: 0,
                         },
-                        state: BundleState::default(),
+                        state: Default::default(),
                     };
 
                     ExecutedBlock {
@@ -1737,7 +1737,8 @@ mod tests {
                                     (*address, Some(Some((*account).into())), Vec::new())
                                 })],
                                 [],
-                            ),
+                            )
+                            .into(),
                             result: BlockExecutionResult {
                                 receipts: Default::default(),
                                 requests: Default::default(),

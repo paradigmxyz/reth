@@ -612,7 +612,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let Some(plain_state) = block.execution_outcome().state.as_plain() else {
+                continue;
+            };
+            let reverts = plain_state.reverts.to_plain_state_reverts();
 
             let changeset: Vec<_> = reverts
                 .accounts
@@ -633,7 +636,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let Some(plain_state) = block.execution_outcome().state.as_plain() else {
+                continue;
+            };
+            let reverts = plain_state.reverts.to_plain_state_reverts();
 
             let changeset: Vec<_> = reverts
                 .storage

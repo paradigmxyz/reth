@@ -2391,15 +2391,30 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // In storage v2 with all outputs directed to static files, plain state and changesets
             // are written elsewhere. Only bytecodes need MDBX writes, so skip the expensive
             // to_plain_state_and_reverts conversion that iterates all accounts and storage.
-            self.write_bytecodes(
-                execution_outcome.state().contracts.iter().map(|(h, b)| (*h, Bytecode(b.clone()))),
-            )?;
+            // Works for both plain and hashed state — contracts are keyed by code hash in both.
+            let contracts: Vec<_> = match &execution_outcome {
+                WriteStateInput::Single { outcome, .. } => {
+                    outcome.state.contracts_iter().map(|(h, b)| (*h, Bytecode(b.clone()))).collect()
+                }
+                WriteStateInput::Multiple(outcome) => outcome
+                    .bundle
+                    .contracts
+                    .iter()
+                    .map(|(h, b)| (*h, Bytecode(b.clone())))
+                    .collect(),
+            };
+            self.write_bytecodes(contracts.into_iter())?;
             return Ok(());
         }
 
+        // The non-v2 path requires plain state for to_plain_state_and_reverts().
+        // Hashed state cannot produce plain storage changesets.
+        let Some(bundle_state) = execution_outcome.plain_state() else {
+            return Ok(());
+        };
+
         let first_block = execution_outcome.first_block();
-        let (plain_state, reverts) =
-            execution_outcome.state().to_plain_state_and_reverts(is_value_known);
+        let (plain_state, reverts) = bundle_state.to_plain_state_and_reverts(is_value_known);
 
         self.write_state_reverts(reverts, first_block, config)?;
         self.write_state_changes(plain_state)?;
@@ -3453,10 +3468,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         // Update pipeline progress
         self.update_pipeline_stages(block, true)?;
 
-        match taken_state {
-            TakenState::Plain(execution_state) => {
-                Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
-            }
+        let execution_state = match taken_state {
+            TakenState::Plain(execution_state) => execution_state,
             TakenState::Hashed(hashed_outcome) => {
                 // When using hashed storage, the DB unwind has already been applied inline
                 // by `take_state_above`. The bundle state is empty because hashed storage
@@ -3466,15 +3479,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
                 // NOTE: ExExes receiving this `Chain` will see an empty bundle state.
                 // Receipts and requests are preserved. If ExExes need access to state
                 // changes, `Chain` should be extended to carry `TakenState` directly.
-                let execution_state = ExecutionOutcome::new(
+                ExecutionOutcome::new(
                     BundleState::default(),
                     hashed_outcome.receipts,
                     hashed_outcome.first_block,
                     hashed_outcome.requests,
-                );
-                Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
+                )
             }
-        }
+        };
+        Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
     }
 
     fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()> {
@@ -5085,7 +5098,7 @@ mod tests {
                         gas_used: 0,
                         blob_gas_used: 0,
                     },
-                    state: bundle,
+                    state: bundle.into(),
                 }),
                 ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
             );
