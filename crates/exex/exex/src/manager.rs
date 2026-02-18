@@ -1345,7 +1345,8 @@ mod tests {
 
         // Set up: ExEx has processed up to block 100 on chain A
         const CHAIN_A: u8 = 0xA0;
-        exex_handle.finished_height = Some(BlockNumHash::new(100, block_hash_for_chain(100, CHAIN_A)));
+        exex_handle.finished_height =
+            Some(BlockNumHash::new(100, block_hash_for_chain(100, CHAIN_A)));
 
         // Create blocks for a reorg scenario:
         // Old chain (A): blocks 95-100
@@ -1362,7 +1363,11 @@ mod tests {
             let mut block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
             block.set_block_number(i);
             block.set_hash(block_hash_for_chain(i, CHAIN_A));
-            block.set_parent_hash(if i == 95 { parent_hash } else { block_hash_for_chain(i - 1, CHAIN_A) });
+            block.set_parent_hash(if i == 95 {
+                parent_hash
+            } else {
+                block_hash_for_chain(i - 1, CHAIN_A)
+            });
             old_blocks.push(block);
         }
 
@@ -1371,7 +1376,11 @@ mod tests {
             let mut block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
             block.set_block_number(i);
             block.set_hash(block_hash_for_chain(i, CHAIN_B));
-            block.set_parent_hash(if i == 95 { parent_hash } else { block_hash_for_chain(i - 1, CHAIN_B) });
+            block.set_parent_hash(if i == 95 {
+                parent_hash
+            } else {
+                block_hash_for_chain(i - 1, CHAIN_B)
+            });
             new_blocks.push(block);
         }
 
@@ -1418,7 +1427,10 @@ mod tests {
         match exex_handle.send(&mut cx, &(1, commit_notification.clone())) {
             Poll::Ready(Ok(())) => {
                 let received = notifications.next().await.unwrap().unwrap();
-                assert_eq!(received, commit_notification, "Block 99 notification should be received, not skipped");
+                assert_eq!(
+                    received, commit_notification,
+                    "Block 99 notification should be received, not skipped"
+                );
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
                 panic!("Block 99 notification should be sent successfully")
@@ -1448,7 +1460,8 @@ mod tests {
 
         // Set up: ExEx has processed up to block 100 on the original chain
         const ORIGINAL_CHAIN: u8 = 0xA0;
-        exex_handle.finished_height = Some(BlockNumHash::new(100, block_hash_for_chain(100, ORIGINAL_CHAIN)));
+        exex_handle.finished_height =
+            Some(BlockNumHash::new(100, block_hash_for_chain(100, ORIGINAL_CHAIN)));
 
         // Create blocks 95-100 that will be reverted
         let parent_hash = block_hash(94); // Block 94 - before the reverted section
@@ -1458,7 +1471,11 @@ mod tests {
             let mut block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
             block.set_block_number(i);
             block.set_hash(block_hash_for_chain(i, ORIGINAL_CHAIN));
-            block.set_parent_hash(if i == 95 { parent_hash } else { block_hash_for_chain(i - 1, ORIGINAL_CHAIN) });
+            block.set_parent_hash(if i == 95 {
+                parent_hash
+            } else {
+                block_hash_for_chain(i - 1, ORIGINAL_CHAIN)
+            });
             blocks.push(block);
         }
 
@@ -1478,7 +1495,8 @@ mod tests {
             }
         }
 
-        // Critical assertion: finished_height should be reset to block 94 (before the reverted chain)
+        // Critical assertion: finished_height should be reset to block 94 (before the reverted
+        // chain)
         assert_eq!(
             exex_handle.finished_height,
             Some(BlockNumHash::new(94, parent_hash)),
@@ -1492,7 +1510,11 @@ mod tests {
             let mut block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
             block.set_block_number(i);
             block.set_hash(block_hash_for_chain(i, NEW_CHAIN));
-            block.set_parent_hash(if i == 95 { parent_hash } else { block_hash_for_chain(i - 1, NEW_CHAIN) });
+            block.set_parent_hash(if i == 95 {
+                parent_hash
+            } else {
+                block_hash_for_chain(i - 1, NEW_CHAIN)
+            });
             new_blocks.push(block);
         }
 
@@ -1504,7 +1526,10 @@ mod tests {
         match exex_handle.send(&mut cx, &(1, commit_notification.clone())) {
             Poll::Ready(Ok(())) => {
                 let received = notifications.next().await.unwrap().unwrap();
-                assert_eq!(received, commit_notification, "New blocks notification should be received after revert");
+                assert_eq!(
+                    received, commit_notification,
+                    "New blocks notification should be received after revert"
+                );
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
                 panic!("New blocks notification should be sent successfully")
