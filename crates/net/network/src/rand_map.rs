@@ -27,10 +27,6 @@ use std::{
 use indexmap::{IndexMap, IndexSet};
 use rand::Rng;
 
-// ---------------------------------------------------------------------------
-// Coprime-stride helpers
-// ---------------------------------------------------------------------------
-
 /// Greatest common divisor (Euclid's algorithm).
 const fn gcd(mut a: usize, mut b: usize) -> usize {
     while b != 0 {
@@ -62,10 +58,6 @@ fn rand_start_stride(len: usize) -> (usize, usize) {
     };
     (start, stride)
 }
-
-// ---------------------------------------------------------------------------
-// Randomized iterator
-// ---------------------------------------------------------------------------
 
 /// An iterator that visits every entry of an [`IndexMap`] exactly once in a
 /// pseudorandom order determined by a coprime-stride permutation.
@@ -199,10 +191,6 @@ impl<K, V, S> Iterator for RandIntoIter<K, V, S> {
 impl<K, V, S> ExactSizeIterator for RandIntoIter<K, V, S> {}
 impl<K, V, S> FusedIterator for RandIntoIter<K, V, S> {}
 
-// ---------------------------------------------------------------------------
-// Set iterator
-// ---------------------------------------------------------------------------
-
 /// An iterator that visits every element of an [`IndexSet`] exactly once in random order.
 pub struct RandSetIter<'a, T, S = RandomState> {
     set: &'a IndexSet<T, S>,
@@ -277,10 +265,6 @@ impl<T, S> Iterator for RandSetIntoIter<T, S> {
 
 impl<T, S> ExactSizeIterator for RandSetIntoIter<T, S> {}
 impl<T, S> FusedIterator for RandSetIntoIter<T, S> {}
-
-// ---------------------------------------------------------------------------
-// RandMap
-// ---------------------------------------------------------------------------
 
 /// A [`IndexMap`]-backed map whose `.iter()` yields entries in a **random order** on every
 /// call.
@@ -363,22 +347,6 @@ impl<K, V, S> RandMap<K, V, S> {
     /// Returns an iterator visiting all values in **random order**.
     pub fn values(&self) -> RandValues<'_, K, V, S> {
         RandValues { inner: self.iter() }
-    }
-
-    /// Returns an iterator visiting all key-value pairs with mutable references to the
-    /// values.
-    ///
-    /// Iteration order is the underlying [`IndexMap`] order (not randomized), since
-    /// mutable iteration is typically used for bulk mutation rather than selection.
-    pub fn iter_mut(&mut self) -> indexmap::map::IterMut<'_, K, V> {
-        self.inner.iter_mut()
-    }
-
-    /// Returns an iterator visiting all values mutably.
-    ///
-    /// Iteration order is the underlying [`IndexMap`] order (not randomized).
-    pub fn values_mut(&mut self) -> indexmap::map::ValuesMut<'_, K, V> {
-        self.inner.values_mut()
     }
 
     /// Clears the map, removing all entries.
@@ -583,10 +551,6 @@ where
 {
 }
 
-// ---------------------------------------------------------------------------
-// RandSet
-// ---------------------------------------------------------------------------
-
 /// A [`IndexSet`]-backed set whose `.iter()` yields elements in a **random order** on
 /// every call.
 ///
@@ -789,10 +753,6 @@ where
     S: BuildHasher,
 {
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -1026,26 +986,6 @@ mod tests {
         let mut map: RandMap<&str, i32> = [("a", 1), ("b", 2)].into_iter().collect();
         map["a"] = 42;
         assert_eq!(map.get("a"), Some(&42));
-    }
-
-    #[test]
-    fn iter_mut_visits_all() {
-        let mut map: RandMap<i32, i32> = (0..10).map(|i| (i, i)).collect();
-        for (_, v) in map.iter_mut() {
-            *v *= 10;
-        }
-        for i in 0..10 {
-            assert_eq!(map.get(&i), Some(&(i * 10)));
-        }
-    }
-
-    #[test]
-    fn values_mut_visits_all() {
-        let mut map: RandMap<i32, i32> = (0..5).map(|i| (i, 0)).collect();
-        for v in map.values_mut() {
-            *v = 99;
-        }
-        assert!(map.values().all(|v| *v == 99));
     }
 
     #[test]
