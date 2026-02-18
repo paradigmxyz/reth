@@ -367,6 +367,7 @@ where
                     gas_used,
                     logs: Vec::new(),
                     status: false,
+                    ..Default::default()
                 }
             }
             ExecutionResult::Revert { output, gas_used } => {
@@ -382,30 +383,36 @@ where
                     gas_used,
                     status: false,
                     logs: Vec::new(),
+                    ..Default::default()
                 }
             }
-            ExecutionResult::Success { output, gas_used, logs, .. } => SimCallResult {
-                return_data: output.into_data(),
-                error: None,
-                gas_used,
-                logs: logs
-                    .into_iter()
-                    .map(|log| {
-                        log_index += 1;
-                        alloy_rpc_types_eth::Log {
-                            inner: log,
-                            log_index: Some(log_index - 1),
-                            transaction_index: Some(index as u64),
-                            transaction_hash: Some(*tx.tx_hash()),
-                            block_hash: Some(block.hash()),
-                            block_number: Some(block.header().number()),
-                            block_timestamp: Some(block.header().timestamp()),
-                            ..Default::default()
-                        }
-                    })
-                    .collect(),
-                status: true,
-            },
+            ExecutionResult::Success { output, gas_used, logs, .. } =>
+            {
+                #[allow(clippy::needless_update)]
+                SimCallResult {
+                    return_data: output.into_data(),
+                    error: None,
+                    gas_used,
+                    logs: logs
+                        .into_iter()
+                        .map(|log| {
+                            log_index += 1;
+                            alloy_rpc_types_eth::Log {
+                                inner: log,
+                                log_index: Some(log_index - 1),
+                                transaction_index: Some(index as u64),
+                                transaction_hash: Some(*tx.tx_hash()),
+                                block_hash: Some(block.hash()),
+                                block_number: Some(block.header().number()),
+                                block_timestamp: Some(block.header().timestamp()),
+                                ..Default::default()
+                            }
+                        })
+                        .collect(),
+                    status: true,
+                    ..Default::default()
+                }
+            }
         };
 
         calls.push(call);
