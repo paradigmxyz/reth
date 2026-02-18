@@ -183,7 +183,12 @@ impl SaveBlocksMode {
         matches!(self, Self::Full | Self::FullNoHistoryIndexing)
     }
 
-    /// Returns `true` if this mode writes history indices (tx lookup + account/storage history).
+    /// Returns `true` if this mode writes tx hash lookups.
+    pub const fn with_tx_lookup(self) -> bool {
+        matches!(self, Self::Full | Self::BlocksOnly)
+    }
+
+    /// Returns `true` if this mode writes history indices (account/storage history).
     pub const fn with_history_indexing(self) -> bool {
         matches!(self, Self::Full)
     }
@@ -603,7 +608,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if save_mode.with_history_indexing() &&
+            if save_mode.with_tx_lookup() &&
                 !self.cached_storage_settings().storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {

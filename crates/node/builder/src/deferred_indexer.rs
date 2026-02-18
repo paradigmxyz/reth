@@ -1,9 +1,10 @@
 //! Deferred history indexer implementation using pipeline stages.
 //!
-//! This implements [`DeferredHistoryIndexer`] by running the history indexing stages
-//! (TransactionLookup, IndexStorageHistory, IndexAccountHistory) incrementally inside
-//! the persistence service's thread. This eliminates MDBX write-lock contention that
-//! would occur if these stages ran on a separate thread.
+//! This implements
+//! [`DeferredHistoryIndexer`](reth_engine_tree::persistence::DeferredHistoryIndexer) by running the
+//! history indexing stages (`TransactionLookup`, `IndexStorageHistory`, `IndexAccountHistory`)
+//! incrementally inside the persistence service's thread. This eliminates MDBX write-lock
+//! contention that would occur if these stages ran on a separate thread.
 
 use reth_config::config::StageConfig;
 use reth_engine_tree::persistence::DeferredHistoryIndexer;
@@ -24,7 +25,7 @@ const DEFAULT_BATCH_SIZE: u64 = 10_000;
 /// Deferred history indexer that runs pipeline stages inside the persistence service.
 ///
 /// Processes history indexing in small batches, round-robining between the three deferred
-/// stages (TransactionLookup, IndexStorageHistory, IndexAccountHistory).
+/// stages (`TransactionLookup`, `IndexStorageHistory`, `IndexAccountHistory`).
 pub struct StageDeferredHistoryIndexer<N: ProviderNodeTypes> {
     provider_factory: ProviderFactory<N>,
     tx_lookup: TransactionLookupStage,
