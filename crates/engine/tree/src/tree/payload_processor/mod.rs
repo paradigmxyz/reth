@@ -433,13 +433,15 @@ where
             self.executor.spawn_blocking(move || {
                 let _enter =
                     debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
-                let (head, rest, convert) = transactions.split_prefix(prefetch);
+                let (transactions, convert) = transactions.into_parts();
+                let mut all: Vec<_> = transactions.into_iter().collect();
+                let rest = all.split_off(prefetch.min(all.len()));
 
-                // Recover the first few transactions sequentially so execution can
+                // Convert the first few transactions sequentially so execution can
                 // start immediately without waiting for rayon work-stealing.
-                convert_serial(head.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
 
-                // Recover the remaining transactions in parallel.
+                // Convert the remaining transactions in parallel.
                 rest.into_par_iter()
                     .enumerate()
                     .map(|(i, tx)| {

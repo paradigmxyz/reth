@@ -93,13 +93,6 @@ pub trait ExecutableTxTuple: Send + 'static {
 
     /// Decomposes into the raw transaction iterator and converter.
     fn into_parts(self) -> (Self::IntoIter, Self::Convert);
-
-    /// Splits off the first `n` raw transactions and returns them together with the remaining
-    /// iterator and converter.
-    ///
-    /// Used by the engine to recover a small prefix sequentially before handing the tail to
-    /// rayon, avoiding a full `collect()` of the remaining items.
-    fn split_prefix(self, n: usize) -> (Vec<Self::RawTx>, Self::IntoIter, Self::Convert);
 }
 
 impl<RawTx, Tx, Err, I, F> ExecutableTxTuple for (I, F)
@@ -109,7 +102,6 @@ where
     Err: core::error::Error + Send + Sync + 'static,
     I: IntoParallelIterator<Item = RawTx, Iter: IndexedParallelIterator>
         + IntoIterator<Item = RawTx>
-        + FromIterator<RawTx>
         + Send
         + 'static,
     F: Fn(RawTx) -> Result<Tx, Err> + Send + Sync + 'static,
@@ -123,13 +115,6 @@ where
 
     fn into_parts(self) -> (I, F) {
         self
-    }
-
-    fn split_prefix(self, n: usize) -> (Vec<RawTx>, I, F) {
-        let (iter, convert) = self;
-        let mut all: Vec<RawTx> = iter.into_iter().collect();
-        let tail = all.split_off(n.min(all.len()));
-        (all, tail.into_iter().collect(), convert)
     }
 }
 
@@ -213,27 +198,6 @@ impl<A: ExecutableTxTuple, B: ExecutableTxTuple> ExecutableTxTuple for Either<A,
             Self::Right(b) => {
                 let (iter, convert) = b.into_parts();
                 (EitherIter(Either::Right(iter)), Either::Right(convert))
-            }
-        }
-    }
-
-    fn split_prefix(self, n: usize) -> (Vec<Self::RawTx>, Self::IntoIter, Self::Convert) {
-        match self {
-            Self::Left(a) => {
-                let (head, tail, convert) = a.split_prefix(n);
-                (
-                    head.into_iter().map(Either::Left).collect(),
-                    EitherIter(Either::Left(tail)),
-                    Either::Left(convert),
-                )
-            }
-            Self::Right(b) => {
-                let (head, tail, convert) = b.split_prefix(n);
-                (
-                    head.into_iter().map(Either::Right).collect(),
-                    EitherIter(Either::Right(tail)),
-                    Either::Right(convert),
-                )
             }
         }
     }
