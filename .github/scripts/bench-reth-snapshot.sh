@@ -22,8 +22,9 @@ BUCKET="minio/reth-snapshots/reth-1-minimal-nightly-previous.tar.zst"
 DATADIR="$SCHELK_MOUNT/datadir"
 ETAG_FILE="$HOME/.reth-bench-snapshot-etag"
 
-# Get remote ETag
-REMOTE_ETAG=$(mc stat "$BUCKET" 2>/dev/null | grep -i '^ETag' | awk '{print $3}')
+# Get remote metadata via JSON for reliable parsing
+MC_STAT=$(mc stat --json "$BUCKET" 2>/dev/null || true)
+REMOTE_ETAG=$(echo "$MC_STAT" | jq -r '.etag // empty')
 if [ -z "$REMOTE_ETAG" ]; then
   echo "::warning::Failed to get ETag from mc stat, will re-download"
   REMOTE_ETAG="unknown-$(date +%s)"
@@ -45,9 +46,9 @@ if [ "${1:-}" = "--check" ]; then
   exit 1
 fi
 
-# Query total snapshot size for progress tracking
-TOTAL_BYTES=$(mc stat "$BUCKET" 2>/dev/null | grep -i '^Size' | awk '{print $3}')
-if [ -z "$TOTAL_BYTES" ]; then
+# Get compressed size for progress tracking
+TOTAL_BYTES=$(echo "$MC_STAT" | jq -r '.size // empty')
+if [ -z "$TOTAL_BYTES" ] || [ "$TOTAL_BYTES" = "0" ]; then
   echo "::error::Failed to get snapshot size from mc stat"
   exit 1
 fi
@@ -74,12 +75,15 @@ update_comment() {
     > /dev/null 2>&1 || true
 }
 
+# Track compressed bytes flowing through the pipe
+DL_BYTES_FILE=$(mktemp)
+echo 0 > "$DL_BYTES_FILE"
+
 # Start progress reporter in background
 (
   while true; do
     sleep 10
-    CURRENT=$(du -sb "$DATADIR" 2>/dev/null | awk '{print $1}')
-    CURRENT=${CURRENT:-0}
+    CURRENT=$(cat "$DL_BYTES_FILE" 2>/dev/null || echo 0)
     if [ "$TOTAL_BYTES" -gt 0 ]; then
       PCT=$(( CURRENT * 100 / TOTAL_BYTES ))
       [ "$PCT" -gt 100 ] && PCT=100
@@ -89,10 +93,21 @@ update_comment() {
   done
 ) &
 PROGRESS_PID=$!
-trap 'kill $PROGRESS_PID 2>/dev/null || true' EXIT
+trap 'kill $PROGRESS_PID 2>/dev/null || true; rm -f "$DL_BYTES_FILE"' EXIT
 
-# Download and extract
-mc cat "$BUCKET" | pzstd -d -p 6 | sudo tar -xf - -C "$DATADIR"
+# Download and extract; python byte counter tracks compressed bytes received
+mc cat "$BUCKET" | python3 -c "
+import sys
+count = 0
+while True:
+    data = sys.stdin.buffer.read(1048576)
+    if not data:
+        break
+    count += len(data)
+    sys.stdout.buffer.write(data)
+    with open('$DL_BYTES_FILE', 'w') as f:
+        f.write(str(count))
+" | pzstd -d -p 6 | sudo tar -xf - -C "$DATADIR"
 
 # Stop progress reporter
 kill $PROGRESS_PID 2>/dev/null || true
