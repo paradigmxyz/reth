@@ -39,6 +39,14 @@ enum ArenaSparseNodeState {
 }
 
 impl ArenaSparseNodeState {
+    /// Returns true if the state is [`Self::Dirty`].
+    const fn is_dirty(&self) -> bool {
+        match self {
+            Self::Revealed { .. } | Self::Cached { .. } => false,
+            Self::Dirty { .. } => true,
+        }
+    }
+
     const fn num_leaves(&self) -> u64 {
         match self {
             Self::Revealed { num_leaves } |
@@ -47,13 +55,23 @@ impl ArenaSparseNodeState {
         }
     }
 
-    fn add_num_leaves(&mut self, delta: i64) {
+    /// Applies a delta to the state's `num_leaves` field, returning the new value.
+    fn add_num_leaves(&mut self, delta: i64) -> u64 {
         match self {
             Self::Revealed { num_leaves } |
             Self::Cached { num_leaves, .. } |
             Self::Dirty { num_leaves, .. } => {
                 *num_leaves = (*num_leaves as i64 + delta) as u64;
+                *num_leaves
             }
+        }
+    }
+
+    /// Returns the `num_dirty_leaves` count, or 0 if not dirty.
+    const fn num_dirty_leaves(&self) -> u64 {
+        match self {
+            Self::Dirty { num_dirty_leaves, .. } => *num_dirty_leaves,
+            _ => 0,
         }
     }
 }
@@ -114,6 +132,15 @@ impl ArenaSparseNode {
             Self::Branch(b) => b.state.num_leaves(),
             Self::Leaf { state, .. } => state.num_leaves(),
             Self::Subtrie(s) => s.arena[s.root].num_leaves(),
+        }
+    }
+
+    fn num_dirty_leaves(&self) -> u64 {
+        match self {
+            Self::EmptyRoot | Self::TakenSubtrie => 0,
+            Self::Branch(b) => b.state.num_dirty_leaves(),
+            Self::Leaf { state, .. } => state.num_dirty_leaves(),
+            Self::Subtrie(s) => s.arena[s.root].num_dirty_leaves(),
         }
     }
 
@@ -197,6 +224,9 @@ struct ArenaStackEntry {
     /// The `num_leaves` value when this branch was pushed onto the stack. Used to compute the
     /// delta to propagate to the parent when popped.
     prev_num_leaves: u64,
+    /// The `num_dirty_leaves` value when this branch was pushed onto the stack. Used to compute
+    /// the delta to propagate to the parent when popped.
+    prev_dirty_leaves: u64,
 }
 
 /// Returns the absolute path of a child at `child_nibble` under the branch at the top of the
@@ -229,6 +259,7 @@ fn maybe_push_branch(
             index: child_idx,
             path,
             prev_num_leaves: b.state.num_leaves(),
+            prev_dirty_leaves: b.state.num_dirty_leaves(),
         });
         true
     } else {
@@ -236,17 +267,32 @@ fn maybe_push_branch(
     }
 }
 
-/// Pops the top entry from the stack and propagates its `num_leaves` delta to the new top
-/// (its parent). Returns the popped entry.
+/// Pops the top entry from the stack and propagates its `num_leaves` and dirty state/count
+/// deltas to the new top (its parent). Returns the popped entry.
 fn pop_and_propagate(
     arena: &mut Arena<ArenaSparseNode>,
     stack: &mut Vec<ArenaStackEntry>,
 ) -> Option<ArenaStackEntry> {
     let entry = stack.pop()?;
     if let Some(parent) = stack.last() {
-        let delta = arena[entry.index].num_leaves() as i64 - entry.prev_num_leaves as i64;
-        if delta != 0 {
-            arena[parent.index].state_mut().add_num_leaves(delta);
+        let child = &arena[entry.index];
+        let cur_num_leaves = child.num_leaves();
+        let cur_dirty_leaves = child.num_dirty_leaves();
+
+        let parent_state = arena[parent.index].state_mut();
+        let leaves_delta = cur_num_leaves as i64 - entry.prev_num_leaves as i64;
+
+        // If a child has any dirty leaves, the parent must become Dirty too. It's sufficient to
+        // check the latest dirty leaf count; if the previous count was >0, but this went to zero,
+        // it would indicate the branch was deleted, and so wouldn't be on the stack.
+        if cur_dirty_leaves > 0 {
+            let dirty_delta = cur_dirty_leaves as i64 - entry.prev_dirty_leaves as i64;
+            *parent_state = ArenaSparseNodeState::Dirty {
+                num_leaves: (parent_state.num_leaves() as i64 + leaves_delta) as u64,
+                num_dirty_leaves: (parent_state.num_dirty_leaves() as i64 + dirty_delta) as u64,
+            };
+        } else if leaves_delta != 0 {
+            parent_state.add_num_leaves(leaves_delta);
         }
     }
     Some(entry)
@@ -284,6 +330,365 @@ impl ArenaSparseSubtrie {
         self.required_proofs.clear();
     }
 
+    /// Applies leaf updates within this subtrie. Uses the same walk-down-with-stack pattern as
+    /// [`Self::reveal_nodes`], but checks accessibility for [`LeafUpdate::Touched`] entries.
+    ///
+    /// `root_path` is the absolute path of the subtrie's root node in the full trie.
+    /// `sorted_updates` must be sorted lexicographically by their nibbles path (index 1).
+    ///
+    /// Any required proofs are appended to `self.required_proofs` and should be drained by the
+    /// caller after this method returns.
+    fn update_leaves(
+        &mut self,
+        sorted_updates: &[(B256, Nibbles, LeafUpdate)],
+        root_path: Nibbles,
+    ) {
+        if sorted_updates.is_empty() {
+            return;
+        }
+
+        self.stack.clear();
+        let root_node = &self.arena[self.root];
+        self.stack.push(ArenaStackEntry {
+            index: self.root,
+            path: root_path,
+            prev_num_leaves: root_node.num_leaves(),
+            prev_dirty_leaves: root_node.num_dirty_leaves(),
+        });
+
+        for &(key, ref full_path, ref update) in sorted_updates {
+            // Pop stack until head is ancestor of full_path.
+            while self.stack.len() > 1 && !full_path.starts_with(&self.stack.last().unwrap().path) {
+                pop_and_propagate(&mut self.arena, &mut self.stack);
+            }
+
+            match update {
+                LeafUpdate::Changed(value) if !value.is_empty() => {
+                    // Upsert: insert or update a leaf with the given value.
+                    self.upsert_leaf(key, full_path, value);
+                }
+                LeafUpdate::Changed(_) => {
+                    // Removal (empty value) — not yet implemented.
+                    todo!("Changed removal updates not yet implemented")
+                }
+                LeafUpdate::Touched => {
+                    // Descend from stack head toward target to check accessibility.
+                    loop {
+                        let head = self.stack.last().unwrap();
+                        let head_branch = self.arena[head.index].branch_ref();
+
+                        let mut head_branch_logical_path = head.path;
+                        head_branch_logical_path.extend(&head_branch.short_key);
+                        debug_assert!(
+                            full_path.len() > head_branch_logical_path.len(),
+                            "full_path {full_path:?} must be longer than branch logical path {head_branch_logical_path:?}",
+                        );
+
+                        if !full_path.starts_with(&head_branch_logical_path) {
+                            break; // exclusion — extension arrives at disjoint branch
+                        }
+
+                        let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
+                        let Some(dense_idx) =
+                            child_dense_index(head_branch.state_mask, child_nibble)
+                        else {
+                            break; // exclusion — no child at this nibble
+                        };
+
+                        match &head_branch.children[dense_idx] {
+                            ArenaSparseNodeBranchChild::Blinded(_) => {
+                                self.required_proofs.push(ArenaRequiredProof {
+                                    key,
+                                    min_len: (head_branch_logical_path.len() as u8 + 1).min(64),
+                                });
+                                break;
+                            }
+                            ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                                let child_idx = *child_idx;
+                                if !maybe_push_branch(
+                                    &self.arena,
+                                    &mut self.stack,
+                                    child_idx,
+                                    child_nibble,
+                                ) {
+                                    // Child is a leaf or empty — accessible or exclusion.
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Drain remaining stack entries, propagating num_leaves deltas.
+        drain_stack(&mut self.arena, &mut self.stack);
+    }
+
+    /// Performs a leaf upsert within this subtrie. Descends from the current stack head
+    /// toward `full_path`, inserting or updating the leaf with `value`.
+    ///
+    /// Handles three cases:
+    /// 1. The target nibble has no child — inserts a new leaf.
+    /// 2. The target nibble has a leaf — updates its value or splits on key divergence.
+    /// 3. The target nibble has a branch/leaf whose short_key partially matches — splits by
+    ///    creating a new intermediate branch at the divergence point.
+    ///
+    /// The stack must have at least one entry (the ancestor branch) when called. All
+    /// ancestor branches on the stack are marked dirty.
+    fn upsert_leaf(&mut self, key: B256, full_path: &Nibbles, value: &[u8]) {
+        // Descend from the stack head toward the target leaf.
+        loop {
+            let head = self.stack.last().unwrap();
+            let head_idx = head.index;
+            let head_path = head.path;
+            let head_branch = self.arena[head_idx].branch_ref();
+
+            let short_key = head_branch.short_key.clone();
+            let state_mask = head_branch.state_mask;
+            let old_num_leaves = head_branch.state.num_leaves();
+            let old_dirty_leaves = head_branch.state.num_dirty_leaves();
+
+            let mut head_branch_logical_path = head_path;
+            head_branch_logical_path.extend(&short_key);
+
+            debug_assert!(
+                full_path.len() > head_branch_logical_path.len(),
+                "full_path {full_path:?} must be longer than branch prefix {head_branch_logical_path:?}",
+            );
+
+            // Check if full_path diverges within the branch's short_key. If so, we need
+            // to split the short_key by creating a new intermediate branch.
+            if !full_path.starts_with(&head_branch_logical_path) {
+                let full_path_from_head = full_path.slice(head_path.len()..);
+                let common_len = full_path_from_head.common_prefix_length(&short_key);
+
+                // Shorten the existing branch's short_key to everything after the split.
+                self.arena[head_idx].branch_mut().short_key = short_key.slice(common_len + 1..);
+
+                let old_child_nibble = short_key.get_unchecked(common_len);
+                let old_child_num_leaves = self.arena[head_idx].num_leaves();
+                let new_branch_idx = self.split_and_insert_leaf(
+                    full_path_from_head,
+                    common_len,
+                    value,
+                    old_child_nibble,
+                    head_idx,
+                    old_child_num_leaves,
+                    old_dirty_leaves,
+                    short_key.slice(..common_len),
+                );
+
+                self.replace_child_in_parent(head_idx, new_branch_idx);
+
+                let stack_entry = self.stack.last_mut().unwrap();
+                stack_entry.index = new_branch_idx;
+
+                return;
+            }
+
+            let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
+
+            match child_dense_index(state_mask, child_nibble) {
+                None => {
+                    // No child at this nibble — insert a new leaf.
+                    let leaf_key: Nibbles = full_path.slice(head_branch_logical_path.len() + 1..);
+                    let new_leaf = self.arena.insert(ArenaSparseNode::Leaf {
+                        state: ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 },
+                        key: leaf_key,
+                        value: value.to_vec(),
+                    });
+
+                    let insert_pos =
+                        (state_mask.get() & ((1u16 << child_nibble) - 1)).count_ones() as usize;
+                    let branch = self.arena[head_idx].branch_mut();
+                    branch.state_mask.set_bit(child_nibble);
+                    branch
+                        .children
+                        .insert(insert_pos, ArenaSparseNodeBranchChild::Revealed(new_leaf));
+                    branch.state = ArenaSparseNodeState::Dirty {
+                        num_leaves: old_num_leaves + 1,
+                        num_dirty_leaves: old_dirty_leaves + 1,
+                    };
+
+                    return;
+                }
+                Some(dense_idx) => {
+                    // Extract child info without holding borrow on arena.
+                    let child_idx = match &self.arena[head_idx].branch_ref().children[dense_idx] {
+                        ArenaSparseNodeBranchChild::Blinded(_) => {
+                            self.required_proofs.push(ArenaRequiredProof {
+                                key,
+                                min_len: (head_branch_logical_path.len() as u8 + 1).min(64),
+                            });
+                            return;
+                        }
+                        ArenaSparseNodeBranchChild::Revealed(idx) => *idx,
+                    };
+
+                    match &self.arena[child_idx] {
+                        ArenaSparseNode::Leaf { key: leaf_key, .. } => {
+                            let leaf_key = leaf_key.clone();
+
+                            // Build the leaf's full path to compare.
+                            let mut leaf_full_path = head_branch_logical_path;
+                            leaf_full_path.push_unchecked(child_nibble);
+                            leaf_full_path.extend(&leaf_key);
+
+                            if &leaf_full_path == full_path {
+                                // Same leaf — update value in place.
+                                let leaf = &mut self.arena[child_idx];
+                                if let ArenaSparseNode::Leaf { value: v, state, .. } = leaf {
+                                    v.clear();
+                                    v.extend_from_slice(value);
+                                    *state = ArenaSparseNodeState::Dirty {
+                                        num_leaves: 1,
+                                        num_dirty_leaves: 1,
+                                    };
+                                }
+                                self.arena[head_idx].branch_mut().state =
+                                    ArenaSparseNodeState::Dirty {
+                                        num_leaves: old_num_leaves,
+                                        num_dirty_leaves: old_dirty_leaves + 1,
+                                    };
+                                return;
+                            }
+
+                            // Different leaf — find divergence point and split.
+                            let child_path_start = head_branch_logical_path.len() + 1;
+                            let remaining_full = full_path.slice(child_path_start..);
+                            let common_prefix_len = remaining_full.common_prefix_length(&leaf_key);
+
+                            let old_leaf_nibble = leaf_key.get_unchecked(common_prefix_len);
+                            let old_leaf_suffix: Nibbles = leaf_key.slice(common_prefix_len + 1..);
+
+                            if let ArenaSparseNode::Leaf { key: k, state, .. } =
+                                &mut self.arena[child_idx]
+                            {
+                                *k = old_leaf_suffix;
+                                *state = ArenaSparseNodeState::Dirty {
+                                    num_leaves: 1,
+                                    num_dirty_leaves: 1,
+                                };
+                            } else {
+                                unreachable!()
+                            }
+
+                            let new_branch_idx = self.split_and_insert_leaf(
+                                remaining_full,
+                                common_prefix_len,
+                                value,
+                                old_leaf_nibble,
+                                child_idx,
+                                1,
+                                0,
+                                remaining_full.slice(..common_prefix_len),
+                            );
+
+                            let branch = self.arena[head_idx].branch_mut();
+                            branch.children[dense_idx] =
+                                ArenaSparseNodeBranchChild::Revealed(new_branch_idx);
+                            branch.state = ArenaSparseNodeState::Dirty {
+                                num_leaves: old_num_leaves + 1,
+                                num_dirty_leaves: old_dirty_leaves + 1,
+                            };
+
+                            return;
+                        }
+                        ArenaSparseNode::Branch(_) => {
+                            let _pushed = maybe_push_branch(
+                                &self.arena,
+                                &mut self.stack,
+                                child_idx,
+                                child_nibble,
+                            );
+                            debug_assert!(_pushed);
+                            continue;
+                        }
+                        _ => unreachable!("unexpected node type in subtrie during upsert"),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Creates a new leaf and a new branch that splits an existing child from the new leaf at
+    /// a divergence point. Returns the index of the new branch.
+    ///
+    /// `new_leaf_path` is the full remaining path for the new leaf (relative to the split
+    /// point's parent). `diverge_len` is the common prefix length where the paths diverge.
+    /// `old_child_nibble` and `old_child_idx` identify the existing child at the split.
+    /// `old_child_num_leaves` and `old_child_dirty_leaves` are the existing child's leaf counts.
+    fn split_and_insert_leaf(
+        &mut self,
+        new_leaf_path: Nibbles,
+        diverge_len: usize,
+        value: &[u8],
+        old_child_nibble: u8,
+        old_child_idx: Index,
+        old_child_num_leaves: u64,
+        old_child_dirty_leaves: u64,
+        short_key: Nibbles,
+    ) -> Index {
+        let new_leaf_nibble = new_leaf_path.get_unchecked(diverge_len);
+        debug_assert_ne!(old_child_nibble, new_leaf_nibble);
+
+        let new_leaf_idx = self.arena.insert(ArenaSparseNode::Leaf {
+            state: ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 },
+            key: new_leaf_path.slice(diverge_len + 1..),
+            value: value.to_vec(),
+        });
+
+        let (first_nibble, first_child, second_nibble, second_child) =
+            if old_child_nibble < new_leaf_nibble {
+                (old_child_nibble, old_child_idx, new_leaf_nibble, new_leaf_idx)
+            } else {
+                (new_leaf_nibble, new_leaf_idx, old_child_nibble, old_child_idx)
+            };
+
+        let state_mask = TrieMask::from(1u16 << first_nibble | 1u16 << second_nibble);
+        let mut children = SmallVec::with_capacity(2);
+        children.push(ArenaSparseNodeBranchChild::Revealed(first_child));
+        children.push(ArenaSparseNodeBranchChild::Revealed(second_child));
+
+        self.arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+            state: ArenaSparseNodeState::Dirty {
+                num_leaves: old_child_num_leaves + 1,
+                num_dirty_leaves: old_child_dirty_leaves + 1,
+            },
+            children,
+            state_mask,
+            short_key,
+            branch_masks: BranchNodeMasks::default(),
+        }))
+    }
+
+    /// Replaces a child index in the parent's children array. The parent is the second-to-last
+    /// stack entry. If the stack has only one entry, `old_idx` is the subtrie root and
+    /// `self.root` is updated instead.
+    ///
+    /// `old_idx` must be on the stack (it is the current stack head), so its nibble within
+    /// the parent can be determined from the last nibble of its path.
+    fn replace_child_in_parent(&mut self, old_idx: Index, new_idx: Index) {
+        if self.stack.len() <= 1 {
+            self.root = new_idx;
+            return;
+        }
+
+        let child_path = &self.stack.last().unwrap().path;
+        let child_nibble = child_path.last().unwrap();
+
+        let parent_entry = &self.stack[self.stack.len() - 2];
+        let parent = self.arena[parent_entry.index].branch_mut();
+        let dense_idx = child_dense_index(parent.state_mask, child_nibble)
+            .expect("child nibble not found in parent state_mask");
+        debug_assert!(
+            matches!(parent.children[dense_idx], ArenaSparseNodeBranchChild::Revealed(idx) if idx == old_idx),
+            "parent child at nibble {child_nibble} does not match old_idx",
+        );
+        parent.children[dense_idx] = ArenaSparseNodeBranchChild::Revealed(new_idx);
+    }
+
     /// Reveals nodes inside this subtrie. Uses the same walk-down algorithm as the upper
     /// trie but operates on the subtrie's own arena.
     ///
@@ -305,6 +710,7 @@ impl ArenaSparseSubtrie {
             index: self.root,
             path: root_path,
             prev_num_leaves: root_num_leaves,
+            prev_dirty_leaves: 0,
         });
 
         for node in nodes.iter_mut() {
@@ -627,6 +1033,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             index: self.root,
             path: Nibbles::default(),
             prev_num_leaves: root_num_leaves,
+            prev_dirty_leaves: 0,
         });
 
         let mut node_idx = 0;
@@ -835,9 +1242,153 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     fn update_leaves(
         &mut self,
-        _updates: &mut B256Map<LeafUpdate>,
-        _proof_required_fn: impl FnMut(B256, u8),
+        updates: &mut B256Map<LeafUpdate>,
+        mut proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()> {
-        todo!()
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        // Drain and sort updates lexicographically by nibbles path.
+        let mut sorted: Vec<_> =
+            updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
+        sorted.sort_unstable_by(|a, b| a.1.cmp(&b.1));
+
+        let root_num_leaves = self.upper_arena[self.root].num_leaves();
+        let mut stack = mem::take(&mut self.stack);
+        stack.clear();
+        stack.push(ArenaStackEntry {
+            index: self.root,
+            path: Nibbles::default(),
+            prev_num_leaves: root_num_leaves,
+            prev_dirty_leaves: 0,
+        });
+
+        let mut update_idx = 0;
+        'outer: while update_idx < sorted.len() {
+            let (key, ref full_path, ref update) = sorted[update_idx];
+
+            // Pop stack until head is ancestor of full_path.
+            while stack.len() > 1 && !full_path.starts_with(&stack.last().unwrap().path) {
+                pop_and_propagate(&mut self.upper_arena, &mut stack);
+            }
+
+            match update {
+                LeafUpdate::Changed(_) => todo!("Changed updates not yet implemented"),
+                LeafUpdate::Touched => {
+                    // Descend from stack head toward target to check accessibility.
+                    let proof_target = 'descent: {
+                        loop {
+                            let head = stack.last().unwrap();
+                            let head_branch = self.upper_arena[head.index].branch_ref();
+
+                            // Check if full_path diverges within the branch's short_key.
+                            let mut head_branch_logical_path = head.path;
+                            head_branch_logical_path.extend(&head_branch.short_key);
+                            debug_assert!(
+                                full_path.len() > head_branch_logical_path.len(),
+                                "full_path {full_path:?} must be longer than branch logical path {head_branch_logical_path:?}"
+                            );
+
+                            if !full_path.starts_with(&head_branch_logical_path) {
+                                break 'descent None; // exclusion
+                            }
+
+                            let child_nibble =
+                                full_path.get_unchecked(head_branch_logical_path.len());
+                            let Some(dense_idx) =
+                                child_dense_index(head_branch.state_mask, child_nibble)
+                            else {
+                                break 'descent None; // exclusion — no child at this nibble
+                            };
+
+                            match &head_branch.children[dense_idx] {
+                                ArenaSparseNodeBranchChild::Blinded(_) => {
+                                    let min_len =
+                                        (head_branch_logical_path.len() as u8 + 1).min(64);
+                                    break 'descent Some((key, min_len));
+                                }
+                                ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                                    let child_idx = *child_idx;
+                                    match &self.upper_arena[child_idx] {
+                                        ArenaSparseNode::Branch(_) => {
+                                            let _pushed = maybe_push_branch(
+                                                &self.upper_arena,
+                                                &mut stack,
+                                                child_idx,
+                                                child_nibble,
+                                            );
+                                            debug_assert!(_pushed);
+                                            continue;
+                                        }
+                                        ArenaSparseNode::Leaf { .. } => {
+                                            break 'descent None; // accessible or exclusion
+                                        }
+                                        ArenaSparseNode::Subtrie(_) => {
+                                            // Collect all updates belonging to this subtrie.
+                                            let subtrie_start = update_idx;
+                                            let mut subtrie_root_path = head_branch_logical_path;
+                                            subtrie_root_path.push_unchecked(child_nibble);
+                                            while update_idx < sorted.len() &&
+                                                sorted[update_idx]
+                                                    .1
+                                                    .starts_with(&subtrie_root_path)
+                                            {
+                                                update_idx += 1;
+                                            }
+
+                                            // Take the subtrie, apply updates, drain proofs,
+                                            // put it back.
+                                            let ArenaSparseNode::Subtrie(mut subtrie) =
+                                                mem::replace(
+                                                    &mut self.upper_arena[child_idx],
+                                                    ArenaSparseNode::TakenSubtrie,
+                                                )
+                                            else {
+                                                unreachable!()
+                                            };
+
+                                            subtrie.update_leaves(
+                                                &sorted[subtrie_start..update_idx],
+                                                subtrie_root_path,
+                                            );
+
+                                            for proof in subtrie.required_proofs.drain(..) {
+                                                proof_required_fn(proof.key, proof.min_len);
+                                                updates.insert(proof.key, LeafUpdate::Touched);
+                                            }
+
+                                            self.upper_arena[child_idx] =
+                                                ArenaSparseNode::Subtrie(subtrie);
+
+                                            // update_idx already advanced past all subtrie
+                                            // entries; continue the outer loop directly.
+                                            continue 'outer;
+                                        }
+                                        ArenaSparseNode::EmptyRoot |
+                                        ArenaSparseNode::TakenSubtrie => {
+                                            unreachable!()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    if let Some((target_key, min_len)) = proof_target {
+                        proof_required_fn(target_key, min_len);
+                        updates.insert(key, LeafUpdate::Touched);
+                    }
+
+                    update_idx += 1;
+                }
+            }
+        }
+
+        // Drain remaining stack entries, propagating num_leaves deltas.
+        drain_stack(&mut self.upper_arena, &mut stack);
+        self.stack = stack;
+
+        Ok(())
     }
 }
