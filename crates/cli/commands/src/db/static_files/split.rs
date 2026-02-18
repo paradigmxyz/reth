@@ -480,7 +480,7 @@ impl SplitCommand {
             let jar = source.get_segment_provider(StaticFileSegment::AccountChangeSets, block)?;
 
             let mut changes = Vec::new();
-            if let Some(offset) = jar.user_header().changeset_offset(block) {
+            if let Some(offset) = jar.read_changeset_offset(block)? {
                 let mut cursor = jar.cursor()?;
                 for i in offset.changeset_range() {
                     if let Some(change) = cursor.get_one::<AccountChangesetMask>(i.into())? {
@@ -513,7 +513,7 @@ impl SplitCommand {
             let jar = source.get_segment_provider(StaticFileSegment::StorageChangeSets, block)?;
 
             let mut changes = Vec::new();
-            if let Some(offset) = jar.user_header().changeset_offset(block) {
+            if let Some(offset) = jar.read_changeset_offset(block)? {
                 let mut cursor = jar.cursor()?;
                 for i in offset.changeset_range() {
                     if let Some(change) = cursor.get_one::<StorageChangesetMask>(i.into())? {
