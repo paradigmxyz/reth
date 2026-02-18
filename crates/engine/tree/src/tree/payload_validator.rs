@@ -1097,17 +1097,20 @@ where
                 // Get a database provider to use as trie cursor factory
                 match overlay_factory.database_provider_ro() {
                     Ok(provider) => {
-                        if let Err(err) = super::trie_updates::compare_trie_updates(
+                        match super::trie_updates::compare_trie_updates(
                             &provider,
                             task_trie_updates,
                             serial_trie_updates,
                         ) {
-                            warn!(
-                                target: "engine::tree::payload_validator",
-                                %err,
-                                "Error comparing trie updates"
-                            );
-                            return true;
+                            Ok(has_diff) => return has_diff,
+                            Err(err) => {
+                                warn!(
+                                    target: "engine::tree::payload_validator",
+                                    %err,
+                                    "Error comparing trie updates"
+                                );
+                                return true;
+                            }
                         }
                     }
                     Err(err) => {
