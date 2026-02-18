@@ -121,6 +121,7 @@ jobs:
       - run: echo "reth build ready"
 
   test:
+    if: always()
     needs:
       - detect-env
       - wait-reth
