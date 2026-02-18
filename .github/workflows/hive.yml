@@ -20,29 +20,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # --------------------------------------------------
-  # ENV DETECTION (SINGLE SOURCE OF TRUTH)
-  # --------------------------------------------------
   detect-env:
     runs-on: ubuntu-latest
     outputs:
-      use_docker: ${{ steps.detect.outputs.use_docker }}
+      use_depot: ${{ steps.detect.outputs.use_depot }}
     steps:
       - id: detect
         run: |
           if [ "${{ github.repository }}" = "paradigmxyz/reth" ] && \
              [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "use_docker=true" >> "$GITHUB_OUTPUT"
+            echo "use_depot=true" >> "$GITHUB_OUTPUT"
           else
-            echo "use_docker=false" >> "$GITHUB_OUTPUT"
+            echo "use_depot=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # --------------------------------------------------
-  # DOCKER FLOW (UPSTREAM, NON-PR ONLY)
-  # --------------------------------------------------
   build-reth-stable:
     needs: detect-env
-    if: needs.detect-env.outputs.use_docker == 'true'
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive-stable
@@ -51,7 +44,6 @@ jobs:
 
   build-reth-edge:
     needs: detect-env
-    if: needs.detect-env.outputs.use_docker == 'true'
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: hive-edge
@@ -59,7 +51,6 @@ jobs:
     secrets: inherit
 
   prepare-hive:
-    needs: detect-env
     timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
@@ -89,7 +80,11 @@ jobs:
       - if: steps.cache-hive.outputs.cache-hit == 'true'
         run: |
           cd hive_assets
-          for f in *.tar; do docker load -i "$f"; done
+          for f in *.tar; do
+            if [ -f "$f" ]; then
+              docker load -i "$f"
+            fi
+          done
           chmod +x hive
 
       - uses: actions/upload-artifact@v6
@@ -97,54 +92,15 @@ jobs:
           name: hive_assets
           path: hive_assets
 
-          
-
-  # --------------------------------------------------
-  # NON-DOCKER FLOW (PRS + FORKS)
-  # --------------------------------------------------
-  prepare-reth-stable:
-    needs: detect-env
-    if: needs.detect-env.outputs.use_docker == 'false'
-    uses: ./.github/workflows/prepare-reth.yml
-    with:
-      image_tag: ghcr.io/paradigmxyz/reth:latest
-      binary_name: reth
-      cargo_features: asm-keccak
-      artifact_name: reth-stable
-
-  prepare-reth-edge:
-    needs: detect-env
-    if: needs.detect-env.outputs.use_docker == 'false'
-    uses: ./.github/workflows/prepare-reth.yml
-    with:
-      image_tag: ghcr.io/paradigmxyz/reth:latest
-      binary_name: reth
-      cargo_features: asm-keccak edge
-      artifact_name: reth-edge
-
-  wait-reth:
+  test:
     needs:
       - detect-env
       - build-reth-stable
       - build-reth-edge
-      - prepare-reth-stable
-      - prepare-reth-edge
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - run: echo "reth build is ready"
-
-  # --------------------------------------------------
-  # TEST MATRIX
-  # --------------------------------------------------
-  test:
-    needs:
-      - detect-env
       - prepare-hive
-      - wait-reth
 
     timeout-minutes: 120
-    runs-on: ${{ needs.detect-env.outputs.use_docker == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.detect-env.outputs.use_depot == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
 
     strategy:
       fail-fast: false
@@ -175,7 +131,6 @@ jobs:
           path: /tmp
 
       - uses: actions/download-artifact@v7
-        if: needs.detect-env.outputs.use_docker == 'true'
         with:
           name: hive_assets
           path: /tmp
@@ -183,8 +138,8 @@ jobs:
       - run: .github/scripts/hive/load_images.sh
 
       - run: |
-          mv /tmp/hive /usr/local/bin || true
-          chmod +x /usr/local/bin/hive || true
+          mv /tmp/hive /usr/local/bin
+          chmod +x /usr/local/bin/hive
 
       - uses: actions/checkout@v6
         with:
@@ -212,19 +167,16 @@ jobs:
               --ignored .github/scripts/hive/ignored_tests.yaml
 
       - if: failure()
-        run: cat hivetests/workspace/logs/*simulator*.log
+        run: cat hivetests/workspace/logs/simulator.log
 
       - if: failure()
         run: cat hivetests/workspace/logs/reth/client-*.log
 
-  # --------------------------------------------------
-  # SLACK (UPSTREAM ONLY)
-  # --------------------------------------------------
   notify-on-error:
     needs:
       - test
       - detect-env
-    if: failure() && needs.detect-env.outputs.use_docker == 'true'
+    if: failure() && needs.detect-env.outputs.use_depot == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: rtCamp/action-slack-notify@v2
