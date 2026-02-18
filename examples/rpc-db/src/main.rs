@@ -49,7 +49,7 @@ async fn main() -> eyre::Result<()> {
         DatabaseArguments::new(ClientVersion::default()),
     )?;
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
-    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
+    let runtime = Runtime::test();
     let factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, DatabaseEnv>>::new(
         db.clone(),
         spec.clone(),
