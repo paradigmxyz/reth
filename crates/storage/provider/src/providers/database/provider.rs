@@ -28,7 +28,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, AddressSet, B256Map, HashMap},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, KECCAK256_EMPTY,
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -70,9 +70,8 @@ use reth_trie::{
     HashedPostStateSorted, StoredNibbles,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor};
-use revm_database::{
-    states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
-    BundleState,
+use revm_database::states::{
+    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
 use std::{
     cmp::Ordering,
@@ -845,20 +844,18 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(())
     }
 
-    /// Writes only bytecodes from the bundle state, skipping plain state and changeset conversion.
+    /// Writes bytecodes to MDBX.
     ///
-    /// Used in storage v2 where plain state and changesets are written to static files, making
-    /// the full [`BundleState::to_plain_state_and_reverts`] conversion unnecessary.
-    fn write_bytecodes(&self, state: &BundleState) -> ProviderResult<()> {
-        if state.contracts.is_empty() {
-            return Ok(());
-        }
-
+    /// Also used as a fast path in [`StateWriter::write_state`] for storage v2 where plain state
+    /// and changesets are written to static files, making the full
+    /// [`BundleState::to_plain_state_and_reverts`] conversion unnecessary.
+    fn write_bytecodes(
+        &self,
+        bytecodes: impl IntoIterator<Item = (B256, Bytecode)>,
+    ) -> ProviderResult<()> {
         let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
-        for (hash, bytecode) in &state.contracts {
-            if *hash != KECCAK256_EMPTY {
-                bytecodes_cursor.upsert(*hash, &Bytecode(bytecode.clone()))?;
-            }
+        for (hash, bytecode) in bytecodes {
+            bytecodes_cursor.upsert(hash, &bytecode)?;
         }
         Ok(())
     }
@@ -2394,7 +2391,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // In storage v2 with all outputs directed to static files, plain state and changesets
             // are written elsewhere. Only bytecodes need MDBX writes, so skip the expensive
             // to_plain_state_and_reverts conversion that iterates all accounts and storage.
-            self.write_bytecodes(execution_outcome.state())?;
+            self.write_bytecodes(
+                execution_outcome.state().contracts.iter().map(|(h, b)| (*h, Bytecode(b.clone()))),
+            )?;
             return Ok(());
         }
 
@@ -2600,7 +2599,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // and take smaller memory footprint.
         changes.accounts.par_sort_by_key(|a| a.0);
         changes.storage.par_sort_by_key(|a| a.address);
-        changes.contracts.par_sort_by_key(|a| a.0);
 
         // When use_hashed_state is enabled, skip plain state writes for accounts and storage.
         // The hashed state is already written by the separate `write_hashed_state()` call.
@@ -2655,10 +2653,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
         // Write bytecode
         tracing::trace!(len = changes.contracts.len(), "Writing bytecodes");
-        let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
-        for (hash, bytecode) in changes.contracts {
-            bytecodes_cursor.upsert(hash, &Bytecode(bytecode))?;
-        }
+        self.write_bytecodes(
+            changes.contracts.into_iter().map(|(hash, bytecode)| (hash, Bytecode(bytecode))),
+        )?;
 
         Ok(())
     }
