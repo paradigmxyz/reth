@@ -50,8 +50,8 @@ pub struct Command<C: ChainSpecParser> {
     num_tasks: Option<u64>,
 
     /// Number of blocks each worker processes before grabbing the next chunk.
-    #[arg(long, default_value = "1000")]
-    blocks_per_worker: u64,
+    #[arg(long, default_value = "5000")]
+    blocks_per_chunk: u64,
 
     /// Continues with execution when an invalid block is encountered and collects these blocks.
     #[arg(long)]
@@ -110,7 +110,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         };
 
         let skip_invalid_blocks = self.skip_invalid_blocks;
-        let blocks_per_worker = self.blocks_per_worker;
+        let blocks_per_chunk = self.blocks_per_chunk;
         let (stats_tx, mut stats_rx) = mpsc::unbounded_channel();
         let (info_tx, mut info_rx) = mpsc::unbounded_channel();
         let cancellation = CancellationToken::new();
@@ -139,11 +139,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                     // Atomically grab the next chunk of blocks.
                     let chunk_start =
-                        next_block.fetch_add(blocks_per_worker, Ordering::Relaxed);
+                        next_block.fetch_add(blocks_per_chunk, Ordering::Relaxed);
                     if chunk_start >= max_block {
                         break;
                     }
-                    let chunk_end = (chunk_start + blocks_per_worker).min(max_block);
+                    let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
 
                     let mut executor = evm_config.batch_executor(db_at(chunk_start - 1));
                     let mut executor_created = Instant::now();
