@@ -247,9 +247,11 @@ jobs:
                 });
                 allRuns.push(...r);
               }
-              const thisRun = allRuns.find(r => r.id === context.runId);
+              // Only count runs that trigger reth-bench (not push-triggered codspeed runs)
+              const benchRuns = allRuns.filter(r => r.event === 'issue_comment' || r.event === 'workflow_dispatch');
+              const thisRun = benchRuns.find(r => r.id === context.runId);
               const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
-              ahead = allRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              ahead = benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
               if (ahead > 0) {
                 queueMsg = `\n🔢 **Queue position:** #${ahead + 1} (${ahead} job(s) ahead)`;
               }
@@ -302,9 +304,10 @@ jobs:
                 });
                 allRuns.push(...r);
               }
-              const thisRun = allRuns.find(r => r.id === context.runId);
+              const benchRuns = allRuns.filter(r => r.event === 'issue_comment' || r.event === 'workflow_dispatch');
+              const thisRun = benchRuns.find(r => r.id === context.runId);
               const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
-              return allRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              return benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
             }
 
             let lastPosition = parseInt('${{ steps.ack.outputs.queue-position }}');
