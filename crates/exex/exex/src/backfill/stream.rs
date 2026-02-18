@@ -261,7 +261,7 @@ mod tests {
     use reth_provider::{
         providers::{BlockchainProvider, ProviderNodeTypes},
         test_utils::create_test_provider_factory_with_chain_spec,
-        ProviderFactory,
+        BundleKind, ProviderFactory,
     };
     use reth_stages_api::ExecutionStageThresholds;
     use reth_testing_utils::{generators, generators::sign_tx_with_key_pair};
@@ -293,7 +293,9 @@ mod tests {
 
         // execute first block
         let (block, mut execution_output) = backfill_stream.next().await.unwrap().unwrap();
-        execution_output.state.reverts.sort();
+        if let BundleKind::Plain(ref mut state) = execution_output.state {
+            state.reverts.sort();
+        }
         let expected_block = blocks_and_execution_outcomes[0].0.clone();
         let expected_output = &blocks_and_execution_outcomes[0].1;
         assert_eq!(block, expected_block);

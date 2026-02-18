@@ -256,8 +256,13 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Compute and check the post state root
-        let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+        let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+            output
+                .state
+                .as_plain()
+                .expect("ef-test execution output must have plain state")
+                .state(),
+        );
         let (computed_state_root, _) = StateRoot::overlay_root_with_updates(
             provider.tx_ref(),
             &hashed_state.clone_into_sorted(),

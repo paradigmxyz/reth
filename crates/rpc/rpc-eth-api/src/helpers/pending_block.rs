@@ -364,7 +364,7 @@ pub trait LoadPendingBlock:
             builder.finish(NoopProvider::default()).map_err(Self::Error::from_eth_err)?;
 
         let execution_outcome =
-            BlockExecutionOutput { state: db.take_bundle(), result: execution_result };
+            BlockExecutionOutput { state: db.take_bundle().into(), result: execution_result };
 
         Ok(ExecutedBlock::new(
             block.into(),

@@ -831,7 +831,7 @@ where
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
-        let output = BlockExecutionOutput { result, state: db.take_bundle() };
+        let output = BlockExecutionOutput { result, state: db.take_bundle().into() };
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
@@ -1222,7 +1222,9 @@ where
 
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "hashed_post_state").entered();
-        let hashed_state = self.provider.hashed_post_state(&output.state);
+        let hashed_state = self.provider.hashed_post_state(
+            output.state.as_plain().expect("execution output must have plain state"),
+        );
         drop(_enter);
 
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
@@ -1696,10 +1698,10 @@ where
     }
 
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>) {
-        self.payload_processor.on_inserted_executed_block(
-            block.recovered_block.block_with_parent(),
-            &block.execution_output.state,
-        );
+        if let Some(plain_state) = block.execution_output.state.as_plain() {
+            self.payload_processor
+                .on_inserted_executed_block(block.recovered_block.block_with_parent(), plain_state);
+        }
     }
 }
 

@@ -254,6 +254,7 @@ mod tests {
     use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+        BundleKind,
     };
     use reth_testing_utils::generators;
 
@@ -325,7 +326,9 @@ mod tests {
         // block
         for (i, res) in blocks_and_outcomes.into_iter().enumerate() {
             let (block, mut execution_output) = res?;
-            execution_output.state.reverts.sort();
+            if let BundleKind::Plain(ref mut state) = execution_output.state {
+                state.reverts.sort();
+            }
 
             let expected_block = blocks_and_execution_outcomes[i].0.clone();
             let expected_output = &blocks_and_execution_outcomes[i].1;

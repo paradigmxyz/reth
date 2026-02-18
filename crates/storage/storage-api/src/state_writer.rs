@@ -57,11 +57,14 @@ impl<'a, R> WriteStateInput<'a, R> {
         }
     }
 
-    /// Returns a reference to the [`BundleState`].
-    pub const fn state(&self) -> &BundleState {
+    /// Returns a reference to the plain [`BundleState`].
+    ///
+    /// For [`WriteStateInput::Multiple`], the bundle is always plain.
+    /// For [`WriteStateInput::Single`], returns `None` if the state is hashed.
+    pub fn plain_state(&self) -> Option<&BundleState> {
         match self {
-            Self::Single { outcome, .. } => &outcome.state,
-            Self::Multiple(outcome) => &outcome.bundle,
+            Self::Single { outcome, .. } => outcome.state.as_plain(),
+            Self::Multiple(outcome) => Some(&outcome.bundle),
         }
     }
 

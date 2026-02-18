@@ -351,7 +351,9 @@ where
         let block_prefix = format!("{}_{}", block.number(), block.hash());
         self.handle_witness_operations(&witness, &block_prefix, block.number())?;
 
-        self.validate_bundle_state(&bundle_state, &output.state, &block_prefix)?;
+        if let Some(original_state) = output.state.as_plain() {
+            self.validate_bundle_state(&bundle_state, original_state, &block_prefix)?;
+        }
 
         self.validate_state_root_and_trie(
             parent_header,
@@ -834,7 +836,7 @@ mod tests {
 
         // Create mock BlockExecutionOutput
         let output = BlockExecutionOutput {
-            state: bundle_state,
+            state: bundle_state.into(),
             result: reth_provider::BlockExecutionResult {
                 receipts: vec![],
                 requests: Requests::default(),
