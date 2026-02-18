@@ -284,18 +284,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         );
 
         // Download and extract all archives in parallel (up to 4 concurrent)
-        let shared = SharedProgress::new(total_size);
+        let shared = SharedProgress::new(total_size, total_archives as u64);
         let progress_handle = spawn_progress_display(Arc::clone(&shared));
 
         let target = target_dir.to_path_buf();
         let results: Vec<Result<()>> = stream::iter(all_downloads)
-            .map(|(url, component)| {
+            .map(|(url, _component)| {
                 let dir = target.clone();
                 let sp = Arc::clone(&shared);
                 async move {
-                    info!(target: "reth::cli", component, url = %url, "Starting archive download");
                     stream_and_extract(&url, &dir, Some(sp)).await?;
-                    info!(target: "reth::cli", component, "Archive complete");
                     Ok(())
                 }
             })
@@ -503,20 +501,28 @@ impl DownloadProgress {
 struct SharedProgress {
     downloaded: AtomicU64,
     total_size: u64,
+    total_archives: u64,
+    archives_done: AtomicU64,
     done: AtomicBool,
 }
 
 impl SharedProgress {
-    fn new(total_size: u64) -> Arc<Self> {
+    fn new(total_size: u64, total_archives: u64) -> Arc<Self> {
         Arc::new(Self {
             downloaded: AtomicU64::new(0),
             total_size,
+            total_archives,
+            archives_done: AtomicU64::new(0),
             done: AtomicBool::new(false),
         })
     }
 
     fn add(&self, bytes: u64) {
         self.downloaded.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    fn archive_done(&self) {
+        self.archives_done.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -541,6 +547,8 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
                 continue;
             }
 
+            let done = progress.archives_done.load(Ordering::Relaxed);
+            let all = progress.total_archives;
             let pct = (downloaded as f64 / total as f64) * 100.0;
             let dl = DownloadProgress::format_size(downloaded);
             let tot = DownloadProgress::format_size(total);
@@ -561,6 +569,7 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
             };
 
             info!(target: "reth::cli",
+                archives = format_args!("{done}/{all}"),
                 progress = format_args!("{pct:.1}%"),
                 downloaded = %dl,
                 total = %tot,
@@ -578,7 +587,7 @@ fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHan
             downloaded = %dl,
             total = %tot,
             elapsed = %elapsed,
-            "Download complete"
+            "Downloads complete"
         );
     })
 }
@@ -653,7 +662,20 @@ fn extract_archive<R: Read>(
         }
     }
 
-    info!(target: "reth::cli", "Extraction complete.");
+    println!();
+    Ok(())
+}
+
+/// Extracts a compressed tar archive without progress tracking.
+fn extract_archive_raw<R: Read>(reader: R, format: CompressionFormat, target_dir: &Path) -> Result<()> {
+    match format {
+        CompressionFormat::Lz4 => {
+            Archive::new(Decoder::new(reader)?).unpack(target_dir)?;
+        }
+        CompressionFormat::Zstd => {
+            Archive::new(ZstdDecoder::new(reader)?).unpack(target_dir)?;
+        }
+    }
     Ok(())
 }
 
@@ -736,7 +758,11 @@ fn resumable_download(
     let final_path = target_dir.join(&file_name);
     let part_path = target_dir.join(format!("{file_name}.part"));
 
-    info!(target: "reth::cli", file = %file_name, "Connecting to download server");
+    let quiet = shared.is_some();
+
+    if !quiet {
+        info!(target: "reth::cli", file = %file_name, "Connecting to download server");
+    }
     let client = BlockingClient::builder().timeout(Duration::from_secs(30)).build()?;
 
     let mut total_size: Option<u64> = None;
@@ -744,7 +770,9 @@ fn resumable_download(
 
     let finalize_download = |size: u64| -> Result<(PathBuf, u64)> {
         fs::rename(&part_path, &final_path)?;
-        info!(target: "reth::cli", file = %file_name, "Download complete");
+        if !quiet {
+            info!(target: "reth::cli", file = %file_name, "Download complete");
+        }
         Ok((final_path.clone(), size))
     };
 
@@ -768,7 +796,7 @@ fn resumable_download(
         let mut request = client.get(url);
         if existing_size > 0 {
             request = request.header(RANGE, format!("bytes={existing_size}-"));
-            if attempt == 1 {
+            if !quiet && attempt == 1 {
                 info!(target: "reth::cli", file = %file_name, "Resuming from {} bytes", existing_size);
             }
         }
@@ -803,7 +831,7 @@ fn resumable_download(
 
         if total_size.is_none() {
             total_size = size;
-            if let Some(s) = size {
+            if !quiet && let Some(s) = size {
                 info!(target: "reth::cli",
                     file = %file_name,
                     size = %DownloadProgress::format_size(s),
@@ -876,27 +904,37 @@ fn download_and_extract(
     target_dir: &Path,
     shared: Option<&Arc<SharedProgress>>,
 ) -> Result<()> {
+    let quiet = shared.is_some();
     let (downloaded_path, total_size) = resumable_download(url, target_dir, shared)?;
 
     let file_name =
         downloaded_path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
 
-    info!(target: "reth::cli",
-        file = %file_name,
-        size = %DownloadProgress::format_size(total_size),
-        "Extracting archive"
-    );
-    let extract_start = Instant::now();
+    if !quiet {
+        info!(target: "reth::cli",
+            file = %file_name,
+            size = %DownloadProgress::format_size(total_size),
+            "Extracting archive"
+        );
+    }
     let file = fs::open(&downloaded_path)?;
-    extract_archive(file, total_size, format, target_dir)?;
 
-    info!(target: "reth::cli",
-        file = %file_name,
-        elapsed = %DownloadProgress::format_duration(extract_start.elapsed()),
-        "Extraction complete"
-    );
+    if quiet {
+        // Skip progress tracking for extraction in parallel mode
+        extract_archive_raw(file, format, target_dir)?;
+    } else {
+        extract_archive(file, total_size, format, target_dir)?;
+        info!(target: "reth::cli",
+            file = %file_name,
+            "Extraction complete"
+        );
+    }
 
     fs::remove_file(&downloaded_path)?;
+
+    if let Some(sp) = shared {
+        sp.archive_done();
+    }
 
     Ok(())
 }
