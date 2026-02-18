@@ -209,6 +209,12 @@ jobs:
             core.setOutput('baseline', baseline);
             core.setOutput('feature', feature);
 
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          fetch-depth: 0
+          ref: ${{ env.BENCH_PR && format('refs/pull/{0}/merge', env.BENCH_PR) || github.ref }}
+
       - name: Acknowledge request
         id: ack
         uses: actions/github-script@v7
@@ -226,23 +232,32 @@ jobs:
             const pr = process.env.BENCH_PR;
             if (!pr) return;
 
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            // Resolve job URL for direct linking to logs
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+            const job = jobs.jobs.find(j => j.name === 'reth-bench');
+            const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
             const blocks = process.env.BENCH_BLOCKS;
             const warmup = process.env.BENCH_WARMUP_BLOCKS;
             const baseline = '${{ steps.args.outputs.baseline }}' || 'merge-base';
             const feature = '${{ steps.args.outputs.feature }}' || 'branch head';
+
+            core.exportVariable('BENCH_JOB_URL', jobUrl);
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``);
+
+            const { buildBody } = require('./.github/scripts/bench-update-status.js');
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: parseInt(pr),
-              body: `cc @${process.env.BENCH_ACTOR}\n\n🚀 Benchmark started! [View run](${runUrl})\n\n⏳ **Status:** Building binaries...\n\n**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``,
+              body: buildBody('Building baseline binary...'),
             });
-            core.setOutput('comment-id', comment.id);
-      - uses: actions/checkout@v6
-        with:
-          submodules: true
-          fetch-depth: 0
-          ref: ${{ env.BENCH_PR && format('refs/pull/{0}/merge', env.BENCH_PR) || github.ref }}
+
+            core.exportVariable('BENCH_COMMENT_ID', comment.id);
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
@@ -313,8 +328,19 @@ jobs:
           echo "feature-name=$FEATURE_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Fetch or build baseline binaries
+        id: build-baseline
         run: .github/scripts/bench-reth-build.sh baseline "${{ steps.refs.outputs.baseline-ref }}"
+
+      - name: Update status (baseline built)
+        if: success() && env.BENCH_COMMENT_ID
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const s = require('./.github/scripts/bench-update-status.js');
+            await s({github, context, status: 'Building feature binary...'});
+
       - name: Fetch or build feature binaries
+        id: build-feature
         run: .github/scripts/bench-reth-build.sh feature "${{ steps.refs.outputs.feature-ref }}"
 
       # System tuning for reproducible benchmarks
@@ -362,23 +388,28 @@ jobs:
           pkill -9 reth || true
           mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
 
-      - name: Update status (running benchmarks)
-        if: steps.ack.outputs.comment-id
+      - name: Update status (running baseline benchmark)
+        if: success() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v7
         with:
           script: |
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            await github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: ${{ steps.ack.outputs.comment-id || 0 }},
-              body: `🚀 Benchmark started! [View run](${runUrl})\n\n⏳ **Status:** Running benchmarks (2 runs)...`,
-            });
+            const s = require('./.github/scripts/bench-update-status.js');
+            await s({github, context, status: 'Running baseline benchmark...'});
 
       - name: "Run benchmark: baseline"
+        id: run-baseline
         run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline target/profiling-baseline/reth /tmp/bench-results-baseline
 
+      - name: Update status (running feature benchmark)
+        if: success() && env.BENCH_COMMENT_ID
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const s = require('./.github/scripts/bench-update-status.js');
+            await s({github, context, status: 'Running feature benchmark...'});
+
       - name: "Run benchmark: feature"
+        id: run-feature
         run: taskset -c 0 .github/scripts/bench-reth-run.sh feature target/profiling/reth /tmp/bench-results-feature
 
       # Results & charts
@@ -495,9 +526,9 @@ jobs:
               comment += chartMarkdown;
             }
 
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = `cc @${process.env.BENCH_ACTOR}\n\n✅ Benchmark complete! [View run](${runUrl})\n\n${comment}`;
-            const ackCommentId = '${{ steps.ack.outputs.comment-id }}';
+            const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `cc @${process.env.BENCH_ACTOR}\n\n✅ Benchmark complete! [View job](${jobUrl})\n\n${comment}`;
+            const ackCommentId = process.env.BENCH_COMMENT_ID;
 
             if (ackCommentId) {
               await github.rest.issues.updateComment({
@@ -510,6 +541,26 @@ jobs:
               // No PR — write results to job summary
               await core.summary.addRaw(body).write();
             }
+
+      - name: Update status (failed)
+        if: failure() && env.BENCH_COMMENT_ID
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const steps_status = [
+              ['building baseline binary', '${{ steps.build-baseline.outcome }}'],
+              ['building feature binary', '${{ steps.build-feature.outcome }}'],
+              ['running baseline benchmark', '${{ steps.run-baseline.outcome }}'],
+              ['running feature benchmark', '${{ steps.run-feature.outcome }}'],
+            ];
+            const failed = steps_status.find(([, o]) => o === 'failure');
+            const failedStep = failed ? failed[0] : 'unknown step';
+
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: parseInt(process.env.BENCH_COMMENT_ID),
+              body: `cc @${process.env.BENCH_ACTOR}\n\n❌ Benchmark failed while ${failedStep}. [View logs](${process.env.BENCH_JOB_URL})`,
+            });
 
       - name: Upload node log
         if: failure()
