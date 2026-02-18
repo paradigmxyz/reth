@@ -1260,9 +1260,40 @@ mod tests {
             wal.handle(),
         );
 
+        // Create simple chains with blocks for the reorg notification
+        let parent_hash = block_hash(0);
+        let mut old_blocks = Vec::new();
+        let mut new_blocks = Vec::new();
+
+        // Old chain: blocks 1-2
+        for i in 1..=2 {
+            let mut block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+            block.set_block_number(i);
+            block.set_hash(block_hash_for_chain(i, 0xA0));
+            block.set_parent_hash(if i == 1 {
+                parent_hash
+            } else {
+                block_hash_for_chain(i - 1, 0xA0)
+            });
+            old_blocks.push(block);
+        }
+
+        // New chain: blocks 1-2 (different hashes)
+        for i in 1..=2 {
+            let mut block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+            block.set_block_number(i);
+            block.set_hash(block_hash_for_chain(i, 0xB0));
+            block.set_parent_hash(if i == 1 {
+                parent_hash
+            } else {
+                block_hash_for_chain(i - 1, 0xB0)
+            });
+            new_blocks.push(block);
+        }
+
         let notification = ExExNotification::ChainReorged {
-            old: Arc::new(Chain::default()),
-            new: Arc::new(Chain::default()),
+            old: Arc::new(Chain::new(old_blocks, Default::default(), Default::default())),
+            new: Arc::new(Chain::new(new_blocks, Default::default(), Default::default())),
         };
 
         // Even if the finished height is higher than the tip of the new chain, the reorg
@@ -1303,7 +1334,22 @@ mod tests {
             wal.handle(),
         );
 
-        let notification = ExExNotification::ChainReverted { old: Arc::new(Chain::default()) };
+        // Create a simple chain with blocks for the revert notification
+        let parent_hash = block_hash(0);
+        let mut old_blocks = Vec::new();
+
+        // Old chain: blocks 1-2
+        for i in 1..=2 {
+            let mut block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+            block.set_block_number(i);
+            block.set_hash(block_hash(i));
+            block.set_parent_hash(if i == 1 { parent_hash } else { block_hash(i - 1) });
+            old_blocks.push(block);
+        }
+
+        let notification = ExExNotification::ChainReverted {
+            old: Arc::new(Chain::new(old_blocks, Default::default(), Default::default())),
+        };
 
         // Even if the finished height is higher than the tip of the new chain, the reorg
         // notification should be received
