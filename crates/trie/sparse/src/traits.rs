@@ -2,7 +2,8 @@
 
 use core::fmt::Debug;
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::borrow::Cow;
+use smallvec::SmallVec;
 use alloy_primitives::{
     map::{B256Map, HashMap, HashSet},
     B256,
@@ -15,12 +16,17 @@ use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2};
 use crate::debug_recorder::TrieDebugRecorder;
 use crate::provider::TrieNodeProvider;
 
+/// Stack-allocated buffer for RLP-encoded trie leaf values.
+/// Sized to hold account RLP (≤110 bytes) and storage slot RLP (≤33 bytes)
+/// without heap allocation.
+pub type LeafValue = SmallVec<[u8; 128]>;
+
 /// Describes an update to a leaf in the sparse trie.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafUpdate {
     /// The leaf value has been changed to the given RLP-encoded value.
     /// Empty Vec indicates the leaf has been removed.
-    Changed(Vec<u8>),
+    Changed(LeafValue),
     /// The leaf value may have changed, but the new value is not yet known.
     /// Used for optimistic prewarming when the actual value is unavailable.
     Touched,
@@ -157,7 +163,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
-        value: Vec<u8>,
+        value: LeafValue,
         provider: P,
     ) -> SparseTrieResult<()>;
 
@@ -217,7 +223,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// - The value does not exists in the trie, so it cannot be revealed
     /// - The value has not yet been revealed. In order to determine which is true, one would need
     ///   an exclusion proof.
-    fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>>;
+    fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&LeafValue>;
 
     /// Attempts to find a leaf node at the specified path.
     ///
@@ -240,7 +246,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     fn find_leaf(
         &self,
         full_path: &Nibbles,
-        expected_value: Option<&Vec<u8>>,
+        expected_value: Option<&LeafValue>,
     ) -> Result<LeafLookup, LeafLookupError>;
 
     /// Returns a reference to the current sparse trie updates.
@@ -383,9 +389,9 @@ pub enum LeafLookupError {
         /// Path to the leaf.
         path: Nibbles,
         /// Expected value.
-        expected: Option<Vec<u8>>,
+        expected: Option<LeafValue>,
         /// Actual value found.
-        actual: Vec<u8>,
+        actual: LeafValue,
     },
 }
 

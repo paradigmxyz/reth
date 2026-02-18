@@ -27,7 +27,7 @@ use reth_trie_parallel::{
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use reth_trie_sparse::{
-    errors::SparseTrieResult, DeferredDrops, LeafUpdate, ParallelSparseTrie, SparseStateTrie,
+    errors::SparseTrieResult, DeferredDrops, LeafUpdate, LeafValue, ParallelSparseTrie, SparseStateTrie,
     SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
@@ -360,9 +360,9 @@ where
         for (address, storage) in hashed_state_update.storages {
             for (slot, value) in storage.storage {
                 let encoded = if value.is_zero() {
-                    Vec::new()
+                    LeafValue::new()
                 } else {
-                    alloy_rlp::encode_fixed_size(&value).to_vec()
+                    LeafValue::from_slice(&alloy_rlp::encode_fixed_size(&value))
                 };
                 self.new_storage_updates
                     .entry(address)
@@ -597,14 +597,14 @@ where
                         let encoded = if account.is_none_or(|account| account.is_empty()) &&
                             storage_root == EMPTY_ROOT_HASH
                         {
-                            Vec::new()
+                            LeafValue::new()
                         } else {
                             account_rlp_buf.clear();
                             account
                                 .unwrap_or_default()
                                 .into_trie_account(storage_root)
                                 .encode(account_rlp_buf);
-                            account_rlp_buf.clone()
+                            LeafValue::from_slice(account_rlp_buf)
                         };
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
@@ -637,11 +637,11 @@ where
                 };
 
                 let encoded = if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
-                    Vec::new()
+                    LeafValue::new()
                 } else {
                     account_rlp_buf.clear();
                     account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
-                    account_rlp_buf.clone()
+                    LeafValue::from_slice(account_rlp_buf)
                 };
                 self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                 num_promoted += 1;
