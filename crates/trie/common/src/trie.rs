@@ -36,8 +36,8 @@ pub type BranchNodeMasksMap = HashMap<Nibbles, BranchNodeMasks>;
 
 /// Carries all information needed by a sparse trie to reveal a particular node.
 ///
-/// This is the legacy version that wraps alloy's [`TrieNode`]. Prefer [`ProofTrieNode`] (from
-/// `trie_node_v2` module) which merges extension nodes into branch nodes.
+/// This is the legacy version that wraps alloy's [`TrieNode`]. Prefer
+/// [`crate::ProofTrieNode`] which merges extension nodes into branch nodes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegacyProofTrieNode {
     /// Path of the node.
