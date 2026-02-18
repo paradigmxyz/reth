@@ -420,7 +420,7 @@ where
                 let _enter =
                     debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
                 let (transactions, convert) = transactions.into_parts();
-                recover_serial(transactions.into_iter(), &convert, 0, &prewarm_tx, &execute_tx);
+                recover_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
@@ -437,7 +437,7 @@ where
 
                 // Recover the first few transactions sequentially so execution can
                 // start immediately without waiting for rayon work-stealing.
-                recover_serial(head.into_iter(), &convert, 0, &prewarm_tx, &execute_tx);
+                recover_serial(head.into_iter(), &convert, &prewarm_tx, &execute_tx);
 
                 // Recover the remaining transactions in parallel.
                 rest.into_par_iter()
@@ -718,13 +718,9 @@ where
 }
 
 /// Recovers transactions sequentially and sends them to the prewarm and execute channels.
-///
-/// `start_idx` is added to the enumeration index so that the global transaction ordering is
-/// preserved when this is used for a prefix of a larger block.
 fn recover_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
-    start_idx: usize,
     prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
     execute_tx: &mpsc::SyncSender<Result<WithTxEnv<TxEnv, Recovered>, Err>>,
 ) where
@@ -732,8 +728,7 @@ fn recover_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     TxEnv: Clone,
     C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
 {
-    for (i, raw_tx) in iter.enumerate() {
-        let idx = start_idx + i;
+    for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
         let tx = tx.map(|tx| {
             let (tx_env, tx) = tx.into_parts();
