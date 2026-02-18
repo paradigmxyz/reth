@@ -28,7 +28,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, AddressSet, B256Map, HashMap},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, KECCAK256_EMPTY,
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -70,8 +70,9 @@ use reth_trie::{
     HashedPostStateSorted, StoredNibbles,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor};
-use revm_database::states::{
-    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
+use revm_database::{
+    states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
+    BundleState,
 };
 use std::{
     cmp::Ordering,
@@ -841,6 +842,24 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 .prune_receipts(to_delete, last_block)?;
         }
 
+        Ok(())
+    }
+
+    /// Writes only bytecodes from the bundle state, skipping plain state and changeset conversion.
+    ///
+    /// Used in storage v2 where plain state and changesets are written to static files, making
+    /// the full [`BundleState::to_plain_state_and_reverts`] conversion unnecessary.
+    fn write_bytecodes(&self, state: &BundleState) -> ProviderResult<()> {
+        if state.contracts.is_empty() {
+            return Ok(());
+        }
+
+        let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
+        for (hash, bytecode) in &state.contracts {
+            if *hash != KECCAK256_EMPTY {
+                bytecodes_cursor.upsert(*hash, &Bytecode(bytecode.clone()))?;
+            }
+        }
         Ok(())
     }
 }
@@ -2372,9 +2391,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             !config.write_account_changesets &&
             !config.write_storage_changesets
         {
-            // In storage v2 with all outputs directed to static files, plain state, changesets,
-            // and bytecodes are all written elsewhere. Skip the expensive
+            // In storage v2 with all outputs directed to static files, plain state and changesets
+            // are written elsewhere. Only bytecodes need MDBX writes, so skip the expensive
             // to_plain_state_and_reverts conversion that iterates all accounts and storage.
+            self.write_bytecodes(execution_outcome.state())?;
             return Ok(());
         }
 
