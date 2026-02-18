@@ -14,8 +14,8 @@ type BoxedTask = Box<dyn FnOnce() + Send + 'static>;
 struct WorkerThread {
     /// Sender to submit work to this worker's thread.
     tx: mpsc::UnboundedSender<BoxedTask>,
-    /// The OS thread handle.
-    _handle: thread::JoinHandle<()>,
+    /// The OS thread handle. Taken during shutdown to join.
+    handle: Option<thread::JoinHandle<()>>,
 }
 
 impl WorkerThread {
@@ -31,7 +31,7 @@ impl WorkerThread {
             })
             .unwrap_or_else(|e| panic!("failed to spawn worker thread {name:?}: {e}"));
 
-        Self { tx, _handle: handle }
+        Self { tx, handle: Some(handle) }
     }
 }
 
@@ -75,6 +75,23 @@ impl WorkerMap {
         let _ = worker.tx.send(task);
 
         result_rx
+    }
+}
+
+impl Drop for WorkerMap {
+    fn drop(&mut self) {
+        // Remove all workers. Dropping the senders closes the channels so the worker
+        // threads will exit their recv loops, then join each thread.
+        let keys: Vec<_> = self.workers.iter().map(|e| *e.key()).collect();
+        for key in keys {
+            if let Some((_, mut w)) = self.workers.remove(key) {
+                // Drop sender so the thread's recv loop exits.
+                drop(w.tx);
+                if let Some(handle) = w.handle.take() {
+                    let _ = handle.join();
+                }
+            }
+        }
     }
 }
 
