@@ -185,8 +185,8 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, alias = "with-changesets")]
     with_state_history: bool,
 
-    /// Download all available components (full archive).
-    #[arg(long, conflicts_with_all = ["with_txs", "with_receipts", "with_state_history"])]
+    /// Download all available components (full archive node, no pruning).
+    #[arg(long, alias = "archive", conflicts_with_all = ["with_txs", "with_receipts", "with_state_history"])]
     all: bool,
 
     /// Skip interactive component selection. Downloads the minimal set
