@@ -551,7 +551,7 @@ jobs:
       # ABBA run order: baseline1, feature1, feature2, baseline2
       # This cancels out systematic drift (thermal, memory, etc.)
 
-      - name: Update status (running baseline #1)
+      - name: "Update status (running baseline #1)"
         if: success() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v7
         with:
@@ -563,7 +563,7 @@ jobs:
         id: run-baseline-1
         run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline-1 ../reth-baseline/target/profiling/reth /tmp/bench-results-baseline-1
 
-      - name: Update status (running feature #1)
+      - name: "Update status (running feature #1)"
         if: success() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v7
         with:
@@ -575,7 +575,7 @@ jobs:
         id: run-feature-1
         run: taskset -c 0 .github/scripts/bench-reth-run.sh feature-1 ../reth-feature/target/profiling/reth /tmp/bench-results-feature-1
 
-      - name: Update status (running feature #2)
+      - name: "Update status (running feature #2)"
         if: success() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v7
         with:
@@ -587,7 +587,7 @@ jobs:
         id: run-feature-2
         run: taskset -c 0 .github/scripts/bench-reth-run.sh feature-2 ../reth-feature/target/profiling/reth /tmp/bench-results-feature-2
 
-      - name: Update status (running baseline #2)
+      - name: "Update status (running baseline #2)"
         if: success() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v7
         with:
