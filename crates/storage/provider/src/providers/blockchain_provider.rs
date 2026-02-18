@@ -21,7 +21,7 @@ use reth_chain_state::{
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{ExecutionOutcome, TakenState};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -142,7 +142,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     pub fn get_state(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Option<ExecutionOutcome<ReceiptTy<N>>>> {
+    ) -> ProviderResult<Option<TakenState<ReceiptTy<N>>>> {
         self.consistent_provider()?.get_state(range)
     }
 }

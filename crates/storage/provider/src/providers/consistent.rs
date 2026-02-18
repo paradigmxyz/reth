@@ -19,7 +19,9 @@ use alloy_primitives::{
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
-use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
+use reth_execution_types::{
+    BundleStateInit, ExecutionOutcome, HashedExecutionOutcome, RevertsInit, TakenState,
+};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry, StorageSlotKey,
@@ -143,13 +145,14 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         self.history_by_block_hash_ref(hash)
     }
 
-    /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
+    /// Return the last N blocks of state, recreating the [`ExecutionOutcome`] or
+    /// [`HashedExecutionOutcome`] depending on whether hashed storage is enabled.
     ///
     /// If the range is empty, or there are no blocks for the given range, then this returns `None`.
     pub fn get_state(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Option<ExecutionOutcome<ReceiptTy<N>>>> {
+    ) -> ProviderResult<Option<TakenState<ReceiptTy<N>>>> {
         if range.is_empty() {
             return Ok(None)
         }
@@ -206,15 +209,26 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             receipts.push(block_receipts);
         }
 
-        Ok(Some(ExecutionOutcome::new_init(
-            state,
-            reverts,
-            // We skip new contracts since we never delete them from the database
-            Vec::new(),
-            receipts,
-            start_block_number,
-            Vec::new(),
-        )))
+        if self.storage_provider.cached_storage_settings().use_hashed_state() {
+            Ok(Some(TakenState::Hashed(HashedExecutionOutcome::new_init(
+                state,
+                reverts,
+                Vec::new(),
+                receipts,
+                start_block_number,
+                Vec::new(),
+            ))))
+        } else {
+            Ok(Some(TakenState::Plain(ExecutionOutcome::new_init(
+                state,
+                reverts,
+                // We skip new contracts since we never delete them from the database
+                Vec::new(),
+                receipts,
+                start_block_number,
+                Vec::new(),
+            ))))
+        }
     }
 
     /// Populate a [`BundleStateInit`] and [`RevertsInit`] based on the given storage and account
@@ -1709,7 +1723,7 @@ impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
             let state = state.block_ref().execution_outcome().clone();
             Ok(Some(ExecutionOutcome::from((state, block))))
         } else {
-            Self::get_state(self, block..=block)
+            Ok(Self::get_state(self, block..=block)?.and_then(|s| s.into_plain()))
         }
     }
 }
@@ -2150,18 +2164,19 @@ mod tests {
         let provider = BlockchainProvider::new(factory)?;
         let consistent_provider = provider.consistent_provider()?;
 
-        let outcome =
+        let taken_state =
             consistent_provider.get_state(1..=1)?.expect("should return execution outcome");
+        let outcome = taken_state.into_hashed().expect("should be hashed state");
 
         let state = &outcome.bundle.state;
         let account_state = state.get(&address).expect("should have account in bundle state");
         let storage = &account_state.storage;
 
-        let slot_as_u256 = U256::from_be_bytes(*hashed_slot);
-        let storage_slot = storage.get(&slot_as_u256).expect("should have the slot in storage");
+        let (_old_value, new_value) =
+            storage.get(&hashed_slot).expect("should have the slot in storage");
 
         assert_eq!(
-            storage_slot.present_value,
+            *new_value,
             U256::from(100),
             "present_value should be 100 (the actual value in HashedStorages)"
         );
@@ -2237,18 +2252,19 @@ mod tests {
         let provider = BlockchainProvider::new(factory)?;
         let consistent_provider = provider.consistent_provider()?;
 
-        let outcome =
+        let taken_state =
             consistent_provider.get_state(1..=2)?.expect("should return execution outcome");
+        let outcome = taken_state.into_hashed().expect("should be hashed state");
 
         let state = &outcome.bundle.state;
         let account_state = state.get(&address).expect("should have account in bundle state");
         let storage = &account_state.storage;
 
-        let slot_as_u256 = U256::from_be_bytes(*hashed_slot);
-        let storage_slot = storage.get(&slot_as_u256).expect("should have the slot in storage");
+        let (_old_value, new_value) =
+            storage.get(&hashed_slot).expect("should have the slot in storage");
 
         assert_eq!(
-            storage_slot.present_value,
+            *new_value,
             U256::from(200),
             "present_value should be 200 (the value at block 2, not 300 which is the latest)"
         );
@@ -2319,8 +2335,9 @@ mod tests {
         let provider = BlockchainProvider::new(factory)?;
         let consistent_provider = provider.consistent_provider()?;
 
-        let outcome =
+        let taken_state =
             consistent_provider.get_state(1..=1)?.expect("should return execution outcome");
+        let outcome = taken_state.into_plain().expect("should be plain state");
 
         let state = &outcome.bundle.state;
         let account_state = state.get(&address).expect("should have account in bundle state");
