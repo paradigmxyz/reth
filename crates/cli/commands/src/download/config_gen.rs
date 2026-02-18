@@ -15,13 +15,18 @@ const MINIMUM_HISTORY_DISTANCE: u64 = 10064;
 
 /// Generates an appropriate [`Config`] based on which snapshot components were downloaded.
 ///
-/// `transaction_lookup` and `sender_recovery` are always pruned full.
-/// `bodies_history` is pruned when transactions weren't downloaded.
+/// When all components are present (archive node), no pruning is configured.
+/// Otherwise, missing components get `--minimal` style pruning.
 pub fn config_for_components(selected: &[SnapshotComponentType]) -> Config {
     let has_txs = selected.contains(&SnapshotComponentType::Transactions);
     let has_receipts = selected.contains(&SnapshotComponentType::Receipts);
     let has_changesets = selected.contains(&SnapshotComponentType::AccountChangesets) ||
         selected.contains(&SnapshotComponentType::StorageChangesets);
+
+    // Archive node — no pruning
+    if has_txs && has_receipts && has_changesets {
+        return Config::default();
+    }
 
     let mut config = Config::default();
     let mut prune = PruneConfig::default();
@@ -167,11 +172,8 @@ pub fn describe_prune_config(selected: &[SnapshotComponentType]) -> Vec<String> 
 
 /// Generates a [`Config`] from per-component range selections.
 ///
-/// Pruning mapping:
-/// - `transaction_lookup` and `sender_recovery` are always pruned full — they're rebuilt on demand.
-/// - The user's "Transactions" selection controls `bodies_history` (the actual tx data in static
-///   files).
-/// - Receipts and changeset selections map directly to their prune segments.
+/// When all data components are selected as `All`, no pruning is configured (archive node).
+/// Otherwise, `--minimal` style pruning is applied for missing/partial components.
 pub fn config_for_selections(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
 ) -> Config {
@@ -192,13 +194,22 @@ pub fn config_for_selections(
         .copied()
         .unwrap_or(ComponentSelection::None);
 
+    // Archive node — all data components present, no pruning
+    let is_archive = tx_sel == ComponentSelection::All &&
+        receipt_sel == ComponentSelection::All &&
+        account_cs_sel == ComponentSelection::All &&
+        storage_cs_sel == ComponentSelection::All;
+
+    if is_archive {
+        return Config::default();
+    }
+
     let mut config = Config::default();
     let mut prune = PruneConfig::default();
 
     prune.segments.sender_recovery = Some(PruneMode::Full);
     prune.segments.transaction_lookup = Some(PruneMode::Full);
 
-    // Transaction bodies — controlled by user's Transactions selection
     if let Some(mode) = selection_to_prune_mode(tx_sel) {
         prune.segments.bodies_history = Some(mode);
     }
@@ -312,13 +323,13 @@ mod tests {
     }
 
     #[test]
-    fn all_components_still_pruned() {
+    fn all_components_no_pruning() {
         let selected = SnapshotComponentType::ALL.to_vec();
         let config = config_for_components(&selected);
 
-        assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
-        // Bodies kept since txs downloaded
+        // Archive node — nothing pruned
+        assert_eq!(config.prune.segments.transaction_lookup, None);
+        assert_eq!(config.prune.segments.sender_recovery, None);
         assert_eq!(config.prune.segments.bodies_history, None);
         assert_eq!(config.prune.segments.receipts, None);
         assert_eq!(config.prune.segments.account_history, None);
@@ -403,10 +414,11 @@ mod tests {
     }
 
     #[test]
-    fn write_prune_checkpoints_always_sets_lookups() {
+    fn write_prune_checkpoints_archive_no_checkpoints() {
         let dir = tempfile::tempdir().unwrap();
         let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::default()).unwrap();
 
+        // Archive node — no pruning configured, so no checkpoints written
         let selected = SnapshotComponentType::ALL.to_vec();
         let config = config_for_components(&selected);
 
@@ -415,22 +427,22 @@ mod tests {
         let tx = db.tx().unwrap();
         for segment in [PruneSegment::SenderRecovery, PruneSegment::TransactionLookup] {
             assert!(
-                tx.get::<tables::PruneCheckpoints>(segment).unwrap().is_some(),
-                "expected checkpoint for {segment}"
+                tx.get::<tables::PruneCheckpoints>(segment).unwrap().is_none(),
+                "expected no checkpoint for {segment} on archive node"
             );
         }
     }
 
     #[test]
-    fn selections_all_keeps_bodies() {
+    fn selections_all_no_pruning() {
         let mut selections = BTreeMap::new();
         for ty in SnapshotComponentType::ALL {
             selections.insert(ty, ComponentSelection::All);
         }
         let config = config_for_selections(&selections);
-        assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
-        assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
-        // Bodies kept
+        // Archive node — nothing pruned
+        assert_eq!(config.prune.segments.transaction_lookup, None);
+        assert_eq!(config.prune.segments.sender_recovery, None);
         assert_eq!(config.prune.segments.bodies_history, None);
         assert_eq!(config.prune.segments.receipts, None);
         assert_eq!(config.prune.segments.account_history, None);
@@ -475,14 +487,14 @@ mod tests {
     }
 
     #[test]
-    fn describe_selections_all_has_lookups() {
+    fn describe_selections_all_no_pruning() {
         let mut selections = BTreeMap::new();
         for ty in SnapshotComponentType::ALL {
             selections.insert(ty, ComponentSelection::All);
         }
         let desc = describe_prune_config_from_selections(&selections);
-        assert!(desc.contains(&"sender_recovery=\"full\"".to_string()));
-        assert!(desc.contains(&"transaction_lookup=\"full\"".to_string()));
+        // Archive node — no prune segments described
+        assert!(desc.is_empty());
     }
 
     #[test]
