@@ -650,7 +650,7 @@ jobs:
 
       - name: Upload results
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: bench-reth-results
           path: |
@@ -753,7 +753,7 @@ jobs:
 
       - name: Upload node log
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: reth-node-log
           path: |
