@@ -167,6 +167,15 @@ impl SparseTrie for ParallelSparseTrie {
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
     ) -> SparseTrieResult<()> {
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.record(RecordedOp::SetRoot {
+            node: ProofTrieNodeRecord::from_proof_trie_node_v2(&ProofTrieNodeV2 {
+                path: Nibbles::default(),
+                node: root.clone(),
+                masks,
+            }),
+        });
+
         // A fresh/cleared `ParallelSparseTrie` has a `SparseNode::Empty` at its root in the upper
         // subtrie. Delete that so we can reveal the new root node.
         let path = Nibbles::default();
