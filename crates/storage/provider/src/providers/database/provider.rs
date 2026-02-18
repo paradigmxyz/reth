@@ -2599,6 +2599,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // and take smaller memory footprint.
         changes.accounts.par_sort_by_key(|a| a.0);
         changes.storage.par_sort_by_key(|a| a.address);
+        changes.contracts.par_sort_by_key(|a| a.0);
 
         // When use_hashed_state is enabled, skip plain state writes for accounts and storage.
         // The hashed state is already written by the separate `write_hashed_state()` call.
