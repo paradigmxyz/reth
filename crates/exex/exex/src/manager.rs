@@ -715,7 +715,7 @@ mod tests {
     }
 
     /// Helper function to generate a deterministic block hash for a specific chain.
-    /// The chain_id helps distinguish between different chains in reorg scenarios.
+    /// The `chain_id` helps distinguish between different chains in reorg scenarios.
     fn block_hash_for_chain(block_number: u64, chain_id: u8) -> B256 {
         let mut bytes = [chain_id; 32];
         bytes[24..32].copy_from_slice(&block_number.to_be_bytes());
