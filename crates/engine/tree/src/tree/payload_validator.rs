@@ -517,16 +517,17 @@ where
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
         let hashed_state_provider = self.provider.clone();
-        let (hashed_state_tx, hashed_state_rx) = tokio::sync::oneshot::channel();
-        self.payload_processor.executor().spawn_blocking_named("hashed-post-state", move || {
-            let _span = debug_span!(
-                target: "engine::tree::payload_validator",
-                "hashed_post_state",
-            )
-            .entered();
-            let hashed_state = hashed_state_provider.hashed_post_state(&hashed_state_output.state);
-            let _ = hashed_state_tx.send(hashed_state);
-        });
+        let hashed_state_rx = self.payload_processor.executor().spawn_blocking_named(
+            "hashed-post-state",
+            move || {
+                let _span = debug_span!(
+                    target: "engine::tree::payload_validator",
+                    "hashed_post_state",
+                )
+                .entered();
+                hashed_state_provider.hashed_post_state(&hashed_state_output.state)
+            },
+        );
 
         let block = convert_to_block(input)?.with_senders(senders);
 
