@@ -162,6 +162,16 @@ pub(crate) struct MultiProofTaskMetrics {
 
     /// Histogram of sparse trie update durations.
     pub sparse_trie_update_duration_histogram: Histogram,
+    /// Time spent applying storage leaf updates to storage tries (parallel via par_bridge).
+    pub sparse_trie_storage_update_leaves_duration_histogram: Histogram,
+    /// Time spent applying account leaf updates to the account trie (sequential).
+    pub sparse_trie_account_update_leaves_duration_histogram: Histogram,
+    /// Time spent merging new updates into the backlog hashmaps.
+    pub sparse_trie_merge_updates_duration_histogram: Histogram,
+    /// Time spent computing storage roots in parallel during account promotion.
+    pub sparse_trie_compute_storage_roots_duration_histogram: Histogram,
+    /// Time spent in the sequential promote loop (RLP decode/encode + account updates).
+    pub sparse_trie_promote_loop_duration_histogram: Histogram,
     /// Histogram of sparse trie final update durations.
     pub sparse_trie_final_update_duration_histogram: Histogram,
     /// Histogram of sparse trie total durations.

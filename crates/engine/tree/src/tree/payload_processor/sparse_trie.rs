@@ -415,6 +415,7 @@ where
         // Firstly apply all new storage and account updates to the tries.
         self.process_leaf_updates(true)?;
 
+        let merge_start = Instant::now();
         for (address, mut new) in self.new_storage_updates.drain() {
             match self.storage_updates.entry(address) {
                 Entry::Vacant(entry) => {
@@ -450,6 +451,7 @@ where
                 }
             }
         }
+        self.metrics.sparse_trie_merge_updates_duration_histogram.record(merge_start.elapsed());
 
         Ok(())
     }
@@ -466,6 +468,7 @@ where
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
         // Process all storage updates in parallel, skipping tries with no pending updates.
+        let storage_start = Instant::now();
         let span = tracing::Span::current();
         let storage_results = storage_updates
             .iter_mut()
@@ -499,6 +502,9 @@ where
             .collect::<Result<Vec<_>, _>>()?;
 
         drop(span);
+        self.metrics
+            .sparse_trie_storage_update_leaves_duration_histogram
+            .record(storage_start.elapsed());
 
         for (address, targets, fetched, trie) in storage_results {
             self.fetched_storage_targets.insert(*address, fetched);
@@ -510,7 +516,11 @@ where
         }
 
         // Process account trie updates and fill the account targets.
+        let account_start = Instant::now();
         self.process_account_leaf_updates(new)?;
+        self.metrics
+            .sparse_trie_account_update_leaves_duration_histogram
+            .record(account_start.elapsed());
 
         Ok(())
     }
@@ -566,6 +576,8 @@ where
             return Ok(());
         }
 
+        // Excludes process_leaf_updates above, which is recorded by its own sub-phase timers.
+        let storage_roots_start = Instant::now();
         let span = debug_span!("compute_storage_roots").entered();
         self
             .trie
@@ -581,7 +593,11 @@ where
                 trie.root().expect("updates are drained, trie should be revealed by now");
             });
         drop(span);
+        self.metrics
+            .sparse_trie_compute_storage_roots_duration_histogram
+            .record(storage_roots_start.elapsed());
 
+        let promote_loop_start = Instant::now();
         loop {
             let span = debug_span!("promote_updates", promoted = tracing::field::Empty).entered();
             // Now handle pending account updates that can be upgraded to a proper update.
@@ -659,6 +675,10 @@ where
                 break
             }
         }
+
+        self.metrics
+            .sparse_trie_promote_loop_duration_histogram
+            .record(promote_loop_start.elapsed());
 
         Ok(())
     }
