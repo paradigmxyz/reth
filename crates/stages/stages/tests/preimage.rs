@@ -329,7 +329,7 @@ fn build_execution_header(parent_hash: B256, number: u64, timestamp: u64) -> Hea
     }
 }
 
-fn expected_destroyed_slots() -> [B256; 2] {
+const fn expected_destroyed_slots() -> [B256; 2] {
     [B256::with_last_byte(0x01), B256::with_last_byte(0x02)]
 }
 
@@ -410,7 +410,7 @@ where
     .add_set(ExecutionStages::new(
         evm_config,
         consensus,
-        stages_config.clone(),
+        stages_config,
         PruneModes::default().sender_recovery,
     ))
     .add_set(HashingStages::default())
