@@ -571,11 +571,18 @@ jobs:
           cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || cat /sys/kernel/mm/transparent_hugepages/enabled 2>/dev/null || echo "THP: unknown"
           free -h
 
-      # Clean up any leftover state
+      # Clean up any leftover state from a previous cancelled/crashed job.
+      # schelk recover can fail with "target is busy" if reth is still running,
+      # so we force-kill, wait, then force-unmount before recovering.
       - name: Pre-flight cleanup
         run: |
           pkill -9 reth || true
-          mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+          sleep 2
+          if mountpoint -q "$SCHELK_MOUNT" 2>/dev/null; then
+            sudo umount "$SCHELK_MOUNT" 2>/dev/null || sudo umount -l "$SCHELK_MOUNT" 2>/dev/null || true
+          fi
+          sudo dmsetup remove bench_era 2>/dev/null || true
+          sudo schelk recover -y 2>/dev/null || true
 
       - name: Update status (running baseline benchmark)
         if: success() && env.BENCH_COMMENT_ID

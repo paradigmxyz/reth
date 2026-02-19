@@ -23,8 +23,13 @@ cleanup() {
       sleep 1
     done
     sudo kill -9 "$RETH_PID" 2>/dev/null || true
+    sleep 1
   fi
-  mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+  if ! sudo schelk recover -y 2>/dev/null; then
+    # recover can fail with "target is busy" after cancellation, force-cleanup
+    sudo umount "$SCHELK_MOUNT" 2>/dev/null || sudo umount -l "$SCHELK_MOUNT" 2>/dev/null || true
+    sudo dmsetup remove bench_era 2>/dev/null || true
+  fi
 }
 TAIL_PID=
 trap cleanup EXIT
