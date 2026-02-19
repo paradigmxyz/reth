@@ -12,7 +12,6 @@ use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, FastInstant as Instant, ParallelBridgeBuffered};
-use std::time::Duration;
 use reth_tasks::Runtime;
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount,
@@ -32,6 +31,7 @@ use reth_trie_sparse::{
     SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
+use std::time::Duration;
 use tracing::{debug, debug_span, error, instrument};
 
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
