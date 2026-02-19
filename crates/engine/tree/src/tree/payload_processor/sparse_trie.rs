@@ -472,7 +472,7 @@ where
                 continue;
             }
 
-            let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "storage_trie_leaf_updates", address=%address).entered();
+            let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "storage_trie_leaf_updates").entered();
 
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
