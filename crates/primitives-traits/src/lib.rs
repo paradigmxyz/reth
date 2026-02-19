@@ -168,7 +168,7 @@ pub use alloy_primitives::{logs_bloom, Log, LogData};
 pub mod proofs;
 
 mod storage;
-pub use storage::{StorageEntry, StorageSlotKey, ValueWithSubKey};
+pub use storage::{StorageEntry, ValueWithSubKey};
 
 pub mod sync;
 

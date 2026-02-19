@@ -1,4 +1,3 @@
-use crate::ChangesetEntry;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloy_primitives::{map::B256Map, Address, BlockNumber, B256};
 use auto_impl::auto_impl;
@@ -48,7 +47,7 @@ pub trait HashingWriter: Send {
     /// Mapping of hashed keys of updated accounts to their respective updated hashed slots.
     fn unwind_storage_hashing(
         &self,
-        changesets: impl Iterator<Item = (BlockNumberAddress, ChangesetEntry)>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<B256Map<BTreeSet<B256>>>;
 
     /// Unwind and clear storage hashing in a given block range.

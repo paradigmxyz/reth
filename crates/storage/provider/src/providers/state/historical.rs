@@ -11,7 +11,7 @@ use reth_db_api::{
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_primitives_traits::{Account, Bytecode, StorageSlotKey};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, StateProofProvider,
     StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
@@ -147,10 +147,13 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     }
 
     /// Lookup a storage key in the `StoragesHistory` table using `EitherReader`.
+    ///
+    /// `lookup_key` must already be in the correct format for the current storage mode
+    /// (hashed if `use_hashed_state`, plain otherwise).
     pub fn storage_history_lookup(
         &self,
         address: Address,
-        storage_key: StorageSlotKey,
+        lookup_key: B256,
     ) -> ProviderResult<HistoryInfo>
     where
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
@@ -158,16 +161,6 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
-
-        let lookup_key = if self.provider.cached_storage_settings().use_hashed_state() {
-            storage_key.to_hashed()
-        } else {
-            debug_assert!(
-                storage_key.is_plain(),
-                "expected plain storage key when use_hashed_state is false"
-            );
-            storage_key.as_b256()
-        };
 
         self.provider.with_rocksdb_tx(|rocks_tx_ref| {
             let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
@@ -183,27 +176,17 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     /// Resolves a storage value by looking up the given key in history, changesets, or
     /// plain state.
     ///
-    /// Accepts a [`StorageSlotKey`]; the correct lookup key is derived internally
-    /// based on the storage mode.
+    /// `lookup_key` must already be in the correct format for the current storage mode
+    /// (hashed if `use_hashed_state`, plain otherwise).
     fn storage_by_lookup_key(
         &self,
         address: Address,
-        storage_key: StorageSlotKey,
+        lookup_key: B256,
     ) -> ProviderResult<Option<StorageValue>>
     where
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
-        let lookup_key = if self.provider.cached_storage_settings().use_hashed_state() {
-            storage_key.to_hashed()
-        } else {
-            debug_assert!(
-                storage_key.is_plain(),
-                "expected plain storage key when use_hashed_state is false"
-            );
-            storage_key.as_b256()
-        };
-
-        match self.storage_history_lookup(address, storage_key)? {
+        match self.storage_history_lookup(address, lookup_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => self
                 .provider
@@ -512,7 +495,12 @@ impl<
         address: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        self.storage_by_lookup_key(address, StorageSlotKey::plain(storage_key))
+        let lookup_key = if self.provider.cached_storage_settings().use_hashed_state() {
+            alloy_primitives::keccak256(storage_key)
+        } else {
+            storage_key
+        };
+        self.storage_by_lookup_key(address, lookup_key)
     }
 
     fn storage_by_hashed_key(
@@ -523,7 +511,7 @@ impl<
         if !self.provider.cached_storage_settings().use_hashed_state() {
             return Err(ProviderError::UnsupportedProvider)
         }
-        self.storage_by_lookup_key(address, StorageSlotKey::hashed(hashed_storage_key))
+        self.storage_by_lookup_key(address, hashed_storage_key)
     }
 }
 
@@ -716,7 +704,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };
-    use reth_primitives_traits::{Account, StorageEntry, StorageSlotKey};
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
         BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
         NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
@@ -971,7 +959,7 @@ mod tests {
             Err(ProviderError::StateAtBlockPruned(number)) if number == provider.block_number
         ));
         assert!(matches!(
-            provider.storage_history_lookup(ADDRESS, StorageSlotKey::plain(STORAGE)),
+            provider.storage_history_lookup(ADDRESS, STORAGE),
             Err(ProviderError::StateAtBlockPruned(number)) if number == provider.block_number
         ));
 
@@ -990,7 +978,7 @@ mod tests {
             Ok(HistoryInfo::MaybeInPlainState)
         ));
         assert!(matches!(
-            provider.storage_history_lookup(ADDRESS, StorageSlotKey::plain(STORAGE)),
+            provider.storage_history_lookup(ADDRESS, STORAGE),
             Ok(HistoryInfo::MaybeInPlainState)
         ));
 
@@ -1009,7 +997,7 @@ mod tests {
             Ok(HistoryInfo::MaybeInPlainState)
         ));
         assert!(matches!(
-            provider.storage_history_lookup(ADDRESS, StorageSlotKey::plain(STORAGE)),
+            provider.storage_history_lookup(ADDRESS, STORAGE),
             Ok(HistoryInfo::MaybeInPlainState)
         ));
     }
