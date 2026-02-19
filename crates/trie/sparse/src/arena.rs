@@ -262,8 +262,6 @@ fn find_parent_branch(
     stack: &mut Vec<ArenaStackEntry>,
     full_path: &Nibbles,
 ) -> FindParentBranchResult {
-    debug_assert_eq!(full_path.len(), 64, "full_path must be 64 nibbles, got {full_path:?}");
-
     // Pop stack until head is ancestor of full_path.
     while stack.len() > 1 && !full_path.starts_with(&stack.last().unwrap().path) {
         pop_and_propagate(arena, stack);
@@ -277,12 +275,11 @@ fn find_parent_branch(
         let mut head_branch_logical_path = head.path;
         head_branch_logical_path.extend(&head_branch.short_key);
 
-        debug_assert!(
-            full_path.len() > head_branch_logical_path.len(),
-            "full_path {full_path:?} must be longer than branch logical path {head_branch_logical_path:?}",
-        );
-
-        if !full_path.starts_with(&head_branch_logical_path) {
+        // If full_path doesn't extend past the branch's logical path, the target is at or
+        // within the branch's short_key — treat as diverged.
+        if full_path.len() <= head_branch_logical_path.len() ||
+            !full_path.starts_with(&head_branch_logical_path)
+        {
             return FindParentBranchResult::Diverged;
         }
 
@@ -501,8 +498,8 @@ impl ArenaSparseSubtrie {
         drain_stack(&mut self.arena, &mut self.stack);
     }
 
-    /// Reveals nodes inside this subtrie. Uses the same walk-down algorithm as the upper
-    /// trie but operates on the subtrie's own arena.
+    /// Reveals nodes inside this subtrie. Uses [`find_parent_branch`] to locate the ancestor
+    /// branch, then replaces blinded children with the proof nodes.
     ///
     /// `root_path` is the absolute path of the subtrie's root node in the full trie (not
     /// including the root's `short_key`).
@@ -526,57 +523,8 @@ impl ArenaSparseSubtrie {
         });
 
         for node in nodes.iter_mut() {
-            let target_path = &node.path;
-
-            // Pop stack until head is ancestor of target_path.
-            while let Some(head) = self.stack.last() &&
-                !target_path.starts_with(&head.path)
-            {
-                pop_and_propagate(&mut self.arena, &mut self.stack);
-            }
-
-            // Descend to find the blinded child to replace.
-            loop {
-                let head = self.stack.last().unwrap();
-                let head_path = head.path;
-                let head_idx = head.index;
-                let head_branch = self.arena[head_idx].branch_ref();
-
-                let child_nibble =
-                    target_path.get_unchecked(head_path.len() + head_branch.short_key.len());
-                let Some(dense_idx) = child_dense_index(head_branch.state_mask, child_nibble)
-                else {
-                    break;
-                };
-
-                match &head_branch.children[dense_idx] {
-                    ArenaSparseNodeBranchChild::Blinded(rlp) => {
-                        let cached_rlp = rlp.clone();
-                        let proof_node = mem::replace(node, ProofTrieNodeV2::empty());
-                        let mut arena_node = ArenaSparseNode::from(proof_node);
-
-                        // Set the child's state to Cached using the parent's RlpNode.
-                        let state = arena_node.state_mut();
-                        let num_leaves = state.num_leaves();
-                        *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp, num_leaves };
-
-                        let child_idx = self.arena.insert(arena_node);
-
-                        self.arena[head_idx].branch_mut().children[dense_idx] =
-                            ArenaSparseNodeBranchChild::Revealed(child_idx);
-
-                        maybe_push_branch(&self.arena, &mut self.stack, child_idx, child_nibble);
-                        break;
-                    }
-                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                        let child_idx = *child_idx;
-                        if !maybe_push_branch(&self.arena, &mut self.stack, child_idx, child_nibble)
-                        {
-                            break;
-                        }
-                    }
-                }
-            }
+            let find_result = find_parent_branch(&mut self.arena, &mut self.stack, &node.path);
+            reveal_node(&mut self.arena, &mut self.stack, node, find_result);
         }
 
         // Drain remaining stack entries, propagating num_leaves deltas.
@@ -812,6 +760,63 @@ fn upsert_leaf(
     }
 }
 
+/// Reveals a single proof node using a pre-computed [`FindParentBranchResult`] from
+/// [`find_parent_branch`].
+///
+/// If the result is `Blinded`, the blinded child is replaced with the proof node (converted to
+/// an arena node with `Cached` state). If the child is a branch, it is pushed onto the stack.
+/// All other cases (already revealed, no child, diverged) are no-ops — the proof node is skipped.
+fn reveal_node(
+    arena: &mut Arena<ArenaSparseNode>,
+    stack: &mut Vec<ArenaStackEntry>,
+    node: &mut ProofTrieNodeV2,
+    find_result: FindParentBranchResult,
+) {
+    let FindParentBranchResult::Blinded = find_result else {
+        // Already revealed, no child slot, or diverged — skip this proof node.
+        return;
+    };
+
+    let head = stack.last().unwrap();
+    let head_idx = head.index;
+    let head_branch = arena[head_idx].branch_ref();
+
+    let mut head_branch_logical_path = head.path;
+    head_branch_logical_path.extend(&head_branch.short_key);
+
+    debug_assert_eq!(
+        node.path.len(),
+        head_branch_logical_path.len() + 1,
+        "proof node path {:?} is not a direct child of branch at {:?} (expected depth {})",
+        node.path,
+        head_branch_logical_path,
+        head_branch_logical_path.len() + 1,
+    );
+
+    let child_nibble = node.path.get_unchecked(head_branch_logical_path.len());
+    let dense_idx = child_dense_index(head_branch.state_mask, child_nibble)
+        .expect("Blinded result but child nibble not in state_mask");
+
+    let cached_rlp = match &head_branch.children[dense_idx] {
+        ArenaSparseNodeBranchChild::Blinded(rlp) => rlp.clone(),
+        ArenaSparseNodeBranchChild::Revealed(_) => return,
+    };
+
+    let proof_node = mem::replace(node, ProofTrieNodeV2::empty());
+    let mut arena_node = ArenaSparseNode::from(proof_node);
+
+    let state = arena_node.state_mut();
+    let num_leaves = state.num_leaves();
+    *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp, num_leaves };
+
+    let child_idx = arena.insert(arena_node);
+
+    arena[head_idx].branch_mut().children[dense_idx] =
+        ArenaSparseNodeBranchChild::Revealed(child_idx);
+
+    maybe_push_branch(arena, stack, child_idx, child_nibble);
+}
+
 /// A proof request generated during leaf updates when a blinded node is encountered.
 #[derive(Debug, Clone)]
 struct ArenaRequiredProof {
@@ -926,59 +931,44 @@ impl ArenaParallelSparseTrie {
         path_len >= UPPER_TRIE_MAX_DEPTH || path_len + short_key_len >= UPPER_TRIE_MAX_DEPTH
     }
 
-    /// Reveals a child node of a branch in the upper arena, replacing its `Blinded` entry.
-    ///
-    /// If the child should be a subtrie, it is wrapped in [`ArenaSparseNode::Subtrie`].
-    /// Otherwise, it is inserted directly into the upper arena. If the child is a branch, it is
-    /// pushed onto the stack for further descent.
-    fn reveal_upper_trie_child(
+    /// If the child node at `child_idx` (under `parent_idx` at `child_nibble`) should be a
+    /// subtrie based on its depth and short key length, wraps it in
+    /// [`ArenaSparseNode::Subtrie`] and updates the parent's child pointer. Also pops the
+    /// stack entry if the child was pushed by [`reveal_node`] (since subtrie roots are not
+    /// traversed by the upper trie's stack).
+    fn maybe_wrap_in_subtrie(
         &mut self,
         parent_idx: Index,
         child_nibble: u8,
         parent_path: Nibbles,
-        proof_node: ProofTrieNodeV2,
         stack: &mut Vec<ArenaStackEntry>,
-    ) -> SparseTrieResult<()> {
-        // Take the cached RlpNode from the parent's Blinded child before replacing it.
+    ) {
         let parent = self.upper_arena[parent_idx].branch_ref();
-        let Some(child_dense_idx) = child_dense_index(parent.state_mask, child_nibble) else {
-            // If the child bit is no longer set then this portion of the trie has been removed via
-            // `update_leaves`, the revealed node is therefore out-of-date and should be dropped.
-            return Ok(());
-        };
-        let cached_rlp = match &parent.children[child_dense_idx] {
-            ArenaSparseNodeBranchChild::Blinded(rlp) => rlp.clone(),
-            ArenaSparseNodeBranchChild::Revealed(_) => {
-                // If the child is already revealed we don't re-reveal it, in case it's been
-                // updated since.
-                return Ok(())
-            }
-        };
-
-        let mut arena_node = ArenaSparseNode::from(proof_node);
-
-        // Set the child's state to Cached using the parent's RlpNode.
-        let state = arena_node.state_mut();
-        let num_leaves = state.num_leaves();
-        *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp, num_leaves };
-
-        let short_key_len = arena_node.short_key_len();
         let child_path_len = parent_path.len() + parent.short_key.len() + 1;
-
-        let child_idx = if Self::should_be_subtrie(child_path_len, short_key_len) {
-            let subtrie = self.take_or_create_subtrie(arena_node);
-            self.upper_arena.insert(ArenaSparseNode::Subtrie(subtrie))
-        } else {
-            self.upper_arena.insert(arena_node)
+        let Some(child_dense_idx) = child_dense_index(parent.state_mask, child_nibble) else {
+            return;
         };
+        let ArenaSparseNodeBranchChild::Revealed(child_idx) = parent.children[child_dense_idx]
+        else {
+            return;
+        };
+        let short_key_len = self.upper_arena[child_idx].short_key_len();
 
+        if !Self::should_be_subtrie(child_path_len, short_key_len) {
+            return;
+        }
+
+        // If reveal_node pushed this child onto the stack (because it's a branch), pop it —
+        // the upper trie doesn't traverse into subtrie roots.
+        if stack.last().is_some_and(|e| e.index == child_idx) {
+            stack.pop();
+        }
+
+        let arena_node = self.upper_arena.remove(child_idx).unwrap();
+        let subtrie = self.take_or_create_subtrie(arena_node);
+        let subtrie_idx = self.upper_arena.insert(ArenaSparseNode::Subtrie(subtrie));
         self.upper_arena[parent_idx].branch_mut().children[child_dense_idx] =
-            ArenaSparseNodeBranchChild::Revealed(child_idx);
-
-        // If the child is an upper-trie branch, push it onto the stack for further descent.
-        maybe_push_branch(&self.upper_arena, stack, child_idx, child_nibble);
-
-        Ok(())
+            ArenaSparseNodeBranchChild::Revealed(subtrie_idx);
     }
 }
 
@@ -1078,88 +1068,49 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let mut node_idx = if nodes[0].path.is_empty() { 1 } else { 0 };
 
         while node_idx < nodes.len() {
-            let target_path = &nodes[node_idx].path;
+            let find_result =
+                find_parent_branch(&mut self.upper_arena, &mut stack, &nodes[node_idx].path);
 
-            // Pop stack until head is ancestor of target_path.
-            while let Some(head) = stack.last() &&
-                !target_path.starts_with(&head.path)
-            {
-                pop_and_propagate(&mut self.upper_arena, &mut stack);
-            }
+            match find_result {
+                FindParentBranchResult::Blinded => {
+                    let head = stack.last().unwrap();
+                    let head_idx = head.index;
+                    let head_path = head.path;
+                    let head_branch = self.upper_arena[head_idx].branch_ref();
+                    let child_nibble_offset = head_path.len() + head_branch.short_key.len();
+                    let child_nibble = nodes[node_idx].path.get_unchecked(child_nibble_offset);
 
-            // Descend from the current stack head toward the target. We may need to traverse
-            // through already-revealed branch nodes.
-            loop {
-                let head = stack.last().unwrap();
-                let head_path = head.path;
-                let head_idx = head.index;
-                let head_branch = self.upper_arena[head_idx].branch_ref();
-
-                debug_assert!(
-                    target_path.starts_with(&head_path),
-                    "target {target_path:?} is not under stack head {head_path:?}",
-                );
-
-                let child_nibble =
-                    target_path.get_unchecked(head_path.len() + head_branch.short_key.len());
-
-                let Some(dense_idx) = child_dense_index(head_branch.state_mask, child_nibble)
-                else {
+                    reveal_node(
+                        &mut self.upper_arena,
+                        &mut stack,
+                        &mut nodes[node_idx],
+                        FindParentBranchResult::Blinded,
+                    );
                     node_idx += 1;
-                    break;
-                };
 
-                match &head_branch.children[dense_idx] {
-                    ArenaSparseNodeBranchChild::Blinded(_) => {
-                        let proof_node =
-                            mem::replace(&mut nodes[node_idx], ProofTrieNodeV2::empty());
+                    self.maybe_wrap_in_subtrie(head_idx, child_nibble, head_path, &mut stack);
+                }
+                FindParentBranchResult::Revealed { child_idx, child_nibble, .. }
+                    if matches!(self.upper_arena[child_idx], ArenaSparseNode::Subtrie(_)) =>
+                {
+                    let subtrie_start = node_idx;
+                    let prefix = child_path(&self.upper_arena, &stack, child_nibble);
+                    while node_idx < nodes.len() && nodes[node_idx].path.starts_with(&prefix) {
                         node_idx += 1;
-
-                        self.reveal_upper_trie_child(
-                            head_idx,
-                            child_nibble,
-                            head_path,
-                            proof_node,
-                            &mut stack,
-                        )?;
-                        break;
                     }
-                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                        let child_idx = *child_idx;
-                        match &self.upper_arena[child_idx] {
-                            ArenaSparseNode::Branch(_) => {
-                                debug_assert!(maybe_push_branch(
-                                    &self.upper_arena,
-                                    &mut stack,
-                                    child_idx,
-                                    child_nibble,
-                                ));
-                            }
-                            ArenaSparseNode::Subtrie(_) => {
-                                let subtrie_start = node_idx;
-                                let prefix = child_path(&self.upper_arena, &stack, child_nibble);
-                                while node_idx < nodes.len() &&
-                                    nodes[node_idx].path.starts_with(&prefix)
-                                {
-                                    node_idx += 1;
-                                }
-                                let ArenaSparseNode::Subtrie(mut subtrie) = mem::replace(
-                                    &mut self.upper_arena[child_idx],
-                                    ArenaSparseNode::TakenSubtrie,
-                                ) else {
-                                    unreachable!()
-                                };
-                                let subtrie_nodes = &mut nodes[subtrie_start..node_idx];
-                                subtrie.reveal_nodes(subtrie_nodes, prefix)?;
-                                self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
-                                break;
-                            }
-                            _ => {
-                                node_idx += 1;
-                                break;
-                            }
-                        }
-                    }
+                    let ArenaSparseNode::Subtrie(mut subtrie) = mem::replace(
+                        &mut self.upper_arena[child_idx],
+                        ArenaSparseNode::TakenSubtrie,
+                    ) else {
+                        unreachable!()
+                    };
+                    let subtrie_nodes = &mut nodes[subtrie_start..node_idx];
+                    subtrie.reveal_nodes(subtrie_nodes, prefix)?;
+                    self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
+                }
+                _ => {
+                    // Diverged, NoChild, or Revealed non-subtrie — skip this proof node.
+                    node_idx += 1;
                 }
             }
         }
