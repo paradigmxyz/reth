@@ -16,7 +16,7 @@ const ETHEREUM_BLOCK_GAS_LIMIT_60M: u64 = 60_000_000;
 /// [`PayloadBuilderArgs`](crate::args::PayloadBuilderArgs) type.
 pub trait PayloadBuilderConfig {
     /// Returns the extra data as bytes.
-    fn extra_data_bytes(&self) -> Bytes;
+    fn extra_data(&self) -> Bytes;
 
     /// The interval at which the job should build a new payload after the last.
     fn interval(&self) -> Duration;

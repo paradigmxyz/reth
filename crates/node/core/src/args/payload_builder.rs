@@ -145,7 +145,7 @@ impl Default for PayloadBuilderArgs {
 }
 
 impl PayloadBuilderConfig for PayloadBuilderArgs {
-    fn extra_data_bytes(&self) -> Bytes {
+    fn extra_data(&self) -> Bytes {
         self.extra_data.clone()
     }
 
