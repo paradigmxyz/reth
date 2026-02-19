@@ -22,6 +22,25 @@ use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterato
 
 use revm_database::{AccountStatus, BundleAccount};
 
+/// Minimum number of accounts in a bundle state to justify rayon parallel iteration.
+/// Below this threshold, sequential iteration avoids work-stealing overhead.
+#[cfg(feature = "rayon")]
+const PARALLEL_HASHING_THRESHOLD: usize = 5;
+
+/// Hash a single bundle account entry into the components needed by [`HashedPostState`].
+fn hash_bundle_account<'a, KH: KeyHasher>(
+    (address, account): (&'a Address, &'a BundleAccount),
+) -> (B256, Option<Account>, Option<HashedStorage>) {
+    let hashed_address = KH::hash_key(address);
+    let hashed_account = account.info.as_ref().map(Into::into);
+    let hashed_storage = HashedStorage::from_plain_storage(
+        account.status,
+        account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+    );
+
+    (hashed_address, hashed_account, (!hashed_storage.is_empty()).then_some(hashed_storage))
+}
+
 /// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
 /// hash maps.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -45,28 +64,22 @@ impl HashedPostState {
     /// Initialize [`HashedPostState`] from bundle state.
     /// Hashes all changed accounts and storage entries that are currently stored in the bundle
     /// state.
+    ///
+    /// When the `rayon` feature is enabled, this falls back to sequential iteration for very
+    /// small state diffs (fewer than [`PARALLEL_HASHING_THRESHOLD`] accounts) to avoid rayon
+    /// work-stealing overhead.
     #[inline]
     #[cfg(feature = "rayon")]
     pub fn from_bundle_state<'a, KH: KeyHasher>(
-        state: impl IntoParallelIterator<Item = (&'a Address, &'a BundleAccount)>,
+        state: impl IntoParallelIterator<Item = (&'a Address, &'a BundleAccount)>
+            + IntoIterator<Item = (&'a Address, &'a BundleAccount)>
+            + Copy,
     ) -> Self {
-        state
-            .into_par_iter()
-            .map(|(address, account)| {
-                let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                );
+        if state.into_iter().size_hint().0 < PARALLEL_HASHING_THRESHOLD {
+            return Self::from_bundle_state_seq::<KH>(state)
+        }
 
-                (
-                    hashed_address,
-                    hashed_account,
-                    (!hashed_storage.is_empty()).then_some(hashed_storage),
-                )
-            })
-            .collect()
+        state.into_par_iter().map(hash_bundle_account::<KH>).collect()
     }
 
     /// Initialize [`HashedPostState`] from bundle state.
@@ -76,23 +89,14 @@ impl HashedPostState {
     pub fn from_bundle_state<'a, KH: KeyHasher>(
         state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
-        state
-            .into_iter()
-            .map(|(address, account)| {
-                let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                );
+        Self::from_bundle_state_seq::<KH>(state)
+    }
 
-                (
-                    hashed_address,
-                    hashed_account,
-                    (!hashed_storage.is_empty()).then_some(hashed_storage),
-                )
-            })
-            .collect()
+    /// Sequential implementation of [`Self::from_bundle_state`].
+    fn from_bundle_state_seq<'a, KH: KeyHasher>(
+        state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
+    ) -> Self {
+        state.into_iter().map(hash_bundle_account::<KH>).collect()
     }
 
     /// Construct [`HashedPostState`] from a single [`HashedStorage`].

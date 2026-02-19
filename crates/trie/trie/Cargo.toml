@@ -109,6 +109,10 @@ name = "hash_post_state"
 harness = false
 
 [[bench]]
+name = "hash_post_state_small"
+harness = false
+
+[[bench]]
 name = "trie_root"
 required-features = ["test-utils"]
 harness = false
