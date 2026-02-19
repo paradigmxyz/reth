@@ -33,7 +33,9 @@ pub mod error;
 pub mod header;
 
 use alloc::{fmt, vec::Vec};
-use alloy_primitives::{Address, B256};
+use alloy_consensus::BlockHeader as _;
+use alloy_eips::BlockNumHash;
+use alloy_primitives::{Address, Sealable, B256};
 use alloy_rlp::{Decodable, Encodable};
 
 use crate::{
@@ -106,6 +108,11 @@ pub trait Block:
     /// Calculate the header hash and seal the block so that it can't be changed.
     fn seal_slow(self) -> SealedBlock<Self> {
         SealedBlock::seal_slow(self)
+    }
+
+    /// Returns the block number and hash, computing the hash from the header.
+    fn num_hash_slow(&self) -> BlockNumHash {
+        BlockNumHash::new(self.header().number(), self.header().hash_slow())
     }
 
     /// Returns reference to block header.
