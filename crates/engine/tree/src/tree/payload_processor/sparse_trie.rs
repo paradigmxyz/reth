@@ -92,6 +92,8 @@ pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparse
     finished_state_updates: bool,
     /// Pending targets to be dispatched to the proof workers.
     pending_targets: MultiProofTargetsV2,
+    /// Cached number of account + storage proof targets currently queued in `pending_targets`.
+    pending_targets_len: usize,
     /// Number of pending execution/prewarming updates received but not yet passed to
     /// `update_leaves`.
     pending_updates: usize,
@@ -141,6 +143,7 @@ where
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             finished_state_updates: Default::default(),
             pending_targets: Default::default(),
+            pending_targets_len: Default::default(),
             pending_updates: Default::default(),
             metrics,
         }
@@ -283,7 +286,7 @@ where
                 // them to the trie,
                 self.process_new_updates()?;
                 self.dispatch_pending_targets();
-            } else if self.pending_targets.chunking_length() > self.chunk_size.unwrap_or_default() {
+            } else if self.pending_targets_len > self.chunk_size.unwrap_or_default() {
                 // Make sure to dispatch targets if we've accumulated a lot of them.
                 self.dispatch_pending_targets();
             }
@@ -505,6 +508,7 @@ where
             self.trie.insert_storage_trie(*address, trie);
 
             if !targets.is_empty() {
+                self.pending_targets_len += targets.len();
                 self.pending_targets.storage_targets.entry(*address).or_default().extend(targets);
             }
         }
@@ -537,6 +541,7 @@ where
                         self.pending_targets
                             .account_targets
                             .push(Target::new(target).with_min_len(min_len));
+                        self.pending_targets_len += 1;
                     }
                 }
                 Entry::Vacant(entry) => {
@@ -544,6 +549,7 @@ where
                     self.pending_targets
                         .account_targets
                         .push(Target::new(target).with_min_len(min_len));
+                    self.pending_targets_len += 1;
                 }
             }
         })?;
@@ -669,8 +675,9 @@ where
         skip_all
     )]
     fn dispatch_pending_targets(&mut self) {
-        if !self.pending_targets.is_empty() {
-            let chunking_length = self.pending_targets.chunking_length();
+        if self.pending_targets_len > 0 {
+            let chunking_length = self.pending_targets_len;
+            self.pending_targets_len = 0;
             dispatch_with_chunking(
                 std::mem::take(&mut self.pending_targets),
                 chunking_length,
