@@ -658,7 +658,10 @@ impl SparseTrie for ParallelSparseTrie {
                     self.lower_subtries[idx].as_revealed_mut().expect("lower subtrie is revealed")
                 }
             };
-            let curr_node = curr_subtrie.nodes.get_mut(&curr_path).unwrap();
+            let curr_node = curr_subtrie
+                .nodes
+                .get_mut(&curr_path)
+                .unwrap_or_else(|| panic!("node not found at path: {curr_path:?}"));
 
             match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
                 FindNextToLeafOutcome::NotFound => return Ok(()), // leaf isn't in the trie
