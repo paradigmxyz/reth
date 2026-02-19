@@ -242,6 +242,9 @@ struct ArenaStackEntry {
 /// Result of [`find_parent_branch`] describing the state at the deepest ancestor branch.
 #[derive(Debug)]
 enum FindParentBranchResult {
+    /// The stack head is a leaf node (i.e. the root is a leaf). The caller must handle this
+    /// before attempting branch-specific operations.
+    RootLeaf,
     /// The next child along the path is blinded (unrevealed).
     Blinded,
     /// The target path diverges within the stack head's `short_key`.
@@ -270,7 +273,11 @@ fn find_parent_branch(
     loop {
         let head = stack.last().unwrap();
         let head_idx = head.index;
-        let head_branch = arena[head_idx].branch_ref();
+
+        // If the stack head is a leaf (e.g. leaf root), return early.
+        let ArenaSparseNode::Branch(head_branch) = &arena[head_idx] else {
+            return FindParentBranchResult::RootLeaf;
+        };
 
         let mut head_branch_logical_path = head.path;
         head_branch_logical_path.extend(&head_branch.short_key);
@@ -639,6 +646,18 @@ fn replace_child_in_parent(
     root
 }
 
+/// Result of [`upsert_leaf`] indicating whether a new branch was created that the caller
+/// may need to wrap as a subtrie (in the upper trie).
+#[derive(Debug)]
+enum UpsertLeafResult {
+    /// No new branch was created (value update, new leaf only, or same-leaf overwrite).
+    None,
+    /// A new branch was created. Contains the parent's arena index, the child nibble under
+    /// which the new branch sits, and the parent's path — enough for the caller to call
+    /// `maybe_wrap_in_subtrie`.
+    NewBranch { parent_idx: Index, child_nibble: u8, parent_path: Nibbles },
+}
+
 /// Performs a leaf upsert using a pre-computed [`FindParentBranchResult`] from
 /// [`find_parent_branch`].
 ///
@@ -649,6 +668,9 @@ fn replace_child_in_parent(
 ///
 /// The caller must handle [`FindParentBranchResult::Blinded`] before calling this function.
 /// The stack must have at least one entry (the ancestor branch) when called.
+///
+/// Returns an [`UpsertLeafResult`] describing any new branch that was created, so the caller
+/// can decide whether to wrap it as a subtrie.
 fn upsert_leaf(
     arena: &mut Arena<ArenaSparseNode>,
     stack: &mut Vec<ArenaStackEntry>,
@@ -656,12 +678,12 @@ fn upsert_leaf(
     full_path: &Nibbles,
     value: &[u8],
     find_result: FindParentBranchResult,
-) {
+) -> UpsertLeafResult {
     let head = stack.last().unwrap();
 
     match find_result {
-        FindParentBranchResult::Blinded => {
-            unreachable!("Blinded case must be handled by caller")
+        FindParentBranchResult::RootLeaf | FindParentBranchResult::Blinded => {
+            unreachable!("RootLeaf and Blinded cases must be handled by caller")
         }
         FindParentBranchResult::Diverged => {
             let head_path = head.path;
@@ -675,6 +697,18 @@ fn upsert_leaf(
             *root = replace_child_in_parent(arena, stack, *root, head_idx, new_branch_idx);
 
             stack.last_mut().unwrap().index = new_branch_idx;
+
+            // The new branch replaced the stack head. Its parent is stack[len-2].
+            if stack.len() >= 2 {
+                let parent_entry = &stack[stack.len() - 2];
+                let child_nibble = stack.last().unwrap().path.last().unwrap();
+                return UpsertLeafResult::NewBranch {
+                    parent_idx: parent_entry.index,
+                    child_nibble,
+                    parent_path: parent_entry.path,
+                };
+            }
+            UpsertLeafResult::None
         }
         FindParentBranchResult::NoChild { child_nibble } => {
             let head_idx = head.index;
@@ -702,17 +736,19 @@ fn upsert_leaf(
                 num_leaves: old_num_leaves + 1,
                 num_dirty_leaves: old_dirty_leaves + 1,
             };
+            UpsertLeafResult::None
         }
         FindParentBranchResult::Revealed { dense_idx, child_nibble, child_idx } => {
             match &arena[child_idx] {
                 ArenaSparseNode::Leaf { key: leaf_key, .. } => {
                     let leaf_key = *leaf_key;
                     let head_idx = head.index;
+                    let head_path = head.path;
                     let head_branch = arena[head_idx].branch_ref();
                     let old_num_leaves = head_branch.state.num_leaves();
                     let old_dirty_leaves = head_branch.state.num_dirty_leaves();
 
-                    let mut head_branch_logical_path = head.path;
+                    let mut head_branch_logical_path = head_path;
                     head_branch_logical_path.extend(&head_branch.short_key);
 
                     let mut leaf_full_path = head_branch_logical_path;
@@ -732,6 +768,7 @@ fn upsert_leaf(
                             num_leaves: old_num_leaves,
                             num_dirty_leaves: old_dirty_leaves + 1,
                         };
+                        UpsertLeafResult::None
                     } else {
                         // Different leaf — find divergence point and split.
                         let child_path_start = head_branch_logical_path.len() + 1;
@@ -752,11 +789,63 @@ fn upsert_leaf(
                             num_leaves: old_num_leaves + 1,
                             num_dirty_leaves: old_dirty_leaves + 1,
                         };
+                        UpsertLeafResult::NewBranch {
+                            parent_idx: head_idx,
+                            child_nibble,
+                            parent_path: head_path,
+                        }
                     }
                 }
                 _ => unreachable!("unexpected node type during upsert"),
             }
         }
+    }
+}
+
+/// Handles a leaf upsert when the root of the trie is itself a leaf node.
+///
+/// If `full_path` matches the root leaf's full path, updates the value in place. Otherwise,
+/// splits the root leaf into a new branch via [`split_and_insert_leaf`], updates `root` and
+/// the stack entry to point to the new branch.
+///
+/// The `root_path` is the absolute path prefix of the root node (empty for the upper trie,
+/// the subtrie prefix for subtries).
+///
+/// Returns `true` if a new branch was created (the root was split), `false` if the value was
+/// updated in place.
+fn upsert_leaf_at_root(
+    arena: &mut Arena<ArenaSparseNode>,
+    stack: &mut Vec<ArenaStackEntry>,
+    root: &mut Index,
+    root_path: Nibbles,
+    full_path: &Nibbles,
+    value: &[u8],
+) -> bool {
+    let root_leaf_key = match &arena[*root] {
+        ArenaSparseNode::Leaf { key, .. } => *key,
+        _ => unreachable!("upsert_leaf_at_root called on non-Leaf root"),
+    };
+
+    let mut root_leaf_full_path = root_path;
+    root_leaf_full_path.extend(&root_leaf_key);
+
+    if &root_leaf_full_path == full_path {
+        // Same leaf — update value in place.
+        if let ArenaSparseNode::Leaf { value: v, state, .. } = &mut arena[*root] {
+            v.clear();
+            v.extend_from_slice(value);
+            *state = ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 };
+        }
+        false
+    } else {
+        // Different leaf — split into a branch.
+        let remaining_full = full_path.slice(root_path.len()..);
+        let new_branch_idx =
+            split_and_insert_leaf(arena, remaining_full, value, &root_leaf_key, *root);
+        *root = new_branch_idx;
+        let entry = stack.last_mut().unwrap();
+        entry.index = new_branch_idx;
+        true
     }
 }
 
@@ -952,7 +1041,12 @@ impl ArenaParallelSparseTrie {
         else {
             return;
         };
-        let short_key_len = self.upper_arena[child_idx].short_key_len();
+
+        // Only branch nodes can become subtrie roots.
+        let ArenaSparseNode::Branch(child_branch) = &self.upper_arena[child_idx] else {
+            return;
+        };
+        let short_key_len = child_branch.short_key.len();
 
         if !Self::should_be_subtrie(child_path_len, short_key_len) {
             return;
@@ -1072,6 +1166,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 find_parent_branch(&mut self.upper_arena, &mut stack, &nodes[node_idx].path);
 
             match find_result {
+                FindParentBranchResult::RootLeaf => {
+                    // Leaf roots have no blinded children — skip.
+                    node_idx += 1;
+                }
                 FindParentBranchResult::Blinded => {
                     let head = stack.last().unwrap();
                     let head_idx = head.index;
@@ -1255,6 +1353,24 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
             let find_result = find_parent_branch(&mut self.upper_arena, &mut stack, full_path);
 
+            // Root is a leaf — handle directly.
+            if let FindParentBranchResult::RootLeaf = find_result {
+                if let LeafUpdate::Changed(v) = update {
+                    if !v.is_empty() {
+                        upsert_leaf_at_root(
+                            &mut self.upper_arena,
+                            &mut stack,
+                            &mut self.root,
+                            Nibbles::default(),
+                            full_path,
+                            v,
+                        );
+                    }
+                }
+                update_idx += 1;
+                continue;
+            }
+
             // If the path hits a blinded node, request a proof regardless of update type.
             if let FindParentBranchResult::Blinded = find_result {
                 let head = stack.last().unwrap();
@@ -1300,7 +1416,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
             match update {
                 LeafUpdate::Changed(v) if !v.is_empty() => {
-                    upsert_leaf(
+                    let result = upsert_leaf(
                         &mut self.upper_arena,
                         &mut stack,
                         &mut self.root,
@@ -1308,6 +1424,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         v,
                         find_result,
                     );
+                    if let UpsertLeafResult::NewBranch { parent_idx, child_nibble, parent_path } =
+                        result
+                    {
+                        self.maybe_wrap_in_subtrie(
+                            parent_idx,
+                            child_nibble,
+                            parent_path,
+                            &mut stack,
+                        );
+                    }
                 }
                 LeafUpdate::Changed(_) => {
                     todo!("Changed removal updates not yet implemented");
