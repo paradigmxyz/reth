@@ -67,7 +67,7 @@ struct ExExMetrics {
     notifications_sent_total: Counter,
     /// The total number of events an `ExEx` has sent to the manager.
     events_sent_total: Counter,
-    /// Current finished height of this ExEx (block number, or -1 if None).
+    /// Current finished height of this ExEx (block number).
     finished_height: Gauge,
 }
 
