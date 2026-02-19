@@ -18,6 +18,7 @@ cond_mod!(
     genesis_account,
     header,
     log,
+    receipt,
     signature,
     trie,
     txkind,

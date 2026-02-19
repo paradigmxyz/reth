@@ -7,10 +7,11 @@
 //! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
 
 #[cfg(feature = "rayon")]
-use crate::pool::{BlockingTaskGuard, BlockingTaskPool};
+use crate::pool::{BlockingTaskGuard, BlockingTaskPool, WorkerPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
+    worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
 };
 use futures_util::{future::select, Future, FutureExt, TryFutureExt};
@@ -198,16 +199,6 @@ pub struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
-    /// Create a config that attaches to an existing tokio runtime handle.
-    #[cfg_attr(not(feature = "rayon"), allow(clippy::missing_const_for_fn))]
-    pub fn with_existing_handle(handle: Handle) -> Self {
-        Self {
-            tokio: TokioConfig::ExistingHandle(handle),
-            #[cfg(feature = "rayon")]
-            rayon: RayonConfig::default(),
-        }
-    }
-
     /// Set the tokio configuration.
     pub fn with_tokio(mut self, tokio: TokioConfig) -> Self {
         self.tokio = tokio;
@@ -263,13 +254,16 @@ struct RuntimeInner {
     blocking_guard: BlockingTaskGuard,
     /// Proof storage worker pool (trie storage proof computation).
     #[cfg(feature = "rayon")]
-    proof_storage_worker_pool: rayon::ThreadPool,
+    proof_storage_worker_pool: WorkerPool,
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
-    proof_account_worker_pool: rayon::ThreadPool,
+    proof_account_worker_pool: WorkerPool,
     /// Prewarming pool (execution prewarming workers).
     #[cfg(feature = "rayon")]
-    prewarming_pool: rayon::ThreadPool,
+    prewarming_pool: WorkerPool,
+    /// Named single-thread worker map. Each unique name gets a dedicated OS thread
+    /// that is reused across all tasks submitted under that name.
+    worker_map: WorkerMap,
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
@@ -294,15 +288,6 @@ pub struct Runtime(Arc<RuntimeInner>);
 impl std::fmt::Debug for Runtime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Runtime").field("handle", &self.0.handle).finish()
-    }
-}
-
-// ── Constructors ──────────────────────────────────────────────────────
-
-impl Runtime {
-    /// Creates a [`Runtime`] that attaches to an existing tokio runtime handle.
-    pub fn with_existing_handle(handle: Handle) -> Result<Self, RuntimeBuildError> {
-        RuntimeBuilder::new(RuntimeConfig::with_existing_handle(handle)).build()
     }
 }
 
@@ -349,19 +334,19 @@ impl Runtime {
 
     /// Get the proof storage worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_storage_worker_pool(&self) -> &rayon::ThreadPool {
+    pub fn proof_storage_worker_pool(&self) -> &WorkerPool {
         &self.0.proof_storage_worker_pool
     }
 
     /// Get the proof account worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_account_worker_pool(&self) -> &rayon::ThreadPool {
+    pub fn proof_account_worker_pool(&self) -> &WorkerPool {
         &self.0.proof_account_worker_pool
     }
 
     /// Get the prewarming pool.
     #[cfg(feature = "rayon")]
-    pub fn prewarming_pool(&self) -> &rayon::ThreadPool {
+    pub fn prewarming_pool(&self) -> &WorkerPool {
         &self.0.prewarming_pool
     }
 }
@@ -378,12 +363,6 @@ impl Runtime {
             Ok(handle) => Self::test_config().with_tokio(TokioConfig::existing_handle(handle)),
             Err(_) => Self::test_config(),
         };
-        RuntimeBuilder::new(config).build().expect("failed to build test Runtime")
-    }
-
-    /// Creates a lightweight [`Runtime`] for tests, attaching to the given tokio handle.
-    pub fn test_with_handle(handle: Handle) -> Self {
-        let config = Self::test_config().with_tokio(TokioConfig::existing_handle(handle));
         RuntimeBuilder::new(config).build().expect("failed to build test Runtime")
     }
 
@@ -497,6 +476,26 @@ impl Runtime {
         R: Send + 'static,
     {
         self.0.handle.spawn_blocking(func)
+    }
+
+    /// Spawns a blocking closure on a dedicated, named OS thread.
+    ///
+    /// Unlike [`spawn_blocking`](Self::spawn_blocking) which uses tokio's blocking thread pool,
+    /// this reuses the same OS thread for all tasks submitted under the same `name`. The thread
+    /// is created lazily on first use and its OS thread name is set to `name`.
+    ///
+    /// This is useful for tasks that benefit from running on a stable thread, e.g. for
+    /// thread-local state reuse or to avoid thread creation overhead on hot paths.
+    pub fn spawn_blocking_named<F, R>(
+        &self,
+        name: &'static str,
+        func: F,
+    ) -> tokio::sync::oneshot::Receiver<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.0.worker_map.spawn_on(name, func)
     }
 
     /// Spawns the task onto the runtime.
@@ -747,7 +746,7 @@ impl RuntimeBuilder {
     /// The [`TaskManager`] is automatically spawned as a background task that monitors
     /// critical tasks for panics. Use [`Runtime::take_task_manager_handle`] to extract
     /// the join handle if you need to poll for panic errors.
-    #[tracing::instrument(level = "debug", skip_all)]
+    #[tracing::instrument(name = "RuntimeBuilder::build", level = "debug", skip_all)]
     pub fn build(self) -> Result<Runtime, RuntimeBuildError> {
         debug!(?self.config, "Building runtime");
         let config = self.config;
@@ -809,23 +808,26 @@ impl RuntimeBuilder {
 
             let proof_storage_worker_threads =
                 config.rayon.proof_storage_worker_threads.unwrap_or(default_threads);
-            let proof_storage_worker_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(proof_storage_worker_threads)
-                .thread_name(|i| format!("proof-strg-{i:02}"))
-                .build()?;
+            let proof_storage_worker_pool = WorkerPool::from_builder(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(proof_storage_worker_threads)
+                    .thread_name(|i| format!("proof-strg-{i:02}")),
+            )?;
 
             let proof_account_worker_threads =
                 config.rayon.proof_account_worker_threads.unwrap_or(default_threads);
-            let proof_account_worker_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(proof_account_worker_threads)
-                .thread_name(|i| format!("proof-acct-{i:02}"))
-                .build()?;
+            let proof_account_worker_pool = WorkerPool::from_builder(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(proof_account_worker_threads)
+                    .thread_name(|i| format!("proof-acct-{i:02}")),
+            )?;
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
-            let prewarming_pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(prewarming_threads)
-                .thread_name(|i| format!("prewarm-{i:02}"))
-                .build()?;
+            let prewarming_pool = WorkerPool::from_builder(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(prewarming_threads)
+                    .thread_name(|i| format!("prewarm-{i:02}")),
+            )?;
 
             debug!(
                 default_threads,
@@ -880,6 +882,7 @@ impl RuntimeBuilder {
             proof_account_worker_pool,
             #[cfg(feature = "rayon")]
             prewarming_pool,
+            worker_map: WorkerMap::new(),
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
             _quanta_upkeep: quanta_upkeep,
         };
@@ -901,7 +904,8 @@ mod tests {
     #[test]
     fn test_runtime_config_existing_handle() {
         let rt = TokioRuntime::new().unwrap();
-        let config = RuntimeConfig::with_existing_handle(rt.handle().clone());
+        let config =
+            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
         assert!(matches!(config.tokio, TokioConfig::ExistingHandle(_)));
     }
 
@@ -916,7 +920,8 @@ mod tests {
     #[test]
     fn test_runtime_builder() {
         let rt = TokioRuntime::new().unwrap();
-        let config = RuntimeConfig::with_existing_handle(rt.handle().clone());
+        let config =
+            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
         let runtime = RuntimeBuilder::new(config).build().unwrap();
         let _ = runtime.handle();
     }

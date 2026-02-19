@@ -16,6 +16,7 @@ use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
 use std::sync::Arc;
 use tracing::info;
 
+#[expect(clippy::too_many_arguments)]
 pub(crate) async fn dump_execution_stage<N, E, C>(
     db_tool: &DbTool<N>,
     from: u64,
@@ -24,6 +25,7 @@ pub(crate) async fn dump_execution_stage<N, E, C>(
     should_run: bool,
     evm_config: E,
     consensus: C,
+    runtime: reth_tasks::Runtime,
 ) -> eyre::Result<()>
 where
     N: ProviderNodeTypes<DB = DatabaseEnv>,
@@ -37,7 +39,6 @@ where
     unwind_and_copy(db_tool, from, tip_block_number, &output_db, evm_config.clone())?;
 
     if should_run {
-        let runtime = reth_tasks::Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
         dry_run(
             ProviderFactory::<N>::new(
                 output_db,
