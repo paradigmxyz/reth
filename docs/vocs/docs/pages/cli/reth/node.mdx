@@ -685,7 +685,9 @@ TxPool:
 
 Builder:
       --builder.extradata <EXTRA_DATA>
-          Block extra data set by the payload builder
+          Block extra data set by the payload builder.
+
+          If the value is a `0x`-prefixed hex string, it is decoded into raw bytes. Otherwise, the raw UTF-8 bytes of the string are used.
 
           [default: reth/<VERSION>/<OS>]
 
