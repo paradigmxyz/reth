@@ -30,6 +30,7 @@ use tokio::{
 };
 use tracing::debug;
 
+pub mod lazy;
 pub mod metrics;
 pub mod runtime;
 pub mod shutdown;
@@ -46,6 +47,7 @@ pub mod for_each_ordered;
 #[cfg(feature = "rayon")]
 pub use for_each_ordered::ForEachOrdered;
 
+pub use lazy::LazyHandle;
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
 pub use runtime::{Runtime, RuntimeBuildError, RuntimeBuilder, RuntimeConfig, TokioConfig};

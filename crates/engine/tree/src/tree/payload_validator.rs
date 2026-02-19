@@ -54,6 +54,9 @@ use std::{
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
+/// Handle to a [`HashedPostState`] computed on a background thread.
+type LazyHashedPostState = reth_tasks::LazyHandle<HashedPostState>;
+
 /// Context providing access to tree state during validation.
 ///
 /// This context is provided to the [`EngineValidator`] and includes the state of the tree's
@@ -338,17 +341,16 @@ where
             BlockOrPayload::Payload(_) => {
                 let payload_clone = input.clone();
                 let validator = self.validator.clone();
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                self.payload_processor.executor().spawn_blocking_named(
+                let handle = self.payload_processor.executor().spawn_blocking_named(
                     "payload-convert",
                     move || {
                         let BlockOrPayload::Payload(payload) = payload_clone else {
                             unreachable!()
                         };
-                        let _ = tx.send(validator.convert_payload_to_block(payload));
+                        validator.convert_payload_to_block(payload)
                     },
                 );
-                Either::Left(rx)
+                Either::Left(handle)
             }
             BlockOrPayload::Block(_) => Either::Right(()),
         };
@@ -358,9 +360,7 @@ where
         let convert_to_block =
             move |input: BlockOrPayload<T>| -> Result<SealedBlock<N::Block>, NewPayloadError> {
                 match convert_to_block {
-                    Either::Left(rx) => rx.blocking_recv().map_err(|_| {
-                        NewPayloadError::Other("block conversion task panicked".into())
-                    })?,
+                    Either::Left(handle) => handle.try_into_inner().expect("sole handle"),
                     Either::Right(()) => {
                         let BlockOrPayload::Block(block) = input else { unreachable!() };
                         Ok(block)
@@ -512,6 +512,21 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
+        // Spawn hashed post state computation in background so it runs concurrently with
+        // block conversion and receipt root computation. This is a pure CPU-bound task
+        // (keccak256 hashing of all changed addresses and storage slots).
+        let hashed_state_output = output.clone();
+        let hashed_state_provider = self.provider.clone();
+        let hashed_state: LazyHashedPostState =
+            self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
+                let _span = debug_span!(
+                    target: "engine::tree::payload_validator",
+                    "hashed_post_state",
+                )
+                .entered();
+                hashed_state_provider.hashed_post_state(&hashed_state_output.state)
+            });
+
         let block = convert_to_block(input)?.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
@@ -531,7 +546,8 @@ where
                 &parent_block,
                 &output,
                 &mut ctx,
-                receipt_root_bloom
+                receipt_root_bloom,
+                hashed_state,
             ),
             block
         );
@@ -938,8 +954,9 @@ where
     fn compute_state_root_parallel(
         &self,
         overlay_factory: OverlayStateProviderFactory<P>,
-        hashed_state: &HashedPostState,
+        hashed_state: &LazyHashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
+        let hashed_state = hashed_state.get();
         // The `hashed_state` argument will be taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // ParallelStateRoot which parts of the trie need to be recomputed.
@@ -957,8 +974,9 @@ where
     /// trie updates for this block.
     fn compute_state_root_serial(
         overlay_factory: OverlayStateProviderFactory<P>,
-        hashed_state: &HashedPostState,
+        hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
+        let hashed_state = hashed_state.get();
         // The `hashed_state` argument will be taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // StateRoot which parts of the trie need to be recomputed.
@@ -996,7 +1014,7 @@ where
         &self,
         handle: &mut PayloadHandle<Tx, Err, R>,
         overlay_factory: OverlayStateProviderFactory<P>,
-        hashed_state: &HashedPostState,
+        hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<Result<StateRootComputeOutcome, ParallelStateRootError>> {
         let Some(timeout) = self.config.state_root_task_timeout() else {
             return Ok(handle.state_root());
@@ -1088,7 +1106,7 @@ where
     fn compare_trie_updates_with_serial(
         &self,
         overlay_factory: OverlayStateProviderFactory<P>,
-        hashed_state: &HashedPostState,
+        hashed_state: &LazyHashedPostState,
         task_trie_updates: TrieUpdates,
     ) -> bool {
         debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
@@ -1187,6 +1205,8 @@ where
     ///
     /// If `receipt_root_bloom` is provided, it will be used instead of computing the receipt root
     /// and logs bloom from the receipts.
+    ///
+    /// The `hashed_state` handle wraps the background hashed post state computation.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
@@ -1195,7 +1215,8 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-    ) -> Result<HashedPostState, InsertBlockErrorKind>
+        hashed_state: LazyHashedPostState,
+    ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
@@ -1230,14 +1251,10 @@ where
         }
         drop(_enter);
 
-        let _enter =
-            debug_span!(target: "engine::tree::payload_validator", "hashed_post_state").entered();
-        let hashed_state = self.provider.hashed_post_state(&output.state);
-        drop(_enter);
-
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
-        if let Err(err) =
-            self.validator.validate_block_post_execution_with_hashed_state(&hashed_state, block)
+        if let Err(err) = self
+            .validator
+            .validate_block_post_execution_with_hashed_state(hashed_state.get(), block)
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
@@ -1461,7 +1478,7 @@ where
         block: RecoveredBlock<N::Block>,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
-        hashed_state: HashedPostState,
+        hashed_state: LazyHashedPostState,
         trie_output: TrieUpdates,
         overlay_factory: OverlayStateProviderFactory<P>,
     ) -> ExecutedBlock<N> {
@@ -1478,12 +1495,14 @@ where
             overlay_blocks.iter().rev().map(|b| b.trie_data_handle()).collect();
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
-        let deferred_trie_data = DeferredTrieData::pending(
-            Arc::new(hashed_state),
-            Arc::new(trie_output),
-            anchor_hash,
-            ancestors,
-        );
+        // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
+        // already been computed and used for state root verification, so .get() returns instantly.
+        let hashed_state = match hashed_state.try_into_inner() {
+            Ok(state) => Arc::new(state),
+            Err(handle) => Arc::new(handle.get().clone()),
+        };
+        let deferred_trie_data =
+            DeferredTrieData::pending(hashed_state, Arc::new(trie_output), anchor_hash, ancestors);
         let deferred_handle_task = deferred_trie_data.clone();
         let block_validation_metrics = self.metrics.block_validation.clone();
 
