@@ -840,9 +840,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Returns iterator yielding transactions from the stream.
     pub fn iter_transactions(&mut self) -> impl Iterator<Item = Result<Tx, Err>> + '_ {
-        core::iter::repeat_with(|| self.transactions.recv())
-            .take_while(|res| res.is_ok())
-            .map(|res| res.unwrap())
+        self.transactions.iter()
     }
 }
 
