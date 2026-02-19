@@ -67,6 +67,8 @@ struct ExExMetrics {
     notifications_sent_total: Counter,
     /// The total number of events an `ExEx` has sent to the manager.
     events_sent_total: Counter,
+    /// Current finished height of this ExEx (block number, or -1 if None).
+    finished_height: Gauge,
 }
 
 /// A handle to an `ExEx` used by the [`ExExManager`] to communicate with `ExEx`'s.
@@ -123,6 +125,12 @@ impl<N: NodePrimitives> ExExHandle<N> {
         )
     }
 
+    /// Sets the finished height for this ExEx.
+    fn set_finished_height(&mut self, height: BlockNumHash) {
+        self.finished_height = Some(height);
+        self.metrics.finished_height.set(height.number as f64);
+    }
+
     /// Reserves a slot in the `PollSender` channel and sends the notification if the slot was
     /// successfully reserved.
     ///
@@ -152,11 +160,15 @@ impl<N: NodePrimitives> ExExHandle<N> {
                         return Poll::Ready(Ok(()))
                     }
                 }
-                // Do not handle [ExExNotification::ChainReorged] and
-                // [ExExNotification::ChainReverted] cases and always send the
-                // notification, because the ExEx should be aware of the reorgs and reverts lower
-                // than its finished height
-                ExExNotification::ChainReorged { .. } | ExExNotification::ChainReverted { .. } => {}
+                // Always send reorg/revert notifications, and reset finished_height because the
+                // ExEx will revert its state to an earlier block. Without resetting, subsequent
+                // ChainCommitted notifications could be incorrectly skipped if the new chain's tip
+                // is at or below the stale finished_height from the old chain.
+                ExExNotification::ChainReorged { old: chain, .. } |
+                ExExNotification::ChainReverted { old: chain } => {
+                    let safe_height = chain.fork_block();
+                    self.set_finished_height(safe_height);
+                }
             }
         }
 
@@ -464,7 +476,7 @@ where
                 debug!(target: "exex::manager", exex_id = %exex.id, ?event, "Received event from ExEx");
                 exex.metrics.events_sent_total.increment(1);
                 match event {
-                    ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
+                    ExExEvent::FinishedHeight(height) => exex.set_finished_height(height),
                 }
             }
         }
@@ -1191,7 +1203,7 @@ mod tests {
         );
 
         // Set finished_height to a value higher than the block tip
-        exex_handle.finished_height = Some(BlockNumHash::new(15, B256::random()));
+        exex_handle.set_finished_height(BlockNumHash::new(15, B256::random()));
 
         let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
         block1.set_hash(B256::new([0x01; 32]));
@@ -1247,7 +1259,7 @@ mod tests {
 
         // Even if the finished height is higher than the tip of the new chain, the reorg
         // notification should be received
-        exex_handle.finished_height = Some(BlockNumHash::new(u64::MAX, B256::random()));
+        exex_handle.set_finished_height(BlockNumHash::new(u64::MAX, B256::random()));
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
@@ -1287,7 +1299,7 @@ mod tests {
 
         // Even if the finished height is higher than the tip of the new chain, the reorg
         // notification should be received
-        exex_handle.finished_height = Some(BlockNumHash::new(u64::MAX, B256::random()));
+        exex_handle.set_finished_height(BlockNumHash::new(u64::MAX, B256::random()));
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
