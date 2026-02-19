@@ -10,7 +10,7 @@ use tracing::debug;
 
 /// Result of a single prune step in [`DbTxPruneExt::prune_table_with_range_step`].
 #[derive(Debug, Clone, Copy)]
-struct PruneStepResult {
+pub(crate) struct PruneStepResult {
     /// `true` if the walker is finished, `false` if it may have more data to prune.
     done: bool,
     /// `true` if the current entry was deleted, `false` if it was skipped.
