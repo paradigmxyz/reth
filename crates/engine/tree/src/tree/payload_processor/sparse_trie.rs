@@ -594,18 +594,7 @@ where
                         return true;
                     } else if let Some(account) = account.take() {
                         let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
-                        let encoded = if account.is_none_or(|account| account.is_empty()) &&
-                            storage_root == EMPTY_ROOT_HASH
-                        {
-                            Vec::new()
-                        } else {
-                            account_rlp_buf.clear();
-                            account
-                                .unwrap_or_default()
-                                .into_trie_account(storage_root)
-                                .encode(account_rlp_buf);
-                            account_rlp_buf.clone()
-                        };
+                        let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
                         return false;
@@ -636,13 +625,7 @@ where
                     (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
                 };
 
-                let encoded = if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
-                    Vec::new()
-                } else {
-                    account_rlp_buf.clear();
-                    account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
-                    account_rlp_buf.clone()
-                };
+                let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                 self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                 num_promoted += 1;
 
@@ -699,6 +682,21 @@ where
     }
 }
 
+/// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
+fn encode_account_leaf_value(
+    account: Option<Account>,
+    storage_root: B256,
+    account_rlp_buf: &mut Vec<u8>,
+) -> Vec<u8> {
+    if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
+        return Vec::new();
+    }
+
+    account_rlp_buf.clear();
+    account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
+    account_rlp_buf.clone()
+}
+
 /// Message type for the sparse trie task.
 enum SparseTrieTaskMessage {
     /// A hashed state update ready to be processed.
@@ -726,7 +724,7 @@ pub struct StateRootComputeOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{keccak256, Address, U256};
+    use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_trie_sparse::ParallelSparseTrie;
 
     #[test]
@@ -776,5 +774,34 @@ mod tests {
 
         assert!(hashed_state_rx.recv().is_err());
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_encode_account_leaf_value_empty_account_and_empty_root_is_empty() {
+        let mut account_rlp_buf = vec![0xAB];
+        let encoded = encode_account_leaf_value(None, EMPTY_ROOT_HASH, &mut account_rlp_buf);
+
+        assert!(encoded.is_empty());
+        // Early return should not touch the caller's buffer.
+        assert_eq!(account_rlp_buf, vec![0xAB]);
+    }
+
+    #[test]
+    fn test_encode_account_leaf_value_non_empty_account_is_rlp() {
+        let storage_root = B256::from([0x99; 32]);
+        let account = Some(Account {
+            nonce: 7,
+            balance: U256::from(42),
+            bytecode_hash: Some(B256::from([0xAA; 32])),
+        });
+        let mut account_rlp_buf = vec![0x00, 0x01];
+
+        let encoded = encode_account_leaf_value(account, storage_root, &mut account_rlp_buf);
+        let decoded = TrieAccount::decode(&mut &encoded[..]).expect("valid account RLP");
+
+        assert_eq!(decoded.nonce, 7);
+        assert_eq!(decoded.balance, U256::from(42));
+        assert_eq!(decoded.storage_root, storage_root);
+        assert_eq!(account_rlp_buf, encoded);
     }
 }
