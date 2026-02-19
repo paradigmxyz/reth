@@ -109,33 +109,22 @@ jobs:
           name: hive_assets
           path: hive_assets
 
-  wait-reth-docker:
+  wait-reth:
     needs:
-      - detect-env
       - build-reth-stable-docker
       - build-reth-edge-docker
-    if: needs.detect-env.outputs.use_docker == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "docker reth ready"
-
-  wait-reth-prepare:
-    needs:
-      - detect-env
       - prepare-reth-stable
       - prepare-reth-edge
-    if: needs.detect-env.outputs.use_docker == 'false'
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - run: echo "prepared reth ready"
-
+      - run: echo "reth build ready"
 
   test:
     needs:
       - detect-env
+      - wait-reth
       - prepare-hive
-      - wait-reth-docker
-      - wait-reth-prepare
 
     runs-on: ${{ needs.detect-env.outputs.use_docker == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     timeout-minutes: 120
@@ -226,6 +215,15 @@ jobs:
         with:
           name: reth-${{ matrix.storage }}
           path: /tmp
+      
+      - name: Ensure reth artifact exists
+        shell: bash
+        run: |
+          if ! ls /tmp | grep -q '^reth-'; then
+            echo "reth artifacts missing → skipping hive tests"
+            exit 1
+          fi
+
 
       - run: .github/scripts/hive/load_images.sh
 
