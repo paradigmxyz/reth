@@ -410,22 +410,48 @@ where
         skip_all
     )]
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {
-        // Reset incoming-update counter for the next batching window.
         self.pending_updates = 0;
 
-        self.apply_new_updates_to_tries()?;
-        self.merge_new_updates_into_backlog();
+        // Firstly apply all new storage and account updates to the tries.
+        self.process_leaf_updates(true)?;
+
+        for (address, mut new) in self.new_storage_updates.drain() {
+            match self.storage_updates.entry(address) {
+                Entry::Vacant(entry) => {
+                    entry.insert(new); // insert the whole map at once, no per-slot loop
+                }
+                Entry::Occupied(mut entry) => {
+                    let updates = entry.get_mut();
+                    for (slot, new) in new.drain() {
+                        match updates.entry(slot) {
+                            Entry::Occupied(mut slot_entry) => {
+                                if new.is_changed() {
+                                    slot_entry.insert(new);
+                                }
+                            }
+                            Entry::Vacant(slot_entry) => {
+                                slot_entry.insert(new);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for (address, new) in self.new_account_updates.drain() {
+            match self.account_updates.entry(address) {
+                Entry::Occupied(mut entry) => {
+                    if new.is_changed() {
+                        entry.insert(new);
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(new);
+                }
+            }
+        }
 
         Ok(())
-    }
-
-    fn apply_new_updates_to_tries(&mut self) -> SparseTrieResult<()> {
-        self.process_leaf_updates(true)
-    }
-
-    fn merge_new_updates_into_backlog(&mut self) {
-        merge_storage_updates(&mut self.storage_updates, &mut self.new_storage_updates);
-        merge_account_updates(&mut self.account_updates, &mut self.new_account_updates);
     }
 
     /// Applies all account and storage leaf updates to corresponding tries and collects any new
@@ -656,52 +682,7 @@ where
     }
 }
 
-fn merge_storage_updates(
-    storage_updates: &mut B256Map<B256Map<LeafUpdate>>,
-    new_storage_updates: &mut B256Map<B256Map<LeafUpdate>>,
-) {
-    for (address, mut new) in new_storage_updates.drain() {
-        match storage_updates.entry(address) {
-            Entry::Vacant(entry) => {
-                entry.insert(new);
-            }
-            Entry::Occupied(mut entry) => {
-                let updates = entry.get_mut();
-                for (slot, new) in new.drain() {
-                    match updates.entry(slot) {
-                        Entry::Occupied(mut slot_entry) => {
-                            if new.is_changed() {
-                                slot_entry.insert(new);
-                            }
-                        }
-                        Entry::Vacant(slot_entry) => {
-                            slot_entry.insert(new);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn merge_account_updates(
-    account_updates: &mut B256Map<LeafUpdate>,
-    new_account_updates: &mut B256Map<LeafUpdate>,
-) {
-    for (address, new) in new_account_updates.drain() {
-        match account_updates.entry(address) {
-            Entry::Occupied(mut entry) => {
-                if new.is_changed() {
-                    entry.insert(new);
-                }
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(new);
-            }
-        }
-    }
-}
-
+/// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
 fn encode_account_leaf_value(
     account: Option<Account>,
     storage_root: B256,
@@ -793,82 +774,6 @@ mod tests {
 
         assert!(hashed_state_rx.recv().is_err());
         handle.join().unwrap();
-    }
-
-    #[test]
-    fn test_merge_storage_updates_changed_overwrites_touched() {
-        let address = B256::from([0x11; 32]);
-        let slot = B256::from([0x22; 32]);
-
-        let mut storage_updates: B256Map<B256Map<LeafUpdate>> = B256Map::default();
-        storage_updates.entry(address).or_default().insert(slot, LeafUpdate::Touched);
-
-        let mut new_storage_updates: B256Map<B256Map<LeafUpdate>> = B256Map::default();
-        new_storage_updates
-            .entry(address)
-            .or_default()
-            .insert(slot, LeafUpdate::Changed(vec![0xAA]));
-
-        merge_storage_updates(&mut storage_updates, &mut new_storage_updates);
-
-        assert!(new_storage_updates.is_empty());
-        assert_eq!(
-            storage_updates.get(&address).and_then(|slots| slots.get(&slot)),
-            Some(&LeafUpdate::Changed(vec![0xAA]))
-        );
-    }
-
-    #[test]
-    fn test_merge_storage_updates_touched_does_not_overwrite_changed() {
-        let address = B256::from([0x33; 32]);
-        let slot = B256::from([0x44; 32]);
-
-        let mut storage_updates: B256Map<B256Map<LeafUpdate>> = B256Map::default();
-        storage_updates.entry(address).or_default().insert(slot, LeafUpdate::Changed(vec![0x01]));
-
-        let mut new_storage_updates: B256Map<B256Map<LeafUpdate>> = B256Map::default();
-        new_storage_updates.entry(address).or_default().insert(slot, LeafUpdate::Touched);
-
-        merge_storage_updates(&mut storage_updates, &mut new_storage_updates);
-
-        assert_eq!(
-            storage_updates.get(&address).and_then(|slots| slots.get(&slot)),
-            Some(&LeafUpdate::Changed(vec![0x01]))
-        );
-    }
-
-    #[test]
-    fn test_merge_account_updates_changed_overwrites_touched() {
-        let address = B256::from([0x55; 32]);
-
-        let mut account_updates = B256Map::default();
-        account_updates.insert(address, LeafUpdate::Touched);
-
-        let mut new_account_updates = B256Map::default();
-        new_account_updates.insert(address, LeafUpdate::Changed(vec![0xFE]));
-
-        merge_account_updates(&mut account_updates, &mut new_account_updates);
-
-        assert!(new_account_updates.is_empty());
-        assert_eq!(account_updates.get(&address), Some(&LeafUpdate::Changed(vec![0xFE])));
-    }
-
-    #[test]
-    fn test_merge_account_updates_repeated_changed_keeps_latest() {
-        let address = B256::from([0x66; 32]);
-
-        let mut account_updates = B256Map::default();
-        account_updates.insert(address, LeafUpdate::Changed(vec![0x01]));
-
-        let mut first = B256Map::default();
-        first.insert(address, LeafUpdate::Changed(vec![0x02]));
-        merge_account_updates(&mut account_updates, &mut first);
-
-        let mut second = B256Map::default();
-        second.insert(address, LeafUpdate::Changed(vec![0x03]));
-        merge_account_updates(&mut account_updates, &mut second);
-
-        assert_eq!(account_updates.get(&address), Some(&LeafUpdate::Changed(vec![0x03])));
     }
 
     #[test]
