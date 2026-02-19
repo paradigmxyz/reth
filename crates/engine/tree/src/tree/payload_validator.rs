@@ -523,7 +523,7 @@ where
         let hashed_state: LazyHashedPostState = self
             .payload_processor
             .executor()
-            .spawn_lazy_background("hashed-post-state", move || {
+            .spawn_blocking_named("hashed-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
                     "hashed_post_state",

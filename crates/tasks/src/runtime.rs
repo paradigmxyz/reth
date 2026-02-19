@@ -486,25 +486,9 @@ impl Runtime {
     ///
     /// This is useful for tasks that benefit from running on a stable thread, e.g. for
     /// thread-local state reuse or to avoid thread creation overhead on hot paths.
+    ///
+    /// Returns a [`LazyBackground`] handle that resolves on first access and caches the result.
     pub fn spawn_blocking_named<F, R>(
-        &self,
-        name: &'static str,
-        func: F,
-    ) -> tokio::sync::oneshot::Receiver<R>
-    where
-        F: FnOnce() -> R + Send + 'static,
-        R: Send + 'static,
-    {
-        self.0.worker_map.spawn_on(name, func)
-    }
-
-    /// Spawns a closure on a dedicated named thread and returns a [`LazyBackground`] handle.
-    ///
-    /// The closure runs immediately in the background. The returned handle resolves on first
-    /// access and caches the result for subsequent calls.
-    ///
-    /// See [`LazyBackground`] for details.
-    pub fn spawn_lazy_background<F, R>(
         &self,
         name: &'static str,
         func: F,
@@ -513,7 +497,7 @@ impl Runtime {
         F: FnOnce() -> R + Send + 'static,
         R: Send + Sync + 'static,
     {
-        crate::LazyBackground::new(self.spawn_blocking_named(name, func))
+        crate::LazyBackground::new(self.0.worker_map.spawn_on(name, func))
     }
 
     /// Spawns the task onto the runtime.
