@@ -336,23 +336,19 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self
-            .cursor
-            .seek_by_key_subkey(self.hashed_address, A::StorageSubKey::from(key))?
-            .map(|value| {
+        Ok(self.cursor.seek_by_key_subkey(self.hashed_address, A::StorageSubKey::from(key))?.map(
+            |value| {
                 let (subkey, node) = value.into_parts();
                 (A::subkey_to_nibbles(&subkey), node)
-            }))
+            },
+        ))
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self
-            .cursor
-            .next_dup()?
-            .map(|(_, value)| {
-                let (subkey, node) = value.into_parts();
-                (A::subkey_to_nibbles(&subkey), node)
-            }))
+        Ok(self.cursor.next_dup()?.map(|(_, value)| {
+            let (subkey, node) = value.into_parts();
+            (A::subkey_to_nibbles(&subkey), node)
+        }))
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
