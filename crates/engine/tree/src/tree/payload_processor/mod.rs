@@ -621,11 +621,17 @@ where
                 return;
             }
 
+            // Mark preparing and release the lock so the next payload's take() blocks
+            // on the condvar instead of the mutex. Expensive trie preparation runs
+            // unlocked below; the PreparingGuard ensures the flag is cleared even on panic.
+            let preparing_guard =
+                guard.mark_preparing_and_release(&preserved_sparse_trie);
+
             // Only preserve the trie as anchored if computation succeeded.
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let deferred = if let Some(state_root) = computed_state_root {
+            if let Some(state_root) = computed_state_root {
                 let start = Instant::now();
                 let (trie, deferred) = task.into_trie_for_reuse(
                     prune_depth,
@@ -637,8 +643,8 @@ where
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                guard.store(PreservedSparseTrie::anchored(trie, state_root));
-                deferred
+                preparing_guard.store(PreservedSparseTrie::anchored(trie, state_root));
+                drop(deferred);
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
@@ -648,12 +654,9 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                guard.store(PreservedSparseTrie::cleared(trie));
-                deferred
+                preparing_guard.store(PreservedSparseTrie::cleared(trie));
+                drop(deferred);
             };
-            // Drop guard before deferred to release lock before expensive deallocations
-            drop(guard);
-            drop(deferred);
         });
     }
 
