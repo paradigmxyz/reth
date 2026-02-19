@@ -1170,17 +1170,18 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ConsistentProvider<N> {
 
                 // Prepare our block indices
                 stored_indices.first_tx_num = stored_indices.next_tx_num();
-                stored_indices.tx_count = 0;
+                stored_indices.tx_count =
+                    block_state.block_ref().recovered_block().body().transactions().len() as u64;
 
-                // Iterate from the lowest block in memory until our target block
-                for state in block_state.chain().collect::<Vec<_>>().into_iter().rev() {
-                    let block_tx_count =
-                        state.block_ref().recovered_block().body().transactions().len() as u64;
-                    if state.block_ref().recovered_block().number() == number {
-                        stored_indices.tx_count = block_tx_count;
-                    } else {
-                        stored_indices.first_tx_num += block_tx_count;
-                    }
+                // `block_state` already corresponds to `number`, so we only need to account for
+                // all its in-memory ancestors (older blocks) to shift `first_tx_num`.
+                for parent_state in block_state.parent_state_chain() {
+                    stored_indices.first_tx_num += parent_state
+                        .block_ref()
+                        .recovered_block()
+                        .body()
+                        .transactions()
+                        .len() as u64;
                 }
 
                 Ok(Some(stored_indices))
