@@ -498,6 +498,24 @@ impl Runtime {
         self.0.worker_map.spawn_on(name, func)
     }
 
+    /// Spawns a closure on a dedicated named thread and returns a [`LazyBackground`] handle.
+    ///
+    /// The closure runs immediately in the background. The returned handle resolves on first
+    /// access and caches the result for subsequent calls.
+    ///
+    /// See [`LazyBackground`] for details.
+    pub fn spawn_lazy_background<F, R>(
+        &self,
+        name: &'static str,
+        func: F,
+    ) -> crate::LazyBackground<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + Sync + 'static,
+    {
+        crate::LazyBackground::new(self.spawn_blocking_named(name, func))
+    }
+
     /// Spawns the task onto the runtime.
     /// The given future resolves as soon as the [Shutdown] signal is received.
     ///

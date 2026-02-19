@@ -55,50 +55,7 @@ use std::{
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
-///
-/// The hashed post state is produced by keccak256-hashing every changed address and storage slot
-/// from the block's [`BundleState`](revm_primitives::BundleState). This work is spawned in the
-/// background immediately after execution so it overlaps with block conversion and receipt root
-/// computation.
-///
-/// The handle resolves on first access via [`Self::get`] and caches the result for subsequent
-/// calls.
-struct HashedPostStateHandle {
-    /// Pending receiver, taken on first access.
-    rx: Option<tokio::sync::oneshot::Receiver<HashedPostState>>,
-    /// Cached result after the first successful receive.
-    value: Option<HashedPostState>,
-}
-
-impl HashedPostStateHandle {
-    /// Creates a new handle from a background task receiver.
-    const fn new(rx: tokio::sync::oneshot::Receiver<HashedPostState>) -> Self {
-        Self { rx: Some(rx), value: None }
-    }
-
-    /// Blocks until the background task completes and returns a reference to the result.
-    ///
-    /// On the first call this awaits the receiver; subsequent calls return the cached value.
-    fn get(&mut self) -> Result<&HashedPostState, InsertBlockErrorKind> {
-        if self.value.is_none() {
-            let rx = self.rx.take().expect("HashedPostStateHandle resolved twice without value");
-            self.value = Some(rx.blocking_recv().map_err(|_| {
-                InsertBlockErrorKind::Other(Box::new(std::io::Error::other(
-                    "hashed post state task failed",
-                )))
-            })?);
-        }
-        Ok(self.value.as_ref().expect("value was just set"))
-    }
-
-    /// Consumes the handle and returns the inner [`HashedPostState`].
-    ///
-    /// Blocks if the background task hasn't completed yet.
-    fn into_inner(mut self) -> Result<HashedPostState, InsertBlockErrorKind> {
-        self.get()?;
-        Ok(self.value.expect("get() ensures value is set"))
-    }
-}
+type LazyHashedPostState = reth_tasks::LazyBackground<HashedPostState>;
 
 /// Context providing access to tree state during validation.
 ///
@@ -563,18 +520,17 @@ where
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
         let hashed_state_provider = self.provider.clone();
-        let hashed_state =
-            HashedPostStateHandle::new(self.payload_processor.executor().spawn_blocking_named(
-                "hashed-post-state",
-                move || {
-                    let _span = debug_span!(
-                        target: "engine::tree::payload_validator",
-                        "hashed_post_state",
-                    )
-                    .entered();
-                    hashed_state_provider.hashed_post_state(&hashed_state_output.state)
-                },
-            ));
+        let hashed_state: LazyHashedPostState = self
+            .payload_processor
+            .executor()
+            .spawn_lazy_background("hashed-post-state", move || {
+                let _span = debug_span!(
+                    target: "engine::tree::payload_validator",
+                    "hashed_post_state",
+                )
+                .entered();
+                hashed_state_provider.hashed_post_state(&hashed_state_output.state)
+            });
 
         let block = convert_to_block(input)?.with_senders(senders);
 
@@ -589,7 +545,7 @@ where
             })
             .ok();
 
-        let mut hashed_state = ensure_ok_post_block!(
+        let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
                 &block,
                 &parent_block,
@@ -615,7 +571,7 @@ where
                     self.await_state_root_with_timeout(
                         &mut handle,
                         overlay_factory.clone(),
-                        &mut hashed_state,
+                        &hashed_state,
                     ),
                     block
                 );
@@ -639,7 +595,7 @@ where
                         if self.config.always_compare_trie_updates() {
                             let _has_diff = self.compare_trie_updates_with_serial(
                                 overlay_factory.clone(),
-                                &mut hashed_state,
+                                &hashed_state,
                                 trie_updates.clone(),
                             );
                             #[cfg(feature = "trie-debug")]
@@ -677,7 +633,7 @@ where
             }
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
-                match self.compute_state_root_parallel(overlay_factory.clone(), &mut hashed_state) {
+                match self.compute_state_root_parallel(overlay_factory.clone(), &hashed_state) {
                     Ok(result) => {
                         let elapsed = root_time.elapsed();
                         info!(
@@ -713,7 +669,7 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                Self::compute_state_root_serial(overlay_factory.clone(), &mut hashed_state),
+                Self::compute_state_root_serial(overlay_factory.clone(), &hashed_state),
                 block
             );
 
@@ -756,8 +712,6 @@ where
         if let Some(valid_block_tx) = valid_block_tx {
             let _ = valid_block_tx.send(());
         }
-
-        let hashed_state = ensure_ok_post_block!(hashed_state.into_inner(), block);
 
         Ok(self.spawn_deferred_trie_task(
             block,
@@ -1005,11 +959,9 @@ where
     fn compute_state_root_parallel(
         &self,
         overlay_factory: OverlayStateProviderFactory<P>,
-        hashed_state: &mut HashedPostStateHandle,
+        hashed_state: &LazyHashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        let hashed_state = hashed_state.get().map_err(|e| {
-            ParallelStateRootError::Other(format!("hashed post state task failed: {e}"))
-        })?;
+        let hashed_state = hashed_state.get();
         // The `hashed_state` argument will be taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // ParallelStateRoot which parts of the trie need to be recomputed.
@@ -1027,14 +979,9 @@ where
     /// trie updates for this block.
     fn compute_state_root_serial(
         overlay_factory: OverlayStateProviderFactory<P>,
-        hashed_state: &mut HashedPostStateHandle,
+        hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let hashed_state = hashed_state.get().map_err(|e| {
-            ProviderError::other(std::io::Error::other(format!(
-                "hashed post state task failed: {e}"
-            )))
-        })?;
-        Self::compute_state_root_serial_inner(overlay_factory, hashed_state)
+        Self::compute_state_root_serial_inner(overlay_factory, hashed_state.get())
     }
 
     /// Inner implementation that takes a resolved `&HashedPostState` directly.
@@ -1079,7 +1026,7 @@ where
         &self,
         handle: &mut PayloadHandle<Tx, Err, R>,
         overlay_factory: OverlayStateProviderFactory<P>,
-        hashed_state: &mut HashedPostStateHandle,
+        hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<Result<StateRootComputeOutcome, ParallelStateRootError>> {
         let Some(timeout) = self.config.state_root_task_timeout() else {
             return Ok(handle.state_root());
@@ -1104,14 +1051,7 @@ where
                     std::sync::mpsc::channel::<ProviderResult<(B256, TrieUpdates)>>();
 
                 let seq_overlay = overlay_factory;
-                let seq_hashed_state = hashed_state
-                    .get()
-                    .map_err(|e| {
-                        ProviderError::other(std::io::Error::other(format!(
-                            "hashed post state task failed: {e}"
-                        )))
-                    })?
-                    .clone();
+                let seq_hashed_state = hashed_state.get().clone();
                 self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
                     let result =
                         Self::compute_state_root_serial_inner(seq_overlay, &seq_hashed_state);
@@ -1179,7 +1119,7 @@ where
     fn compare_trie_updates_with_serial(
         &self,
         overlay_factory: OverlayStateProviderFactory<P>,
-        hashed_state: &mut HashedPostStateHandle,
+        hashed_state: &LazyHashedPostState,
         task_trie_updates: TrieUpdates,
     ) -> bool {
         debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
@@ -1288,8 +1228,8 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        mut hashed_state: HashedPostStateHandle,
-    ) -> Result<HashedPostStateHandle, InsertBlockErrorKind>
+        hashed_state: LazyHashedPostState,
+    ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
@@ -1327,7 +1267,7 @@ where
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
         if let Err(err) = self
             .validator
-            .validate_block_post_execution_with_hashed_state(hashed_state.get()?, block)
+            .validate_block_post_execution_with_hashed_state(hashed_state.get(), block)
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
@@ -1551,10 +1491,11 @@ where
         block: RecoveredBlock<N::Block>,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
-        hashed_state: HashedPostState,
+        hashed_state: LazyHashedPostState,
         trie_output: TrieUpdates,
         overlay_factory: OverlayStateProviderFactory<P>,
     ) -> ExecutedBlock<N> {
+        let hashed_state = hashed_state.into_inner();
         // Capture parent hash and ancestor overlays for deferred trie input construction.
         let (anchor_hash, overlay_blocks) = ctx
             .state()
