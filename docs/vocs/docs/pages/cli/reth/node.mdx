@@ -685,7 +685,9 @@ TxPool:
 
 Builder:
       --builder.extradata <EXTRA_DATA>
-          Block extra data set by the payload builder
+          Block extra data set by the payload builder.
+
+          If the value is a `0x`-prefixed hex string, it is decoded into raw bytes. Otherwise, the raw UTF-8 bytes of the string are used.
 
           [default: reth/<VERSION>/<OS>]
 
@@ -1100,9 +1102,9 @@ Logging:
           [default: 200]
 
       --log.file.max-files <COUNT>
-          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled.
 
-          [default: 5]
+          Default: 5 for `node` command, 0 for non-node utility subcommands.
 
       --log.journald
           Write logs to journald

@@ -138,13 +138,10 @@ impl Decode for StoredNibbles {
 }
 
 impl Encode for StoredNibblesSubKey {
-    type Encoded = Vec<u8>;
+    type Encoded = [u8; 65];
 
-    // Delegate to the Compact implementation
     fn encode(self) -> Self::Encoded {
-        let mut buf = Vec::with_capacity(65);
-        self.to_compact(&mut buf);
-        buf
+        self.to_compact_array()
     }
 }
 

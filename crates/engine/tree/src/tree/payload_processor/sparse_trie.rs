@@ -118,7 +118,7 @@ where
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
-        executor.spawn_blocking(move || {
+        executor.spawn_blocking_named("trie-hashing", move || {
             let _span = debug_span!(parent: parent_span, "run_hashing_task").entered();
             Self::run_hashing_task(updates, hashed_state_tx)
         });
@@ -613,13 +613,13 @@ where
                 }
 
                 // Get the current account state either from the trie or from latest account update.
-                let trie_account = if let Some(LeafUpdate::Changed(encoded)) = self.account_updates.get(addr) {
-                    Some(encoded).filter(|encoded| !encoded.is_empty())
-                } else if !self.account_updates.contains_key(addr) {
-                    self.trie.get_account_value(addr)
-                } else {
+                let trie_account = match self.account_updates.get(addr) {
+                    Some(LeafUpdate::Changed(encoded)) => {
+                        Some(encoded).filter(|encoded| !encoded.is_empty())
+                    }
                     // Needs to be revealed first
-                    return true;
+                    Some(LeafUpdate::Touched) => return true,
+                    None => self.trie.get_account_value(addr),
                 };
 
                 let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));

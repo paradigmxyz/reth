@@ -55,7 +55,7 @@ where
             EthereumBuilderConfig::new()
                 .with_gas_limit(gas_limit)
                 .with_max_blobs_per_block(conf.max_blobs_per_block())
-                .with_extra_data(conf.extra_data_bytes()),
+                .with_extra_data(conf.extra_data()),
         ))
     }
 }
