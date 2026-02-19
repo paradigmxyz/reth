@@ -360,7 +360,7 @@ where
         let convert_to_block =
             move |input: BlockOrPayload<T>| -> Result<SealedBlock<N::Block>, NewPayloadError> {
                 match convert_to_block {
-                    Either::Left(handle) => handle.into_inner(),
+                    Either::Left(handle) => handle.into_inner().expect("sole handle"),
                     Either::Right(()) => {
                         let BlockOrPayload::Block(block) = input else { unreachable!() };
                         Ok(block)
@@ -517,10 +517,8 @@ where
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
         let hashed_state_provider = self.provider.clone();
-        let hashed_state: LazyHashedPostState = self
-            .payload_processor
-            .executor()
-            .spawn_blocking_named("hash-post-state", move || {
+        let hashed_state: LazyHashedPostState =
+            self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
                     "hashed_post_state",
@@ -1043,8 +1041,7 @@ where
                 let seq_overlay = overlay_factory;
                 let seq_hashed_state = hashed_state.clone();
                 self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
-                    let result =
-                        Self::compute_state_root_serial(seq_overlay, &seq_hashed_state);
+                    let result = Self::compute_state_root_serial(seq_overlay, &seq_hashed_state);
                     let _ = seq_tx.send(result);
                 });
 
@@ -1255,9 +1252,8 @@ where
         drop(_enter);
 
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
-        if let Err(err) = self
-            .validator
-            .validate_block_post_execution_with_hashed_state(&hashed_state, block)
+        if let Err(err) =
+            self.validator.validate_block_post_execution_with_hashed_state(&hashed_state, block)
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
@@ -1498,12 +1494,8 @@ where
             overlay_blocks.iter().rev().map(|b| b.trie_data_handle()).collect();
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
-        let deferred_trie_data = DeferredTrieData::pending(
-            hashed_state,
-            Arc::new(trie_output),
-            anchor_hash,
-            ancestors,
-        );
+        let deferred_trie_data =
+            DeferredTrieData::pending(hashed_state, Arc::new(trie_output), anchor_hash, ancestors);
         let deferred_handle_task = deferred_trie_data.clone();
         let block_validation_metrics = self.metrics.block_validation.clone();
 

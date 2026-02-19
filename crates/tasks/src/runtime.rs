@@ -488,11 +488,7 @@ impl Runtime {
     /// thread-local state reuse or to avoid thread creation overhead on hot paths.
     ///
     /// Returns a [`LazyHandle`] handle that resolves on first access and caches the result.
-    pub fn spawn_blocking_named<F, R>(
-        &self,
-        name: &'static str,
-        func: F,
-    ) -> crate::LazyHandle<R>
+    pub fn spawn_blocking_named<F, R>(&self, name: &'static str, func: F) -> crate::LazyHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,

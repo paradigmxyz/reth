@@ -167,7 +167,7 @@ impl DeferredTrieData {
     ) -> ComputedTrieData {
         #[cfg(feature = "rayon")]
         let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
-            || hashed_state.into_inner().into_sorted(),
+            || hashed_state.into_inner_cloned().into_sorted(),
             || match Arc::try_unwrap(trie_updates) {
                 Ok(updates) => updates.into_sorted(),
                 Err(arc) => arc.clone_into_sorted(),
@@ -176,7 +176,7 @@ impl DeferredTrieData {
 
         #[cfg(not(feature = "rayon"))]
         let (sorted_hashed_state, sorted_trie_updates) = (
-            hashed_state.into_inner().into_sorted(),
+            hashed_state.into_inner_cloned().into_sorted(),
             match Arc::try_unwrap(trie_updates) {
                 Ok(updates) => updates.into_sorted(),
                 Err(arc) => arc.clone_into_sorted(),
