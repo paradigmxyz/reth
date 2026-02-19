@@ -627,34 +627,50 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
-            for (i, block) in blocks.iter().enumerate() {
-                let recovered_block = block.recovered_block();
+            // Batch insert all block indices/lookups/senders + block bodies with cursors
+            // opened once instead of per-block.
+            let start = Instant::now();
+            self.insert_blocks_mdbx_batch(&blocks, &tx_nums)?;
+            timings.insert_block = start.elapsed();
+
+            if save_mode.with_state() {
+                let state_config = StateWriteConfig {
+                    write_receipts: !sf_ctx.write_receipts,
+                    write_account_changesets: !sf_ctx.write_account_changesets,
+                    write_storage_changesets: !sf_ctx.write_storage_changesets,
+                };
+
+                // In v2 mode with all outputs directed to static files, write_state only
+                // writes bytecodes. Batch them across all blocks in a single cursor session
+                // instead of opening a Bytecodes cursor per block.
+                let bytecodes_only = self.cached_storage_settings().use_hashed_state() &&
+                    !state_config.write_receipts &&
+                    !state_config.write_account_changesets &&
+                    !state_config.write_storage_changesets;
 
                 let start = Instant::now();
-                self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
-                timings.insert_block += start.elapsed();
-
-                if save_mode.with_state() {
-                    let execution_output = block.execution_outcome();
-
-                    // Write state and changesets to the database.
-                    // Must be written after blocks because of the receipt lookup.
-                    // Skip receipts/account changesets if they're being written to static files.
-                    let start = Instant::now();
-                    self.write_state(
-                        WriteStateInput::Single {
-                            outcome: execution_output,
-                            block: recovered_block.number(),
-                        },
-                        OriginalValuesKnown::No,
-                        StateWriteConfig {
-                            write_receipts: !sf_ctx.write_receipts,
-                            write_account_changesets: !sf_ctx.write_account_changesets,
-                            write_storage_changesets: !sf_ctx.write_storage_changesets,
-                        },
-                    )?;
-                    timings.write_state += start.elapsed();
+                if bytecodes_only {
+                    self.write_bytecodes(blocks.iter().flat_map(|b| {
+                        b.execution_outcome()
+                            .state
+                            .contracts
+                            .iter()
+                            .map(|(h, bytes)| (*h, Bytecode(bytes.clone())))
+                    }))?;
+                } else {
+                    for block in &blocks {
+                        let recovered_block = block.recovered_block();
+                        self.write_state(
+                            WriteStateInput::Single {
+                                outcome: block.execution_outcome(),
+                                block: recovered_block.number(),
+                            },
+                            OriginalValuesKnown::No,
+                            state_config,
+                        )?;
+                    }
                 }
+                timings.write_state = start.elapsed();
             }
 
             // Write all hashed state and trie updates in single batches.
@@ -716,67 +732,72 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(())
     }
 
-    /// Writes MDBX-only data for a block (indices, lookups, and senders if configured for MDBX).
+    /// Writes MDBX-only data for a batch of blocks with cursors opened once.
     ///
-    /// SF data (headers, transactions, senders if SF, receipts if SF) must be written separately.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
-    fn insert_block_mdbx_only(
+    /// Called by [`Self::save_blocks`] to avoid opening/closing MDBX cursors
+    /// (`BlockBodyIndices`, `TransactionBlocks`, `TransactionSenders`, `BlockOmmers`,
+    /// `BlockWithdrawals`) for every block.
+    fn insert_blocks_mdbx_batch(
         &self,
-        block: &RecoveredBlock<BlockTy<N>>,
-        first_tx_num: TxNumber,
-    ) -> ProviderResult<StoredBlockBodyIndices> {
-        if self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()) &&
-            EitherWriterDestination::senders(self).is_database()
-        {
-            let start = Instant::now();
-            let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
-            let mut cursor = self.tx.cursor_write::<tables::TransactionSenders>()?;
-            for (tx_num, sender) in tx_nums_iter.zip(block.senders_iter().copied()) {
-                cursor.append(tx_num, &sender)?;
-            }
-            self.metrics
-                .record_duration(metrics::Action::InsertTransactionSenders, start.elapsed());
-        }
-
-        let block_number = block.number();
-        let tx_count = block.body().transaction_count() as u64;
-
-        let start = Instant::now();
-        self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
-        self.metrics.record_duration(metrics::Action::InsertHeaderNumbers, start.elapsed());
-
-        self.write_block_body_indices(block_number, block.body(), first_tx_num, tx_count)?;
-
-        Ok(StoredBlockBodyIndices { first_tx_num, tx_count })
-    }
-
-    /// Writes MDBX block body indices (`BlockBodyIndices`, `TransactionBlocks`,
-    /// `Ommers`/`Withdrawals`).
-    fn write_block_body_indices(
-        &self,
-        block_number: BlockNumber,
-        body: &BodyTy<N>,
-        first_tx_num: TxNumber,
-        tx_count: u64,
+        blocks: &[ExecutedBlock<N::Primitives>],
+        tx_nums: &[TxNumber],
     ) -> ProviderResult<()> {
-        // MDBX: BlockBodyIndices
-        let start = Instant::now();
-        self.tx
-            .cursor_write::<tables::BlockBodyIndices>()?
-            .append(block_number, &StoredBlockBodyIndices { first_tx_num, tx_count })?;
-        self.metrics.record_duration(metrics::Action::InsertBlockBodyIndices, start.elapsed());
+        debug_assert_eq!(blocks.len(), tx_nums.len());
 
-        // MDBX: TransactionBlocks (last tx -> block mapping)
-        if tx_count > 0 {
-            let start = Instant::now();
-            self.tx
-                .cursor_write::<tables::TransactionBlocks>()?
-                .append(first_tx_num + tx_count - 1, &block_number)?;
-            self.metrics.record_duration(metrics::Action::InsertTransactionBlocks, start.elapsed());
+        let write_senders = self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()) &&
+            EitherWriterDestination::senders(self).is_database();
+
+        // Open senders cursor once for all blocks.
+        let mut senders_cursor = if write_senders {
+            Some(self.tx.cursor_write::<tables::TransactionSenders>()?)
+        } else {
+            None
+        };
+
+        // Open index cursors once for all blocks.
+        let mut body_indices_cursor = self.tx.cursor_write::<tables::BlockBodyIndices>()?;
+        let mut tx_blocks_cursor = self.tx.cursor_write::<tables::TransactionBlocks>()?;
+
+        // Collect bodies for a single write_block_bodies call (opens ommers/withdrawals cursors
+        // once instead of per-block).
+        let mut bodies = Vec::with_capacity(blocks.len());
+
+        for (i, executed) in blocks.iter().enumerate() {
+            let block = executed.recovered_block();
+            let block_number = block.number();
+            let first_tx_num = tx_nums[i];
+            let tx_count = block.body().transaction_count() as u64;
+
+            // TransactionSenders
+            if let Some(cursor) = senders_cursor.as_mut() {
+                let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
+                for (tx_num, sender) in tx_nums_iter.zip(block.senders_iter().copied()) {
+                    cursor.append(tx_num, &sender)?;
+                }
+            }
+
+            // HeaderNumbers
+            self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
+
+            // BlockBodyIndices
+            body_indices_cursor
+                .append(block_number, &StoredBlockBodyIndices { first_tx_num, tx_count })?;
+
+            // TransactionBlocks (last tx -> block mapping)
+            if tx_count > 0 {
+                tx_blocks_cursor.append(first_tx_num + tx_count - 1, &block_number)?;
+            }
+
+            bodies.push((block_number, Some(block.body())));
         }
 
-        // MDBX: Ommers/Withdrawals
-        self.storage.writer().write_block_bodies(self, vec![(block_number, Some(body))])?;
+        // Drop index cursors before write_block_bodies opens its own cursors.
+        drop(senders_cursor);
+        drop(body_indices_cursor);
+        drop(tx_blocks_cursor);
+
+        // Ommers/Withdrawals — single call opens cursors once for all blocks.
+        self.storage.writer().write_block_bodies(self, bodies)?;
 
         Ok(())
     }

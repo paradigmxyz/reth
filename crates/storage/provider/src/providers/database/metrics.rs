@@ -38,10 +38,8 @@ pub(crate) enum Action {
     InsertHashes,
     InsertHistoryIndices,
     UpdatePipelineStages,
-    InsertHeaderNumbers,
     InsertBlockBodyIndices,
     InsertTransactionBlocks,
-    InsertTransactionSenders,
     InsertTransactionHashNumbers,
 }
 
@@ -59,14 +57,10 @@ pub(crate) struct DatabaseProviderMetrics {
     insert_history_indices: Histogram,
     /// Duration of update pipeline stages
     update_pipeline_stages: Histogram,
-    /// Duration of insert header numbers
-    insert_header_numbers: Histogram,
     /// Duration of insert block body indices
     insert_block_body_indices: Histogram,
     /// Duration of insert transaction blocks
     insert_tx_blocks: Histogram,
-    /// Duration of insert transaction senders
-    insert_transaction_senders: Histogram,
     /// Duration of insert transaction hash numbers
     insert_transaction_hash_numbers: Histogram,
     /// Duration of `save_blocks`
@@ -160,10 +154,8 @@ impl DatabaseProviderMetrics {
             Action::InsertHashes => self.insert_hashes.record(duration),
             Action::InsertHistoryIndices => self.insert_history_indices.record(duration),
             Action::UpdatePipelineStages => self.update_pipeline_stages.record(duration),
-            Action::InsertHeaderNumbers => self.insert_header_numbers.record(duration),
             Action::InsertBlockBodyIndices => self.insert_block_body_indices.record(duration),
             Action::InsertTransactionBlocks => self.insert_tx_blocks.record(duration),
-            Action::InsertTransactionSenders => self.insert_transaction_senders.record(duration),
             Action::InsertTransactionHashNumbers => {
                 self.insert_transaction_hash_numbers.record(duration)
             }
