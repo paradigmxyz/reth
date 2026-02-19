@@ -165,23 +165,21 @@ impl DeferredTrieData {
         anchor_hash: B256,
         ancestors: &[Self],
     ) -> ComputedTrieData {
+        let sort_hashed_state = || match hashed_state.try_into_inner() {
+            Ok(state) => state.into_sorted(),
+            Err(handle) => handle.get().clone_into_sorted(),
+        };
+        let sort_trie_updates = || match Arc::try_unwrap(trie_updates) {
+            Ok(updates) => updates.into_sorted(),
+            Err(arc) => arc.clone_into_sorted(),
+        };
+
         #[cfg(feature = "rayon")]
-        let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
-            || hashed_state.into_inner_cloned().into_sorted(),
-            || match Arc::try_unwrap(trie_updates) {
-                Ok(updates) => updates.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-        );
+        let (sorted_hashed_state, sorted_trie_updates) =
+            rayon::join(sort_hashed_state, sort_trie_updates);
 
         #[cfg(not(feature = "rayon"))]
-        let (sorted_hashed_state, sorted_trie_updates) = (
-            hashed_state.into_inner_cloned().into_sorted(),
-            match Arc::try_unwrap(trie_updates) {
-                Ok(updates) => updates.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-        );
+        let (sorted_hashed_state, sorted_trie_updates) = (sort_hashed_state(), sort_trie_updates());
 
         // Reuse parent's overlay if available and anchors match.
         // We can only reuse the parent's overlay if it was built on top of the same

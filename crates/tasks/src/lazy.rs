@@ -65,27 +65,15 @@ impl<T: Send + 'static> LazyHandle<T> {
 
     /// Consumes the handle and returns the inner value if this is the only handle.
     ///
-    /// Returns `None` if other clones exist.
+    /// Returns `Err(self)` if other clones exist, so the caller can fall back
+    /// to a reference-based path (e.g. `clone_into_sorted` instead of `into_sorted`).
     ///
     /// Blocks if the background task hasn't completed yet.
-    pub fn into_inner(self) -> Option<T> {
-        self.get();
-        Arc::try_unwrap(self.inner).ok()?.value.into_inner()
-    }
-
-    /// Consumes the handle and returns the inner value.
-    ///
-    /// If this is the only handle, the value is moved out. Otherwise it is cloned.
-    ///
-    /// Blocks if the background task hasn't completed yet.
-    pub fn into_inner_cloned(self) -> T
-    where
-        T: Clone,
-    {
+    pub fn try_into_inner(self) -> Result<T, Self> {
         self.get();
         match Arc::try_unwrap(self.inner) {
-            Ok(inner) => inner.value.into_inner().expect("value was just set by get()"),
-            Err(arc) => arc.value.get().expect("value was just set by get()").clone(),
+            Ok(inner) => Ok(inner.value.into_inner().expect("value was just set by get()")),
+            Err(arc) => Err(Self { inner: arc }),
         }
     }
 }
@@ -127,29 +115,21 @@ mod tests {
     }
 
     #[test]
-    fn test_lazy_handle_into_inner() {
+    fn test_lazy_handle_try_into_inner() {
         let (tx, rx) = oneshot::channel();
         let handle = LazyHandle::new(rx);
         tx.send(String::from("hello")).unwrap();
-        assert_eq!(handle.into_inner(), Some(String::from("hello")));
+        assert_eq!(handle.try_into_inner().unwrap(), "hello");
     }
 
     #[test]
-    fn test_lazy_handle_into_inner_returns_none_with_clone() {
+    fn test_lazy_handle_try_into_inner_returns_self_with_clone() {
         let (tx, rx) = oneshot::channel();
         let handle = LazyHandle::new(rx);
         let _clone = handle.clone();
         tx.send(String::from("hello")).unwrap();
-        assert!(handle.into_inner().is_none());
-    }
-
-    #[test]
-    fn test_lazy_handle_into_inner_cloned() {
-        let (tx, rx) = oneshot::channel();
-        let handle = LazyHandle::new(rx);
-        let _clone = handle.clone();
-        tx.send(String::from("hello")).unwrap();
-        assert_eq!(handle.into_inner_cloned(), "hello");
+        let handle = handle.try_into_inner().unwrap_err();
+        assert_eq!(*handle.get(), "hello");
     }
 
     #[test]
