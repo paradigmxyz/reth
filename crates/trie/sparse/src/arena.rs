@@ -249,6 +249,8 @@ struct ArenaStackEntry {
 /// Result of [`find_ancestor`] describing the state at the deepest ancestor node.
 #[derive(Debug)]
 enum FindAncestorResult {
+    /// The stack head is an empty root node.
+    EmptyRoot,
     /// The stack head is a leaf node. The leaf has been pushed onto the stack.
     RevealedLeaf,
     /// The next child along the path is blinded (unrevealed).
@@ -281,8 +283,13 @@ fn find_ancestor(
         let head = stack.last().unwrap();
         let head_idx = head.index;
 
-        let ArenaSparseNode::Branch(head_branch) = &arena[head_idx] else {
-            return FindAncestorResult::RevealedLeaf;
+        let head_branch = match &arena[head_idx] {
+            ArenaSparseNode::EmptyRoot => return FindAncestorResult::EmptyRoot,
+            ArenaSparseNode::Leaf { .. } => return FindAncestorResult::RevealedLeaf,
+            ArenaSparseNode::Branch(head_branch) => head_branch,
+            ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie => {
+                unreachable!("unexpected node type on stack: {:?}", arena[head_idx])
+            }
         };
 
         let mut head_branch_logical_path = head.path;
@@ -491,7 +498,7 @@ impl ArenaSparseSubtrie {
 
         debug_assert!(
             !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot),
-            "subtrie root must not be EmptyRoot in update_leaves"
+            "subtrie root must not be EmptyRoot at start of update_leaves"
         );
 
         self.stack.clear();
@@ -736,6 +743,16 @@ fn upsert_leaf(
         FindAncestorResult::Blinded => {
             unreachable!("Blinded case must be handled by caller")
         }
+        FindAncestorResult::EmptyRoot => {
+            let head_idx = head.index;
+            let head_path = head.path;
+            arena[head_idx] = ArenaSparseNode::Leaf {
+                state: ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 },
+                key: full_path.slice(head_path.len()..),
+                value: value.to_vec(),
+            };
+            UpsertLeafResult::None
+        }
         FindAncestorResult::RevealedLeaf => {
             let head_idx = head.index;
             let head_path = head.path;
@@ -872,7 +889,9 @@ fn remove_leaf(
         FindAncestorResult::Blinded | FindAncestorResult::RevealedSubtrie { .. } => {
             unreachable!("Blinded/RevealedSubtrie must be handled by caller")
         }
-        FindAncestorResult::Diverged | FindAncestorResult::NoChild { .. } => RemoveLeafResult::None,
+        FindAncestorResult::EmptyRoot |
+        FindAncestorResult::Diverged |
+        FindAncestorResult::NoChild { .. } => RemoveLeafResult::None,
         FindAncestorResult::RevealedLeaf => {
             let head = stack.last().unwrap();
             let head_idx = head.index;
@@ -923,9 +942,16 @@ fn remove_leaf(
             stack.pop();
 
             if stack.is_empty() {
-                // The leaf is the root — replace with EmptyRoot.
+                // The leaf is the root — replace with EmptyRoot and push it back onto
+                // the stack so subsequent iterations can call find_ancestor normally.
                 arena.remove(head_idx);
                 *root = arena.insert(ArenaSparseNode::EmptyRoot);
+                stack.push(ArenaStackEntry {
+                    index: *root,
+                    path: head_path,
+                    prev_num_leaves: 0,
+                    prev_dirty_leaves: 0,
+                });
                 return RemoveLeafResult::None;
             }
 
@@ -1580,31 +1606,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
         sorted.sort_unstable_by(|a, b| a.1.cmp(&b.1));
 
-        // If the root node is EmptyRoot then we cannot use `find_ancestor`. Instead find the first
-        // leaf upsert and apply it directly. We can skip all Touched and leaf removals until that
-        // first upsert, as they could not have any effect on an empty trie. If there is no upsert
-        // in the update set then we can early return.
-        let mut start_idx = 0;
-        if matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot) {
-            if let Some(pos) = sorted.iter().position(
-                |(_, _, update)| matches!(update, LeafUpdate::Changed(v) if !v.is_empty()),
-            ) {
-                let (_, ref full_path, ref update) = sorted[pos];
-                let LeafUpdate::Changed(value) = update else { unreachable!() };
-                self.upper_arena[self.root] = ArenaSparseNode::Leaf {
-                    state: ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 },
-                    key: *full_path,
-                    value: value.clone(),
-                };
-                start_idx = pos + 1;
-            } else {
-                return Ok(());
-            }
-            if start_idx >= sorted.len() {
-                return Ok(());
-            }
-        }
-
         let root_num_leaves = self.upper_arena[self.root].num_leaves();
         let mut stack = mem::take(&mut self.stack);
         stack.clear();
@@ -1615,7 +1616,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             prev_dirty_leaves: 0,
         });
 
-        let mut update_idx = start_idx;
+        let mut update_idx = 0;
         while update_idx < sorted.len() {
             let (key, ref full_path, ref update) = sorted[update_idx];
 
@@ -1665,8 +1666,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     // Don't increment update_idx — already advanced past subtrie updates.
                     continue;
                 }
-                // Leaf, diverged branch, or empty child slot — upsert directly.
-                find_result @ (FindAncestorResult::RevealedLeaf |
+                // EmptyRoot, leaf, diverged branch, or empty child slot — upsert directly.
+                find_result @ (FindAncestorResult::EmptyRoot |
+                FindAncestorResult::RevealedLeaf |
                 FindAncestorResult::Diverged |
                 FindAncestorResult::NoChild { .. }) => match update {
                     LeafUpdate::Changed(v) if !v.is_empty() => {
