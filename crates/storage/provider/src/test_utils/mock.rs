@@ -884,13 +884,6 @@ where
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
     }
 
-    fn storage_by_hashed_key(
-        &self,
-        _address: Address,
-        _hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        Ok(None)
-    }
 }
 
 impl<T, ChainSpec> BytecodeReader for MockEthProvider<T, ChainSpec>

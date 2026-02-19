@@ -217,9 +217,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// Populate a [`BundleStateInit`] and [`RevertsInit`] based on the given storage and account
     /// changesets.
     ///
-    /// When `use_hashed_state` is enabled, storage changeset keys are already hashed, so current
-    /// values are read directly from [`reth_db_api::tables::HashedStorages`]. Otherwise, values
-    /// are read via [`StateProvider::storage`] which queries plain state tables.
+    /// Storage changeset keys are always plain (unhashed). Current values are read via
+    /// [`StateProvider::storage`], which handles hashing internally when `use_hashed_state` is
+    /// enabled.
     fn populate_bundle_state(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
@@ -2322,7 +2322,7 @@ mod tests {
 
     #[test]
     fn test_storage_changeset_consistent_keys_hashed_state() -> eyre::Result<()> {
-        use alloy_primitives::{keccak256, U256};
+        use alloy_primitives::U256;
         use reth_db_api::models::StorageSettings;
         use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
         use std::collections::HashMap;
@@ -2402,7 +2402,6 @@ mod tests {
         let mem_changeset = consistent_provider.storage_changeset(1)?;
 
         let slot_b256 = B256::from(slot);
-        let _hashed_slot_b256 = keccak256(slot_b256);
 
         assert_eq!(db_changeset.len(), 1);
         assert_eq!(mem_changeset.len(), 1);
@@ -2410,9 +2409,13 @@ mod tests {
         let db_key = db_changeset[0].1.key;
         let mem_key = mem_changeset[0].1.key;
 
+        // Changeset keys are always plain (unhashed), even with v2 storage settings.
+        assert_eq!(db_key, slot_b256, "DB changeset key should be the plain slot");
+        assert_eq!(mem_key, slot_b256, "in-memory changeset key should be the plain slot");
+
         assert_eq!(
             db_key, mem_key,
-            "DB and in-memory changesets should return the same key format (hashed) for the same logical slot"
+            "DB and in-memory changesets should return the same key format (plain) for the same logical slot"
         );
 
         Ok(())
@@ -2602,11 +2605,16 @@ mod tests {
 
         assert_eq!(all_changesets.len(), 2, "should have one changeset entry per block");
 
+        let slot_b256 = B256::from(slot);
         let keys: Vec<B256> = all_changesets.iter().map(|(_, entry)| entry.key).collect();
+
+        // Changeset keys are always plain (unhashed), even with v2 storage settings.
+        assert_eq!(keys[0], slot_b256, "DB changeset key should be the plain slot");
+        assert_eq!(keys[1], slot_b256, "in-memory changeset key should be the plain slot");
 
         assert_eq!(
             keys[0], keys[1],
-            "same logical slot should produce identical keys whether from DB or memory"
+            "same logical slot should produce identical plain keys whether from DB or memory"
         );
 
         Ok(())

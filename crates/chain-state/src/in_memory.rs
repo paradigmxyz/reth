@@ -1062,13 +1062,6 @@ mod tests {
             Ok(None)
         }
 
-        fn storage_by_hashed_key(
-            &self,
-            _address: Address,
-            _hashed_storage_key: StorageKey,
-        ) -> ProviderResult<Option<StorageValue>> {
-            Ok(None)
-        }
     }
 
     impl BytecodeReader for MockStateProvider {

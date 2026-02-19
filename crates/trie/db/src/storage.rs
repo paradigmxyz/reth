@@ -213,9 +213,9 @@ mod tests {
             &factory,
             vec![
                 (0, vec![]),
-                (1, vec![StorageBeforeTx { address, key: hashed_slot1, value: U256::from(10) }]),
-                (2, vec![StorageBeforeTx { address, key: hashed_slot2, value: U256::from(20) }]),
-                (3, vec![StorageBeforeTx { address, key: hashed_slot1, value: U256::from(999) }]),
+                (1, vec![StorageBeforeTx { address, key: plain_slot1, value: U256::from(10) }]),
+                (2, vec![StorageBeforeTx { address, key: plain_slot2, value: U256::from(20) }]),
+                (3, vec![StorageBeforeTx { address, key: plain_slot1, value: U256::from(999) }]),
             ],
         );
 

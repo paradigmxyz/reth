@@ -543,13 +543,6 @@ impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {
         Ok(None)
     }
 
-    fn storage_by_hashed_key(
-        &self,
-        _account: Address,
-        _hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        Err(ProviderError::UnsupportedProvider)
-    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> BytecodeReader for NoopProvider<C, N> {

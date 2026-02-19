@@ -154,14 +154,6 @@ impl StateProvider for StateProviderTraitObjWrapper {
         self.0.storage(account, storage_key)
     }
 
-    fn storage_by_hashed_key(
-        &self,
-        address: Address,
-        hashed_storage_key: alloy_primitives::StorageKey,
-    ) -> reth_errors::ProviderResult<Option<alloy_primitives::StorageValue>> {
-        self.0.storage_by_hashed_key(address, hashed_storage_key)
-    }
-
     fn account_code(
         &self,
         addr: &Address,

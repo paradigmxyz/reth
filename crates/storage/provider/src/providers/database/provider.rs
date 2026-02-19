@@ -1272,77 +1272,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 
         Ok((state, reverts))
     }
-
-    /// Like [`populate_bundle_state`](Self::populate_bundle_state), but reads current values from
-    /// `HashedAccounts`/`HashedStorages`. Addresses are hashed via `keccak256` for DB lookups,
-    /// while storage keys from changesets are plain and hashed via `keccak256` for table lookups.
-    /// The output `BundleStateInit`/`RevertsInit` structures remain keyed by plain address.
-    fn populate_bundle_state_hashed(
-        &self,
-        account_changeset: Vec<(u64, AccountBeforeTx)>,
-        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
-        hashed_accounts_cursor: &mut impl DbCursorRO<tables::HashedAccounts>,
-        hashed_storage_cursor: &mut impl DbDupCursorRO<tables::HashedStorages>,
-    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
-        let mut state: BundleStateInit = HashMap::default();
-        let mut reverts: RevertsInit = HashMap::default();
-
-        // add account changeset changes
-        for (block_number, account_before) in account_changeset.into_iter().rev() {
-            let AccountBeforeTx { info: old_info, address } = account_before;
-            match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let hashed_address = keccak256(address);
-                    let new_info =
-                        hashed_accounts_cursor.seek_exact(hashed_address)?.map(|kv| kv.1);
-                    entry.insert((old_info, new_info, HashMap::default()));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().0 = old_info;
-                }
-            }
-            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
-        }
-
-        // add storage changeset changes
-        for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
-            let BlockNumberAddress((block_number, address)) = block_and_address;
-            let account_state = match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let hashed_address = keccak256(address);
-                    let present_info =
-                        hashed_accounts_cursor.seek_exact(hashed_address)?.map(|kv| kv.1);
-                    entry.insert((present_info, present_info, HashMap::default()))
-                }
-                hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            };
-
-            let hashed_key = keccak256(old_storage.key);
-            match account_state.2.entry(hashed_key) {
-                hash_map::Entry::Vacant(entry) => {
-                    let hashed_address = keccak256(address);
-                    let new_storage = hashed_storage_cursor
-                        .seek_by_key_subkey(hashed_address, hashed_key)?
-                        .filter(|storage| storage.key == hashed_key)
-                        .unwrap_or_default();
-                    entry.insert((old_storage.value, new_storage.value));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().0 = old_storage.value;
-                }
-            };
-
-            reverts
-                .entry(block_number)
-                .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .push(old_storage);
-        }
-
-        Ok((state, reverts))
-    }
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -2504,10 +2433,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     // storage state has to be taken from the database and written to storage
                     // history. See [StorageWipe::Primary] for more details.
                     //
-                    // In `use_hashed_state` mode, the `ExecutionStage` has already injected
-                    // plain-key slot entries into the wipe reverts via the slot-preimage
-                    // lookup table, so we only need the plain-state DB walk here.
-                    //
                     // TODO(mediocregopher): This could be rewritten in a way which doesn't
                     // require collecting wiped entries into a Vec like this, see
                     // `write_storage_trie_changesets`.
@@ -2562,9 +2487,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         changes.storage.par_sort_by_key(|a| a.address);
         changes.contracts.par_sort_by_key(|a| a.0);
 
-        // When use_hashed_state is enabled, skip plain state writes for accounts and storage.
-        // The hashed state is already written by the separate `write_hashed_state()` call.
-        // Bytecode writes remain unconditional since Bytecodes is not a plain/hashed table.
         if !self.cached_storage_settings().use_hashed_state() {
             // Write new account state
             tracing::trace!(len = changes.accounts.len(), "Writing new account state");
@@ -2717,16 +2639,26 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             self.take::<tables::AccountChangeSets>(range)?
         };
 
-        if self.cached_storage_settings().use_hashed_state() {
+        let use_hashed_state = self.cached_storage_settings().use_hashed_state();
+
+        // This is not working for blocks that are not at tip. as plain state is not the last
+        // state of end range. We should rename the functions or add support to access
+        // History state. Accessing history state can be tricky but we are not gaining
+        // anything.
+        let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
+        let mut plain_storage_cursor =
+            self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        let (state, _) = self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            &mut plain_accounts_cursor,
+            &mut plain_storage_cursor,
+        )?;
+
+        if use_hashed_state {
             let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
-
-            let (state, _) = self.populate_bundle_state_hashed(
-                account_changeset,
-                storage_changeset,
-                &mut hashed_accounts_cursor,
-                &mut hashed_storage_cursor,
-            )?;
 
             for (address, (old_account, new_account, storage)) in &state {
                 if old_account != new_account {
@@ -2741,11 +2673,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 for (storage_key, (old_storage_value, _new_storage_value)) in storage {
                     let hashed_address = keccak256(address);
+                    let hashed_storage_key = keccak256(storage_key);
                     let storage_entry =
-                        StorageEntry { key: *storage_key, value: *old_storage_value };
+                        StorageEntry { key: hashed_storage_key, value: *old_storage_value };
                     if hashed_storage_cursor
-                        .seek_by_key_subkey(hashed_address, *storage_key)?
-                        .filter(|s| s.key == *storage_key)
+                        .seek_by_key_subkey(hashed_address, hashed_storage_key)?
+                        .filter(|s| s.key == hashed_storage_key)
                         .is_some()
                     {
                         hashed_storage_cursor.delete_current()?
@@ -2757,21 +2690,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 }
             }
         } else {
-            // This is not working for blocks that are not at tip. as plain state is not the last
-            // state of end range. We should rename the functions or add support to access
-            // History state. Accessing history state can be tricky but we are not gaining
-            // anything.
-            let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
-            let mut plain_storage_cursor =
-                self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
-
-            let (state, _) = self.populate_bundle_state(
-                account_changeset,
-                storage_changeset,
-                &mut plain_accounts_cursor,
-                &mut plain_storage_cursor,
-            )?;
-
             for (address, (old_account, new_account, storage)) in &state {
                 if old_account != new_account {
                     let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
@@ -2881,16 +2799,26 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             self.take::<tables::AccountChangeSets>(range)?
         };
 
-        let (state, reverts) = if self.cached_storage_settings().use_hashed_state() {
+        let use_hashed_state = self.cached_storage_settings().use_hashed_state();
+
+        // This is not working for blocks that are not at tip. as plain state is not the last
+        // state of end range. We should rename the functions or add support to access
+        // History state. Accessing history state can be tricky but we are not gaining
+        // anything.
+        let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
+        let mut plain_storage_cursor =
+            self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        let (state, reverts) = self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            &mut plain_accounts_cursor,
+            &mut plain_storage_cursor,
+        )?;
+
+        if use_hashed_state {
             let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
-
-            let (state, reverts) = self.populate_bundle_state_hashed(
-                account_changeset,
-                storage_changeset,
-                &mut hashed_accounts_cursor,
-                &mut hashed_storage_cursor,
-            )?;
 
             for (address, (old_account, new_account, storage)) in &state {
                 if old_account != new_account {
@@ -2905,11 +2833,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 for (storage_key, (old_storage_value, _new_storage_value)) in storage {
                     let hashed_address = keccak256(address);
+                    let hashed_storage_key = keccak256(storage_key);
                     let storage_entry =
-                        StorageEntry { key: *storage_key, value: *old_storage_value };
+                        StorageEntry { key: hashed_storage_key, value: *old_storage_value };
                     if hashed_storage_cursor
-                        .seek_by_key_subkey(hashed_address, *storage_key)?
-                        .filter(|s| s.key == *storage_key)
+                        .seek_by_key_subkey(hashed_address, hashed_storage_key)?
+                        .filter(|s| s.key == hashed_storage_key)
                         .is_some()
                     {
                         hashed_storage_cursor.delete_current()?
@@ -2920,24 +2849,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     }
                 }
             }
-
-            (state, reverts)
         } else {
-            // This is not working for blocks that are not at tip. as plain state is not the last
-            // state of end range. We should rename the functions or add support to access
-            // History state. Accessing history state can be tricky but we are not gaining
-            // anything.
-            let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
-            let mut plain_storage_cursor =
-                self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
-
-            let (state, reverts) = self.populate_bundle_state(
-                account_changeset,
-                storage_changeset,
-                &mut plain_accounts_cursor,
-                &mut plain_storage_cursor,
-            )?;
-
             for (address, (old_account, new_account, storage)) in &state {
                 if old_account != new_account {
                     let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
@@ -2964,9 +2876,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     }
                 }
             }
-
-            (state, reverts)
-        };
+        }
 
         // Collect receipts into tuples (tx_num, receipt) to correctly handle pruned receipts
         let mut receipts_iter = self
@@ -5325,78 +5235,6 @@ mod tests {
 
         let mdbx_account_cs = provider_rw.tx.entries::<tables::AccountChangeSets>().unwrap();
         assert_eq!(mdbx_account_cs, 0, "v2: MDBX AccountChangeSets should remain empty");
-    }
-
-    #[test]
-    fn test_populate_bundle_state_hashed_with_hashed_keys() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
-
-        let address = Address::with_last_byte(1);
-        let hashed_address = keccak256(address);
-        let slot_key = B256::from(U256::from(42));
-        let hashed_slot = keccak256(slot_key);
-        let current_value = U256::from(100);
-        let old_value = U256::from(50);
-
-        let provider_rw = factory.provider_rw().unwrap();
-
-        provider_rw
-            .tx
-            .cursor_write::<tables::HashedAccounts>()
-            .unwrap()
-            .upsert(hashed_address, &Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None })
-            .unwrap();
-        provider_rw
-            .tx
-            .cursor_dup_write::<tables::HashedStorages>()
-            .unwrap()
-            .upsert(hashed_address, &StorageEntry { key: hashed_slot, value: current_value })
-            .unwrap();
-
-        let storage_changeset = vec![(
-            BlockNumberAddress((1, address)),
-            StorageEntry { key: slot_key, value: old_value },
-        )];
-
-        let account_changeset = vec![(
-            1u64,
-            AccountBeforeTx {
-                address,
-                info: Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None }),
-            },
-        )];
-
-        let mut hashed_accounts_cursor =
-            provider_rw.tx.cursor_read::<tables::HashedAccounts>().unwrap();
-        let mut hashed_storage_cursor =
-            provider_rw.tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
-
-        let (state, reverts) = provider_rw
-            .populate_bundle_state_hashed(
-                account_changeset,
-                storage_changeset,
-                &mut hashed_accounts_cursor,
-                &mut hashed_storage_cursor,
-            )
-            .unwrap();
-
-        let (_, new_account, storage_map) =
-            state.get(&address).expect("address should be in state");
-        assert!(new_account.is_some());
-        assert_eq!(new_account.unwrap().nonce, 1);
-
-        let (old_val, new_val) =
-            storage_map.get(&hashed_slot).expect("hashed slot should be in storage map");
-        assert_eq!(*old_val, old_value);
-        assert_eq!(*new_val, current_value);
-
-        let block_reverts = reverts.get(&1).expect("block 1 should have reverts");
-        let (_, storage_reverts) =
-            block_reverts.get(&address).expect("address should have reverts");
-        assert_eq!(storage_reverts.len(), 1);
-        assert_eq!(storage_reverts[0].key, slot_key);
-        assert_eq!(storage_reverts[0].value, old_value);
     }
 
     #[test]
