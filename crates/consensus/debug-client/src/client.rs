@@ -110,13 +110,13 @@ pub enum ForkchoiceMode {
     /// emitted with head=safe=finalized set to the block's own hash.
     ///
     /// **Note:** Requires a provider that supports [`BlockNumberOrTag::Finalized`] lookups
-    /// (e.g., [`RpcBlockProvider`]). Not supported by [`EtherscanBlockProvider`].
+    /// (e.g., [`crate::RpcBlockProvider`]). Not supported by [`crate::EtherscanBlockProvider`].
     Finalized,
     /// Fetches the safe and finalized blocks by their respective tags
     /// ([`BlockNumberOrTag::Safe`] and [`BlockNumberOrTag::Finalized`]) from the provider.
     ///
     /// **Note:** Requires a provider that supports tag-based lookups
-    /// (e.g., [`RpcBlockProvider`]). Not supported by [`EtherscanBlockProvider`].
+    /// (e.g., [`crate::RpcBlockProvider`]). Not supported by [`crate::EtherscanBlockProvider`].
     Tag,
 }
 
