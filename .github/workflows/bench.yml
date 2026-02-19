@@ -523,7 +523,14 @@ jobs:
             git clone . ../reth-baseline
           fi
           git -C ../reth-baseline checkout "$BASELINE_REF"
-          ln -sfn "$(pwd)" ../reth-feature
+
+          FEATURE_REF="${{ steps.refs.outputs.feature-ref }}"
+          if [ -d ../reth-feature ]; then
+            git -C ../reth-feature fetch origin "$FEATURE_REF"
+          else
+            git clone . ../reth-feature
+          fi
+          git -C ../reth-feature checkout "$FEATURE_REF"
 
       - name: Build binaries and download snapshot in parallel
         id: build
