@@ -478,13 +478,12 @@ where
                 .header_by_number(start_block)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(start_block.into()))?;
 
-            let path = provider.storage_path().join("preimage.dat");
+            let path = provider.storage_path().join("preimage");
             if !provider.chain_spec().is_cancun_active_at_timestamp(start_header.timestamp()) {
                 slot_preimages::inject_plain_wipe_slots(&path, provider, &mut state)?;
             } else if path.exists() {
                 // Post-Cancun: no more self-destructs, preimage db is no longer needed.
-                let _ = std::fs::remove_file(&path);
-                let _ = std::fs::remove_file(provider.storage_path().join("preimage.lck"));
+                let _ = std::fs::remove_dir_all(&path);
             }
         }
 

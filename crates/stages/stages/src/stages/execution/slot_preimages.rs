@@ -29,10 +29,10 @@ struct SlotPreimages {
 }
 
 impl SlotPreimages {
-    /// Opens (or creates) the slot-preimage MDBX environment at the given file `path`.
+    /// Opens (or creates) the slot-preimage MDBX environment at the given directory `path`.
     ///
-    /// Uses `no_sub_dir` so `path` is treated as the data file directly (e.g.
-    /// `db/preimage.dat`), matching how MDBX uses `mdbx.dat` in the `db/` directory.
+    /// Uses subdir mode (`no_sub_dir = false`), so MDBX creates `mdbx.dat` / `mdbx.lck`
+    /// under the directory (e.g. `db/preimage/mdbx.dat`).
     fn open(path: &Path) -> eyre::Result<Self> {
         const GIGABYTE: usize = 1024 * 1024 * 1024;
         const TERABYTE: usize = GIGABYTE * 1024;
@@ -48,7 +48,7 @@ impl SlotPreimages {
         });
         builder.write_map();
         builder.set_flags(EnvironmentFlags {
-            no_sub_dir: true,
+            no_sub_dir: false,
             mode: Mode::ReadWrite { sync_mode: SyncMode::Durable },
             ..Default::default()
         });
