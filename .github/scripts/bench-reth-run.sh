@@ -79,8 +79,12 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
+# Run reth-bench with high priority but as the current user so output
+# files are not root-owned (avoids EACCES on next checkout).
+BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
+
 # Warmup
-sudo nice -n -20 "$RETH_BENCH" new-payload-fcu \
+$BENCH_NICE "$RETH_BENCH" new-payload-fcu \
   --rpc-url "$BENCH_RPC_URL" \
   --engine-rpc-url http://127.0.0.1:8551 \
   --jwt-secret "$DATADIR/jwt.hex" \
@@ -88,7 +92,7 @@ sudo nice -n -20 "$RETH_BENCH" new-payload-fcu \
   --reth-new-payload 2>&1 | sed -u "s/^/[bench] /"
 
 # Benchmark
-sudo nice -n -20 "$RETH_BENCH" new-payload-fcu \
+$BENCH_NICE "$RETH_BENCH" new-payload-fcu \
   --rpc-url "$BENCH_RPC_URL" \
   --engine-rpc-url http://127.0.0.1:8551 \
   --jwt-secret "$DATADIR/jwt.hex" \
