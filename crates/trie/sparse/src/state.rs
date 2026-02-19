@@ -17,7 +17,7 @@ use reth_primitives_traits::Account;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    BranchNodeMasks, DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount,
+    BranchNodeMasks, LegacyDecodedMultiProof, MultiProof, Nibbles, ProofTrieNode, TrieAccount,
     TrieNodeV2, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 #[cfg(feature = "std")]
@@ -31,7 +31,7 @@ use tracing::{instrument, trace};
 #[derive(Debug, Default)]
 pub struct DeferredDrops {
     /// Each nodes reveal operation creates a new buffer, uses it, and pushes it here.
-    pub proof_nodes_bufs: Vec<Vec<ProofTrieNodeV2>>,
+    pub proof_nodes_bufs: Vec<Vec<ProofTrieNode>>,
 }
 
 #[derive(Debug)]
@@ -48,7 +48,7 @@ pub struct SparseStateTrie<
     storage: StorageTries<S>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
-    /// When true, skip filtering of V2 proof nodes that have already been revealed.
+    /// When true, skip filtering of proof nodes that have already been revealed.
     /// This is useful when the sparse trie is being reused across blocks and already
     /// tracks revealed nodes internally.
     skip_proof_node_filtering: bool,
@@ -125,9 +125,9 @@ impl<A, S> SparseStateTrie<A, S> {
         self
     }
 
-    /// Set whether to skip filtering of V2 proof nodes.
+    /// Set whether to skip filtering of proof nodes.
     ///
-    /// When true, `reveal_*_v2_proof_nodes` methods will pass all nodes directly to the
+    /// When true, `reveal_*_proof_nodes` methods will pass all nodes directly to the
     /// sparse trie without filtering already-revealed paths. This is useful when the
     /// sparse trie is being reused across blocks and handles node deduplication internally.
     pub const fn with_skip_proof_node_filtering(mut self, skip: bool) -> Self {
@@ -278,44 +278,44 @@ where
         let decoded_multiproof = multiproof.try_into()?;
 
         // then reveal the decoded multiproof
-        self.reveal_decoded_multiproof(decoded_multiproof)
+        self.reveal_legacy_decoded_multiproof(decoded_multiproof)
     }
 
-    /// Reveal unknown trie paths from decoded multiproof.
+    /// Reveal unknown trie paths from legacy decoded multiproof.
     /// NOTE: This method does not extensively validate the proof.
+    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
+    pub fn reveal_legacy_decoded_multiproof(
+        &mut self,
+        multiproof: LegacyDecodedMultiProof,
+    ) -> SparseStateTrieResult<()> {
+        self.reveal_decoded_multiproof(multiproof.into())
+    }
+
+    /// Reveals a decoded multiproof.
+    ///
+    /// Decoded multiproofs use a simpler format where proof nodes are stored as vectors rather than
+    /// hashmaps, with masks already included in the `ProofTrieNode` structure.
     #[instrument(level = "debug", target = "trie::sparse", skip_all)]
     pub fn reveal_decoded_multiproof(
         &mut self,
-        multiproof: DecodedMultiProof,
-    ) -> SparseStateTrieResult<()> {
-        self.reveal_decoded_multiproof_v2(multiproof.into())
-    }
-
-    /// Reveals a V2 decoded multiproof.
-    ///
-    /// V2 multiproofs use a simpler format where proof nodes are stored as vectors rather than
-    /// hashmaps, with masks already included in the `ProofTrieNode` structure.
-    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
-    pub fn reveal_decoded_multiproof_v2(
-        &mut self,
-        multiproof: reth_trie_common::DecodedMultiProofV2,
+        multiproof: reth_trie_common::DecodedMultiProof,
     ) -> SparseStateTrieResult<()> {
         // Reveal the account proof nodes.
         //
         // Skip revealing account nodes if this result only contains storage proofs.
-        // `reveal_account_v2_proof_nodes` will return an error if empty `nodes` are passed into it
+        // `reveal_account_proof_nodes` will return an error if empty `nodes` are passed into it
         // before the accounts trie root was revealed. This might happen in cases when first account
         // trie proof arrives later than first storage trie proof even though the account trie proof
         // was requested first.
         if !multiproof.account_proofs.is_empty() {
-            self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
+            self.reveal_account_proof_nodes(multiproof.account_proofs)?;
         }
 
         #[cfg(not(feature = "std"))]
         // If nostd then serially reveal storage proof nodes for each storage trie
         {
             for (account, storage_proofs) in multiproof.storage_proofs {
-                self.reveal_storage_v2_proof_nodes(account, storage_proofs)?;
+                self.reveal_storage_proof_nodes(account, storage_proofs)?;
                 // Mark this storage trie as hot (accessed this tick)
                 self.storage.modifications.mark_accessed(account);
             }
@@ -346,7 +346,7 @@ where
                 .par_bridge_buffered()
                 .map(|(account, storage_proofs, mut revealed_nodes, mut trie)| {
                     let mut bufs = Vec::new();
-                    let result = Self::reveal_storage_v2_proof_nodes_inner(
+                    let result = Self::reveal_storage_proof_nodes_inner(
                         account,
                         storage_proofs,
                         &mut revealed_nodes,
@@ -385,23 +385,23 @@ where
         }
     }
 
-    /// Reveals account proof nodes from a V2 proof.
+    /// Reveals account proof nodes.
     ///
-    /// V2 proofs already include the masks in the `ProofTrieNode` structure,
+    /// Proofs already include the masks in the `ProofTrieNode` structure,
     /// so no separate masks map is needed.
-    pub fn reveal_account_v2_proof_nodes(
+    pub fn reveal_account_proof_nodes(
         &mut self,
-        mut nodes: Vec<ProofTrieNodeV2>,
+        mut nodes: Vec<ProofTrieNode>,
     ) -> SparseStateTrieResult<()> {
         if self.skip_proof_node_filtering {
-            let capacity = estimate_v2_proof_capacity(&nodes);
+            let capacity = estimate_proof_capacity(&nodes);
 
             #[cfg(feature = "metrics")]
             self.metrics.increment_total_account_nodes(nodes.len() as u64);
 
             let root_node = nodes.iter().find(|n| n.path.is_empty());
             let trie = if let Some(root_node) = root_node {
-                trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
+                trace!(target: "trie::sparse", ?root_node, "Revealing root account node from proof");
                 self.state.reveal_root(
                     root_node.node.clone(),
                     root_node.masks,
@@ -411,15 +411,15 @@ where
                 self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
             };
             trie.reserve_nodes(capacity);
-            trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof (unfiltered)");
+            trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from proof (unfiltered)");
             trie.reveal_nodes(&mut nodes)?;
 
             self.deferred_drops.proof_nodes_bufs.push(nodes);
             return Ok(())
         }
 
-        let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values: _metric_values } =
-            filter_revealed_v2_proof_nodes(nodes, &mut self.revealed_account_paths)?;
+        let FilteredProofNodes { root_node, mut nodes, new_nodes, metric_values: _metric_values } =
+            filter_revealed_proof_nodes(nodes, &mut self.revealed_account_paths)?;
 
         #[cfg(feature = "metrics")]
         {
@@ -428,7 +428,7 @@ where
         }
 
         let trie = if let Some(root_node) = root_node {
-            trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
+            trace!(target: "trie::sparse", ?root_node, "Revealing root account node from proof");
             self.state.reveal_root(root_node.node, root_node.masks, self.retain_updates)?
         } else {
             self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
@@ -436,7 +436,7 @@ where
 
         trie.reserve_nodes(new_nodes);
 
-        trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
+        trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from proof");
         trie.reveal_nodes(&mut nodes)?;
 
         // Keep buffer for deferred dropping
@@ -445,17 +445,17 @@ where
         Ok(())
     }
 
-    /// Reveals storage proof nodes from a V2 proof for the given address.
+    /// Reveals storage proof nodes for the given address.
     ///
-    /// V2 proofs already include the masks in the `ProofTrieNode` structure,
+    /// Proofs already include the masks in the `ProofTrieNode` structure,
     /// so no separate masks map is needed.
-    pub fn reveal_storage_v2_proof_nodes(
+    pub fn reveal_storage_proof_nodes(
         &mut self,
         account: B256,
-        nodes: Vec<ProofTrieNodeV2>,
+        nodes: Vec<ProofTrieNode>,
     ) -> SparseStateTrieResult<()> {
         let (trie, revealed_paths) = self.storage.get_trie_and_revealed_paths_mut(account);
-        let _metric_values = Self::reveal_storage_v2_proof_nodes_inner(
+        let _metric_values = Self::reveal_storage_proof_nodes_inner(
             account,
             nodes,
             revealed_paths,
@@ -474,42 +474,42 @@ where
         Ok(())
     }
 
-    /// Reveals storage V2 proof nodes for the given address. This is an internal static function
+    /// Reveals storage proof nodes for the given address. This is an internal static function
     /// designed to handle a variety of associated public functions.
-    fn reveal_storage_v2_proof_nodes_inner(
+    fn reveal_storage_proof_nodes_inner(
         account: B256,
-        mut nodes: Vec<ProofTrieNodeV2>,
+        mut nodes: Vec<ProofTrieNode>,
         revealed_nodes: &mut HashSet<Nibbles>,
         trie: &mut RevealableSparseTrie<S>,
-        bufs: &mut Vec<Vec<ProofTrieNodeV2>>,
+        bufs: &mut Vec<Vec<ProofTrieNode>>,
         retain_updates: bool,
         skip_filtering: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
         if skip_filtering {
-            let capacity = estimate_v2_proof_capacity(&nodes);
+            let capacity = estimate_proof_capacity(&nodes);
             let metric_values =
                 ProofNodesMetricValues { total_nodes: nodes.len(), skipped_nodes: 0 };
 
             let root_node = nodes.iter().find(|n| n.path.is_empty());
             let trie = if let Some(root_node) = root_node {
-                trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
+                trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from proof");
                 trie.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
             } else {
                 trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
             };
             trie.reserve_nodes(capacity);
-            trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof (unfiltered)");
+            trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from proof (unfiltered)");
             trie.reveal_nodes(&mut nodes)?;
 
             bufs.push(nodes);
             return Ok(metric_values)
         }
 
-        let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values } =
-            filter_revealed_v2_proof_nodes(nodes, revealed_nodes)?;
+        let FilteredProofNodes { root_node, mut nodes, new_nodes, metric_values } =
+            filter_revealed_proof_nodes(nodes, revealed_nodes)?;
 
         let trie = if let Some(root_node) = root_node {
-            trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
+            trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from proof");
             trie.reveal_root(root_node.node, root_node.masks, retain_updates)?
         } else {
             trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
@@ -517,7 +517,7 @@ where
 
         trie.reserve_nodes(new_nodes);
 
-        trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof");
+        trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from proof");
         trie.reveal_nodes(&mut nodes)?;
 
         // Keep buffer for deferred dropping
@@ -1207,13 +1207,13 @@ struct ProofNodesMetricValues {
     skipped_nodes: usize,
 }
 
-/// Result of [`filter_revealed_v2_proof_nodes`].
+/// Result of [`filter_revealed_proof_nodes`].
 #[derive(Debug, PartialEq, Eq)]
-struct FilteredV2ProofNodes {
+struct FilteredProofNodes {
     /// Root node which was pulled out of the original node set to be handled specially.
-    root_node: Option<ProofTrieNodeV2>,
+    root_node: Option<ProofTrieNode>,
     /// Filtered proof nodes. Root node is removed.
-    nodes: Vec<ProofTrieNodeV2>,
+    nodes: Vec<ProofTrieNode>,
     /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
     /// if they are not in the proof.
     new_nodes: usize,
@@ -1221,12 +1221,12 @@ struct FilteredV2ProofNodes {
     metric_values: ProofNodesMetricValues,
 }
 
-/// Calculates capacity estimation for V2 proof nodes without filtering.
+/// Calculates capacity estimation for proof nodes without filtering.
 ///
 /// This counts nodes and their children (for branch and extension nodes) to provide
 /// proper capacity hints for `reserve_nodes`. Used when `skip_proof_node_filtering` is
 /// enabled and no filtering is performed.
-fn estimate_v2_proof_capacity(nodes: &[ProofTrieNodeV2]) -> usize {
+fn estimate_proof_capacity(nodes: &[ProofTrieNode]) -> usize {
     let mut capacity = nodes.len();
 
     for node in nodes {
@@ -1238,16 +1238,16 @@ fn estimate_v2_proof_capacity(nodes: &[ProofTrieNodeV2]) -> usize {
     capacity
 }
 
-/// Filters V2 proof nodes that are already revealed, separates the root node if present, and
+/// Filters proof nodes that are already revealed, separates the root node if present, and
 /// returns additional information about the number of total, skipped, and new nodes.
 ///
-/// V2 proof nodes already have masks included in the `ProofTrieNode` structure, so no separate
+/// Proof nodes already have masks included in the `ProofTrieNode` structure, so no separate
 /// masks map is needed.
-fn filter_revealed_v2_proof_nodes(
-    proof_nodes: Vec<ProofTrieNodeV2>,
+fn filter_revealed_proof_nodes(
+    proof_nodes: Vec<ProofTrieNode>,
     revealed_nodes: &mut HashSet<Nibbles>,
-) -> SparseStateTrieResult<FilteredV2ProofNodes> {
-    let mut result = FilteredV2ProofNodes {
+) -> SparseStateTrieResult<FilteredProofNodes> {
+    let mut result = FilteredProofNodes {
         root_node: None,
         nodes: Vec::with_capacity(proof_nodes.len()),
         new_nodes: 0,
@@ -1369,7 +1369,7 @@ mod tests {
         };
 
         // Reveal multiproof and check that the state trie contains the leaf node and value
-        sparse.reveal_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
+        sparse.reveal_legacy_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::Exists)
@@ -1390,7 +1390,7 @@ mod tests {
 
         // Reveal multiproof again and check that the state trie still does not contain the leaf
         // node and value, because they were already revealed before
-        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+        sparse.reveal_legacy_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::NonExistent)
@@ -1442,7 +1442,7 @@ mod tests {
         };
 
         // Reveal multiproof and check that the storage trie contains the leaf node and value
-        sparse.reveal_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
+        sparse.reveal_legacy_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
         assert!(matches!(
             sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::Exists)
@@ -1467,7 +1467,7 @@ mod tests {
 
         // Reveal multiproof again and check that the storage trie still does not contain the leaf
         // node and value, because they were already revealed before
-        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+        sparse.reveal_legacy_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
         assert!(matches!(
             sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::NonExistent)
@@ -1480,7 +1480,7 @@ mod tests {
     }
 
     #[test]
-    fn reveal_v2_proof_nodes() {
+    fn reveal_proof_nodes() {
         let provider_factory = DefaultTrieNodeProviderFactory;
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
@@ -1501,9 +1501,9 @@ mod tests {
             branch_rlp_node: None,
         });
 
-        // Create V2 proof nodes with masks already included
-        let v2_proof_nodes = vec![
-            ProofTrieNodeV2 {
+        // Create proof nodes with masks already included
+        let proof_nodes = vec![
+            ProofTrieNode {
                 path: Nibbles::default(),
                 node: branch_node,
                 masks: Some(BranchNodeMasks {
@@ -1511,12 +1511,12 @@ mod tests {
                     tree_mask: TrieMask::default(),
                 }),
             },
-            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x0]), node: leaf_1_node, masks: None },
-            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x1]), node: leaf_2_node, masks: None },
+            ProofTrieNode { path: Nibbles::from_nibbles([0x0]), node: leaf_1_node, masks: None },
+            ProofTrieNode { path: Nibbles::from_nibbles([0x1]), node: leaf_2_node, masks: None },
         ];
 
-        // Reveal V2 proof nodes
-        sparse.reveal_account_v2_proof_nodes(v2_proof_nodes.clone()).unwrap();
+        // Reveal proof nodes
+        sparse.reveal_account_proof_nodes(proof_nodes.clone()).unwrap();
 
         // Check that the state trie contains the leaf node and value
         assert!(matches!(
@@ -1533,12 +1533,12 @@ mod tests {
         assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
 
         // Reveal again - should skip already revealed paths
-        sparse.reveal_account_v2_proof_nodes(v2_proof_nodes).unwrap();
+        sparse.reveal_account_proof_nodes(proof_nodes).unwrap();
         assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
     }
 
     #[test]
-    fn reveal_storage_v2_proof_nodes() {
+    fn reveal_storage_proof_nodes_test() {
         let provider_factory = DefaultTrieNodeProviderFactory;
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
@@ -1559,14 +1559,14 @@ mod tests {
             branch_rlp_node: None,
         });
 
-        let v2_proof_nodes = vec![
-            ProofTrieNodeV2 { path: Nibbles::default(), node: branch_node, masks: None },
-            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x0]), node: leaf_1_node, masks: None },
-            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x1]), node: leaf_2_node, masks: None },
+        let proof_nodes = vec![
+            ProofTrieNode { path: Nibbles::default(), node: branch_node, masks: None },
+            ProofTrieNode { path: Nibbles::from_nibbles([0x0]), node: leaf_1_node, masks: None },
+            ProofTrieNode { path: Nibbles::from_nibbles([0x1]), node: leaf_2_node, masks: None },
         ];
 
-        // Reveal V2 storage proof nodes for account
-        sparse.reveal_storage_v2_proof_nodes(B256::ZERO, v2_proof_nodes.clone()).unwrap();
+        // Reveal storage proof nodes for account
+        sparse.reveal_storage_proof_nodes(B256::ZERO, proof_nodes.clone()).unwrap();
 
         // Check that the storage trie contains the leaf node and value
         assert!(matches!(
@@ -1587,7 +1587,7 @@ mod tests {
             .is_none());
 
         // Reveal again - should skip already revealed paths
-        sparse.reveal_storage_v2_proof_nodes(B256::ZERO, v2_proof_nodes).unwrap();
+        sparse.reveal_storage_proof_nodes(B256::ZERO, proof_nodes).unwrap();
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
@@ -1653,7 +1653,7 @@ mod tests {
         let provider_factory = DefaultTrieNodeProviderFactory;
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default().with_updates(true);
         sparse
-            .reveal_decoded_multiproof(
+            .reveal_legacy_decoded_multiproof(
                 MultiProof {
                     account_subtree: proof_nodes,
                     branch_node_masks: BranchNodeMasksMap::from_iter([(

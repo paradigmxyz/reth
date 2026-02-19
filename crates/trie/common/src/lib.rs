@@ -46,7 +46,7 @@ mod subnode;
 pub use subnode::StoredSubNode;
 
 mod trie;
-pub use trie::{BranchNodeMasks, BranchNodeMasksMap, ProofTrieNode};
+pub use trie::{BranchNodeMasks, BranchNodeMasksMap, LegacyProofTrieNode};
 
 mod trie_node_v2;
 pub use trie_node_v2::*;

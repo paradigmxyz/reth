@@ -2,7 +2,7 @@ use crate::proof_v2::DeferredValueEncoder;
 use alloy_rlp::Encodable;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    BranchNodeMasks, BranchNodeV2, LeafNode, LeafNodeRef, Nibbles, ProofTrieNodeV2, RlpNode,
+    BranchNodeMasks, BranchNodeV2, LeafNode, LeafNodeRef, Nibbles, ProofTrieNode, RlpNode,
     TrieMask, TrieNodeV2,
 };
 
@@ -67,7 +67,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         }
     }
 
-    /// Converts this child into a [`ProofTrieNodeV2`] having the given path.
+    /// Converts this child into a [`ProofTrieNode`] having the given path.
     ///
     /// # Panics
     ///
@@ -76,7 +76,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         self,
         path: Nibbles,
         buf: &mut Vec<u8>,
-    ) -> Result<ProofTrieNodeV2, StateProofError> {
+    ) -> Result<ProofTrieNode, StateProofError> {
         let (node, masks) = match self {
             Self::Leaf { short_key, value } => {
                 value.encode(buf)?;
@@ -94,7 +94,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
             Self::RlpNode(_) => panic!("Cannot call `into_proof_trie_node` on RlpNode"),
         };
 
-        Ok(ProofTrieNodeV2 { node, path, masks })
+        Ok(ProofTrieNode { node, path, masks })
     }
 
     /// Returns the short key of the child, if it is a leaf or branch, or empty if its a
