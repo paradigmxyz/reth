@@ -3,6 +3,7 @@
 use crate::{
     bench::{
         context::BenchContext,
+        metrics_scraper::MetricsScraper,
         output::{
             NewPayloadResult, TotalGasOutput, TotalGasRow, GAS_OUTPUT_SUFFIX,
             NEW_PAYLOAD_OUTPUT_SUFFIX,
@@ -53,6 +54,8 @@ impl Command {
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let total_blocks = benchmark_mode.total_blocks();
+
+        let mut metrics_scraper = MetricsScraper::maybe_new(self.benchmark.metrics_url.clone());
 
         if use_reth_namespace {
             info!("Using reth_newPayload endpoint");
@@ -142,6 +145,12 @@ impl Command {
             let row =
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((row, new_payload_result));
+
+            if let Some(scraper) = metrics_scraper.as_mut() &&
+                let Err(err) = scraper.scrape_after_block(block_number).await
+            {
+                tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
+            }
         }
 
         // Check if the spawned task encountered an error
@@ -171,6 +180,10 @@ impl Command {
                 writer.serialize(row)?;
             }
             writer.flush()?;
+
+            if let Some(scraper) = &metrics_scraper {
+                scraper.write_csv(&path)?;
+            }
 
             info!(target: "reth-bench", "Finished writing benchmark output files to {:?}.", path);
         }
