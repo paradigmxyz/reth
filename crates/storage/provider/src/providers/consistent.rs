@@ -1176,12 +1176,9 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ConsistentProvider<N> {
                 // `block_state` already corresponds to `number`, so we only need to account for
                 // all its in-memory ancestors (older blocks) to shift `first_tx_num`.
                 for parent_state in block_state.parent_state_chain() {
-                    stored_indices.first_tx_num += parent_state
-                        .block_ref()
-                        .recovered_block()
-                        .body()
-                        .transactions()
-                        .len() as u64;
+                    stored_indices.first_tx_num +=
+                        parent_state.block_ref().recovered_block().body().transactions().len()
+                            as u64;
                 }
 
                 Ok(Some(stored_indices))
