@@ -23,8 +23,12 @@ cleanup() {
       sleep 1
     done
     sudo kill -9 "$RETH_PID" 2>/dev/null || true
+    sleep 1
   fi
-  mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+  if mountpoint -q "$SCHELK_MOUNT"; then
+    sudo umount -l "$SCHELK_MOUNT" || true
+    sudo schelk recover -y || true
+  fi
 }
 TAIL_PID=
 trap cleanup EXIT
