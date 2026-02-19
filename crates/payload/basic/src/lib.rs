@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
+use alloy_consensus::BlockHeader;
 use alloy_eips::merge::SLOT_DURATION;
 use alloy_primitives::{B256, U256};
 use futures_core::ready;
@@ -17,7 +18,7 @@ use reth_chain_state::CanonStateNotification;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
-use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
+use reth_primitives_traits::{BlockBody, HeaderTy, NodePrimitives, SealedHeader};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
@@ -28,7 +29,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     sync::{oneshot, Semaphore},
@@ -346,16 +347,43 @@ where
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
+        let metrics = self.metrics.clone();
         self.executor.spawn_blocking_task(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
             let args =
                 BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
+            let start = Instant::now();
             let result = builder.try_build(args);
+            let elapsed = start.elapsed();
+            metrics.payload_build_duration_seconds.record(elapsed);
+
+            if let Ok(ref outcome) = result
+                && let Some(payload) = outcome.payload()
+            {
+                let gas_used = payload.block().gas_used();
+                let secs = elapsed.as_secs_f64();
+                if secs > 0.0 {
+                    metrics.built_payload_gas_per_second.set(gas_used as f64 / secs);
+                }
+            }
+
             let _ = tx.send(result);
         });
 
         self.pending_block = Some(PendingPayload { _cancel, payload: rx });
+    }
+
+    /// Records payload composition metrics from a built payload.
+    fn record_payload_metrics(&self, payload: &Builder::BuiltPayload) {
+        let block = payload.block();
+        let gas_used = block.gas_used();
+        let tx_count = block.body().transactions().len();
+        let rlp_size = block.rlp_length();
+
+        self.metrics.built_payload_transactions.record(tx_count as f64);
+        self.metrics.built_payload_gas_used.set(gas_used as f64);
+        self.metrics.built_payload_rlp_size.record(rlp_size as f64);
     }
 }
 
@@ -392,10 +420,12 @@ where
                     BuildOutcome::Better { payload, cached_reads } => {
                         this.cached_reads = Some(cached_reads);
                         debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
+                        this.record_payload_metrics(&payload);
                         this.best_payload = PayloadState::Best(payload);
                     }
                     BuildOutcome::Freeze(payload) => {
                         debug!(target: "payload_builder", "payload frozen, no further building will occur");
+                        this.record_payload_metrics(&payload);
                         this.best_payload = PayloadState::Frozen(payload);
                     }
                     BuildOutcome::Aborted { fees, cached_reads } => {
