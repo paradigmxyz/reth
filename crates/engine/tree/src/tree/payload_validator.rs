@@ -341,17 +341,16 @@ where
             BlockOrPayload::Payload(_) => {
                 let payload_clone = input.clone();
                 let validator = self.validator.clone();
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                self.payload_processor.executor().spawn_blocking_named(
+                let handle = self.payload_processor.executor().spawn_blocking_named(
                     "payload-convert",
                     move || {
                         let BlockOrPayload::Payload(payload) = payload_clone else {
                             unreachable!()
                         };
-                        let _ = tx.send(validator.convert_payload_to_block(payload));
+                        validator.convert_payload_to_block(payload)
                     },
                 );
-                Either::Left(rx)
+                Either::Left(handle)
             }
             BlockOrPayload::Block(_) => Either::Right(()),
         };
@@ -361,9 +360,10 @@ where
         let convert_to_block =
             move |input: BlockOrPayload<T>| -> Result<SealedBlock<N::Block>, NewPayloadError> {
                 match convert_to_block {
-                    Either::Left(rx) => rx.blocking_recv().map_err(|_| {
-                        NewPayloadError::Other("block conversion task panicked".into())
-                    })?,
+                    Either::Left(handle) => match handle.get() {
+                        Ok(block) => Ok(block.clone()),
+                        Err(e) => Err(NewPayloadError::Other(e.to_string().into())),
+                    },
                     Either::Right(()) => {
                         let BlockOrPayload::Block(block) = input else { unreachable!() };
                         Ok(block)
