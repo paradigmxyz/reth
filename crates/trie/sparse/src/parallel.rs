@@ -6120,6 +6120,344 @@ mod tests {
         });
     }
 
+    /// Helper to convert `ProofNodes` + hash/tree masks into `Vec<ProofTrieNodeV2>` for
+    /// `reveal_nodes`.
+    fn proof_nodes_to_v2(
+        proof_nodes: ProofNodes,
+        hash_masks: &HashMap<Nibbles, TrieMask>,
+        tree_masks: &HashMap<Nibbles, TrieMask>,
+    ) -> Vec<ProofTrieNodeV2> {
+        proof_nodes
+            .nodes_sorted()
+            .into_iter()
+            .map(|(path, node)| {
+                let masks = BranchNodeMasks::from_optional(
+                    hash_masks.get(&path).copied(),
+                    tree_masks.get(&path).copied(),
+                );
+                ProofTrieNodeV2 { path, node: TrieNodeV2::decode(&mut &node[..]).unwrap(), masks }
+            })
+            .collect()
+    }
+
+    /// Comprehensive fuzzer for `ParallelSparseTrie` that exercises reveal, update, remove, prune,
+    /// and re-reveal cycles — matching the real-world flow more closely than `sparse_trie_fuzz`.
+    ///
+    /// Covers:
+    /// 1. Repeated reveals of the same nodes (even after updates/removals)
+    /// 2. Pruning followed by re-reveal of nodes that were converted to hash stubs
+    /// 3. Empty trie instantiated on top of existing state via `set_root` + reveal
+    /// 4. Trie updates compared with `HashBuilder` after every operation cycle
+    #[test]
+    fn sparse_trie_fuzz_reveal_prune() {
+        const KEY_NIBBLES_LEN: usize = 3;
+
+        fn test(
+            initial_state: BTreeMap<Nibbles, Account>,
+            rounds: Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)>,
+        ) {
+            let provider_factory = create_test_provider_factory();
+            let default_provider = DefaultTrieNodeProvider;
+
+            // -- Phase 0: Build initial state in the DB and compute initial root --
+            let mut state = initial_state;
+
+            // Write initial state to DB via hash builder
+            if !state.is_empty() {
+                let (_, initial_updates, _, _, _) = run_hash_builder(
+                    state.clone(),
+                    NoopAccountTrieCursor::default(),
+                    Default::default(),
+                    state.keys().copied(),
+                );
+                let provider_rw = provider_factory.provider_rw().unwrap();
+                provider_rw.write_trie_updates(initial_updates).unwrap();
+                provider_rw.commit().unwrap();
+            }
+
+            // -- Phase 1: Create sparse trie from existing state (set_root + reveal) --
+            // This exercises scenario 3: empty trie on top of existing DB state.
+            let mut sparse = ParallelSparseTrie::default().with_updates(true);
+
+            if !state.is_empty() {
+                // Get root proof to initialize the trie
+                let (_, _, root_proof_nodes, root_hash_masks, root_tree_masks) = run_hash_builder(
+                    state.clone(),
+                    {
+                        let provider = provider_factory.provider().unwrap();
+                        DatabaseTrieCursorFactory::new(provider.tx_ref())
+                            .account_trie_cursor()
+                            .unwrap()
+                    },
+                    Default::default(),
+                    [Nibbles::default()],
+                );
+
+                // Decode root node and set it
+                let root_nodes =
+                    proof_nodes_to_v2(root_proof_nodes, &root_hash_masks, &root_tree_masks);
+                if let Some(root_node) = root_nodes.iter().find(|n| n.path.is_empty()) {
+                    sparse.set_root(root_node.node.clone(), root_node.masks, true).unwrap();
+                }
+
+                // Reveal proof for all existing keys
+                let (_, _, proof_nodes, hash_masks, tree_masks) = run_hash_builder(
+                    state.clone(),
+                    {
+                        let provider = provider_factory.provider().unwrap();
+                        DatabaseTrieCursorFactory::new(provider.tx_ref())
+                            .account_trie_cursor()
+                            .unwrap()
+                    },
+                    Default::default(),
+                    state.keys().copied(),
+                );
+                let mut revealed = proof_nodes_to_v2(proof_nodes.clone(), &hash_masks, &tree_masks);
+                sparse.reveal_nodes(&mut revealed).unwrap();
+
+                // Scenario 1: Reveal the SAME nodes again (idempotence)
+                let mut revealed_again = proof_nodes_to_v2(proof_nodes, &hash_masks, &tree_masks);
+                sparse.reveal_nodes(&mut revealed_again).unwrap();
+
+                // Insert all existing leaf values
+                for (key, account) in &state {
+                    let trie_account = account.into_trie_account(EMPTY_ROOT_HASH);
+                    let mut account_rlp = Vec::new();
+                    trie_account.encode(&mut account_rlp);
+                    sparse.update_leaf(*key, account_rlp, &default_provider).unwrap();
+                }
+            }
+
+            // Verify initial root matches hash builder
+            {
+                let provider = provider_factory.provider().unwrap();
+                let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
+                let (expected_root, _, _, _, _) = run_hash_builder(
+                    state.clone(),
+                    trie_cursor.account_trie_cursor().unwrap(),
+                    Default::default(),
+                    state.keys().copied(),
+                );
+                let mut check_sparse = sparse.clone();
+                assert_eq!(check_sparse.root(), expected_root);
+            }
+
+            // -- Phase 2: Apply rounds of updates/deletes with reveal + prune cycles --
+            for (round_idx, (update, keys_to_delete)) in rounds.into_iter().enumerate() {
+                // 2a. Generate proof for keys we're about to touch (before mutating)
+                let touch_keys: BTreeSet<_> =
+                    update.keys().chain(keys_to_delete.iter()).copied().collect();
+
+                if !touch_keys.is_empty() {
+                    let provider = provider_factory.provider().unwrap();
+                    let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
+                    let (_, _, proof_nodes, hash_masks, tree_masks) = run_hash_builder(
+                        state.clone(),
+                        trie_cursor.account_trie_cursor().unwrap(),
+                        Default::default(),
+                        touch_keys.iter().copied(),
+                    );
+
+                    // Reveal proof nodes (some may already be revealed — tests idempotence)
+                    let mut revealed =
+                        proof_nodes_to_v2(proof_nodes.clone(), &hash_masks, &tree_masks);
+                    sparse.reveal_nodes(&mut revealed).unwrap();
+
+                    // Scenario 1: Reveal same nodes AGAIN
+                    let mut revealed_dup = proof_nodes_to_v2(proof_nodes, &hash_masks, &tree_masks);
+                    sparse.reveal_nodes(&mut revealed_dup).unwrap();
+                }
+
+                // 2b. Apply updates
+                for (key, account) in &update {
+                    let trie_account = account.into_trie_account(EMPTY_ROOT_HASH);
+                    let mut account_rlp = Vec::new();
+                    trie_account.encode(&mut account_rlp);
+                    sparse.update_leaf(*key, account_rlp, &default_provider).unwrap();
+                }
+                state.extend(update);
+
+                // 2c. Apply deletes
+                for key in &keys_to_delete {
+                    state.remove(key).unwrap();
+                    sparse.remove_leaf(key, &default_provider).unwrap();
+                }
+
+                // 2d. Compute root and compare with hash builder (EVERY cycle)
+                let mut check_sparse = sparse.clone();
+                let sparse_root = check_sparse.root();
+                let sparse_updates = check_sparse.take_updates();
+
+                let provider = provider_factory.provider().unwrap();
+                let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
+                let (expected_root, expected_updates, expected_proof_nodes, _, _) =
+                    run_hash_builder(
+                        state.clone(),
+                        trie_cursor.account_trie_cursor().unwrap(),
+                        keys_to_delete
+                            .iter()
+                            .map(|nibbles| B256::from_slice(&nibbles.pack()))
+                            .collect(),
+                        state.keys().copied(),
+                    );
+
+                assert_eq!(sparse_root, expected_root, "Root mismatch at round {round_idx}");
+                pretty_assertions::assert_eq!(
+                    BTreeMap::from_iter(sparse_updates.updated_nodes),
+                    BTreeMap::from_iter(expected_updates.account_nodes.clone()),
+                    "Trie updates mismatch at round {round_idx}"
+                );
+                assert_eq_parallel_sparse_trie_proof_nodes(&check_sparse, expected_proof_nodes);
+
+                // Write trie updates to DB for next round
+                let expected_updates_for_db = expected_updates;
+                let provider_rw = provider_factory.provider_rw().unwrap();
+                provider_rw.write_trie_updates(expected_updates_for_db).unwrap();
+                provider_rw.commit().unwrap();
+
+                // 2e. Take updates from the actual sparse trie to sync branch_node_masks
+                let _ = sparse.root();
+                let _ = sparse.take_updates();
+
+                // -- Phase 3: Prune and re-reveal (scenario 2) --
+                // Only prune on even rounds to mix pruned and non-pruned cycles.
+                if round_idx % 2 == 0 && !state.is_empty() {
+                    // Prune at depth 2 to create hash stubs for lower nodes
+                    sparse.prune(2);
+
+                    // Verify root is still correct after pruning
+                    let mut post_prune_sparse = sparse.clone();
+                    assert_eq!(
+                        post_prune_sparse.root(),
+                        expected_root,
+                        "Root changed after prune at round {round_idx}"
+                    );
+
+                    // Re-reveal nodes that were pruned (scenario 2)
+                    let provider = provider_factory.provider().unwrap();
+                    let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
+                    let (_, _, proof_nodes, hash_masks, tree_masks) = run_hash_builder(
+                        state.clone(),
+                        trie_cursor.account_trie_cursor().unwrap(),
+                        Default::default(),
+                        state.keys().copied(),
+                    );
+                    let mut revealed = proof_nodes_to_v2(proof_nodes, &hash_masks, &tree_masks);
+                    sparse.reveal_nodes(&mut revealed).unwrap();
+
+                    // Verify root still correct after re-reveal
+                    let mut post_rereveal_sparse = sparse.clone();
+                    assert_eq!(
+                        post_rereveal_sparse.root(),
+                        expected_root,
+                        "Root changed after re-reveal at round {round_idx}"
+                    );
+                }
+
+                // -- Phase 4: Restart from scratch on odd rounds (scenario 3) --
+                if round_idx % 3 == 1 && !state.is_empty() {
+                    // Simulate a fresh sparse trie on top of existing DB state
+                    let mut fresh_sparse = ParallelSparseTrie::default().with_updates(true);
+
+                    // Get root proof
+                    let provider = provider_factory.provider().unwrap();
+                    let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
+                    let (_, _, root_proof, root_hash_masks, root_tree_masks) = run_hash_builder(
+                        state.clone(),
+                        trie_cursor.account_trie_cursor().unwrap(),
+                        Default::default(),
+                        [Nibbles::default()],
+                    );
+                    let root_nodes =
+                        proof_nodes_to_v2(root_proof, &root_hash_masks, &root_tree_masks);
+                    if let Some(root_node) = root_nodes.iter().find(|n| n.path.is_empty()) {
+                        fresh_sparse
+                            .set_root(root_node.node.clone(), root_node.masks, true)
+                            .unwrap();
+                    }
+
+                    // Reveal all keys
+                    let provider = provider_factory.provider().unwrap();
+                    let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
+                    let (_, _, proof_nodes, hash_masks, tree_masks) = run_hash_builder(
+                        state.clone(),
+                        trie_cursor.account_trie_cursor().unwrap(),
+                        Default::default(),
+                        state.keys().copied(),
+                    );
+                    let mut revealed = proof_nodes_to_v2(proof_nodes, &hash_masks, &tree_masks);
+                    fresh_sparse.reveal_nodes(&mut revealed).unwrap();
+
+                    // Insert all current leaf values
+                    for (key, account) in &state {
+                        let trie_account = account.into_trie_account(EMPTY_ROOT_HASH);
+                        let mut account_rlp = Vec::new();
+                        trie_account.encode(&mut account_rlp);
+                        fresh_sparse.update_leaf(*key, account_rlp, &default_provider).unwrap();
+                    }
+
+                    // Verify root matches
+                    assert_eq!(
+                        fresh_sparse.root(),
+                        expected_root,
+                        "Fresh trie root mismatch at round {round_idx}"
+                    );
+
+                    // Continue with the fresh trie
+                    sparse = fresh_sparse;
+                }
+            }
+        }
+
+        fn transform_updates(
+            updates: Vec<BTreeMap<Nibbles, Account>>,
+            mut rng: impl rand::Rng,
+        ) -> (BTreeMap<Nibbles, Account>, Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)>)
+        {
+            let mut all_keys = BTreeSet::new();
+            let mut rounds = Vec::new();
+
+            // First batch becomes initial state
+            let initial_state = if let Some(first) = updates.first() {
+                all_keys.extend(first.keys().copied());
+                first.clone()
+            } else {
+                BTreeMap::new()
+            };
+
+            // Remaining batches become update rounds
+            for update in updates.into_iter().skip(1) {
+                all_keys.extend(update.keys().copied());
+
+                let keys_to_delete_len = update.len() / 2;
+                let keys_to_delete = (0..keys_to_delete_len)
+                    .filter_map(|_| {
+                        let key = *rand::seq::IteratorRandom::choose(all_keys.iter(), &mut rng)?;
+                        all_keys.take(&key)
+                    })
+                    .collect();
+
+                rounds.push((update, keys_to_delete));
+            }
+
+            (initial_state, rounds)
+        }
+
+        proptest!(ProptestConfig::with_cases(10), |(
+            updates in proptest::collection::vec(
+                proptest::collection::btree_map(
+                    any_with::<Nibbles>(SizeRange::new(KEY_NIBBLES_LEN..=KEY_NIBBLES_LEN)).prop_map(pad_nibbles_right),
+                    arb::<Account>(),
+                    1..30,
+                ),
+                2..20,
+            ).prop_perturb(transform_updates)
+        )| {
+            let (initial_state, rounds) = updates;
+            test(initial_state, rounds)
+        });
+    }
+
     #[test]
     fn sparse_trie_two_leaves_at_lower_roots() {
         let provider = DefaultTrieNodeProvider;
