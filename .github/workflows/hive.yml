@@ -111,6 +111,7 @@ jobs:
 
   wait-reth-docker:
     needs:
+      - detect-env
       - build-reth-stable-docker
       - build-reth-edge-docker
     if: needs.detect-env.outputs.use_docker == 'true'
@@ -120,12 +121,14 @@ jobs:
 
   wait-reth-prepare:
     needs:
+      - detect-env
       - prepare-reth-stable
       - prepare-reth-edge
     if: needs.detect-env.outputs.use_docker == 'false'
     runs-on: ubuntu-latest
     steps:
       - run: echo "prepared reth ready"
+
 
   test:
     needs:
