@@ -183,11 +183,13 @@ def compute_paired_stats(
     all_pairs = []
     all_lat_diffs = []
     all_mgas_diffs = []
+    blocks_per_pair = []
     for baseline, feature in zip(baseline_runs, feature_runs):
         pairs, lat_diffs, mgas_diffs = _paired_data(baseline, feature)
         all_pairs.extend(pairs)
         all_lat_diffs.extend(lat_diffs)
         all_mgas_diffs.extend(mgas_diffs)
+        blocks_per_pair.append(len(pairs))
 
     if not all_lat_diffs:
         return {}
@@ -237,6 +239,7 @@ def compute_paired_stats(
         "p99_ci_ms": (p99_boot[hi] - p99_boot[lo]) / 2,
         "mean_mgas_diff": mean_mgas_diff,
         "mgas_ci": mgas_ci,
+        "blocks": max(blocks_per_pair),
     }
 
 
@@ -298,7 +301,7 @@ def generate_comparison_table(
     feature_sha: str,
 ) -> str:
     """Generate a markdown comparison table between baseline and feature."""
-    n = paired["n"]
+    n = paired["blocks"]
 
     def pct(base: float, feat: float) -> float:
         return (feat - base) / base * 100.0 if base > 0 else 0.0

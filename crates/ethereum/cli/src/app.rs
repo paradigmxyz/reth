@@ -106,6 +106,11 @@ where
                 self.cli.logs.log_file_directory.join(chain_spec.chain().to_string());
         }
 
+        // Apply node-specific log defaults before initializing tracing
+        if matches!(self.cli.command, Commands::Node(_)) {
+            self.cli.logs.apply_node_defaults();
+        }
+
         self.init_tracing(&runner)?;
 
         // Install the prometheus recorder to be sure to record all metrics

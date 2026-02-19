@@ -108,7 +108,7 @@ jobs:
     steps:
       - name: Check org membership
         if: github.event_name == 'issue_comment'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -127,7 +127,7 @@ jobs:
 
       - name: Parse arguments
         id: args
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             let pr, actor, blocks, warmup, baseline, feature;
@@ -234,7 +234,7 @@ jobs:
 
       - name: Acknowledge request
         id: ack
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             if (context.eventName === 'issue_comment') {
@@ -298,7 +298,7 @@ jobs:
 
       - name: Poll queue position
         if: steps.ack.outputs.comment-id && steps.ack.outputs.queue-position != '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const pr = '${{ steps.args.outputs.pr }}';
@@ -366,21 +366,44 @@ jobs:
     env:
       BENCH_RPC_URL: https://ethereum.reth.rs/rpc
       SCHELK_MOUNT: /reth-bench
+      BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
       BENCH_PR: ${{ needs.reth-bench-ack.outputs.pr }}
       BENCH_ACTOR: ${{ needs.reth-bench-ack.outputs.actor }}
       BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
       BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
     steps:
+      - name: Resolve checkout ref
+        id: checkout-ref
+        uses: actions/github-script@v8
+        with:
+          script: |
+            if (!process.env.BENCH_PR) {
+              core.setOutput('ref', '${{ github.ref }}');
+              return;
+            }
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: parseInt(process.env.BENCH_PR),
+            });
+            // For closed/merged PRs, the merge ref doesn't exist — use head SHA
+            if (pr.state !== 'open') {
+              core.info(`PR #${process.env.BENCH_PR} is ${pr.state}, using head SHA ${pr.head.sha}`);
+              core.setOutput('ref', pr.head.sha);
+            } else {
+              core.setOutput('ref', `refs/pull/${process.env.BENCH_PR}/merge`);
+            }
+
       - uses: actions/checkout@v6
         with:
           submodules: true
           fetch-depth: 0
-          ref: ${{ env.BENCH_PR && format('refs/pull/{0}/merge', env.BENCH_PR) || github.ref }}
+          ref: ${{ steps.checkout-ref.outputs.ref }}
 
       - name: Resolve job URL and update status
         if: env.BENCH_COMMENT_ID
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
@@ -403,7 +426,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               comment_id: parseInt(process.env.BENCH_COMMENT_ID),
-              body: buildBody('Building baseline binary...'),
+              body: buildBody('Building binaries...'),
             });
 
       - uses: dtolnay/rust-toolchain@stable
@@ -417,7 +440,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
-          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv; do
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv pzstd jq; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -429,7 +452,7 @@ jobs:
       # Build binaries
       - name: Resolve PR head branch
         id: pr-info
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             if (process.env.BENCH_PR) {
@@ -474,21 +497,63 @@ jobs:
           echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
           echo "feature-name=$FEATURE_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch or build baseline binaries
-        id: build-baseline
-        run: .github/scripts/bench-reth-build.sh baseline "${{ steps.refs.outputs.baseline-ref }}"
+      - name: Check if snapshot needs update
+        id: snapshot-check
+        run: |
+          if .github/scripts/bench-reth-snapshot.sh --check; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Update status (baseline built)
-        if: success() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@v7
+      - name: Update status (snapshot needed)
+        if: env.BENCH_COMMENT_ID && steps.snapshot-check.outputs.needed == 'true'
+        uses: actions/github-script@v8
         with:
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
-            await s({github, context, status: 'Building feature binary...'});
+            await s({github, context, status: 'Building binaries & downloading snapshot...'});
 
-      - name: Fetch or build feature binaries
-        id: build-feature
-        run: .github/scripts/bench-reth-build.sh feature "${{ steps.refs.outputs.feature-ref }}"
+      - name: Prepare source dirs
+        run: |
+          BASELINE_REF="${{ steps.refs.outputs.baseline-ref }}"
+          if [ -d ../reth-baseline ]; then
+            git -C ../reth-baseline fetch origin "$BASELINE_REF"
+          else
+            git clone . ../reth-baseline
+          fi
+          git -C ../reth-baseline checkout "$BASELINE_REF"
+          ln -sfn "$(pwd)" ../reth-feature
+
+      - name: Build binaries and download snapshot in parallel
+        id: build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCH_REPO: ${{ github.repository }}
+          SNAPSHOT_NEEDED: ${{ steps.snapshot-check.outputs.needed }}
+        run: |
+          BASELINE_DIR="$(cd ../reth-baseline && pwd)"
+          FEATURE_DIR="$(cd ../reth-feature && pwd)"
+
+          .github/scripts/bench-reth-build.sh baseline "${BASELINE_DIR}" "${{ steps.refs.outputs.baseline-ref }}" &
+          PID_BASELINE=$!
+          .github/scripts/bench-reth-build.sh feature "${FEATURE_DIR}" "${{ steps.refs.outputs.feature-ref }}" &
+          PID_FEATURE=$!
+
+          PID_SNAPSHOT=
+          if [ "$SNAPSHOT_NEEDED" = "true" ]; then
+            .github/scripts/bench-reth-snapshot.sh &
+            PID_SNAPSHOT=$!
+          fi
+
+          FAIL=0
+          wait $PID_BASELINE || FAIL=1
+          wait $PID_FEATURE || FAIL=1
+          [ -n "$PID_SNAPSHOT" ] && { wait $PID_SNAPSHOT || FAIL=1; }
+          if [ $FAIL -ne 0 ]; then
+            echo "::error::One or more parallel tasks failed (builds / snapshot download)"
+            exit 1
+          fi
 
       # System tuning for reproducible benchmarks
       - name: System setup
@@ -532,32 +597,40 @@ jobs:
       # Clean up any leftover state
       - name: Pre-flight cleanup
         run: |
-          pkill -9 reth || true
-          mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+          sudo pkill -9 reth || true
+          sleep 1
+          if mountpoint -q "$SCHELK_MOUNT"; then
+            sudo umount -l "$SCHELK_MOUNT" || true
+            sudo schelk recover -y || true
+          fi
+          rm -rf "$BENCH_WORK_DIR"
+          mkdir -p "$BENCH_WORK_DIR"
 
-      - name: Update status (running baseline benchmark)
+      - name: Update status (running benchmarks)
         if: success() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const s = require('./.github/scripts/bench-update-status.js');
-            await s({github, context, status: 'Running baseline benchmark...'});
+            await s({github, context, status: 'Running benchmarks...'});
 
-      - name: "Run benchmark: baseline"
-        id: run-baseline
-        run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline target/profiling-baseline/reth /tmp/bench-results-baseline
+      # Interleaved run order (B-F-F-B) to reduce systematic bias from
+      # thermal drift and cache warming.
+      - name: "Run benchmark: baseline (1/2)"
+        id: run-baseline-1
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-1"
 
-      - name: Update status (running feature benchmark)
-        if: success() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const s = require('./.github/scripts/bench-update-status.js');
-            await s({github, context, status: 'Running feature benchmark...'});
+      - name: "Run benchmark: feature (1/2)"
+        id: run-feature-1
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-1"
 
-      - name: "Run benchmark: feature"
-        id: run-feature
-        run: taskset -c 0 .github/scripts/bench-reth-run.sh feature target/profiling/reth /tmp/bench-results-feature
+      - name: "Run benchmark: feature (2/2)"
+        id: run-feature-2
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh feature ../reth-feature/target/profiling/reth "$BENCH_WORK_DIR/feature-2"
+
+      - name: "Run benchmark: baseline (2/2)"
+        id: run-baseline-2
+        run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-2"
 
       # Results & charts
       - name: Parse results
@@ -576,16 +649,16 @@ jobs:
             BEHIND_BASELINE=$(git rev-list --count "${BASELINE_REF}..${BASELINE_HEAD}" 2>/dev/null || echo "0")
           fi
 
-          SUMMARY_ARGS="--output-summary /tmp/bench-summary.json"
-          SUMMARY_ARGS="$SUMMARY_ARGS --output-markdown /tmp/bench-comment.md"
+          SUMMARY_ARGS="--output-summary $BENCH_WORK_DIR/summary.json"
+          SUMMARY_ARGS="$SUMMARY_ARGS --output-markdown $BENCH_WORK_DIR/comment.md"
           SUMMARY_ARGS="$SUMMARY_ARGS --repo ${{ github.repository }}"
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-ref ${BASELINE_REF}"
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-name ${BASELINE_NAME}"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-name ${FEATURE_NAME}"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-ref ${FEATURE_REF}"
-          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv /tmp/bench-results-baseline/combined_latency.csv"
-          SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv /tmp/bench-results-feature/combined_latency.csv"
-          SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv /tmp/bench-results-feature/total_gas.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv $BENCH_WORK_DIR/baseline-1/combined_latency.csv $BENCH_WORK_DIR/baseline-2/combined_latency.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv $BENCH_WORK_DIR/feature-1/combined_latency.csv $BENCH_WORK_DIR/feature-2/combined_latency.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv $BENCH_WORK_DIR/feature-1/total_gas.csv"
           if [ "$BEHIND_BASELINE" -gt 0 ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --behind-baseline $BEHIND_BASELINE"
           fi
@@ -598,8 +671,9 @@ jobs:
           BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
           FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
         run: |
-          CHART_ARGS="/tmp/bench-results-feature/combined_latency.csv --output-dir /tmp/bench-charts"
-          CHART_ARGS="$CHART_ARGS --baseline /tmp/bench-results-baseline/combined_latency.csv"
+          CHART_ARGS="--output-dir $BENCH_WORK_DIR/charts"
+          CHART_ARGS="$CHART_ARGS --feature $BENCH_WORK_DIR/feature-1/combined_latency.csv $BENCH_WORK_DIR/feature-2/combined_latency.csv"
+          CHART_ARGS="$CHART_ARGS --baseline $BENCH_WORK_DIR/baseline-1/combined_latency.csv $BENCH_WORK_DIR/baseline-2/combined_latency.csv"
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
@@ -607,14 +681,10 @@ jobs:
 
       - name: Upload results
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: bench-reth-results
-          path: |
-            /tmp/bench-results-baseline/
-            /tmp/bench-results-feature/
-            /tmp/bench-summary.json
-            /tmp/bench-charts/
+          path: ${{ env.BENCH_WORK_DIR }}
 
       - name: Push charts
         id: push-charts
@@ -632,7 +702,7 @@ jobs:
           fi
 
           mkdir -p "${CHART_DIR}"
-          cp /tmp/bench-charts/*.png "${CHART_DIR}/"
+          cp "$BENCH_WORK_DIR"/charts/*.png "${CHART_DIR}/"
           git add "${CHART_DIR}"
           git -c user.name="github-actions" -c user.email="github-actions@github.com" \
             commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
@@ -641,14 +711,14 @@ jobs:
 
       - name: Compare & comment
         if: success()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
 
             let comment = '';
             try {
-              comment = fs.readFileSync('/tmp/bench-comment.md', 'utf8');
+              comment = fs.readFileSync(process.env.BENCH_WORK_DIR + '/comment.md', 'utf8');
             } catch (e) {
               comment = '⚠️ Engine benchmark completed but failed to generate comparison.';
             }
@@ -691,14 +761,15 @@ jobs:
 
       - name: Update status (failed)
         if: failure() && env.BENCH_COMMENT_ID
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const steps_status = [
-              ['building baseline binary', '${{ steps.build-baseline.outcome }}'],
-              ['building feature binary', '${{ steps.build-feature.outcome }}'],
-              ['running baseline benchmark', '${{ steps.run-baseline.outcome }}'],
-              ['running feature benchmark', '${{ steps.run-feature.outcome }}'],
+              ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
+              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
+              ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
+              ['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}'],
+              ['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}'],
             ];
             const failed = steps_status.find(([, o]) => o === 'failure');
             const failedStep = failed ? failed[0] : 'unknown step';
@@ -711,12 +782,11 @@ jobs:
 
       - name: Upload node log
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: reth-node-log
           path: |
-            /tmp/reth-bench-node-baseline.log
-            /tmp/reth-bench-node-feature.log
+            ${{ env.BENCH_WORK_DIR }}/*/node.log
 
       - name: Restore system settings
         if: always()

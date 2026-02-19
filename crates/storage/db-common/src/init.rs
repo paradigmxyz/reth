@@ -182,7 +182,7 @@ where
                         target: "reth::storage",
                         ?stored,
                         requested = ?genesis_storage_settings,
-                        "Storage settings mismatch detected"
+                        "Storage settings mismatch detected. Using the stored settings from the existing database."
                     );
                 }
 

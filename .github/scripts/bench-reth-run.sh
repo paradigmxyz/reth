@@ -12,7 +12,8 @@ LABEL="$1"
 BINARY="$2"
 OUTPUT_DIR="$3"
 DATADIR="$SCHELK_MOUNT/datadir"
-LOG="/tmp/reth-bench-node-${LABEL}.log"
+mkdir -p "$OUTPUT_DIR"
+LOG="${OUTPUT_DIR}/node.log"
 
 cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
@@ -23,8 +24,12 @@ cleanup() {
       sleep 1
     done
     sudo kill -9 "$RETH_PID" 2>/dev/null || true
+    sleep 1
   fi
-  mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+  if mountpoint -q "$SCHELK_MOUNT"; then
+    sudo umount -l "$SCHELK_MOUNT" || true
+    sudo schelk recover -y || true
+  fi
 }
 TAIL_PID=
 trap cleanup EXIT
