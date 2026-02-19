@@ -495,7 +495,7 @@ impl Runtime {
     ) -> crate::LazyHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
-        R: Send + Sync + 'static,
+        R: Send + 'static,
     {
         crate::LazyHandle::new(self.0.worker_map.spawn_on(name, func))
     }

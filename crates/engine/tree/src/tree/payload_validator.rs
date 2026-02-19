@@ -360,10 +360,7 @@ where
         let convert_to_block =
             move |input: BlockOrPayload<T>| -> Result<SealedBlock<N::Block>, NewPayloadError> {
                 match convert_to_block {
-                    Either::Left(handle) => match handle.get() {
-                        Ok(block) => Ok(block.clone()),
-                        Err(e) => Err(NewPayloadError::Other(e.to_string().into())),
-                    },
+                    Either::Left(handle) => handle.into_inner(),
                     Either::Right(()) => {
                         let BlockOrPayload::Block(block) = input else { unreachable!() };
                         Ok(block)

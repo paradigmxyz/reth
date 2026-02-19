@@ -34,9 +34,7 @@ impl<T: Send + 'static> LazyHandle<T> {
             }),
         }
     }
-}
 
-impl<T> LazyHandle<T> {
     /// Creates a handle that is already resolved with the given value.
     pub fn ready(value: T) -> Self {
         let inner = LazyHandleInner {
@@ -69,25 +67,25 @@ impl<T> LazyHandle<T> {
 
     /// Consumes the handle and returns the inner value.
     ///
-    /// If this is the only handle (no other clones exist), the value is returned without
-    /// cloning. Otherwise the value is cloned.
-    ///
     /// Blocks if the background task hasn't completed yet.
-    pub fn into_inner(self) -> T
-    where
-        T: Clone,
-    {
+    ///
+    /// # Panics
+    ///
+    /// Panics if other clones of this handle still exist.
+    pub fn into_inner(self) -> T {
         // Ensure the value is resolved.
         self.get();
 
-        match Arc::try_unwrap(self.inner) {
-            Ok(inner) => inner.value.into_inner().expect("value was just set by get()"),
-            Err(arc) => arc.value.get().expect("value was just set by get()").clone(),
-        }
+        Arc::try_unwrap(self.inner)
+            .ok()
+            .expect("LazyHandle::into_inner called with outstanding clones")
+            .value
+            .into_inner()
+            .expect("value was just set by get()")
     }
 }
 
-impl<T: std::fmt::Debug> std::fmt::Debug for LazyHandle<T> {
+impl<T: Send + std::fmt::Debug + 'static> std::fmt::Debug for LazyHandle<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = f.debug_struct("LazyHandle");
         if let Some(value) = self.inner.value.get() {
@@ -132,12 +130,13 @@ mod tests {
     }
 
     #[test]
-    fn test_lazy_handle_into_inner_with_clone() {
+    #[should_panic(expected = "LazyHandle::into_inner called with outstanding clones")]
+    fn test_lazy_handle_into_inner_with_clone_panics() {
         let (tx, rx) = oneshot::channel();
         let handle = LazyHandle::new(rx);
         let _clone = handle.clone();
         tx.send(String::from("hello")).unwrap();
-        assert_eq!(handle.into_inner(), "hello");
+        handle.into_inner();
     }
 
     #[test]
