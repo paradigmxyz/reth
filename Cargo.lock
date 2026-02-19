@@ -10159,6 +10159,7 @@ dependencies = [
  "reth-execution-types",
  "reth-exex",
  "reth-fs-util",
+ "reth-libmdbx",
  "reth-network-p2p",
  "reth-network-peers",
  "reth-primitives-traits",

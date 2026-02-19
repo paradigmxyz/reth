@@ -2502,8 +2502,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             tracing::trace!("Writing storage changes");
             let mut storages_cursor =
                 self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
-            let mut hashed_storages_cursor =
-                self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
             for (block_index, mut storage_changes) in reverts.storage.into_iter().enumerate() {
                 let block_number = first_block + block_index as BlockNumber;
 
@@ -2527,11 +2525,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     // storage state has to be taken from the database and written to storage
                     // history. See [StorageWipe::Primary] for more details.
                     //
-                    // When `use_hashed_state` is enabled, we read from `HashedStorages`
-                    // instead of `PlainStorageState`. The hashed entries already have
-                    // `keccak256(slot)` keys which is exactly the format needed for hashed
-                    // changesets (static file changesets always use hashed keys when
-                    // `use_hashed_state` is true).
+                    // In `use_hashed_state` mode, the `ExecutionStage` has already injected
+                    // plain-key slot entries into the wipe reverts via the slot-preimage
+                    // lookup table, so we only need the plain-state DB walk here.
                     //
                     // TODO(mediocregopher): This could be rewritten in a way which doesn't
                     // require collecting wiped entries into a Vec like this, see
@@ -2539,17 +2535,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     let mut wiped_storage = Vec::new();
                     if wiped {
                         tracing::trace!(?address, "Wiping storage");
-                        if use_hashed_state {
-                            let hashed_address = keccak256(address);
-                            if let Some((_, entry)) =
-                                hashed_storages_cursor.seek_exact(hashed_address)?
-                            {
-                                wiped_storage.push((entry.key, entry.value));
-                                while let Some(entry) = hashed_storages_cursor.next_dup_val()? {
-                                    wiped_storage.push((entry.key, entry.value))
-                                }
-                            }
-                        } else if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
+                        if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                             wiped_storage.push((entry.key, entry.value));
                             while let Some(entry) = storages_cursor.next_dup_val()? {
                                 wiped_storage.push((entry.key, entry.value))

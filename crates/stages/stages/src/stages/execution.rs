@@ -1,10 +1,14 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{keccak256, BlockNumber, B256};
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    transaction::DbTx,
+};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
@@ -15,7 +19,7 @@ use reth_provider::{
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, revm::database::states::RevertToSlot};
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     ExecutionCheckpoint, ExecutionStageThresholds, Stage, StageCheckpoint, StageError, StageId,
@@ -25,15 +29,19 @@ use reth_static_file_types::StaticFileSegment;
 use reth_trie::KeccakKeyHasher;
 use std::{
     cmp::{max, Ordering},
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     ops::RangeInclusive,
+    path::PathBuf,
     sync::Arc,
     task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
 use tracing::*;
 
-use super::missing_static_data_error;
+use super::{
+    missing_static_data_error,
+    slot_preimages::{SlotPreimages, SlotPreimagesReader},
+};
 
 /// The execution stage executes all transactions and
 /// update history indexes.
@@ -91,6 +99,13 @@ where
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
+    /// Path for the auxiliary slot-preimage MDBX database.
+    ///
+    /// When set, enables storage-slot preimage tracking for pre-Cancun selfdestruct handling
+    /// in `--storage.v2` mode so that changesets always contain plain (unhashed) storage keys.
+    slot_preimages_path: Option<PathBuf>,
+    /// Lazily-opened slot preimage store.
+    slot_preimages: Option<SlotPreimages>,
 }
 
 impl<E> ExecutionStage<E>
@@ -114,7 +129,19 @@ where
             post_unwind_commit_input: None,
             exex_manager_handle,
             metrics: ExecutorMetrics::default(),
+            slot_preimages_path: None,
+            slot_preimages: None,
         }
+    }
+
+    /// Sets the path for the auxiliary slot-preimage database.
+    ///
+    /// When enabled, the execution stage will track `keccak256(slot) → slot` mappings so that
+    /// pre-Cancun selfdestruct wipe changesets always contain plain storage keys instead of
+    /// hashed ones.
+    pub fn with_slot_preimages_path(mut self, path: PathBuf) -> Self {
+        self.slot_preimages_path = Some(path);
+        self
     }
 
     /// Create an execution stage with the provided executor.
@@ -252,6 +279,122 @@ where
             }
         }
 
+        Ok(())
+    }
+
+    /// Collects `keccak256(slot) → slot` preimage entries from the bundle state and stores
+    /// them in the auxiliary preimage database, then rewrites wipe reverts for self-destructed
+    /// accounts to use plain slot keys instead of relying on the hashed-storage DB walk.
+    ///
+    /// This eliminates the need for the changeset writer to read from `HashedStorages` during
+    /// storage wipes, keeping all changeset keys in plain format.
+    fn inject_plain_wipe_slots<P: DBProvider>(
+        &mut self,
+        provider: &P,
+        state: &mut ExecutionOutcome<<E::Primitives as NodePrimitives>::Receipt>,
+    ) -> Result<(), StageError> {
+        // Collect preimage entries from all storage changes in the bundle.
+        // StorageKey in revm is U256, representing a plain EVM slot index.
+        let mut preimage_entries = Vec::new();
+        let mut seen_hashes = HashSet::new();
+        for (_, account) in state.bundle.state() {
+            for (&slot_key, _) in account.storage.iter() {
+                let plain = B256::from(slot_key.to_be_bytes());
+                let hashed = keccak256(plain);
+                if seen_hashes.insert(hashed) {
+                    preimage_entries.push((hashed, plain));
+                }
+            }
+        }
+
+        // Lazily open the preimage store if we have entries to write.
+        if !preimage_entries.is_empty() {
+            if self.slot_preimages.is_none() {
+                if let Some(path) = &self.slot_preimages_path {
+                    self.slot_preimages = Some(SlotPreimages::open(path).map_err(|e| {
+                        StageError::Fatal(Box::new(std::io::Error::other(e.to_string())))
+                    })?);
+                }
+            }
+
+            if let Some(preimages) = &self.slot_preimages {
+                preimages.insert_preimages(&preimage_entries).map_err(|e| {
+                    StageError::Fatal(Box::new(std::io::Error::other(e.to_string())))
+                })?;
+            }
+        }
+
+        // Find all wipe reverts (self-destructed accounts) and inject plain slot keys.
+        // Track addresses already wiped within this batch to handle the case where an
+        // account is destroyed, re-created, and destroyed again in the same batch.
+        let mut already_wiped = HashSet::new();
+
+        // Open a single RO transaction for all preimage lookups in this batch.
+        let reader = self
+            .slot_preimages
+            .as_ref()
+            .map(|p| {
+                p.reader()
+                    .map_err(|e| StageError::Fatal(Box::new(std::io::Error::other(e.to_string()))))
+            })
+            .transpose()?;
+
+        for block_reverts in state.bundle.reverts.iter_mut() {
+            for (address, revert) in block_reverts.iter_mut() {
+                if !revert.wipe_storage {
+                    continue;
+                }
+
+                if !already_wiped.insert(*address) {
+                    // Second (or subsequent) destruction within the same batch: skip the DB walk.
+                    // All slots from re-creation are already in `revert.storage` as explicit
+                    // changes from execution.
+                    continue;
+                }
+
+                let Some(reader) = &reader else {
+                    continue;
+                };
+
+                // Walk all hashed storage slots for this account in the DB and look up
+                // their plain-key preimages.
+                let addr = *address;
+                let hashed_address = keccak256(addr);
+                let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>()?;
+
+                if let Some((_, entry)) = cursor.seek_exact(hashed_address)? {
+                    Self::inject_preimage_entry(reader, revert, addr, entry.key, entry.value)?;
+                    while let Some(entry) = cursor.next_dup_val()? {
+                        Self::inject_preimage_entry(reader, revert, addr, entry.key, entry.value)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Looks up the plain-key preimage for a single hashed storage slot and inserts it
+    /// into the account revert if not already present.
+    fn inject_preimage_entry(
+        reader: &SlotPreimagesReader,
+        revert: &mut reth_revm::revm::database::AccountRevert,
+        address: alloy_primitives::Address,
+        hashed_slot: B256,
+        value: alloy_primitives::U256,
+    ) -> Result<(), StageError> {
+        let plain_slot = reader
+            .get(&hashed_slot)
+            .map_err(|e| StageError::Fatal(Box::new(std::io::Error::other(e.to_string()))))?
+            .ok_or_else(|| {
+                StageError::Fatal(Box::new(std::io::Error::other(format!(
+                    "missing slot preimage for {hashed_slot:?} (addr={address:?})"
+                ))))
+            })?;
+
+        // Convert B256 plain slot to U256 StorageKey for the revert map.
+        let plain_key = alloy_primitives::U256::from_be_bytes(plain_slot.0);
+        revert.storage.entry(plain_key).or_insert(RevertToSlot::Some(value));
         Ok(())
     }
 }
@@ -460,6 +603,15 @@ where
                     reverts.clear();
                 }
             }
+        }
+
+        // When using hashed state (storage.v2), inject plain storage-slot keys into wipe
+        // reverts for self-destructed accounts. Without this, the changeset writer would only
+        // see hashed slot keys (from `HashedStorages`) which pollutes the entire codebase.
+        //
+        // Self-destructs were disabled at Cancun, so this is only needed for historical sync.
+        if provider.cached_storage_settings().use_hashed_state() {
+            self.inject_plain_wipe_slots(provider, &mut state)?;
         }
 
         // Write output. When `use_hashed_state` is enabled, `write_state` skips writing to

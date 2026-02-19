@@ -20,6 +20,7 @@ mod merkle;
 mod prune;
 /// The sender recovery stage.
 mod sender_recovery;
+mod slot_preimages;
 /// The transaction lookup stage
 mod tx_lookup;
 

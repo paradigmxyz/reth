@@ -20,6 +20,7 @@ reth-consensus.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
 reth-etl.workspace = true
+reth-libmdbx.workspace = true
 reth-evm = { workspace = true, features = ["metrics"] }
 reth-era-downloader.workspace = true
 reth-era-utils.workspace = true
