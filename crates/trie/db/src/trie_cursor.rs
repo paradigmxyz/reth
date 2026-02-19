@@ -120,7 +120,11 @@ where
         + DbDupCursorRO<tables::StoragesTrie>
         + DbDupCursorRW<tables::StoragesTrie>,
 {
-    /// Writes storage updates that are already sorted
+    /// Writes storage updates that are already sorted.
+    ///
+    /// Uses a merge-walk to minimize random seeks: positions the cursor once via
+    /// `seek_by_key_subkey` at the first update's nibbles, then walks both the
+    /// sorted updates and DB duplicates simultaneously using `next_dup()`.
     pub fn write_storage_trie_updates_sorted(
         &mut self,
         updates: &StorageTrieUpdatesSorted,
@@ -131,26 +135,54 @@ where
         }
 
         let mut num_entries = 0;
-        for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
-        {
+        let mut iter = updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty()).peekable();
+
+        let Some(&(first_nibbles, _)) = iter.peek() else {
+            return Ok(num_entries);
+        };
+
+        // Position cursor at the first relevant duplicate for this account.
+        let mut db_entry = self
+            .cursor
+            .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(first_nibbles.clone()))?;
+
+        for (nibbles, maybe_updated) in iter {
             num_entries += 1;
-            let nibbles = StoredNibblesSubKey(*nibbles);
-            // Delete the old entry if it exists.
-            if self
-                .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .filter(|e| e.nibbles == nibbles)
-                .is_some()
-            {
+            let sub = StoredNibblesSubKey(nibbles.clone());
+
+            // Advance DB cursor past entries before the current update nibbles.
+            while let Some(ref entry) = db_entry {
+                if entry.nibbles >= sub {
+                    break;
+                }
+                db_entry = self
+                    .cursor
+                    .next_dup()?
+                    .filter(|(k, _)| k == &self.hashed_address)
+                    .map(|(_, v)| v);
+            }
+
+            // Delete existing entry if nibbles match exactly.
+            if db_entry.as_ref().is_some_and(|entry| entry.nibbles == sub) {
                 self.cursor.delete_current()?;
+                db_entry = self
+                    .cursor
+                    .current()?
+                    .filter(|(k, _)| k == &self.hashed_address)
+                    .map(|(_, v)| v);
             }
 
             // There is an updated version of this node, insert new entry.
             if let Some(node) = maybe_updated {
                 self.cursor.upsert(
                     self.hashed_address,
-                    &StorageTrieEntry { nibbles, node: node.clone() },
+                    &StorageTrieEntry { nibbles: sub, node: node.clone() },
                 )?;
+                db_entry = self
+                    .cursor
+                    .next_dup()?
+                    .filter(|(k, _)| k == &self.hashed_address)
+                    .map(|(_, v)| v);
             }
         }
 

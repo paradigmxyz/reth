@@ -2669,7 +2669,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         }
 
-        // Write hashed storage changes.
+        // Write hashed storage changes using a merge-walk to minimize random seeks.
+        // Both the update slots and the DB duplicates are sorted by hashed slot key,
+        // so we can walk them simultaneously using sequential cursor operations.
         let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
         let mut hashed_storage_cursor =
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
@@ -2678,18 +2680,43 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
-            for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
+            let slots = storage.storage_slots_ref();
+            if slots.is_empty() {
+                continue;
+            }
 
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
+            // Position cursor at the first relevant duplicate for this account.
+            let mut db_entry =
+                hashed_storage_cursor.seek_by_key_subkey(*hashed_address, slots[0].0)?;
+
+            for &(hashed_slot, value) in slots {
+                // Advance DB cursor past entries before the current update slot.
+                while let Some(ref entry) = db_entry {
+                    if entry.key >= hashed_slot {
+                        break;
+                    }
+                    db_entry = hashed_storage_cursor
+                        .next_dup()?
+                        .filter(|(k, _)| k == hashed_address)
+                        .map(|(_, v)| v);
                 }
 
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                // Delete existing entry if subkey matches exactly.
+                if db_entry.as_ref().is_some_and(|entry| entry.key == hashed_slot) {
+                    hashed_storage_cursor.delete_current()?;
+                    db_entry = hashed_storage_cursor
+                        .current()?
+                        .filter(|(k, _)| k == hashed_address)
+                        .map(|(_, v)| v);
+                }
+
+                if !value.is_zero() {
+                    hashed_storage_cursor
+                        .upsert(*hashed_address, &StorageEntry { key: hashed_slot, value })?;
+                    db_entry = hashed_storage_cursor
+                        .next_dup()?
+                        .filter(|(k, _)| k == hashed_address)
+                        .map(|(_, v)| v);
                 }
             }
         }
