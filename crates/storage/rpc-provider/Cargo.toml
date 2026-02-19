@@ -16,6 +16,7 @@ workspace = true
 reth-storage-api.workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-errors.workspace = true
 reth-execution-types.workspace = true
@@ -24,7 +25,6 @@ reth-node-types.workspace = true
 reth-trie.workspace = true
 reth-stages-types.workspace = true
 reth-db-api.workspace = true
-reth-rpc-convert.workspace = true
 
 # alloy
 alloy-provider = { workspace = true, features = ["debug-api"] }
@@ -40,7 +40,7 @@ tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 # other
 tracing.workspace = true
-parking_lot.workspace = true
+dashmap = { workspace = true, features = ["inline"] }
 
 # revm
 revm.workspace = true

@@ -37,7 +37,7 @@ mod key;
 pub use key::{KeccakKeyHasher, KeyHasher};
 
 mod nibbles;
-pub use nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey};
+pub use nibbles::{depth_first_cmp, Nibbles, StoredNibbles, StoredNibblesSubKey};
 
 mod storage;
 pub use storage::StorageTrieEntry;
@@ -47,6 +47,9 @@ pub use subnode::StoredSubNode;
 
 mod trie;
 pub use trie::{BranchNodeMasks, BranchNodeMasksMap, ProofTrieNode};
+
+mod trie_node_v2;
+pub use trie_node_v2::*;
 
 /// The implementation of a container for storing intermediate changes to a trie.
 /// The container indicates when the trie has been modified.
@@ -85,4 +88,6 @@ pub mod serde_bincode_compat {
 }
 
 /// Re-export
-pub use alloy_trie::{nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH};
+pub use alloy_trie::{
+    nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, TrieMaskIter, EMPTY_ROOT_HASH,
+};

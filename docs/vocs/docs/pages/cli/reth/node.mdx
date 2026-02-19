@@ -293,6 +293,11 @@ Networking:
 
           Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
 
+      --enforce-enr-fork-id
+          Enforce EIP-868 ENR fork ID validation for discovered peers.
+
+          When enabled, peers discovered without a confirmed fork ID are not added to the peer set until their fork ID is verified via EIP-868 ENR request. This filters out peers from other networks that pollute the discovery table.
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -367,7 +372,7 @@ RPC:
 
           This will enforce JWT authentication for all requests coming from the consensus layer.
 
-          If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
+          If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex` by default.
 
       --auth-ipc
           Enable auth engine API over IPC
@@ -539,6 +544,11 @@ Gas Price Oracle:
           Skip invalid transactions in `testing_buildBlockV1` instead of failing.
 
           When enabled, transactions that fail execution will be skipped, and all subsequent transactions from the same sender will also be skipped.
+
+      --rpc.force-blob-sidecar-upcasting
+          Force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
+
+          When enabled, blob transactions submitted via `eth_sendRawTransaction` with EIP-4844 sidecars will be automatically converted to EIP-7594 format if the next block is Osaka. By default this is disabled, meaning transactions are submitted as-is.
 
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
@@ -832,7 +842,7 @@ Dev testnet:
 
 Pruning:
       --full
-          Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored
+          Run full node. Only the most recent [`MINIMUM_UNWIND_SAFE_DISTANCE`] block states are stored
 
       --minimal
           Run minimal storage mode with maximum pruning and smaller static files.
@@ -902,36 +912,6 @@ Pruning:
       --prune.bodies.before <BLOCK_NUMBER>
           Prune storage history before the specified block number. The specified block number is not pruned
 
-RocksDB:
-      --rocksdb.all
-          Route all supported tables to `RocksDB` instead of MDBX.
-
-          This enables `RocksDB` for `tx-hash`, `storages-history`, and `account-history` tables. Cannot be combined with individual flags set to false.
-
-      --rocksdb.tx-hash <TX_HASH>
-          Route tx hash -> number table to `RocksDB` instead of MDBX.
-
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
-
-          [default: false]
-          [possible values: true, false]
-
-      --rocksdb.storages-history <STORAGES_HISTORY>
-          Route storages history tables to `RocksDB` instead of MDBX.
-
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
-
-          [default: false]
-          [possible values: true, false]
-
-      --rocksdb.account-history <ACCOUNT_HISTORY>
-          Route account history tables to `RocksDB` instead of MDBX.
-
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
-
-          [default: false]
-          [possible values: true, false]
-
 Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for the engine. This determines how many canonical blocks must be in-memory, ahead of the last persisted block, before flushing canonical blocks to disk again.
@@ -996,16 +976,38 @@ Engine:
           Allow unwinding canonical header to ancestor during forkchoice updates. See `TreeConfig::unwind_canonical_header` for more details
 
       --engine.storage-worker-count <STORAGE_WORKER_COUNT>
-          Configure the number of storage proof workers in the Tokio blocking pool. If not specified, defaults to 2x available parallelism, clamped between 2 and 64
+          Configure the number of storage proof workers in the Tokio blocking pool. If not specified, defaults to 2x available parallelism
 
       --engine.account-worker-count <ACCOUNT_WORKER_COUNT>
           Configure the number of account proof workers in the Tokio blocking pool. If not specified, defaults to the same count as storage workers
 
-      --engine.enable-proof-v2
-          Enable V2 storage proofs for state root calculations
+      --engine.prewarming-threads <PREWARMING_THREADS>
+          Configure the number of prewarming threads. If not specified, defaults to available parallelism
 
       --engine.disable-cache-metrics
           Disable cache metrics recording, which can take up to 50ms with large cached state
+
+      --engine.sparse-trie-prune-depth <SPARSE_TRIE_PRUNE_DEPTH>
+          Sparse trie prune depth
+
+          [default: 4]
+
+      --engine.sparse-trie-max-storage-tries <SPARSE_TRIE_MAX_STORAGE_TRIES>
+          Maximum number of storage tries to retain after sparse trie pruning
+
+          [default: 100]
+
+      --engine.disable-sparse-trie-cache-pruning
+          Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved without any node pruning or storage trie eviction between blocks. Useful for benchmarking the effects of retaining the full trie cache
+
+      --engine.state-root-task-timeout <STATE_ROOT_TASK_TIMEOUT>
+          Configure the timeout for the state root task before spawning a sequential fallback. If the state root task takes longer than this, a sequential computation starts in parallel and whichever finishes first is used.
+
+          --engine.state-root-task-timeout 1s --engine.state-root-task-timeout 400ms
+
+          Set to 0s to disable.
+
+          [default: 1s]
 
 ERA:
       --era.enable
@@ -1041,69 +1043,15 @@ Static Files:
       --static-files.blocks-per-file.storage-change-sets <BLOCKS_PER_FILE_STORAGE_CHANGE_SETS>
           Number of blocks per file for the storage changesets segment
 
-      --static-files.receipts <RECEIPTS>
-          Store receipts in static files instead of the database.
+Storage:
+      --storage.v2
+          Enable v2 storage defaults (static files + `RocksDB` routing).
 
-          When enabled, receipts will be written to static files on disk instead of the database.
+          When enabled, the node uses optimized storage settings: - Receipts and transaction senders in static files - History indices in `RocksDB` (accounts, storages, transaction hashes) - Account and storage changesets in static files
 
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+          This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
 
-          [default: false]
-          [possible values: true, false]
-
-      --static-files.transaction-senders <TRANSACTION_SENDERS>
-          Store transaction senders in static files instead of the database.
-
-          When enabled, transaction senders will be written to static files on disk instead of the database.
-
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          [default: false]
-          [possible values: true, false]
-
-      --static-files.account-change-sets <ACCOUNT_CHANGESETS>
-          Store account changesets in static files.
-
-          When enabled, account changesets will be written to static files on disk instead of the database.
-
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          [default: false]
-          [possible values: true, false]
-
-      --static-files.storage-change-sets <STORAGE_CHANGESETS>
-          Store storage changesets in static files.
-
-          When enabled, storage changesets will be written to static files on disk instead of the database.
-
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          [default: false]
-          [possible values: true, false]
-
-Ress:
-      --ress.enable
-          Enable support for `ress` subprotocol
-
-      --ress.max-active-connections <MAX_ACTIVE_CONNECTIONS>
-          The maximum number of active connections for `ress` subprotocol
-
-          [default: 5]
-
-      --ress.max-witness-window <MAX_WITNESS_WINDOW>
-          The maximum witness lookback window
-
-          [default: 1024]
-
-      --ress.witness-max-parallel <WITNESS_MAX_PARALLEL>
-          The maximum number of witnesses to generate in parallel
-
-          [default: 5]
-
-      --ress.witness-cache-size <WITNESS_CACHE_SIZE>
-          Witness cache size
-
-          [default: 10]
+          Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
 
 Logging:
       --log.stdout.format <FORMAT>

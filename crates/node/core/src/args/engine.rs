@@ -1,8 +1,11 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::{builder::Resettable, Args};
-use reth_engine_primitives::{TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE};
-use std::sync::OnceLock;
+use reth_engine_primitives::{
+    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+    DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+};
+use std::{sync::OnceLock, time::Duration};
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
@@ -35,8 +38,12 @@ pub struct DefaultEngineValues {
     allow_unwind_canonical_header: bool,
     storage_worker_count: Option<usize>,
     account_worker_count: Option<usize>,
-    enable_proof_v2: bool,
+    prewarming_threads: Option<usize>,
     cache_metrics_disabled: bool,
+    sparse_trie_prune_depth: usize,
+    sparse_trie_max_storage_tries: usize,
+    disable_sparse_trie_cache_pruning: bool,
+    state_root_task_timeout: Option<String>,
 }
 
 impl DefaultEngineValues {
@@ -161,15 +168,39 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set whether to enable proof V2 by default
-    pub const fn with_enable_proof_v2(mut self, v: bool) -> Self {
-        self.enable_proof_v2 = v;
+    /// Set the default prewarming thread count
+    pub const fn with_prewarming_threads(mut self, v: Option<usize>) -> Self {
+        self.prewarming_threads = v;
         self
     }
 
     /// Set whether to disable cache metrics by default
     pub const fn with_cache_metrics_disabled(mut self, v: bool) -> Self {
         self.cache_metrics_disabled = v;
+        self
+    }
+
+    /// Set the sparse trie prune depth by default
+    pub const fn with_sparse_trie_prune_depth(mut self, v: usize) -> Self {
+        self.sparse_trie_prune_depth = v;
+        self
+    }
+
+    /// Set the maximum number of storage tries to retain after sparse trie pruning by default
+    pub const fn with_sparse_trie_max_storage_tries(mut self, v: usize) -> Self {
+        self.sparse_trie_max_storage_tries = v;
+        self
+    }
+
+    /// Set whether to disable sparse trie cache pruning by default
+    pub const fn with_disable_sparse_trie_cache_pruning(mut self, v: bool) -> Self {
+        self.disable_sparse_trie_cache_pruning = v;
+        self
+    }
+
+    /// Set the default state root task timeout
+    pub fn with_state_root_task_timeout(mut self, v: Option<String>) -> Self {
+        self.state_root_task_timeout = v;
         self
     }
 }
@@ -195,8 +226,12 @@ impl Default for DefaultEngineValues {
             allow_unwind_canonical_header: false,
             storage_worker_count: None,
             account_worker_count: None,
-            enable_proof_v2: false,
+            prewarming_threads: None,
             cache_metrics_disabled: false,
+            sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+            sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            disable_sparse_trie_cache_pruning: false,
+            state_root_task_timeout: Some("1s".to_string()),
         }
     }
 }
@@ -308,7 +343,7 @@ pub struct EngineArgs {
     pub allow_unwind_canonical_header: bool,
 
     /// Configure the number of storage proof workers in the Tokio blocking pool.
-    /// If not specified, defaults to 2x available parallelism, clamped between 2 and 64.
+    /// If not specified, defaults to 2x available parallelism.
     #[arg(long = "engine.storage-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().storage_worker_count.map(|v| v.to_string().into())))]
     pub storage_worker_count: Option<usize>,
 
@@ -317,13 +352,43 @@ pub struct EngineArgs {
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
 
-    /// Enable V2 storage proofs for state root calculations
-    #[arg(long = "engine.enable-proof-v2", default_value_t = DefaultEngineValues::get_global().enable_proof_v2)]
-    pub enable_proof_v2: bool,
+    /// Configure the number of prewarming threads.
+    /// If not specified, defaults to available parallelism.
+    #[arg(long = "engine.prewarming-threads", default_value = Resettable::from(DefaultEngineValues::get_global().prewarming_threads.map(|v| v.to_string().into())))]
+    pub prewarming_threads: Option<usize>,
 
     /// Disable cache metrics recording, which can take up to 50ms with large cached state.
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
+
+    /// Sparse trie prune depth.
+    #[arg(long = "engine.sparse-trie-prune-depth", default_value_t = DefaultEngineValues::get_global().sparse_trie_prune_depth)]
+    pub sparse_trie_prune_depth: usize,
+
+    /// Maximum number of storage tries to retain after sparse trie pruning.
+    #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries)]
+    pub sparse_trie_max_storage_tries: usize,
+
+    /// Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved
+    /// without any node pruning or storage trie eviction between blocks. Useful for benchmarking
+    /// the effects of retaining the full trie cache.
+    #[arg(long = "engine.disable-sparse-trie-cache-pruning", default_value_t = DefaultEngineValues::get_global().disable_sparse_trie_cache_pruning)]
+    pub disable_sparse_trie_cache_pruning: bool,
+
+    /// Configure the timeout for the state root task before spawning a sequential fallback.
+    /// If the state root task takes longer than this, a sequential computation starts in
+    /// parallel and whichever finishes first is used.
+    ///
+    /// --engine.state-root-task-timeout 1s
+    /// --engine.state-root-task-timeout 400ms
+    ///
+    /// Set to 0s to disable.
+    #[arg(
+        long = "engine.state-root-task-timeout",
+        value_parser = humantime::parse_duration,
+        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("1s"),
+    )]
+    pub state_root_task_timeout: Option<Duration>,
 }
 
 #[allow(deprecated)]
@@ -348,8 +413,12 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            enable_proof_v2,
+            prewarming_threads,
             cache_metrics_disabled,
+            sparse_trie_prune_depth,
+            sparse_trie_max_storage_tries,
+            disable_sparse_trie_cache_pruning,
+            state_root_task_timeout,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -374,8 +443,14 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            enable_proof_v2,
+            prewarming_threads,
             cache_metrics_disabled,
+            sparse_trie_prune_depth,
+            sparse_trie_max_storage_tries,
+            disable_sparse_trie_cache_pruning,
+            state_root_task_timeout: state_root_task_timeout
+                .as_deref()
+                .map(|s| humantime::parse_duration(s).expect("valid default duration")),
         }
     }
 }
@@ -383,7 +458,7 @@ impl Default for EngineArgs {
 impl EngineArgs {
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
-        let mut config = TreeConfig::default()
+        TreeConfig::default()
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
@@ -400,20 +475,14 @@ impl EngineArgs {
             .with_always_process_payload_attributes_on_canonical_head(
                 self.always_process_payload_attributes_on_canonical_head,
             )
-            .with_unwind_canonical_header(self.allow_unwind_canonical_header);
-
-        if let Some(count) = self.storage_worker_count {
-            config = config.with_storage_worker_count(count);
-        }
-
-        if let Some(count) = self.account_worker_count {
-            config = config.with_account_worker_count(count);
-        }
-
-        config = config.with_enable_proof_v2(self.enable_proof_v2);
-        config = config.without_cache_metrics(self.cache_metrics_disabled);
-
-        config
+            .with_unwind_canonical_header(self.allow_unwind_canonical_header)
+            .with_storage_worker_count_opt(self.storage_worker_count)
+            .with_account_worker_count_opt(self.account_worker_count)
+            .without_cache_metrics(self.cache_metrics_disabled)
+            .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
+            .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
+            .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
+            .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
     }
 }
 
@@ -462,8 +531,12 @@ mod tests {
             allow_unwind_canonical_header: true,
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
-            enable_proof_v2: false,
+            prewarming_threads: Some(4),
             cache_metrics_disabled: true,
+            sparse_trie_prune_depth: 10,
+            sparse_trie_max_storage_tries: 100,
+            disable_sparse_trie_cache_pruning: true,
+            state_root_task_timeout: Some(Duration::from_secs(2)),
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -493,7 +566,16 @@ mod tests {
             "16",
             "--engine.account-worker-count",
             "8",
+            "--engine.prewarming-threads",
+            "4",
             "--engine.disable-cache-metrics",
+            "--engine.sparse-trie-prune-depth",
+            "10",
+            "--engine.sparse-trie-max-storage-tries",
+            "100",
+            "--engine.disable-sparse-trie-cache-pruning",
+            "--engine.state-root-task-timeout",
+            "2s",
         ])
         .args;
 

@@ -4,12 +4,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, MAINNET};
-use reth_db::{
-    test_utils::{
-        create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir, TempDatabase,
-    },
-    DatabaseEnv,
-};
+use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_errors::ProviderResult;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_types::NodeTypesWithDBAdapter;
@@ -36,8 +31,8 @@ pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
 >;
 
 /// Mock [`reth_node_types::NodeTypesWithDB`] for testing.
-pub type MockNodeTypesWithDB<DB = TempDatabase<DatabaseEnv>> =
-    NodeTypesWithDBAdapter<MockNodeTypes, Arc<DB>>;
+pub type MockNodeTypesWithDB<DB = Arc<TempDatabase<DatabaseEnv>>> =
+    NodeTypesWithDBAdapter<MockNodeTypes, DB>;
 
 /// Creates test provider factory with mainnet chain spec.
 pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
@@ -55,17 +50,28 @@ pub fn create_test_provider_factory_with_chain_spec(
 pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     chain_spec: Arc<N::ChainSpec>,
 ) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
-    let (static_dir, _) = create_test_static_files_dir();
-    let (rocksdb_dir, _) = create_test_rocksdb_dir();
-    let db = create_test_rw_db();
+    // Create a single temp directory that contains all data dirs (db, static_files, rocksdb).
+    // TempDatabase will clean up the entire directory on drop.
+    let datadir_path = reth_db::test_utils::tempdir_path();
+
+    let static_files_path = datadir_path.join("static_files");
+    let rocksdb_path = datadir_path.join("rocksdb");
+
+    // Create static_files directory
+    std::fs::create_dir_all(&static_files_path).expect("failed to create static_files dir");
+
+    // Create database with the datadir path so TempDatabase cleans up everything on drop
+    let db = reth_db::test_utils::create_test_rw_db_with_datadir(&datadir_path);
+
     ProviderFactory::new(
         db,
         chain_spec,
-        StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
-        RocksDBBuilder::new(&rocksdb_dir)
+        StaticFileProvider::read_write(static_files_path).expect("static file provider"),
+        RocksDBBuilder::new(&rocksdb_path)
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
+        reth_tasks::Runtime::test(),
     )
     .expect("failed to create test provider factory")
 }

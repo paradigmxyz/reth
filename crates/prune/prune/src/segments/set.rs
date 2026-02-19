@@ -7,10 +7,11 @@ use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
-    PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
+    PruneCheckpointReader, PruneCheckpointWriter, RocksDBProviderFactory,
+    StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
-use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
+use reth_storage_api::{ChangeSetReader, StorageChangeSetReader, StorageSettingsCache};
 
 /// Collection of [`Segment`]. Thread-safe, allocated on the heap.
 #[derive(Debug)]
@@ -55,7 +56,8 @@ where
         + ChainStateBlockReader
         + StorageSettingsCache
         + ChangeSetReader
-        + StorageChangeSetReader,
+        + StorageChangeSetReader
+        + RocksDBProviderFactory,
 {
     /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
     /// [`PruneModes`].
@@ -74,8 +76,11 @@ where
         } = prune_modes;
 
         Self::default()
-            // Bodies - run first since file deletion is fast
-            .segment_opt(bodies_history.map(Bodies::new))
+            // Transaction lookup must run before bodies because it needs to read transaction
+            // data from static files before bodies deletes them.
+            .segment_opt(transaction_lookup.map(TransactionLookup::new))
+            // Bodies
+            .segment_opt(bodies_history.map(|mode| Bodies::new(mode, transaction_lookup)))
             // Account history
             .segment_opt(account_history.map(AccountHistory::new))
             // Storage history
@@ -87,8 +92,6 @@ where
                 (!receipts_log_filter.is_empty())
                     .then(|| ReceiptsByLogs::new(receipts_log_filter.clone())),
             )
-            // Transaction lookup
-            .segment_opt(transaction_lookup.map(TransactionLookup::new))
             // Sender recovery
             .segment_opt(sender_recovery.map(SenderRecovery::new))
     }

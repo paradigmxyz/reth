@@ -3,7 +3,7 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
+use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -35,7 +35,7 @@ use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
     StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
-use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner};
+use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
@@ -59,7 +59,7 @@ where
     pub fn new(
         eth_api: Eth,
         blocking_task_guard: BlockingTaskGuard,
-        executor: impl TaskSpawner,
+        executor: &Runtime,
         mut stream: impl Stream<Item = ConsensusEngineEvent<Eth::Primitives>> + Send + Unpin + 'static,
     ) -> Self {
         let bad_block_store = BadBlockStore::default();
@@ -70,7 +70,7 @@ where
         });
 
         // Spawn a task caching bad blocks
-        executor.spawn(Box::pin(async move {
+        executor.spawn_task(async move {
             while let Some(event) = stream.next().await {
                 if let ConsensusEngineEvent::InvalidBlock(block) = event &&
                     let Ok(recovered) =
@@ -79,7 +79,7 @@ where
                     bad_block_store.insert(recovered);
                 }
             }
-        }));
+        });
 
         Self { inner }
     }
@@ -998,7 +998,7 @@ where
         Ok(())
     }
 
-    async fn debug_set_head(&self, _number: u64) -> RpcResult<()> {
+    async fn debug_set_head(&self, _number: U64) -> RpcResult<()> {
         Ok(())
     }
 

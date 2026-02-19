@@ -11,7 +11,7 @@ use reth_node_builder::{EngineNodeLauncher, FullNodeComponents, NodeBuilder, Nod
 use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_builder::Identity;
-use reth_tasks::TaskManager;
+use reth_tasks::Runtime;
 
 #[test]
 fn test_basic_setup() {
@@ -46,13 +46,13 @@ fn test_basic_setup() {
 
 #[tokio::test]
 async fn test_eth_launcher() {
-    let tasks = TaskManager::current();
+    let runtime = Runtime::test();
     let config = NodeConfig::test();
     let db = create_test_rw_db();
     let _builder =
         NodeBuilder::new(config)
             .with_database(db)
-            .with_launch_context(tasks.executor())
+            .with_launch_context(runtime.clone())
             .with_types_and_provider::<EthereumNode, BlockchainProvider<
                 NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
             >>()
@@ -64,7 +64,7 @@ async fn test_eth_launcher() {
             })
             .launch_with_fn(|builder| {
                 let launcher = EngineNodeLauncher::new(
-                    tasks.executor(),
+                    runtime.clone(),
                     builder.config().datadir(),
                     Default::default(),
                 );
@@ -81,13 +81,13 @@ fn test_eth_launcher_with_tokio_runtime() {
     let custom_rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     main_rt.block_on(async {
-        let tasks = TaskManager::current();
+        let runtime = Runtime::test();
         let config = NodeConfig::test();
         let db = create_test_rw_db();
         let _builder =
             NodeBuilder::new(config)
                 .with_database(db)
-                .with_launch_context(tasks.executor())
+                .with_launch_context(runtime.clone())
                 .with_types_and_provider::<EthereumNode, BlockchainProvider<
                     NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
                 >>()
@@ -101,7 +101,7 @@ fn test_eth_launcher_with_tokio_runtime() {
                 })
                 .launch_with_fn(|builder| {
                     let launcher = EngineNodeLauncher::new(
-                        tasks.executor(),
+                        runtime.clone(),
                         builder.config().datadir(),
                         Default::default(),
                     );

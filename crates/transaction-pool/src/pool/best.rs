@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
-use alloy_primitives::Address;
+use alloy_primitives::map::AddressSet;
 use core::fmt;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use std::{
@@ -364,7 +364,7 @@ pub struct BestTransactionsWithPrioritizedSenders<I: Iterator> {
     /// Inner iterator
     inner: I,
     /// A set of senders which transactions should be prioritized
-    prioritized_senders: HashSet<Address>,
+    prioritized_senders: AddressSet,
     /// Maximum total gas limit of prioritized transactions
     max_prioritized_gas: u64,
     /// Buffer with transactions that are not being prioritized. Those will be the first to be
@@ -377,7 +377,7 @@ pub struct BestTransactionsWithPrioritizedSenders<I: Iterator> {
 
 impl<I: Iterator> BestTransactionsWithPrioritizedSenders<I> {
     /// Constructs a new [`BestTransactionsWithPrioritizedSenders`].
-    pub fn new(prioritized_senders: HashSet<Address>, max_prioritized_gas: u64, inner: I) -> Self {
+    pub fn new(prioritized_senders: AddressSet, max_prioritized_gas: u64, inner: I) -> Self {
         Self {
             inner,
             prioritized_senders,
@@ -857,7 +857,7 @@ mod tests {
         pool.add_transaction(Arc::new(valid_prioritized_tx2), 0);
 
         let prioritized_senders =
-            HashSet::from([prioritized_tx.sender(), prioritized_tx2.sender()]);
+            AddressSet::from_iter([prioritized_tx.sender(), prioritized_tx2.sender()]);
         let best =
             BestTransactionsWithPrioritizedSenders::new(prioritized_senders, 200, pool.best());
 

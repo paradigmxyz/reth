@@ -381,7 +381,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             let Some(TxFetchMetadata { retries, fallback_peers, .. }) =
                 self.hashes_fetch_inflight_and_pending_fetch.get(&hash)
             else {
-                return
+                continue
             };
 
             if let Some(peer_id) = fallback_peer {

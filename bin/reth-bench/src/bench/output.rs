@@ -6,7 +6,7 @@ use csv::Writer;
 use eyre::OptionExt;
 use reth_primitives_traits::constants::GIGAGAS;
 use serde::{ser::SerializeStruct, Deserialize, Serialize};
-use std::{path::Path, time::Duration};
+use std::{fs, path::Path, time::Duration};
 use tracing::info;
 
 /// This is the suffix for gas output csv files.
@@ -27,6 +27,9 @@ pub(crate) struct GasRampPayloadFile {
     pub(crate) block_hash: B256,
     /// The params to pass to newPayload.
     pub(crate) params: serde_json::Value,
+    /// The execution data for `reth_newPayload`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub(crate) execution_data: Option<alloy_rpc_types_engine::ExecutionData>,
 }
 
 /// This represents the results of a single `newPayload` call in the benchmark, containing the gas
@@ -37,6 +40,12 @@ pub(crate) struct NewPayloadResult {
     pub(crate) gas_used: u64,
     /// The latency of the `newPayload` call.
     pub(crate) latency: Duration,
+    /// Time spent waiting for persistence. `None` when no persistence was in-flight.
+    pub(crate) persistence_wait: Option<Duration>,
+    /// Time spent waiting for execution cache lock.
+    pub(crate) execution_cache_wait: Duration,
+    /// Time spent waiting for sparse trie lock.
+    pub(crate) sparse_trie_wait: Duration,
 }
 
 impl NewPayloadResult {
@@ -67,9 +76,12 @@ impl Serialize for NewPayloadResult {
     {
         // convert the time to microseconds
         let time = self.latency.as_micros();
-        let mut state = serializer.serialize_struct("NewPayloadResult", 2)?;
+        let mut state = serializer.serialize_struct("NewPayloadResult", 5)?;
         state.serialize_field("gas_used", &self.gas_used)?;
         state.serialize_field("latency", &time)?;
+        state.serialize_field("persistence_wait", &self.persistence_wait.map(|d| d.as_micros()))?;
+        state.serialize_field("execution_cache_wait", &self.execution_cache_wait.as_micros())?;
+        state.serialize_field("sparse_trie_wait", &self.sparse_trie_wait.as_micros())?;
         state.end()
     }
 }
@@ -126,7 +138,7 @@ impl Serialize for CombinedResult {
         let fcu_latency = self.fcu_latency.as_micros();
         let new_payload_latency = self.new_payload_result.latency.as_micros();
         let total_latency = self.total_latency.as_micros();
-        let mut state = serializer.serialize_struct("CombinedResult", 7)?;
+        let mut state = serializer.serialize_struct("CombinedResult", 10)?;
 
         // flatten the new payload result because this is meant for CSV writing
         state.serialize_field("block_number", &self.block_number)?;
@@ -136,6 +148,18 @@ impl Serialize for CombinedResult {
         state.serialize_field("new_payload_latency", &new_payload_latency)?;
         state.serialize_field("fcu_latency", &fcu_latency)?;
         state.serialize_field("total_latency", &total_latency)?;
+        state.serialize_field(
+            "persistence_wait",
+            &self.new_payload_result.persistence_wait.map(|d| d.as_micros()),
+        )?;
+        state.serialize_field(
+            "execution_cache_wait",
+            &self.new_payload_result.execution_cache_wait.as_micros(),
+        )?;
+        state.serialize_field(
+            "sparse_trie_wait",
+            &self.new_payload_result.sparse_trie_wait.as_micros(),
+        )?;
         state.end()
     }
 }
@@ -158,29 +182,58 @@ pub(crate) struct TotalGasRow {
 pub(crate) struct TotalGasOutput {
     /// The total gas used in the benchmark.
     pub(crate) total_gas_used: u64,
-    /// The total duration of the benchmark.
+    /// The total wall-clock duration of the benchmark (includes wait times).
     pub(crate) total_duration: Duration,
-    /// The total gas used per second.
-    pub(crate) total_gas_per_second: f64,
+    /// The total execution-only duration (excludes wait times).
+    pub(crate) execution_duration: Duration,
     /// The number of blocks processed.
     pub(crate) blocks_processed: u64,
 }
 
 impl TotalGasOutput {
-    /// Create a new [`TotalGasOutput`] from a list of [`TotalGasRow`].
+    /// Create a new [`TotalGasOutput`] from gas rows only.
+    ///
+    /// Use this when execution-only timing is not available (e.g., `new_payload_only`).
+    /// `execution_duration` will equal `total_duration`.
     pub(crate) fn new(rows: Vec<TotalGasRow>) -> eyre::Result<Self> {
-        // the duration is obtained from the last row
         let total_duration = rows.last().map(|row| row.time).ok_or_eyre("empty results")?;
         let blocks_processed = rows.len() as u64;
         let total_gas_used: u64 = rows.into_iter().map(|row| row.gas_used).sum();
-        let total_gas_per_second = total_gas_used as f64 / total_duration.as_secs_f64();
 
-        Ok(Self { total_gas_used, total_duration, total_gas_per_second, blocks_processed })
+        Ok(Self {
+            total_gas_used,
+            total_duration,
+            execution_duration: total_duration,
+            blocks_processed,
+        })
     }
 
-    /// Return the total gigagas per second.
+    /// Create a new [`TotalGasOutput`] from gas rows and combined results.
+    ///
+    /// - `rows`: Used for total gas and wall-clock duration
+    /// - `combined_results`: Used for execution-only duration (sum of `total_latency`)
+    pub(crate) fn with_combined_results(
+        rows: Vec<TotalGasRow>,
+        combined_results: &[CombinedResult],
+    ) -> eyre::Result<Self> {
+        let total_duration = rows.last().map(|row| row.time).ok_or_eyre("empty results")?;
+        let blocks_processed = rows.len() as u64;
+        let total_gas_used: u64 = rows.into_iter().map(|row| row.gas_used).sum();
+
+        // Sum execution-only time from combined results
+        let execution_duration: Duration = combined_results.iter().map(|r| r.total_latency).sum();
+
+        Ok(Self { total_gas_used, total_duration, execution_duration, blocks_processed })
+    }
+
+    /// Return the total gigagas per second based on wall-clock time.
     pub(crate) fn total_gigagas_per_second(&self) -> f64 {
-        self.total_gas_per_second / GIGAGAS as f64
+        self.total_gas_used as f64 / self.total_duration.as_secs_f64() / GIGAGAS as f64
+    }
+
+    /// Return the execution-only gigagas per second (excludes wait times).
+    pub(crate) fn execution_gigagas_per_second(&self) -> f64 {
+        self.total_gas_used as f64 / self.execution_duration.as_secs_f64() / GIGAGAS as f64
     }
 }
 
@@ -192,10 +245,12 @@ impl TotalGasOutput {
 pub(crate) fn write_benchmark_results(
     output_dir: &Path,
     gas_results: &[TotalGasRow],
-    combined_results: Vec<CombinedResult>,
+    combined_results: &[CombinedResult],
 ) -> eyre::Result<()> {
+    fs::create_dir_all(output_dir)?;
+
     let output_path = output_dir.join(COMBINED_OUTPUT_SUFFIX);
-    info!("Writing engine api call latency output to file: {:?}", output_path);
+    info!(target: "reth-bench", "Writing engine api call latency output to file: {:?}", output_path);
     let mut writer = Writer::from_path(&output_path)?;
     for result in combined_results {
         writer.serialize(result)?;
@@ -203,14 +258,14 @@ pub(crate) fn write_benchmark_results(
     writer.flush()?;
 
     let output_path = output_dir.join(GAS_OUTPUT_SUFFIX);
-    info!("Writing total gas output to file: {:?}", output_path);
+    info!(target: "reth-bench", "Writing total gas output to file: {:?}", output_path);
     let mut writer = Writer::from_path(&output_path)?;
     for row in gas_results {
         writer.serialize(row)?;
     }
     writer.flush()?;
 
-    info!("Finished writing benchmark output files to {:?}.", output_dir);
+    info!(target: "reth-bench", "Finished writing benchmark output files to {:?}.", output_dir);
     Ok(())
 }
 

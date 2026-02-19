@@ -14,10 +14,20 @@ pub use trie::*;
 mod traits;
 pub use traits::*;
 
+mod parallel;
+pub use parallel::*;
+
+mod lower;
+
 pub mod provider;
 
 #[cfg(feature = "metrics")]
 mod metrics;
+
+#[cfg(feature = "trie-debug")]
+pub mod debug_recorder;
+#[cfg(feature = "trie-debug")]
+use serde_json as _;
 
 /// Re-export sparse trie error types.
 pub mod errors {

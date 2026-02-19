@@ -763,11 +763,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 pub fn dummy_name() -> String {
     use rand::Rng;
     let num: u64 = rand::rng().random();
-    if cfg!(windows) {
-        format!(r"\\.\pipe\my-pipe-{num}")
-    } else {
-        format!(r"/tmp/my-uds-{num}")
-    }
+    format!(r"/tmp/my-uds-{num}")
 }
 
 #[cfg(test)]

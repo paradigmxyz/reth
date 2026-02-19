@@ -5,7 +5,7 @@ name: kurtosis
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 0 * * *"
 
   push:
     tags:
@@ -19,20 +19,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare-reth:
-    uses: ./.github/workflows/prepare-reth.yml
+  build-reth:
+    if: github.repository == 'paradigmxyz/reth'
+    uses: ./.github/workflows/docker-test.yml
     with:
-      image_tag: ghcr.io/paradigmxyz/reth:kurtosis-ci
-      binary_name: reth
+      hive_target: kurtosis
+    secrets: inherit
 
   test:
     timeout-minutes: 60
     strategy:
       fail-fast: false
     name: run kurtosis
-    runs-on: depot-ubuntu-latest
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     needs:
-      - prepare-reth
+      - build-reth
     steps:
       - uses: actions/checkout@v6
         with:
@@ -65,4 +66,4 @@ jobs:
         env:
           SLACK_COLOR: ${{ job.status }}
           SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_HIVE_WEBHOOK_URL }}

@@ -66,8 +66,8 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
-    ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
+    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
+    RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
     StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
@@ -85,7 +85,7 @@ use reth_tracing::{
 };
 use reth_transaction_pool::TransactionPool;
 use reth_trie_db::ChangesetCache;
-use std::{sync::Arc, thread::available_parallelism, time::Duration};
+use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
@@ -215,9 +215,7 @@ impl LaunchContext {
     /// Configure global settings this includes:
     ///
     /// - Raising the file descriptor limit
-    /// - Configuring the global rayon thread pool with available parallelism. Honoring
-    ///   engine.reserved-cpu-cores to reserve given number of cores for O while using at least 1
-    ///   core for the rayon thread pool
+    /// - Configuring the global rayon thread pool for implicit `par_iter` usage
     pub fn configure_globals(&self, reserved_cpu_cores: usize) {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
@@ -229,14 +227,14 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Reserving the given number of CPU cores for the rest of OS.
-        // Users can reserve more cores by setting engine.reserved-cpu-cores
-        // Note: The global rayon thread pool will use at least one core.
-        let num_threads = available_parallelism()
-            .map_or(0, |num| num.get().saturating_sub(reserved_cpu_cores).max(1));
+        // Configure the implicit global rayon pool for `par_iter` usage.
+        // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
+        // sizes doesn't actually reserve CPU cores for other processes.
+        let _ = reserved_cpu_cores;
+        let num_threads = available_parallelism().map_or(1, NonZeroUsize::get);
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
-            .thread_name(|i| format!("reth-rayon-{i}"))
+            .thread_name(|i| format!("rayon-{i:02}"))
             .build_global()
         {
             warn!(%err, "Failed to build global thread pool")
@@ -503,36 +501,15 @@ where
             self.chain_spec(),
             static_file_provider,
             rocksdb_provider,
+            self.task_executor().clone(),
         )?
         .with_prune_modes(self.prune_modes())
         .with_changeset_cache(changeset_cache);
 
-        // Keep MDBX, static files, and RocksDB aligned. If any check fails, unwind to the
-        // earliest consistent block.
-        //
-        // Order matters:
-        // 1) heal static files (no pruning)
-        // 2) check RocksDB (needs static-file tx data)
-        // 3) check static-file checkpoints vs MDBX (may prune)
-        //
-        // Compute one unwind target and run a single unwind.
-
-        let provider_ro = factory.database_provider_ro()?;
-
-        // Step 1: heal file-level inconsistencies (no pruning)
-        factory.static_file_provider().check_file_consistency(&provider_ro)?;
-
-        // Step 2: RocksDB consistency check (needs static files tx data)
-        let rocksdb_unwind = factory.rocksdb_provider().check_consistency(&provider_ro)?;
-
-        // Step 3: Static file checkpoint consistency (may prune)
-        let static_file_unwind = factory
-            .static_file_provider()
-            .check_consistency(&provider_ro)?
-            .map(|target| match target {
-                PipelineTarget::Unwind(block) => block,
-                PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
-            });
+        // Check consistency between the database and static files, returning
+        // the unwind targets for each storage layer if inconsistencies are
+        // found.
+        let (rocksdb_unwind, static_file_unwind) = factory.check_consistency()?;
 
         // Take the minimum block number to ensure all storage layers are consistent.
         let unwind_target = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
@@ -580,7 +557,7 @@ where
             let (tx, rx) = oneshot::channel();
 
             // Pipeline should be run as blocking and panic if it fails.
-            self.task_executor().spawn_critical_blocking(
+            self.task_executor().spawn_critical_blocking_task(
                 "pipeline task",
                 Box::pin(async move {
                     let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
@@ -700,7 +677,8 @@ where
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
         let sync_metrics_listener = reth_stages::MetricsListener::new(metrics_receiver);
-        self.task_executor().spawn_critical("stages metrics listener task", sync_metrics_listener);
+        self.task_executor()
+            .spawn_critical_task("stages metrics listener task", sync_metrics_listener);
 
         LaunchContextWith {
             inner: self.inner,
@@ -1127,7 +1105,7 @@ where
         // If engine events are provided, spawn listener for new payload reporting
         let ethstats_for_events = ethstats.clone();
         let task_executor = self.task_executor().clone();
-        task_executor.spawn(Box::pin(async move {
+        task_executor.spawn_task(Box::pin(async move {
             while let Some(event) = engine_events.next().await {
                 use reth_engine_primitives::ConsensusEngineEvent;
                 match event {
@@ -1153,7 +1131,7 @@ where
         }));
 
         // Spawn main ethstats service
-        task_executor.spawn(Box::pin(async move { ethstats.run().await }));
+        task_executor.spawn_task(Box::pin(async move { ethstats.run().await }));
 
         Ok(())
     }

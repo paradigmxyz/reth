@@ -4,7 +4,7 @@ use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
     GasPriceOracleArgs, RpcStateCacheArgs,
 };
-use alloy_primitives::Address;
+use alloy_primitives::map::AddressSet;
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, Resettable, TypedValueParser},
@@ -15,7 +15,6 @@ use reth_cli_util::{parse_duration_from_secs_or_ms, parse_ether_value};
 use reth_rpc_eth_types::builder::config::PendingBlockKind;
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
 use std::{
-    collections::HashSet,
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
@@ -89,7 +88,7 @@ pub struct DefaultRpcServerArgs {
     rpc_proof_permits: usize,
     rpc_pending_block: PendingBlockKind,
     rpc_forwarder: Option<Url>,
-    builder_disallow: Option<HashSet<Address>>,
+    builder_disallow: Option<AddressSet>,
     rpc_state_cache: RpcStateCacheArgs,
     gas_price_oracle: GasPriceOracleArgs,
     rpc_send_raw_transaction_sync_timeout: Duration,
@@ -335,7 +334,7 @@ impl DefaultRpcServerArgs {
     }
 
     /// Set the default builder disallow addresses
-    pub fn with_builder_disallow(mut self, v: Option<HashSet<Address>>) -> Self {
+    pub fn with_builder_disallow(mut self, v: Option<AddressSet>) -> Self {
         self.builder_disallow = v;
         self
     }
@@ -484,7 +483,8 @@ pub struct RpcServerArgs {
     /// This will enforce JWT authentication for all requests coming from the consensus layer.
     ///
     /// If no path is provided, a secret will be generated and stored in the datadir under
-    /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
+    /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex`
+    /// by default.
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false, default_value = Resettable::from(DefaultRpcServerArgs::get_global().auth_jwtsecret.as_ref().map(|v| v.to_string_lossy().into())))]
     pub auth_jwtsecret: Option<PathBuf>,
 
@@ -621,8 +621,8 @@ pub struct RpcServerArgs {
 
     /// Path to file containing disallowed addresses, json-encoded list of strings. Block
     /// validation API will reject blocks containing transactions from these addresses.
-    #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>, default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|v| format!("{:?}", v).into())))]
-    pub builder_disallow: Option<HashSet<Address>>,
+    #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<AddressSet>, default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|v| format!("{:?}", v).into())))]
+    pub builder_disallow: Option<AddressSet>,
 
     /// State cache configuration.
     #[command(flatten)]
@@ -645,8 +645,16 @@ pub struct RpcServerArgs {
     ///
     /// When enabled, transactions that fail execution will be skipped, and all subsequent
     /// transactions from the same sender will also be skipped.
-    #[arg(long = "testing.skip-invalid-transactions", default_value_t = false)]
+    #[arg(long = "testing.skip-invalid-transactions", default_value_t = true)]
     pub testing_skip_invalid_transactions: bool,
+
+    /// Force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
+    ///
+    /// When enabled, blob transactions submitted via `eth_sendRawTransaction` with EIP-4844
+    /// sidecars will be automatically converted to EIP-7594 format if the next block is Osaka.
+    /// By default this is disabled, meaning transactions are submitted as-is.
+    #[arg(long = "rpc.force-blob-sidecar-upcasting", default_value_t = false)]
+    pub rpc_force_blob_sidecar_upcasting: bool,
 }
 
 impl RpcServerArgs {
@@ -768,6 +776,12 @@ impl RpcServerArgs {
         self.rpc_send_raw_transaction_sync_timeout = timeout;
         self
     }
+
+    /// Enables forced blob sidecar upcasting from EIP-4844 to EIP-7594 format.
+    pub const fn with_force_blob_sidecar_upcasting(mut self) -> Self {
+        self.rpc_force_blob_sidecar_upcasting = true;
+        self
+    }
 }
 
 impl Default for RpcServerArgs {
@@ -859,7 +873,8 @@ impl Default for RpcServerArgs {
             rpc_state_cache,
             gas_price_oracle,
             rpc_send_raw_transaction_sync_timeout,
-            testing_skip_invalid_transactions: false,
+            testing_skip_invalid_transactions: true,
+            rpc_force_blob_sidecar_upcasting: false,
         }
     }
 }
@@ -1036,6 +1051,7 @@ mod tests {
             },
             rpc_send_raw_transaction_sync_timeout: std::time::Duration::from_secs(30),
             testing_skip_invalid_transactions: true,
+            rpc_force_blob_sidecar_upcasting: false,
         };
 
         let parsed_args = CommandParser::<RpcServerArgs>::parse_from([

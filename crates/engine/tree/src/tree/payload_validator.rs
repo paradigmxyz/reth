@@ -4,20 +4,21 @@ use crate::tree::{
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::InstrumentedStateProvider,
-    payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
+    payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, MeteredStateHook, PayloadHandle,
-    StateProviderBuilder, StateProviderDatabase, TreeConfig,
+    CacheWaitDurations, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
+    StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::BlockAccessList;
-use alloy_eips::{eip1898::BlockWithParent, NumHash};
+use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
+#[cfg(feature = "trie-debug")]
+use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
-use rayon::prelude::*;
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -32,14 +33,14 @@ use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
-    SealedHeader, SignerRecoverable,
+    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
+    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, StorageChangeSetReader,
+    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, State};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
@@ -49,8 +50,7 @@ use revm_primitives::Address;
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
-    sync::Arc,
-    time::Instant,
+    sync::{mpsc::RecvTimeoutError, Arc},
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
@@ -134,6 +134,8 @@ where
     validator: V,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Task runtime for spawning parallel work.
+    runtime: reth_tasks::Runtime,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -145,7 +147,8 @@ where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
-                          + BlockNumReader,
+                          + BlockNumReader
+                          + StorageSettingsCache,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
@@ -166,10 +169,11 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
+        runtime: reth_tasks::Runtime,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
-            WorkloadExecutor::default(),
+            runtime.clone(),
             evm_config.clone(),
             &config,
             precompile_cache_map.clone(),
@@ -186,6 +190,7 @@ where
             metrics: EngineApiMetrics::default(),
             validator,
             changeset_cache,
+            runtime,
         }
     }
 
@@ -228,35 +233,20 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
-        match input {
+        Ok(match input {
             BlockOrPayload::Payload(payload) => {
-                let (iter, convert) = self
+                let iter = self
                     .evm_config
                     .tx_iterator_for_payload(payload)
-                    .map_err(NewPayloadError::other)?
-                    .into();
-
-                let iter = Either::Left(iter.into_par_iter().map(Either::Left));
-                let convert = move |tx| {
-                    let Either::Left(tx) = tx else { unreachable!() };
-                    convert(tx).map(Either::Left).map_err(Either::Left)
-                };
-
-                // Box the closure to satisfy the `Fn` bound both here and in the branch below
-                Ok((iter, Box::new(convert) as Box<dyn Fn(_) -> _ + Send + Sync + 'static>))
+                    .map_err(NewPayloadError::other)?;
+                Either::Left(iter)
             }
             BlockOrPayload::Block(block) => {
-                let iter = Either::Right(
-                    block.body().clone_transactions().into_par_iter().map(Either::Right),
-                );
-                let convert = move |tx: Either<_, N::SignedTx>| {
-                    let Either::Right(tx) = tx else { unreachable!() };
-                    tx.try_into_recovered().map(Either::Right).map_err(Either::Right)
-                };
-
-                Ok((iter, Box::new(convert)))
+                let txs = block.body().clone_transactions();
+                let convert = |tx: N::SignedTx| tx.try_into_recovered();
+                Either::Right((txs, convert))
             }
-        }
+        })
     }
 
     /// Returns a [`ExecutionCtxFor`] for the given payload or block.
@@ -338,9 +328,46 @@ where
         mut ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N, InsertPayloadError<N::Block>>
     where
-        V: PayloadValidator<T, Block = N::Block>,
+        V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        // Spawn block conversion on a background thread so it runs concurrently with the
+        // rest of the function (setup + execution). For payloads this overlaps the cost of
+        // RLP decoding + header hashing; for already-converted blocks this is a no-op.
+        let convert_to_block = match &input {
+            BlockOrPayload::Payload(_) => {
+                let payload_clone = input.clone();
+                let validator = self.validator.clone();
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                self.payload_processor.executor().spawn_blocking_named(
+                    "payload-convert",
+                    move || {
+                        let BlockOrPayload::Payload(payload) = payload_clone else {
+                            unreachable!()
+                        };
+                        let _ = tx.send(validator.convert_payload_to_block(payload));
+                    },
+                );
+                Either::Left(rx)
+            }
+            BlockOrPayload::Block(_) => Either::Right(()),
+        };
+
+        // Returns the sealed block, either by awaiting the background conversion task (for
+        // payloads) or by extracting the already-converted block directly.
+        let convert_to_block =
+            move |input: BlockOrPayload<T>| -> Result<SealedBlock<N::Block>, NewPayloadError> {
+                match convert_to_block {
+                    Either::Left(rx) => rx.blocking_recv().map_err(|_| {
+                        NewPayloadError::Other("block conversion task panicked".into())
+                    })?,
+                    Either::Right(()) => {
+                        let BlockOrPayload::Block(block) = input else { unreachable!() };
+                        Ok(block)
+                    }
+                }
+            };
+
         /// A helper macro that returns the block in case there was an error
         /// This macro is used for early returns before block conversion
         macro_rules! ensure_ok {
@@ -348,7 +375,7 @@ where
                 match $expr {
                     Ok(val) => val,
                     Err(e) => {
-                        let block = self.convert_to_block(input)?;
+                        let block = convert_to_block(input)?;
                         return Err(InsertBlockError::new(block, e.into()).into())
                     }
                 }
@@ -373,13 +400,13 @@ where
 
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
-            debug_span!(target: "engine::tree::payload_validator", "state provider").entered();
+            debug_span!(target: "engine::tree::payload_validator", "state_provider").entered();
         let Some(provider_builder) =
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                self.convert_to_block(input)?,
+                convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -392,17 +419,25 @@ where
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
-                self.convert_to_block(input)?,
+                convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
         };
 
-        let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm env")
+        let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
-        let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
+        let env = ExecutionEnv {
+            evm_env,
+            hash: input.hash(),
+            parent_hash: input.parent_hash(),
+            parent_state_root: parent_block.state_root(),
+            transaction_count: input.transaction_count(),
+            gas_used: input.gas_used(),
+            withdrawals: input.withdrawals().map(|w| w.to_vec()),
+        };
 
         // Plan the strategy used for state root computation.
         let strategy = self.plan_state_root_computation();
@@ -477,7 +512,7 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
-        let block = self.convert_to_block(input)?.with_senders(senders);
+        let block = convert_to_block(input)?.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = receipt_root_rx
@@ -504,14 +539,53 @@ where
         let root_time = Instant::now();
         let mut maybe_state_root = None;
         let mut state_root_task_failed = false;
+        #[cfg(feature = "trie-debug")]
+        let mut trie_debug_recorders = Vec::new();
 
         match strategy {
             StateRootStrategy::StateRootTask => {
                 debug!(target: "engine::tree::payload_validator", "Using sparse trie state root algorithm");
-                match handle.state_root() {
-                    Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
+
+                let task_result = ensure_ok_post_block!(
+                    self.await_state_root_with_timeout(
+                        &mut handle,
+                        overlay_factory.clone(),
+                        &hashed_state,
+                    ),
+                    block
+                );
+
+                match task_result {
+                    Ok(StateRootComputeOutcome {
+                        state_root,
+                        trie_updates,
+                        #[cfg(feature = "trie-debug")]
+                        debug_recorders,
+                    }) => {
                         let elapsed = root_time.elapsed();
                         info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
+
+                        #[cfg(feature = "trie-debug")]
+                        {
+                            trie_debug_recorders = debug_recorders;
+                        }
+
+                        // Compare trie updates with serial computation if configured
+                        if self.config.always_compare_trie_updates() {
+                            let _has_diff = self.compare_trie_updates_with_serial(
+                                overlay_factory.clone(),
+                                &hashed_state,
+                                trie_updates.clone(),
+                            );
+                            #[cfg(feature = "trie-debug")]
+                            if _has_diff {
+                                Self::write_trie_debug_recorders(
+                                    block.header().number(),
+                                    &trie_debug_recorders,
+                                );
+                            }
+                        }
+
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
                             maybe_state_root = Some((state_root, trie_updates, elapsed))
@@ -521,6 +595,11 @@ where
                                 ?state_root,
                                 block_state_root = ?block.header().state_root(),
                                 "State root task returned incorrect state root"
+                            );
+                            #[cfg(feature = "trie-debug")]
+                            Self::write_trie_debug_recorders(
+                                block.header().number(),
+                                &trie_debug_recorders,
                             );
                             state_root_task_failed = true;
                         }
@@ -569,7 +648,7 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                self.compute_state_root_serial(overlay_factory.clone(), &hashed_state),
+                Self::compute_state_root_serial(overlay_factory.clone(), &hashed_state),
                 block
             );
 
@@ -581,10 +660,15 @@ where
         };
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
+        self.metrics
+            .record_state_root_gas_bucket(block.header().gas_used(), root_elapsed.as_secs_f64());
         debug!(target: "engine::tree::payload_validator", ?root_elapsed, "Calculated state root");
 
         // ensure state root matches
         if state_root != block.header().state_root() {
+            #[cfg(feature = "trie-debug")]
+            Self::write_trie_debug_recorders(block.header().number(), &trie_debug_recorders);
+
             // call post-block hook
             self.on_invalid_block(
                 &parent_block,
@@ -683,20 +767,27 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(state_provider))
-            .with_bundle_update()
-            .without_state_clear()
-            .build();
+        let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
+            State::builder()
+                .with_database(StateProviderDatabase::new(state_provider))
+                .with_bundle_update()
+                .without_state_clear()
+                .build()
+        });
 
-        let spec_id = *env.evm_env.spec_id();
-        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
-        let ctx =
-            self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-        let mut executor = self.evm_config.create_executor(evm, ctx);
+        let (spec_id, mut executor) = {
+            let _span = debug_span!(target: "engine::tree", "create_evm").entered();
+            let spec_id = *env.evm_env.spec_id();
+            let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
+            let ctx = self
+                .execution_ctx_for(input)
+                .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+            let executor = self.evm_config.create_executor(evm, ctx);
+            (spec_id, executor)
+        };
 
         if !self.config.precompile_cache_disabled() {
-            // Only cache pure precompiles to avoid issues with stateful precompiles
+            let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
             executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
                 let metrics = self
                     .precompile_cache_metrics
@@ -718,15 +809,12 @@ where
         let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor.executor().spawn_blocking(move || task_handle.run(receipts_len));
-
-        // Wrap the state hook with metrics collection
-        let inner_hook = Box::new(handle.state_hook());
-        let state_hook =
-            MeteredStateHook { metrics: self.metrics.executor_metrics().clone(), inner_hook };
+        self.payload_processor
+            .executor()
+            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
         let transaction_count = input.transaction_count();
-        let executor = executor.with_state_hook(Some(Box::new(state_hook)));
+        let executor = executor.with_state_hook(Some(Box::new(handle.state_hook())));
 
         let execution_start = Instant::now();
 
@@ -747,13 +835,14 @@ where
         self.metrics.record_post_execution(post_exec_start.elapsed());
 
         // Merge transitions into bundle state
-        debug_span!(target: "engine::tree", "merge transitions")
+        debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
+        self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
 
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
         Ok((output, senders, result_rx))
@@ -785,13 +874,18 @@ where
 
         // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
-        debug_span!(target: "engine::tree", "pre execution")
+        debug_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
         let mut transactions = transactions.into_iter();
+        // Some executors may execute transactions that do not append receipts during the
+        // main loop (e.g., system transactions whose receipts are added during finalization).
+        // In that case, invoking the callback on every transaction would resend the previous
+        // receipt with the same index and can panic the ordered root builder.
+        let mut last_sent_len = 0usize;
         loop {
             // Measure time spent waiting for next transaction from iterator
             // (e.g., parallel signature recovery)
@@ -801,30 +895,29 @@ where
 
             let tx = tx_result.map_err(BlockExecutionError::other)?;
             let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
-            let tx_hash = <Tx as alloy_evm::RecoveredTx<InnerTx>>::tx(&tx).tx_hash();
 
             senders.push(tx_signer);
 
-            let span = debug_span!(
+            let _enter = debug_span!(
                 target: "engine::tree",
                 "execute tx",
-                ?tx_hash,
-                gas_used = tracing::field::Empty,
-            );
-            let enter = span.entered();
+            )
+            .entered();
             trace!(target: "engine::tree", "Executing transaction");
 
             let tx_start = Instant::now();
-            let gas_used = executor.execute_transaction(tx)?;
+            executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
-            // Send the latest receipt to the background task for incremental root computation
-            if let Some(receipt) = executor.receipts().last() {
-                let tx_index = executor.receipts().len() - 1;
-                let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+            let current_len = executor.receipts().len();
+            if current_len > last_sent_len {
+                last_sent_len = current_len;
+                // Send the latest receipt to the background task for incremental root computation.
+                if let Some(receipt) = executor.receipts().last() {
+                    let tx_index = current_len - 1;
+                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                }
             }
-
-            enter.record("gas_used", gas_used);
         }
         drop(exec_span);
 
@@ -853,7 +946,8 @@ where
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
         let overlay_factory =
             overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
-        ParallelStateRoot::new(overlay_factory, prefix_sets).incremental_root_with_updates()
+        ParallelStateRoot::new(overlay_factory, prefix_sets, self.runtime.clone())
+            .incremental_root_with_updates()
     }
 
     /// Compute state root for the given hashed post state in serial.
@@ -862,7 +956,6 @@ where
     /// [`HashedPostState`] containing the changes of this block, to compute the state root and
     /// trie updates for this block.
     fn compute_state_root_serial(
-        &self,
         overlay_factory: OverlayStateProviderFactory<P>,
         hashed_state: &HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
@@ -878,6 +971,208 @@ where
         Ok(StateRoot::new(&provider, &provider)
             .with_prefix_sets(prefix_sets)
             .root_with_updates()?)
+    }
+
+    /// Awaits the state root from the background task, with an optional timeout fallback.
+    ///
+    /// If a timeout is configured (`state_root_task_timeout`), this method first waits for the
+    /// state root task up to the timeout duration. If the task doesn't complete in time, a
+    /// sequential state root computation is spawned via `spawn_blocking`. Both computations
+    /// then race: the main thread polls the task receiver and the sequential result channel
+    /// in a loop, returning whichever finishes first.
+    ///
+    /// If no timeout is configured, this simply awaits the state root task without any fallback.
+    ///
+    /// Returns `ProviderResult<Result<...>>` where the outer `ProviderResult` captures
+    /// unrecoverable errors from the sequential fallback (e.g. DB errors), while the inner
+    /// `Result` captures parallel state root task errors that can still fall back to serial.
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_validator",
+        name = "await_state_root",
+        skip_all
+    )]
+    fn await_state_root_with_timeout<Tx, Err, R: Send + Sync + 'static>(
+        &self,
+        handle: &mut PayloadHandle<Tx, Err, R>,
+        overlay_factory: OverlayStateProviderFactory<P>,
+        hashed_state: &HashedPostState,
+    ) -> ProviderResult<Result<StateRootComputeOutcome, ParallelStateRootError>> {
+        let Some(timeout) = self.config.state_root_task_timeout() else {
+            return Ok(handle.state_root());
+        };
+
+        let task_rx = handle.take_state_root_rx();
+
+        match task_rx.recv_timeout(timeout) {
+            Ok(result) => Ok(result),
+            Err(RecvTimeoutError::Disconnected) => {
+                Ok(Err(ParallelStateRootError::Other("sparse trie task dropped".to_string())))
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    ?timeout,
+                    "State root task timed out, spawning sequential fallback"
+                );
+                self.metrics.block_validation.state_root_task_timeout_total.increment(1);
+
+                let (seq_tx, seq_rx) =
+                    std::sync::mpsc::channel::<ProviderResult<(B256, TrieUpdates)>>();
+
+                let seq_overlay = overlay_factory;
+                let seq_hashed_state = hashed_state.clone();
+                self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
+                    let result = Self::compute_state_root_serial(seq_overlay, &seq_hashed_state);
+                    let _ = seq_tx.send(result);
+                });
+
+                const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+
+                loop {
+                    match task_rx.recv_timeout(POLL_INTERVAL) {
+                        Ok(result) => {
+                            debug!(
+                                target: "engine::tree::payload_validator",
+                                source = "task",
+                                "State root timeout race won"
+                            );
+                            return Ok(result);
+                        }
+                        Err(RecvTimeoutError::Disconnected) => {
+                            debug!(
+                                target: "engine::tree::payload_validator",
+                                "State root task dropped, waiting for sequential fallback"
+                            );
+                            let result = seq_rx.recv().map_err(|_| {
+                                ProviderError::other(std::io::Error::other(
+                                    "both state root computations failed",
+                                ))
+                            })?;
+                            let (state_root, trie_updates) = result?;
+                            return Ok(Ok(StateRootComputeOutcome {
+                                state_root,
+                                trie_updates,
+                                #[cfg(feature = "trie-debug")]
+                                debug_recorders: Vec::new(),
+                            }));
+                        }
+                        Err(RecvTimeoutError::Timeout) => {}
+                    }
+
+                    if let Ok(result) = seq_rx.try_recv() {
+                        debug!(
+                            target: "engine::tree::payload_validator",
+                            source = "sequential",
+                            "State root timeout race won"
+                        );
+                        let (state_root, trie_updates) = result?;
+                        return Ok(Ok(StateRootComputeOutcome {
+                            state_root,
+                            trie_updates,
+                            #[cfg(feature = "trie-debug")]
+                            debug_recorders: Vec::new(),
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Compares trie updates from the state root task with serial state root computation.
+    ///
+    /// This is used for debugging and validating the correctness of the parallel state root
+    /// task implementation. When enabled via `--engine.state-root-task-compare-updates`, this
+    /// method runs a separate serial state root computation and compares the resulting trie
+    /// updates.
+    fn compare_trie_updates_with_serial(
+        &self,
+        overlay_factory: OverlayStateProviderFactory<P>,
+        hashed_state: &HashedPostState,
+        task_trie_updates: TrieUpdates,
+    ) -> bool {
+        debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
+
+        match Self::compute_state_root_serial(overlay_factory.clone(), hashed_state) {
+            Ok((serial_root, serial_trie_updates)) => {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    ?serial_root,
+                    "Serial state root computation finished for comparison"
+                );
+
+                // Get a database provider to use as trie cursor factory
+                match overlay_factory.database_provider_ro() {
+                    Ok(provider) => {
+                        if let Err(err) = super::trie_updates::compare_trie_updates(
+                            &provider,
+                            task_trie_updates,
+                            serial_trie_updates,
+                        ) {
+                            warn!(
+                                target: "engine::tree::payload_validator",
+                                %err,
+                                "Error comparing trie updates"
+                            );
+                            return true;
+                        }
+                    }
+                    Err(err) => {
+                        warn!(
+                            target: "engine::tree::payload_validator",
+                            %err,
+                            "Failed to get database provider for trie update comparison"
+                        );
+                    }
+                }
+            }
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    "Failed to compute serial state root for comparison"
+                );
+            }
+        }
+        false
+    }
+
+    /// Writes trie debug recorders to a JSON file for the given block number.
+    ///
+    /// The file is written to the current working directory as
+    /// `trie_debug_block_{block_number}.json`.
+    #[cfg(feature = "trie-debug")]
+    fn write_trie_debug_recorders(
+        block_number: u64,
+        recorders: &[(Option<B256>, TrieDebugRecorder)],
+    ) {
+        let path = format!("trie_debug_block_{block_number}.json");
+        match serde_json::to_string_pretty(recorders) {
+            Ok(json) => match std::fs::write(&path, json) {
+                Ok(()) => {
+                    warn!(
+                        target: "engine::tree::payload_validator",
+                        %path,
+                        "Wrote trie debug recorders to file"
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        target: "engine::tree::payload_validator",
+                        %err,
+                        %path,
+                        "Failed to write trie debug recorders"
+                    );
+                }
+            },
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    "Failed to serialize trie debug recorders"
+                );
+            }
+        }
     }
 
     /// Validates the block after execution.
@@ -975,7 +1270,7 @@ where
         level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
-        fields(strategy)
+        fields(?strategy)
     )]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
@@ -1103,16 +1398,30 @@ where
     /// while the trie input computation is deferred until the overlay is actually needed.
     ///
     /// If parent is on disk (no in-memory blocks), returns `None` for the lazy overlay.
+    ///
+    /// Uses a cached overlay if available for the canonical head (the common case).
     fn get_parent_lazy_overlay(
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> (Option<LazyOverlay>, B256) {
+        // Get blocks leading to the parent to determine the anchor
         let (anchor_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
         if blocks.is_empty() {
             debug!(target: "engine::tree::payload_validator", "Parent found on disk, no lazy overlay needed");
             return (None, anchor_hash);
+        }
+
+        // Try to use the cached overlay if it matches both parent hash and anchor
+        if let Some(cached) = state.tree_state.get_cached_overlay(parent_hash, anchor_hash) {
+            debug!(
+                target: "engine::tree::payload_validator",
+                %parent_hash,
+                %anchor_hash,
+                "Using cached canonical overlay"
+            );
+            return (Some(cached.overlay.clone()), cached.anchor_hash);
         }
 
         debug!(
@@ -1257,7 +1566,9 @@ where
         };
 
         // Spawn task that computes trie data asynchronously.
-        self.payload_processor.executor().spawn_blocking(compute_trie_input_task);
+        self.payload_processor
+            .executor()
+            .spawn_blocking_named("trie-input", compute_trie_input_task);
 
         ExecutedBlock::with_deferred_trie_data(
             Arc::new(block),
@@ -1346,7 +1657,8 @@ where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + StorageChangeSetReader
-                          + BlockNumReader,
+                          + BlockNumReader
+                          + StorageSettingsCache,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
@@ -1356,7 +1668,7 @@ where
         + Clone
         + 'static,
     N: NodePrimitives,
-    V: PayloadValidator<Types, Block = N::Block>,
+    V: PayloadValidator<Types, Block = N::Block> + Clone,
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
@@ -1400,8 +1712,17 @@ where
     }
 }
 
+impl<P, Evm, V> WaitForCaches for BasicEngineValidator<P, Evm, V>
+where
+    Evm: ConfigureEvm,
+{
+    fn wait_for_caches(&self) -> CacheWaitDurations {
+        self.payload_processor.wait_for_caches()
+    }
+}
+
 /// Enum representing either block or payload being validated.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BlockOrPayload<T: PayloadTypes> {
     /// Payload.
     Payload(T::ExecutionData),
@@ -1464,6 +1785,28 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.transaction_count(),
             Self::Block(block) => block.transaction_count(),
+        }
+    }
+
+    /// Returns the withdrawals from the payload or block.
+    pub fn withdrawals(&self) -> Option<&[Withdrawal]>
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.withdrawals().map(|w| w.as_slice()),
+            Self::Block(block) => block.body().withdrawals().map(|w| w.as_slice()),
+        }
+    }
+
+    /// Returns the total gas used by the block.
+    pub fn gas_used(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.gas_used(),
+            Self::Block(block) => block.gas_used(),
         }
     }
 }

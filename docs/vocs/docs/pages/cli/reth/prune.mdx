@@ -111,75 +111,33 @@ Static Files:
       --static-files.blocks-per-file.storage-change-sets <BLOCKS_PER_FILE_STORAGE_CHANGE_SETS>
           Number of blocks per file for the storage changesets segment
 
-      --static-files.receipts <RECEIPTS>
-          Store receipts in static files instead of the database.
+Storage:
+      --storage.v2
+          Enable v2 storage defaults (static files + `RocksDB` routing).
 
-          When enabled, receipts will be written to static files on disk instead of the database.
+          When enabled, the node uses optimized storage settings: - Receipts and transaction senders in static files - History indices in `RocksDB` (accounts, storages, transaction hashes) - Account and storage changesets in static files
 
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+          This is a genesis-initialization-only setting: changing it after genesis requires a re-sync.
 
-          [default: false]
-          [possible values: true, false]
+          Individual settings can still be overridden with `--static-files.*` and `--rocksdb.*` flags.
 
-      --static-files.transaction-senders <TRANSACTION_SENDERS>
-          Store transaction senders in static files instead of the database.
+Metrics:
+      --metrics <PROMETHEUS>
+          Enable Prometheus metrics.
 
-          When enabled, transaction senders will be written to static files on disk instead of the database.
+          The metrics will be served at the given interface and port.
 
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+      --metrics.prometheus.push.url <PUSH_GATEWAY_URL>
+          URL for pushing Prometheus metrics to a push gateway.
 
-          [default: false]
-          [possible values: true, false]
+          If set, the node will periodically push metrics to the specified push gateway URL.
 
-      --static-files.account-change-sets <ACCOUNT_CHANGESETS>
-          Store account changesets in static files.
+      --metrics.prometheus.push.interval <SECONDS>
+          Interval in seconds for pushing metrics to push gateway.
 
-          When enabled, account changesets will be written to static files on disk instead of the database.
+          Default: 5 seconds
 
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          [default: false]
-          [possible values: true, false]
-
-      --static-files.storage-change-sets <STORAGE_CHANGESETS>
-          Store storage changesets in static files.
-
-          When enabled, storage changesets will be written to static files on disk instead of the database.
-
-          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
-
-          [default: false]
-          [possible values: true, false]
-
-RocksDB:
-      --rocksdb.all
-          Route all supported tables to `RocksDB` instead of MDBX.
-
-          This enables `RocksDB` for `tx-hash`, `storages-history`, and `account-history` tables. Cannot be combined with individual flags set to false.
-
-      --rocksdb.tx-hash <TX_HASH>
-          Route tx hash -> number table to `RocksDB` instead of MDBX.
-
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
-
-          [default: false]
-          [possible values: true, false]
-
-      --rocksdb.storages-history <STORAGES_HISTORY>
-          Route storages history tables to `RocksDB` instead of MDBX.
-
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
-
-          [default: false]
-          [possible values: true, false]
-
-      --rocksdb.account-history <ACCOUNT_HISTORY>
-          Route account history tables to `RocksDB` instead of MDBX.
-
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
-
-          [default: false]
-          [possible values: true, false]
+          [default: 5]
 
 Logging:
       --log.stdout.format <FORMAT>

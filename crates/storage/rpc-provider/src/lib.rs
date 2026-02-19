@@ -27,13 +27,11 @@
 use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
-use alloy_primitives::{
-    map::HashMap, Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256,
-};
+use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
 use alloy_rpc_types::{AccountInfo, BlockId};
 use alloy_rpc_types_engine::ForkchoiceState;
-use parking_lot::RwLock;
+use dashmap::DashMap;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
@@ -53,13 +51,14 @@ use reth_provider::{
     TransactionVariant, TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
-use reth_rpc_convert::{TryFromBlockResponse, TryFromReceiptResponse, TryFromTransactionResponse};
+pub mod rpc_response;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
     ReceiptProviderIdExt, StatsReader,
 };
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput};
+pub use rpc_response::{EthRpcConverter, RpcResponseConverter};
 use std::{
     collections::BTreeMap,
     future::{Future, IntoFuture},
@@ -102,6 +101,14 @@ impl RpcBlockchainProviderConfig {
     }
 }
 
+/// Type-erased RPC response converter stored in [`RpcBlockchainProvider`].
+type DynRpcConverter<Node, N> = dyn RpcResponseConverter<
+    N,
+    Block = BlockTy<Node>,
+    Transaction = TxTy<Node>,
+    Receipt = ReceiptTy<Node>,
+>;
+
 /// An RPC-based blockchain provider that fetches blockchain data via remote RPC calls.
 ///
 /// This is the RPC equivalent of
@@ -121,6 +128,7 @@ impl RpcBlockchainProviderConfig {
 pub struct RpcBlockchainProvider<P, Node, N = alloy_network::AnyNetwork>
 where
     Node: NodeTypes,
+    N: Network,
 {
     /// The underlying Alloy provider
     provider: P,
@@ -134,25 +142,66 @@ where
     config: RpcBlockchainProviderConfig,
     /// Cached chain spec
     chain_spec: Arc<Node::ChainSpec>,
+    /// Converts RPC responses to primitive types.
+    converter: Arc<DynRpcConverter<Node, N>>,
 }
 
-impl<P, Node: NodeTypes, N> std::fmt::Debug for RpcBlockchainProvider<P, Node, N> {
+impl<P, Node: NodeTypes, N: Network> std::fmt::Debug for RpcBlockchainProvider<P, Node, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RpcBlockchainProvider").field("config", &self.config).finish()
     }
 }
 
-impl<P, Node: NodeTypes, N> RpcBlockchainProvider<P, Node, N> {
-    /// Creates a new `RpcBlockchainProvider` with default configuration
+impl<P, Node: NodeTypes, N: Network> RpcBlockchainProvider<P, Node, N>
+where
+    EthRpcConverter: RpcResponseConverter<
+        N,
+        Block = BlockTy<Node>,
+        Transaction = TxTy<Node>,
+        Receipt = ReceiptTy<Node>,
+    >,
+{
+    /// Creates a new `RpcBlockchainProvider` with the default [`EthRpcConverter`].
     pub fn new(provider: P) -> Self
     where
         Node::ChainSpec: Default,
     {
-        Self::new_with_config(provider, RpcBlockchainProviderConfig::default())
+        Self::new_with_converter(provider, EthRpcConverter)
+    }
+}
+
+impl<P, Node: NodeTypes, N: Network> RpcBlockchainProvider<P, Node, N> {
+    /// Creates a new `RpcBlockchainProvider` with default configuration and the given converter.
+    pub fn new_with_converter(
+        provider: P,
+        converter: impl RpcResponseConverter<
+            N,
+            Block = BlockTy<Node>,
+            Transaction = TxTy<Node>,
+            Receipt = ReceiptTy<Node>,
+        >,
+    ) -> Self
+    where
+        Node::ChainSpec: Default,
+    {
+        Self::new_with_converter_and_config(
+            provider,
+            converter,
+            RpcBlockchainProviderConfig::default(),
+        )
     }
 
-    /// Creates a new `RpcBlockchainProvider` with custom configuration
-    pub fn new_with_config(provider: P, config: RpcBlockchainProviderConfig) -> Self
+    /// Creates a new `RpcBlockchainProvider` with custom configuration and the given converter.
+    pub fn new_with_converter_and_config(
+        provider: P,
+        converter: impl RpcResponseConverter<
+            N,
+            Block = BlockTy<Node>,
+            Transaction = TxTy<Node>,
+            Receipt = ReceiptTy<Node>,
+        >,
+        config: RpcBlockchainProviderConfig,
+    ) -> Self
     where
         Node::ChainSpec: Default,
     {
@@ -164,19 +213,13 @@ impl<P, Node: NodeTypes, N> RpcBlockchainProvider<P, Node, N> {
             canon_state_notification,
             config,
             chain_spec: Arc::new(Node::ChainSpec::default()),
+            converter: Arc::new(converter),
         }
     }
 
     /// Use a custom chain spec for the provider
     pub fn with_chain_spec(self, chain_spec: Arc<Node::ChainSpec>) -> Self {
-        Self {
-            provider: self.provider,
-            node_types: std::marker::PhantomData,
-            network: std::marker::PhantomData,
-            canon_state_notification: self.canon_state_notification,
-            config: self.config,
-            chain_spec,
-        }
+        Self { chain_spec, ..self }
     }
 
     /// Helper function to execute async operations in a blocking context
@@ -334,7 +377,6 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
-    BlockTy<Node>: TryFromBlockResponse<N>,
 {
     type Header = HeaderTy<Node>;
 
@@ -349,8 +391,7 @@ where
         };
 
         // Convert the network block response to primitive block
-        let block = <BlockTy<Node> as TryFromBlockResponse<N>>::from_block_response(block_response)
-            .map_err(ProviderError::other)?;
+        let block = self.converter.block(block_response).map_err(ProviderError::other)?;
 
         Ok(Some(block.into_header()))
     }
@@ -386,8 +427,7 @@ where
         let block_hash = block_response.header().hash();
 
         // Convert the network block response to primitive block
-        let block = <BlockTy<Node> as TryFromBlockResponse<N>>::from_block_response(block_response)
-            .map_err(ProviderError::other)?;
+        let block = self.converter.block(block_response).map_err(ProviderError::other)?;
 
         Ok(Some(SealedHeader::new(block.into_header(), block_hash)))
     }
@@ -424,9 +464,6 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
-    BlockTy<Node>: TryFromBlockResponse<N>,
-    TxTy<Node>: TryFromTransactionResponse<N>,
-    ReceiptTy<Node>: TryFromReceiptResponse<N>,
 {
     type Block = BlockTy<Node>;
 
@@ -449,8 +486,7 @@ where
         };
 
         // Convert the network block response to primitive block
-        let block = <BlockTy<Node> as TryFromBlockResponse<N>>::from_block_response(block_response)
-            .map_err(ProviderError::other)?;
+        let block = self.converter.block(block_response).map_err(ProviderError::other)?;
 
         Ok(Some(block))
     }
@@ -509,9 +545,6 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
-    BlockTy<Node>: TryFromBlockResponse<N>,
-    TxTy<Node>: TryFromTransactionResponse<N>,
-    ReceiptTy<Node>: TryFromReceiptResponse<N>,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
@@ -543,7 +576,6 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
-    ReceiptTy<Node>: TryFromReceiptResponse<N>,
 {
     type Receipt = ReceiptTy<Node>;
 
@@ -557,15 +589,10 @@ where
         })?;
 
         let Some(receipt_response) = receipt_response else {
-            // If the receipt was not found, return None
             return Ok(None);
         };
 
-        // Convert the network receipt response to primitive receipt
-        let receipt =
-            <ReceiptTy<Node> as TryFromReceiptResponse<N>>::from_receipt_response(receipt_response)
-                .map_err(ProviderError::other)?;
-
+        let receipt = self.converter.receipt(receipt_response).map_err(ProviderError::other)?;
         Ok(Some(receipt))
     }
 
@@ -581,19 +608,12 @@ where
                 .map_err(ProviderError::other)?;
 
             let Some(receipts) = receipts_response else {
-                // If the receipts were not found, return None
                 return Ok(None);
             };
 
-            // Convert the network receipts response to primitive receipts
             let receipts = receipts
                 .into_iter()
-                .map(|receipt_response| {
-                    <ReceiptTy<Node> as TryFromReceiptResponse<N>>::from_receipt_response(
-                        receipt_response,
-                    )
-                    .map_err(ProviderError::other)
-                })
+                .map(|r| self.converter.receipt(r).map_err(ProviderError::other))
                 .collect::<Result<Vec<_>, _>>()?;
 
             Ok(Some(receipts))
@@ -620,7 +640,6 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
-    ReceiptTy<Node>: TryFromReceiptResponse<N>,
 {
 }
 
@@ -629,8 +648,6 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
-    BlockTy<Node>: TryFromBlockResponse<N>,
-    TxTy<Node>: TryFromTransactionResponse<N>,
 {
     type Transaction = TxTy<Node>;
 
@@ -655,16 +672,11 @@ where
         })?;
 
         let Some(transaction_response) = transaction_response else {
-            // If the transaction was not found, return None
             return Ok(None);
         };
 
-        // Convert the network transaction response to primitive transaction
-        let transaction = <TxTy<Node> as TryFromTransactionResponse<N>>::from_transaction_response(
-            transaction_response,
-        )
-        .map_err(ProviderError::other)?;
-
+        let transaction =
+            self.converter.transaction(transaction_response).map_err(ProviderError::other)?;
         Ok(Some(transaction))
     }
 
@@ -684,14 +696,10 @@ where
         })?;
 
         let Some(block_response) = block_response else {
-            // If the block was not found, return None
             return Ok(None);
         };
 
-        // Convert the network block response to primitive block
-        let block = <BlockTy<Node> as TryFromBlockResponse<N>>::from_block_response(block_response)
-            .map_err(ProviderError::other)?;
-
+        let block = self.converter.block(block_response).map_err(ProviderError::other)?;
         Ok(Some(block.into_body().into_transactions()))
     }
 
@@ -857,7 +865,7 @@ where
 impl<P, Node, N> NodePrimitivesProvider for RpcBlockchainProvider<P, Node, N>
 where
     P: Send + Sync,
-    N: Send + Sync,
+    N: Network,
     Node: NodeTypes,
 {
     type Primitives = PrimitivesTy<Node>;
@@ -878,7 +886,7 @@ where
 impl<P, Node, N> ChainSpecProvider for RpcBlockchainProvider<P, Node, N>
 where
     P: Send + Sync,
-    N: Send + Sync,
+    N: Network,
     Node: NodeTypes,
     Node::ChainSpec: Default,
 {
@@ -912,7 +920,7 @@ where
     /// Cached bytecode for accounts
     ///
     /// Since the state provider is short-lived, we don't worry about memory leaks.
-    code_store: RwLock<HashMap<B256, Bytecode>>,
+    code_store: DashMap<B256, Bytecode>,
     /// Whether to use Reth-specific RPC methods for better performance
     reth_rpc_support: bool,
 }
@@ -942,7 +950,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
             network: std::marker::PhantomData,
             chain_spec: None,
             compute_state_root: false,
-            code_store: RwLock::new(HashMap::default()),
+            code_store: Default::default(),
             reth_rpc_support: true,
         }
     }
@@ -960,7 +968,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
             network: std::marker::PhantomData,
             chain_spec: Some(chain_spec),
             compute_state_root: false,
-            code_store: RwLock::new(HashMap::default()),
+            code_store: Default::default(),
             reth_rpc_support: true,
         }
     }
@@ -982,7 +990,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
             network: self.network,
             chain_spec: self.chain_spec.clone(),
             compute_state_root: self.compute_state_root,
-            code_store: RwLock::new(HashMap::default()),
+            code_store: Default::default(),
             reth_rpc_support: self.reth_rpc_support,
         }
     }
@@ -1038,9 +1046,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
             let code_hash = account_info.code_hash();
             if code_hash != KECCAK_EMPTY {
                 // Insert code into the cache
-                self.code_store
-                    .write()
-                    .insert(code_hash, Bytecode::new_raw(account_info.code.clone()));
+                self.code_store.insert(code_hash, Bytecode::new_raw(account_info.code.clone()));
             }
 
             Ok(account_info)
@@ -1085,6 +1091,14 @@ where
         })
     }
 
+    fn storage_by_hashed_key(
+        &self,
+        _address: Address,
+        _hashed_storage_key: StorageKey,
+    ) -> Result<Option<U256>, ProviderError> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
     fn account_code(&self, addr: &Address) -> Result<Option<Bytecode>, ProviderError> {
         self.block_on_async(async {
             let code = self
@@ -1119,7 +1133,7 @@ where
 {
     fn bytecode_by_hash(&self, code_hash: &B256) -> Result<Option<Bytecode>, ProviderError> {
         if !self.reth_rpc_support {
-            return Ok(self.code_store.read().get(code_hash).cloned());
+            return Ok(self.code_store.get(code_hash).map(|entry| entry.value().clone()));
         }
 
         self.block_on_async(async {
@@ -1830,7 +1844,7 @@ where
 impl<P, Node, N> ChainSpecProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Send + Sync + std::fmt::Debug,
-    N: Send + Sync,
+    N: Network,
     Node: NodeTypes,
     Node::ChainSpec: Default,
 {
@@ -1884,7 +1898,7 @@ where
 impl<P, Node, N> NodePrimitivesProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Send + Sync + std::fmt::Debug,
-    N: Send + Sync,
+    N: Network,
     Node: NodeTypes,
 {
     type Primitives = PrimitivesTy<Node>;

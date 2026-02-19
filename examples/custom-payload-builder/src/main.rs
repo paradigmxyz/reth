@@ -84,7 +84,7 @@ where
             PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
 
         ctx.task_executor()
-            .spawn_critical("custom payload builder service", Box::pin(payload_service));
+            .spawn_critical_task("custom payload builder service", Box::pin(payload_service));
 
         Ok(payload_builder)
     }
