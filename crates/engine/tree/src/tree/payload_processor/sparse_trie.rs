@@ -12,6 +12,7 @@ use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, FastInstant as Instant, ParallelBridgeBuffered};
+use std::time::Duration;
 use reth_tasks::Runtime;
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount,
