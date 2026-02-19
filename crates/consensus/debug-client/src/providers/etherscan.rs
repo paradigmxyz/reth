@@ -1,4 +1,4 @@
-use crate::BlockProvider;
+use crate::RawBlockProvider;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_json_rpc::{Response, ResponsePayload};
@@ -9,7 +9,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc, time::interval};
 
 /// Block provider that fetches new blocks from Etherscan API.
-#[derive(derive_more::Debug, Clone)]
+#[derive(derive_more::Debug)]
 pub struct EtherscanBlockProvider<RpcBlock, PrimitiveBlock> {
     http_client: Client,
     base_url: String,
@@ -18,6 +18,19 @@ pub struct EtherscanBlockProvider<RpcBlock, PrimitiveBlock> {
     interval: Duration,
     #[debug(skip)]
     convert: Arc<dyn Fn(RpcBlock) -> PrimitiveBlock + Send + Sync>,
+}
+
+impl<RpcBlock, PrimitiveBlock> Clone for EtherscanBlockProvider<RpcBlock, PrimitiveBlock> {
+    fn clone(&self) -> Self {
+        Self {
+            http_client: self.http_client.clone(),
+            base_url: self.base_url.clone(),
+            api_key: self.api_key.clone(),
+            chain_id: self.chain_id,
+            interval: self.interval,
+            convert: self.convert.clone(),
+        }
+    }
 }
 
 impl<RpcBlock, PrimitiveBlock> EtherscanBlockProvider<RpcBlock, PrimitiveBlock>
@@ -88,7 +101,7 @@ where
     }
 }
 
-impl<RpcBlock, PrimitiveBlock> BlockProvider for EtherscanBlockProvider<RpcBlock, PrimitiveBlock>
+impl<RpcBlock, PrimitiveBlock> RawBlockProvider for EtherscanBlockProvider<RpcBlock, PrimitiveBlock>
 where
     RpcBlock: Serialize + DeserializeOwned + 'static,
     PrimitiveBlock: reth_primitives_traits::Block + 'static,
@@ -125,7 +138,7 @@ where
         }
     }
 
-    async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
-        self.load_block(BlockNumberOrTag::Number(block_number)).await
+    async fn get_block(&self, block: BlockNumberOrTag) -> eyre::Result<Self::Block> {
+        self.load_block(block).await
     }
 }
