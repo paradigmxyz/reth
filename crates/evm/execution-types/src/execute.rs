@@ -1,5 +1,5 @@
 use crate::HashedStorageBundleState;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use reth_primitives_traits::{Account, Bytecode};
 use revm::database::{states::BundleState, BundleAccount};
 
@@ -141,13 +141,18 @@ impl<T> BlockExecutionOutput<T> {
     /// Get storage if value is known.
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.
-    /// Returns `None` if the state is hashed (storage keys are hashed `B256`, not plain `U256`).
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
         match &self.state {
             BundleKind::Plain(state) => {
                 state.account(address).and_then(|a| a.storage_slot(storage_key))
             }
-            BundleKind::Hashed(_) => None,
+            BundleKind::Hashed(state) => {
+                let hashed_key = keccak256(B256::from(storage_key));
+                state
+                    .state
+                    .get(address)
+                    .and_then(|a| a.storage.get(&hashed_key).map(|(_old, new)| *new))
+            }
         }
     }
 }
