@@ -52,6 +52,9 @@ pub trait StorageTrieEntryLike: Sized {
     /// Returns a reference to the branch node.
     fn node(&self) -> &BranchNodeCompact;
 
+    /// Decompose this value into owned parts.
+    fn into_parts(self) -> (Self::SubKey, BranchNodeCompact);
+
     /// Construct a new entry from a subkey and node.
     fn new(nibbles: Self::SubKey, node: BranchNodeCompact) -> Self;
 }
@@ -65,6 +68,10 @@ impl StorageTrieEntryLike for StorageTrieEntry {
 
     fn node(&self) -> &BranchNodeCompact {
         &self.node
+    }
+
+    fn into_parts(self) -> (Self::SubKey, BranchNodeCompact) {
+        (self.nibbles, self.node)
     }
 
     fn new(nibbles: Self::SubKey, node: BranchNodeCompact) -> Self {
@@ -99,6 +106,10 @@ impl StorageTrieEntryLike for PackedStorageTrieEntry {
 
     fn node(&self) -> &BranchNodeCompact {
         &self.node
+    }
+
+    fn into_parts(self) -> (Self::SubKey, BranchNodeCompact) {
+        (self.nibbles, self.node)
     }
 
     fn new(nibbles: Self::SubKey, node: BranchNodeCompact) -> Self {
@@ -315,7 +326,10 @@ where
             .cursor
             .seek_by_key_subkey(self.hashed_address, subkey.clone())?
             .filter(|e| *e.nibbles() == subkey)
-            .map(|value| (A::subkey_to_nibbles(value.nibbles()), value.node().clone())))
+            .map(|value| {
+                let (subkey, node) = value.into_parts();
+                (A::subkey_to_nibbles(&subkey), node)
+            }))
     }
 
     fn seek(
@@ -325,14 +339,20 @@ where
         Ok(self
             .cursor
             .seek_by_key_subkey(self.hashed_address, A::StorageSubKey::from(key))?
-            .map(|value| (A::subkey_to_nibbles(value.nibbles()), value.node().clone())))
+            .map(|value| {
+                let (subkey, node) = value.into_parts();
+                (A::subkey_to_nibbles(&subkey), node)
+            }))
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         Ok(self
             .cursor
             .next_dup()?
-            .map(|(_, v)| (A::subkey_to_nibbles(v.nibbles()), v.node().clone())))
+            .map(|(_, value)| {
+                let (subkey, node) = value.into_parts();
+                (A::subkey_to_nibbles(&subkey), node)
+            }))
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
