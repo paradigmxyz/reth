@@ -627,13 +627,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
-            // Batch insert all block indices/lookups/senders + block bodies with cursors
-            // opened once instead of per-block.
+            // Batch MDBX-only block writes to reduce per-block cursor open/close overhead.
             let start = Instant::now();
             self.insert_blocks_mdbx_batch(&blocks, &tx_nums)?;
             timings.insert_block = start.elapsed();
 
             if save_mode.with_state() {
+                // Write state and changesets to the database.
+                // Must be written after blocks because of the receipt lookup.
+                // Skip receipts/account changesets if they're being written to static files.
                 let state_config = StateWriteConfig {
                     write_receipts: !sf_ctx.write_receipts,
                     write_account_changesets: !sf_ctx.write_account_changesets,
@@ -747,14 +749,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let write_senders = self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()) &&
             EitherWriterDestination::senders(self).is_database();
 
-        // Open senders cursor once for all blocks.
+        // MDBX: Open senders cursor once for all blocks.
         let mut senders_cursor = if write_senders {
             Some(self.tx.cursor_write::<tables::TransactionSenders>()?)
         } else {
             None
         };
 
-        // Open index cursors once for all blocks.
+        // MDBX: Open index cursors once for all blocks.
         let mut body_indices_cursor = self.tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut tx_blocks_cursor = self.tx.cursor_write::<tables::TransactionBlocks>()?;
 
@@ -768,7 +770,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let first_tx_num = tx_nums[i];
             let tx_count = block.body().transaction_count() as u64;
 
-            // TransactionSenders
+            // MDBX: TransactionSenders
             if let Some(cursor) = senders_cursor.as_mut() {
                 let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
                 for (tx_num, sender) in tx_nums_iter.zip(block.senders_iter().copied()) {
@@ -776,14 +778,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 }
             }
 
-            // HeaderNumbers
+            // MDBX: HeaderNumbers
             self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
 
-            // BlockBodyIndices
+            // MDBX: BlockBodyIndices
             body_indices_cursor
                 .append(block_number, &StoredBlockBodyIndices { first_tx_num, tx_count })?;
 
-            // TransactionBlocks (last tx -> block mapping)
+            // MDBX: TransactionBlocks (last tx -> block mapping)
             if tx_count > 0 {
                 tx_blocks_cursor.append(first_tx_num + tx_count - 1, &block_number)?;
             }
