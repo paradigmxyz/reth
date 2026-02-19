@@ -323,7 +323,7 @@ where
             Ok(())
         }
 
-        let _span = debug_span!("reveal_decoded_multiproof_v2").entered();
+        let _span = debug_span!("reveal_storage_v2_proof_nodes").entered();
         #[cfg(feature = "std")]
         // If std then reveal storage proofs in parallel
         {
