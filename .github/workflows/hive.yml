@@ -127,15 +127,12 @@ jobs:
     steps:
       - run: echo "prepared reth ready"
 
-
-
   test:
     needs:
-    - detect-env
-    - prepare-hive
-    - wait-reth-docker
-    - wait-reth-prepare
-
+      - detect-env
+      - prepare-hive
+      - wait-reth-docker
+      - wait-reth-prepare
 
     runs-on: ${{ needs.detect-env.outputs.use_docker == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     timeout-minutes: 120
