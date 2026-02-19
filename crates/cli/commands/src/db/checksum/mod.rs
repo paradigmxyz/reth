@@ -115,6 +115,13 @@ fn checksum_hasher() -> impl Hasher {
     FixedState::with_seed(u64::from_be_bytes(*b"RETHRETH")).build_hasher()
 }
 
+#[inline]
+fn hash_row_columns<H: Hasher>(hasher: &mut H, row: &[&[u8]]) {
+    for col_data in row.iter() {
+        hasher.write(col_data);
+    }
+}
+
 fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
     tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     segment: StaticFileSegment,
@@ -149,7 +156,8 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         if limit == usize::MAX { None } else { Some(limit) }
     );
 
-    'outer: for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
+    let mut reached_limit = false;
+    for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
         if block_range.end() < start_block || block_range.start() > end_block {
             continue;
         }
@@ -167,25 +175,83 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
 
         let mut cursor = jar_provider.cursor()?;
 
-        while let Ok(Some(row)) = cursor.next_row() {
-            for col_data in row.iter() {
-                hasher.write(col_data);
+        if segment.is_change_based() {
+            let offsets = jar_provider.read_changeset_offsets()?.ok_or_else(|| {
+                eyre::eyre!(
+                    "Missing changeset offsets sidecar for segment {} at range {}",
+                    segment,
+                    block_range
+                )
+            })?;
+
+            for (offset_index, offset) in offsets.iter().enumerate() {
+                let block_number = block_range.start() + offset_index as u64;
+                let include_block = block_number >= start_block && block_number <= end_block;
+
+                for _ in 0..offset.num_changes() {
+                    let row = cursor.next_row()?.ok_or_else(|| {
+                        eyre::eyre!(
+                            "Unexpected EOF while checksumming {} static file at range {}",
+                            segment,
+                            block_range
+                        )
+                    })?;
+
+                    if include_block {
+                        // Match MDBX changeset checksum semantics: hash raw key + raw value.
+                        // For static files, rows already contain the value bytes.
+                        hasher.write(&block_number.to_be_bytes());
+                        hash_row_columns(&mut hasher, &row);
+
+                        total += 1;
+
+                        if total.is_multiple_of(PROGRESS_LOG_INTERVAL) {
+                            info!("Hashed {total} entries.");
+                        }
+
+                        if total >= limit {
+                            reached_limit = true;
+                            break;
+                        }
+                    }
+                }
+
+                if reached_limit {
+                    break;
+                }
             }
 
-            total += 1;
-
-            if total.is_multiple_of(PROGRESS_LOG_INTERVAL) {
-                info!("Hashed {total} entries.");
+            if !reached_limit && cursor.next_row()?.is_some() {
+                return Err(eyre::eyre!(
+                    "Changeset offsets do not cover all rows for {} at range {}",
+                    segment,
+                    block_range
+                ));
             }
+        } else {
+            while let Some(row) = cursor.next_row()? {
+                hash_row_columns(&mut hasher, &row);
 
-            if total >= limit {
-                break 'outer;
+                total += 1;
+
+                if total.is_multiple_of(PROGRESS_LOG_INTERVAL) {
+                    info!("Hashed {total} entries.");
+                }
+
+                if total >= limit {
+                    reached_limit = true;
+                    break;
+                }
             }
         }
 
         // Explicitly drop provider before removing from cache to avoid deadlock
         drop(jar_provider);
         static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
+
+        if reached_limit {
+            break;
+        }
     }
 
     let checksum = hasher.finish();
@@ -267,7 +333,7 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
 
             total = index + 1;
             if total >= limit {
-                break
+                break;
             }
         }
 
