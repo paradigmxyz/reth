@@ -14,7 +14,7 @@ use reth_db_api::{
 use reth_db_common::DbTool;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_provider::{providers::ProviderNodeTypes, DBProvider, StaticFileProviderFactory};
-use reth_static_file_types::StaticFileSegment;
+use reth_static_file_types::{ChangesetOffset, StaticFileSegment};
 use std::{
     hash::{BuildHasher, Hasher},
     time::{Duration, Instant},
@@ -178,6 +178,73 @@ fn split_storage_changeset_row(block_number: u64, row: &[u8]) -> eyre::Result<([
     Ok((key_buf, &row[20..]))
 }
 
+fn checksum_change_based_segment<H: Hasher>(
+    checksummer: &mut Checksummer<H>,
+    segment: StaticFileSegment,
+    block_range_start: u64,
+    start_block: u64,
+    end_block: u64,
+    is_storage: bool,
+    offsets: &[ChangesetOffset],
+    cursor: &mut reth_db::static_file::StaticFileCursor<'_>,
+) -> eyre::Result<bool> {
+    let mut reached_limit = false;
+
+    for (offset_index, offset) in offsets.iter().enumerate() {
+        let block_number = block_range_start + offset_index as u64;
+        let include = block_number >= start_block && block_number <= end_block;
+
+        for _ in 0..offset.num_changes() {
+            let row = cursor.next_row()?.ok_or_else(|| {
+                eyre::eyre!(
+                    "Unexpected EOF while checksumming {} static file at range starting {}",
+                    segment,
+                    block_range_start
+                )
+            })?;
+
+            if !include {
+                continue;
+            }
+
+            // Reconstruct MDBX key/value write boundaries. foldhash rotates
+            // its accumulator by `len` on each write(), so boundaries must
+            // match exactly.
+            let done = if is_storage {
+                // StorageChangeSets: MDBX key = BlockNumberAddress (28B),
+                // value = compact StorageEntry. Column 0 is compact
+                // StorageBeforeTx = [20B address][32B key][compact U256].
+                let col = row[0];
+                let (key, value) = split_storage_changeset_row(block_number, col)?;
+                checksummer.write_entry(&key, value)
+            } else {
+                // AccountChangeSets: MDBX key = BlockNumber (8B),
+                // value = compact AccountBeforeTx (= column 0).
+                checksummer.write_entry(&block_number.to_be_bytes(), row[0])
+            };
+
+            if done {
+                reached_limit = true;
+                break;
+            }
+        }
+
+        if reached_limit {
+            break;
+        }
+    }
+
+    if !reached_limit && cursor.next_row()?.is_some() {
+        return Err(eyre::eyre!(
+            "Changeset offsets do not cover all rows for {} at range starting {}",
+            segment,
+            block_range_start
+        ));
+    }
+
+    Ok(reached_limit)
+}
+
 fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
     tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     segment: StaticFileSegment,
@@ -241,57 +308,16 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
                 )
             })?;
 
-            for (offset_index, offset) in offsets.iter().enumerate() {
-                let block_number = block_range.start() + offset_index as u64;
-                let include = block_number >= start_block && block_number <= end_block;
-
-                for _ in 0..offset.num_changes() {
-                    let row = cursor.next_row()?.ok_or_else(|| {
-                        eyre::eyre!(
-                            "Unexpected EOF while checksumming {} static file at range {}",
-                            segment,
-                            block_range
-                        )
-                    })?;
-
-                    if !include {
-                        continue;
-                    }
-
-                    // Reconstruct MDBX key/value write boundaries. foldhash rotates
-                    // its accumulator by `len` on each write(), so boundaries must
-                    // match exactly.
-                    let done = if is_storage {
-                        // StorageChangeSets: MDBX key = BlockNumberAddress (28B),
-                        // value = compact StorageEntry. Column 0 is compact
-                        // StorageBeforeTx = [20B address][32B key][compact U256].
-                        let col = row[0];
-                        let (key, value) = split_storage_changeset_row(block_number, col)?;
-                        checksummer.write_entry(&key, value)
-                    } else {
-                        // AccountChangeSets: MDBX key = BlockNumber (8B),
-                        // value = compact AccountBeforeTx (= column 0).
-                        checksummer.write_entry(&block_number.to_be_bytes(), row[0])
-                    };
-
-                    if done {
-                        reached_limit = true;
-                        break;
-                    }
-                }
-
-                if reached_limit {
-                    break;
-                }
-            }
-
-            if !reached_limit && cursor.next_row()?.is_some() {
-                return Err(eyre::eyre!(
-                    "Changeset offsets do not cover all rows for {} at range {}",
-                    segment,
-                    block_range
-                ));
-            }
+            reached_limit = checksum_change_based_segment(
+                &mut checksummer,
+                segment,
+                block_range.start(),
+                start_block,
+                end_block,
+                is_storage,
+                &offsets,
+                &mut cursor,
+            )?;
         } else {
             while let Some(row) = cursor.next_row()? {
                 if checksummer.write_row(&row) {
