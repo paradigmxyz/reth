@@ -1949,7 +1949,7 @@ impl PooledTransactionsHashesBuilder {
     fn new(version: EthVersion) -> Self {
         match version {
             EthVersion::Eth66 | EthVersion::Eth67 => Self::Eth66(Default::default()),
-            EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 => {
+            EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71 => {
                 Self::Eth68(Default::default())
             }
         }
@@ -2167,6 +2167,7 @@ mod tests {
         sync::{NetworkSyncUpdater, SyncState},
     };
     use reth_storage_api::noop::NoopProvider;
+    use reth_tasks::Runtime;
     use reth_transaction_pool::test_utils::{
         testing_pool, MockTransaction, MockTransactionFactory, TestPool,
     };
@@ -2196,7 +2197,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::eth(secret_key)
+        let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -2266,7 +2267,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -2332,7 +2333,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let client = NoopProvider::default();
 
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             // let OS choose port
             .listener_port(0)
             .disable_discovery()
@@ -2440,7 +2441,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -2518,7 +2519,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -2936,7 +2937,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let client = NoopProvider::default();
 
-        let network_config = NetworkConfigBuilder::new(secret_key)
+        let network_config = NetworkConfigBuilder::new(secret_key, Runtime::test())
             .listener_port(0)
             .disable_discovery()
             .build(client.clone());

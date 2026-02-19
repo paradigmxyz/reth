@@ -218,6 +218,13 @@ impl PeersManager {
         })
     }
 
+    /// Returns `true` if the given peer is connected via an inbound session.
+    pub(crate) fn is_inbound_peer(&self, peer_id: &PeerId) -> bool {
+        self.peers.get(peer_id).is_some_and(|p| {
+            matches!(p.state, PeerConnectionState::In | PeerConnectionState::DisconnectingIn)
+        })
+    }
+
     /// Returns an iterator over all peer ids for peers with the given kind
     pub(crate) fn peers_by_kind(&self, kind: PeerKind) -> impl Iterator<Item = PeerId> + '_ {
         self.peers.iter().filter_map(move |(peer_id, peer)| (peer.kind == kind).then_some(*peer_id))

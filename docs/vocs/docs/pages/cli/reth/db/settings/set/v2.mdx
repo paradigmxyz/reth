@@ -1,12 +1,12 @@
-# reth db settings set account_changesets_in_static_files
+# reth db settings set v2
 
-Store account changesets in static files instead of the database
+Enable or disable v2 storage layout
 
 ```bash
-$ reth db settings set account_changesets_in_static_files --help
+$ reth db settings set v2 --help
 ```
 ```txt
-Usage: reth db settings set account_changesets_in_static_files [OPTIONS] <VALUE>
+Usage: reth db settings set v2 [OPTIONS] <VALUE>
 
 Arguments:
   <VALUE>
@@ -73,9 +73,9 @@ Logging:
           [default: 200]
 
       --log.file.max-files <COUNT>
-          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled.
 
-          [default: 5]
+          Default: 5 for `node` command, 0 for non-node utility subcommands.
 
       --log.journald
           Write logs to journald
@@ -94,6 +94,24 @@ Logging:
           - never:  Colors off
 
           [default: always]
+
+      --logs-otlp[=<URL>]
+          Enable `Opentelemetry` logs export to an OTLP endpoint.
+
+          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/logs` - gRPC: `http://localhost:4317`
+
+          Example: --logs-otlp=http://collector:4318/v1/logs
+
+          [env: OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=]
+
+      --logs-otlp.filter <FILTER>
+          Set a filter directive for the OTLP logs exporter. This controls the verbosity of logs sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
+
+          Example: --logs-otlp.filter=info,reth=debug
+
+          Defaults to INFO if not specified.
+
+          [default: info]
 
 Display:
   -v, --verbosity...
@@ -119,9 +137,9 @@ Tracing:
           [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
 
       --tracing-otlp-protocol <PROTOCOL>
-          OTLP transport protocol to use for exporting traces.
+          OTLP transport protocol to use for exporting traces and logs.
 
-          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
+          - `http`: expects endpoint path to end with `/v1/traces` or `/v1/logs` - `grpc`: expects endpoint without a path
 
           Defaults to HTTP if not specified.
 

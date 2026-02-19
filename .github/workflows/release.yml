@@ -102,7 +102,7 @@ jobs:
       - name: Install cross main
         id: cross_main
         run: |
-          cargo install cross --git https://github.com/cross-rs/cross
+          cargo install cross --locked --git https://github.com/cross-rs/cross
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true

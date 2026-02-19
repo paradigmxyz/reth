@@ -63,7 +63,7 @@ impl Command {
         address: Address,
         limit: usize,
     ) -> eyre::Result<()> {
-        let use_hashed_state = tool.provider_factory.cached_storage_settings().use_hashed_state;
+        let use_hashed_state = tool.provider_factory.cached_storage_settings().use_hashed_state();
 
         let entries = tool.provider_factory.db_ref().view(|tx| {
             let (account, walker_entries) = if use_hashed_state {
@@ -145,7 +145,7 @@ impl Command {
 
         // Check storage settings to determine where history is stored
         let storage_settings = tool.provider_factory.cached_storage_settings();
-        let history_in_rocksdb = storage_settings.storages_history_in_rocksdb;
+        let history_in_rocksdb = storage_settings.storage_v2;
 
         // For historical queries, enumerate keys from history indices only
         // (not PlainStorageState, which reflects current state)

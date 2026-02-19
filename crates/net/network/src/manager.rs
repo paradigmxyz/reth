@@ -25,7 +25,7 @@ use crate::{
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage},
     metrics::{
-        BackedOffPeersMetrics, ClosedSessionsMetrics, DisconnectMetrics, NetworkMetrics,
+        BackedOffPeersMetrics, ClosedSessionsMetrics, DirectionalDisconnectMetrics, NetworkMetrics,
         PendingSessionFailureMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE,
     },
     network::{NetworkHandle, NetworkHandleMessage},
@@ -140,8 +140,8 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     num_active_peers: Arc<AtomicUsize>,
     /// Metrics for the Network
     metrics: NetworkMetrics,
-    /// Disconnect metrics for the Network
-    disconnect_metrics: DisconnectMetrics,
+    /// Disconnect metrics for the Network, split by connection direction.
+    disconnect_metrics: DirectionalDisconnectMetrics,
     /// Closed sessions metrics, split by direction.
     closed_sessions_metrics: ClosedSessionsMetrics,
     /// Pending session failure metrics, split by direction.
@@ -157,8 +157,9 @@ impl NetworkManager {
     /// # async fn f() {
     /// use reth_chainspec::MAINNET;
     /// use reth_network::{NetworkConfig, NetworkManager};
-    /// let config =
-    ///     NetworkConfig::builder_with_rng_secret_key().build_with_noop_provider(MAINNET.clone());
+    /// use reth_tasks::Runtime;
+    /// let config = NetworkConfig::builder_with_rng_secret_key(Runtime::test())
+    ///     .build_with_noop_provider(MAINNET.clone());
     /// let manager = NetworkManager::eth(config).await;
     /// # }
     /// ```
@@ -378,6 +379,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// };
     /// use reth_network_peers::mainnet_nodes;
     /// use reth_storage_api::noop::NoopProvider;
+    /// use reth_tasks::Runtime;
     /// use reth_transaction_pool::TransactionPool;
     /// async fn launch<Pool: TransactionPool>(pool: Pool) {
     ///     // This block provider implementation is used for testing purposes.
@@ -386,7 +388,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     ///     // The key that's used for encrypting sessions and to identify our node.
     ///     let local_key = rng_secret_key();
     ///
-    ///     let config = NetworkConfig::<_, EthNetworkPrimitives>::builder(local_key)
+    ///     let config = NetworkConfig::<_, EthNetworkPrimitives>::builder(local_key, Runtime::test())
     ///         .boot_nodes(mainnet_nodes())
     ///         .build(client.clone());
     ///     let transactions_manager_config = config.transactions_manager_config.clone();
@@ -546,6 +548,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             }
             PeerRequest::GetReceipts70 { request, response } => {
                 self.delegate_eth_request(IncomingEthRequest::GetReceipts70 {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
+            PeerRequest::GetBlockAccessLists { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetBlockAccessLists {
                     peer_id,
                     request,
                     response,
@@ -864,6 +873,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     "Session disconnected"
                 );
 
+                // Capture direction before state is reset to Idle
+                let is_inbound = self.swarm.state().peers().is_inbound_peer(&peer_id);
+
                 let reason = if let Some(ref err) = error {
                     // If the connection was closed due to an error, we report
                     // the peer
@@ -887,7 +899,11 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 self.update_active_connection_metrics();
 
                 if let Some(reason) = reason {
-                    self.disconnect_metrics.increment(reason);
+                    if is_inbound {
+                        self.disconnect_metrics.increment_inbound(reason);
+                    } else {
+                        self.disconnect_metrics.increment_outbound(reason);
+                    }
                 }
                 self.metrics
                     .backed_off_peers
@@ -910,7 +926,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         .on_incoming_pending_session_dropped(remote_addr, err);
                     self.pending_session_failure_metrics.inbound.increment(1);
                     if let Some(reason) = err.as_disconnected() {
-                        self.disconnect_metrics.increment(reason);
+                        self.disconnect_metrics.increment_inbound(reason);
                     }
                 } else {
                     self.swarm
@@ -943,7 +959,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         BackoffReason::from_disconnect(err.as_disconnected()),
                     );
                     if let Some(reason) = err.as_disconnected() {
-                        self.disconnect_metrics.increment(reason);
+                        self.disconnect_metrics.increment_outbound(reason);
                     }
                 } else {
                     self.swarm

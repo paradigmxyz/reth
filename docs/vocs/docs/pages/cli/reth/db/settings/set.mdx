@@ -9,15 +9,8 @@ $ reth db settings set --help
 Usage: reth db settings set [OPTIONS] <COMMAND>
 
 Commands:
-  receipts                  Store receipts in static files instead of the database
-  transaction_senders       Store transaction senders in static files instead of the database
-  account_changesets        Store account changesets in static files instead of the database
-  storages_history          Store storage history in rocksdb instead of MDBX
-  transaction_hash_numbers  Store transaction hash to number mapping in rocksdb instead of MDBX
-  account_history           Store account history in rocksdb instead of MDBX
-  storage_changesets        Store storage changesets in static files instead of the database
-  use_hashed_state          Use hashed state tables (HashedAccounts/HashedStorages) as canonical state
-  help                      Print this message or the help of the given subcommand(s)
+  v2    Enable or disable v2 storage layout
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
@@ -80,9 +73,9 @@ Logging:
           [default: 200]
 
       --log.file.max-files <COUNT>
-          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled.
 
-          [default: 5]
+          Default: 5 for `node` command, 0 for non-node utility subcommands.
 
       --log.journald
           Write logs to journald
