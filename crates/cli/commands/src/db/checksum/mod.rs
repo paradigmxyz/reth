@@ -156,6 +156,28 @@ impl<H: Hasher> Checksummer<H> {
     }
 }
 
+/// Reconstruct MDBX `StorageChangeSets` key/value boundaries from a static-file row.
+///
+/// MDBX layout:
+/// - key: `BlockNumberAddress` => `[8B block_number][20B address]`
+/// - value: `StorageEntry` => `[32B storage_key][compact U256 value]`
+///
+/// Static-file row layout for `StorageBeforeTx`:
+/// - `[20B address][32B storage_key][compact U256 value]`
+fn split_storage_changeset_row(block_number: u64, row: &[u8]) -> eyre::Result<([u8; 28], &[u8])> {
+    if row.len() < 20 {
+        return Err(eyre::eyre!(
+            "Storage changeset row too short: expected at least 20 bytes, got {}",
+            row.len()
+        ));
+    }
+
+    let mut key_buf = [0u8; 28];
+    key_buf[..8].copy_from_slice(&block_number.to_be_bytes());
+    key_buf[8..].copy_from_slice(&row[..20]);
+    Ok((key_buf, &row[20..]))
+}
+
 fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
     tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     segment: StaticFileSegment,
@@ -189,7 +211,8 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         if limit == usize::MAX { None } else { Some(limit) }
     );
 
-    'jars: for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
+    let mut reached_limit = false;
+    for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
         if block_range.end() < start_block || block_range.start() > end_block {
             continue;
         }
@@ -243,10 +266,8 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
                         // value = compact StorageEntry. Column 0 is compact
                         // StorageBeforeTx = [20B address][32B key][compact U256].
                         let col = row[0];
-                        let mut key_buf = [0u8; 28];
-                        key_buf[..8].copy_from_slice(&block_number.to_be_bytes());
-                        key_buf[8..].copy_from_slice(&col[..20]);
-                        checksummer.write_entry(&key_buf, &col[20..])
+                        let (key, value) = split_storage_changeset_row(block_number, col)?;
+                        checksummer.write_entry(&key, value)
                     } else {
                         // AccountChangeSets: MDBX key = BlockNumber (8B),
                         // value = compact AccountBeforeTx (= column 0).
@@ -254,12 +275,17 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
                     };
 
                     if done {
-                        break 'jars;
+                        reached_limit = true;
+                        break;
                     }
+                }
+
+                if reached_limit {
+                    break;
                 }
             }
 
-            if cursor.next_row()?.is_some() {
+            if !reached_limit && cursor.next_row()?.is_some() {
                 return Err(eyre::eyre!(
                     "Changeset offsets do not cover all rows for {} at range {}",
                     segment,
@@ -269,7 +295,8 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         } else {
             while let Some(row) = cursor.next_row()? {
                 if checksummer.write_row(&row) {
-                    break 'jars;
+                    reached_limit = true;
+                    break;
                 }
             }
         }
@@ -277,6 +304,10 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         // Explicitly drop provider before removing from cache to avoid deadlock
         drop(jar_provider);
         static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
+
+        if reached_limit {
+            break;
+        }
     }
 
     let (checksum, total) = checksummer.finish();
@@ -374,5 +405,35 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
         info!("Checksum for table `{}`: {:#x} (elapsed: {:?})", T::NAME, checksum, elapsed);
 
         Ok((checksum, elapsed))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_storage_changeset_row;
+    use alloy_primitives::Address;
+
+    #[test]
+    fn split_storage_changeset_row_ok() {
+        let block = 0x0102_0304_0506_0708u64;
+        let address = Address::repeat_byte(0x11);
+        let mut row = Vec::new();
+        row.extend_from_slice(address.as_slice());
+        row.extend_from_slice(&[0x22; 32]); // storage key
+        row.extend_from_slice(&[0x33, 0x44]); // compact U256 payload (test bytes)
+
+        let (key, value) = split_storage_changeset_row(block, &row).expect("valid row");
+
+        assert_eq!(&key[..8], &block.to_be_bytes());
+        assert_eq!(&key[8..], address.as_slice());
+        assert_eq!(value.len(), 34);
+        assert_eq!(&value[..32], &[0x22; 32]);
+        assert_eq!(&value[32..], &[0x33, 0x44]);
+    }
+
+    #[test]
+    fn split_storage_changeset_row_too_short() {
+        let err = split_storage_changeset_row(1, &[0xAA; 19]).expect_err("must fail");
+        assert!(err.to_string().contains("too short"));
     }
 }
