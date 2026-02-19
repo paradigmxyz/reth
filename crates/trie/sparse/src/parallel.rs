@@ -5369,7 +5369,7 @@ mod tests {
             );
 
         let mut sparse = ParallelSparseTrie::default().with_updates(true);
-        ctx.update_leaves(&mut sparse, [(key, value_encoded().into())]);
+        ctx.update_leaves(&mut sparse, [(key, value_encoded())]);
         ctx.assert_with_hash_builder(
             &mut sparse,
             hash_builder_root,
@@ -5433,7 +5433,7 @@ mod tests {
         let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default().with_updates(true);
         for path in &paths {
-            sparse.update_leaf(*path, value_encoded().into(), &provider).unwrap();
+            sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
@@ -6228,7 +6228,7 @@ mod tests {
         );
 
         // Insert the leaf for the second key
-        sparse.update_leaf(key2(), value_encoded().into(), &provider).unwrap();
+        sparse.update_leaf(key2(), value_encoded(), &provider).unwrap();
 
         // Check that the branch node was updated and another nibble was set
         assert_eq!(
@@ -6441,7 +6441,7 @@ mod tests {
         );
 
         // Insert the leaf with a different prefix
-        sparse.update_leaf(key3(), value_encoded().into(), &provider).unwrap();
+        sparse.update_leaf(key3(), value_encoded(), &provider).unwrap();
 
         // Check that the extension node was turned into a branch node
         assert_matches!(
@@ -7446,7 +7446,7 @@ mod tests {
         let result = sparse.find_leaf(&path, Some(&wrong_value));
         assert_matches!(
             result,
-            Err(LeafLookupError::ValueMismatch { path: p, expected, actual: _a }) if p == path && *expected == Some(wrong_value.clone())
+            Err(LeafLookupError::ValueMismatch { path: p, expected, actual: _a }) if p == path && *expected == Some(wrong_value)
         );
     }
 
