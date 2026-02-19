@@ -10345,6 +10345,7 @@ name = "reth-tasks"
 version = "1.11.0"
 dependencies = [
  "crossbeam-utils",
+ "dashmap",
  "futures-util",
  "metrics",
  "parking_lot",

@@ -11,6 +11,7 @@ use crate::pool::{BlockingTaskGuard, BlockingTaskPool, WorkerPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
+    worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
 };
 use futures_util::{future::select, Future, FutureExt, TryFutureExt};
@@ -260,6 +261,9 @@ struct RuntimeInner {
     /// Prewarming pool (execution prewarming workers).
     #[cfg(feature = "rayon")]
     prewarming_pool: WorkerPool,
+    /// Named single-thread worker map. Each unique name gets a dedicated OS thread
+    /// that is reused across all tasks submitted under that name.
+    worker_map: WorkerMap,
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
@@ -472,6 +476,26 @@ impl Runtime {
         R: Send + 'static,
     {
         self.0.handle.spawn_blocking(func)
+    }
+
+    /// Spawns a blocking closure on a dedicated, named OS thread.
+    ///
+    /// Unlike [`spawn_blocking`](Self::spawn_blocking) which uses tokio's blocking thread pool,
+    /// this reuses the same OS thread for all tasks submitted under the same `name`. The thread
+    /// is created lazily on first use and its OS thread name is set to `name`.
+    ///
+    /// This is useful for tasks that benefit from running on a stable thread, e.g. for
+    /// thread-local state reuse or to avoid thread creation overhead on hot paths.
+    pub fn spawn_blocking_named<F, R>(
+        &self,
+        name: &'static str,
+        func: F,
+    ) -> tokio::sync::oneshot::Receiver<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.0.worker_map.spawn_on(name, func)
     }
 
     /// Spawns the task onto the runtime.
@@ -858,6 +882,7 @@ impl RuntimeBuilder {
             proof_account_worker_pool,
             #[cfg(feature = "rayon")]
             prewarming_pool,
+            worker_map: WorkerMap::new(),
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
             _quanta_upkeep: quanta_upkeep,
         };
