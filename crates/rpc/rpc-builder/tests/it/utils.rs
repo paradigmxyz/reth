@@ -19,7 +19,7 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::{bal_store::NoopBalStore, capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_layer::JwtSecret;
 use reth_rpc_server_types::RpcModuleSelection;
-use reth_tasks::TokioTaskExecutor;
+use reth_tasks::{Runtime, TokioTaskExecutor};
 use reth_transaction_pool::{
     noop::NoopTransactionPool,
     test_utils::{TestPool, TestPoolBuilder},
@@ -49,7 +49,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         beacon_engine_handle,
         spawn_test_payload_service().into(),
         NoopTransactionPool::default(),
-        Box::<TokioTaskExecutor>::default(),
+        Runtime::test(),
         client,
         EngineCapabilities::default(),
         EthereumEngineValidator::new(MAINNET.clone()),
