@@ -238,7 +238,6 @@ mod tests {
     };
     use reth_primitives_traits::StorageEntry;
     use reth_storage_api::StorageSettingsCache;
-    use reth_storage_errors::provider::ProviderError;
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
