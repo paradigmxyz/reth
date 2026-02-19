@@ -467,13 +467,20 @@ where
 
         // Process all storage updates in parallel, skipping tries with no pending updates.
         let num_storage_updates =
-            storage_updates.iter().map(|(_, updates)| updates.len()).sum::<usize>();
-        let span = debug_span!("process_storage_leaf_updates", num_updates = num_storage_updates)
-            .entered();
+            storage_updates.values().map(|updates| updates.len()).sum::<usize>();
+        let span = debug_span!(
+            "process_storage_leaf_updates",
+            num_updates = num_storage_updates,
+            num_addresses = tracing::field::Empty
+        )
+        .entered();
+        let mut num_addresses = 0;
         for (address, updates) in storage_updates {
             if updates.is_empty() {
                 continue;
             }
+
+            num_addresses += 1;
 
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
@@ -497,6 +504,7 @@ where
             }
         }
 
+        span.record("num_addresses", num_addresses);
         drop(span);
 
         // Process account trie updates and fill the account targets.
