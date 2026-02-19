@@ -763,12 +763,33 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Collect bodies for a single write_block_bodies call (opens ommers/withdrawals cursors
         // once instead of per-block).
         let mut bodies = Vec::with_capacity(blocks.len());
+        let mut prev_block_number = None;
+        let mut expected_next_first_tx_num = None;
 
         for (i, executed) in blocks.iter().enumerate() {
             let block = executed.recovered_block();
             let block_number = block.number();
             let first_tx_num = tx_nums[i];
             let tx_count = block.body().transaction_count() as u64;
+
+            if let Some(prev) = prev_block_number {
+                debug_assert!(
+                    block_number > prev,
+                    "save_blocks requires strictly increasing block numbers, got {block_number} after {prev}"
+                );
+            }
+            if let Some(expected) = expected_next_first_tx_num {
+                debug_assert_eq!(
+                    first_tx_num, expected,
+                    "save_blocks requires contiguous tx numbers, expected first_tx_num {expected}, got {first_tx_num} at block {block_number}"
+                );
+            }
+            debug_assert!(
+                first_tx_num <= TxNumber::MAX - tx_count,
+                "tx number overflow while batching block {block_number}: first_tx_num={first_tx_num}, tx_count={tx_count}"
+            );
+            expected_next_first_tx_num = Some(first_tx_num + tx_count);
+            prev_block_number = Some(block_number);
 
             // MDBX: TransactionSenders
             if let Some(cursor) = senders_cursor.as_mut() {
