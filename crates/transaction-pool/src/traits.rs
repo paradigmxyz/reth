@@ -1257,6 +1257,9 @@ pub trait PoolTransaction:
         self.clone().into_consensus()
     }
 
+    /// Returns a reference to the consensus transaction with the recovered sender.
+    fn consensus_ref(&self) -> Recovered<&Self::Consensus>;
+
     /// Define a method to convert from the `Self` type to `Consensus`
     fn into_consensus(self) -> Recovered<Self::Consensus>;
 
@@ -1445,6 +1448,10 @@ impl PoolTransaction for EthPooledTransaction {
 
     fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.transaction().clone()
+    }
+
+    fn consensus_ref(&self) -> Recovered<&Self::Consensus> {
+        Recovered::new_unchecked(&*self.transaction, self.transaction.signer())
     }
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {

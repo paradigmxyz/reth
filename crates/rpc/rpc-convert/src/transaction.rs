@@ -5,7 +5,6 @@ use crate::{
 use alloy_consensus::{
     error::ValueError, transaction::Recovered, EthereumTxEnvelope, Sealable, TxEip4844,
 };
-use alloy_network::Network;
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types_eth::{request::TransactionRequest, Transaction, TransactionInfo};
 use core::error;
@@ -900,115 +899,6 @@ pub mod op {
             let signature = Signature::new(Default::default(), Default::default(), false);
 
             Ok(tx.into_signed(signature).into())
-        }
-    }
-}
-
-/// Trait for converting network transaction responses to primitive transaction types.
-pub trait TryFromTransactionResponse<N: Network> {
-    /// The error type returned if the conversion fails.
-    type Error: core::error::Error + Send + Sync + Unpin;
-
-    /// Converts a network transaction response to a primitive transaction type.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(Self)` on successful conversion, or `Err(Self::Error)` if the conversion fails.
-    fn from_transaction_response(
-        transaction_response: N::TransactionResponse,
-    ) -> Result<Self, Self::Error>
-    where
-        Self: Sized;
-}
-
-impl TryFromTransactionResponse<alloy_network::Ethereum>
-    for reth_ethereum_primitives::TransactionSigned
-{
-    type Error = Infallible;
-
-    fn from_transaction_response(transaction_response: Transaction) -> Result<Self, Self::Error> {
-        Ok(transaction_response.into_inner().into())
-    }
-}
-
-#[cfg(feature = "op")]
-impl TryFromTransactionResponse<op_alloy_network::Optimism> for op_alloy_consensus::OpTxEnvelope {
-    type Error = Infallible;
-
-    fn from_transaction_response(
-        transaction_response: op_alloy_rpc_types::Transaction,
-    ) -> Result<Self, Self::Error> {
-        Ok(transaction_response.inner.into_inner())
-    }
-}
-
-#[cfg(test)]
-mod transaction_response_tests {
-    use super::*;
-    use alloy_consensus::{transaction::Recovered, EthereumTxEnvelope, Signed, TxLegacy};
-    use alloy_network::Ethereum;
-    use alloy_primitives::{Address, Signature, B256, U256};
-    use alloy_rpc_types_eth::Transaction;
-
-    #[test]
-    fn test_ethereum_transaction_conversion() {
-        let signed_tx = Signed::new_unchecked(
-            TxLegacy::default(),
-            Signature::new(U256::ONE, U256::ONE, false),
-            B256::ZERO,
-        );
-        let envelope = EthereumTxEnvelope::Legacy(signed_tx);
-
-        let tx_response = Transaction {
-            inner: Recovered::new_unchecked(envelope, Address::ZERO),
-            block_hash: None,
-            block_number: None,
-            transaction_index: None,
-            effective_gas_price: None,
-        };
-
-        let result = <reth_ethereum_primitives::TransactionSigned as TryFromTransactionResponse<
-            Ethereum,
-        >>::from_transaction_response(tx_response);
-        assert!(result.is_ok());
-    }
-
-    #[cfg(feature = "op")]
-    mod op {
-        use super::*;
-
-        #[test]
-        fn test_optimism_transaction_conversion() {
-            use op_alloy_consensus::OpTxEnvelope;
-            use op_alloy_network::Optimism;
-
-            let signed_tx = Signed::new_unchecked(
-                TxLegacy::default(),
-                Signature::new(U256::ONE, U256::ONE, false),
-                B256::ZERO,
-            );
-            let envelope = OpTxEnvelope::Legacy(signed_tx);
-
-            let inner_tx = Transaction {
-                inner: Recovered::new_unchecked(envelope, Address::ZERO),
-                block_hash: None,
-                block_number: None,
-                transaction_index: None,
-                effective_gas_price: None,
-            };
-
-            let tx_response = op_alloy_rpc_types::Transaction {
-                inner: inner_tx,
-                deposit_nonce: None,
-                deposit_receipt_version: None,
-            };
-
-            let result =
-                <OpTxEnvelope as TryFromTransactionResponse<Optimism>>::from_transaction_response(
-                    tx_response,
-                );
-
-            assert!(result.is_ok());
         }
     }
 }

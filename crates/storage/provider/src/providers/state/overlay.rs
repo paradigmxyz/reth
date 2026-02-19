@@ -282,7 +282,7 @@ where
         level = "debug",
         target = "providers::state::overlay",
         skip_all,
-        fields(db_tip_block)
+        fields(%db_tip_block)
     )]
     fn calculate_overlay(
         &self,
@@ -315,7 +315,7 @@ where
             // Collect trie reverts using changeset cache
             let mut trie_reverts = {
                 let _guard =
-                    debug_span!(target: "providers::state::overlay", "Retrieving trie reverts")
+                    debug_span!(target: "providers::state::overlay", "retrieving_trie_reverts")
                         .entered();
 
                 let start = Instant::now();
@@ -332,7 +332,7 @@ where
 
             // Collect state reverts
             let mut hashed_state_reverts = {
-                let _guard = debug_span!(target: "providers::state::overlay", "Retrieving hashed state reverts").entered();
+                let _guard = debug_span!(target: "providers::state::overlay", "retrieving_hashed_state_reverts").entered();
 
                 let start = Instant::now();
                 let res = reth_trie_db::from_reverts_auto(provider, from_block + 1..)?;
@@ -458,9 +458,6 @@ where
 
         // Get a read-only provider
         let provider = {
-            let _guard =
-                debug_span!(target: "providers::state::overlay", "Creating db provider").entered();
-
             let start = Instant::now();
             let res = self.factory.database_provider_ro()?;
             self.metrics.create_provider_duration.record(start.elapsed());

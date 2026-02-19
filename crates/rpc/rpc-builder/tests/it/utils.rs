@@ -19,7 +19,7 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::{bal_store::NoopBalStore, capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_layer::JwtSecret;
 use reth_rpc_server_types::RpcModuleSelection;
-use reth_tasks::{Runtime, TokioTaskExecutor};
+use reth_tasks::Runtime;
 use reth_transaction_pool::{
     noop::NoopTransactionPool,
     test_utils::{TestPool, TestPoolBuilder},
@@ -135,7 +135,7 @@ pub fn test_rpc_builder(
         .with_provider(NoopProvider::default())
         .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
-        .with_executor(Box::new(TokioTaskExecutor::default()))
+        .with_executor(Runtime::test())
         .with_evm_config(EthEvmConfig::mainnet())
         .with_consensus(NoopConsensus::default())
 }

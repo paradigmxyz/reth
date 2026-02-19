@@ -22,6 +22,7 @@ use reth_ethereum::{
         NetworkConfig, NetworkManager, NetworkProtocols,
     },
     node::{builder::NodeHandle, EthereumNode},
+    tasks::Runtime,
 };
 use subprotocol::{
     connection::CustomCommand,
@@ -50,7 +51,7 @@ fn main() -> eyre::Result<()> {
         let secret_key = rng_secret_key();
         let (tx, mut from_peer1) = mpsc::unbounded_channel();
         let custom_rlpx_handler_2 = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
-        let net_cfg = NetworkConfig::builder(secret_key)
+        let net_cfg = NetworkConfig::builder(secret_key, Runtime::test())
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .disable_discovery()
             .add_rlpx_sub_protocol(custom_rlpx_handler_2.into_rlpx_sub_protocol())

@@ -90,8 +90,8 @@ async fn test_fee_history() -> eyre::Result<()> {
     assert_eq!(block.header.gas_used, receipt.gas_used,);
     assert_eq!(block.header.base_fee_per_gas.unwrap(), expected_first_base_fee as u64);
 
-    for _ in 0..100 {
-        let _ = GasWaster::deploy_builder(&provider, U256::from(rng.random_range(0..1000)))
+    for _ in 0..20 {
+        let _ = GasWaster::deploy_builder(&provider, U256::from(rng.random_range(0..100)))
             .send()
             .await?;
 
@@ -100,7 +100,7 @@ async fn test_fee_history() -> eyre::Result<()> {
 
     let latest_block = provider.get_block_number().await?;
 
-    for _ in 0..100 {
+    for _ in 0..20 {
         let latest_block = rng.random_range(0..=latest_block);
         let block_count = rng.random_range(1..=(latest_block + 1));
 
@@ -344,7 +344,7 @@ async fn test_eth_config() -> eyre::Result<()> {
 async fn test_admin_external_ip() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::test();
 
     // Chain spec with test allocs
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();

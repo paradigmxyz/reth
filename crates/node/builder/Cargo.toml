@@ -24,7 +24,6 @@ reth-db-common.workspace = true
 reth-downloaders.workspace = true
 reth-engine-local.workspace = true
 reth-engine-primitives.workspace = true
-reth-engine-service.workspace = true
 reth-engine-tree.workspace = true
 reth-engine-util.workspace = true
 reth-evm.workspace = true
@@ -123,6 +122,7 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-tasks/test-utils",
 ]
+trie-debug = ["reth-engine-tree/trie-debug"]
 op = [
     "reth-db/op",
     "reth-db-api/op",

@@ -346,6 +346,18 @@ mod block_bincode {
         }
     }
 
+    impl super::SerdeBincodeCompat for alloy_consensus::EthereumReceipt {
+        type BincodeRepr<'a> = alloy_consensus::serde_bincode_compat::EthereumReceipt<'a>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
+        }
+    }
+
     #[cfg(feature = "op")]
     impl super::SerdeBincodeCompat for op_alloy_consensus::OpReceipt {
         type BincodeRepr<'a> = op_alloy_consensus::serde_bincode_compat::OpReceipt<'a>;

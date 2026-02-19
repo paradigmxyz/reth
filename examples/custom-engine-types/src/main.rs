@@ -339,7 +339,7 @@ where
                 pool,
                 evm_config,
                 EthereumBuilderConfig::new()
-                    .with_extra_data(ctx.payload_builder_config().extra_data_bytes()),
+                    .with_extra_data(ctx.payload_builder_config().extra_data()),
             ),
         };
         Ok(payload_builder)
@@ -391,7 +391,7 @@ where
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
-    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current())?;
+    let runtime = Runtime::test();
 
     // create genesis with canyon at block 2
     let spec = ChainSpec::builder()
