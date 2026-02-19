@@ -190,7 +190,8 @@ where
     B: BodyDownloader<Block = Block> + 'static,
 {
     let consensus = NoopConsensus::arc();
-    let stages_config = StageConfig::default();
+    let mut stages_config = StageConfig::default();
+    stages_config.deferred_history_indexing = false;
     let evm_config = EthEvmConfig::new(provider_factory.chain_spec());
 
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
