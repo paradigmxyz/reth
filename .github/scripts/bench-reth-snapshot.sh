@@ -116,10 +116,12 @@ wait $PROGRESS_PID 2>/dev/null || true
 update_comment "100"
 echo "Snapshot download complete"
 
-# Sync the new snapshot as the schelk baseline
+# Promote the new snapshot to become the schelk baseline (virgin volume).
+# This copies changed blocks from scratch → virgin so that future
+# `schelk recover` calls restore to this new state.
 sync
-sudo schelk recover -y
+sudo schelk promote -y
 
 # Save ETag marker
 echo "$REMOTE_ETAG" > "$ETAG_FILE"
-echo "Snapshot synced to schelk (ETag: ${REMOTE_ETAG})"
+echo "Snapshot promoted to schelk baseline (ETag: ${REMOTE_ETAG})"
