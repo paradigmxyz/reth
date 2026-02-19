@@ -1051,10 +1051,10 @@ where
                     std::sync::mpsc::channel::<ProviderResult<(B256, TrieUpdates)>>();
 
                 let seq_overlay = overlay_factory;
-                let seq_hashed_state = hashed_state.get().clone();
+                let seq_hashed_state = hashed_state.clone();
                 self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
                     let result =
-                        Self::compute_state_root_serial_inner(seq_overlay, &seq_hashed_state);
+                        Self::compute_state_root_serial_inner(seq_overlay, seq_hashed_state.get());
                     let _ = seq_tx.send(result);
                 });
 
