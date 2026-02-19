@@ -487,7 +487,8 @@ impl Runtime {
     /// This is useful for tasks that benefit from running on a stable thread, e.g. for
     /// thread-local state reuse or to avoid thread creation overhead on hot paths.
     ///
-    /// Returns a [`LazyHandle`](crate::LazyHandle) handle that resolves on first access and caches the result.
+    /// Returns a [`LazyHandle`](crate::LazyHandle) handle that resolves on first access and caches
+    /// the result.
     pub fn spawn_blocking_named<F, R>(&self, name: &'static str, func: F) -> crate::LazyHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,

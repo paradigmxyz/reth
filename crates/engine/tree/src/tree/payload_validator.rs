@@ -1252,8 +1252,9 @@ where
         drop(_enter);
 
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
-        if let Err(err) =
-            self.validator.validate_block_post_execution_with_hashed_state(hashed_state.get(), block)
+        if let Err(err) = self
+            .validator
+            .validate_block_post_execution_with_hashed_state(hashed_state.get(), block)
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
@@ -1500,12 +1501,8 @@ where
             Ok(state) => Arc::new(state),
             Err(handle) => Arc::new(handle.get().clone()),
         };
-        let deferred_trie_data = DeferredTrieData::pending(
-            hashed_state,
-            Arc::new(trie_output),
-            anchor_hash,
-            ancestors,
-        );
+        let deferred_trie_data =
+            DeferredTrieData::pending(hashed_state, Arc::new(trie_output), anchor_hash, ancestors);
         let deferred_handle_task = deferred_trie_data.clone();
         let block_validation_metrics = self.metrics.block_validation.clone();
 
