@@ -30,6 +30,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_execution_types::BundleKind;
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{
@@ -612,17 +613,28 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let Some(plain_state) = block.execution_outcome().state.as_plain() else {
-                continue;
+            let changeset: Vec<_> = match &block.execution_outcome().state {
+                BundleKind::Plain(plain_state) => {
+                    let reverts = plain_state.reverts.to_plain_state_reverts();
+                    reverts
+                        .accounts
+                        .into_iter()
+                        .flatten()
+                        .map(|(address, info)| AccountBeforeTx {
+                            address,
+                            info: info.map(Into::into),
+                        })
+                        .collect()
+                }
+                BundleKind::Hashed(hashed_state) => hashed_state
+                    .state
+                    .iter()
+                    .map(|(address, account)| AccountBeforeTx {
+                        address: *address,
+                        info: account.original_info.as_ref().map(Into::into),
+                    })
+                    .collect(),
             };
-            let reverts = plain_state.reverts.to_plain_state_reverts();
-
-            let changeset: Vec<_> = reverts
-                .accounts
-                .into_iter()
-                .flatten()
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
-                .collect();
             w.append_account_changeset(changeset, block_number)?;
         }
         Ok(())
@@ -636,25 +648,38 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let Some(plain_state) = block.execution_outcome().state.as_plain() else {
-                continue;
-            };
-            let reverts = plain_state.reverts.to_plain_state_reverts();
-
-            let changeset: Vec<_> = reverts
-                .storage
-                .into_iter()
-                .flatten()
-                .flat_map(|revert| {
-                    revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
-                        StorageBeforeTx {
-                            address: revert.address,
-                            key: StorageSlotKey::from_u256(key).to_hashed(),
-                            value: revert_to_slot.to_previous_value(),
-                        }
+            let changeset: Vec<_> = match &block.execution_outcome().state {
+                BundleKind::Plain(plain_state) => {
+                    let reverts = plain_state.reverts.to_plain_state_reverts();
+                    reverts
+                        .storage
+                        .into_iter()
+                        .flatten()
+                        .flat_map(|revert| {
+                            revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
+                                StorageBeforeTx {
+                                    address: revert.address,
+                                    key: StorageSlotKey::from_u256(key).to_hashed(),
+                                    value: revert_to_slot.to_previous_value(),
+                                }
+                            })
+                        })
+                        .collect()
+                }
+                BundleKind::Hashed(hashed_state) => hashed_state
+                    .state
+                    .iter()
+                    .flat_map(|(address, account)| {
+                        account.storage.iter().map(move |(slot_hash, (old_value, _new_value))| {
+                            StorageBeforeTx {
+                                address: *address,
+                                key: *slot_hash,
+                                value: *old_value,
+                            }
+                        })
                     })
-                })
-                .collect();
+                    .collect(),
+            };
             w.append_storage_changeset(changeset, block_number)?;
         }
         Ok(())

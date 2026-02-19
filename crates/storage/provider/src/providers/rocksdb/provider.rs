@@ -19,6 +19,7 @@ use reth_db_api::{
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
 };
+use reth_execution_types::BundleKind;
 use reth_primitives_traits::{BlockBody as _, FastInstant as Instant};
 use reth_prune_types::PruneMode;
 use reth_storage_errors::{
@@ -1296,16 +1297,19 @@ impl RocksDBProvider {
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let Some(plain_state) = block.execution_outcome().state.as_plain() else {
-                continue;
-            };
-            let reverts = plain_state.reverts.to_plain_state_reverts();
-
-            // Iterate through account reverts - these are exactly the accounts that have
-            // changesets written, ensuring history indices match changeset entries.
-            for account_block_reverts in reverts.accounts {
-                for (address, _) in account_block_reverts {
-                    account_history.entry(address).or_default().push(block_number);
+            match &block.execution_outcome().state {
+                BundleKind::Plain(plain_state) => {
+                    let reverts = plain_state.reverts.to_plain_state_reverts();
+                    for account_block_reverts in reverts.accounts {
+                        for (address, _) in account_block_reverts {
+                            account_history.entry(address).or_default().push(block_number);
+                        }
+                    }
+                }
+                BundleKind::Hashed(hashed_state) => {
+                    for address in hashed_state.state.keys() {
+                        account_history.entry(*address).or_default().push(block_number);
+                    }
                 }
             }
         }
@@ -1332,22 +1336,30 @@ impl RocksDBProvider {
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let Some(plain_state) = block.execution_outcome().state.as_plain() else {
-                continue;
-            };
-            let reverts = plain_state.reverts.to_plain_state_reverts();
-
-            // Iterate through storage reverts - these are exactly the slots that have
-            // changesets written, ensuring history indices match changeset entries.
-            for storage_block_reverts in reverts.storage {
-                for revert in storage_block_reverts {
-                    for (slot, _) in revert.storage_revert {
-                        let plain_key = B256::new(slot.to_be_bytes());
-                        let key = keccak256(plain_key);
-                        storage_history
-                            .entry((revert.address, key))
-                            .or_default()
-                            .push(block_number);
+            match &block.execution_outcome().state {
+                BundleKind::Plain(plain_state) => {
+                    let reverts = plain_state.reverts.to_plain_state_reverts();
+                    for storage_block_reverts in reverts.storage {
+                        for revert in storage_block_reverts {
+                            for (slot, _) in revert.storage_revert {
+                                let plain_key = B256::new(slot.to_be_bytes());
+                                let key = keccak256(plain_key);
+                                storage_history
+                                    .entry((revert.address, key))
+                                    .or_default()
+                                    .push(block_number);
+                            }
+                        }
+                    }
+                }
+                BundleKind::Hashed(hashed_state) => {
+                    for (address, account) in &hashed_state.state {
+                        for slot_hash in account.storage.keys() {
+                            storage_history
+                                .entry((*address, *slot_hash))
+                                .or_default()
+                                .push(block_number);
+                        }
                     }
                 }
             }
