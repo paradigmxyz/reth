@@ -8,6 +8,15 @@ use reth_db_api::{
 use std::{fmt::Debug, ops::RangeBounds};
 use tracing::debug;
 
+/// Result of a single prune step in [`DbTxPruneExt::prune_table_with_range_step`].
+#[derive(Debug, Clone, Copy)]
+struct PruneStepResult {
+    /// `true` if the walker is finished, `false` if it may have more data to prune.
+    done: bool,
+    /// `true` if the current entry was deleted, `false` if it was skipped.
+    deleted: bool,
+}
+
 pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
     /// Clear the entire table in a single operation.
     ///
@@ -91,18 +100,18 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
                 break false
             }
 
-            let (step_done, was_deleted) = self.prune_table_with_range_step(
+            let result = self.prune_table_with_range_step(
                 &mut walker,
                 limiter,
                 &mut skip_filter,
                 &mut delete_callback,
             )?;
 
-            if was_deleted {
+            if result.deleted {
                 deleted_entries += 1;
             }
 
-            if step_done {
+            if result.done {
                 break true
             }
         };
@@ -111,10 +120,6 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
     }
 
     /// Steps once with the given walker and prunes the entry in the table.
-    ///
-    /// Returns a tuple of `(done, was_deleted)`:
-    /// - `done`: `true` if the walker is finished, `false` if it may have more data to prune.
-    /// - `was_deleted`: `true` if the current entry was deleted, `false` if it was skipped.
     ///
     /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune run that's
     /// pruning different tables concurrently, by letting them step to the same height before
@@ -125,18 +130,20 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
         limiter: &mut PruneLimiter,
         skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
         delete_callback: &mut impl FnMut(TableRow<T>),
-    ) -> Result<(bool, bool), DatabaseError> {
-        let Some(res) = walker.next() else { return Ok((true, false)) };
+    ) -> Result<PruneStepResult, DatabaseError> {
+        let Some(res) = walker.next() else {
+            return Ok(PruneStepResult { done: true, deleted: false })
+        };
 
         let row = res?;
 
         if skip_filter(&row) {
-            Ok((false, false))
+            Ok(PruneStepResult { done: false, deleted: false })
         } else {
             walker.delete_current()?;
             limiter.increment_deleted_entries_count();
             delete_callback(row);
-            Ok((false, true))
+            Ok(PruneStepResult { done: false, deleted: true })
         }
     }
 
