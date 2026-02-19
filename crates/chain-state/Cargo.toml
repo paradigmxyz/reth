@@ -83,6 +83,7 @@ test-utils = [
     "revm-state",
     "reth-chainspec/test-utils",
     "reth-primitives-traits/test-utils",
+    "reth-tasks/test-utils",
     "reth-trie/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]
