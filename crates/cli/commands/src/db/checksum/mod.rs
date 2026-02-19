@@ -140,7 +140,6 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
     let start_block = start_block.unwrap_or(0);
     let end_block = end_block.unwrap_or(u64::MAX);
     let is_change_based = segment.is_change_based();
-    let is_storage = segment.is_storage_change_sets();
 
     info!(
         "Computing checksum for {} static files, start_block={}, end_block={}, limit={:?}",
@@ -177,17 +176,15 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
                     block_range
                 )
             })?;
-
-            reached_limit = checksum_change_based_segment(
-                &mut checksummer,
+            let input = ChangeBasedChecksumInput {
                 segment,
-                block_range.start(),
+                block_range_start: block_range.start(),
                 start_block,
                 end_block,
-                is_storage,
-                &offsets,
-                &mut cursor,
-            )?;
+                offsets: &offsets,
+            };
+
+            reached_limit = checksum_change_based_segment(&mut checksummer, input, &mut cursor)?;
         } else {
             while let Some(row) = cursor.next_row()? {
                 if checksummer.write_row(&row) {
@@ -367,16 +364,22 @@ fn split_storage_changeset_row(block_number: u64, row: &[u8]) -> eyre::Result<([
     Ok((key_buf, &row[20..]))
 }
 
-fn checksum_change_based_segment<H: Hasher>(
-    checksummer: &mut Checksummer<H>,
+struct ChangeBasedChecksumInput<'a> {
     segment: StaticFileSegment,
     block_range_start: u64,
     start_block: u64,
     end_block: u64,
-    is_storage: bool,
-    offsets: &[ChangesetOffset],
+    offsets: &'a [ChangesetOffset],
+}
+
+fn checksum_change_based_segment<H: Hasher>(
+    checksummer: &mut Checksummer<H>,
+    input: ChangeBasedChecksumInput<'_>,
     cursor: &mut reth_db::static_file::StaticFileCursor<'_>,
 ) -> eyre::Result<bool> {
+    let ChangeBasedChecksumInput { segment, block_range_start, start_block, end_block, offsets } =
+        input;
+    let is_storage = segment.is_storage_change_sets();
     let mut reached_limit = false;
 
     for (offset_index, offset) in offsets.iter().enumerate() {
