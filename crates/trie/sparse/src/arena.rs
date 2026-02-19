@@ -87,6 +87,12 @@ enum ArenaSparseNodeBranchChild {
     Blinded(RlpNode),
 }
 
+impl ArenaSparseNodeBranchChild {
+    const fn is_blinded(&self) -> bool {
+        matches!(self, Self::Blinded(_))
+    }
+}
+
 /// The branch-specific data stored in an [`ArenaSparseNode::Branch`].
 #[derive(Debug)]
 struct ArenaSparseNodeBranch {
@@ -207,6 +213,13 @@ impl From<ProofTrieNodeV2> for ArenaSparseNode {
             }
         }
     }
+}
+
+/// Right-pads a nibble path with zeros and packs it into a [`B256`].
+fn nibbles_to_padded_b256(path: &Nibbles) -> B256 {
+    let mut bytes = [0u8; 32];
+    path.pack_to(&mut bytes);
+    B256::from(bytes)
 }
 
 /// Returns the index into a densely-packed children array for a given nibble, based on the
@@ -516,8 +529,18 @@ impl ArenaSparseSubtrie {
                     );
                 }
                 LeafUpdate::Changed(_) => {
-                    // Removal (empty value) — not yet implemented.
-                    todo!("Changed removal updates not yet implemented")
+                    let result = remove_leaf(
+                        &mut self.arena,
+                        &mut self.stack,
+                        &mut self.root,
+                        key,
+                        full_path,
+                        find_result,
+                    );
+                    if let RemoveLeafResult::NeedsProof { key, proof_key, min_len } = result {
+                        self.required_proofs.push(ArenaRequiredProof { key: proof_key, min_len });
+                        self.required_proofs.push(ArenaRequiredProof { key, min_len });
+                    }
                 }
                 LeafUpdate::Touched => {}
             }
@@ -811,6 +834,200 @@ fn upsert_leaf(
     }
 }
 
+/// Result of [`remove_leaf`] indicating whether a proof is needed to complete a branch
+/// collapse.
+#[derive(Debug)]
+enum RemoveLeafResult {
+    /// No proof needed — the removal (and any collapse) completed fully.
+    None,
+    /// The branch collapse requires revealing a blinded sibling. The caller must request a
+    /// proof for the given key at the given minimum depth.
+    NeedsProof { key: B256, proof_key: B256, min_len: u8 },
+}
+
+/// Removes a leaf node from the trie using a pre-computed [`FindAncestorResult`] from
+/// [`find_ancestor`].
+///
+/// Only the `RevealedLeaf` case performs a removal — the leaf must exist and its full path
+/// must match `full_path`. All other cases (`Diverged`, `NoChild`) are no-ops since the leaf
+/// doesn't exist at that path.
+///
+/// When removing a leaf from a branch, if the branch is left with only one remaining child,
+/// the branch is collapsed: the remaining child absorbs the branch's `short_key` + the child's
+/// nibble as a prefix to its own key/`short_key`, and replaces the branch in the parent.
+/// If the remaining child is blinded, the collapse cannot proceed and a
+/// [`RemoveLeafResult::NeedsProof`] is returned so the caller can request a proof.
+///
+/// The caller must handle [`FindAncestorResult::Blinded`] and
+/// [`FindAncestorResult::RevealedSubtrie`] before calling this function.
+fn remove_leaf(
+    arena: &mut Arena<ArenaSparseNode>,
+    stack: &mut Vec<ArenaStackEntry>,
+    root: &mut Index,
+    key: B256,
+    full_path: &Nibbles,
+    find_result: FindAncestorResult,
+) -> RemoveLeafResult {
+    match find_result {
+        FindAncestorResult::Blinded | FindAncestorResult::RevealedSubtrie { .. } => {
+            unreachable!("Blinded/RevealedSubtrie must be handled by caller")
+        }
+        FindAncestorResult::Diverged | FindAncestorResult::NoChild { .. } => RemoveLeafResult::None,
+        FindAncestorResult::RevealedLeaf => {
+            let head = stack.last().unwrap();
+            let head_idx = head.index;
+            let head_path = head.path;
+
+            let leaf_key = match &arena[head_idx] {
+                ArenaSparseNode::Leaf { key, .. } => *key,
+                _ => unreachable!("RevealedLeaf but stack head is not a leaf"),
+            };
+
+            let mut leaf_full_path = head_path;
+            leaf_full_path.extend(&leaf_key);
+
+            if &leaf_full_path != full_path {
+                return RemoveLeafResult::None;
+            }
+
+            // Before mutating, check if removing this leaf would leave the parent
+            // branch with a single blinded sibling (requiring a proof to collapse).
+            if stack.len() >= 2 {
+                let parent_entry = &stack[stack.len() - 2];
+                let parent_idx = parent_entry.index;
+                let child_nibble = head_path.last().unwrap();
+                let parent_branch = arena[parent_idx].branch_ref();
+
+                if parent_branch.state_mask.count_bits() == 2 {
+                    let dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
+                        .expect("leaf nibble not found in parent state_mask");
+                    // With exactly 2 bits set the dense array has indices 0 and 1.
+                    let sibling_dense_idx = 1 - dense_idx;
+                    if parent_branch.children[sibling_dense_idx].is_blinded() {
+                        let parent_path = parent_entry.path;
+                        let sibling_nibble =
+                            parent_branch.state_mask.iter().find(|&n| n != child_nibble).unwrap();
+                        let mut sibling_path = parent_path;
+                        sibling_path.extend(&parent_branch.short_key);
+                        sibling_path.push_unchecked(sibling_nibble);
+                        return RemoveLeafResult::NeedsProof {
+                            key,
+                            proof_key: nibbles_to_padded_b256(&sibling_path),
+                            min_len: (sibling_path.len() as u8).min(64),
+                        };
+                    }
+                }
+            }
+
+            // Pop the leaf entry from the stack.
+            stack.pop();
+
+            if stack.is_empty() {
+                // The leaf is the root — replace with EmptyRoot.
+                arena.remove(head_idx);
+                *root = arena.insert(ArenaSparseNode::EmptyRoot);
+                return RemoveLeafResult::None;
+            }
+
+            // The parent must be a branch. Remove the leaf from it.
+            let parent_entry = stack.last().unwrap();
+            let parent_idx = parent_entry.index;
+            let child_nibble = head_path.last().unwrap();
+
+            let parent_branch = arena[parent_idx].branch_ref();
+            let dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
+                .expect("leaf nibble not found in parent state_mask");
+
+            let old_num_leaves = parent_branch.state.num_leaves();
+            let old_dirty_leaves = parent_branch.state.num_dirty_leaves();
+
+            // Remove the leaf from the arena and from the parent's children.
+            arena.remove(head_idx);
+            let parent_branch = arena[parent_idx].branch_mut();
+            parent_branch.children.remove(dense_idx);
+            parent_branch.state_mask.unset_bit(child_nibble);
+            parent_branch.state = ArenaSparseNodeState::Dirty {
+                num_leaves: old_num_leaves - 1,
+                num_dirty_leaves: if old_dirty_leaves > 0 { old_dirty_leaves - 1 } else { 0 },
+            };
+
+            // If the branch now has only one child, collapse it. The blinded sibling
+            // case was already handled above before any mutations.
+            if parent_branch.state_mask.count_bits() == 1 {
+                collapse_branch(arena, stack, root, parent_idx);
+            }
+            RemoveLeafResult::None
+        }
+    }
+}
+
+/// Collapses a branch node that has exactly one remaining revealed child. The branch's
+/// `short_key`, the remaining child's nibble, and the child's own key/`short_key` are
+/// concatenated to form the child's new key/`short_key`. The child then replaces the branch
+/// in the grandparent (or becomes the new root).
+///
+/// The caller must verify that the remaining child is not blinded before calling this function.
+///
+/// `branch_idx` must be the index of the branch being collapsed and must be the current stack
+/// head. The branch is freed from the arena.
+fn collapse_branch(
+    arena: &mut Arena<ArenaSparseNode>,
+    stack: &mut Vec<ArenaStackEntry>,
+    root: &mut Index,
+    branch_idx: Index,
+) {
+    let branch = arena[branch_idx].branch_ref();
+    debug_assert_eq!(branch.state_mask.count_bits(), 1, "collapse_branch requires exactly 1 child");
+    debug_assert!(
+        !branch.children[0].is_blinded(),
+        "collapse_branch called with a blinded remaining child"
+    );
+
+    let remaining_nibble = branch.state_mask.iter().next().unwrap();
+    let branch_short_key = branch.short_key;
+
+    // Build the prefix: branch's short_key + remaining child's nibble.
+    let mut prefix = branch_short_key;
+    prefix.push_unchecked(remaining_nibble);
+
+    let ArenaSparseNodeBranchChild::Revealed(child_idx) = branch.children[0] else {
+        unreachable!()
+    };
+
+    // Prepend the prefix to the child's key/short_key and mark dirty.
+    match &mut arena[child_idx] {
+        ArenaSparseNode::Leaf { key, state, .. } => {
+            let mut new_key = prefix;
+            new_key.extend(key);
+            *key = new_key;
+            *state = ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 };
+        }
+        ArenaSparseNode::Branch(b) => {
+            let mut new_short_key = prefix;
+            new_short_key.extend(&b.short_key);
+            b.short_key = new_short_key;
+            b.state = b.state.to_dirty();
+        }
+        ArenaSparseNode::Subtrie(subtrie) => {
+            let ArenaSparseNode::Branch(b) = &mut subtrie.arena[subtrie.root] else {
+                unreachable!("subtrie root must be a Branch during collapse_branch")
+            };
+            let mut new_short_key = prefix;
+            new_short_key.extend(&b.short_key);
+            b.short_key = new_short_key;
+            b.state = b.state.to_dirty();
+        }
+        _ => unreachable!("remaining child must be Leaf, Branch, or Subtrie"),
+    }
+
+    // Replace the branch with the remaining child in the grandparent (or root).
+    *root = replace_child_in_parent(arena, stack, *root, branch_idx, child_idx);
+    stack.last_mut().unwrap().index = child_idx;
+
+    // Free the collapsed branch.
+    arena.remove(branch_idx);
+}
+
 /// Reveals a single proof node using a pre-computed [`FindAncestorResult`] from
 /// [`find_ancestor`].
 ///
@@ -1036,6 +1253,55 @@ impl ArenaParallelSparseTrie {
         let subtrie_idx = self.upper_arena.insert(ArenaSparseNode::Subtrie(subtrie));
         self.upper_arena[parent_idx].branch_mut().children[child_dense_idx] =
             ArenaSparseNodeBranchChild::Revealed(subtrie_idx);
+    }
+
+    /// Checks whether a subtrie node at `subtrie_idx` (child of `parent_idx` at
+    /// `child_nibble`) should still be a subtrie. If the subtrie's root is no longer a branch,
+    /// or if its path + short_key no longer meets the subtrie depth threshold, its root node
+    /// is moved into the upper arena and the subtrie is returned to the pool.
+    fn maybe_unwrap_subtrie(
+        &mut self,
+        parent_idx: Index,
+        child_nibble: u8,
+        parent_path: &Nibbles,
+        subtrie_idx: Index,
+    ) {
+        let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[subtrie_idx] else {
+            return;
+        };
+
+        let subtrie_root = &subtrie.arena[subtrie.root];
+        let child_path_len =
+            parent_path.len() + self.upper_arena[parent_idx].branch_ref().short_key.len() + 1;
+
+        let should_remain = match subtrie_root {
+            ArenaSparseNode::Branch(b) => {
+                Self::should_be_subtrie(child_path_len, b.short_key.len())
+            }
+            _ => false,
+        };
+
+        if should_remain {
+            return;
+        }
+
+        // Extract the subtrie, move its root node into the upper arena, and recycle it.
+        let ArenaSparseNode::Subtrie(mut subtrie) = self.upper_arena.remove(subtrie_idx).unwrap()
+        else {
+            unreachable!()
+        };
+
+        let root_node = subtrie.arena.remove(subtrie.root).unwrap();
+        let new_child_idx = self.upper_arena.insert(root_node);
+
+        let dense_idx =
+            child_dense_index(self.upper_arena[parent_idx].branch_ref().state_mask, child_nibble)
+                .expect("child nibble not found in parent state_mask");
+        self.upper_arena[parent_idx].branch_mut().children[dense_idx] =
+            ArenaSparseNodeBranchChild::Revealed(new_child_idx);
+
+        subtrie.clear();
+        self.cleared_subtries.push(*subtrie);
     }
 }
 
@@ -1390,6 +1656,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     }
 
                     self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
+
+                    // Check if the subtrie's root still qualifies as a subtrie after updates.
+                    let parent_idx = stack.last().unwrap().index;
+                    let parent_path = stack.last().unwrap().path;
+                    self.maybe_unwrap_subtrie(parent_idx, child_nibble, &parent_path, child_idx);
+
                     // Don't increment update_idx — already advanced past subtrie updates.
                     continue;
                 }
@@ -1421,7 +1693,18 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         }
                     }
                     LeafUpdate::Changed(_) => {
-                        todo!("Changed removal updates not yet implemented");
+                        let result = remove_leaf(
+                            &mut self.upper_arena,
+                            &mut stack,
+                            &mut self.root,
+                            key,
+                            full_path,
+                            find_result,
+                        );
+                        if let RemoveLeafResult::NeedsProof { key, proof_key, min_len } = result {
+                            proof_required_fn(proof_key, min_len);
+                            updates.insert(key, LeafUpdate::Touched);
+                        }
                     }
                     LeafUpdate::Touched => {}
                 },
