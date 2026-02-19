@@ -55,7 +55,7 @@ use std::{
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
-type LazyHashedPostState = reth_tasks::LazyBackground<HashedPostState>;
+type LazyHashedPostState = reth_tasks::LazyHandle<HashedPostState>;
 
 /// Context providing access to tree state during validation.
 ///
