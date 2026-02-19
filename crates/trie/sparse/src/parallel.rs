@@ -486,23 +486,14 @@ impl SparseTrie for ParallelSparseTrie {
         // `new_nodes` to keep track of any nodes that were created during the traversal.
         let mut new_nodes = Vec::new();
         let mut next = Some(Nibbles::default());
-        // Track the original node that was modified (path, original_node) for rollback
-        let mut modified_original: Option<(Nibbles, SparseNode)> = None;
 
         // Traverse the upper subtrie to find the node to update or the subtrie to update.
         //
         // We stop when the next node to traverse would be in a lower subtrie, or if there are no
         // more nodes to traverse.
         while let Some(current) =
-            next.filter(|next| SparseSubtrieType::path_len_is_upper(next.len()))
+            next.as_mut().filter(|next| SparseSubtrieType::path_len_is_upper(next.len()))
         {
-            // Save original node for potential rollback (only if not already saved)
-            if modified_original.is_none() &&
-                let Some(node) = self.upper_subtrie.nodes.get(&current)
-            {
-                modified_original = Some((current, node.clone()));
-            }
-
             // Traverse the next node, keeping track of any changed nodes and the next step in the
             // trie. If traversal fails, clean up the value we inserted and propagate the error.
             let step_result = self.upper_subtrie.update_next_node(current, &full_path);
@@ -513,11 +504,7 @@ impl SparseTrie for ParallelSparseTrie {
             }
 
             match step_result? {
-                LeafUpdateStep::Continue { next_node } => {
-                    next = Some(next_node);
-                    // Clear modified_original since we haven't actually modified anything yet
-                    modified_original = None;
-                }
+                LeafUpdateStep::Continue => {}
                 LeafUpdateStep::Complete { inserted_nodes } => {
                     new_nodes.extend(inserted_nodes);
                     next = None;
@@ -2492,38 +2479,10 @@ impl SparseSubtrie {
         // Here we are starting at the root of the subtrie, and traversing from there.
         let mut current = Some(self.path);
 
-        // Track inserted nodes and modified original for rollback on error
-        let mut inserted_nodes: Vec<Nibbles> = Vec::new();
-        let mut modified_original: Option<(Nibbles, SparseNode)> = None;
-
-        while let Some(current_path) = current {
-            // Save original node for potential rollback (only if not already saved)
-            if modified_original.is_none() &&
-                let Some(node) = self.nodes.get(&current_path)
-            {
-                modified_original = Some((current_path, node.clone()));
-            }
-
-            let step_result = self.update_next_node(current_path, &full_path);
-
-            if let Err(err) = step_result {
-                self.rollback_leaf_insert(&full_path, &inserted_nodes, modified_original.take());
-                return Err(err);
-            }
-
-            match step_result? {
-                LeafUpdateStep::Continue { next_node } => {
-                    current = Some(next_node);
-                    // Clear modified_original since we haven't actually modified anything yet
-                    modified_original = None;
-                }
-                LeafUpdateStep::Complete { inserted_nodes: new_inserted } => {
-                    inserted_nodes.extend(new_inserted);
-                    current = None;
-                }
-                LeafUpdateStep::NodeNotFound => {
-                    current = None;
-                }
+        while let Some(current_path) = current.as_mut() {
+            match self.update_next_node(current_path, &full_path)? {
+                LeafUpdateStep::Continue => {}
+                LeafUpdateStep::NodeNotFound | LeafUpdateStep::Complete { .. } => break,
             }
         }
 
@@ -2531,30 +2490,6 @@ impl SparseSubtrie {
         self.inner.values.insert(full_path, value);
 
         Ok(())
-    }
-
-    /// Rollback structural changes made during a failed leaf insert.
-    ///
-    /// This removes any nodes that were inserted and restores the original node
-    /// that was modified, ensuring atomicity of `update_leaf`.
-    fn rollback_leaf_insert(
-        &mut self,
-        full_path: &Nibbles,
-        inserted_nodes: &[Nibbles],
-        modified_original: Option<(Nibbles, SparseNode)>,
-    ) {
-        // Remove any values that may have been inserted
-        self.inner.values.remove(full_path);
-
-        // Remove all inserted nodes
-        for node_path in inserted_nodes {
-            self.nodes.remove(node_path);
-        }
-
-        // Restore the original node that was modified
-        if let Some((path, original_node)) = modified_original {
-            self.nodes.insert(path, original_node);
-        }
     }
 
     /// Processes the current node, returning what to do next in the leaf update process.
@@ -2565,13 +2500,13 @@ impl SparseSubtrie {
     /// the paths of nodes that were inserted during this step.
     fn update_next_node(
         &mut self,
-        mut current: Nibbles,
+        current: &mut Nibbles,
         path: &Nibbles,
     ) -> SparseTrieResult<LeafUpdateStep> {
         debug_assert!(path.starts_with(&self.path));
         debug_assert!(current.starts_with(&self.path));
-        debug_assert!(path.starts_with(&current));
-        let Some(node) = self.nodes.get_mut(&current) else {
+        debug_assert!(path.starts_with(current));
+        let Some(node) = self.nodes.get_mut(current) else {
             return Ok(LeafUpdateStep::NodeNotFound);
         };
 
@@ -2581,16 +2516,13 @@ impl SparseSubtrie {
                 // the subtrie.
                 let path = path.slice(self.path.len()..);
                 *node = SparseNode::new_leaf(path);
-                Ok(LeafUpdateStep::complete_with_insertions(vec![current]))
+                Ok(LeafUpdateStep::complete_with_insertions(vec![*current]))
             }
             SparseNode::Leaf { key: current_key, .. } => {
                 current.extend(current_key);
 
                 // this leaf is being updated
-                debug_assert!(
-                    &current != path,
-                    "we already checked leaf presence in the beginning"
-                );
+                debug_assert!(current != path, "we already checked leaf presence in the beginning");
 
                 // find the common prefix
                 let common = current.common_prefix_length(path);
@@ -2625,7 +2557,7 @@ impl SparseSubtrie {
             SparseNode::Extension { key, .. } => {
                 current.extend(key);
 
-                if !path.starts_with(&current) {
+                if !path.starts_with(current) {
                     // find the common prefix
                     let common = current.common_prefix_length(path);
                     *key = current.slice(current.len() - key.len()..common);
@@ -2659,28 +2591,29 @@ impl SparseSubtrie {
                     return Ok(LeafUpdateStep::complete_with_insertions(inserted_nodes))
                 }
 
-                Ok(LeafUpdateStep::continue_with(current))
+                Ok(LeafUpdateStep::Continue)
             }
             SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
                 let nibble = path.get_unchecked(current.len());
                 current.push_unchecked(nibble);
+
                 if !state_mask.is_bit_set(nibble) {
                     state_mask.set_bit(nibble);
                     let new_leaf = SparseNode::new_leaf(path.slice(current.len()..));
-                    self.nodes.insert(current, new_leaf);
-                    return Ok(LeafUpdateStep::complete_with_insertions(vec![current]))
+                    self.nodes.insert(*current, new_leaf);
+                    return Ok(LeafUpdateStep::complete_with_insertions(vec![*current]))
                 }
 
                 if blinded_mask.is_bit_set(nibble) {
                     return Err(SparseTrieErrorKind::BlindedNode {
-                        path: current,
+                        path: *current,
                         hash: blinded_hashes[nibble as usize],
                     }
                     .into());
                 }
 
                 // If the nibble is set, we can continue traversing the branch.
-                Ok(LeafUpdateStep::continue_with(current))
+                Ok(LeafUpdateStep::Continue)
             }
         }
     }
@@ -3381,10 +3314,7 @@ impl SparseSubtrieInner {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum LeafUpdateStep {
     /// Continue traversing to the next node
-    Continue {
-        /// The next node path to process
-        next_node: Nibbles,
-    },
+    Continue,
     /// Update is complete with nodes inserted
     Complete {
         /// The node paths that were inserted during this step
@@ -3396,11 +3326,6 @@ pub enum LeafUpdateStep {
 }
 
 impl LeafUpdateStep {
-    /// Creates a step to continue with the next node
-    pub const fn continue_with(next_node: Nibbles) -> Self {
-        Self::Continue { next_node }
-    }
-
     /// Creates a step indicating completion with inserted nodes
     pub const fn complete_with_insertions(inserted_nodes: Vec<Nibbles>) -> Self {
         Self::Complete { inserted_nodes }
