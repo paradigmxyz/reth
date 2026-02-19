@@ -231,7 +231,11 @@ where
         skip_all
     )]
     pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+        /// Interval for periodic subtrie hash updates.
+        const SUBTRIE_HASH_UPDATE_INTERVAL: Duration = Duration::from_millis(10);
+
         let now = Instant::now();
+        let mut subtrie_hash_ticker = crossbeam_channel::after(SUBTRIE_HASH_UPDATE_INTERVAL);
 
         loop {
             crossbeam_channel::select_biased! {
@@ -260,6 +264,12 @@ where
                     }
 
                     self.on_proof_result(result)?;
+                },
+                recv(subtrie_hash_ticker) -> _ => {
+                    // Periodically update subtrie hashes on the sparse tries to spread out
+                    // the hash computation work over time.
+                    self.update_subtrie_hashes();
+                    subtrie_hash_ticker = crossbeam_channel::after(SUBTRIE_HASH_UPDATE_INTERVAL);
                 },
             }
 
@@ -678,6 +688,27 @@ where
                     }
                 },
             );
+        }
+    }
+
+    /// Updates subtrie hashes on the account trie and all storage tries.
+    ///
+    /// This spreads out the hash computation work over time by periodically
+    /// updating the RLP hashes of subtries deeper than a certain level.
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
+    fn update_subtrie_hashes(&mut self) {
+        // Update account trie subtrie hashes
+        self.trie.calculate_subtries();
+
+        // Update storage trie subtrie hashes
+        for storage_trie in self.trie.storage_tries_mut().values_mut() {
+            if let Some(revealed) = storage_trie.as_revealed_mut() {
+                revealed.update_subtrie_hashes();
+            }
         }
     }
 }
