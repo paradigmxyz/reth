@@ -1286,8 +1286,6 @@ impl SparseTrie for ParallelSparseTrie {
         }
 
         if effective_pruned_roots.is_empty() {
-            #[cfg(feature = "trie-debug")]
-            self.debug_snapshot_initial_state();
             return 0;
         }
 
@@ -1362,9 +1360,6 @@ impl SparseTrie for ParallelSparseTrie {
                 !starts_with_pruned_in(roots_lower, p) && !starts_with_pruned_in(roots_upper, p)
             }
         });
-
-        #[cfg(feature = "trie-debug")]
-        self.debug_snapshot_initial_state();
 
         nodes_converted
     }
@@ -1458,16 +1453,7 @@ impl SparseTrie for ParallelSparseTrie {
     fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
         core::mem::take(&mut self.debug_recorder)
     }
-}
 
-impl ParallelSparseTrie {
-    /// Sets the thresholds that control when parallelism is used during operations.
-    pub const fn with_parallelism_thresholds(mut self, thresholds: ParallelismThresholds) -> Self {
-        self.parallelism_thresholds = thresholds;
-        self
-    }
-
-    /// Resets the debug recorder and snapshots the current revealed nodes as the initial state.
     #[cfg(feature = "trie-debug")]
     fn debug_snapshot_initial_state(&mut self) {
         self.debug_recorder.reset();
@@ -1491,6 +1477,14 @@ impl ParallelSparseTrie {
 
         initial_state.sort_unstable_by(|a, b| a.path.cmp(&b.path));
         self.debug_recorder.set_initial_state(initial_state);
+    }
+}
+
+impl ParallelSparseTrie {
+    /// Sets the thresholds that control when parallelism is used during operations.
+    pub const fn with_parallelism_thresholds(mut self, thresholds: ParallelismThresholds) -> Self {
+        self.parallelism_thresholds = thresholds;
+        self
     }
 
     /// Returns the leaf value for a node if it is a leaf, by looking up the full leaf path
