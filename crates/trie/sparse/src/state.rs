@@ -816,6 +816,19 @@ where
     A: SparseTrieTrait + Default,
     S: SparseTrieTrait + Default + Clone,
 {
+    /// Returns the number of revealed account trie nodes (O(1) via `size_hint`).
+    pub fn account_node_count(&self) -> usize {
+        match self.state.as_revealed_ref() {
+            Some(trie) => trie.size_hint(),
+            None => 0,
+        }
+    }
+
+    /// Returns the number of storage tries currently held.
+    pub fn storage_trie_count(&self) -> usize {
+        self.storage.tries.len()
+    }
+
     /// Clears all trie data while preserving allocations for reuse.
     ///
     /// This resets the trie to an empty state but keeps the underlying memory allocations,

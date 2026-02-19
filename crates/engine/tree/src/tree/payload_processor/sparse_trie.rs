@@ -36,6 +36,15 @@ use tracing::{debug, debug_span, error, instrument};
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
 
+/// Minimum number of account trie nodes before pruning is considered worthwhile.
+const MIN_NODES_FOR_PRUNE: usize = 500_000;
+
+/// Minimum number of storage tries before pruning is considered worthwhile.
+const MIN_STORAGE_TRIES_FOR_PRUNE: usize = 10_000;
+
+/// Only shrink if current node count exceeds target capacity by this factor (1.5 = 50% slack).
+const SHRINK_SLACK_FACTOR: f64 = 1.5;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparseTrie> {
     /// Sender for proof results.
@@ -185,6 +194,11 @@ where
     /// When `disable_pruning` is true, the trie is preserved without any node pruning,
     /// storage trie eviction, or capacity shrinking, keeping the full cache intact for
     /// benchmarking purposes.
+    ///
+    /// Pruning and shrinking are adaptive: for small blocks with few dirty nodes, unconditional
+    /// maintenance erases useful hot structure and adds fixed overhead that dominates. We only
+    /// prune when the trie is large enough to benefit, and only shrink when capacity significantly
+    /// exceeds the target.
     pub(super) fn into_trie_for_reuse(
         self,
         prune_depth: usize,
@@ -193,10 +207,24 @@ where
         max_values_capacity: usize,
         disable_pruning: bool,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
-        let Self { mut trie, .. } = self;
+        let Self { mut trie, metrics, .. } = self;
         if !disable_pruning {
-            trie.prune(prune_depth, max_storage_tries);
-            trie.shrink_to(max_nodes_capacity, max_values_capacity);
+            let node_count = trie.account_node_count();
+            let storage_count = trie.storage_trie_count();
+
+            if should_prune(node_count, storage_count) {
+                trie.prune(prune_depth, max_storage_tries);
+            } else {
+                metrics.trie_reuse_prune_skipped.increment(1);
+            }
+
+            // Re-check node count after potential pruning for accurate shrink decision
+            let post_prune_node_count = trie.account_node_count();
+            if should_shrink(post_prune_node_count, max_nodes_capacity) {
+                trie.shrink_to(max_nodes_capacity, max_values_capacity);
+            } else {
+                metrics.trie_reuse_shrink_skipped.increment(1);
+            }
         }
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
@@ -723,11 +751,59 @@ pub struct StateRootComputeOutcome {
     pub debug_recorders: Vec<(Option<B256>, TrieDebugRecorder)>,
 }
 
+/// Returns `true` if the trie is large enough that pruning would be beneficial.
+///
+/// For small tries, pruning erases useful hot structure and adds fixed overhead.
+const fn should_prune(node_count: usize, storage_trie_count: usize) -> bool {
+    node_count >= MIN_NODES_FOR_PRUNE || storage_trie_count >= MIN_STORAGE_TRIES_FOR_PRUNE
+}
+
+/// Returns `true` if current node count significantly exceeds the target capacity,
+/// meaning shrinking would reclaim meaningful memory.
+fn should_shrink(node_count: usize, max_capacity: usize) -> bool {
+    node_count as f64 > max_capacity as f64 * SHRINK_SLACK_FACTOR
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, U256};
     use reth_trie_sparse::ParallelSparseTrie;
+
+    #[test]
+    fn test_should_prune_below_thresholds() {
+        assert!(!should_prune(100, 50));
+        assert!(!should_prune(0, 0));
+        assert!(!should_prune(MIN_NODES_FOR_PRUNE - 1, MIN_STORAGE_TRIES_FOR_PRUNE - 1));
+    }
+
+    #[test]
+    fn test_should_prune_above_node_threshold() {
+        assert!(should_prune(MIN_NODES_FOR_PRUNE, 0));
+        assert!(should_prune(MIN_NODES_FOR_PRUNE + 1, 0));
+    }
+
+    #[test]
+    fn test_should_prune_above_storage_threshold() {
+        assert!(should_prune(0, MIN_STORAGE_TRIES_FOR_PRUNE));
+        assert!(should_prune(0, MIN_STORAGE_TRIES_FOR_PRUNE + 1));
+    }
+
+    #[test]
+    fn test_should_shrink_within_slack() {
+        // 100k nodes, 100k capacity => ratio 1.0 < 1.5, no shrink
+        assert!(!should_shrink(100_000, 100_000));
+        // 140k nodes, 100k capacity => ratio 1.4 < 1.5, no shrink
+        assert!(!should_shrink(140_000, 100_000));
+    }
+
+    #[test]
+    fn test_should_shrink_exceeds_slack() {
+        // 160k nodes, 100k capacity => ratio 1.6 > 1.5, shrink
+        assert!(should_shrink(160_000, 100_000));
+        // 200k nodes, 100k capacity => ratio 2.0 > 1.5, shrink
+        assert!(should_shrink(200_000, 100_000));
+    }
 
     #[test]
     fn test_run_hashing_task_hashed_state_update_forwards() {
