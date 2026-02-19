@@ -61,7 +61,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, StateProvider, StateWriteConfig, StorageChangeSetReader,
+    NodePrimitivesProvider, StateProvider, StateWriteConfig, StorageChangeSetReader, StoragePath,
     StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
@@ -78,6 +78,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
+    path::PathBuf,
     sync::Arc,
 };
 use tracing::{debug, instrument, trace};
@@ -201,6 +202,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     changeset_cache: ChangesetCache,
     /// Task runtime for spawning parallel I/O work.
     runtime: reth_tasks::Runtime,
+    /// Path to the database directory.
+    db_path: PathBuf,
     /// Pending `RocksDB` batches to be committed at provider commit time.
     #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
     pending_rocksdb_batches: PendingRocksDBBatches,
@@ -358,6 +361,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         rocksdb_provider: RocksDBProvider,
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
+        db_path: PathBuf,
         commit_order: CommitOrder,
     ) -> Self {
         Self {
@@ -370,6 +374,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             rocksdb_provider,
             changeset_cache,
             runtime,
+            db_path,
             pending_rocksdb_batches: Default::default(),
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -389,6 +394,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         rocksdb_provider: RocksDBProvider,
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
+        db_path: PathBuf,
     ) -> Self {
         Self::new_rw_inner(
             tx,
@@ -400,6 +406,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             rocksdb_provider,
             changeset_cache,
             runtime,
+            db_path,
             CommitOrder::Normal,
         )
     }
@@ -416,6 +423,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         rocksdb_provider: RocksDBProvider,
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
+        db_path: PathBuf,
     ) -> Self {
         Self::new_rw_inner(
             tx,
@@ -427,6 +435,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             rocksdb_provider,
             changeset_cache,
             runtime,
+            db_path,
             CommitOrder::Unwind,
         )
     }
@@ -984,6 +993,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         rocksdb_provider: RocksDBProvider,
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
+        db_path: PathBuf,
     ) -> Self {
         Self {
             tx,
@@ -995,6 +1005,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             rocksdb_provider,
             changeset_cache,
             runtime,
+            db_path,
             pending_rocksdb_batches: Default::default(),
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -3773,6 +3784,12 @@ impl<TX: Send, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
 
     fn set_storage_settings_cache(&self, settings: StorageSettings) {
         *self.storage_settings.write() = settings;
+    }
+}
+
+impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
+    fn storage_path(&self) -> PathBuf {
+        self.db_path.clone()
     }
 }
 

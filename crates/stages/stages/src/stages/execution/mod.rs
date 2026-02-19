@@ -14,7 +14,7 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
+    StaticFileProviderFactory, StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -28,7 +28,6 @@ use std::{
     cmp::{max, Ordering},
     collections::BTreeMap,
     ops::RangeInclusive,
-    path::PathBuf,
     sync::Arc,
     task::{ready, Context, Poll},
     time::{Duration, Instant},
@@ -95,11 +94,6 @@ where
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
-    /// Path for the auxiliary slot-preimage MDBX database.
-    ///
-    /// When set, enables storage-slot preimage tracking for pre-Cancun selfdestruct handling
-    /// in `--storage.v2` mode so that changesets always contain plain (unhashed) storage keys.
-    slot_preimages_path: Option<PathBuf>,
 }
 
 impl<E> ExecutionStage<E>
@@ -123,18 +117,7 @@ where
             post_unwind_commit_input: None,
             exex_manager_handle,
             metrics: ExecutorMetrics::default(),
-            slot_preimages_path: None,
         }
-    }
-
-    /// Sets the path for the auxiliary slot-preimage database.
-    ///
-    /// When enabled, the execution stage will track `keccak256(slot) → slot` mappings so that
-    /// pre-Cancun selfdestruct wipe changesets always contain plain storage keys instead of
-    /// hashed ones.
-    pub fn with_slot_preimages_path(mut self, path: PathBuf) -> Self {
-        self.slot_preimages_path = Some(path);
-        self
     }
 
     /// Create an execution stage with the provided executor.
@@ -289,6 +272,7 @@ where
         + BlockHashReader
         + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
         + StorageSettingsCache
+        + StoragePath
         + ChainSpecProvider<ChainSpec: EthereumHardforks>,
 {
     /// Return the id of the stage
@@ -489,18 +473,18 @@ where
         //
         // SELFDESTRUCT no longer destroys storage post-Cancun, so this is only needed for
         // pre-Cancun blocks. Post-Cancun we can remove the preimage db entirely.
-        if provider.cached_storage_settings().use_hashed_state() &&
-            let Some(path) = &self.slot_preimages_path
-        {
+        if provider.cached_storage_settings().use_hashed_state() {
             let start_header = provider
                 .header_by_number(start_block)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(start_block.into()))?;
 
+            let path = provider.storage_path().join("preimage.dat");
             if !provider.chain_spec().is_cancun_active_at_timestamp(start_header.timestamp()) {
-                slot_preimages::inject_plain_wipe_slots(path, provider, &mut state)?;
+                slot_preimages::inject_plain_wipe_slots(&path, provider, &mut state)?;
             } else if path.exists() {
                 // Post-Cancun: no more self-destructs, preimage db is no longer needed.
-                let _ = std::fs::remove_dir_all(path);
+                let _ = std::fs::remove_file(&path);
+                let _ = std::fs::remove_file(provider.storage_path().join("preimage.lck"));
             }
         }
 
