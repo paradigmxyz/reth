@@ -22,7 +22,7 @@ use reth_trie_common::{
 };
 #[cfg(feature = "std")]
 use tracing::debug;
-use tracing::{instrument, trace};
+use tracing::{debug_span, instrument, trace};
 
 /// Holds data that should be dropped after any locks are released.
 ///
@@ -323,6 +323,7 @@ where
             Ok(())
         }
 
+        let _span = debug_span!("reveal_decoded_multiproof_v2").entered();
         #[cfg(feature = "std")]
         // If std then reveal storage proofs in parallel
         {
@@ -389,6 +390,7 @@ where
     ///
     /// V2 proofs already include the masks in the `ProofTrieNode` structure,
     /// so no separate masks map is needed.
+    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
     pub fn reveal_account_v2_proof_nodes(
         &mut self,
         mut nodes: Vec<ProofTrieNodeV2>,

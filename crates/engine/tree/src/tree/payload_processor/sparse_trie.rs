@@ -466,7 +466,7 @@ where
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
         // Process all storage updates in parallel, skipping tries with no pending updates.
-        let span = tracing::Span::current();
+        let span = debug_span!("process_storage_leaf_updates").entered();
         let storage_results = storage_updates
             .iter_mut()
             .filter(|(_, updates)| !updates.is_empty())
@@ -497,9 +497,9 @@ where
                 SparseTrieResult::Ok((address, targets, fetched, trie))
             })
             .collect::<Result<Vec<_>, _>>()?;
-
         drop(span);
 
+        let span = debug_span!("reinsert_storage_tries").entered();
         for (address, targets, fetched, trie) in storage_results {
             self.fetched_storage_targets.insert(*address, fetched);
             self.trie.insert_storage_trie(*address, trie);
@@ -508,6 +508,7 @@ where
                 self.pending_targets.storage_targets.entry(*address).or_default().extend(targets);
             }
         }
+        drop(span);
 
         // Process account trie updates and fill the account targets.
         self.process_account_leaf_updates(new)?;
