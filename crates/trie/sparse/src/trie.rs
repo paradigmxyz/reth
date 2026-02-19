@@ -169,6 +169,11 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         self.as_revealed_ref().is_some_and(|trie| trie.is_root_cached())
     }
 
+    /// Returns the length of the prefix set of the trie.
+    pub fn prefix_set_len(&self) -> usize {
+        self.as_revealed_ref().map(|trie| trie.prefix_set_len()).unwrap_or(0)
+    }
+
     /// Returns the root hash along with any accumulated update information.
     ///
     /// This is useful for when you need both the root hash and information about

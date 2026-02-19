@@ -578,7 +578,7 @@ where
             })
             .par_bridge_buffered()
             .for_each(|(address, trie)| {
-                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_root", ?address).entered();
+                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_root", ?address, prefix_set_len = trie.prefix_set_len()).entered();
                 trie.root().expect("updates are drained, trie should be revealed by now");
             });
         drop(span);
