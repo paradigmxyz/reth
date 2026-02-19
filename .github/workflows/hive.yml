@@ -109,22 +109,32 @@ jobs:
           name: hive_assets
           path: hive_assets
 
-  wait-reth:
-    needs:
-      - build-reth-stable-docker
-      - build-reth-edge-docker
-      - prepare-reth-stable
-      - prepare-reth-edge
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "reth build ready"
+  wait-reth-docker:
+  needs:
+    - build-reth-stable-docker
+    - build-reth-edge-docker
+  if: needs.detect-env.outputs.use_docker == 'true'
+  runs-on: ubuntu-latest
+  steps:
+    - run: echo "docker reth ready"
+
+wait-reth-prepare:
+  needs:
+    - prepare-reth-stable
+    - prepare-reth-edge
+  if: needs.detect-env.outputs.use_docker == 'false'
+  runs-on: ubuntu-latest
+  steps:
+    - run: echo "prepared reth ready"
+
 
   test:
     needs:
-      - detect-env
-      - wait-reth
-      - prepare-hive
+    - detect-env
+    - prepare-hive
+    - wait-reth-docker
+    - wait-reth-prepare
+
 
     runs-on: ${{ needs.detect-env.outputs.use_docker == 'true' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     timeout-minutes: 120
