@@ -202,6 +202,8 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
 
     let start_block = start_block.unwrap_or(0);
     let end_block = end_block.unwrap_or(u64::MAX);
+    let is_change_based = segment.is_change_based();
+    let is_storage = segment.is_storage_change_sets();
 
     info!(
         "Computing checksum for {} static files, start_block={}, end_block={}, limit={:?}",
@@ -230,7 +232,7 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
 
         let mut cursor = jar_provider.cursor()?;
 
-        if segment.is_change_based() {
+        if is_change_based {
             let offsets = jar_provider.read_changeset_offsets()?.ok_or_else(|| {
                 eyre::eyre!(
                     "Missing changeset offsets sidecar for segment {} at range {}",
@@ -238,8 +240,6 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
                     block_range
                 )
             })?;
-
-            let is_storage = segment.is_storage_change_sets();
 
             for (offset_index, offset) in offsets.iter().enumerate() {
                 let block_number = block_range.start() + offset_index as u64;
