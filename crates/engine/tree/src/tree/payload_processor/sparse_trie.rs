@@ -466,48 +466,35 @@ where
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
         // Process all storage updates in parallel, skipping tries with no pending updates.
-        let span = tracing::Span::current();
-        let storage_results = storage_updates
-            .iter_mut()
-            .filter(|(_, updates)| !updates.is_empty())
-            .map(|(address, updates)| {
-                let trie = self.trie.take_or_create_storage_trie(address);
-                let fetched = self.fetched_storage_targets.remove(address).unwrap_or_default();
+        let span = debug_span!("process_storage_leaf_updates").entered();
+        for (address, updates) in storage_updates {
+            if updates.is_empty() {
+                continue;
+            }
 
-                (address, updates, fetched, trie)
-            })
-            .par_bridge_buffered()
-            .map(|(address, updates, mut fetched, mut trie)| {
-                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
-                let mut targets = Vec::new();
+            let trie = self.trie.get_or_create_storage_trie_mut(*address);
+            let fetched = self.fetched_storage_targets.entry(*address).or_default();
+            let mut targets = Vec::new();
 
-                trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                    Entry::Occupied(mut entry) => {
-                        if min_len < *entry.get() {
-                            entry.insert(min_len);
-                            targets.push(Target::new(path).with_min_len(min_len));
-                        }
-                    }
-                    Entry::Vacant(entry) => {
+            trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+                Entry::Occupied(mut entry) => {
+                    if min_len < *entry.get() {
                         entry.insert(min_len);
                         targets.push(Target::new(path).with_min_len(min_len));
                     }
-                })?;
-
-                SparseTrieResult::Ok((address, targets, fetched, trie))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        drop(span);
-
-        for (address, targets, fetched, trie) in storage_results {
-            self.fetched_storage_targets.insert(*address, fetched);
-            self.trie.insert_storage_trie(*address, trie);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(min_len);
+                    targets.push(Target::new(path).with_min_len(min_len));
+                }
+            })?;
 
             if !targets.is_empty() {
                 self.pending_targets.storage_targets.entry(*address).or_default().extend(targets);
             }
         }
+
+        drop(span);
 
         // Process account trie updates and fill the account targets.
         self.process_account_leaf_updates(new)?;
