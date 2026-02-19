@@ -5275,8 +5275,10 @@ mod tests {
 
             let first_tx_num = tx_num;
             let tx_count_u64 = tx_count as u64;
-            expected_body_indices
-                .push((block_number, StoredBlockBodyIndices { first_tx_num, tx_count: tx_count_u64 }));
+            expected_body_indices.push((
+                block_number,
+                StoredBlockBodyIndices { first_tx_num, tx_count: tx_count_u64 },
+            ));
             expected_header_numbers.push((recovered.hash(), block_number));
 
             if tx_count_u64 > 0 {
@@ -5339,7 +5341,8 @@ mod tests {
             .unwrap();
         assert_eq!(got_senders, expected_senders);
 
-        let mut header_numbers_cursor = provider.tx_ref().cursor_read::<tables::HeaderNumbers>().unwrap();
+        let mut header_numbers_cursor =
+            provider.tx_ref().cursor_read::<tables::HeaderNumbers>().unwrap();
         for (hash, number) in expected_header_numbers {
             let entry = header_numbers_cursor.seek_exact(hash).unwrap();
             assert_eq!(entry.map(|(_, value)| value), Some(number));
