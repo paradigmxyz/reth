@@ -102,6 +102,24 @@ impl RocksDBProvider {
             + BlockBodyIndicesProvider
             + TransactionsProvider<Transaction: Encodable2718>,
     {
+        if provider
+            .prune_modes_ref()
+            .transaction_lookup
+            .is_some_and(|mode| mode.is_full())
+        {
+            // Transaction lookup is fully pruned by configuration, so tx hash numbers are not
+            // part of the expected persistent state. Avoid startup-time healing scans and just
+            // clear stale leftovers if they exist.
+            if self.first::<tables::TransactionHashNumbers>()?.is_some() {
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    "Transaction lookup prune mode is full, clearing TransactionHashNumbers"
+                );
+                self.clear::<tables::TransactionHashNumbers>()?;
+            }
+            return Ok(None);
+        }
+
         let checkpoint = provider
             .get_stage_checkpoint(StageId::TransactionLookup)?
             .map(|cp| cp.block_number)
@@ -454,6 +472,7 @@ mod tests {
         tables::{self, BlockNumberList},
         transaction::DbTxMut,
     };
+    use reth_prune_types::{PruneMode, PruneModes};
     use reth_stages_types::StageCheckpoint;
     use reth_testing_utils::generators::{self, BlockRangeParams};
     use tempfile::TempDir;
@@ -533,6 +552,39 @@ mod tests {
         // Since static file tip defaults to 0 when None, and 0 < 100, an unwind is triggered.
         let result = rocksdb.check_consistency(&provider).unwrap();
         assert_eq!(result, Some(0), "Static file tip (0) behind checkpoint (100) triggers unwind");
+    }
+
+    #[test]
+    fn test_check_consistency_tx_lookup_full_prune_skips_healing_and_unwind() {
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let factory = create_test_provider_factory().with_prune_modes(PruneModes {
+            transaction_lookup: Some(PruneMode::Full),
+            ..Default::default()
+        });
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        // Insert stale tx hash mapping that should be cleared when tx lookup is fully pruned.
+        let stale_hash = B256::from([0xabu8; 32]);
+        rocksdb.put::<tables::TransactionHashNumbers>(stale_hash, &42).unwrap();
+
+        // A checkpoint ahead of static files would normally trigger unwind in tx-lookup healing.
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "tx-lookup full prune should bypass tx-hash consistency unwind");
+        assert!(
+            rocksdb.get::<tables::TransactionHashNumbers>(stale_hash).unwrap().is_none(),
+            "stale tx-hash rows should be cleared when tx lookup is fully pruned"
+        );
     }
 
     /// Tests that when checkpoint=0 and `RocksDB` has data, all entries are pruned.
