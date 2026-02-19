@@ -3,7 +3,6 @@
 use alloc::vec::Vec;
 use reth_db_api::models::StorageSettings;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use std::path::PathBuf;
 
 /// Metadata keys.
 pub mod keys {
@@ -59,7 +58,8 @@ pub trait StorageSettingsCache: Send {
 }
 
 /// Trait for accessing the database directory path.
+#[cfg(feature = "std")]
 pub trait StoragePath: Send {
     /// Returns the path to the database directory (e.g. `<datadir>/db`).
-    fn storage_path(&self) -> PathBuf;
+    fn storage_path(&self) -> std::path::PathBuf;
 }

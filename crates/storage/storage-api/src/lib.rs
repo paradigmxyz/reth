@@ -98,8 +98,10 @@ pub use header_sync_gap::HeaderSyncGapProvider;
 
 #[cfg(feature = "db-api")]
 pub mod metadata;
+#[cfg(all(feature = "db-api", feature = "std"))]
+pub use metadata::StoragePath;
 #[cfg(feature = "db-api")]
-pub use metadata::{MetadataProvider, MetadataWriter, StoragePath, StorageSettingsCache};
+pub use metadata::{MetadataProvider, MetadataWriter, StorageSettingsCache};
 #[cfg(feature = "db-api")]
 pub use reth_db_api::models::StorageSettings;
 
