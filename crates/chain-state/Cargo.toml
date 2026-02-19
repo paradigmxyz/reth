@@ -20,7 +20,6 @@ reth-metrics.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
-reth-tasks.workspace = true
 reth-trie.workspace = true
 
 # ethereum
@@ -83,7 +82,6 @@ test-utils = [
     "revm-state",
     "reth-chainspec/test-utils",
     "reth-primitives-traits/test-utils",
-    "reth-tasks/test-utils",
     "reth-trie/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]

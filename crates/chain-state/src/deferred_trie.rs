@@ -1,7 +1,6 @@
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_metrics::{metrics::Counter, Metrics};
-use reth_tasks::LazyHandle;
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, TrieInputSorted,
@@ -77,10 +76,10 @@ enum DeferredState {
 }
 
 /// Inputs kept while a deferred trie computation is pending.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct PendingInputs {
-    /// Lazily-resolved hashed post-state from execution.
-    hashed_state: LazyHandle<HashedPostState>,
+    /// Unsorted hashed post-state from execution.
+    hashed_state: Arc<HashedPostState>,
     /// Unsorted trie updates from state root computation.
     trie_updates: Arc<TrieUpdates>,
     /// The persisted ancestor hash this trie input is anchored to.
@@ -110,12 +109,12 @@ impl DeferredTrieData {
     /// will be computed synchronously from these inputs. This eliminates deadlock risk.
     ///
     /// # Arguments
-    /// * `hashed_state` - Lazily-resolved hashed post-state from execution
+    /// * `hashed_state` - Unsorted hashed post-state from execution
     /// * `trie_updates` - Unsorted trie updates from state root computation
     /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
     /// * `ancestors` - Deferred trie data from ancestor blocks for merging
     pub fn pending(
-        hashed_state: LazyHandle<HashedPostState>,
+        hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
         anchor_hash: B256,
         ancestors: Vec<Self>,
@@ -154,32 +153,39 @@ impl DeferredTrieData {
     /// Used by both the async background task and the synchronous fallback path.
     ///
     /// # Arguments
-    /// * `hashed_state` - Lazily-resolved hashed post-state (account/storage changes) from
-    ///   execution
+    /// * `hashed_state` - Unsorted hashed post-state (account/storage changes) from execution
     /// * `trie_updates` - Unsorted trie node updates from state root computation
     /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
     /// * `ancestors` - Deferred trie data from ancestor blocks for merging (oldest -> newest)
     pub fn sort_and_build_trie_input(
-        hashed_state: LazyHandle<HashedPostState>,
+        hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
         anchor_hash: B256,
         ancestors: &[Self],
     ) -> ComputedTrieData {
-        let sort_hashed_state = || match hashed_state.try_into_inner() {
-            Ok(state) => state.into_sorted(),
-            Err(handle) => handle.get().clone_into_sorted(),
-        };
-        let sort_trie_updates = || match Arc::try_unwrap(trie_updates) {
-            Ok(updates) => updates.into_sorted(),
-            Err(arc) => arc.clone_into_sorted(),
-        };
-
         #[cfg(feature = "rayon")]
-        let (sorted_hashed_state, sorted_trie_updates) =
-            rayon::join(sort_hashed_state, sort_trie_updates);
+        let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
+            || match Arc::try_unwrap(hashed_state) {
+                Ok(state) => state.into_sorted(),
+                Err(arc) => arc.clone_into_sorted(),
+            },
+            || match Arc::try_unwrap(trie_updates) {
+                Ok(updates) => updates.into_sorted(),
+                Err(arc) => arc.clone_into_sorted(),
+            },
+        );
 
         #[cfg(not(feature = "rayon"))]
-        let (sorted_hashed_state, sorted_trie_updates) = (sort_hashed_state(), sort_trie_updates());
+        let (sorted_hashed_state, sorted_trie_updates) = (
+            match Arc::try_unwrap(hashed_state) {
+                Ok(state) => state.into_sorted(),
+                Err(arc) => arc.clone_into_sorted(),
+            },
+            match Arc::try_unwrap(trie_updates) {
+                Ok(updates) => updates.into_sorted(),
+                Err(arc) => arc.clone_into_sorted(),
+            },
+        );
 
         // Reuse parent's overlay if available and anchors match.
         // We can only reuse the parent's overlay if it was built on top of the same
@@ -405,7 +411,7 @@ mod tests {
 
     fn empty_pending_with_anchor(anchor: B256) -> DeferredTrieData {
         DeferredTrieData::pending(
-            LazyHandle::ready(HashedPostState::default()),
+            Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
             anchor,
             Vec::new(),
@@ -500,7 +506,7 @@ mod tests {
 
         // Create pending with ancestor
         let deferred = DeferredTrieData::pending(
-            LazyHandle::ready(HashedPostState::default()),
+            Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
             B256::with_last_byte(2),
             vec![ancestor],
@@ -540,7 +546,7 @@ mod tests {
 
         // Pass ancestors oldest -> newest; newest should take precedence
         let deferred = DeferredTrieData::pending(
-            LazyHandle::ready(HashedPostState::default()),
+            Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
             B256::ZERO,
             vec![DeferredTrieData::ready(oldest), DeferredTrieData::ready(newest)],
@@ -582,7 +588,7 @@ mod tests {
 
         // First block after anchor - no ancestors
         let first_block = DeferredTrieData::pending(
-            LazyHandle::ready(HashedPostState::default().with_accounts([(key, Some(account))])),
+            Arc::new(HashedPostState::default().with_accounts([(key, Some(account))])),
             Arc::new(TrieUpdates::default()),
             anchor,
             vec![], // No ancestors
@@ -611,7 +617,7 @@ mod tests {
 
         // Create child - should reuse parent's overlay
         let child = DeferredTrieData::pending(
-            LazyHandle::ready(HashedPostState::default()),
+            Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
             anchor,
             vec![parent],
@@ -644,7 +650,7 @@ mod tests {
         // Create child with NEW anchor (simulates after persist)
         // Should NOT reuse parent's overlay because anchor changed
         let child = DeferredTrieData::pending(
-            LazyHandle::ready(HashedPostState::default()),
+            Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
             new_anchor,
             vec![parent],
@@ -685,7 +691,7 @@ mod tests {
 
         // Create child - should rebuild from parent's hashed_state
         let child = DeferredTrieData::pending(
-            LazyHandle::ready(HashedPostState::default()),
+            Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
             anchor,
             vec![parent],
@@ -719,7 +725,7 @@ mod tests {
             Some(Account { nonce: 2, balance: U256::ZERO, bytecode_hash: None }),
         )]);
         let block2 = DeferredTrieData::pending(
-            LazyHandle::ready(block2_hashed),
+            Arc::new(block2_hashed),
             Arc::new(TrieUpdates::default()),
             anchor,
             vec![block1.clone()],
@@ -734,7 +740,7 @@ mod tests {
             Some(Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None }),
         )]);
         let block3 = DeferredTrieData::pending(
-            LazyHandle::ready(block3_hashed),
+            Arc::new(block3_hashed),
             Arc::new(TrieUpdates::default()),
             anchor,
             vec![block1, block2_ready],
@@ -771,7 +777,7 @@ mod tests {
             Some(Account { nonce: 99, balance: U256::ZERO, bytecode_hash: None }),
         )]);
         let child = DeferredTrieData::pending(
-            LazyHandle::ready(child_hashed),
+            Arc::new(child_hashed),
             Arc::new(TrieUpdates::default()),
             anchor,
             vec![parent],
@@ -804,7 +810,7 @@ mod tests {
             let hashed = HashedPostState::default().with_accounts([(key, Some(account))]);
 
             let block = DeferredTrieData::pending(
-                LazyHandle::ready(hashed),
+                Arc::new(hashed),
                 Arc::new(TrieUpdates::default()),
                 anchor,
                 ancestors.clone(),
@@ -856,7 +862,7 @@ mod tests {
             Some(Account { nonce: 2, balance: U256::ZERO, bytecode_hash: None }),
         )]);
         let block2 = DeferredTrieData::pending(
-            LazyHandle::ready(block2_hashed),
+            Arc::new(block2_hashed),
             Arc::new(TrieUpdates::default()),
             old_anchor,
             vec![block1.clone()],
@@ -868,7 +874,7 @@ mod tests {
             Some(Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None }),
         )]);
         let block3 = DeferredTrieData::pending(
-            LazyHandle::ready(block3_hashed),
+            Arc::new(block3_hashed),
             Arc::new(TrieUpdates::default()),
             old_anchor,
             vec![block1.clone(), block2_ready.clone()],
@@ -890,7 +896,7 @@ mod tests {
             Some(Account { nonce: 4, balance: U256::ZERO, bytecode_hash: None }),
         )]);
         let block4 = DeferredTrieData::pending(
-            LazyHandle::ready(block4_hashed),
+            Arc::new(block4_hashed),
             Arc::new(TrieUpdates::default()),
             new_anchor, // Different anchor - simulates post-persist
             vec![block1, block2_ready, block3_ready],

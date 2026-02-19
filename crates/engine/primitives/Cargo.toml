@@ -20,7 +20,6 @@ reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-chain-state.workspace = true
 reth-errors.workspace = true
-reth-tasks.workspace = true
 reth-trie-common.workspace = true
 
 # alloy

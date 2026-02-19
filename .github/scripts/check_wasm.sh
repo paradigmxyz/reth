@@ -64,13 +64,6 @@ exclude_crates=(
   reth-prune # tokio
   reth-prune-static-files # reth-provider
   reth-tasks # tokio rt-multi-thread
-  reth-chain-state # reth-tasks
-  reth-engine-primitives # reth-tasks
-  reth-ethereum-engine-primitives # reth-engine-primitives
-  reth-exex-types # reth-chain-state
-  reth-node-types # reth-chain-state
-  reth-payload-builder-primitives # reth-engine-primitives
-  reth-payload-primitives # reth-engine-primitives
   reth-stages-api # reth-provider, reth-prune
   reth-static-file # tokio
   reth-transaction-pool # c-kzg
