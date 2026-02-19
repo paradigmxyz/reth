@@ -60,7 +60,7 @@ pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
 
-use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
+use preserved_sparse_trie::SharedPreservedSparseTrie;
 
 /// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
 ///
@@ -554,18 +554,13 @@ where
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 
-            // Reuse a stored SparseStateTrie if available, applying continuation logic.
-            // If this payload's parent state root matches the preserved trie's anchor,
-            // we can reuse the pruned trie structure. Otherwise, we clear the trie but
-            // keep allocations.
+            // Reuse a stored SparseStateTrie if available. The cache prioritizes:
+            // 1. Exact anchored match for the parent state root
+            // 2. A cleared trie with preserved allocations
+            // 3. Evicting the oldest anchored trie and clearing it
             let start = Instant::now();
-            let preserved = preserved_sparse_trie.take();
-            trie_metrics
-                .sparse_trie_cache_wait_duration_histogram
-                .record(start.elapsed().as_secs_f64());
-
-            let sparse_state_trie = preserved
-                .map(|preserved| preserved.into_trie_for(parent_state_root))
+            let sparse_state_trie = preserved_sparse_trie
+                .take_for_parent(parent_state_root)
                 .unwrap_or_else(|| {
                     debug!(
                         target: "engine::tree::payload_processor",
@@ -581,6 +576,9 @@ where
                         .with_default_storage_trie(default_trie)
                         .with_updates(true)
                 });
+            trie_metrics
+                .sparse_trie_cache_wait_duration_histogram
+                .record(start.elapsed().as_secs_f64());
 
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
@@ -614,7 +612,7 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                guard.store(PreservedSparseTrie::cleared(trie));
+                guard.store_cleared(trie);
                 // Drop guard before deferred to release lock before expensive deallocations
                 drop(guard);
                 drop(deferred);
@@ -625,7 +623,7 @@ where
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let deferred = if let Some(state_root) = computed_state_root {
+            let (deferred, evicted) = if let Some(state_root) = computed_state_root {
                 let start = Instant::now();
                 let (trie, deferred) = task.into_trie_for_reuse(
                     prune_depth,
@@ -637,8 +635,8 @@ where
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                guard.store(PreservedSparseTrie::anchored(trie, state_root));
-                deferred
+                let evicted = guard.store_anchored(state_root, trie);
+                (deferred, evicted)
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
@@ -648,12 +646,13 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                guard.store(PreservedSparseTrie::cleared(trie));
-                deferred
+                guard.store_cleared(trie);
+                (deferred, Vec::new())
             };
-            // Drop guard before deferred to release lock before expensive deallocations
+            // Drop guard before deferred/evicted to release lock before expensive deallocations
             drop(guard);
             drop(deferred);
+            drop(evicted);
         });
     }
 

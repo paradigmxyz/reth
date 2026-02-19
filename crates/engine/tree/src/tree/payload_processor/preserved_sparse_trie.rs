@@ -3,26 +3,81 @@
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_trie_sparse::SparseStateTrie;
-use std::{sync::Arc, time::Instant};
+use std::{collections::VecDeque, sync::Arc, time::Instant};
 use tracing::debug;
 
 /// Type alias for the sparse trie type used in preservation.
 pub(super) type SparseTrie = SparseStateTrie;
 
+/// Maximum number of preserved tries to cache.
+const PRESERVED_TRIE_CACHE_CAPACITY: usize = 3;
+
+/// Inner storage for preserved sparse tries.
+#[derive(Debug, Default)]
+struct PreservedTrieCache {
+    /// Anchored tries, keyed by their computed state root, most-recent-first.
+    anchored: VecDeque<(B256, SparseTrie)>,
+    /// A single cleared trie with preserved allocations as fallback.
+    cleared: Option<SparseTrie>,
+}
+
 /// Shared handle to a preserved sparse trie that can be reused across payload validations.
 ///
 /// This is stored in [`PayloadProcessor`](super::PayloadProcessor) and cloned to pass to
 /// [`SparseTrieCacheTask`](super::sparse_trie::SparseTrieCacheTask) for trie reuse.
+///
+/// Maintains a bounded cache of anchored tries keyed by state root, enabling trie reuse
+/// across short reorgs and parallel payload validations.
 #[derive(Debug, Default, Clone)]
-pub(super) struct SharedPreservedSparseTrie(Arc<Mutex<Option<PreservedSparseTrie>>>);
+pub(super) struct SharedPreservedSparseTrie(Arc<Mutex<PreservedTrieCache>>);
 
 impl SharedPreservedSparseTrie {
-    /// Takes the preserved trie if present, leaving `None` in its place.
-    pub(super) fn take(&self) -> Option<PreservedSparseTrie> {
-        self.0.lock().take()
+    /// Takes the best matching trie for the given parent state root.
+    ///
+    /// Priority:
+    /// 1. Exact anchored match (`state_root` == `parent_state_root`)
+    /// 2. Cleared trie with preserved allocations
+    /// 3. Evict oldest anchored trie and clear it for allocation reuse
+    pub(super) fn take_for_parent(&self, parent_state_root: B256) -> Option<SparseTrie> {
+        let mut cache = self.0.lock();
+
+        // 1) Exact match
+        if let Some(idx) = cache.anchored.iter().position(|(root, _)| *root == parent_state_root) {
+            let (_, trie) = cache.anchored.remove(idx).unwrap();
+            debug!(
+                target: "engine::tree::payload_processor",
+                %parent_state_root,
+                "Reusing anchored sparse trie for continuation payload"
+            );
+            return Some(trie);
+        }
+
+        // 2) Cleared fallback
+        if let Some(trie) = cache.cleared.take() {
+            debug!(
+                target: "engine::tree::payload_processor",
+                %parent_state_root,
+                "Using cleared sparse trie with preserved allocations"
+            );
+            return Some(trie);
+        }
+
+        // 3) Evict oldest and clear
+        if let Some((evicted_root, mut trie)) = cache.anchored.pop_back() {
+            debug!(
+                target: "engine::tree::payload_processor",
+                %parent_state_root,
+                %evicted_root,
+                "Clearing evicted anchored sparse trie - parent state root mismatch"
+            );
+            trie.clear();
+            return Some(trie);
+        }
+
+        None
     }
 
-    /// Acquires a guard that blocks `take()` until dropped.
+    /// Acquires a guard that blocks `take_for_parent()` until dropped.
     /// Use this before sending the state root result to ensure the next block
     /// waits for the trie to be stored.
     pub(super) fn lock(&self) -> PreservedTrieGuard<'_> {
@@ -51,87 +106,175 @@ impl SharedPreservedSparseTrie {
     }
 }
 
-/// Guard that holds the lock on the preserved trie.
-/// While held, `take()` will block. Call `store()` to save the trie before dropping.
-pub(super) struct PreservedTrieGuard<'a>(parking_lot::MutexGuard<'a, Option<PreservedSparseTrie>>);
+/// Guard that holds the lock on the preserved trie cache.
+/// While held, `take_for_parent()` will block. Call `store_anchored()` or `store_cleared()`
+/// to save a trie before dropping.
+pub(super) struct PreservedTrieGuard<'a>(parking_lot::MutexGuard<'a, PreservedTrieCache>);
 
 impl PreservedTrieGuard<'_> {
-    /// Stores a preserved trie for later reuse.
-    pub(super) fn store(&mut self, trie: PreservedSparseTrie) {
-        self.0.replace(trie);
-    }
-}
-
-/// A preserved sparse trie that can be reused across payload validations.
-///
-/// The trie exists in one of two states:
-/// - **Anchored**: Has a computed state root and can be reused for payloads whose parent state root
-///   matches the anchor.
-/// - **Cleared**: Trie data has been cleared but allocations are preserved for reuse.
-#[derive(Debug)]
-pub(super) enum PreservedSparseTrie {
-    /// Trie with a computed state root that can be reused for continuation payloads.
-    Anchored {
-        /// The sparse state trie (pruned after root computation).
-        trie: SparseTrie,
-        /// The state root this trie represents (computed from the previous block).
-        /// Used to verify continuity: new payload's `parent_state_root` must match this.
-        state_root: B256,
-    },
-    /// Cleared trie with preserved allocations, ready for fresh use.
-    Cleared {
-        /// The sparse state trie with cleared data but preserved allocations.
-        trie: SparseTrie,
-    },
-}
-
-impl PreservedSparseTrie {
-    /// Creates a new anchored preserved trie.
+    /// Stores an anchored trie for future reuse.
     ///
-    /// The `state_root` is the computed state root from the trie, which becomes the
-    /// anchor for determining if subsequent payloads can reuse this trie.
-    pub(super) const fn anchored(trie: SparseTrie, state_root: B256) -> Self {
-        Self::Anchored { trie, state_root }
-    }
-
-    /// Creates a cleared preserved trie (allocations preserved, data cleared).
-    pub(super) const fn cleared(trie: SparseTrie) -> Self {
-        Self::Cleared { trie }
-    }
-
-    /// Consumes self and returns the trie for reuse.
-    ///
-    /// If the preserved trie is anchored and the parent state root matches, the pruned
-    /// trie structure is reused directly. Otherwise, the trie is cleared but allocations
-    /// are preserved to reduce memory overhead.
-    pub(super) fn into_trie_for(self, parent_state_root: B256) -> SparseTrie {
-        match self {
-            Self::Anchored { trie, state_root } if state_root == parent_state_root => {
-                debug!(
-                    target: "engine::tree::payload_processor",
-                    %state_root,
-                    "Reusing anchored sparse trie for continuation payload"
-                );
-                trie
-            }
-            Self::Anchored { mut trie, state_root } => {
-                debug!(
-                    target: "engine::tree::payload_processor",
-                    anchor_root = %state_root,
-                    %parent_state_root,
-                    "Clearing anchored sparse trie - parent state root mismatch"
-                );
-                trie.clear();
-                trie
-            }
-            Self::Cleared { trie } => {
-                debug!(
-                    target: "engine::tree::payload_processor",
-                    %parent_state_root,
-                    "Using cleared sparse trie with preserved allocations"
-                );
-                trie
+    /// Returns any evicted tries that should be dropped outside the lock.
+    pub(super) fn store_anchored(&mut self, state_root: B256, trie: SparseTrie) -> Vec<SparseTrie> {
+        let mut evicted = Vec::new();
+        // Remove any existing entry for this root
+        if let Some(idx) = self.0.anchored.iter().position(|(root, _)| *root == state_root) {
+            let (_, old_trie) = self.0.anchored.remove(idx).unwrap();
+            evicted.push(old_trie);
+        }
+        // Push to front (most recent)
+        self.0.anchored.push_front((state_root, trie));
+        // Evict oldest if over capacity
+        while self.0.anchored.len() > PRESERVED_TRIE_CACHE_CAPACITY {
+            if let Some((_, evicted_trie)) = self.0.anchored.pop_back() {
+                evicted.push(evicted_trie);
             }
         }
+        evicted
+    }
+
+    /// Stores a cleared trie with preserved allocations.
+    pub(super) fn store_cleared(&mut self, trie: SparseTrie) {
+        self.0.cleared = Some(trie);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn new_default_trie() -> SparseTrie {
+        SparseStateTrie::new()
+    }
+
+    #[test]
+    fn take_exact_anchored_match() {
+        let shared = SharedPreservedSparseTrie::default();
+        let root1 = B256::from([1u8; 32]);
+        let root2 = B256::from([2u8; 32]);
+        let root3 = B256::from([3u8; 32]);
+
+        {
+            let mut guard = shared.lock();
+            guard.store_anchored(root1, new_default_trie());
+            guard.store_anchored(root2, new_default_trie());
+            guard.store_anchored(root3, new_default_trie());
+        }
+
+        // Should find exact match for root2
+        let trie = shared.take_for_parent(root2);
+        assert!(trie.is_some(), "expected exact match for root2");
+
+        // root1 and root3 should still be present
+        let trie1 = shared.take_for_parent(root1);
+        assert!(trie1.is_some(), "expected root1 still present");
+        let trie3 = shared.take_for_parent(root3);
+        assert!(trie3.is_some(), "expected root3 still present");
+    }
+
+    #[test]
+    fn fallback_to_cleared_trie() {
+        let shared = SharedPreservedSparseTrie::default();
+        let root = B256::from([1u8; 32]);
+        let query = B256::from([99u8; 32]);
+
+        {
+            let mut guard = shared.lock();
+            guard.store_anchored(root, new_default_trie());
+            guard.store_cleared(new_default_trie());
+        }
+
+        // Query for non-existent root should prefer cleared trie over evicting anchored
+        let trie = shared.take_for_parent(query);
+        assert!(trie.is_some(), "expected cleared fallback");
+
+        // Anchored should still be present
+        let trie1 = shared.take_for_parent(root);
+        assert!(trie1.is_some(), "expected anchored trie still present");
+    }
+
+    #[test]
+    fn evict_oldest_when_no_match_and_no_cleared() {
+        let shared = SharedPreservedSparseTrie::default();
+        let root1 = B256::from([1u8; 32]);
+        let root2 = B256::from([2u8; 32]);
+        let query = B256::from([99u8; 32]);
+
+        {
+            let mut guard = shared.lock();
+            guard.store_anchored(root1, new_default_trie());
+            guard.store_anchored(root2, new_default_trie());
+        }
+
+        // No cleared trie, no exact match — should evict oldest (root1)
+        let trie = shared.take_for_parent(query);
+        assert!(trie.is_some(), "expected evicted trie");
+
+        // root2 should still be present, root1 evicted
+        let trie2 = shared.take_for_parent(root2);
+        assert!(trie2.is_some(), "expected root2 still present");
+
+        let trie1 = shared.take_for_parent(root1);
+        assert!(trie1.is_none(), "expected root1 to be evicted");
+    }
+
+    #[test]
+    fn capacity_bound_respected() {
+        let shared = SharedPreservedSparseTrie::default();
+        let roots: Vec<B256> = (0..5).map(|i| B256::from([i as u8; 32])).collect();
+
+        {
+            let mut guard = shared.lock();
+            for root in &roots {
+                guard.store_anchored(*root, new_default_trie());
+            }
+        }
+
+        // Only the most recent PRESERVED_TRIE_CACHE_CAPACITY entries should remain
+        // Stored in order: root0, root1, root2, root3, root4
+        // Most recent (front): root4, root3, root2
+        // Evicted: root0, root1
+        let trie4 = shared.take_for_parent(roots[4]);
+        assert!(trie4.is_some(), "expected root4 present");
+
+        let trie3 = shared.take_for_parent(roots[3]);
+        assert!(trie3.is_some(), "expected root3 present");
+
+        let trie2 = shared.take_for_parent(roots[2]);
+        assert!(trie2.is_some(), "expected root2 present");
+
+        // root0 and root1 were evicted — no more entries left
+        let trie1 = shared.take_for_parent(roots[1]);
+        assert!(trie1.is_none(), "expected root1 evicted");
+    }
+
+    #[test]
+    fn empty_cache_returns_none() {
+        let shared = SharedPreservedSparseTrie::default();
+        let query = B256::from([42u8; 32]);
+
+        let trie = shared.take_for_parent(query);
+        assert!(trie.is_none(), "expected None from empty cache");
+    }
+
+    #[test]
+    fn store_anchored_deduplicates() {
+        let shared = SharedPreservedSparseTrie::default();
+        let root = B256::from([1u8; 32]);
+
+        {
+            let mut guard = shared.lock();
+            guard.store_anchored(root, new_default_trie());
+            guard.store_anchored(root, new_default_trie());
+            guard.store_anchored(root, new_default_trie());
+        }
+
+        // Take the one entry
+        let trie = shared.take_for_parent(root);
+        assert!(trie.is_some());
+
+        // Should be empty now (no duplicates)
+        let trie2 = shared.take_for_parent(root);
+        assert!(trie2.is_none(), "expected no duplicates");
     }
 }
