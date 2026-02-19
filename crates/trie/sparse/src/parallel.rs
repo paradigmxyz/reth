@@ -171,7 +171,7 @@ impl SparseTrie for ParallelSparseTrie {
     ) -> SparseTrieResult<()> {
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.record(RecordedOp::SetRoot {
-            node: ProofTrieNodeRecord::from_proof_trie_node_v2(&ProofTrieNodeV2 {
+            node: ProofTrieNodeRecord::from_proof_trie_node(&ProofTrieNode {
                 path: Nibbles::default(),
                 node: root.clone(),
                 masks,
