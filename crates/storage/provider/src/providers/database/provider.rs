@@ -2670,15 +2670,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
-            for (address, (old_account, new_account, storage)) in &state {
-                if old_account != new_account {
-                    let hashed_address = keccak256(address);
-                    let existing_entry = hashed_accounts_cursor.seek_exact(hashed_address)?;
-                    if let Some(account) = old_account {
-                        hashed_accounts_cursor.upsert(hashed_address, account)?;
-                    } else if existing_entry.is_some() {
-                        hashed_accounts_cursor.delete_current()?;
-                    }
+            for (address, (old_account, _new_account, storage)) in &state {
+                // In v2 mode, `_new_account` was read from PlainAccountState which is empty,
+                // so we always check against the hashed table directly.
+                let hashed_address = keccak256(address);
+                let existing_entry = hashed_accounts_cursor.seek_exact(hashed_address)?;
+                if let Some(account) = old_account {
+                    hashed_accounts_cursor.upsert(hashed_address, account)?;
+                } else if existing_entry.is_some() {
+                    hashed_accounts_cursor.delete_current()?;
                 }
 
                 for (storage_key, (old_storage_value, _new_storage_value)) in storage {
@@ -2829,15 +2829,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
-            for (address, (old_account, new_account, storage)) in &state {
-                if old_account != new_account {
-                    let hashed_address = keccak256(address);
-                    let existing_entry = hashed_accounts_cursor.seek_exact(hashed_address)?;
-                    if let Some(account) = old_account {
-                        hashed_accounts_cursor.upsert(hashed_address, account)?;
-                    } else if existing_entry.is_some() {
-                        hashed_accounts_cursor.delete_current()?;
-                    }
+            for (address, (old_account, _new_account, storage)) in &state {
+                // In v2 mode, `_new_account` was read from PlainAccountState which is empty,
+                // so we always check against the hashed table directly.
+                let hashed_address = keccak256(address);
+                let existing_entry = hashed_accounts_cursor.seek_exact(hashed_address)?;
+                if let Some(account) = old_account {
+                    hashed_accounts_cursor.upsert(hashed_address, account)?;
+                } else if existing_entry.is_some() {
+                    hashed_accounts_cursor.delete_current()?;
                 }
 
                 for (storage_key, (old_storage_value, _new_storage_value)) in storage {
