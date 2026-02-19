@@ -223,7 +223,6 @@ impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
 
         self.historical.storage(address, storage_key)
     }
-
 }
 
 impl<N: NodePrimitives> BytecodeReader for MemoryOverlayStateProviderRef<'_, N> {

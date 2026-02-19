@@ -1061,7 +1061,6 @@ mod tests {
         ) -> ProviderResult<Option<StorageValue>> {
             Ok(None)
         }
-
     }
 
     impl BytecodeReader for MockStateProvider {

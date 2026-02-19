@@ -351,7 +351,6 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
             self.state_provider.storage(account, storage_key)
         }
     }
-
 }
 
 impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvider<S, PREWARM> {

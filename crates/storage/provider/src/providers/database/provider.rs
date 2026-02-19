@@ -2646,8 +2646,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // History state. Accessing history state can be tricky but we are not gaining
         // anything.
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
-        let mut plain_storage_cursor =
-            self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+        let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
         let (state, _) = self.populate_bundle_state(
             account_changeset,
@@ -2806,8 +2805,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // History state. Accessing history state can be tricky but we are not gaining
         // anything.
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
-        let mut plain_storage_cursor =
-            self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+        let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
         let (state, reverts) = self.populate_bundle_state(
             account_changeset,

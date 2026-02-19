@@ -496,7 +496,6 @@ impl<
     ) -> ProviderResult<Option<StorageValue>> {
         self.storage_by_lookup_key(address, storage_key)
     }
-
 }
 
 impl<Provider: DBProvider + BlockNumReader> BytecodeReader
@@ -1245,5 +1244,4 @@ mod tests {
         assert!(!needs_prev_shard_check(0, Some(5), 5)); // found_block == block_number
         assert!(!needs_prev_shard_check(1, Some(10), 5)); // rank > 0
     }
-
 }

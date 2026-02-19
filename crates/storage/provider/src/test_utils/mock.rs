@@ -883,7 +883,6 @@ where
         let lock = self.accounts.lock();
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
     }
-
 }
 
 impl<T, ChainSpec> BytecodeReader for MockEthProvider<T, ChainSpec>

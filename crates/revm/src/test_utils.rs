@@ -160,7 +160,6 @@ impl StateProvider for StateProviderTest {
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).copied()))
     }
-
 }
 
 impl BytecodeReader for StateProviderTest {

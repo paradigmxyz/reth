@@ -31,7 +31,7 @@ struct SlotPreimages {
 impl SlotPreimages {
     /// Opens (or creates) the slot-preimage MDBX environment at the given `path`.
     ///
-    /// Uses the same environment settings as the main reth MDBX database (WriteMap mode,
+    /// Uses the same environment settings as the main reth MDBX database (`WriteMap` mode,
     /// matching geometry and page size).
     fn open(path: &Path) -> eyre::Result<Self> {
         const GIGABYTE: usize = 1024 * 1024 * 1024;
@@ -83,8 +83,7 @@ impl SlotPreimages {
                 plain_slot.as_slice(),
                 WriteFlags::NO_OVERWRITE,
             ) {
-                Ok(()) => {}
-                Err(MdbxError::KeyExist) => {}
+                Ok(()) | Err(MdbxError::KeyExist) => {}
                 Err(e) => return Err(e.into()),
             }
         }
@@ -136,8 +135,8 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     // StorageKey in revm is U256, representing a plain EVM slot index.
     let mut preimage_entries = Vec::new();
     let mut seen_hashes = HashSet::new();
-    for (_, account) in state.bundle.state() {
-        for (&slot_key, _) in account.storage.iter() {
+    for account in state.bundle.state().values() {
+        for &slot_key in account.storage.keys() {
             let plain = B256::from(slot_key.to_be_bytes());
             let hashed = keccak256(plain);
             if seen_hashes.insert(hashed) {

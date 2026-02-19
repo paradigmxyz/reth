@@ -195,7 +195,6 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
             Ok(None)
         }
     }
-
 }
 
 impl<Provider: DBProvider + BlockHashReader> BytecodeReader
@@ -355,5 +354,4 @@ mod tests {
         let provider_ref = LatestStateProviderRef::new(&db);
         assert_eq!(provider_ref.storage(address, slot).unwrap(), None);
     }
-
 }

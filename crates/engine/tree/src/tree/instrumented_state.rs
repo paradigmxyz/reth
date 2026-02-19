@@ -199,7 +199,6 @@ impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
         self.record_storage_fetch(start.elapsed());
         res
     }
-
 }
 
 impl<S: BytecodeReader> BytecodeReader for InstrumentedStateProvider<S> {

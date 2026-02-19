@@ -2,6 +2,7 @@ use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
@@ -9,7 +10,6 @@ use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
@@ -489,18 +489,18 @@ where
         //
         // SELFDESTRUCT no longer destroys storage post-Cancun, so this is only needed for
         // pre-Cancun blocks. Post-Cancun we can remove the preimage db entirely.
-        if provider.cached_storage_settings().use_hashed_state() {
-            if let Some(path) = &self.slot_preimages_path {
-                let start_header = provider
-                    .header_by_number(start_block)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(start_block.into()))?;
+        if provider.cached_storage_settings().use_hashed_state() &&
+            let Some(path) = &self.slot_preimages_path
+        {
+            let start_header = provider
+                .header_by_number(start_block)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(start_block.into()))?;
 
-                if !provider.chain_spec().is_cancun_active_at_timestamp(start_header.timestamp()) {
-                    slot_preimages::inject_plain_wipe_slots(path, provider, &mut state)?;
-                } else if path.exists() {
-                    // Post-Cancun: no more self-destructs, preimage db is no longer needed.
-                    let _ = std::fs::remove_dir_all(path);
-                }
+            if !provider.chain_spec().is_cancun_active_at_timestamp(start_header.timestamp()) {
+                slot_preimages::inject_plain_wipe_slots(path, provider, &mut state)?;
+            } else if path.exists() {
+                // Post-Cancun: no more self-destructs, preimage db is no longer needed.
+                let _ = std::fs::remove_dir_all(path);
             }
         }
 
