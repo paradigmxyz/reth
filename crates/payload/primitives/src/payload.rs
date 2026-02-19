@@ -203,7 +203,7 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
             // explicit `repr`, the compiler lays it out identically to `Vec<Withdrawal>`, so
             // transmuting a shared reference is sound. This is analogous to the well-known
             // pattern for `repr(transparent)` newtypes and avoids an unnecessary heap clone.
-            unsafe { &*(&p.withdrawals as *const Vec<Withdrawal> as *const Withdrawals) }
+            unsafe { &*(&raw const p.withdrawals as *const Withdrawals) }
         })
     }
 
