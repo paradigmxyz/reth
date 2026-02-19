@@ -5,7 +5,7 @@ use alloy_primitives::Bytes;
 use reth_chainspec::{Chain, ChainKind, NamedChain};
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkPrimitives};
 use reth_transaction_pool::PoolConfig;
-use std::{borrow::Cow, time::Duration};
+use std::time::Duration;
 
 /// 60M gas limit
 const ETHEREUM_BLOCK_GAS_LIMIT_60M: u64 = 60_000_000;
@@ -15,13 +15,8 @@ const ETHEREUM_BLOCK_GAS_LIMIT_60M: u64 = 60_000_000;
 /// This provides all basic payload builder settings and is implemented by the
 /// [`PayloadBuilderArgs`](crate::args::PayloadBuilderArgs) type.
 pub trait PayloadBuilderConfig {
-    /// Block extra data set by the payload builder.
-    fn extra_data(&self) -> Cow<'_, str>;
-
     /// Returns the extra data as bytes.
-    fn extra_data_bytes(&self) -> Bytes {
-        self.extra_data().as_bytes().to_vec().into()
-    }
+    fn extra_data_bytes(&self) -> Bytes;
 
     /// The interval at which the job should build a new payload after the last.
     fn interval(&self) -> Duration;
