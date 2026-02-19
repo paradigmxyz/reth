@@ -2,8 +2,7 @@
 use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Block, RecoveredBlock};
-use std::time::Instant;
+use reth_primitives_traits::{Block, FastInstant as Instant, RecoveredBlock};
 
 /// Executor metrics.
 #[derive(Metrics, Clone)]
@@ -28,13 +27,6 @@ pub struct ExecutorMetrics {
     pub execution_histogram: Histogram,
     /// The total amount of time it took to execute the latest block.
     pub execution_duration: Gauge,
-
-    /// The Histogram for number of accounts loaded when executing the latest block.
-    pub accounts_loaded_histogram: Histogram,
-    /// The Histogram for number of storage slots loaded when executing the latest block.
-    pub storage_slots_loaded_histogram: Histogram,
-    /// The Histogram for number of bytecodes loaded when executing the latest block.
-    pub bytecodes_loaded_histogram: Histogram,
 
     /// The Histogram for number of accounts updated when executing the latest block.
     pub accounts_updated_histogram: Histogram,

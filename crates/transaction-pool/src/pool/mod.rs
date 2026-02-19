@@ -204,9 +204,15 @@ where
     pub fn block_info(&self) -> BlockInfo {
         self.get_pool_data().block_info()
     }
-    /// Sets the currently tracked block
+    /// Sets the currently tracked block.
+    ///
+    /// This will also notify subscribers about any transactions that were promoted to the pending
+    /// pool due to fee changes.
     pub fn set_block_info(&self, info: BlockInfo) {
-        self.pool.write().set_block_info(info)
+        let outcome = self.pool.write().set_block_info(info);
+
+        // Notify subscribers about promoted transactions due to fee changes
+        self.notify_on_transaction_updates(outcome.promoted, outcome.discarded);
     }
 
     /// Returns the internal [`SenderId`] for this address
@@ -630,10 +636,24 @@ where
     }
 
     /// Adds all transactions in the iterator to the pool, returning a list of results.
+    ///
+    /// Convenience method that assigns the same origin to all transactions. Delegates to
+    /// [`Self::add_transactions_with_origins`].
     pub fn add_transactions(
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        self.add_transactions_with_origins(transactions.into_iter().map(|tx| (origin, tx)))
+    }
+
+    /// Adds all transactions in the iterator to the pool, each with its own
+    /// [`TransactionOrigin`], returning a list of results.
+    pub fn add_transactions_with_origins(
+        &self,
+        transactions: impl IntoIterator<
+            Item = (TransactionOrigin, TransactionValidationOutcome<T::Transaction>),
+        >,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         // Collect results and metadata while holding the pool write lock
         let (mut results, added_metas, discarded) = {
@@ -642,7 +662,7 @@ where
 
             let results = transactions
                 .into_iter()
-                .map(|tx| {
+                .map(|(origin, tx)| {
                     let (result, meta) = self.add_transaction(&mut pool, origin, tx);
 
                     // Only collect metadata for successful insertions
@@ -1064,6 +1084,21 @@ where
         self.with_event_listener(|listener| listener.discarded_many(&removed));
 
         removed
+    }
+
+    /// Prunes and returns all matching transactions from the pool.
+    ///
+    /// This removes the transactions as if they were mined: descendant transactions are **not**
+    /// parked and remain eligible for inclusion.
+    pub fn prune_transactions(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        if hashes.is_empty() {
+            return Vec::new()
+        }
+
+        self.pool.write().prune_transactions(hashes)
     }
 
     /// Removes and returns all transactions that are present in the pool.

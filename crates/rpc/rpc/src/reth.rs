@@ -1,16 +1,21 @@
 use std::{future::Future, sync::Arc};
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
-use reth_chain_state::{CanonStateSubscriptions, PersistedBlockSubscriptions};
+use reth_chain_state::{
+    CanonStateNotification, CanonStateSubscriptions, ForkChoiceSubscriptions,
+    PersistedBlockSubscriptions,
+};
 use reth_errors::RethResult;
+use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::RethApiServer;
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
@@ -30,7 +35,7 @@ impl<Provider> RethApi<Provider> {
     }
 
     /// Create a new instance of the [`RethApi`]
-    pub fn new(provider: Provider, task_spawner: Box<dyn TaskSpawner>) -> Self {
+    pub fn new(provider: Provider, task_spawner: Runtime) -> Self {
         let inner = Arc::new(RethApiInner { provider, task_spawner });
         Self { inner }
     }
@@ -50,10 +55,10 @@ where
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         let f = c(this);
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+        self.inner.task_spawner.spawn_blocking_task(async move {
             let res = f.await;
             let _ = tx.send(res);
-        }));
+        });
         rx.await.map_err(|_| EthApiError::InternalEthError)?
     }
 
@@ -92,6 +97,7 @@ where
         + ChangeSetReader
         + StateProviderFactory
         + CanonStateSubscriptions
+        + ForkChoiceSubscriptions<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
         + PersistedBlockSubscriptions
         + 'static,
 {
@@ -110,7 +116,7 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().canonical_state_stream();
-        self.inner.task_spawner.spawn(Box::pin(pipe_from_stream(sink, stream)));
+        self.inner.task_spawner.spawn_task(pipe_from_stream(sink, stream));
 
         Ok(())
     }
@@ -122,7 +128,24 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().persisted_block_stream();
-        self.inner.task_spawner.spawn(Box::pin(pipe_from_stream(sink, stream)));
+        self.inner.task_spawner.spawn_task(pipe_from_stream(sink, stream));
+
+        Ok(())
+    }
+
+    /// Handler for `reth_subscribeFinalizedChainNotifications`
+    async fn reth_subscribe_finalized_chain_notifications(
+        &self,
+        pending: PendingSubscriptionSink,
+    ) -> jsonrpsee::core::SubscriptionResult {
+        let sink = pending.accept().await?;
+        let canon_stream = self.provider().canonical_state_stream();
+        let finalized_stream = self.provider().finalized_block_stream();
+        self.inner.task_spawner.spawn_task(finalized_chain_notifications(
+            sink,
+            canon_stream,
+            finalized_stream,
+        ));
 
         Ok(())
     }
@@ -158,6 +181,71 @@ where
     }
 }
 
+/// Buffers committed chain notifications and emits them when a new finalized block is received.
+async fn finalized_chain_notifications<N>(
+    sink: SubscriptionSink,
+    mut canon_stream: reth_chain_state::CanonStateNotificationStream<N>,
+    mut finalized_stream: reth_chain_state::ForkChoiceStream<SealedHeader<N::BlockHeader>>,
+) where
+    N: NodePrimitives,
+{
+    let mut buffered: Vec<CanonStateNotification<N>> = Vec::new();
+
+    loop {
+        tokio::select! {
+            _ = sink.closed() => {
+                break
+            }
+            maybe_canon = canon_stream.next() => {
+                let Some(notification) = maybe_canon else { break };
+                match &notification {
+                    CanonStateNotification::Commit { .. } => {
+                        buffered.push(notification);
+                    }
+                    CanonStateNotification::Reorg { .. } => {
+                        buffered.clear();
+                    }
+                }
+            }
+            maybe_finalized = finalized_stream.next() => {
+                let Some(finalized_header) = maybe_finalized else { break };
+                let finalized_num = finalized_header.number();
+
+                let mut committed = Vec::new();
+                buffered.retain(|n| {
+                    if *n.committed().range().end() <= finalized_num {
+                        committed.push(n.clone());
+                        false
+                    } else {
+                        true
+                    }
+                });
+
+                if committed.is_empty() {
+                    continue;
+                }
+
+                committed.sort_by_key(|n| *n.committed().range().start());
+
+                let msg = match SubscriptionMessage::new(
+                    sink.method_name(),
+                    sink.subscription_id(),
+                    &committed,
+                ) {
+                    Ok(msg) => msg,
+                    Err(err) => {
+                        tracing::error!(target: "rpc::reth", %err, "Failed to serialize finalized chain notification");
+                        break
+                    }
+                };
+                if sink.send(msg).await.is_err() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
 impl<Provider> std::fmt::Debug for RethApi<Provider> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RethApi").finish_non_exhaustive()
@@ -174,5 +262,5 @@ struct RethApiInner<Provider> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// The type that can spawn tasks which would otherwise block.
-    task_spawner: Box<dyn TaskSpawner>,
+    task_spawner: Runtime,
 }

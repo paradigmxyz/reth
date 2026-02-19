@@ -162,7 +162,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
     {
-        if provider.cached_storage_settings().account_changesets_in_static_files {
+        if provider.cached_storage_settings().storage_v2 {
             Ok(EitherWriter::StaticFile(
                 provider
                     .get_static_file_writer(block_number, StaticFileSegment::AccountChangeSets)?,
@@ -183,7 +183,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
     {
-        if provider.cached_storage_settings().storage_changesets_in_static_files {
+        if provider.cached_storage_settings().storage_v2 {
             Ok(EitherWriter::StaticFile(
                 provider
                     .get_static_file_writer(block_number, StaticFileSegment::StorageChangeSets)?,
@@ -206,7 +206,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     pub fn receipts_destination<P: DBProvider + StorageSettingsCache>(
         provider: &P,
     ) -> EitherWriterDestination {
-        let receipts_in_static_files = provider.cached_storage_settings().receipts_in_static_files;
+        let receipts_in_static_files = provider.cached_storage_settings().storage_v2;
         let prune_modes = provider.prune_modes_ref();
 
         if !receipts_in_static_files && prune_modes.has_receipts_pruning() ||
@@ -225,7 +225,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     pub fn account_changesets_destination<P: DBProvider + StorageSettingsCache>(
         provider: &P,
     ) -> EitherWriterDestination {
-        if provider.cached_storage_settings().account_changesets_in_static_files {
+        if provider.cached_storage_settings().storage_v2 {
             EitherWriterDestination::StaticFile
         } else {
             EitherWriterDestination::Database
@@ -238,7 +238,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     pub fn storage_changesets_destination<P: DBProvider + StorageSettingsCache>(
         provider: &P,
     ) -> EitherWriterDestination {
-        if provider.cached_storage_settings().storage_changesets_in_static_files {
+        if provider.cached_storage_settings().storage_v2 {
             EitherWriterDestination::StaticFile
         } else {
             EitherWriterDestination::Database
@@ -255,7 +255,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         P::Tx: DbTxMut,
     {
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().storages_history_in_rocksdb {
+        if provider.cached_storage_settings().storage_v2 {
             return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
 
@@ -272,7 +272,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         P::Tx: DbTxMut,
     {
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+        if provider.cached_storage_settings().storage_v2 {
             return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
 
@@ -291,7 +291,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         P::Tx: DbTxMut,
     {
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().account_history_in_rocksdb {
+        if provider.cached_storage_settings().storage_v2 {
             return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
 
@@ -764,7 +764,7 @@ impl<'a> EitherReader<'a, (), ()> {
         P::Tx: DbTx,
     {
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().storages_history_in_rocksdb {
+        if provider.cached_storage_settings().storage_v2 {
             return Ok(EitherReader::RocksDB(
                 _rocksdb_tx.expect("storages_history_in_rocksdb requires rocksdb tx"),
             ));
@@ -786,7 +786,7 @@ impl<'a> EitherReader<'a, (), ()> {
         P::Tx: DbTx,
     {
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+        if provider.cached_storage_settings().storage_v2 {
             return Ok(EitherReader::RocksDB(
                 _rocksdb_tx.expect("transaction_hash_numbers_in_rocksdb requires rocksdb tx"),
             ));
@@ -808,7 +808,7 @@ impl<'a> EitherReader<'a, (), ()> {
         P::Tx: DbTx,
     {
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().account_history_in_rocksdb {
+        if provider.cached_storage_settings().storage_v2 {
             return Ok(EitherReader::RocksDB(
                 _rocksdb_tx.expect("account_history_in_rocksdb requires rocksdb tx"),
             ));
@@ -1002,7 +1002,7 @@ where
                 };
 
                 let start = *range.start();
-                let static_end = (*range.end()).min(highest + 1);
+                let static_end = (*range.end()).min(highest);
 
                 let mut changed_accounts = BTreeSet::default();
                 if start <= static_end {
@@ -1046,7 +1046,7 @@ impl EitherWriterDestination {
         P: StorageSettingsCache,
     {
         // Write senders to static files only if they're explicitly enabled
-        if provider.cached_storage_settings().transaction_senders_in_static_files {
+        if provider.cached_storage_settings().storage_v2 {
             Self::StaticFile
         } else {
             Self::Database
@@ -1059,7 +1059,7 @@ impl EitherWriterDestination {
         P: StorageSettingsCache,
     {
         // Write account changesets to static files only if they're explicitly enabled
-        if provider.cached_storage_settings().account_changesets_in_static_files {
+        if provider.cached_storage_settings().storage_v2 {
             Self::StaticFile
         } else {
             Self::Database
@@ -1072,7 +1072,7 @@ impl EitherWriterDestination {
         P: StorageSettingsCache,
     {
         // Write storage changesets to static files only if they're explicitly enabled
-        if provider.cached_storage_settings().storage_changesets_in_static_files {
+        if provider.cached_storage_settings().storage_v2 {
             Self::StaticFile
         } else {
             Self::Database
@@ -1082,11 +1082,69 @@ impl EitherWriterDestination {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::create_test_provider_factory;
+    use crate::{test_utils::create_test_provider_factory, StaticFileWriter};
 
     use super::*;
     use alloy_primitives::Address;
+    use reth_db::models::AccountBeforeTx;
+    use reth_static_file_types::StaticFileSegment;
     use reth_storage_api::{DatabaseProviderFactory, StorageSettings};
+
+    /// Verifies that `changed_accounts_with_range` correctly caps the query range to the
+    /// static file tip when the requested range extends beyond it.
+    ///
+    /// This test documents the fix for an off-by-one bug where the code computed
+    /// `static_end = range.end().min(highest + 1)` instead of `min(highest)`.
+    /// The bug allowed iteration to attempt reading block `highest + 1` which doesn't
+    /// exist (silently returning empty results due to `MissingStaticFileBlock` handling).
+    ///
+    /// While the bug was masked by error handling, it caused:
+    /// 1. Unnecessary iteration/lookup for non-existent blocks
+    /// 2. Potential overflow when `highest == u64::MAX`
+    #[test]
+    fn test_changed_accounts_with_range_caps_at_static_file_tip() {
+        let factory = create_test_provider_factory();
+        let highest_block = 5u64;
+
+        let addresses: Vec<Address> = (0..=highest_block)
+            .map(|i| {
+                let mut addr = Address::ZERO;
+                addr.0[0] = i as u8;
+                addr
+            })
+            .collect();
+
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            for block_num in 0..=highest_block {
+                let changeset =
+                    vec![AccountBeforeTx { address: addresses[block_num as usize], info: None }];
+                writer.append_account_changeset(changeset, block_num).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+        assert_eq!(sf_tip, Some(highest_block));
+
+        let mut reader = EitherReader::new_account_changesets(&provider).unwrap();
+        assert!(matches!(reader, EitherReader::StaticFile(_, _)));
+
+        // Query range 0..=10 when tip is 5 - should return only accounts from blocks 0-5
+        let result = reader.changed_accounts_with_range(0..=10).unwrap();
+
+        let expected: BTreeSet<Address> = addresses.into_iter().collect();
+        assert_eq!(result, expected);
+    }
 
     #[test]
     fn test_reader_senders_by_tx_range() {
@@ -1101,10 +1159,11 @@ mod tests {
         ];
 
         for transaction_senders_in_static_files in [false, true] {
-            factory.set_storage_settings_cache(
-                StorageSettings::legacy()
-                    .with_transaction_senders_in_static_files(transaction_senders_in_static_files),
-            );
+            factory.set_storage_settings_cache(if transaction_senders_in_static_files {
+                StorageSettings::v2()
+            } else {
+                StorageSettings::v1()
+            });
 
             let provider = factory.database_provider_rw().unwrap();
             let mut writer = EitherWriter::new_senders(&provider, 0).unwrap();
@@ -1174,9 +1233,7 @@ mod rocksdb_tests {
         let factory = create_test_provider_factory();
 
         // Enable RocksDB for transaction hash numbers
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let hash1 = B256::from([1u8; 32]);
         let hash2 = B256::from([2u8; 32]);
@@ -1218,9 +1275,7 @@ mod rocksdb_tests {
         let factory = create_test_provider_factory();
 
         // Enable RocksDB for transaction hash numbers
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let hash = B256::from([1u8; 32]);
         let tx_num = 100u64;
@@ -1772,9 +1827,7 @@ mod rocksdb_tests {
         let factory = create_test_provider_factory();
 
         // Enable RocksDB for transaction hash numbers
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let hash1 = B256::from([1u8; 32]);
         let hash2 = B256::from([2u8; 32]);
@@ -1832,9 +1885,7 @@ mod rocksdb_tests {
     fn test_settings_mismatch_panics() {
         let factory = create_test_provider_factory();
 
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_account_history_in_rocksdb(true),
-        );
+        factory.set_storage_settings_cache(StorageSettings::v2());
 
         let provider = factory.database_provider_ro().unwrap();
         let _ = EitherReader::<(), ()>::new_accounts_history(&provider, None);

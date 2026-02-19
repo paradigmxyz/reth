@@ -11,7 +11,7 @@ format = "per-crate"
 # Fixed groups: all always share the same version
 # reth binaries share version
 [[fixed]]
-members = ["reth", "op-reth"]
+members = ["reth"]
 
 # Packages to ignore (internal/test-only crates)
 ignore = [

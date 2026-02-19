@@ -245,8 +245,7 @@ where
             }
 
             // Buffer any empty headers
-            while this.pending_headers.front().is_some_and(|h| h.is_empty()) {
-                let header = this.pending_headers.pop_front().unwrap();
+            while let Some(header) = this.pending_headers.pop_front_if(|h| h.is_empty()) {
                 this.buffer.push(BlockResponse::Empty(header));
             }
         }

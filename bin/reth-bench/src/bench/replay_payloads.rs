@@ -14,24 +14,27 @@
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
     bench::{
+        helpers::parse_duration,
+        metrics_scraper::MetricsScraper,
         output::{
             write_benchmark_results, CombinedResult, GasRampPayloadFile, NewPayloadResult,
             TotalGasOutput, TotalGasRow,
         },
         persistence_waiter::{
             derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
-            PERSISTENCE_CHECKPOINT_TIMEOUT,
         },
     },
-    valid_payload::{call_forkchoice_updated, call_new_payload},
+    valid_payload::{call_forkchoice_updated, call_new_payload_with_reth},
 };
 use alloy_primitives::B256;
 use alloy_provider::{ext::EngineApi, network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
-use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV4, ForkchoiceState, JwtSecret};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionData, ExecutionPayloadEnvelopeV4, ExecutionPayloadSidecar,
+    ForkchoiceState, JwtSecret, PraguePayloadFields,
+};
 use clap::Parser;
 use eyre::Context;
-use humantime::parse_duration;
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_api::EngineApiMessageVersion;
@@ -79,6 +82,9 @@ pub struct Command {
     output: Option<PathBuf>,
 
     /// How long to wait after a forkchoice update before sending the next payload.
+    ///
+    /// Accepts a duration string (e.g. `100ms`, `2s`) or a bare integer treated as
+    /// milliseconds (e.g. `400`).
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
 
@@ -105,10 +111,39 @@ pub struct Command {
     )]
     persistence_threshold: u64,
 
+    /// Timeout for waiting on persistence at each checkpoint.
+    ///
+    /// Must be long enough to account for the persistence thread being blocked
+    /// by pruning after the previous save.
+    #[arg(
+        long = "persistence-timeout",
+        value_name = "PERSISTENCE_TIMEOUT",
+        value_parser = parse_duration,
+        default_value = "120s",
+        verbatim_doc_comment
+    )]
+    persistence_timeout: Duration,
+
     /// Optional `WebSocket` RPC URL for persistence subscription.
     /// If not provided, derives from engine RPC URL by changing scheme to ws and port to 8546.
     #[arg(long, value_name = "WS_RPC_URL", verbatim_doc_comment)]
     ws_rpc_url: Option<String>,
+
+    /// Use `reth_newPayload` endpoint instead of `engine_newPayload*`.
+    ///
+    /// The `reth_newPayload` endpoint is a reth-specific extension that takes `ExecutionData`
+    /// directly, waits for persistence and cache updates to complete before processing,
+    /// and returns server-side timing breakdowns (latency, persistence wait, cache wait).
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    reth_new_payload: bool,
+
+    /// Optional Prometheus metrics endpoint to scrape after each block.
+    ///
+    /// When provided, reth-bench will fetch metrics from this URL after each
+    /// payload, recording per-block execution and state root durations.
+    /// Results are written to `metrics.csv` in the output directory.
+    #[arg(long = "metrics-url", value_name = "URL", verbatim_doc_comment)]
+    metrics_url: Option<String>,
 }
 
 /// A loaded payload ready for execution.
@@ -134,18 +169,22 @@ struct GasRampPayload {
 impl Command {
     /// Execute the `replay-payloads` command.
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        info!(payload_dir = %self.payload_dir.display(), "Replaying payloads");
+        info!(target: "reth-bench", payload_dir = %self.payload_dir.display(), "Replaying payloads");
 
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!("Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+            info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
         }
         if self.wait_for_persistence {
             info!(
+                target: "reth-bench",
                 "Persistence waiting enabled (waits after every {} blocks to match engine gap > {} behavior)",
                 self.persistence_threshold + 1,
                 self.persistence_threshold
             );
+        }
+        if self.reth_new_payload {
+            info!("Using reth_newPayload endpoint");
         }
 
         // Set up waiter based on configured options
@@ -153,26 +192,28 @@ impl Command {
         let mut waiter = match (self.wait_time, self.wait_for_persistence) {
             (Some(duration), true) => {
                 let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
-                let sub = setup_persistence_subscription(ws_url).await?;
+                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
                 Some(PersistenceWaiter::with_duration_and_subscription(
                     duration,
                     sub,
                     self.persistence_threshold,
-                    PERSISTENCE_CHECKPOINT_TIMEOUT,
+                    self.persistence_timeout,
                 ))
             }
             (Some(duration), false) => Some(PersistenceWaiter::with_duration(duration)),
             (None, true) => {
                 let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
-                let sub = setup_persistence_subscription(ws_url).await?;
+                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
                 Some(PersistenceWaiter::with_subscription(
                     sub,
                     self.persistence_threshold,
-                    PERSISTENCE_CHECKPOINT_TIMEOUT,
+                    self.persistence_timeout,
                 ))
             }
             (None, false) => None,
         };
+
+        let mut metrics_scraper = MetricsScraper::maybe_new(self.metrics_url.clone());
 
         // Set up authenticated engine provider
         let jwt =
@@ -180,7 +221,7 @@ impl Command {
         let jwt = JwtSecret::from_hex(jwt.trim())?;
         let auth_url = Url::parse(&self.engine_rpc_url)?;
 
-        info!("Connecting to Engine RPC at {}", auth_url);
+        info!(target: "reth-bench", "Connecting to Engine RPC at {}", auth_url);
         let auth_transport = AuthenticatedTransportConnect::new(auth_url.clone(), jwt);
         let auth_client = ClientBuilder::default().connect_with(auth_transport).await?;
         let auth_provider = RootProvider::<AnyNetwork>::new(auth_client);
@@ -195,6 +236,7 @@ impl Command {
         let initial_parent_number = parent_block.header.number;
 
         info!(
+            target: "reth-bench",
             parent_hash = %initial_parent_hash,
             parent_number = initial_parent_number,
             "Using initial parent block"
@@ -206,7 +248,7 @@ impl Command {
             if payloads.is_empty() {
                 return Err(eyre::eyre!("No gas ramp payload files found in {:?}", gas_ramp_dir));
             }
-            info!(count = payloads.len(), "Loaded gas ramp payloads from disk");
+            info!(target: "reth-bench", count = payloads.len(), "Loaded gas ramp payloads from disk");
             payloads
         } else {
             Vec::new()
@@ -216,13 +258,14 @@ impl Command {
         if payloads.is_empty() {
             return Err(eyre::eyre!("No payload files found in {:?}", self.payload_dir));
         }
-        info!(count = payloads.len(), "Loaded main payloads from disk");
+        info!(target: "reth-bench", count = payloads.len(), "Loaded main payloads from disk");
 
         let mut parent_hash = initial_parent_hash;
 
         // Replay gas ramp payloads first
         for (i, payload) in gas_ramp_payloads.iter().enumerate() {
             info!(
+                target: "reth-bench",
                 gas_ramp_payload = i + 1,
                 total = gas_ramp_payloads.len(),
                 block_number = payload.block_number,
@@ -230,7 +273,15 @@ impl Command {
                 "Executing gas ramp payload (newPayload + FCU)"
             );
 
-            call_new_payload(&auth_provider, payload.version, payload.file.params.clone()).await?;
+            let reth_data =
+                if self.reth_new_payload { payload.file.execution_data.clone() } else { None };
+            let _ = call_new_payload_with_reth(
+                &auth_provider,
+                payload.version,
+                payload.file.params.clone(),
+                reth_data,
+            )
+            .await?;
 
             let fcu_state = ForkchoiceState {
                 head_block_hash: payload.file.block_hash,
@@ -239,7 +290,7 @@ impl Command {
             };
             call_forkchoice_updated(&auth_provider, payload.version, fcu_state, None).await?;
 
-            info!(gas_ramp_payload = i + 1, "Gas ramp payload executed successfully");
+            info!(target: "reth-bench", gas_ramp_payload = i + 1, "Gas ramp payload executed successfully");
 
             if let Some(w) = &mut waiter {
                 w.on_block(payload.block_number).await?;
@@ -249,7 +300,7 @@ impl Command {
         }
 
         if !gas_ramp_payloads.is_empty() {
-            info!(count = gas_ramp_payloads.len(), "All gas ramp payloads replayed");
+            info!(target: "reth-bench", count = gas_ramp_payloads.len(), "All gas ramp payloads replayed");
         }
 
         let mut results = Vec::new();
@@ -268,6 +319,7 @@ impl Command {
                 execution_payload.payload_inner.payload_inner.transactions.len() as u64;
 
             debug!(
+                target: "reth-bench",
                 payload = i + 1,
                 total = payloads.len(),
                 index = payload.index,
@@ -278,25 +330,53 @@ impl Command {
             let start = Instant::now();
 
             debug!(
+                target: "reth-bench",
                 method = "engine_newPayloadV4",
                 block_hash = %block_hash,
                 "Sending newPayload"
             );
 
-            let status = auth_provider
-                .new_payload_v4(
-                    execution_payload.clone(),
-                    vec![],
-                    B256::ZERO,
-                    envelope.execution_requests.to_vec(),
-                )
-                .await?;
+            let params = serde_json::to_value((
+                execution_payload.clone(),
+                Vec::<B256>::new(),
+                B256::ZERO,
+                envelope.execution_requests.to_vec(),
+            ))?;
 
-            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
+            let reth_data = self.reth_new_payload.then(|| ExecutionData {
+                payload: execution_payload.clone().into(),
+                sidecar: ExecutionPayloadSidecar::v4(
+                    CancunPayloadFields {
+                        versioned_hashes: Vec::new(),
+                        parent_beacon_block_root: B256::ZERO,
+                    },
+                    PraguePayloadFields { requests: envelope.execution_requests.clone().into() },
+                ),
+            });
 
-            if !status.is_valid() {
-                return Err(eyre::eyre!("Payload rejected: {:?}", status));
-            }
+            let server_timings = call_new_payload_with_reth(
+                &auth_provider,
+                EngineApiMessageVersion::V4,
+                params,
+                reth_data,
+            )
+            .await?;
+
+            let np_latency =
+                server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
+            let new_payload_result = NewPayloadResult {
+                gas_used,
+                latency: np_latency,
+                persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
+                execution_cache_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.execution_cache_wait)
+                    .unwrap_or_default(),
+                sparse_trie_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.sparse_trie_wait)
+                    .unwrap_or_default(),
+            };
 
             let fcu_state = ForkchoiceState {
                 head_block_hash: block_hash,
@@ -304,12 +384,14 @@ impl Command {
                 finalized_block_hash: parent_hash,
             };
 
-            debug!(method = "engine_forkchoiceUpdatedV3", ?fcu_state, "Sending forkchoiceUpdated");
+            debug!(target: "reth-bench", method = "engine_forkchoiceUpdatedV3", ?fcu_state, "Sending forkchoiceUpdated");
 
+            let fcu_start = Instant::now();
             let fcu_result = auth_provider.fork_choice_updated_v3(fcu_state, None).await?;
+            let fcu_latency = fcu_start.elapsed();
 
-            let total_latency = start.elapsed();
-            let fcu_latency = total_latency - new_payload_result.latency;
+            let total_latency =
+                if server_timings.is_some() { np_latency + fcu_latency } else { start.elapsed() };
 
             let combined_result = CombinedResult {
                 block_number,
@@ -321,7 +403,14 @@ impl Command {
             };
 
             let current_duration = total_benchmark_duration.elapsed();
-            info!(%combined_result);
+            let progress = format!("{}/{}", i + 1, payloads.len());
+            info!(target: "reth-bench", progress, %combined_result);
+
+            if let Some(scraper) = metrics_scraper.as_mut() &&
+                let Err(err) = scraper.scrape_after_block(block_number).await
+            {
+                tracing::warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
+            }
 
             if let Some(w) = &mut waiter {
                 w.on_block(block_number).await?;
@@ -331,7 +420,7 @@ impl Command {
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
 
-            debug!(?status, ?fcu_result, "Payload executed successfully");
+            debug!(target: "reth-bench", ?fcu_result, "Payload executed successfully");
             parent_hash = block_hash;
         }
 
@@ -346,9 +435,14 @@ impl Command {
             write_benchmark_results(path, &gas_output_results, &combined_results)?;
         }
 
+        if let (Some(path), Some(scraper)) = (&self.output, &metrics_scraper) {
+            scraper.write_csv(path)?;
+        }
+
         let gas_output =
             TotalGasOutput::with_combined_results(gas_output_results, &combined_results)?;
         info!(
+            target: "reth-bench",
             total_gas_used = gas_output.total_gas_used,
             total_duration = ?gas_output.total_duration,
             execution_duration = ?gas_output.execution_duration,
@@ -407,7 +501,8 @@ impl Command {
             let block_hash =
                 envelope.envelope_inner.execution_payload.payload_inner.payload_inner.block_hash;
 
-            info!(
+            debug!(
+                target: "reth-bench",
                 index = index,
                 block_hash = %block_hash,
                 path = %path.display(),

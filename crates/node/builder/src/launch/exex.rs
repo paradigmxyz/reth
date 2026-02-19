@@ -111,7 +111,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 let exex = exex.launch(context).instrument(span.clone()).await?;
 
                 // spawn it as a crit task
-                executor.spawn_critical(
+                executor.spawn_critical_task(
                     "exex",
                     async move {
                         info!(target: "reth::cli", "ExEx started");
@@ -140,14 +140,14 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         )
         .with_wal_blocks_warning(wal_blocks_warning);
         let exex_manager_handle = exex_manager.handle();
-        components.task_executor().spawn_critical("exex manager", async move {
+        components.task_executor().spawn_critical_task("exex manager", async move {
             exex_manager.await.expect("exex manager crashed");
         });
 
         // send notifications from the blockchain tree to exex manager
         let mut canon_state_notifications = components.provider().subscribe_to_canonical_state();
         let mut handle = exex_manager_handle.clone();
-        components.task_executor().spawn_critical(
+        components.task_executor().spawn_critical_task(
             "exex manager blockchain tree notifications",
             async move {
                 while let Ok(notification) = canon_state_notifications.recv().await {

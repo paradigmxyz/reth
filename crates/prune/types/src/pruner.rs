@@ -165,4 +165,43 @@ impl PruneProgress {
     pub const fn is_finished(&self) -> bool {
         matches!(self, Self::Finished)
     }
+
+    /// Combines two progress values, keeping `HasMoreData` if either has it.
+    ///
+    /// Once any segment reports `HasMoreData`, the combined progress remains
+    /// `HasMoreData`. Only returns `Finished` if both are `Finished`.
+    #[must_use]
+    pub const fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::HasMoreData(reason), _) => Self::HasMoreData(reason),
+            (Self::Finished, other) => other,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prune_progress_combine() {
+        use PruneInterruptReason::*;
+        use PruneProgress::*;
+
+        // HasMoreData dominates Finished
+        assert!(matches!(HasMoreData(Timeout).combine(Finished), HasMoreData(Timeout)));
+
+        // First HasMoreData reason is preserved
+        assert!(matches!(
+            HasMoreData(Timeout).combine(HasMoreData(DeletedEntriesLimitReached)),
+            HasMoreData(Timeout)
+        ));
+
+        // Finished adopts new progress
+        assert!(matches!(Finished.combine(Finished), Finished));
+        assert!(matches!(
+            Finished.combine(HasMoreData(DeletedEntriesLimitReached)),
+            HasMoreData(DeletedEntriesLimitReached)
+        ));
+    }
 }

@@ -22,9 +22,6 @@ use tracing::{debug, info};
 const DEFAULT_WS_RPC_PORT: u16 = 8546;
 use url::Url;
 
-/// Default timeout for waiting on persistence.
-pub(crate) const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(60);
-
 /// Returns the websocket RPC URL used for the persistence subscription.
 ///
 /// Preference:
@@ -157,12 +154,18 @@ impl PersistenceSubscription {
 }
 
 /// Establishes a websocket connection and subscribes to `reth_subscribePersistedBlock`.
+///
+/// The `keepalive_interval` is set to match `persistence_timeout` so that the `WebSocket`
+/// connection is not dropped during long MDBX commits that block the server from responding
+/// to pings.
 pub(crate) async fn setup_persistence_subscription(
     ws_url: Url,
+    persistence_timeout: Duration,
 ) -> eyre::Result<PersistenceSubscription> {
-    info!("Connecting to WebSocket at {} for persistence subscription", ws_url);
+    info!(target: "reth-bench", "Connecting to WebSocket at {} for persistence subscription", ws_url);
 
-    let ws_connect = WsConnect::new(ws_url.to_string());
+    let ws_connect =
+        WsConnect::new(ws_url.to_string()).with_keepalive_interval(persistence_timeout);
     let client = RpcClient::connect_pubsub(ws_connect)
         .await
         .wrap_err("Failed to connect to WebSocket RPC endpoint")?;
@@ -173,7 +176,7 @@ pub(crate) async fn setup_persistence_subscription(
         .await
         .wrap_err("Failed to subscribe to persistence notifications")?;
 
-    info!("Subscribed to persistence notifications");
+    info!(target: "reth-bench", "Subscribed to persistence notifications");
 
     Ok(PersistenceSubscription::new(provider, subscription.into_stream()))
 }

@@ -12,26 +12,26 @@
 use crate::{
     bench::{
         context::BenchContext,
+        helpers::parse_duration,
+        metrics_scraper::MetricsScraper,
         output::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
         persistence_waiter::{
             derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
-            PERSISTENCE_CHECKPOINT_TIMEOUT,
         },
     },
-    valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload},
+    valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload_with_reth},
 };
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use eyre::{Context, OptionExt};
-use humantime::parse_duration;
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_core::args::BenchmarkArgs;
 use std::time::{Duration, Instant};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// `reth benchmark new-payload-fcu` command
 #[derive(Debug, Parser)]
@@ -41,6 +41,9 @@ pub struct Command {
     rpc_url: String,
 
     /// How long to wait after a forkchoice update before sending the next payload.
+    ///
+    /// Accepts a duration string (e.g. `100ms`, `2s`) or a bare integer treated as
+    /// milliseconds (e.g. `400`).
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
 
@@ -67,6 +70,19 @@ pub struct Command {
     )]
     persistence_threshold: u64,
 
+    /// Timeout for waiting on persistence at each checkpoint.
+    ///
+    /// Must be long enough to account for the persistence thread being blocked
+    /// by pruning after the previous save.
+    #[arg(
+        long = "persistence-timeout",
+        value_name = "PERSISTENCE_TIMEOUT",
+        value_parser = parse_duration,
+        default_value = "120s",
+        verbatim_doc_comment
+    )]
+    persistence_timeout: Duration,
+
     /// The size of the block buffer (channel capacity) for prefetching blocks from the RPC
     /// endpoint.
     #[arg(
@@ -86,10 +102,11 @@ impl Command {
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         // Log mode configuration
         if let Some(duration) = self.wait_time {
-            info!("Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+            info!(target: "reth-bench", "Using wait-time mode with {}ms delay between blocks", duration.as_millis());
         }
         if self.wait_for_persistence {
             info!(
+                target: "reth-bench",
                 "Persistence waiting enabled (waits after every {} blocks to match engine gap > {} behavior)",
                 self.persistence_threshold + 1,
                 self.persistence_threshold
@@ -104,12 +121,12 @@ impl Command {
                     self.benchmark.ws_rpc_url.as_deref(),
                     &self.benchmark.engine_rpc_url,
                 )?;
-                let sub = setup_persistence_subscription(ws_url).await?;
+                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
                 Some(PersistenceWaiter::with_duration_and_subscription(
                     duration,
                     sub,
                     self.persistence_threshold,
-                    PERSISTENCE_CHECKPOINT_TIMEOUT,
+                    self.persistence_timeout,
                 ))
             }
             (Some(duration), false) => Some(PersistenceWaiter::with_duration(duration)),
@@ -118,11 +135,11 @@ impl Command {
                     self.benchmark.ws_rpc_url.as_deref(),
                     &self.benchmark.engine_rpc_url,
                 )?;
-                let sub = setup_persistence_subscription(ws_url).await?;
+                let sub = setup_persistence_subscription(ws_url, self.persistence_timeout).await?;
                 Some(PersistenceWaiter::with_subscription(
                     sub,
                     self.persistence_threshold,
-                    PERSISTENCE_CHECKPOINT_TIMEOUT,
+                    self.persistence_timeout,
                 ))
             }
             (None, false) => None,
@@ -134,8 +151,16 @@ impl Command {
             auth_provider,
             mut next_block,
             is_optimism,
-            ..
+            use_reth_namespace,
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
+
+        let total_blocks = benchmark_mode.total_blocks();
+
+        let mut metrics_scraper = MetricsScraper::maybe_new(self.benchmark.metrics_url.clone());
+
+        if use_reth_namespace {
+            info!("Using reth_newPayload endpoint");
+        }
 
         let buffer_size = self.rpc_block_buffer_size;
 
@@ -153,7 +178,7 @@ impl Command {
                 let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
                     Ok(block) => block,
                     Err(e) => {
-                        tracing::error!("Failed to fetch block {next_block}: {e}");
+                        tracing::error!(target: "reth-bench", "Failed to fetch block {next_block}: {e}");
                         let _ = error_sender.send(e);
                         break;
                     }
@@ -183,13 +208,14 @@ impl Command {
                     .send((block, head_block_hash, safe_block_hash, finalized_block_hash))
                     .await
                 {
-                    tracing::error!("Failed to send block data: {e}");
+                    tracing::error!(target: "reth-bench", "Failed to send block data: {e}");
                     break;
                 }
             }
         });
 
         let mut results = Vec::new();
+        let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
@@ -212,16 +238,40 @@ impl Command {
                 finalized_block_hash: finalized,
             };
 
-            let (version, params) = block_to_new_payload(block, is_optimism)?;
+            let (version, params, execution_data) = block_to_new_payload(block, is_optimism)?;
             let start = Instant::now();
-            call_new_payload(&auth_provider, version, params).await?;
+            let reth_data = use_reth_namespace.then_some(execution_data);
+            let server_timings =
+                call_new_payload_with_reth(&auth_provider, version, params, reth_data).await?;
 
-            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
+            let np_latency =
+                server_timings.as_ref().map(|t| t.latency).unwrap_or_else(|| start.elapsed());
+            let new_payload_result = NewPayloadResult {
+                gas_used,
+                latency: np_latency,
+                persistence_wait: server_timings.as_ref().and_then(|t| t.persistence_wait),
+                execution_cache_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.execution_cache_wait)
+                    .unwrap_or_default(),
+                sparse_trie_wait: server_timings
+                    .as_ref()
+                    .map(|t| t.sparse_trie_wait)
+                    .unwrap_or_default(),
+            };
 
+            let fcu_start = Instant::now();
             call_forkchoice_updated(&auth_provider, version, forkchoice_state, None).await?;
+            let fcu_latency = fcu_start.elapsed();
 
-            let total_latency = start.elapsed();
-            let fcu_latency = total_latency - new_payload_result.latency;
+            let total_latency = if server_timings.is_some() {
+                // When using server-side latency for newPayload, derive total from the
+                // independently measured components to avoid mixing server-side and
+                // client-side (network-inclusive) timings.
+                np_latency + fcu_latency
+            } else {
+                start.elapsed()
+            };
             let combined_result = CombinedResult {
                 block_number,
                 gas_limit,
@@ -233,8 +283,19 @@ impl Command {
 
             // Exclude time spent waiting on the block prefetch channel from the benchmark duration.
             // We want to measure engine throughput, not RPC fetch latency.
+            blocks_processed += 1;
             let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
-            info!(%combined_result);
+            let progress = match total_blocks {
+                Some(total) => format!("{blocks_processed}/{total}"),
+                None => format!("{blocks_processed}"),
+            };
+            info!(target: "reth-bench", progress, %combined_result);
+
+            if let Some(scraper) = metrics_scraper.as_mut() &&
+                let Err(err) = scraper.scrape_after_block(block_number).await
+            {
+                warn!(target: "reth-bench", %err, block_number, "Failed to scrape metrics");
+            }
 
             if let Some(w) = &mut waiter {
                 w.on_block(block_number).await?;
@@ -261,10 +322,15 @@ impl Command {
             write_benchmark_results(path, &gas_output_results, &combined_results)?;
         }
 
+        if let (Some(path), Some(scraper)) = (&self.benchmark.output, &metrics_scraper) {
+            scraper.write_csv(path)?;
+        }
+
         let gas_output =
             TotalGasOutput::with_combined_results(gas_output_results, &combined_results)?;
 
         info!(
+            target: "reth-bench",
             total_gas_used = gas_output.total_gas_used,
             total_duration = ?gas_output.total_duration,
             execution_duration = ?gas_output.execution_duration,

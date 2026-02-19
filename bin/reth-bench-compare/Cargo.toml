@@ -98,5 +98,5 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
-# no-op feature flag for switching between the `optimism` and default functionality in CI matrices
+# no-op feature flag for CI matrices
 ethereum = []

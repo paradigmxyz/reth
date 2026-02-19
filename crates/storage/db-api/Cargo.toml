@@ -27,7 +27,7 @@ alloy-primitives.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
 
-# optimism
+# op
 op-alloy-consensus = { workspace = true, optional = true }
 
 # codecs
@@ -94,4 +94,5 @@ op = [
     "reth-primitives-traits/op",
 ]
 bench = []
-edge = []
+rocksdb = []
+edge = ["rocksdb"]

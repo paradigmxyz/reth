@@ -64,7 +64,7 @@ impl Command {
             let executor = task_executor.clone();
             let pprof_dump_dir = data_dir.pprof_dumps();
 
-            let handle = task_executor.spawn_critical("metrics server", async move {
+            let handle = task_executor.spawn_critical_task("metrics server", async move {
                 let config = MetricServerConfig::new(
                     listen_addr,
                     VersionInfo {
@@ -285,7 +285,6 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
                 // (We can't just use `upsert` method with a dup cursor, it's not properly
                 // supported)
                 let nibbles = StoredNibblesSubKey(path);
-                let entry = StorageTrieEntry { nibbles: nibbles.clone(), node };
                 if storage_trie_cursor
                     .seek_by_key_subkey(account, nibbles.clone())?
                     .filter(|v| v.nibbles == nibbles)
@@ -293,6 +292,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
                 {
                     storage_trie_cursor.delete_current()?;
                 }
+                let entry = StorageTrieEntry { nibbles, node };
                 storage_trie_cursor.upsert(account, &entry)?;
             }
             Output::Progress(path) => {

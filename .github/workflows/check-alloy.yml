@@ -1,0 +1,65 @@
+# Checks reth compilation against alloy branches to detect breaking changes.
+# Run on-demand via workflow_dispatch.
+
+name: Check Alloy Breaking Changes
+
+on:
+  workflow_dispatch:
+    inputs:
+      alloy_branch:
+        description: 'Branch/rev for alloy-rs/alloy (leave empty to skip)'
+        required: false
+        type: string
+      alloy_evm_branch:
+        description: 'Branch/rev for alloy-rs/evm (alloy-evm, alloy-op-evm) (leave empty to skip)'
+        required: false
+        type: string
+      op_alloy_branch:
+        description: 'Branch/rev for alloy-rs/op-alloy (leave empty to skip)'
+        required: false
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check compilation with patched alloy
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Apply alloy patches
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.alloy_branch }}" ]; then
+            ARGS="$ARGS --alloy ${{ inputs.alloy_branch }}"
+          fi
+          if [ -n "${{ inputs.alloy_evm_branch }}" ]; then
+            ARGS="$ARGS --evm ${{ inputs.alloy_evm_branch }}"
+          fi
+          if [ -n "${{ inputs.op_alloy_branch }}" ]; then
+            ARGS="$ARGS --op ${{ inputs.op_alloy_branch }}"
+          fi
+          
+          if [ -z "$ARGS" ]; then
+            echo "No branches specified, nothing to patch"
+            exit 1
+          fi
+          
+          ./scripts/patch-alloy.sh $ARGS
+          
+          echo "=== Final patch section ==="
+          tail -50 Cargo.toml
+
+      - name: Check workspace
+        run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
+        env:
+          RUSTFLAGS: -D warnings

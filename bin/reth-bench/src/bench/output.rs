@@ -27,6 +27,9 @@ pub(crate) struct GasRampPayloadFile {
     pub(crate) block_hash: B256,
     /// The params to pass to newPayload.
     pub(crate) params: serde_json::Value,
+    /// The execution data for `reth_newPayload`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub(crate) execution_data: Option<alloy_rpc_types_engine::ExecutionData>,
 }
 
 /// This represents the results of a single `newPayload` call in the benchmark, containing the gas
@@ -37,6 +40,12 @@ pub(crate) struct NewPayloadResult {
     pub(crate) gas_used: u64,
     /// The latency of the `newPayload` call.
     pub(crate) latency: Duration,
+    /// Time spent waiting for persistence. `None` when no persistence was in-flight.
+    pub(crate) persistence_wait: Option<Duration>,
+    /// Time spent waiting for execution cache lock.
+    pub(crate) execution_cache_wait: Duration,
+    /// Time spent waiting for sparse trie lock.
+    pub(crate) sparse_trie_wait: Duration,
 }
 
 impl NewPayloadResult {
@@ -67,9 +76,12 @@ impl Serialize for NewPayloadResult {
     {
         // convert the time to microseconds
         let time = self.latency.as_micros();
-        let mut state = serializer.serialize_struct("NewPayloadResult", 2)?;
+        let mut state = serializer.serialize_struct("NewPayloadResult", 5)?;
         state.serialize_field("gas_used", &self.gas_used)?;
         state.serialize_field("latency", &time)?;
+        state.serialize_field("persistence_wait", &self.persistence_wait.map(|d| d.as_micros()))?;
+        state.serialize_field("execution_cache_wait", &self.execution_cache_wait.as_micros())?;
+        state.serialize_field("sparse_trie_wait", &self.sparse_trie_wait.as_micros())?;
         state.end()
     }
 }
@@ -126,7 +138,7 @@ impl Serialize for CombinedResult {
         let fcu_latency = self.fcu_latency.as_micros();
         let new_payload_latency = self.new_payload_result.latency.as_micros();
         let total_latency = self.total_latency.as_micros();
-        let mut state = serializer.serialize_struct("CombinedResult", 7)?;
+        let mut state = serializer.serialize_struct("CombinedResult", 10)?;
 
         // flatten the new payload result because this is meant for CSV writing
         state.serialize_field("block_number", &self.block_number)?;
@@ -136,6 +148,18 @@ impl Serialize for CombinedResult {
         state.serialize_field("new_payload_latency", &new_payload_latency)?;
         state.serialize_field("fcu_latency", &fcu_latency)?;
         state.serialize_field("total_latency", &total_latency)?;
+        state.serialize_field(
+            "persistence_wait",
+            &self.new_payload_result.persistence_wait.map(|d| d.as_micros()),
+        )?;
+        state.serialize_field(
+            "execution_cache_wait",
+            &self.new_payload_result.execution_cache_wait.as_micros(),
+        )?;
+        state.serialize_field(
+            "sparse_trie_wait",
+            &self.new_payload_result.sparse_trie_wait.as_micros(),
+        )?;
         state.end()
     }
 }
@@ -226,7 +250,7 @@ pub(crate) fn write_benchmark_results(
     fs::create_dir_all(output_dir)?;
 
     let output_path = output_dir.join(COMBINED_OUTPUT_SUFFIX);
-    info!("Writing engine api call latency output to file: {:?}", output_path);
+    info!(target: "reth-bench", "Writing engine api call latency output to file: {:?}", output_path);
     let mut writer = Writer::from_path(&output_path)?;
     for result in combined_results {
         writer.serialize(result)?;
@@ -234,14 +258,14 @@ pub(crate) fn write_benchmark_results(
     writer.flush()?;
 
     let output_path = output_dir.join(GAS_OUTPUT_SUFFIX);
-    info!("Writing total gas output to file: {:?}", output_path);
+    info!(target: "reth-bench", "Writing total gas output to file: {:?}", output_path);
     let mut writer = Writer::from_path(&output_path)?;
     for row in gas_results {
         writer.serialize(row)?;
     }
     writer.flush()?;
 
-    info!("Finished writing benchmark output files to {:?}.", output_dir);
+    info!(target: "reth-bench", "Finished writing benchmark output files to {:?}.", output_dir);
     Ok(())
 }
 

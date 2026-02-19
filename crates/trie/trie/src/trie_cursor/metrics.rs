@@ -1,9 +1,10 @@
 use super::{TrieCursor, TrieStorageCursor};
 use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
+use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
-use std::time::{Duration, Instant};
-use tracing::debug_span;
+use std::time::Duration;
+use tracing::trace_span;
 
 #[cfg(feature = "metrics")]
 use crate::TrieType;
@@ -108,7 +109,7 @@ impl TrieCursorMetricsCache {
 
     /// Record the span for metrics.
     pub fn record_span(&self, name: &'static str) {
-        let _span = debug_span!(
+        let _span = trace_span!(
             target: "trie::trie_cursor",
             "Trie cursor metrics",
             name,

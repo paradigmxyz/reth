@@ -8,8 +8,6 @@ export const redirects: Record<string, string> = {
   // Run a node redirects
   '/run/run-a-node': '/run/overview',
   '/run/mainnet': '/run/ethereum',
-  '/run/optimism': '/run/opstack',
-  '/run/sync-op-mainnet': '/run/faq/sync-op-mainnet',
   '/run/private-testnet': '/run/private-testnets',
   '/run/observability': '/run/monitoring',
   '/run/config': '/run/configuration',

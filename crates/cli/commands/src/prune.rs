@@ -12,7 +12,7 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
-#[cfg(all(unix, feature = "edge"))]
+#[cfg(all(unix, feature = "rocksdb"))]
 use reth_provider::RocksDBProviderFactory;
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -36,7 +36,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
-        let env = self.env.init::<N>(AccessRights::RW)?;
+        let env = self.env.init::<N>(AccessRights::RW, ctx.task_executor.clone())?;
         let provider_factory = env.provider_factory;
         let config = env.config.prune;
         let data_dir = env.data_dir;
@@ -76,7 +76,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
             // Set up cancellation token for graceful shutdown on Ctrl+C
             let cancellation = CancellationToken::new();
             let cancellation_clone = cancellation.clone();
-            ctx.task_executor.spawn_critical("prune-ctrl-c", async move {
+            ctx.task_executor.spawn_critical_task("prune-ctrl-c", async move {
                 tokio::signal::ctrl_c().await.expect("failed to listen for ctrl-c");
                 cancellation_clone.cancel();
             });
@@ -100,12 +100,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                 let batch_pruned: usize = output.segments.iter().map(|(_, seg)| seg.pruned).sum();
                 total_pruned = total_pruned.saturating_add(batch_pruned);
 
-                // Check if all segments are finished (not just the overall progress,
-                // since the pruner sets overall progress from the last segment only)
-                let all_segments_finished =
-                    output.segments.iter().all(|(_, seg)| seg.progress.is_finished());
-
-                if all_segments_finished {
+                if output.progress.is_finished() {
                     info!(target: "reth::cli", total_pruned, "Pruned data from database");
                     break;
                 }
@@ -127,7 +122,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         }
 
         // Flush and compact RocksDB to reclaim disk space after pruning
-        #[cfg(all(unix, feature = "edge"))]
+        #[cfg(all(unix, feature = "rocksdb"))]
         {
             info!(target: "reth::cli", "Flushing and compacting RocksDB...");
             provider_factory.rocksdb_provider().flush_and_compact()?;

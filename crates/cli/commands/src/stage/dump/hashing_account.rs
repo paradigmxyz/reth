@@ -18,6 +18,7 @@ pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = Databas
     to: BlockNumber,
     output_datadir: ChainPath<DataDirPath>,
     should_run: bool,
+    runtime: reth_tasks::Runtime,
 ) -> Result<()> {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
@@ -39,6 +40,7 @@ pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = Databas
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                runtime,
             )?,
             to,
             from,

@@ -200,7 +200,7 @@ where
         }
 
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+        if provider.cached_storage_settings().storage_v2 {
             provider.commit_pending_rocksdb_batches()?;
             provider.rocksdb_provider().flush(&[Tables::TransactionHashNumbers.name()])?;
         }
@@ -618,9 +618,7 @@ mod tests {
             let runner = TransactionLookupTestRunner::default();
 
             // Enable RocksDB for transaction hash numbers
-            runner.db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
-            );
+            runner.db.factory.set_storage_settings_cache(StorageSettings::v2());
 
             let input = ExecInput {
                 target: Some(previous_stage),
@@ -686,9 +684,7 @@ mod tests {
             let runner = TransactionLookupTestRunner::default();
 
             // Enable RocksDB for transaction hash numbers
-            runner.db.factory.set_storage_settings_cache(
-                StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
-            );
+            runner.db.factory.set_storage_settings_cache(StorageSettings::v2());
 
             // Insert blocks with transactions
             let blocks = random_block_range(

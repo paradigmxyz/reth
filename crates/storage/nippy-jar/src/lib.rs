@@ -59,6 +59,8 @@ const INDEX_FILE_EXTENSION: &str = "idx";
 const OFFSETS_FILE_EXTENSION: &str = "off";
 /// The file extension used for configuration files.
 pub const CONFIG_FILE_EXTENSION: &str = "conf";
+/// The file extension used for changeset offset sidecar files.
+pub const CHANGESET_OFFSETS_FILE_EXTENSION: &str = "csoff";
 
 /// A [`RefRow`] is a list of column value slices pointing to either an internal buffer or a
 /// memory-mapped file.
@@ -240,13 +242,22 @@ impl<H: NippyJarHeader> NippyJar<H> {
         self.path.with_extension(CONFIG_FILE_EXTENSION)
     }
 
+    /// Returns the path for the changeset offsets sidecar file.
+    pub fn changeset_offsets_path(&self) -> PathBuf {
+        self.path.with_extension(CHANGESET_OFFSETS_FILE_EXTENSION)
+    }
+
     /// Deletes from disk this [`NippyJar`] alongside every satellite file.
     pub fn delete(self) -> Result<(), NippyJarError> {
         // TODO(joshie): ensure consistency on unexpected shutdown
 
-        for path in
-            [self.data_path().into(), self.index_path(), self.offsets_path(), self.config_path()]
-        {
+        for path in [
+            self.data_path().into(),
+            self.index_path(),
+            self.offsets_path(),
+            self.config_path(),
+            self.changeset_offsets_path(),
+        ] {
             if path.exists() {
                 debug!(target: "nippy-jar", ?path, "Removing file.");
                 reth_fs_util::remove_file(path)?;

@@ -1,0 +1,40 @@
+# Ignored Tests Configuration
+#
+# This file contains tests that should be ignored for various reasons (flaky, known issues, etc).
+# These tests will be IGNORED in the CI results - they won't cause the build to fail
+# regardless of whether they pass or fail.
+#
+# Format
+# test_suite:
+#   - "test name 1"
+#   - "test name 2"
+#
+# When a test should no longer be ignored, remove it from this list.
+
+# flaky
+engine-withdrawals:
+  - Withdrawals Fork on Block 1 - 8 Block Re-Org NewPayload (Paris) (reth)
+  - Withdrawals Fork on Block 8 - 10 Block Re-Org NewPayload (Paris) (reth)
+  - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org (Paris) (reth)
+  - Sync after 2 blocks - Withdrawals on Block 2 - Multiple Withdrawal Accounts (Paris) (reth)
+  - Sync after 2 blocks - Withdrawals on Block 2 - Multiple Withdrawal Accounts - No Transactions (Paris) (reth)
+  - Sync after 128 blocks - Withdrawals on Block 2 - Multiple Withdrawal Accounts (Paris) (reth)
+engine-cancun:
+  - Transaction Re-Org, New Payload on Revert Back (Cancun) (reth)
+  - Transaction Re-Org, Re-Org to Different Block (Cancun) (reth)
+  - Transaction Re-Org, Re-Org Out (Cancun) (reth)
+  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Cancun) (reth)
+  - Multiple New Payloads Extending Canonical Chain, Wait for Canonical Payload (Cancun) (reth)
+engine-api:
+  - Transaction Re-Org, Re-Org Out (Paris) (reth)
+  - Transaction Re-Org, Re-Org to Different Block (Paris) (reth)
+  - Transaction Re-Org, New Payload on Revert Back (Paris) (reth)
+  - Transaction Re-Org, Re-Org to Different Block (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Nonce, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=True, Invalid P10 (Paris) (reth)
+  - Multiple New Payloads Extending Canonical Chain, Wait for Canonical Payload (Paris) (reth)
+  - Multiple New Payloads Extending Canonical Chain, Set Head to First Payload Received (Paris) (reth)

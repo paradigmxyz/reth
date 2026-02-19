@@ -21,13 +21,13 @@ use reth_rpc_eth_api::{
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    builder::config::PendingBlockKind, receipt::EthReceiptConverter, tx_forward::ForwardConfig,
-    EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+    builder::config::PendingBlockKind, receipt::EthReceiptConverter, EthApiError, EthStateCache,
+    FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskSpawner, TokioTaskExecutor,
+    Runtime,
 };
 use reth_transaction_pool::{
     blobstore::BlobSidecarConverter, noop::NoopTransactionPool, AddedTransactionOutcome,
@@ -132,59 +132,6 @@ impl
     }
 }
 
-impl<N, Rpc> EthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    Rpc: RpcConvert,
-    (): PendingEnvBuilder<N::Evm>,
-{
-    /// Creates a new, shareable instance using the default tokio task spawner.
-    #[expect(clippy::too_many_arguments)]
-    pub fn new(
-        components: N,
-        eth_cache: EthStateCache<N::Primitives>,
-        gas_oracle: GasPriceOracle<N::Provider>,
-        gas_cap: impl Into<GasCap>,
-        max_simulate_blocks: u64,
-        eth_proof_window: u64,
-        blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
-        proof_permits: usize,
-        rpc_converter: Rpc,
-        max_batch_size: usize,
-        max_blocking_io_requests: usize,
-        pending_block_kind: PendingBlockKind,
-        raw_tx_forwarder: ForwardConfig,
-        send_raw_transaction_sync_timeout: Duration,
-        evm_memory_limit: u64,
-        force_blob_sidecar_upcasting: bool,
-    ) -> Self {
-        let inner = EthApiInner::new(
-            components,
-            eth_cache,
-            gas_oracle,
-            gas_cap,
-            max_simulate_blocks,
-            eth_proof_window,
-            blocking_task_pool,
-            fee_history_cache,
-            TokioTaskExecutor::default().boxed(),
-            proof_permits,
-            rpc_converter,
-            (),
-            max_batch_size,
-            max_blocking_io_requests,
-            pending_block_kind,
-            raw_tx_forwarder.forwarder_client(),
-            send_raw_transaction_sync_timeout,
-            evm_memory_limit,
-            force_blob_sidecar_upcasting,
-        );
-
-        Self { inner: Arc::new(inner) }
-    }
-}
-
 impl<N, Rpc> EthApiTypes for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
@@ -254,7 +201,7 @@ where
     Rpc: RpcConvert<Error = EthApiError>,
 {
     #[inline]
-    fn io_task_spawner(&self) -> impl TaskSpawner {
+    fn io_task_spawner(&self) -> &Runtime {
         self.inner.task_spawner()
     }
 
@@ -294,7 +241,7 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// The block number at which the node started
     starting_block: U256,
     /// The type that can spawn tasks which would otherwise block.
-    task_spawner: Box<dyn TaskSpawner>,
+    task_spawner: Runtime,
     /// Cached pending block if any
     pending_block: Mutex<Option<PendingBlock<N::Primitives>>>,
     /// A pool dedicated to CPU heavy blocking tasks.
@@ -356,7 +303,7 @@ where
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
-        task_spawner: Box<dyn TaskSpawner + 'static>,
+        task_spawner: Runtime,
         proof_permits: usize,
         converter: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
@@ -385,7 +332,7 @@ where
         // Create tx pool insertion batcher
         let (processor, tx_batch_sender) =
             BatchTxProcessor::new(components.pool().clone(), max_batch_size);
-        task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
+        task_spawner.spawn_critical_task("tx-batcher", processor);
 
         Self {
             components,
@@ -454,8 +401,8 @@ where
 
     /// Returns a handle to the task spawner.
     #[inline]
-    pub const fn task_spawner(&self) -> &dyn TaskSpawner {
-        &*self.task_spawner
+    pub const fn task_spawner(&self) -> &Runtime {
+        &self.task_spawner
     }
 
     /// Returns a handle to the blocking thread pool.
@@ -556,10 +503,11 @@ where
     #[inline]
     pub async fn add_pool_transaction(
         &self,
+        origin: reth_transaction_pool::TransactionOrigin,
         transaction: <N::Pool as TransactionPool>::Transaction,
     ) -> Result<AddedTransactionOutcome, EthApiError> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        let request = reth_transaction_pool::BatchTxRequest::new(transaction, response_tx);
+        let request = reth_transaction_pool::BatchTxRequest::new(origin, transaction, response_tx);
 
         self.tx_batch_sender()
             .send(request)

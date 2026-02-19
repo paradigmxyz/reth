@@ -276,10 +276,10 @@ impl<T: PoolTransaction> BlobTransaction<T> {
         pending_fees: &PendingFees,
     ) -> Self {
         let priority = blob_tx_priority(
-            pending_fees.blob_fee,
             transaction.max_fee_per_blob_gas().unwrap_or_default(),
-            pending_fees.base_fee as u128,
+            pending_fees.blob_fee,
             transaction.max_fee_per_gas(),
+            pending_fees.base_fee as u128,
         );
         let ord = BlobOrd { priority, submission_id };
         Self { transaction, ord }
@@ -288,10 +288,10 @@ impl<T: PoolTransaction> BlobTransaction<T> {
     /// Updates the priority for the transaction based on the current pending fees.
     pub(crate) fn update_priority(&mut self, pending_fees: &PendingFees) {
         self.ord.priority = blob_tx_priority(
-            pending_fees.blob_fee,
             self.transaction.max_fee_per_blob_gas().unwrap_or_default(),
-            pending_fees.base_fee as u128,
+            pending_fees.blob_fee,
             self.transaction.max_fee_per_gas(),
+            pending_fees.base_fee as u128,
         );
     }
 }
@@ -498,31 +498,11 @@ mod tests {
                 ],
                 network_fees: PendingFees { base_fee: 0, blob_fee: 0 },
             },
-            // If only basefees are used (blob fee matches with network), return the ones the
-            // furthest below the current basefee, splitting same ones with the tip. Anything above
-            // the basefee should be split by tip.
+            // If only basefees are used (blob fee matches with network), return the ones
+            // above the basefee first (best priority = 0), then the ones furthest below
+            // the basefee last (worst priority). Ties broken by submission_id.
             TransactionOrdering {
                 fees: vec![
-                    TransactionFees {
-                        max_blob_fee: 0,
-                        max_priority_fee_per_gas: 50,
-                        max_fee_per_gas: 500,
-                    },
-                    TransactionFees {
-                        max_blob_fee: 0,
-                        max_priority_fee_per_gas: 100,
-                        max_fee_per_gas: 500,
-                    },
-                    TransactionFees {
-                        max_blob_fee: 0,
-                        max_priority_fee_per_gas: 50,
-                        max_fee_per_gas: 1000,
-                    },
-                    TransactionFees {
-                        max_blob_fee: 0,
-                        max_priority_fee_per_gas: 100,
-                        max_fee_per_gas: 1000,
-                    },
                     TransactionFees {
                         max_blob_fee: 0,
                         max_priority_fee_per_gas: 1,
@@ -537,35 +517,35 @@ mod tests {
                         max_blob_fee: 0,
                         max_priority_fee_per_gas: 3,
                         max_fee_per_gas: 2000,
+                    },
+                    TransactionFees {
+                        max_blob_fee: 0,
+                        max_priority_fee_per_gas: 50,
+                        max_fee_per_gas: 1000,
+                    },
+                    TransactionFees {
+                        max_blob_fee: 0,
+                        max_priority_fee_per_gas: 100,
+                        max_fee_per_gas: 1000,
+                    },
+                    TransactionFees {
+                        max_blob_fee: 0,
+                        max_priority_fee_per_gas: 50,
+                        max_fee_per_gas: 500,
+                    },
+                    TransactionFees {
+                        max_blob_fee: 0,
+                        max_priority_fee_per_gas: 100,
+                        max_fee_per_gas: 500,
                     },
                 ],
                 network_fees: PendingFees { base_fee: 1999, blob_fee: 0 },
             },
-            // If only blobfees are used (base fee matches with network), return the
-            // ones the furthest below the current blobfee, splitting same ones with
-            // the tip. Anything above the blobfee should be split by tip.
+            // If only blobfees are used (base fee matches with network), return the ones
+            // above the blobfee first (best priority = 0), then the ones furthest below
+            // the blobfee last (worst priority). Ties broken by submission_id.
             TransactionOrdering {
                 fees: vec![
-                    TransactionFees {
-                        max_blob_fee: 500,
-                        max_priority_fee_per_gas: 50,
-                        max_fee_per_gas: 0,
-                    },
-                    TransactionFees {
-                        max_blob_fee: 500,
-                        max_priority_fee_per_gas: 100,
-                        max_fee_per_gas: 0,
-                    },
-                    TransactionFees {
-                        max_blob_fee: 1000,
-                        max_priority_fee_per_gas: 50,
-                        max_fee_per_gas: 0,
-                    },
-                    TransactionFees {
-                        max_blob_fee: 1000,
-                        max_priority_fee_per_gas: 100,
-                        max_fee_per_gas: 0,
-                    },
                     TransactionFees {
                         max_blob_fee: 2000,
                         max_priority_fee_per_gas: 1,
@@ -579,25 +559,41 @@ mod tests {
                     TransactionFees {
                         max_blob_fee: 2000,
                         max_priority_fee_per_gas: 3,
+                        max_fee_per_gas: 0,
+                    },
+                    TransactionFees {
+                        max_blob_fee: 1000,
+                        max_priority_fee_per_gas: 50,
+                        max_fee_per_gas: 0,
+                    },
+                    TransactionFees {
+                        max_blob_fee: 1000,
+                        max_priority_fee_per_gas: 100,
+                        max_fee_per_gas: 0,
+                    },
+                    TransactionFees {
+                        max_blob_fee: 500,
+                        max_priority_fee_per_gas: 50,
+                        max_fee_per_gas: 0,
+                    },
+                    TransactionFees {
+                        max_blob_fee: 500,
+                        max_priority_fee_per_gas: 100,
                         max_fee_per_gas: 0,
                     },
                 ],
                 network_fees: PendingFees { base_fee: 0, blob_fee: 1999 },
             },
             // If both basefee and blobfee are specified, sort by the larger distance
-            // of the two from the current network conditions, splitting same (loglog)
-            // ones via the tip.
+            // of the two from the current network conditions.
             //
-            // Basefee: 1000
-            // Blobfee: 100
+            // Basefee: 1000, Blobfee: 100
             //
-            // Tx #0: (800, 80) - 2 jumps below both => priority -1
-            // Tx #1: (630, 63) - 4 jumps below both => priority -2
-            // Tx #2: (800, 63) - 2 jumps below basefee, 4 jumps below blobfee => priority -2 (blob
-            // penalty dominates) Tx #3: (630, 80) - 4 jumps below basefee, 2 jumps
-            // below blobfee => priority -2 (base penalty dominates)
+            // Txs with blob_fee=80: fee_delta(80, 100) = 0 (ilog2 granularity) => priority 0
+            // Txs with blob_fee=63: fee_delta(63, 100) = -2 => priority -2
             //
-            // Txs 1, 2, 3 share the same priority, split via tip, prefer 0 as the best
+            // Priority 0 txs come first (best), then priority -2 (worst).
+            // Within same priority, ties broken by submission_id.
             TransactionOrdering {
                 fees: vec![
                     TransactionFees {
@@ -606,6 +602,11 @@ mod tests {
                         max_fee_per_gas: 630,
                     },
                     TransactionFees {
+                        max_blob_fee: 80,
+                        max_priority_fee_per_gas: 1,
+                        max_fee_per_gas: 800,
+                    },
+                    TransactionFees {
                         max_blob_fee: 63,
                         max_priority_fee_per_gas: 3,
                         max_fee_per_gas: 800,
@@ -614,11 +615,6 @@ mod tests {
                         max_blob_fee: 63,
                         max_priority_fee_per_gas: 2,
                         max_fee_per_gas: 630,
-                    },
-                    TransactionFees {
-                        max_blob_fee: 80,
-                        max_priority_fee_per_gas: 1,
-                        max_fee_per_gas: 800,
                     },
                 ],
                 network_fees: PendingFees { base_fee: 1000, blob_fee: 100 },

@@ -1,0 +1,143 @@
+# Publishes Docker images.
+#
+# Triggers:
+#   - Push tag v*: builds release (RC or latest)
+#   - Schedule: builds nightly + profiling
+#   - Manual: builds git-sha or nightly
+
+name: docker
+
+on:
+  push:
+    tags:
+      - v*
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Build type"
+        required: true
+        type: choice
+        options:
+          - git-sha
+          - nightly
+        default: git-sha
+      dry_run:
+        description: "Skip pushing images (dry run)"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    if: github.repository == 'paradigmxyz/reth'
+    name: Build Docker images
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Depot CLI
+        uses: depot/setup-action@v1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get git info for vergen
+        id: git
+        run: |
+          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "describe=$(git describe --always --tags)" >> "$GITHUB_OUTPUT"
+          echo "dirty=false" >> "$GITHUB_OUTPUT"
+
+      - name: Determine build parameters
+        id: params
+        run: |
+          REGISTRY="ghcr.io/${{ github.repository_owner }}"
+
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            echo "targets=ethereum" >> "$GITHUB_OUTPUT"
+
+            # Add 'latest' tag for non-RC releases
+            if [[ ! "$VERSION" =~ -rc ]]; then
+              echo "ethereum_tags=${REGISTRY}/reth:${VERSION},${REGISTRY}/reth:latest" >> "$GITHUB_OUTPUT"
+              {
+                echo "ethereum_set<<EOF"
+                echo "ethereum.tags=${REGISTRY}/reth:${VERSION}"
+                echo "ethereum.tags=${REGISTRY}/reth:latest"
+                echo "EOF"
+              } >> "$GITHUB_OUTPUT"
+            else
+              echo "ethereum_tags=${REGISTRY}/reth:${VERSION}" >> "$GITHUB_OUTPUT"
+              echo "ethereum_set=ethereum.tags=${REGISTRY}/reth:${VERSION}" >> "$GITHUB_OUTPUT"
+            fi
+
+          elif [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_type }}" == "nightly" ]]; then
+            echo "targets=nightly" >> "$GITHUB_OUTPUT"
+            echo "ethereum_tags=${REGISTRY}/reth:nightly" >> "$GITHUB_OUTPUT"
+            echo "ethereum_set=ethereum.tags=${REGISTRY}/reth:nightly" >> "$GITHUB_OUTPUT"
+
+          else
+            # git-sha build
+            echo "targets=ethereum" >> "$GITHUB_OUTPUT"
+            echo "ethereum_tags=${REGISTRY}/reth:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "ethereum_set=ethereum.tags=${REGISTRY}/reth:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push images
+        uses: depot/bake-action@v1
+        env:
+          VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
+          VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
+          VERGEN_GIT_DIRTY: ${{ steps.git.outputs.dirty }}
+          DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
+        with:
+          project: ${{ vars.DEPOT_PROJECT_ID }}
+          files: docker-bake.hcl
+          targets: ${{ steps.params.outputs.targets }}
+          push: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+          set: |
+            ${{ steps.params.outputs.ethereum_set }}
+
+      - name: Verify image architectures
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          ./.github/scripts/verify_image_arch.sh \
+            "${{ steps.params.outputs.targets }}" \
+            "ghcr.io/${{ github.repository_owner }}" \
+            "${{ steps.params.outputs.ethereum_tags }}"
+
+  notify:
+    name: Notify on failure
+    runs-on: ubuntu-latest
+    needs: build
+    if: failure() && github.event_name == 'schedule'
+    steps:
+      - name: Slack Webhook Action
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_COLOR: danger
+          SLACK_ICON_EMOJI: ":rotating_light:"
+          SLACK_USERNAME: "GitHub Actions"
+          SLACK_TITLE: ":rotating_light: Nightly Docker Build Failed"
+          SLACK_MESSAGE: |
+            The scheduled nightly Docker build failed.
+
+            *Commit:* `${{ github.sha }}`
+            *Branch:* `${{ github.ref_name }}`
+            *Run:* <https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}|View logs>
+
+            *Action required:* Re-run the workflow or investigate the build failure.
+          SLACK_FOOTER: "paradigmxyz/reth · docker.yml"
+          MSG_MINIMAL: true
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,21 @@
+# Runs `cargo update` periodically.
+
+name: Update Dependencies
+
+on:
+  schedule:
+    # Run weekly
+    - cron: "0 0 * * SUN"
+  workflow_dispatch:
+    # Needed so we can run it manually
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    if: github.repository == 'paradigmxyz/reth'
+    uses: tempoxyz/ci/.github/workflows/cargo-update-pr.yml@main
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}

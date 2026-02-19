@@ -16,6 +16,7 @@ use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
 use std::sync::Arc;
 use tracing::info;
 
+#[expect(clippy::too_many_arguments)]
 pub(crate) async fn dump_execution_stage<N, E, C>(
     db_tool: &DbTool<N>,
     from: u64,
@@ -24,6 +25,7 @@ pub(crate) async fn dump_execution_stage<N, E, C>(
     should_run: bool,
     evm_config: E,
     consensus: C,
+    runtime: reth_tasks::Runtime,
 ) -> eyre::Result<()>
 where
     N: ProviderNodeTypes<DB = DatabaseEnv>,
@@ -43,6 +45,7 @@ where
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                runtime,
             )?,
             to,
             from,

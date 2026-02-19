@@ -38,6 +38,7 @@ where
 
     async fn send_transaction(
         &self,
+        origin: reth_transaction_pool::TransactionOrigin,
         tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
     ) -> Result<B256, Self::Error> {
         let (tx, recovered) = tx.split();
@@ -106,7 +107,7 @@ where
                 }).map_err(EthApiError::other)?;
 
             // Retain tx in local tx pool after forwarding, for local RPC usage.
-            let _ = self.inner.add_pool_transaction(pool_transaction).await;
+            let _ = self.inner.add_pool_transaction(origin, pool_transaction).await;
 
             return Ok(hash);
         }
@@ -114,9 +115,8 @@ where
         // broadcast raw transaction to subscribers if there is any.
         self.broadcast_raw_transaction(tx);
 
-        // submit the transaction to the pool with a `Local` origin
         let AddedTransactionOutcome { hash, .. } =
-            self.inner.add_pool_transaction(pool_transaction).await?;
+            self.inner.add_pool_transaction(origin, pool_transaction).await?;
 
         Ok(hash)
     }

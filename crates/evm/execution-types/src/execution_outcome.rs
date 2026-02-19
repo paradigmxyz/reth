@@ -411,7 +411,7 @@ impl ExecutionOutcome {
     pub fn ethereum_receipts_root(&self, block_number: BlockNumber) -> Option<B256> {
         self.generic_receipts_root_slow(
             block_number,
-            reth_ethereum_primitives::Receipt::calculate_receipt_root_no_memo,
+            reth_ethereum_primitives::calculate_receipt_root_no_memo,
         )
     }
 }

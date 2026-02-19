@@ -32,7 +32,7 @@ use reth_primitives_traits::{
     SealedBlock,
 };
 use reth_storage_api::{AccountInfoReader, BlockReaderIdExt, BytecodeReader, StateProviderFactory};
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
 use revm::context_interface::Cfg;
 use revm_primitives::U256;
 use std::{
@@ -230,7 +230,7 @@ where
         transaction: Tx,
         maybe_state: &mut Option<Box<dyn AccountInfoReader + Send>>,
     ) -> TransactionValidationOutcome<Tx> {
-        match self.validate_one_no_state(origin, transaction) {
+        match self.validate_stateless(origin, transaction) {
             Ok(transaction) => {
                 // stateless checks passed, pass transaction down stateful validation pipeline
                 // If we don't have a state provider yet, fetch the latest state
@@ -250,30 +250,33 @@ where
 
                 let state = maybe_state.as_deref().expect("provider is set");
 
-                self.validate_one_against_state(origin, transaction, state)
+                self.validate_stateful(origin, transaction, state)
             }
             Err(invalid_outcome) => invalid_outcome,
         }
     }
 
-    /// Validates a single transaction with the provided state provider.
+    /// Validates a single transaction against the given state provider, performing both
+    /// [stateless](Self::validate_stateless) and [stateful](Self::validate_stateful) checks.
     pub fn validate_one_with_state_provider(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
         state: impl AccountInfoReader,
     ) -> TransactionValidationOutcome<Tx> {
-        let tx = match self.validate_one_no_state(origin, transaction) {
+        let tx = match self.validate_stateless(origin, transaction) {
             Ok(tx) => tx,
             Err(invalid_outcome) => return invalid_outcome,
         };
-        self.validate_one_against_state(origin, tx, state)
+        self.validate_stateful(origin, tx, state)
     }
 
-    /// Performs stateless validation on single transaction. Returns unaltered input transaction
-    /// if all checks pass, so transaction can continue through to stateful validation as argument
-    /// to [`validate_one_against_state`](Self::validate_one_against_state).
-    fn validate_one_no_state(
+    /// Validates a single transaction without requiring any state access (stateless checks only).
+    ///
+    /// Checks tx type support, nonce bounds, size limits, gas limits, fee constraints, chain ID,
+    /// intrinsic gas, and blob tx pre-checks. Returns the unmodified transaction on success so it
+    /// can be passed to [`validate_stateful`](Self::validate_stateful).
+    pub fn validate_stateless(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
@@ -530,8 +533,11 @@ where
         Ok(transaction)
     }
 
-    /// Validates a single transaction using given state provider.
-    fn validate_one_against_state<P>(
+    /// Validates a single transaction against the given state (stateful checks only).
+    ///
+    /// Checks sender account balance, nonce, bytecode, and validates blob sidecars. The
+    /// transaction must have already passed [`validate_stateless`](Self::validate_stateless).
+    pub fn validate_stateful<P>(
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
@@ -743,7 +749,7 @@ where
     /// Validates all given transactions.
     fn validate_batch(
         &self,
-        transactions: Vec<(TransactionOrigin, Tx)>,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         let mut provider = None;
         transactions
@@ -853,7 +859,8 @@ where
 
     async fn validate_transactions(
         &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction), IntoIter: Send>
+            + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_batch(transactions)
     }
@@ -861,7 +868,7 @@ where
     async fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
+        transactions: impl IntoIterator<Item = Self::Transaction, IntoIter: Send> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_batch_with_origin(origin, transactions)
     }
@@ -1083,6 +1090,17 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
         self
     }
 
+    /// Disables the support for EIP-7702 transactions.
+    pub const fn no_eip7702(self) -> Self {
+        self.set_eip7702(false)
+    }
+
+    /// Set the support for EIP-7702 transactions.
+    pub const fn set_eip7702(mut self, eip7702: bool) -> Self {
+        self.eip7702 = eip7702;
+        self
+    }
+
     /// Disables EIP-7594 blob sidecar support.
     ///
     /// When disabled, EIP-7594 (v1) blob sidecars are always rejected and EIP-4844 (v0)
@@ -1234,13 +1252,12 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
     /// The validator will spawn `additional_tasks` additional tasks for validation.
     ///
     /// By default this will spawn 1 additional task.
-    pub fn build_with_tasks<Tx, T, S>(
+    pub fn build_with_tasks<Tx, S>(
         self,
-        tasks: T,
+        tasks: Runtime,
         blob_store: S,
     ) -> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx, Evm>>
     where
-        T: TaskSpawner,
         S: BlobStore,
     {
         let additional_tasks = self.additional_tasks;
@@ -1251,19 +1268,16 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
         // Spawn validation tasks, they are blocking because they perform db lookups
         for _ in 0..additional_tasks {
             let task = task.clone();
-            tasks.spawn_blocking(Box::pin(async move {
+            tasks.spawn_blocking_task(async move {
                 task.run().await;
-            }));
+            });
         }
 
         // we spawn them on critical tasks because validation, especially for EIP-4844 can be quite
         // heavy
-        tasks.spawn_critical_blocking(
-            "transaction-validation-service",
-            Box::pin(async move {
-                task.run().await;
-            }),
-        );
+        tasks.spawn_critical_blocking_task("transaction-validation-service", async move {
+            task.run().await;
+        });
 
         let to_validation_task = Arc::new(Mutex::new(tx));
 

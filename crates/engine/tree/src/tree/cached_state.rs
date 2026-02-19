@@ -76,8 +76,16 @@ impl CacheConfig for EpochCacheConfig {
 type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, EpochCacheConfig>;
 
 /// A wrapper of a state provider and a shared cache.
+///
+/// The const generic `PREWARM` controls whether every cache miss is populated. This is only
+/// relevant for pre-warm transaction execution with the intention to pre-populate the cache with
+/// data for regular block execution. During regular block execution the cache doesn't need to be
+/// populated because the actual EVM database [`State`](revm::database::State) also caches
+/// internally during block execution and the cache is then updated after the block with the entire
+/// [`BundleState`] output of that block which contains all accessed accounts, code, storage. See
+/// also [`ExecutionCache::insert_state`].
 #[derive(Debug)]
-pub struct CachedStateProvider<S> {
+pub struct CachedStateProvider<S, const PREWARM: bool = false> {
     /// The state provider
     state_provider: S,
 
@@ -86,15 +94,9 @@ pub struct CachedStateProvider<S> {
 
     /// Metrics for the cached state provider
     metrics: CachedStateMetrics,
-
-    /// If prewarm enabled we populate every cache miss
-    prewarm: bool,
 }
 
-impl<S> CachedStateProvider<S>
-where
-    S: StateProvider,
-{
+impl<S> CachedStateProvider<S> {
     /// Creates a new [`CachedStateProvider`] from an [`ExecutionCache`], state provider, and
     /// [`CachedStateMetrics`].
     pub const fn new(
@@ -102,27 +104,18 @@ where
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
     ) -> Self {
-        Self { state_provider, caches, metrics, prewarm: false }
+        Self { state_provider, caches, metrics }
     }
 }
 
-impl<S> CachedStateProvider<S> {
-    /// Enables pre-warm mode so that every cache miss is populated.
-    ///
-    /// This is only relevant for pre-warm transaction execution with the intention to pre-populate
-    /// the cache with data for regular block execution. During regular block execution the
-    /// cache doesn't need to be populated because the actual EVM database
-    /// [`State`](revm::database::State) also caches internally during block execution and the cache
-    /// is then updated after the block with the entire [`BundleState`] output of that block which
-    /// contains all accessed accounts,code,storage. See also [`ExecutionCache::insert_state`].
-    pub const fn prewarm(mut self) -> Self {
-        self.prewarm = true;
-        self
-    }
-
-    /// Returns whether this provider should pre-warm cache misses.
-    const fn is_prewarm(&self) -> bool {
-        self.prewarm
+impl<S> CachedStateProvider<S, true> {
+    /// Creates a new [`CachedStateProvider`] with prewarming enabled.
+    pub const fn new_prewarm(
+        state_provider: S,
+        caches: ExecutionCache,
+        metrics: CachedStateMetrics,
+    ) -> Self {
+        Self { state_provider, caches, metrics }
     }
 }
 
@@ -307,15 +300,15 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
     }
 }
 
-impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
+impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvider<S, PREWARM> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if self.is_prewarm() {
+        if PREWARM {
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
             })? {
                 CachedStatus::NotCached(value) | CachedStatus::Cached(value) => Ok(value),
             }
-        } else if let Some(account) = self.caches.account_cache.get(address) {
+        } else if let Some(account) = self.caches.0.account_cache.get(address) {
             self.metrics.account_cache_hits.increment(1);
             Ok(account)
         } else {
@@ -334,13 +327,13 @@ pub enum CachedStatus<T> {
     Cached(T),
 }
 
-impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
+impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvider<S, PREWARM> {
     fn storage(
         &self,
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        if self.is_prewarm() {
+        if PREWARM {
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
             })? {
@@ -350,7 +343,7 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
                     Ok(Some(value).filter(|v| !v.is_zero()))
                 }
             }
-        } else if let Some(value) = self.caches.storage_cache.get(&(account, storage_key)) {
+        } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
             self.metrics.storage_cache_hits.increment(1);
             Ok(Some(value).filter(|v| !v.is_zero()))
         } else {
@@ -358,17 +351,25 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
             self.state_provider.storage(account, storage_key)
         }
     }
+
+    fn storage_by_hashed_key(
+        &self,
+        address: Address,
+        hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        self.state_provider.storage_by_hashed_key(address, hashed_storage_key)
+    }
 }
 
-impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
+impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvider<S, PREWARM> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        if self.is_prewarm() {
+        if PREWARM {
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
             })? {
                 CachedStatus::NotCached(code) | CachedStatus::Cached(code) => Ok(code),
             }
-        } else if let Some(code) = self.caches.code_cache.get(code_hash) {
+        } else if let Some(code) = self.caches.0.code_cache.get(code_hash) {
             self.metrics.code_cache_hits.increment(1);
             Ok(code)
         } else {
@@ -378,7 +379,9 @@ impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     }
 }
 
-impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
+impl<S: StateRootProvider, const PREWARM: bool> StateRootProvider
+    for CachedStateProvider<S, PREWARM>
+{
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         self.state_provider.state_root(hashed_state)
     }
@@ -402,7 +405,9 @@ impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
     }
 }
 
-impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
+impl<S: StateProofProvider, const PREWARM: bool> StateProofProvider
+    for CachedStateProvider<S, PREWARM>
+{
     fn proof(
         &self,
         input: TrieInput,
@@ -429,7 +434,9 @@ impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
     }
 }
 
-impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
+impl<S: StorageRootProvider, const PREWARM: bool> StorageRootProvider
+    for CachedStateProvider<S, PREWARM>
+{
     fn storage_root(
         &self,
         address: Address,
@@ -457,7 +464,7 @@ impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
     }
 }
 
-impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
+impl<S: BlockHashReader, const PREWARM: bool> BlockHashReader for CachedStateProvider<S, PREWARM> {
     fn block_hash(&self, number: alloy_primitives::BlockNumber) -> ProviderResult<Option<B256>> {
         self.state_provider.block_hash(number)
     }
@@ -471,7 +478,9 @@ impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
     }
 }
 
-impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider<S> {
+impl<S: HashedPostStateProvider, const PREWARM: bool> HashedPostStateProvider
+    for CachedStateProvider<S, PREWARM>
+{
     fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
         self.state_provider.hashed_post_state(bundle_state)
     }
@@ -488,27 +497,31 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider
 /// Since EIP-6780, SELFDESTRUCT only works within the same transaction where the
 /// contract was created, so we don't need to handle clearing the storage.
 #[derive(Debug, Clone)]
-pub struct ExecutionCache {
+pub struct ExecutionCache(Arc<ExecutionCacheInner>);
+
+/// Inner state of the [`ExecutionCache`], wrapped in a single [`Arc`].
+#[derive(Debug)]
+struct ExecutionCacheInner {
     /// Cache for contract bytecode, keyed by code hash.
-    code_cache: Arc<FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>>,
+    code_cache: FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
     /// Flat storage cache: maps `(Address, StorageKey)` to storage value.
-    storage_cache: Arc<FixedCache<(Address, StorageKey), StorageValue>>,
+    storage_cache: FixedCache<(Address, StorageKey), StorageValue>,
 
     /// Cache for basic account information (nonce, balance, code hash).
-    account_cache: Arc<FixedCache<Address, Option<Account>, FbBuildHasher<20>>>,
+    account_cache: FixedCache<Address, Option<Account>, FbBuildHasher<20>>,
 
-    /// Stats handler for the code cache.
+    /// Stats handler for the code cache (shared with the cache via [`Stats`]).
     code_stats: Arc<CacheStatsHandler>,
 
-    /// Stats handler for the storage cache.
+    /// Stats handler for the storage cache (shared with the cache via [`Stats`]).
     storage_stats: Arc<CacheStatsHandler>,
 
-    /// Stats handler for the account cache.
+    /// Stats handler for the account cache (shared with the cache via [`Stats`]).
     account_stats: Arc<CacheStatsHandler>,
 
     /// One-time notification when SELFDESTRUCT is encountered
-    selfdestruct_encountered: Arc<Once>,
+    selfdestruct_encountered: Once,
 }
 
 impl ExecutionCache {
@@ -546,24 +559,18 @@ impl ExecutionCache {
         let storage_stats = Arc::new(CacheStatsHandler::new(storage_capacity));
         let account_stats = Arc::new(CacheStatsHandler::new(account_capacity));
 
-        Self {
-            code_cache: Arc::new(
-                FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
-                    .with_stats(Some(Stats::new(code_stats.clone()))),
-            ),
-            storage_cache: Arc::new(
-                FixedCache::new(storage_capacity, DefaultHashBuilder::default())
-                    .with_stats(Some(Stats::new(storage_stats.clone()))),
-            ),
-            account_cache: Arc::new(
-                FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
-                    .with_stats(Some(Stats::new(account_stats.clone()))),
-            ),
+        Self(Arc::new(ExecutionCacheInner {
+            code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
+                .with_stats(Some(Stats::new(code_stats.clone()))),
+            storage_cache: FixedCache::new(storage_capacity, DefaultHashBuilder::default())
+                .with_stats(Some(Stats::new(storage_stats.clone()))),
+            account_cache: FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
+                .with_stats(Some(Stats::new(account_stats.clone()))),
             code_stats,
             storage_stats,
             account_stats,
-            selfdestruct_encountered: Arc::default(),
-        }
+            selfdestruct_encountered: Once::new(),
+        }))
     }
 
     /// Gets code from cache, or inserts using the provided function.
@@ -573,7 +580,7 @@ impl ExecutionCache {
         f: impl FnOnce() -> Result<Option<Bytecode>, E>,
     ) -> Result<CachedStatus<Option<Bytecode>>, E> {
         let mut miss = false;
-        let result = self.code_cache.get_or_try_insert_with(hash, |_| {
+        let result = self.0.code_cache.get_or_try_insert_with(hash, |_| {
             miss = true;
             f()
         })?;
@@ -593,7 +600,7 @@ impl ExecutionCache {
         f: impl FnOnce() -> Result<StorageValue, E>,
     ) -> Result<CachedStatus<StorageValue>, E> {
         let mut miss = false;
-        let result = self.storage_cache.get_or_try_insert_with((address, key), |_| {
+        let result = self.0.storage_cache.get_or_try_insert_with((address, key), |_| {
             miss = true;
             f()
         })?;
@@ -612,7 +619,7 @@ impl ExecutionCache {
         f: impl FnOnce() -> Result<Option<Account>, E>,
     ) -> Result<CachedStatus<Option<Account>>, E> {
         let mut miss = false;
-        let result = self.account_cache.get_or_try_insert_with(address, |_| {
+        let result = self.0.account_cache.get_or_try_insert_with(address, |_| {
             miss = true;
             f()
         })?;
@@ -626,17 +633,17 @@ impl ExecutionCache {
 
     /// Insert storage value into cache.
     pub fn insert_storage(&self, address: Address, key: StorageKey, value: Option<StorageValue>) {
-        self.storage_cache.insert((address, key), value.unwrap_or_default());
+        self.0.storage_cache.insert((address, key), value.unwrap_or_default());
     }
 
     /// Insert code into cache.
     fn insert_code(&self, hash: B256, code: Option<Bytecode>) {
-        self.code_cache.insert(hash, code);
+        self.0.code_cache.insert(hash, code);
     }
 
     /// Insert account into cache.
     fn insert_account(&self, address: Address, account: Option<Account>) {
-        self.account_cache.insert(address, account);
+        self.0.account_cache.insert(address, account);
     }
 
     /// Inserts the post-execution state changes into the cache.
@@ -694,7 +701,7 @@ impl ExecutionCache {
                 let had_code =
                     account.original_info.as_ref().is_some_and(|info| !info.is_empty_code_hash());
                 if had_code {
-                    self.selfdestruct_encountered.call_once(|| {
+                    self.0.selfdestruct_encountered.call_once(|| {
                         warn!(
                             target: "engine::caching",
                             address = ?addr,
@@ -707,8 +714,7 @@ impl ExecutionCache {
                     return Ok(())
                 }
 
-                self.account_cache.remove(addr);
-                self.account_stats.decrement_size();
+                self.0.account_cache.remove(addr);
                 continue
             }
 
@@ -738,30 +744,30 @@ impl ExecutionCache {
     /// We do not clear the bytecodes cache, because its mapping can never change, as it's
     /// `keccak256(bytecode) => bytecode`.
     pub(crate) fn clear(&self) {
-        self.storage_cache.clear();
-        self.account_cache.clear();
+        self.0.storage_cache.clear();
+        self.0.account_cache.clear();
 
-        self.storage_stats.reset_size();
-        self.account_stats.reset_size();
+        self.0.storage_stats.reset_size();
+        self.0.account_stats.reset_size();
     }
 
     /// Updates the provided metrics with the current stats from the cache's stats handlers,
     /// and resets the hit/miss/collision counters.
     pub(crate) fn update_metrics(&self, metrics: &CachedStateMetrics) {
-        metrics.code_cache_size.set(self.code_stats.size() as f64);
-        metrics.code_cache_capacity.set(self.code_stats.capacity() as f64);
-        metrics.code_cache_collisions.set(self.code_stats.collisions() as f64);
-        self.code_stats.reset_stats();
+        metrics.code_cache_size.set(self.0.code_stats.size() as f64);
+        metrics.code_cache_capacity.set(self.0.code_stats.capacity() as f64);
+        metrics.code_cache_collisions.set(self.0.code_stats.collisions() as f64);
+        self.0.code_stats.reset_stats();
 
-        metrics.storage_cache_size.set(self.storage_stats.size() as f64);
-        metrics.storage_cache_capacity.set(self.storage_stats.capacity() as f64);
-        metrics.storage_cache_collisions.set(self.storage_stats.collisions() as f64);
-        self.storage_stats.reset_stats();
+        metrics.storage_cache_size.set(self.0.storage_stats.size() as f64);
+        metrics.storage_cache_capacity.set(self.0.storage_stats.capacity() as f64);
+        metrics.storage_cache_collisions.set(self.0.storage_stats.collisions() as f64);
+        self.0.storage_stats.reset_stats();
 
-        metrics.account_cache_size.set(self.account_stats.size() as f64);
-        metrics.account_cache_capacity.set(self.account_stats.capacity() as f64);
-        metrics.account_cache_collisions.set(self.account_stats.collisions() as f64);
-        self.account_stats.reset_stats();
+        metrics.account_cache_size.set(self.0.account_stats.size() as f64);
+        metrics.account_cache_capacity.set(self.0.account_stats.capacity() as f64);
+        metrics.account_cache_collisions.set(self.0.account_stats.collisions() as f64);
+        self.0.account_stats.reset_stats();
     }
 }
 
@@ -972,9 +978,9 @@ mod tests {
         caches.insert_storage(addr1, storage_key, Some(U256::from(42)));
 
         // Verify caches are populated
-        assert!(caches.account_cache.get(&addr1).is_some());
-        assert!(caches.account_cache.get(&addr2).is_some());
-        assert!(caches.storage_cache.get(&(addr1, storage_key)).is_some());
+        assert!(caches.0.account_cache.get(&addr1).is_some());
+        assert!(caches.0.account_cache.get(&addr2).is_some());
+        assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_some());
 
         let bundle = BundleState {
             // BundleState with a destroyed contract (had code)
@@ -1004,9 +1010,9 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify all caches were cleared
-        assert!(caches.account_cache.get(&addr1).is_none());
-        assert!(caches.account_cache.get(&addr2).is_none());
-        assert!(caches.storage_cache.get(&(addr1, storage_key)).is_none());
+        assert!(caches.0.account_cache.get(&addr1).is_none());
+        assert!(caches.0.account_cache.get(&addr2).is_none());
+        assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_none());
     }
 
     #[test]
@@ -1048,9 +1054,9 @@ mod tests {
         assert!(caches.insert_state(&bundle).is_ok());
 
         // Verify only addr1 was removed, other data is still present
-        assert!(caches.account_cache.get(&addr1).is_none());
-        assert!(caches.account_cache.get(&addr2).is_some());
-        assert!(caches.storage_cache.get(&(addr1, storage_key)).is_some());
+        assert!(caches.0.account_cache.get(&addr1).is_none());
+        assert!(caches.0.account_cache.get(&addr2).is_some());
+        assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_some());
     }
 
     #[test]
@@ -1084,7 +1090,7 @@ mod tests {
         assert!(caches.insert_state(&bundle).is_ok());
 
         // Verify only addr1 was removed
-        assert!(caches.account_cache.get(&addr1).is_none());
-        assert!(caches.account_cache.get(&addr2).is_some());
+        assert!(caches.0.account_cache.get(&addr1).is_none());
+        assert!(caches.0.account_cache.get(&addr2).is_some());
     }
 }
