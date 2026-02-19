@@ -658,6 +658,8 @@ where
         skip_all
     )]
     fn dispatch_pending_targets(&mut self) {
+        // Guard against cached-length drift if future enqueue paths miss counter updates.
+        debug_assert_eq!(self.pending_targets_len, self.pending_targets.chunking_length());
         if self.pending_targets_len > 0 {
             let chunking_length = self.pending_targets_len;
             self.pending_targets_len = 0;
