@@ -617,9 +617,9 @@ where
                     Some(LeafUpdate::Changed(encoded)) => {
                         Some(encoded).filter(|encoded| !encoded.is_empty())
                     }
-                    None => self.trie.get_account_value(addr),
                     // Needs to be revealed first
                     Some(LeafUpdate::Touched) => return true,
+                    None => self.trie.get_account_value(addr),
                 };
 
                 let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
