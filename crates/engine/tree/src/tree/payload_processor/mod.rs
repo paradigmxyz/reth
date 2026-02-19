@@ -2,12 +2,12 @@
 
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
-    cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache, SavedCache},
+    cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
     },
-    sparse_trie::{SparseTrieCacheTask, SparseTrieTask, SpawnedSparseTrieTask},
+    sparse_trie::SparseTrieCacheTask,
     CacheWaitDurations, StateProviderBuilder, TreeConfig, WaitForCaches,
 };
 use alloy_eip7928::BlockAccessList;
@@ -16,7 +16,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use metrics::{Counter, Histogram};
-use multiproof::{SparseTrieUpdate, *};
+use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
@@ -30,8 +30,7 @@ use reth_evm::{
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProvider,
-    StateProviderFactory, StateReader,
+    BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_tasks::{ForEachOrdered, Runtime};
@@ -249,7 +248,7 @@ where
     ///
     /// ## Sparse trie task
     ///
-    /// Responsible for calculating the state root based on the received [`SparseTrieUpdate`].
+    /// Responsible for calculating the state root.
     ///
     /// This task runs until there are no further updates to process.
     ///
@@ -284,66 +283,32 @@ where
             self.spawn_tx_iterator(transactions, env.transaction_count);
 
         let span = Span::current();
-        let (to_sparse_trie, sparse_trie_rx) = channel();
         let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
 
-        let v2_proofs_enabled = !config.disable_proof_v2();
         let parent_state_root = env.parent_state_root;
         let transaction_count = env.transaction_count;
         let chunk_size = Self::adaptive_chunk_size(config, env.gas_used);
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
-            provider_builder.clone(),
+            provider_builder,
             Some(to_multi_proof.clone()),
             bal,
-            v2_proofs_enabled,
         );
 
         // Create and spawn the storage proof task.
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let halve_workers = transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
-        let proof_handle =
-            ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers, v2_proofs_enabled);
-
-        if config.disable_trie_cache() {
-            let multi_proof_task = MultiProofTask::new(
-                proof_handle.clone(),
-                to_sparse_trie,
-                chunk_size,
-                to_multi_proof.clone(),
-                from_multi_proof.clone(),
-            )
-            .with_v2_proofs_enabled(v2_proofs_enabled);
-
-            // spawn multi-proof task
-            let parent_span = span.clone();
-            let saved_cache = prewarm_handle.saved_cache.clone();
-            self.executor.spawn_blocking(move || {
-                let _enter = parent_span.entered();
-                // Build a state provider for the multiproof task
-                let provider = provider_builder.build().expect("failed to build provider");
-                let provider = if let Some(saved_cache) = saved_cache {
-                    let (cache, metrics, _disable_metrics) = saved_cache.split();
-                    Box::new(CachedStateProvider::new(provider, cache, metrics))
-                        as Box<dyn StateProvider>
-                } else {
-                    Box::new(provider)
-                };
-                multi_proof_task.run(provider);
-            });
-        }
+        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
 
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
         self.spawn_sparse_trie_task(
-            sparse_trie_rx,
             proof_handle,
             state_root_tx,
             from_multi_proof,
-            config,
             parent_state_root,
             chunk_size,
         );
@@ -373,9 +338,7 @@ where
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
-        // This path doesn't use multiproof, so V2 proofs flag doesn't matter
-        let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal, false);
+        let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
@@ -389,13 +352,22 @@ where
     /// produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
 
-    /// Transaction count threshold below which sequential signature recovery is used.
+    /// Transaction count threshold below which sequential conversion is used.
     ///
     /// For blocks with fewer than this many transactions, the rayon parallel iterator overhead
-    /// (work-stealing setup, channel-based reorder) exceeds the cost of sequential ECDSA
-    /// recovery. Inspired by Nethermind's `RecoverSignature` which uses sequential `foreach`
-    /// for small blocks.
+    /// (work-stealing setup, channel-based reorder) exceeds the cost of sequential conversion.
+    /// Inspired by Nethermind's `RecoverSignature` which uses sequential `foreach` for small
+    /// blocks.
     const SMALL_BLOCK_TX_THRESHOLD: usize = 30;
+
+    /// Number of leading transactions to convert sequentially before entering the rayon
+    /// parallel path.
+    ///
+    /// Rayon's work-stealing does not guarantee that index 0 is processed first, so the
+    /// ordered consumer can block for up to ~1ms waiting for the first slot. By converting
+    /// a small head sequentially and sending it immediately, execution can start without
+    /// waiting for rayon scheduling.
+    const PARALLEL_PREFETCH_COUNT: usize = 4;
 
     /// Returns the multiproof chunk size adapted to the block's gas usage.
     ///
@@ -419,7 +391,7 @@ where
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
     /// sequential iteration to avoid rayon overhead. For larger blocks, uses rayon parallel
-    /// iteration with [`ForEachOrdered`] to recover signatures in parallel while streaming
+    /// iteration with [`ForEachOrdered`] to convert transactions in parallel while streaming
     /// results to execution in the original transaction order.
     #[expect(clippy::type_complexity)]
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
@@ -438,7 +410,7 @@ where
             // Empty block — nothing to do.
         } else if transaction_count < Self::SMALL_BLOCK_TX_THRESHOLD {
             // Sequential path for small blocks — avoids rayon work-stealing setup and
-            // channel-based reorder overhead when it costs more than the ECDSA recovery itself.
+            // channel-based reorder overhead when it costs more than sequential conversion.
             debug!(
                 target: "engine::tree::payload_processor",
                 transaction_count,
@@ -446,36 +418,38 @@ where
             );
             self.executor.spawn_blocking(move || {
                 let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
+                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
                 let (transactions, convert) = transactions.into_parts();
-                for (idx, tx) in transactions.into_iter().enumerate() {
-                    let tx = convert.convert(tx);
-                    let tx = tx.map(|tx| {
-                        let (tx_env, tx) = tx.into_parts();
-                        WithTxEnv { tx_env, tx: Arc::new(tx) }
-                    });
-                    if let Ok(tx) = &tx {
-                        let _ = prewarm_tx.send((idx, tx.clone()));
-                    }
-                    let _ = execute_tx.send(tx);
-                }
+                convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
             // to execution in order via `for_each_ordered`.
+            //
+            // To avoid a ~1ms stall waiting for rayon to schedule index 0, the first
+            // few transactions are recovered sequentially and sent immediately before
+            // entering the parallel iterator for the remainder.
+            let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
             self.executor.spawn_blocking(move || {
                 let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
+                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
                 let (transactions, convert) = transactions.into_parts();
-                transactions
-                    .into_par_iter()
+                let mut all: Vec<_> = transactions.into_iter().collect();
+                let rest = all.split_off(prefetch.min(all.len()));
+
+                // Convert the first few transactions sequentially so execution can
+                // start immediately without waiting for rayon work-stealing.
+                convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+
+                // Convert the remaining transactions in parallel.
+                rest.into_par_iter()
                     .enumerate()
-                    .map(|(idx, tx)| {
+                    .map(|(i, tx)| {
+                        let idx = i + prefetch;
                         let tx = convert.convert(tx);
                         tx.map(|tx| {
                             let (tx_env, tx) = tx.into_parts();
                             let tx = WithTxEnv { tx_env, tx: Arc::new(tx) };
-                            // Send to prewarming out of order with the original index.
                             let _ = prewarm_tx.send((idx, tx.clone()));
                             tx
                         })
@@ -494,7 +468,7 @@ where
         level = "debug",
         target = "engine::tree::payload_processor",
         skip_all,
-        fields(bal=%bal.is_some(), %v2_proofs_enabled)
+        fields(bal=%bal.is_some())
     )]
     fn spawn_caching_with<P>(
         &self,
@@ -503,7 +477,6 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
-        v2_proofs_enabled: bool,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -523,7 +496,6 @@ where
             terminate_execution: Arc::new(AtomicBool::new(false)),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
-            v2_proofs_enabled,
         };
 
         let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
@@ -535,7 +507,7 @@ where
 
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            self.executor.spawn_blocking(move || {
+            self.executor.spawn_blocking_named("prewarm", move || {
                 let mode = if skip_prewarm {
                     PrewarmMode::Skipped
                 } else if let Some(bal) = bal {
@@ -570,30 +542,26 @@ where
         }
     }
 
-    /// Spawns the [`SparseTrieTask`] for this payload processor.
+    /// Spawns the [`SparseTrieCacheTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
-    #[expect(clippy::too_many_arguments)]
     fn spawn_sparse_trie_task(
         &self,
-        sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
         proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
-        config: &TreeConfig,
         parent_state_root: B256,
         chunk_size: Option<usize>,
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
-        let disable_trie_cache = config.disable_trie_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
         let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("sparse-trie", move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 
@@ -625,23 +593,14 @@ where
                         .with_updates(true)
                 });
 
-            let mut task = if disable_trie_cache {
-                SpawnedSparseTrieTask::Cleared(SparseTrieTask::new(
-                    sparse_trie_rx,
-                    proof_worker_handle,
-                    trie_metrics.clone(),
-                    sparse_state_trie,
-                ))
-            } else {
-                SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_trie(
-                    &executor,
-                    from_multi_proof,
-                    proof_worker_handle,
-                    trie_metrics.clone(),
-                    sparse_state_trie.with_skip_proof_node_filtering(true),
-                    chunk_size,
-                ))
-            };
+            let mut task = SparseTrieCacheTask::new_with_trie(
+                &executor,
+                from_multi_proof,
+                proof_worker_handle,
+                trie_metrics.clone(),
+                sparse_state_trie.with_skip_proof_node_filtering(true),
+                chunk_size,
+            );
 
             let result = task.run();
             // Capture the computed state_root before sending the result
@@ -757,6 +716,30 @@ where
             *cached = Some(new_cache);
             debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
         });
+    }
+}
+
+/// Converts transactions sequentially and sends them to the prewarm and execute channels.
+fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
+    iter: impl Iterator<Item = RawTx>,
+    convert: &C,
+    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
+    execute_tx: &mpsc::SyncSender<Result<WithTxEnv<TxEnv, Recovered>, Err>>,
+) where
+    Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
+    TxEnv: Clone,
+    C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
+{
+    for (idx, raw_tx) in iter.enumerate() {
+        let tx = convert.convert(raw_tx);
+        let tx = tx.map(|tx| {
+            let (tx_env, tx) = tx.into_parts();
+            WithTxEnv { tx_env, tx: Arc::new(tx) }
+        });
+        if let Ok(tx) = &tx {
+            let _ = prewarm_tx.send((idx, tx.clone()));
+        }
+        let _ = execute_tx.send(tx);
     }
 }
 

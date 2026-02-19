@@ -18,8 +18,6 @@ pub mod stats;
 pub mod root;
 
 /// Implementation of parallel proof computation.
-pub mod proof;
-
 pub mod proof_task;
 
 /// Async value encoder for V2 proofs.

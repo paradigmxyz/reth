@@ -12,6 +12,7 @@ pub(crate) mod helpers;
 pub use generate_big_block::{
     RawTransaction, RpcTransactionSource, TransactionCollector, TransactionSource,
 };
+pub(crate) mod metrics_scraper;
 mod new_payload_fcu;
 mod new_payload_only;
 mod output;

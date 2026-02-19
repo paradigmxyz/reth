@@ -2,10 +2,10 @@ use crate::{
     provider::TrieNodeProvider, LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait,
     SparseTrieUpdates,
 };
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNode, TrieNodeV2};
+use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNodeV2};
 use tracing::instrument;
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
@@ -335,121 +335,168 @@ impl SparseNodeType {
 pub enum SparseNode {
     /// Empty trie node.
     Empty,
-    /// The hash of the node that was not revealed.
-    Hash(B256),
     /// Sparse leaf node with remaining key suffix.
     Leaf {
         /// Remaining key suffix for the leaf node.
         key: Nibbles,
-        /// Pre-computed hash of the sparse node.
-        /// Can be reused unless this trie path has been updated.
-        hash: Option<B256>,
+        /// Tracker for the node's state, e.g. cached `RlpNode` tracking.
+        state: SparseNodeState,
     },
     /// Sparse extension node with key.
     Extension {
         /// The key slice stored by this extension node.
         key: Nibbles,
-        /// Pre-computed hash of the sparse node.
-        /// Can be reused unless this trie path has been updated.
-        ///
-        /// If [`None`], then the value is not known and should be calculated from scratch.
-        hash: Option<B256>,
-        /// Pre-computed flag indicating whether the trie node should be stored in the database.
-        /// Can be reused unless this trie path has been updated.
-        ///
-        /// If [`None`], then the value is not known and should be calculated from scratch.
-        store_in_db_trie: Option<bool>,
+        /// Tracker for the node's state, e.g. cached `RlpNode` tracking.
+        state: SparseNodeState,
     },
     /// Sparse branch node with state mask.
     Branch {
         /// The bitmask representing children present in the branch node.
         state_mask: TrieMask,
-        /// Pre-computed hash of the sparse node.
-        /// Can be reused unless this trie path has been updated.
-        ///
-        /// If [`None`], then the value is not known and should be calculated from scratch.
-        hash: Option<B256>,
-        /// Pre-computed flag indicating whether the trie node should be stored in the database.
-        /// Can be reused unless this trie path has been updated.
-        ///
-        /// If [`None`], then the value is not known and should be calculated from scratch.
-        store_in_db_trie: Option<bool>,
+        /// Tracker for the node's state, e.g. cached `RlpNode` tracking.
+        state: SparseNodeState,
+        /// The mask of the children that are blinded.
+        blinded_mask: TrieMask,
+        /// The hashes of the children that are blinded.
+        blinded_hashes: Box<[B256; 16]>,
     },
 }
 
 impl SparseNode {
-    /// Create new sparse node from [`TrieNode`].
-    pub fn from_node(node: TrieNode) -> Self {
-        match node {
-            TrieNode::EmptyRoot => Self::Empty,
-            TrieNode::Leaf(leaf) => Self::new_leaf(leaf.key),
-            TrieNode::Extension(ext) => Self::new_ext(ext.key),
-            TrieNode::Branch(branch) => Self::new_branch(branch.state_mask),
-        }
-    }
+    /// Create new [`SparseNode::Branch`] from state mask and blinded nodes.
+    #[cfg(test)]
+    pub fn new_branch(state_mask: TrieMask, blinded_children: &[(u8, B256)]) -> Self {
+        let mut blinded_mask = TrieMask::default();
+        let mut blinded_hashes = Box::new([B256::ZERO; 16]);
 
-    /// Create new [`SparseNode::Branch`] from state mask.
-    pub const fn new_branch(state_mask: TrieMask) -> Self {
-        Self::Branch { state_mask, hash: None, store_in_db_trie: None }
+        for (nibble, hash) in blinded_children {
+            blinded_mask.set_bit(*nibble);
+            blinded_hashes[*nibble as usize] = *hash;
+        }
+        Self::Branch { state_mask, state: SparseNodeState::Dirty, blinded_mask, blinded_hashes }
     }
 
     /// Create new [`SparseNode::Branch`] with two bits set.
-    pub const fn new_split_branch(bit_a: u8, bit_b: u8) -> Self {
+    pub fn new_split_branch(bit_a: u8, bit_b: u8) -> Self {
         let state_mask = TrieMask::new(
             // set bits for both children
             (1u16 << bit_a) | (1u16 << bit_b),
         );
-        Self::Branch { state_mask, hash: None, store_in_db_trie: None }
+        Self::Branch {
+            state_mask,
+            state: SparseNodeState::Dirty,
+            blinded_mask: TrieMask::default(),
+            blinded_hashes: Box::new([B256::ZERO; 16]),
+        }
     }
 
     /// Create new [`SparseNode::Extension`] from the key slice.
     pub const fn new_ext(key: Nibbles) -> Self {
-        Self::Extension { key, hash: None, store_in_db_trie: None }
+        Self::Extension { key, state: SparseNodeState::Dirty }
     }
 
     /// Create new [`SparseNode::Leaf`] from leaf key and value.
     pub const fn new_leaf(key: Nibbles) -> Self {
-        Self::Leaf { key, hash: None }
+        Self::Leaf { key, state: SparseNodeState::Dirty }
     }
 
-    /// Returns `true` if the node is a hash node.
-    pub const fn is_hash(&self) -> bool {
-        matches!(self, Self::Hash(_))
-    }
-
-    /// Returns the hash of the node if it exists.
-    pub const fn hash(&self) -> Option<B256> {
-        match self {
+    /// Returns the cached [`RlpNode`] of the node, if it's available.
+    pub fn cached_rlp_node(&self) -> Option<Cow<'_, RlpNode>> {
+        match &self {
             Self::Empty => None,
-            Self::Hash(hash) => Some(*hash),
-            Self::Leaf { hash, .. } | Self::Extension { hash, .. } | Self::Branch { hash, .. } => {
-                *hash
-            }
+            Self::Leaf { state, .. } |
+            Self::Extension { state, .. } |
+            Self::Branch { state, .. } => state.cached_rlp_node().map(Cow::Borrowed),
+        }
+    }
+
+    /// Returns the cached hash of the node, if it's available.
+    pub fn cached_hash(&self) -> Option<B256> {
+        match &self {
+            Self::Empty => None,
+            Self::Leaf { state, .. } |
+            Self::Extension { state, .. } |
+            Self::Branch { state, .. } => state.cached_hash(),
         }
     }
 
     /// Sets the hash of the node for testing purposes.
     ///
-    /// For [`SparseNode::Empty`] and [`SparseNode::Hash`] nodes, this method does nothing.
+    /// For [`SparseNode::Empty`] nodes, this method panics.
     #[cfg(any(test, feature = "test-utils"))]
-    pub const fn set_hash(&mut self, new_hash: Option<B256>) {
+    pub fn set_state(&mut self, new_state: SparseNodeState) {
         match self {
-            Self::Empty | Self::Hash(_) => {
-                // Cannot set hash for Empty or Hash nodes
+            Self::Empty => {
+                panic!("Cannot set hash for Empty or Hash nodes")
             }
-            Self::Leaf { hash, .. } | Self::Extension { hash, .. } | Self::Branch { hash, .. } => {
-                *hash = new_hash;
+            Self::Leaf { state, .. } |
+            Self::Extension { state, .. } |
+            Self::Branch { state, .. } => {
+                *state = new_state;
             }
         }
+    }
+
+    /// Sets the state of the node and returns a new node with the same state.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_state(mut self, state: SparseNodeState) -> Self {
+        self.set_state(state);
+        self
     }
 
     /// Returns the memory size of this node in bytes.
     pub const fn memory_size(&self) -> usize {
         match self {
-            Self::Empty | Self::Hash(_) | Self::Branch { .. } => core::mem::size_of::<Self>(),
+            Self::Empty | Self::Branch { .. } => core::mem::size_of::<Self>(),
             Self::Leaf { key, .. } | Self::Extension { key, .. } => {
                 core::mem::size_of::<Self>() + key.len()
             }
+        }
+    }
+}
+
+/// Tracks the current state of a node in the trie, specifically regarding whether it's been updated
+/// or not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SparseNodeState {
+    /// The node has been updated and its new `RlpNode` has not yet been calculated.
+    ///
+    /// If a node is dirty and has children (branches or extensions) then at least once child must
+    /// also be dirty.
+    Dirty,
+    /// The node has a cached `RlpNode`, either from being revealed or computed after an update.
+    Cached {
+        /// The RLP node which is used to represent this node in its parent. Usually this is the
+        /// RLP encoding of the node's hash, except for when the node RLP encodes to <32
+        /// bytes.
+        rlp_node: RlpNode,
+        /// Flag indicating if this node is cached in the database.
+        ///
+        /// NOTE for extension nodes this actually indicates the node's child branch is in the
+        /// database, not the extension itself.
+        store_in_db_trie: Option<bool>,
+    },
+}
+
+impl SparseNodeState {
+    /// Returns the cached [`RlpNode`] of the node, if it's available.
+    pub const fn cached_rlp_node(&self) -> Option<&RlpNode> {
+        match self {
+            Self::Cached { rlp_node, .. } => Some(rlp_node),
+            Self::Dirty => None,
+        }
+    }
+
+    /// Returns the cached hash of the node, if it's available.
+    pub fn cached_hash(&self) -> Option<B256> {
+        self.cached_rlp_node().and_then(|n| n.as_hash())
+    }
+
+    /// Returns whether or not this node is stored in the db, or None if it's not known.
+    pub const fn store_in_db_trie(&self) -> Option<bool> {
+        match self {
+            Self::Cached { store_in_db_trie, .. } => *store_in_db_trie,
+            Self::Dirty => None,
         }
     }
 }
