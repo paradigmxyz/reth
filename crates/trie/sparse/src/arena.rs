@@ -476,6 +476,11 @@ impl ArenaSparseSubtrie {
             return;
         }
 
+        debug_assert!(
+            !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot),
+            "subtrie root must not be EmptyRoot in update_leaves"
+        );
+
         self.stack.clear();
         let root_node = &self.arena[self.root];
         self.stack.push(ArenaStackEntry {
@@ -535,6 +540,11 @@ impl ArenaSparseSubtrie {
         if nodes.is_empty() {
             return Ok(());
         }
+
+        debug_assert!(
+            !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot),
+            "subtrie root must not be EmptyRoot in reveal_nodes"
+        );
 
         let root_num_leaves = self.arena[self.root].num_leaves();
 
@@ -1106,6 +1116,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Ok(());
         }
 
+        if matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot) {
+            return Ok(());
+        }
+
         // Sort nodes lexicographically by path.
         nodes.sort_unstable_by(|a, b| a.path.cmp(&b.path));
 
@@ -1300,6 +1314,31 @@ impl SparseTrie for ArenaParallelSparseTrie {
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
         sorted.sort_unstable_by(|a, b| a.1.cmp(&b.1));
 
+        // If the root node is EmptyRoot then we cannot use `find_ancestor`. Instead find the first
+        // leaf upsert and apply it directly. We can skip all Touched and leaf removals until that
+        // first upsert, as they could not have any effect on an empty trie. If there is no upsert
+        // in the update set then we can early return.
+        let mut start_idx = 0;
+        if matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot) {
+            if let Some(pos) = sorted.iter().position(
+                |(_, _, update)| matches!(update, LeafUpdate::Changed(v) if !v.is_empty()),
+            ) {
+                let (_, ref full_path, ref update) = sorted[pos];
+                let LeafUpdate::Changed(value) = update else { unreachable!() };
+                self.upper_arena[self.root] = ArenaSparseNode::Leaf {
+                    state: ArenaSparseNodeState::Dirty { num_leaves: 1, num_dirty_leaves: 1 },
+                    key: *full_path,
+                    value: value.clone(),
+                };
+                start_idx = pos + 1;
+            } else {
+                return Ok(());
+            }
+            if start_idx >= sorted.len() {
+                return Ok(());
+            }
+        }
+
         let root_num_leaves = self.upper_arena[self.root].num_leaves();
         let mut stack = mem::take(&mut self.stack);
         stack.clear();
@@ -1310,7 +1349,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             prev_dirty_leaves: 0,
         });
 
-        let mut update_idx = 0;
+        let mut update_idx = start_idx;
         while update_idx < sorted.len() {
             let (key, ref full_path, ref update) = sorted[update_idx];
 
