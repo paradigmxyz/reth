@@ -11,6 +11,7 @@ use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::{StorageKind, TestStageDB},
 };
+use reth_storage_api::StorageSettingsCache;
 use reth_testing_utils::generators::{
     self, random_block_range, random_changeset_range, random_contract_account_range,
     random_eoa_accounts, BlockRangeParams,
@@ -142,14 +143,19 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         db.insert_accounts_and_storages(start_state.clone()).unwrap();
 
         // make first block after genesis have valid state root
-        let (root, updates) = <StateRoot<
-            reth_trie_db::DatabaseTrieCursorFactory<_, reth_trie_db::LegacyKeyAdapter>,
-            reth_trie_db::DatabaseHashedCursorFactory<_>,
-        > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(
-            db.factory.provider_rw().unwrap().tx_ref(),
-        )
-        .root_with_updates()
-        .unwrap();
+        let (root, updates) = {
+            let provider_rw = db.factory.provider_rw().unwrap();
+            reth_trie_db::with_adapter!(&provider_rw, |A| {
+                <StateRoot<
+                    reth_trie_db::DatabaseTrieCursorFactory<_, A>,
+                    reth_trie_db::DatabaseHashedCursorFactory<_>,
+                > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(
+                    provider_rw.tx_ref()
+                )
+                .root_with_updates()
+            })
+            .unwrap()
+        };
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header().clone();
@@ -182,13 +188,14 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         // make last block have valid state root
         let root = {
             let tx_mut = db.factory.provider_rw().unwrap();
-            let root =
+            let root = reth_trie_db::with_adapter!(&tx_mut, |A| {
                 <StateRoot<
-                    reth_trie_db::DatabaseTrieCursorFactory<_, reth_trie_db::LegacyKeyAdapter>,
+                    reth_trie_db::DatabaseTrieCursorFactory<_, A>,
                     reth_trie_db::DatabaseHashedCursorFactory<_>,
                 > as reth_trie_db::DatabaseStateRoot<_>>::from_tx(tx_mut.tx_ref())
                 .root()
-                .unwrap();
+            })
+            .unwrap();
             tx_mut.commit().unwrap();
             root
         };
