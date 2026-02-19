@@ -24,7 +24,7 @@ struct LazyHandleInner<T> {
     value: OnceLock<T>,
 }
 
-impl<T: Send + Sync + 'static> LazyHandle<T> {
+impl<T: Send + 'static> LazyHandle<T> {
     /// Creates a new handle from a background task receiver.
     pub(crate) fn new(rx: oneshot::Receiver<T>) -> Self {
         Self {
@@ -34,7 +34,9 @@ impl<T: Send + Sync + 'static> LazyHandle<T> {
             }),
         }
     }
+}
 
+impl<T> LazyHandle<T> {
     /// Creates a handle that is already resolved with the given value.
     pub fn ready(value: T) -> Self {
         let inner = LazyHandleInner {
@@ -85,7 +87,7 @@ impl<T: Send + Sync + 'static> LazyHandle<T> {
     }
 }
 
-impl<T: std::fmt::Debug + Send + Sync + 'static> std::fmt::Debug for LazyHandle<T> {
+impl<T: std::fmt::Debug> std::fmt::Debug for LazyHandle<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = f.debug_struct("LazyHandle");
         if let Some(value) = self.inner.value.get() {
