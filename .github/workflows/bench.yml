@@ -574,8 +574,12 @@ jobs:
       # Clean up any leftover state
       - name: Pre-flight cleanup
         run: |
-          pkill -9 reth || true
-          mountpoint -q "$SCHELK_MOUNT" && sudo schelk recover -y || true
+          sudo pkill -9 reth || true
+          sleep 1
+          if mountpoint -q "$SCHELK_MOUNT"; then
+            sudo umount -l "$SCHELK_MOUNT" || true
+            sudo schelk recover -y || true
+          fi
 
       - name: Update status (running baseline benchmark)
         if: success() && env.BENCH_COMMENT_ID
