@@ -90,9 +90,14 @@ fn assert_changesets_queryable(
             block_range
         );
 
-        // Verify keys are in hashed format (v2 mode)
+        // Verify keys are plain (not hashed) — v2 changesets use plain keys like v1
         for (_, entry) in &storage_changesets {
-            assert!(entry.key.is_hashed(), "v2: storage changeset keys should be tagged as hashed");
+            let key = entry.key;
+            assert_ne!(
+                key,
+                keccak256(key),
+                "v2: storage changeset key should be plain (not its own keccak256)"
+            );
         }
     } else {
         let storage_changesets: Vec<_> = provider
