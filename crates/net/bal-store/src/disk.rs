@@ -73,7 +73,7 @@ struct RecentBalCache {
 }
 
 impl RecentBalCache {
-    fn new(capacity: u32) -> Self {
+    const fn new(capacity: u32) -> Self {
         Self { capacity, entries: BTreeMap::new() }
     }
 
@@ -95,13 +95,9 @@ impl RecentBalCache {
     }
 
     fn get(&self, block_number: BlockNumber, block_hash: BlockHash) -> Option<Bytes> {
-        self.entries.get(&block_number).and_then(|(cached_hash, bal)| {
-            if *cached_hash == block_hash {
-                Some(bal.clone())
-            } else {
-                None
-            }
-        })
+        self.entries
+            .get(&block_number)
+            .and_then(|(cached_hash, bal)| (*cached_hash == block_hash).then(|| bal.clone()))
     }
 
     fn remove_by_hash(&mut self, block_hash: BlockHash) {
@@ -269,20 +265,20 @@ impl DiskFileBalStoreInner {
         let mut removed_hashes = Vec::new();
 
         // If the hash was previously indexed at another number, move the index.
-        if let Some(old_number) = state.hash_to_block.get(&block_hash).copied() {
-            if old_number != block_number {
-                state.block_to_hash.remove(&old_number);
-                self.remove_if_exists(self.index_file(old_number))?;
-            }
+        if let Some(old_number) =
+            state.hash_to_block.get(&block_hash).copied().filter(|n| *n != block_number)
+        {
+            state.block_to_hash.remove(&old_number);
+            self.remove_if_exists(self.index_file(old_number))?;
         }
 
         // Reorg replacement: remove old hash payload at this number.
-        if let Some(old_hash) = state.block_to_hash.get(&block_number).copied() {
-            if old_hash != block_hash {
-                state.hash_to_block.remove(&old_hash);
-                self.remove_if_exists(self.entry_file(old_hash))?;
-                removed_hashes.push(old_hash);
-            }
+        if let Some(old_hash) =
+            state.block_to_hash.get(&block_number).copied().filter(|h| *h != block_hash)
+        {
+            state.hash_to_block.remove(&old_hash);
+            self.remove_if_exists(self.entry_file(old_hash))?;
+            removed_hashes.push(old_hash);
         }
 
         fs::write(self.entry_file(block_hash), bal.as_ref())?;
@@ -321,11 +317,11 @@ impl DiskFileBalStoreInner {
         {
             let recent_cache = self.recent_cache.read();
             for (idx, hash) in block_hashes.iter().copied().enumerate() {
-                if let Some(block_number) = block_numbers[idx] {
-                    if let Some(bal) = recent_cache.get(block_number, hash) {
-                        results[idx] = Some(bal);
-                        continue;
-                    }
+                if let Some(bal) =
+                    block_numbers[idx].and_then(|block_number| recent_cache.get(block_number, hash))
+                {
+                    results[idx] = Some(bal);
+                    continue;
                 }
                 misses.push((idx, hash, block_numbers[idx]));
             }
