@@ -36,7 +36,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
-        let env = self.env.init::<N>(AccessRights::RW)?;
+        let env = self.env.init::<N>(AccessRights::RW, ctx.task_executor.clone())?;
         let provider_factory = env.provider_factory;
         let config = env.config.prune;
         let data_dir = env.data_dir;

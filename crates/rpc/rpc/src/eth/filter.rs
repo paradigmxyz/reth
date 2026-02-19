@@ -271,11 +271,15 @@ where
                             .flatten();
                         logs_utils::get_filter_block_range(from, to, start_block, info)?
                     }
-                    FilterBlockOption::AtBlockHash(_) => {
+                    FilterBlockOption::AtBlockHash(block_hash) => {
                         // blockHash is equivalent to fromBlock = toBlock = the block number with
                         // hash blockHash
                         // get_logs_in_block_range is inclusive
-                        (start_block, best_number)
+                        let block_number = self
+                            .provider()
+                            .block_number(block_hash)?
+                            .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
+                        (block_number, block_number)
                     }
                 };
                 let logs = self

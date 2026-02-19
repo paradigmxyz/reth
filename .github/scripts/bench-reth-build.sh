@@ -2,55 +2,56 @@
 #
 # Builds (or fetches from cache) reth binaries for benchmarking.
 #
-# Usage: bench-reth-build.sh <main|branch> <commit> [branch-sha]
+# Usage: bench-reth-build.sh <baseline|feature> <source-dir> <commit> [branch-sha]
 #
-#   main   — build/fetch the baseline binary at <commit> (merge-base)
-#   branch — build/fetch the candidate binary + reth-bench at <commit>
-#            optional branch-sha is the PR head commit for cache key
+#   baseline — build/fetch the baseline binary at <commit> (merge-base)
+#              source-dir must be checked out at <commit>
+#   feature  — build/fetch the candidate binary + reth-bench at <commit>
+#              source-dir must be checked out at <commit>
+#              optional branch-sha is the PR head commit for cache key
 #
 # Outputs:
-#   main:   target/profiling-baseline/reth
-#   branch: target/profiling/reth, reth-bench installed to cargo bin
+#   baseline: <source-dir>/target/profiling/reth
+#   feature:  <source-dir>/target/profiling/reth, reth-bench installed to cargo bin
 #
 # Required: mc (MinIO client) configured at /home/ubuntu/.mc
 set -euo pipefail
 
 MC="mc --config-dir /home/ubuntu/.mc"
 MODE="$1"
-COMMIT="$2"
+SOURCE_DIR="$2"
+COMMIT="$3"
 
 case "$MODE" in
-  main)
+  baseline|main)
     BUCKET="minio/reth-binaries/${COMMIT}"
-    mkdir -p target/profiling-baseline
+    mkdir -p "${SOURCE_DIR}/target/profiling"
 
     if $MC stat "${BUCKET}/reth" &>/dev/null; then
-      echo "Cache hit for main (${COMMIT}), downloading binary..."
-      $MC cp "${BUCKET}/reth" target/profiling-baseline/reth
-      chmod +x target/profiling-baseline/reth
+      echo "Cache hit for baseline (${COMMIT}), downloading binary..."
+      $MC cp "${BUCKET}/reth" "${SOURCE_DIR}/target/profiling/reth"
+      chmod +x "${SOURCE_DIR}/target/profiling/reth"
     else
-      echo "Cache miss for main (${COMMIT}), building from source..."
-      CURRENT_REF=$(git rev-parse HEAD)
-      git checkout "${COMMIT}"
+      echo "Cache miss for baseline (${COMMIT}), building from source..."
+      cd "${SOURCE_DIR}"
       cargo build --profile profiling --bin reth
-      cp target/profiling/reth target/profiling-baseline/reth
-      $MC cp target/profiling-baseline/reth "${BUCKET}/reth"
-      git checkout "${CURRENT_REF}"
+      $MC cp target/profiling/reth "${BUCKET}/reth"
     fi
     ;;
 
-  branch)
-    BRANCH_SHA="${3:-$COMMIT}"
+  feature|branch)
+    BRANCH_SHA="${4:-$COMMIT}"
     BUCKET="minio/reth-binaries/${BRANCH_SHA}"
 
     if $MC stat "${BUCKET}/reth" &>/dev/null && $MC stat "${BUCKET}/reth-bench" &>/dev/null; then
       echo "Cache hit for ${BRANCH_SHA}, downloading binaries..."
-      mkdir -p target/profiling
-      $MC cp "${BUCKET}/reth" target/profiling/reth
+      mkdir -p "${SOURCE_DIR}/target/profiling"
+      $MC cp "${BUCKET}/reth" "${SOURCE_DIR}/target/profiling/reth"
       $MC cp "${BUCKET}/reth-bench" /home/ubuntu/.cargo/bin/reth-bench
-      chmod +x target/profiling/reth /home/ubuntu/.cargo/bin/reth-bench
+      chmod +x "${SOURCE_DIR}/target/profiling/reth" /home/ubuntu/.cargo/bin/reth-bench
     else
       echo "Cache miss for ${BRANCH_SHA}, building from source..."
+      cd "${SOURCE_DIR}"
       rustup show active-toolchain || rustup default stable
       make profiling
       make install-reth-bench
@@ -60,7 +61,7 @@ case "$MODE" in
     ;;
 
   *)
-    echo "Usage: $0 <main|branch> <commit> [branch-sha]"
+    echo "Usage: $0 <baseline|feature> <source-dir> <commit> [branch-sha]"
     exit 1
     ;;
 esac

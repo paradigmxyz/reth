@@ -53,7 +53,7 @@ def parse_combined_csv(path: str) -> list[dict]:
 
 def plot_latency_and_throughput(
     feature: list[dict], baseline: list[dict] | None, out: Path,
-    baseline_name: str = "main", branch_name: str = "branch",
+    baseline_name: str = "baseline", feature_name: str = "feature",
 ):
     num_plots = 3 if baseline else 2
     fig, axes = plt.subplots(num_plots, 1, figsize=(12, 4 * num_plots), sharex=True)
@@ -76,14 +76,14 @@ def plot_latency_and_throughput(
         ax1.plot(base_x, base_lat, linewidth=0.8, label=baseline_name, alpha=0.7)
         ax2.plot(base_x, base_ggas, linewidth=0.8, label=baseline_name, alpha=0.7)
 
-    ax1.plot(feat_x, feat_lat, linewidth=0.8, label=branch_name)
+    ax1.plot(feat_x, feat_lat, linewidth=0.8, label=feature_name)
     ax1.set_ylabel("Latency (ms)")
     ax1.set_title("newPayload Latency per Block")
     ax1.grid(True, alpha=0.3)
     if baseline:
         ax1.legend()
 
-    ax2.plot(feat_x, feat_ggas, linewidth=0.8, label=branch_name)
+    ax2.plot(feat_x, feat_ggas, linewidth=0.8, label=feature_name)
     ax2.set_ylabel("Ggas/s")
     ax2.set_title("Execution Throughput per Block")
     ax2.grid(True, alpha=0.3)
@@ -105,7 +105,7 @@ def plot_latency_and_throughput(
             ax3.bar(blocks, diffs, width=1.0, color=colors, alpha=0.7, edgecolor="none")
             ax3.axhline(0, color="black", linewidth=0.5)
         ax3.set_ylabel("Δ Latency (%)")
-        ax3.set_title("Per-Block newPayload Latency Change (branch vs main)")
+        ax3.set_title("Per-Block newPayload Latency Change (feature vs baseline)")
         ax3.grid(True, alpha=0.3, axis="y")
 
     axes[-1].set_xlabel("Block Number")
@@ -116,7 +116,7 @@ def plot_latency_and_throughput(
 
 def plot_wait_breakdown(
     feature: list[dict], baseline: list[dict] | None, out: Path,
-    baseline_name: str = "main", branch_name: str = "branch",
+    baseline_name: str = "baseline", feature_name: str = "feature",
 ):
     series = [
         ("Persistence Wait", "persistence_wait_us"),
@@ -135,7 +135,7 @@ def plot_wait_breakdown(
         fx = [r["block_number"] for r in feature if r[key] is not None]
         fy = [r[key] / 1_000 for r in feature if r[key] is not None]
         if fx:
-            ax.plot(fx, fy, linewidth=0.8, label=branch_name)
+            ax.plot(fx, fy, linewidth=0.8, label=feature_name)
 
         ax.set_ylabel("ms")
         ax.set_title(label)
@@ -163,7 +163,7 @@ def _add_regression(ax, x, y, color, label):
 
 def plot_gas_vs_latency(
     feature: list[dict], baseline: list[dict] | None, out: Path,
-    baseline_name: str = "main", branch_name: str = "branch",
+    baseline_name: str = "baseline", feature_name: str = "feature",
 ):
     fig, ax = plt.subplots(figsize=(8, 6))
 
@@ -176,7 +176,7 @@ def plot_gas_vs_latency(
     fgas = [r["gas_used"] / 1_000_000 for r in feature]
     flat = [r["new_payload_latency_us"] / 1_000 for r in feature]
     ax.scatter(fgas, flat, s=8, alpha=0.6)
-    _add_regression(ax, fgas, flat, "tab:orange", branch_name)
+    _add_regression(ax, fgas, flat, "tab:orange", feature_name)
 
     ax.set_xlabel("Gas Used (Mgas)")
     ax.set_ylabel("newPayload Latency (ms)")
@@ -188,30 +188,56 @@ def plot_gas_vs_latency(
     plt.close(fig)
 
 
+def merge_csvs(paths: list[str]) -> list[dict]:
+    """Parse and merge multiple CSVs, averaging values for duplicate blocks."""
+    by_block: dict[int, list[dict]] = {}
+    for path in paths:
+        for row in parse_combined_csv(path):
+            by_block.setdefault(row["block_number"], []).append(row)
+
+    merged = []
+    for bn in sorted(by_block):
+        rows = by_block[bn]
+        if len(rows) == 1:
+            merged.append(rows[0])
+        else:
+            avg = {"block_number": bn}
+            for key in ("gas_used", "new_payload_latency_us"):
+                avg[key] = int(sum(r[key] for r in rows) / len(rows))
+            for key in ("persistence_wait_us", "execution_cache_wait_us", "sparse_trie_wait_us"):
+                vals = [r[key] for r in rows if r[key] is not None]
+                avg[key] = int(sum(vals) / len(vals)) if vals else None
+            merged.append(avg)
+    return merged
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate benchmark charts")
-    parser.add_argument("combined_csv", help="Path to combined_latency.csv (feature)")
+    parser.add_argument(
+        "--feature", nargs="+", required=True,
+        help="Path(s) to feature combined_latency.csv",
+    )
     parser.add_argument(
         "--output-dir", required=True, help="Output directory for PNG charts"
     )
     parser.add_argument(
-        "--baseline", help="Path to baseline (main) combined_latency.csv"
+        "--baseline", nargs="+", help="Path(s) to baseline combined_latency.csv"
     )
-    parser.add_argument("--baseline-name", default="main", help="Label for baseline")
-    parser.add_argument("--branch-name", default="branch", help="Label for branch")
+    parser.add_argument("--baseline-name", default="baseline", help="Label for baseline")
+    parser.add_argument("--feature-name", "--branch-name", default="feature", help="Label for feature")
     args = parser.parse_args()
 
-    feature = parse_combined_csv(args.combined_csv)
+    feature = merge_csvs(args.feature)
     if not feature:
-        print("No results found in combined CSV", file=sys.stderr)
+        print("No results found in feature CSV(s)", file=sys.stderr)
         sys.exit(1)
 
     baseline = None
     if args.baseline:
-        baseline = parse_combined_csv(args.baseline)
+        baseline = merge_csvs(args.baseline)
         if not baseline:
             print(
-                "Warning: no results in baseline CSV, skipping comparison",
+                "Warning: no results in baseline CSV(s), skipping comparison",
                 file=sys.stderr,
             )
             baseline = None
@@ -220,7 +246,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     bname = args.baseline_name
-    fname = args.branch_name
+    fname = args.feature_name
     plot_latency_and_throughput(feature, baseline, out_dir / "latency_throughput.png", bname, fname)
     plot_wait_breakdown(feature, baseline, out_dir / "wait_breakdown.png", bname, fname)
     plot_gas_vs_latency(feature, baseline, out_dir / "gas_vs_latency.png", bname, fname)

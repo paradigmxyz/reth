@@ -87,6 +87,7 @@ pub async fn import_blocks_from_file<N>(
     config: &Config,
     executor: impl ConfigureEvm<Primitives = N::Primitives> + 'static,
     consensus: Arc<impl FullConsensus<N::Primitives> + 'static>,
+    runtime: reth_tasks::Runtime,
 ) -> eyre::Result<ImportResult>
 where
     N: ProviderNodeTypes,
@@ -139,7 +140,7 @@ where
         total_decoded_blocks += file_client.headers_len();
         total_decoded_txns += file_client.total_transactions();
 
-        let (mut pipeline, events, _runtime) = build_import_pipeline_impl(
+        let (mut pipeline, events) = build_import_pipeline_impl(
             config,
             provider_factory.clone(),
             &consensus,
@@ -147,6 +148,7 @@ where
             static_file_producer.clone(),
             import_config.no_state,
             executor.clone(),
+            runtime.clone(),
         )?;
 
         // override the tip
@@ -257,6 +259,7 @@ where
 ///
 /// If configured to execute, all stages will run. Otherwise, only stages that don't require state
 /// will run.
+#[expect(clippy::too_many_arguments)]
 pub fn build_import_pipeline_impl<N, C, E>(
     config: &Config,
     provider_factory: ProviderFactory<N>,
@@ -265,11 +268,8 @@ pub fn build_import_pipeline_impl<N, C, E>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
     evm_config: E,
-) -> eyre::Result<(
-    Pipeline<N>,
-    impl futures::Stream<Item = NodeEvent<N::Primitives>> + use<N, C, E>,
-    reth_tasks::Runtime,
-)>
+    runtime: reth_tasks::Runtime,
+) -> eyre::Result<(Pipeline<N>, impl futures::Stream<Item = NodeEvent<N::Primitives>> + use<N, C, E>)>
 where
     N: ProviderNodeTypes,
     C: FullConsensus<N::Primitives> + 'static,
@@ -284,9 +284,6 @@ where
     let local_head = provider_factory
         .sealed_header(last_block_number)?
         .ok_or_else(|| ProviderError::HeaderNotFound(last_block_number.into()))?;
-
-    let runtime = reth_tasks::Runtime::with_existing_handle(tokio::runtime::Handle::current())
-        .expect("failed to create runtime");
 
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
         .build(file_client.clone(), consensus.clone())
@@ -333,5 +330,5 @@ where
 
     let events = pipeline.events().map(Into::into);
 
-    Ok((pipeline, events, runtime))
+    Ok((pipeline, events))
 }

@@ -46,7 +46,7 @@ fn test_basic_setup() {
 
 #[tokio::test]
 async fn test_eth_launcher() {
-    let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+    let runtime = Runtime::test();
     let config = NodeConfig::test();
     let db = create_test_rw_db();
     let _builder =
@@ -81,7 +81,7 @@ fn test_eth_launcher_with_tokio_runtime() {
     let custom_rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     main_rt.block_on(async {
-        let runtime = Runtime::with_existing_handle(tokio::runtime::Handle::current()).unwrap();
+        let runtime = Runtime::test();
         let config = NodeConfig::test();
         let db = create_test_rw_db();
         let _builder =

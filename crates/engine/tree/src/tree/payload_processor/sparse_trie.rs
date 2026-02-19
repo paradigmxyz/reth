@@ -118,7 +118,7 @@ where
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
-        executor.spawn_blocking(move || {
+        executor.spawn_blocking_named("trie-hashing", move || {
             let _span = debug_span!(parent: parent_span, "run_hashing_task").entered();
             Self::run_hashing_task(updates, hashed_state_tx)
         });
@@ -158,7 +158,7 @@ where
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
                 MultiProofMessage::StateUpdate(_, state) => {
-                    let _span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing state update", n = state.len()).entered();
+                    let _span = debug_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
                     let hashed = evm_state_to_hashed_post_state(state);
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
@@ -475,7 +475,7 @@ where
             })
             .par_bridge_buffered()
             .map(|(address, updates, mut fetched, mut trie)| {
-                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie leaf updates", a=%address).entered();
+                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
                 let mut targets = Vec::new();
 
                 trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
@@ -574,7 +574,7 @@ where
             })
             .par_bridge_buffered()
             .for_each(|(address, trie)| {
-                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage root", ?address).entered();
+                let _enter = debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_root", ?address).entered();
                 trie.root().expect("updates are drained, trie should be revealed by now");
             });
         drop(span);
@@ -610,13 +610,13 @@ where
                 }
 
                 // Get the current account state either from the trie or from latest account update.
-                let trie_account = if let Some(LeafUpdate::Changed(encoded)) = self.account_updates.get(addr) {
-                    Some(encoded).filter(|encoded| !encoded.is_empty())
-                } else if !self.account_updates.contains_key(addr) {
-                    self.trie.get_account_value(addr)
-                } else {
+                let trie_account = match self.account_updates.get(addr) {
+                    Some(LeafUpdate::Changed(encoded)) => {
+                        Some(encoded).filter(|encoded| !encoded.is_empty())
+                    }
                     // Needs to be revealed first
-                    return true;
+                    Some(LeafUpdate::Touched) => return true,
+                    None => self.trie.get_account_value(addr),
                 };
 
                 let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));

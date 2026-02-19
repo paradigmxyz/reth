@@ -1486,7 +1486,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         info!(target: "reth::cli", "Healing static file inconsistencies.");
 
         for segment in self.segments_to_check(provider) {
-            let _guard = info_span!("Healing static file segment", ?segment).entered();
+            let _guard = info_span!("healing_static_file_segment", ?segment).entered();
             let _ = self.maybe_heal_segment(segment)?;
         }
 

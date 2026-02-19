@@ -409,7 +409,7 @@ where
             );
             self.executor.spawn_blocking(move || {
                 let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
+                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
                 let (transactions, convert) = transactions.into_parts();
                 for (idx, tx) in transactions.into_iter().enumerate() {
                     let tx = convert.convert(tx);
@@ -428,7 +428,7 @@ where
             // to execution in order via `for_each_ordered`.
             self.executor.spawn_blocking(move || {
                 let _enter =
-                    debug_span!(target: "engine::tree::payload_processor", "tx iterator").entered();
+                    debug_span!(target: "engine::tree::payload_processor", "tx_iterator").entered();
                 let (transactions, convert) = transactions.into_parts();
                 transactions
                     .into_par_iter()
@@ -496,7 +496,7 @@ where
 
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            self.executor.spawn_blocking(move || {
+            self.executor.spawn_blocking_named("prewarm", move || {
                 let mode = if skip_prewarm {
                     PrewarmMode::Skipped
                 } else if let Some(bal) = bal {
@@ -550,7 +550,7 @@ where
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("sparse-trie", move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 
