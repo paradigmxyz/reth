@@ -19,7 +19,6 @@ use reth_db_api::{
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
 };
-use reth_execution_types::BundleKind;
 use reth_primitives_traits::{BlockBody as _, FastInstant as Instant};
 use reth_prune_types::PruneMode;
 use reth_storage_errors::{
@@ -1285,7 +1284,7 @@ impl RocksDBProvider {
 
     /// Writes account history indices for the given blocks.
     ///
-    /// Derives history indices from reverts (same source as changesets) to ensure consistency.
+    /// Only called in storage v2 where state is always hashed.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_account_history<N: reth_node_types::NodePrimitives>(
         &self,
@@ -1297,20 +1296,11 @@ impl RocksDBProvider {
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            match &block.execution_outcome().state {
-                BundleKind::Plain(plain_state) => {
-                    let reverts = plain_state.reverts.to_plain_state_reverts();
-                    for account_block_reverts in reverts.accounts {
-                        for (address, _) in account_block_reverts {
-                            account_history.entry(address).or_default().push(block_number);
-                        }
-                    }
-                }
-                BundleKind::Hashed(hashed_state) => {
-                    for address in hashed_state.state.keys() {
-                        account_history.entry(*address).or_default().push(block_number);
-                    }
-                }
+            let hashed_state =
+                block.execution_outcome().state.as_hashed().expect("v2 state must be hashed");
+
+            for address in hashed_state.state.keys() {
+                account_history.entry(*address).or_default().push(block_number);
             }
         }
 
@@ -1324,7 +1314,8 @@ impl RocksDBProvider {
 
     /// Writes storage history indices for the given blocks.
     ///
-    /// Derives history indices from reverts (same source as changesets) to ensure consistency.
+    /// Only called in storage v2 where state is always hashed. Storage keys are already
+    /// keccak256-hashed `B256` values.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_storage_history<N: reth_node_types::NodePrimitives>(
         &self,
@@ -1336,31 +1327,12 @@ impl RocksDBProvider {
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            match &block.execution_outcome().state {
-                BundleKind::Plain(plain_state) => {
-                    let reverts = plain_state.reverts.to_plain_state_reverts();
-                    for storage_block_reverts in reverts.storage {
-                        for revert in storage_block_reverts {
-                            for (slot, _) in revert.storage_revert {
-                                let plain_key = B256::new(slot.to_be_bytes());
-                                let key = keccak256(plain_key);
-                                storage_history
-                                    .entry((revert.address, key))
-                                    .or_default()
-                                    .push(block_number);
-                            }
-                        }
-                    }
-                }
-                BundleKind::Hashed(hashed_state) => {
-                    for (address, account) in &hashed_state.state {
-                        for slot_hash in account.storage.keys() {
-                            storage_history
-                                .entry((*address, *slot_hash))
-                                .or_default()
-                                .push(block_number);
-                        }
-                    }
+            let hashed_state =
+                block.execution_outcome().state.as_hashed().expect("v2 state must be hashed");
+
+            for (address, account) in &hashed_state.state {
+                for slot_hash in account.storage.keys() {
+                    storage_history.entry((*address, *slot_hash)).or_default().push(block_number);
                 }
             }
         }
