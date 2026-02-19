@@ -981,14 +981,7 @@ where
         overlay_factory: OverlayStateProviderFactory<P>,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        Self::compute_state_root_serial_inner(overlay_factory, hashed_state.get())
-    }
-
-    /// Inner implementation that takes a resolved `&HashedPostState` directly.
-    fn compute_state_root_serial_inner(
-        overlay_factory: OverlayStateProviderFactory<P>,
-        hashed_state: &HashedPostState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let hashed_state = hashed_state.get();
         // The `hashed_state` argument will be taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // StateRoot which parts of the trie need to be recomputed.
@@ -1054,7 +1047,7 @@ where
                 let seq_hashed_state = hashed_state.clone();
                 self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
                     let result =
-                        Self::compute_state_root_serial_inner(seq_overlay, seq_hashed_state.get());
+                        Self::compute_state_root_serial(seq_overlay, &seq_hashed_state);
                     let _ = seq_tx.send(result);
                 });
 
@@ -1267,7 +1260,7 @@ where
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
         if let Err(err) = self
             .validator
-            .validate_block_post_execution_with_hashed_state(hashed_state.get(), block)
+            .validate_block_post_execution_with_hashed_state(&hashed_state, block)
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());

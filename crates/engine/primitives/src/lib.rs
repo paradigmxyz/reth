@@ -18,6 +18,7 @@ use reth_payload_primitives::{
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
+use reth_tasks::LazyHandle;
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -175,7 +176,7 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// Verifies payload post-execution w.r.t. hashed state updates.
     fn validate_block_post_execution_with_hashed_state(
         &self,
-        _state_updates: &HashedPostState,
+        _state_updates: &LazyHandle<HashedPostState>,
         _block: &RecoveredBlock<Self::Block>,
     ) -> Result<(), ConsensusError> {
         // method not used by l1
