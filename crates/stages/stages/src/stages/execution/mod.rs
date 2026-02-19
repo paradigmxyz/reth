@@ -485,10 +485,21 @@ where
         // reverts for self-destructed accounts. Without this, the changeset writer would only
         // see hashed slot keys (from `HashedStorages`) which pollutes the entire codebase.
         //
-        // Self-destructs were disabled at Cancun, so this is only needed for historical sync.
+        // SELFDESTRUCT no longer destroys storage post-Cancun, so this is only needed for
+        // pre-Cancun blocks. Post-Cancun we can remove the preimage db entirely.
         if provider.cached_storage_settings().use_hashed_state() {
             if let Some(path) = &self.slot_preimages_path {
-                slot_preimages::inject_plain_wipe_slots(path, provider, &mut state)?;
+                let start_header = provider
+                    .header_by_number(start_block)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(start_block.into()))?;
+                let is_pre_cancun = start_header.excess_blob_gas().is_none();
+
+                if is_pre_cancun {
+                    slot_preimages::inject_plain_wipe_slots(path, provider, &mut state)?;
+                } else if path.exists() {
+                    // Post-Cancun: no more self-destructs, preimage db is no longer needed.
+                    let _ = std::fs::remove_dir_all(path);
+                }
             }
         }
 
