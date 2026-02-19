@@ -239,7 +239,7 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
                 )
             })?;
 
-            let is_storage = segment == StaticFileSegment::StorageChangeSets;
+            let is_storage = segment.is_storage_change_sets();
 
             for (offset_index, offset) in offsets.iter().enumerate() {
                 let block_number = block_range.start() + offset_index as u64;
