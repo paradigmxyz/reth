@@ -1286,6 +1286,8 @@ impl SparseTrie for ParallelSparseTrie {
         }
 
         if effective_pruned_roots.is_empty() {
+            #[cfg(feature = "trie-debug")]
+            self.debug_snapshot_initial_state();
             return 0;
         }
 
