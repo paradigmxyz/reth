@@ -4,7 +4,7 @@
 //! infrastructure for recording all mutations to a [`crate::ParallelSparseTrie`]
 //! for post-hoc debugging of state root mismatches.
 
-use alloc::{string::String, vec::Vec};
+use alloc::{string::String, vec, vec::Vec};
 use alloy_primitives::{hex, Bytes, B256};
 use alloy_trie::nodes::TrieNode;
 use reth_trie_common::Nibbles;
@@ -13,6 +13,7 @@ use serde::Serialize;
 /// Records mutating operations performed on a sparse trie in the order they occurred.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct TrieDebugRecorder {
+    initial_state: Vec<InitialNode>,
     ops: Vec<RecordedOp>,
 }
 
@@ -25,6 +26,14 @@ impl TrieDebugRecorder {
     /// Clears all recorded operations.
     pub fn reset(&mut self) {
         self.ops.clear();
+    }
+
+    /// Sets the initial state snapshot of revealed trie nodes.
+    ///
+    /// This captures all revealed nodes (with their `state_mask` for branches) at a point in time.
+    /// For blinded tries this will be empty.
+    pub fn set_initial_state(&mut self, state: Vec<InitialNode>) {
+        self.initial_state = state;
     }
 
     /// Records a single operation.
@@ -174,5 +183,115 @@ impl From<&crate::LeafUpdate> for LeafUpdateRecord {
             crate::LeafUpdate::Changed(value) => Self::Changed(value.clone().into()),
             crate::LeafUpdate::Touched => Self::Touched,
         }
+    }
+}
+
+/// A serializable snapshot of a single revealed trie node captured as part of the initial state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InitialNode {
+    /// The nibble path of the node.
+    pub path: Nibbles,
+    /// The type and relevant data for this node.
+    pub node: InitialNodeKind,
+    /// The state of the node (dirty or cached).
+    pub state: InitialNodeState,
+}
+
+/// Serializable mirror of [`crate::SparseNodeState`].
+///
+/// A separate type is needed because [`crate::SparseNodeState`] contains
+/// [`reth_trie_common::RlpNode`] from an external crate that does not implement `Serialize`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum InitialNodeState {
+    /// The node has no state (empty root).
+    None,
+    /// The node is dirty and its RLP has not been computed.
+    Dirty,
+    /// The node has a cached RLP.
+    Cached {
+        /// Hex-encoded RLP node.
+        rlp_node: String,
+        /// Whether this node is stored in the database trie, if known.
+        store_in_db_trie: Option<bool>,
+    },
+}
+
+impl From<&crate::SparseNodeState> for InitialNodeState {
+    fn from(state: &crate::SparseNodeState) -> Self {
+        match state {
+            crate::SparseNodeState::Dirty => Self::Dirty,
+            crate::SparseNodeState::Cached { rlp_node, store_in_db_trie } => Self::Cached {
+                rlp_node: hex::encode(rlp_node.as_ref()),
+                store_in_db_trie: *store_in_db_trie,
+            },
+        }
+    }
+}
+
+/// The kind of a revealed node in the initial state snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum InitialNodeKind {
+    /// An empty root node.
+    Empty,
+    /// A leaf node with its remaining key suffix and value.
+    Leaf {
+        /// Remaining key suffix.
+        key: Nibbles,
+        /// The hex-encoded RLP value of the leaf.
+        value: String,
+    },
+    /// An extension node with its key.
+    Extension {
+        /// The key slice stored by this extension node.
+        key: Nibbles,
+    },
+    /// A branch node with its masks and blinded children hashes.
+    Branch {
+        /// Bitmask of children present.
+        state_mask: u16,
+        /// Bitmask of children that are blinded.
+        blinded_mask: u16,
+        /// The hashes of blinded children, as `(nibble, hash)` pairs.
+        blinded_hashes: Vec<(u8, B256)>,
+    },
+}
+
+impl InitialNode {
+    /// Creates an [`InitialNode`] from a path, a [`crate::SparseNode`], and an optional leaf value.
+    ///
+    /// For leaf nodes the `value` should be the RLP-encoded leaf value looked up from the values
+    /// map. For non-leaf nodes it is ignored.
+    pub fn from_sparse_node(
+        path: Nibbles,
+        node: &crate::SparseNode,
+        value: Option<&Vec<u8>>,
+    ) -> Self {
+        let (kind, state) = match node {
+            crate::SparseNode::Empty => (InitialNodeKind::Empty, InitialNodeState::None),
+            crate::SparseNode::Leaf { key, state, .. } => (
+                InitialNodeKind::Leaf { key: *key, value: hex::encode(value.unwrap_or(&vec![])) },
+                state.into(),
+            ),
+            crate::SparseNode::Extension { key, state, .. } => {
+                (InitialNodeKind::Extension { key: *key }, state.into())
+            }
+            crate::SparseNode::Branch {
+                state_mask, blinded_mask, blinded_hashes, state, ..
+            } => {
+                let hashes = blinded_mask
+                    .iter()
+                    .map(|nibble| (nibble, blinded_hashes[nibble as usize]))
+                    .collect();
+                (
+                    InitialNodeKind::Branch {
+                        state_mask: state_mask.get(),
+                        blinded_mask: blinded_mask.get(),
+                        blinded_hashes: hashes,
+                    },
+                    state.into(),
+                )
+            }
+        };
+        Self { path, node: kind, state }
     }
 }

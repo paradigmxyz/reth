@@ -1,5 +1,7 @@
 #[cfg(feature = "trie-debug")]
-use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
+use crate::debug_recorder::{
+    InitialNode, LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder,
+};
 use crate::{
     lower::LowerSparseSubtrie, provider::TrieNodeProvider, LeafLookup, LeafLookupError,
     RlpNodeStackItem, SparseNode, SparseNodeState, SparseNodeType, SparseTrie, SparseTrieUpdates,
@@ -1042,6 +1044,8 @@ impl SparseTrie for ParallelSparseTrie {
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
         self.subtrie_heat.clear();
+        #[cfg(feature = "trie-debug")]
+        self.debug_snapshot_initial_state();
     }
 
     fn clear(&mut self) {
@@ -1055,7 +1059,7 @@ impl SparseTrie for ParallelSparseTrie {
         self.branch_node_masks.clear();
         self.subtrie_heat.clear();
         #[cfg(feature = "trie-debug")]
-        self.debug_recorder.reset();
+        self.debug_snapshot_initial_state();
         // `update_actions_buffers` doesn't need to be cleared; we want to reuse the Vecs it has
         // buffered, and all of those are already inherently cleared when they get used.
     }
@@ -1170,9 +1174,6 @@ impl SparseTrie for ParallelSparseTrie {
     }
 
     fn prune(&mut self, max_depth: usize) -> usize {
-        #[cfg(feature = "trie-debug")]
-        self.debug_recorder.reset();
-
         // Decay heat for subtries not modified this cycle
         self.subtrie_heat.decay_and_reset();
 
@@ -1360,6 +1361,9 @@ impl SparseTrie for ParallelSparseTrie {
             }
         });
 
+        #[cfg(feature = "trie-debug")]
+        self.debug_snapshot_initial_state();
+
         nodes_converted
     }
 
@@ -1459,6 +1463,49 @@ impl ParallelSparseTrie {
     pub const fn with_parallelism_thresholds(mut self, thresholds: ParallelismThresholds) -> Self {
         self.parallelism_thresholds = thresholds;
         self
+    }
+
+    /// Resets the debug recorder and snapshots the current revealed nodes as the initial state.
+    #[cfg(feature = "trie-debug")]
+    fn debug_snapshot_initial_state(&mut self) {
+        self.debug_recorder.reset();
+        let mut initial_state = Vec::new();
+
+        // Collect nodes from the upper subtrie.
+        for (path, node) in &self.upper_subtrie.nodes {
+            let value = Self::leaf_value_for_node(path, node, &self.upper_subtrie.inner.values);
+            initial_state.push(InitialNode::from_sparse_node(*path, node, value));
+        }
+
+        // Collect nodes from revealed lower subtries.
+        for subtrie in &*self.lower_subtries {
+            if let Some(revealed) = subtrie.as_revealed_ref() {
+                for (path, node) in &revealed.nodes {
+                    let value = Self::leaf_value_for_node(path, node, &revealed.inner.values);
+                    initial_state.push(InitialNode::from_sparse_node(*path, node, value));
+                }
+            }
+        }
+
+        initial_state.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+        self.debug_recorder.set_initial_state(initial_state);
+    }
+
+    /// Returns the leaf value for a node if it is a leaf, by looking up the full leaf path
+    /// (node path + leaf key suffix) in the given values map.
+    #[cfg(feature = "trie-debug")]
+    fn leaf_value_for_node<'a>(
+        path: &Nibbles,
+        node: &SparseNode,
+        values: &'a HashMap<Nibbles, Vec<u8>>,
+    ) -> Option<&'a Vec<u8>> {
+        if let SparseNode::Leaf { key, .. } = node {
+            let mut full_path = *path;
+            full_path.extend(key);
+            values.get(&full_path)
+        } else {
+            None
+        }
     }
 
     /// Returns true if retaining updates is enabled for the overall trie.
