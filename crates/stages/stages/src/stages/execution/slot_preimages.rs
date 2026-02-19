@@ -204,12 +204,9 @@ fn inject_preimage_entry(
     hashed_slot: B256,
     value: alloy_primitives::U256,
 ) -> Result<(), StageError> {
-    let plain_slot = reader
-        .get(&hashed_slot)
-        .map_err(fatal)?
-        .ok_or_else(|| {
-            fatal(eyre::eyre!("missing slot preimage for {hashed_slot:?} (addr={address:?})"))
-        })?;
+    let plain_slot = reader.get(&hashed_slot).map_err(fatal)?.ok_or_else(|| {
+        fatal(eyre::eyre!("missing slot preimage for {hashed_slot:?} (addr={address:?})"))
+    })?;
 
     // Convert B256 plain slot to U256 StorageKey for the revert map.
     let plain_key = alloy_primitives::U256::from_be_bytes(plain_slot.0);
