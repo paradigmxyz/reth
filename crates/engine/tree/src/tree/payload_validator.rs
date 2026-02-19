@@ -512,6 +512,22 @@ where
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
+        // Spawn hashed post state computation in background so it runs concurrently with
+        // block conversion and receipt root computation. This is a pure CPU-bound task
+        // (keccak256 hashing of all changed addresses and storage slots).
+        let hashed_state_output = output.clone();
+        let hashed_state_provider = self.provider.clone();
+        let (hashed_state_tx, hashed_state_rx) = tokio::sync::oneshot::channel();
+        self.payload_processor.executor().spawn_blocking_named("hashed-post-state", move || {
+            let _span = debug_span!(
+                target: "engine::tree::payload_validator",
+                "hashed_post_state",
+            )
+            .entered();
+            let hashed_state = hashed_state_provider.hashed_post_state(&hashed_state_output.state);
+            let _ = hashed_state_tx.send(hashed_state);
+        });
+
         let block = convert_to_block(input)?.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
@@ -531,7 +547,8 @@ where
                 &parent_block,
                 &output,
                 &mut ctx,
-                receipt_root_bloom
+                receipt_root_bloom,
+                hashed_state_rx,
             ),
             block
         );
@@ -1187,6 +1204,8 @@ where
     ///
     /// If `receipt_root_bloom` is provided, it will be used instead of computing the receipt root
     /// and logs bloom from the receipts.
+    ///
+    /// The `hashed_state_rx` receives the hashed post state computed in the background.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
@@ -1195,6 +1214,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
+        hashed_state_rx: tokio::sync::oneshot::Receiver<HashedPostState>,
     ) -> Result<HashedPostState, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1230,10 +1250,12 @@ where
         }
         drop(_enter);
 
-        let _enter =
-            debug_span!(target: "engine::tree::payload_validator", "hashed_post_state").entered();
-        let hashed_state = self.provider.hashed_post_state(&output.state);
-        drop(_enter);
+        // Await the hashed post state from the background task.
+        let hashed_state = hashed_state_rx.blocking_recv().map_err(|_| {
+            InsertBlockErrorKind::Other(Box::new(std::io::Error::other(
+                "hashed post state task failed",
+            )))
+        })?;
 
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
         if let Err(err) =
