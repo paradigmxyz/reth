@@ -612,7 +612,9 @@ where
 
     /// Returns storage trie updates for tries that have been revealed.
     pub fn storage_trie_updates(&mut self) -> B256Map<StorageTrieUpdates> {
-        self.storage.tries.iter_mut()
+        self.storage
+            .tries
+            .iter_mut()
             .filter_map(|(address, trie)| {
                 let trie = trie.as_revealed_mut()?;
                 let updates = trie.take_updates();
