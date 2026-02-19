@@ -1,0 +1,1029 @@
+================================================================================
+PARALLEL.RS — REVIEW OF SUBSTANTIVE NON-TEST CHANGES
+================================================================================
+
+Functions with real logic changes (non-test): 6
+Test functions changed: 52 (all just remove provider param)
+
+────────────────────────────────────────────────────────────────────────────────
+REMOVED NON-TEST FUNCTIONS
+────────────────────────────────────────────────────────────────────────────────
+  ✗ add_revealed_node
+    /// Adds a revealed node at the specified path
+            fn add_revealed_node(&mut self, path: Nibbles, node: RevealedNode) {
+                self.nodes.insert(path, node);
+            }
+
+  ✗ clear_L2332
+    /// Clears all modification flags.
+        #[inline]
+        const fn clear(&mut self) {
+            self.0 = U256::ZERO;
+        }
+
+  ✗ clear_L2387
+    /// Clears all heat tracking state.
+        const fn clear(&mut self) {
+            self.heat = [0; NUM_LOWER_SUBTRIES];
+            self.modified.clear();
+        }
+
+  ✗ clear_L3044
+    /// Clears the subtrie, keeping the data structures allocated.
+        pub(crate) fn clear(&mut self) {
+            self.nodes.clear();
+            self.inner.clear();
+        }
+
+  ✗ clear_L3441
+    /// Clears the subtrie, keeping the data structures allocated.
+        fn clear(&mut self) {
+            self.values.clear();
+            self.buffers.clear();
+        }
+
+  ✗ clear_L3560
+    /// Clears all buffers.
+        fn clear(&mut self) {
+            self.path_stack.clear();
+            self.rlp_node_stack.clear();
+            self.branch_child_buf.clear();
+
+  ✗ default_L2354
+    fn default() -> Self {
+            Self { heat: [0; NUM_LOWER_SUBTRIES], modified: SubtriesBitmap::default() }
+        }
+
+  ✗ memory_size_L3060
+    /// Returns a heuristic for the in-memory size of this subtrie in bytes.
+        pub(crate) fn memory_size(&self) -> usize {
+            let mut size = core::mem::size_of::<Self>();
+    
+            // Nodes map: key (Nibbles) + value (SparseNode)
+
+  ✗ memory_size_L3569
+    /// Returns a heuristic for the in-memory size of these buffers in bytes.
+        const fn memory_size(&self) -> usize {
+            let mut size = core::mem::size_of::<Self>();
+    
+            size += self.path_stack.capacity() * core::mem::size_of::<RlpNodePathStackItem>();
+
+  ✗ shrink_nodes_to_L3050
+    /// Shrinks the capacity of the subtrie's node storage.
+        pub(crate) fn shrink_nodes_to(&mut self, size: usize) {
+            self.nodes.shrink_to(size);
+        }
+
+  ✗ shrink_values_to_L3055
+    /// Shrinks the capacity of the subtrie's value storage.
+        pub(crate) fn shrink_values_to(&mut self, size: usize) {
+            self.inner.values.shrink_to(size);
+        }
+
+  ✗ trie_node
+    fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+                Ok(self.nodes.get(path).cloned())
+            }
+
+  ✗ update_leaf_L2481
+    /// Updates or inserts a leaf node at the specified key path with the provided RLP-encoded
+        /// value.
+        ///
+        /// If the leaf did not previously exist, this method adjusts the trie structure by inserting
+        /// new leaf nodes, splitting branch nodes, or collapsing extension nodes as needed.
+
+  ✗ update_leaves_L3849
+    /// Update multiple leaves in the trie
+            fn update_leaves(
+                &self,
+                trie: &mut ParallelSparseTrie,
+                leaves: impl IntoIterator<Item = (Nibbles, Vec<u8>)>,
+
+  ✗ wipe_L3038
+    /// Removes all nodes and values from the subtrie, resetting it to a blank state
+        /// with only an empty root node. This is used when a storage root is deleted.
+        fn wipe(&mut self) {
+            self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
+            self.inner.clear();
+
+────────────────────────────────────────────────────────────────────────────────
+FUNCTION: pre_validate_reveal_chain
+────────────────────────────────────────────────────────────────────────────────
+--- old/pre_validate_reveal_chain
++++ new/pre_validate_reveal_chain
+@@ -4,11 +4,7 @@
+     /// any mutations to ensure the operation will succeed atomically.
+     ///
+     /// Returns `BlindedNode` error if any node in the chain cannot be revealed by the provider.
+-    fn pre_validate_reveal_chain<P: TrieNodeProvider>(
+-        &self,
+-        path: &Nibbles,
+-        provider: &P,
+-    ) -> SparseTrieResult<()> {
++    fn pre_validate_reveal_chain(&self, path: &Nibbles) -> SparseTrieResult<()> {
+         // Find the subtrie containing this path, or return Ok if path doesn't exist
+         let subtrie = match self.subtrie_for_path(path) {
+             Some(s) => s,
+@@ -16,23 +12,10 @@
+         };
+ 
+         match subtrie.nodes.get(path) {
+-            // Hash node: attempt to reveal from provider
+-            Some(SparseNode::Hash(hash)) => match provider.trie_node(path)? {
+-                Some(RevealedNode { node, .. }) => {
+-                    let decoded = TrieNode::decode(&mut &node[..])?;
+-                    // Extension nodes have children that also need validation
+-                    if let TrieNode::Extension(ext) = decoded {
+-                        let mut grandchild_path = *path;
+-                        grandchild_path.extend(&ext.key);
+-
+-                        return self.pre_validate_reveal_chain(&grandchild_path, provider);
+-                    }
+-
+-                    Ok(())
+-                }
+-                // Provider cannot reveal this node - operation would fail
+-                None => Err(SparseTrieErrorKind::BlindedNode { path: *path, hash: *hash }.into()),
+-            },
++            // Hash node: cannot be revealed without a provider
++            Some(SparseNode::Hash(hash)) => {
++                Err(SparseTrieErrorKind::BlindedNode { path: *path, hash: *hash }.into())
++            }
+             // Leaf, Extension, Branch, Empty, or missing: no further validation needed
+             _ => Ok(()),
+         }
+
+────────────────────────────────────────────────────────────────────────────────
+FUNCTION: remove_leaf
+────────────────────────────────────────────────────────────────────────────────
+--- old/remove_leaf
++++ new/remove_leaf
+@@ -1,8 +1,4 @@
+-    fn remove_leaf<P: TrieNodeProvider>(
+-        &mut self,
+-        full_path: &Nibbles,
+-        provider: P,
+-    ) -> SparseTrieResult<()> {
++    fn remove_leaf(&mut self, full_path: &Nibbles) -> SparseTrieResult<()> {
+         debug_assert_eq!(
+             full_path.len(),
+             B256::len_bytes() * 2,
+@@ -139,7 +135,7 @@
+                 // This check mirrors the logic in `reveal_remaining_child_on_leaf_removal` with
+                 // `recurse_into_extension: true` to ensure all nodes that would be revealed
+                 // are accessible before any mutations occur.
+-                self.pre_validate_reveal_chain(&remaining_child_path, &provider)?;
++                self.pre_validate_reveal_chain(&remaining_child_path)?;
+             }
+         }
+ 
+@@ -213,11 +209,8 @@
+ 
+                 // If the remaining child node is not yet revealed then we have to reveal it here,
+                 // otherwise it's not possible to know how to collapse the branch.
+-                let remaining_child_node = self.reveal_remaining_child_on_leaf_removal(
+-                    provider,
+-                    full_path,
+-                    &remaining_child_path,
+-                )?;
++                let remaining_child_node =
++                    self.reveal_remaining_child_on_leaf_removal(full_path, &remaining_child_path)?;
+ 
+                 let (new_branch_node, remove_child) = Self::branch_changes_on_leaf_removal(
+                     branch_path,
+
+────────────────────────────────────────────────────────────────────────────────
+FUNCTION: reveal_node_or_hash
+────────────────────────────────────────────────────────────────────────────────
+--- old/reveal_node_or_hash
++++ new/reveal_node_or_hash
+@@ -5,7 +5,7 @@
+     /// handles both cases:
+     ///
+     /// 1. If the child data represents a hash (32+1=33 bytes), store it as a hash node
+-    /// 2. Otherwise, decode the data as a [`TrieNode`] and recursively reveal it using
++    /// 2. Otherwise, decode the data as a [`TrieNodeV2`] and recursively reveal it using
+     ///    `reveal_node`
+     ///
+     /// # Returns
+
+────────────────────────────────────────────────────────────────────────────────
+FUNCTION: reveal_remaining_child_on_leaf_removal
+────────────────────────────────────────────────────────────────────────────────
+--- old/reveal_remaining_child_on_leaf_removal
++++ new/reveal_remaining_child_on_leaf_removal
+@@ -7,55 +7,27 @@
+     /// ## Returns
+     ///
+     /// The node of the remaining child, whether it was already revealed or not.
+-    fn reveal_remaining_child_on_leaf_removal<P: TrieNodeProvider>(
++    fn reveal_remaining_child_on_leaf_removal(
+         &mut self,
+-        provider: P,
+         full_path: &Nibbles, // only needed for logs
+         remaining_child_path: &Nibbles,
+     ) -> SparseTrieResult<SparseNode> {
+         let remaining_child_subtrie = self.subtrie_for_path_mut(remaining_child_path);
+ 
+-        let (remaining_child_node, remaining_child_masks) = match remaining_child_subtrie
+-            .nodes
+-            .get(remaining_child_path)
+-            .unwrap()
+-        {
+-            SparseNode::Hash(_) => {
+-                debug!(
+-                    target: "trie::parallel_sparse",
+-                    child_path = ?remaining_child_path,
+-                    leaf_full_path = ?full_path,
+-                    "Node child not revealed in remove_leaf, falling back to db",
+-                );
+-                if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+-                    provider.trie_node(remaining_child_path)?
+-                {
+-                    let decoded = TrieNodeV2::decode(&mut &node[..])?;
+-                    trace!(
+-                        target: "trie::parallel_sparse",
+-                        ?remaining_child_path,
+-                        ?decoded,
+-                        ?tree_mask,
+-                        ?hash_mask,
+-                        "Revealing remaining blinded branch child"
+-                    );
+-                    let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
+-                    remaining_child_subtrie.reveal_node(*remaining_child_path, &decoded, masks)?;
+-                    (
+-                        remaining_child_subtrie.nodes.get(remaining_child_path).unwrap().clone(),
+-                        masks,
+-                    )
+-                } else {
++        let (remaining_child_node, remaining_child_masks) =
++            match remaining_child_subtrie.nodes.get(remaining_child_path).unwrap() {
++                SparseNode::Hash(_) => {
+                     return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
+                         path: *remaining_child_path,
+                     }
+                     .into())
+                 }
+-            }
+-            // The node is already revealed so we don't need to return its masks here, as they don't
+-            // need to be inserted.
+-            node => (node.clone(), None),
+-        };
++                // The node is already revealed so we don't need to return its masks here, as they
++                // don't need to be inserted.
++                node => (node.clone(), None),
++            };
++
++        let _ = full_path;
+ 
+         if let Some(masks) = remaining_child_masks {
+             self.branch_node_masks.insert(*remaining_child_path, masks);
+
+────────────────────────────────────────────────────────────────────────────────
+FUNCTION: update_leaf
+────────────────────────────────────────────────────────────────────────────────
+--- old/update_leaf
++++ new/update_leaf
+@@ -1,9 +1,4 @@
+-    fn update_leaf<P: TrieNodeProvider>(
+-        &mut self,
+-        full_path: Nibbles,
+-        value: Vec<u8>,
+-        _provider: P,
+-    ) -> SparseTrieResult<()> {
++    fn update_leaf(&mut self, full_path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
+         debug_assert_eq!(
+             full_path.len(),
+             B256::len_bytes() * 2,
+
+────────────────────────────────────────────────────────────────────────────────
+FUNCTION: update_leaves
+────────────────────────────────────────────────────────────────────────────────
+--- old/update_leaves
++++ new/update_leaves
+@@ -3,7 +3,7 @@
+         updates: &mut alloy_primitives::map::B256Map<crate::LeafUpdate>,
+         mut proof_required_fn: impl FnMut(B256, u8),
+     ) -> SparseTrieResult<()> {
+-        use crate::{provider::NoRevealProvider, LeafUpdate};
++        use crate::LeafUpdate;
+ 
+         #[cfg(feature = "trie-debug")]
+         let recorded_updates: Vec<_> =
+@@ -23,7 +23,7 @@
+                     if value.is_empty() {
+                         // Removal: remove_leaf with NoRevealProvider is atomic - returns a
+                         // retriable error before any mutations (via pre_validate_reveal_chain).
+-                        match self.remove_leaf(&full_path, NoRevealProvider) {
++                        match self.remove_leaf(&full_path) {
+                             Ok(()) => {}
+                             Err(e) => {
+                                 if let Some(path) = Self::get_retriable_path(&e) {
+@@ -40,8 +40,7 @@
+                         }
+                     } else {
+                         // Update/insert: update_leaf is atomic - cleans up on error.
+-                        if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider)
+-                        {
++                        if let Err(e) = self.update_leaf(full_path, value.clone()) {
+                             if let Some(path) = Self::get_retriable_path(&e) {
+                                 let (target_key, min_len) =
+                                     Self::proof_target_for_path(key, &full_path, &path);
+
+
+================================================================================
+OTHER FILES (straightforward diffs)
+================================================================================
+
+diff --git a/crates/trie/sparse/src/state.rs b/crates/trie/sparse/src/state.rs
+index 20c6769664..8b95b13709 100644
+--- a/crates/trie/sparse/src/state.rs
++++ b/crates/trie/sparse/src/state.rs
+@@ -12,13 +12,12 @@ use alloy_primitives::{
+ };
+ use alloy_rlp::{Decodable, Encodable};
+ use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
+-use reth_primitives_traits::Account;
+ #[cfg(feature = "std")]
+ use reth_primitives_traits::FastInstant as Instant;
+ use reth_trie_common::{
+     updates::{StorageTrieUpdates, TrieUpdates},
+-    BranchNodeMasks, DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount,
+-    TrieNodeV2, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
++    BranchNodeMasks, DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieNodeV2,
++    TRIE_ACCOUNT_RLP_MAX_SIZE,
+ };
+ #[cfg(feature = "std")]
+ use tracing::debug;
+@@ -645,162 +644,6 @@ where
+             }
+         })
+     }
+-
+-    /// Update the account leaf node.
+-    pub fn update_account_leaf(
+-        &mut self,
+-        path: Nibbles,
+-        value: Vec<u8>,
+-        provider_factory: impl TrieNodeProviderFactory,
+-    ) -> SparseStateTrieResult<()> {
+-        if !self.revealed_account_paths.contains(&path) {
+-            self.revealed_account_paths.insert(path);
+-        }
+-
+-        let provider = provider_factory.account_node_provider();
+-        self.state.update_leaf(path, value, provider)?;
+-        Ok(())
+-    }
+-
+-    /// Update the leaf node of a revealed storage trie at the provided address.
+-    pub fn update_storage_leaf(
+-        &mut self,
+-        address: B256,
+-        slot: Nibbles,
+-        value: Vec<u8>,
+-        provider_factory: impl TrieNodeProviderFactory,
+-    ) -> SparseStateTrieResult<()> {
+-        let provider = provider_factory.storage_node_provider(address);
+-        self.storage
+-            .tries
+-            .get_mut(&address)
+-            .ok_or(SparseTrieErrorKind::Blind)?
+-            .update_leaf(slot, value, provider)?;
+-        self.storage.get_revealed_paths_mut(address).insert(slot);
+-        Ok(())
+-    }
+-
+-    /// Update or remove trie account based on new account info. This method will either recompute
+-    /// the storage root based on update storage trie or look it up from existing leaf value.
+-    ///
+-    /// Returns false if the new account info and storage trie are empty, indicating the account
+-    /// leaf should be removed.
+-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
+-    pub fn update_account(
+-        &mut self,
+-        address: B256,
+-        account: Account,
+-        provider_factory: impl TrieNodeProviderFactory,
+-    ) -> SparseStateTrieResult<bool> {
+-        let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
+-            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
+-            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
+-        } else if self.is_account_revealed(address) {
+-            trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
+-            // The account was revealed, either...
+-            if let Some(value) = self.get_account_value(&address) {
+-                // ..it exists and we should take its current storage root or...
+-                TrieAccount::decode(&mut &value[..])?.storage_root
+-            } else {
+-                // ...the account is newly created and the storage trie is empty.
+-                EMPTY_ROOT_HASH
+-            }
+-        } else {
+-            return Err(SparseTrieErrorKind::Blind.into())
+-        };
+-
+-        if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
+-            return Ok(false);
+-        }
+-
+-        trace!(target: "trie::sparse", ?address, "Updating account");
+-        let nibbles = Nibbles::unpack(address);
+-        self.account_rlp_buf.clear();
+-        account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
+-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+-
+-        Ok(true)
+-    }
+-
+-    /// Update the storage root of a revealed account.
+-    ///
+-    /// If the account doesn't exist in the trie, the function is a no-op.
+-    ///
+-    /// Returns false if the new storage root is empty, and the account info was already empty,
+-    /// indicating the account leaf should be removed.
+-    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
+-    pub fn update_account_storage_root(
+-        &mut self,
+-        address: B256,
+-        provider_factory: impl TrieNodeProviderFactory,
+-    ) -> SparseStateTrieResult<bool> {
+-        if !self.is_account_revealed(address) {
+-            return Err(SparseTrieErrorKind::Blind.into())
+-        }
+-
+-        // Nothing to update if the account doesn't exist in the trie.
+-        let Some(mut trie_account) = self
+-            .get_account_value(&address)
+-            .map(|v| TrieAccount::decode(&mut &v[..]))
+-            .transpose()?
+-        else {
+-            trace!(target: "trie::sparse", ?address, "Account not found in trie, skipping storage root update");
+-            return Ok(true)
+-        };
+-
+-        // Calculate the new storage root. If the storage trie doesn't exist, the storage root will
+-        // be empty.
+-        let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
+-            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
+-            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
+-        } else {
+-            EMPTY_ROOT_HASH
+-        };
+-
+-        // Update the account with the new storage root.
+-        trie_account.storage_root = storage_root;
+-
+-        // If the account is empty, indicate that it should be removed.
+-        if trie_account == TrieAccount::default() {
+-            return Ok(false)
+-        }
+-
+-        // Otherwise, update the account leaf.
+-        trace!(target: "trie::sparse", ?address, "Updating account with the new storage root");
+-        let nibbles = Nibbles::unpack(address);
+-        self.account_rlp_buf.clear();
+-        trie_account.encode(&mut self.account_rlp_buf);
+-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+-
+-        Ok(true)
+-    }
+-
+-    /// Remove the account leaf node.
+-    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
+-    pub fn remove_account_leaf(
+-        &mut self,
+-        path: &Nibbles,
+-        provider_factory: impl TrieNodeProviderFactory,
+-    ) -> SparseStateTrieResult<()> {
+-        let provider = provider_factory.account_node_provider();
+-        self.state.remove_leaf(path, provider)?;
+-        Ok(())
+-    }
+-
+-    /// Update the leaf node of a storage trie at the provided address.
+-    pub fn remove_storage_leaf(
+-        &mut self,
+-        address: B256,
+-        slot: &Nibbles,
+-        provider_factory: impl TrieNodeProviderFactory,
+-    ) -> SparseStateTrieResult<()> {
+-        let storage_trie =
+-            self.storage.tries.get_mut(&address).ok_or(SparseTrieErrorKind::Blind)?;
+-
+-        let provider = provider_factory.storage_node_provider(address);
+-        storage_trie.remove_leaf(slot, provider)?;
+-        Ok(())
+-    }
+ }
+ 
+ impl<A, S> SparseStateTrie<A, S>
+@@ -1057,14 +900,6 @@ impl<S: SparseTrieTrait> StorageTries<S> {
+ }
+ 
+ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
+-    /// Returns the set of already revealed trie node paths for an account's storage, creating the
+-    /// set if it didn't previously exist.
+-    fn get_revealed_paths_mut(&mut self, account: B256) -> &mut HashSet<Nibbles> {
+-        self.revealed_paths
+-            .entry(account)
+-            .or_insert_with(|| self.cleared_revealed_paths.pop().unwrap_or_default())
+-    }
+-
+     /// Returns the `RevealableSparseTrie` and the set of already revealed trie node paths for an
+     /// account's storage, creating them if they didn't previously exist.
+     fn get_trie_and_revealed_paths_mut(
+@@ -1306,10 +1141,12 @@ fn filter_revealed_v2_proof_nodes(
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+-    use crate::{provider::DefaultTrieNodeProviderFactory, LeafLookup, ParallelSparseTrie};
++    use crate::{
++        provider::DefaultTrieNodeProviderFactory, LeafLookup, LeafUpdate, ParallelSparseTrie,
++    };
+     use alloy_primitives::{
+         b256,
+-        map::{HashMap, HashSet},
++        map::{B256Map, HashMap, HashSet},
+         U256,
+     };
+     use arbitrary::Arbitrary;
+@@ -1319,7 +1156,7 @@ mod tests {
+     use reth_trie_common::{
+         proof::{ProofNodes, ProofRetainer},
+         BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
+-        TrieMask,
++        TrieAccount, TrieMask,
+     };
+ 
+     /// Create a leaf key (suffix) with given nibbles padded with zeros to reach `total_len`.
+@@ -1332,7 +1169,6 @@ mod tests {
+ 
+     #[test]
+     fn reveal_account_path_twice() {
+-        let provider_factory = DefaultTrieNodeProviderFactory;
+         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+ 
+         // Full 64-nibble paths
+@@ -1381,7 +1217,10 @@ mod tests {
+ 
+         // Remove the leaf node and check that the state trie does not contain the leaf node and
+         // value
+-        sparse.remove_account_leaf(&full_path_0, &provider_factory).unwrap();
++        let key_0 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
++        let mut updates = B256Map::default();
++        updates.insert(key_0, LeafUpdate::Changed(Vec::new()));
++        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
+         assert!(matches!(
+             sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
+             Ok(LeafLookup::NonExistent)
+@@ -1400,7 +1239,6 @@ mod tests {
+ 
+     #[test]
+     fn reveal_storage_path_twice() {
+-        let provider_factory = DefaultTrieNodeProviderFactory;
+         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+ 
+         // Full 64-nibble path
+@@ -1454,7 +1292,14 @@ mod tests {
+ 
+         // Remove the leaf node and check that the storage trie does not contain the leaf node and
+         // value
+-        sparse.remove_storage_leaf(B256::ZERO, &full_path_0, &provider_factory).unwrap();
++        let key_0 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
++        let mut updates = B256Map::default();
++        updates.insert(key_0, LeafUpdate::Changed(Vec::new()));
++        sparse
++            .storage_trie_mut(&B256::ZERO)
++            .unwrap()
++            .update_leaves(&mut updates, |_, _| {})
++            .unwrap();
+         assert!(matches!(
+             sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
+             Ok(LeafLookup::NonExistent)
+@@ -1481,7 +1326,6 @@ mod tests {
+ 
+     #[test]
+     fn reveal_v2_proof_nodes() {
+-        let provider_factory = DefaultTrieNodeProviderFactory;
+         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+ 
+         // Full 64-nibble path
+@@ -1529,7 +1373,10 @@ mod tests {
+         );
+ 
+         // Remove the leaf node
+-        sparse.remove_account_leaf(&full_path_0, &provider_factory).unwrap();
++        let key_0 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
++        let mut updates = B256Map::default();
++        updates.insert(key_0, LeafUpdate::Changed(Vec::new()));
++        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
+         assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
+ 
+         // Reveal again - should skip already revealed paths
+@@ -1539,7 +1386,6 @@ mod tests {
+ 
+     #[test]
+     fn reveal_storage_v2_proof_nodes() {
+-        let provider_factory = DefaultTrieNodeProviderFactory;
+         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+ 
+         // Full 64-nibble path
+@@ -1579,7 +1425,14 @@ mod tests {
+         );
+ 
+         // Remove the leaf node
+-        sparse.remove_storage_leaf(B256::ZERO, &full_path_0, &provider_factory).unwrap();
++        let key_0 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
++        let mut updates = B256Map::default();
++        updates.insert(key_0, LeafUpdate::Changed(Vec::new()));
++        sparse
++            .storage_trie_mut(&B256::ZERO)
++            .unwrap()
++            .update_leaves(&mut updates, |_, _| {})
++            .unwrap();
+         assert!(sparse
+             .storage_trie_ref(&B256::ZERO)
+             .unwrap()
+@@ -1612,7 +1465,6 @@ mod tests {
+         let slot_path_2 = Nibbles::unpack(slot_2);
+         let value_2 = U256::from(rng.random::<u64>());
+         let slot_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+-        let slot_path_3 = Nibbles::unpack(slot_3);
+         let value_3 = U256::from(rng.random::<u64>());
+ 
+         let mut storage_hash_builder = HashBuilder::default()
+@@ -1690,44 +1542,30 @@ mod tests {
+         assert_eq!(sparse.root(&provider_factory).unwrap(), root);
+ 
+         let address_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+-        let address_path_3 = Nibbles::unpack(address_3);
+         let account_3 = Account { nonce: account_1.nonce + 1, ..account_1 };
+         let trie_account_3 = account_3.into_trie_account(EMPTY_ROOT_HASH);
+ 
+-        sparse
+-            .update_account_leaf(
+-                address_path_3,
+-                alloy_rlp::encode(trie_account_3),
+-                &provider_factory,
+-            )
+-            .unwrap();
++        let mut updates = B256Map::default();
++        updates.insert(address_3, LeafUpdate::Changed(alloy_rlp::encode(trie_account_3)));
++        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
+ 
++        let mut updates = B256Map::default();
++        updates.insert(slot_3, LeafUpdate::Changed(alloy_rlp::encode(value_3)));
+         sparse
+-            .update_storage_leaf(
+-                address_1,
+-                slot_path_3,
+-                alloy_rlp::encode(value_3),
+-                &provider_factory,
+-            )
++            .storage_trie_mut(&address_1)
++            .unwrap()
++            .update_leaves(&mut updates, |_, _| {})
+             .unwrap();
+         trie_account_1.storage_root = sparse.storage_root(&address_1).unwrap();
+-        sparse
+-            .update_account_leaf(
+-                address_path_1,
+-                alloy_rlp::encode(trie_account_1),
+-                &provider_factory,
+-            )
+-            .unwrap();
++        let mut updates = B256Map::default();
++        updates.insert(address_1, LeafUpdate::Changed(alloy_rlp::encode(trie_account_1)));
++        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
+ 
+         sparse.wipe_storage(address_2).unwrap();
+         trie_account_2.storage_root = sparse.storage_root(&address_2).unwrap();
+-        sparse
+-            .update_account_leaf(
+-                address_path_2,
+-                alloy_rlp::encode(trie_account_2),
+-                &provider_factory,
+-            )
+-            .unwrap();
++        let mut updates = B256Map::default();
++        updates.insert(address_2, LeafUpdate::Changed(alloy_rlp::encode(trie_account_2)));
++        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
+ 
+         sparse.root(&provider_factory).unwrap();
+ 
+diff --git a/crates/trie/sparse/src/traits.rs b/crates/trie/sparse/src/traits.rs
+index d24a87a345..680e276327 100644
+--- a/crates/trie/sparse/src/traits.rs
++++ b/crates/trie/sparse/src/traits.rs
+@@ -13,7 +13,6 @@ use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2};
+ 
+ #[cfg(feature = "trie-debug")]
+ use crate::debug_recorder::TrieDebugRecorder;
+-use crate::provider::TrieNodeProvider;
+ 
+ /// Describes an update to a leaf in the sparse trie.
+ #[derive(Debug, Clone, PartialEq, Eq)]
+@@ -140,46 +139,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
+     /// each node with [`TrieNodeV2::EmptyRoot`] to avoid cloning.
+     fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()>;
+ 
+-    /// Updates the value of a leaf node at the specified path.
+-    ///
+-    /// If the leaf doesn't exist, it will be created.
+-    /// If it does exist, its value will be updated.
+-    ///
+-    /// # Arguments
+-    ///
+-    /// * `full_path` - The full path to the leaf
+-    /// * `value` - The new value for the leaf
+-    /// * `provider` - The trie provider for resolving missing nodes
+-    ///
+-    /// # Returns
+-    ///
+-    /// `Ok(())` if successful, or an error if the update failed.
+-    fn update_leaf<P: TrieNodeProvider>(
+-        &mut self,
+-        full_path: Nibbles,
+-        value: Vec<u8>,
+-        provider: P,
+-    ) -> SparseTrieResult<()>;
+-
+-    /// Removes a leaf node at the specified path.
+-    ///
+-    /// This will also handle collapsing the trie structure as needed
+-    /// (e.g., removing branch nodes that become unnecessary).
+-    ///
+-    /// # Arguments
+-    ///
+-    /// * `full_path` - The full path to the leaf to remove
+-    /// * `provider` - The trie node provider for resolving missing nodes
+-    ///
+-    /// # Returns
+-    ///
+-    /// `Ok(())` if successful, or an error if the removal failed.
+-    fn remove_leaf<P: TrieNodeProvider>(
+-        &mut self,
+-        full_path: &Nibbles,
+-        provider: P,
+-    ) -> SparseTrieResult<()>;
+-
+     /// Calculates and returns the root hash of the trie.
+     ///
+     /// This processes any dirty nodes by updating their RLP encodings
+diff --git a/crates/trie/sparse/src/trie.rs b/crates/trie/sparse/src/trie.rs
+index 95277e06b5..84a6fbc271 100644
+--- a/crates/trie/sparse/src/trie.rs
++++ b/crates/trie/sparse/src/trie.rs
+@@ -1,12 +1,8 @@
+-use crate::{
+-    provider::TrieNodeProvider, LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait,
+-    SparseTrieUpdates,
+-};
+-use alloc::{borrow::Cow, boxed::Box, vec::Vec};
++use crate::{LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait, SparseTrieUpdates};
++use alloc::{borrow::Cow, boxed::Box};
+ use alloy_primitives::{map::B256Map, B256};
+ use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
+ use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNode, TrieNodeV2};
+-use tracing::instrument;
+ 
+ /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
+ /// unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
+@@ -202,39 +198,6 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
+         };
+     }
+ 
+-    /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
+-    ///
+-    /// # Errors
+-    ///
+-    /// Returns an error if the trie is still blind, or if the update fails.
+-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
+-    pub fn update_leaf(
+-        &mut self,
+-        path: Nibbles,
+-        value: Vec<u8>,
+-        provider: impl TrieNodeProvider,
+-    ) -> SparseTrieResult<()> {
+-        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
+-        revealed.update_leaf(path, value, provider)?;
+-        Ok(())
+-    }
+-
+-    /// Removes a leaf node at the specified key path.
+-    ///
+-    /// # Errors
+-    ///
+-    /// Returns an error if the trie is still blind, or if the leaf cannot be removed
+-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
+-    pub fn remove_leaf(
+-        &mut self,
+-        path: &Nibbles,
+-        provider: impl TrieNodeProvider,
+-    ) -> SparseTrieResult<()> {
+-        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
+-        revealed.remove_leaf(path, provider)?;
+-        Ok(())
+-    }
+-
+     /// Shrinks the capacity of the sparse trie's node storage.
+     /// Works for both revealed and blind tries with allocated storage.
+     pub fn shrink_nodes_to(&mut self, size: usize) {
+diff --git a/crates/trie/trie/src/witness.rs b/crates/trie/trie/src/witness.rs
+index 5d7050a7bc..3bc96ac002 100644
+--- a/crates/trie/trie/src/witness.rs
++++ b/crates/trie/trie/src/witness.rs
+@@ -1,13 +1,13 @@
+ use crate::{
+     hashed_cursor::{HashedCursor, HashedCursorFactory},
+     prefix_set::TriePrefixSetsMut,
+-    proof::{Proof, ProofTrieNodeProviderFactory},
++    proof::Proof,
+     trie_cursor::TrieCursorFactory,
+ };
+ use alloy_rlp::EMPTY_STRING_CODE;
+ use alloy_trie::EMPTY_ROOT_HASH;
+ use reth_trie_common::HashedPostState;
+-use reth_trie_sparse::SparseTrie;
++use reth_trie_sparse::{LeafUpdate, SparseTrie};
+ 
+ use alloy_primitives::{
+     keccak256,
+@@ -16,15 +16,10 @@ use alloy_primitives::{
+ };
+ use itertools::Itertools;
+ use reth_execution_errors::{
+-    SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind, StateProofError,
+-    TrieWitnessError,
++    SparseStateTrieErrorKind, SparseTrieErrorKind, StateProofError, TrieWitnessError,
+ };
+ use reth_trie_common::{MultiProofTargets, Nibbles};
+-use reth_trie_sparse::{
+-    provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
+-    SparseStateTrie,
+-};
+-use std::sync::mpsc;
++use reth_trie_sparse::SparseStateTrie;
+ 
+ /// State transition witness for the trie.
+ #[derive(Debug)]
+@@ -146,11 +141,6 @@ where
+             }
+         }
+ 
+-        let (tx, rx) = mpsc::channel();
+-        let blinded_provider_factory = WitnessTrieNodeProviderFactory::new(
+-            ProofTrieNodeProviderFactory::new(self.trie_cursor_factory, self.hashed_cursor_factory),
+-            tx,
+-        );
+         let mut sparse_trie = SparseStateTrie::new();
+         sparse_trie.reveal_multiproof(multiproof)?;
+ 
+@@ -159,7 +149,6 @@ where
+             proof_targets.into_iter().sorted_unstable_by_key(|(ha, _)| *ha)
+         {
+             // Update storage trie first.
+-            let provider = blinded_provider_factory.storage_node_provider(hashed_address);
+             let storage = state.storages.get(&hashed_address);
+             let storage_trie = sparse_trie.storage_trie_mut(&hashed_address).ok_or(
+                 SparseStateTrieErrorKind::SparseStorageTrie(
+@@ -167,37 +156,57 @@ where
+                     SparseTrieErrorKind::Blind,
+                 ),
+             )?;
++
++            // Collect storage updates into a B256Map for batch update.
++            let mut storage_updates = B256Map::default();
+             for hashed_slot in hashed_slots.into_iter().sorted_unstable() {
+-                let storage_nibbles = Nibbles::unpack(hashed_slot);
+                 let maybe_leaf_value = storage
+                     .and_then(|s| s.storage.get(&hashed_slot))
+                     .filter(|v| !v.is_zero())
+                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
+ 
+-                if let Some(value) = maybe_leaf_value {
+-                    storage_trie.update_leaf(storage_nibbles, value, &provider).map_err(|err| {
+-                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
+-                    })?;
+-                } else {
+-                    storage_trie.remove_leaf(&storage_nibbles, &provider).map_err(|err| {
+-                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
+-                    })?;
+-                }
++                let value = maybe_leaf_value.unwrap_or_default();
++                storage_updates.insert(hashed_slot, LeafUpdate::Changed(value));
+             }
+ 
++            storage_trie.update_leaves(&mut storage_updates, |_, _| {}).map_err(|err| {
++                SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
++            })?;
++
+             let account = state
+                 .accounts
+                 .get(&hashed_address)
+                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
+                 .unwrap_or_default();
+ 
+-            if !sparse_trie.update_account(hashed_address, account, &blinded_provider_factory)? {
+-                let nibbles = Nibbles::unpack(hashed_address);
+-                sparse_trie.remove_account_leaf(&nibbles, &blinded_provider_factory)?;
+-            }
+-
+-            while let Ok(node) = rx.try_recv() {
+-                self.witness.insert(keccak256(&node), node);
++            // Update account leaf via update_leaves.
++            let storage_root =
++                if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
++                    storage_trie.root()
++                } else {
++                    EMPTY_ROOT_HASH
++                };
++
++            if !account.is_empty() || storage_root != EMPTY_ROOT_HASH {
++                let mut account_rlp = Vec::new();
++                alloy_rlp::Encodable::encode(
++                    &account.into_trie_account(storage_root),
++                    &mut account_rlp,
++                );
++                let mut account_updates = B256Map::default();
++                account_updates.insert(hashed_address, LeafUpdate::Changed(account_rlp));
++                sparse_trie
++                    .trie_mut()
++                    .update_leaves(&mut account_updates, |_, _| {})
++                    .map_err(SparseStateTrieErrorKind::from)?;
++            } else {
++                // Account is empty - remove it.
++                let mut account_updates = B256Map::default();
++                account_updates.insert(hashed_address, LeafUpdate::Changed(Vec::new()));
++                sparse_trie
++                    .trie_mut()
++                    .update_leaves(&mut account_updates, |_, _| {})
++                    .map_err(SparseStateTrieErrorKind::from)?;
+             }
+         }
+ 
+@@ -233,63 +242,3 @@ where
+         Ok(proof_targets)
+     }
+ }
+-
+-#[derive(Debug, Clone)]
+-struct WitnessTrieNodeProviderFactory<F> {
+-    /// Trie node provider factory.
+-    provider_factory: F,
+-    /// Sender for forwarding fetched trie node.
+-    tx: mpsc::Sender<Bytes>,
+-}
+-
+-impl<F> WitnessTrieNodeProviderFactory<F> {
+-    const fn new(provider_factory: F, tx: mpsc::Sender<Bytes>) -> Self {
+-        Self { provider_factory, tx }
+-    }
+-}
+-
+-impl<F> TrieNodeProviderFactory for WitnessTrieNodeProviderFactory<F>
+-where
+-    F: TrieNodeProviderFactory,
+-    F::AccountNodeProvider: TrieNodeProvider,
+-    F::StorageNodeProvider: TrieNodeProvider,
+-{
+-    type AccountNodeProvider = WitnessTrieNodeProvider<F::AccountNodeProvider>;
+-    type StorageNodeProvider = WitnessTrieNodeProvider<F::StorageNodeProvider>;
+-
+-    fn account_node_provider(&self) -> Self::AccountNodeProvider {
+-        let provider = self.provider_factory.account_node_provider();
+-        WitnessTrieNodeProvider::new(provider, self.tx.clone())
+-    }
+-
+-    fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider {
+-        let provider = self.provider_factory.storage_node_provider(account);
+-        WitnessTrieNodeProvider::new(provider, self.tx.clone())
+-    }
+-}
+-
+-#[derive(Debug)]
+-struct WitnessTrieNodeProvider<P> {
+-    /// Proof-based blinded.
+-    provider: P,
+-    /// Sender for forwarding fetched blinded node.
+-    tx: mpsc::Sender<Bytes>,
+-}
+-
+-impl<P> WitnessTrieNodeProvider<P> {
+-    const fn new(provider: P, tx: mpsc::Sender<Bytes>) -> Self {
+-        Self { provider, tx }
+-    }
+-}
+-
+-impl<P: TrieNodeProvider> TrieNodeProvider for WitnessTrieNodeProvider<P> {
+-    fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+-        let maybe_node = self.provider.trie_node(path)?;
+-        if let Some(node) = &maybe_node {
+-            self.tx
+-                .send(node.node.clone())
+-                .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
+-        }
+-        Ok(maybe_node)
+-    }
+-}
