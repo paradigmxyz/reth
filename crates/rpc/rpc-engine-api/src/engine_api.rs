@@ -33,7 +33,7 @@ use reth_payload_primitives::{
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
-use reth_tasks::TaskSpawner;
+use reth_tasks::{Runtime, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
 use std::{
     sync::Arc,
@@ -50,6 +50,31 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The upper limit for blobs in `engine_getBlobsVx`.
 const MAX_BLOB_LIMIT: usize = 128;
+
+pub trait IntoEngineTaskSpawner {
+    fn into_task_spawner(self) -> Box<dyn TaskSpawner>;
+}
+
+impl IntoEngineTaskSpawner for Box<dyn TaskSpawner> {
+    fn into_task_spawner(self) -> Box<dyn TaskSpawner> {
+        self
+    }
+}
+
+impl<T> IntoEngineTaskSpawner for Box<T>
+where
+    T: TaskSpawner + 'static,
+{
+    fn into_task_spawner(self) -> Box<dyn TaskSpawner> {
+        self
+    }
+}
+
+impl IntoEngineTaskSpawner for Runtime {
+    fn into_task_spawner(self) -> Box<dyn TaskSpawner> {
+        Box::new(self)
+    }
+}
 
 #[derive(Clone)]
 struct BalProvider {
@@ -224,7 +249,7 @@ where
         beacon_consensus: ConsensusEngineHandle<PayloadT>,
         payload_store: PayloadStore<PayloadT>,
         tx_pool: Pool,
-        task_spawner: Box<dyn TaskSpawner>,
+        task_spawner: impl IntoEngineTaskSpawner,
         client: ClientVersionV1,
         capabilities: EngineCapabilities,
         validator: Validator,
@@ -257,7 +282,7 @@ where
         beacon_consensus: ConsensusEngineHandle<PayloadT>,
         payload_store: PayloadStore<PayloadT>,
         tx_pool: Pool,
-        task_spawner: Box<dyn TaskSpawner>,
+        task_spawner: impl IntoEngineTaskSpawner,
         client: ClientVersionV1,
         capabilities: EngineCapabilities,
         validator: Validator,
@@ -290,7 +315,7 @@ where
         beacon_consensus: ConsensusEngineHandle<PayloadT>,
         payload_store: PayloadStore<PayloadT>,
         tx_pool: Pool,
-        task_spawner: Box<dyn TaskSpawner>,
+        task_spawner: impl IntoEngineTaskSpawner,
         client: ClientVersionV1,
         capabilities: EngineCapabilities,
         validator: Validator,
@@ -322,7 +347,7 @@ where
         beacon_consensus: ConsensusEngineHandle<PayloadT>,
         payload_store: PayloadStore<PayloadT>,
         tx_pool: Pool,
-        task_spawner: Box<dyn TaskSpawner>,
+        task_spawner: impl IntoEngineTaskSpawner,
         client: ClientVersionV1,
         capabilities: EngineCapabilities,
         validator: Validator,
@@ -331,6 +356,7 @@ where
         bal_store: Arc<dyn BalStore>,
         bal_cache: BalCache,
     ) -> Self {
+        let task_spawner = task_spawner.into_task_spawner();
         let is_syncing = Arc::new(move || network.is_syncing());
         let bal_provider = BalProvider::new(bal_store, bal_cache);
         let inner = Arc::new(EngineApiInner {
