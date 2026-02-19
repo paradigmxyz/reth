@@ -115,10 +115,44 @@ fn checksum_hasher() -> impl Hasher {
     FixedState::with_seed(u64::from_be_bytes(*b"RETHRETH")).build_hasher()
 }
 
-#[inline]
-fn hash_row_columns<H: Hasher>(hasher: &mut H, row: &[&[u8]]) {
-    for col_data in row.iter() {
-        hasher.write(col_data);
+/// Accumulates a checksum over key-value entries, tracking count and limit.
+struct Checksummer<H> {
+    hasher: H,
+    total: usize,
+    limit: usize,
+}
+
+impl<H: Hasher> Checksummer<H> {
+    fn new(hasher: H, limit: usize) -> Self {
+        Self { hasher, total: 0, limit }
+    }
+
+    /// Hash a row's columns (non-changeset segments). Returns `true` if the limit is reached.
+    fn write_row(&mut self, row: &[&[u8]]) -> bool {
+        for col in row {
+            self.hasher.write(col);
+        }
+        self.advance()
+    }
+
+    /// Hash a key + value as two separate writes, matching MDBX raw entry semantics.
+    /// Write boundaries matter: foldhash rotates its accumulator by `len` on each `write`.
+    fn write_entry(&mut self, key: &[u8], value: &[u8]) -> bool {
+        self.hasher.write(key);
+        self.hasher.write(value);
+        self.advance()
+    }
+
+    fn advance(&mut self) -> bool {
+        self.total += 1;
+        if self.total.is_multiple_of(PROGRESS_LOG_INTERVAL) {
+            info!("Hashed {} entries.", self.total);
+        }
+        self.total >= self.limit
+    }
+
+    fn finish(self) -> (u64, usize) {
+        (self.hasher.finish(), self.total)
     }
 }
 
@@ -141,9 +175,8 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         .ok_or_else(|| eyre::eyre!("No static files found for segment: {}", segment))?;
 
     let start_time = Instant::now();
-    let mut hasher = checksum_hasher();
-    let mut total = 0usize;
     let limit = limit.unwrap_or(usize::MAX);
+    let mut checksummer = Checksummer::new(checksum_hasher(), limit);
 
     let start_block = start_block.unwrap_or(0);
     let end_block = end_block.unwrap_or(u64::MAX);
@@ -156,8 +189,7 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         if limit == usize::MAX { None } else { Some(limit) }
     );
 
-    let mut reached_limit = false;
-    for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
+    'jars: for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
         if block_range.end() < start_block || block_range.start() > end_block {
             continue;
         }
@@ -184,9 +216,11 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
                 )
             })?;
 
+            let is_storage = segment == StaticFileSegment::StorageChangeSets;
+
             for (offset_index, offset) in offsets.iter().enumerate() {
                 let block_number = block_range.start() + offset_index as u64;
-                let include_block = block_number >= start_block && block_number <= end_block;
+                let include = block_number >= start_block && block_number <= end_block;
 
                 for _ in 0..offset.num_changes() {
                     let row = cursor.next_row()?.ok_or_else(|| {
@@ -197,31 +231,35 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
                         )
                     })?;
 
-                    if include_block {
-                        // Match MDBX changeset checksum semantics: hash raw key + raw value.
-                        // For static files, rows already contain the value bytes.
-                        hasher.write(&block_number.to_be_bytes());
-                        hash_row_columns(&mut hasher, &row);
-
-                        total += 1;
-
-                        if total.is_multiple_of(PROGRESS_LOG_INTERVAL) {
-                            info!("Hashed {total} entries.");
-                        }
-
-                        if total >= limit {
-                            reached_limit = true;
-                            break;
-                        }
+                    if !include {
+                        continue;
                     }
-                }
 
-                if reached_limit {
-                    break;
+                    // Reconstruct MDBX key/value write boundaries. foldhash rotates
+                    // its accumulator by `len` on each write(), so boundaries must
+                    // match exactly.
+                    let done = if is_storage {
+                        // StorageChangeSets: MDBX key = BlockNumberAddress (28B),
+                        // value = compact StorageEntry. Column 0 is compact
+                        // StorageBeforeTx = [20B address][32B key][compact U256].
+                        let col = row[0];
+                        let mut key_buf = [0u8; 28];
+                        key_buf[..8].copy_from_slice(&block_number.to_be_bytes());
+                        key_buf[8..].copy_from_slice(&col[..20]);
+                        checksummer.write_entry(&key_buf, &col[20..])
+                    } else {
+                        // AccountChangeSets: MDBX key = BlockNumber (8B),
+                        // value = compact AccountBeforeTx (= column 0).
+                        checksummer.write_entry(&block_number.to_be_bytes(), row[0])
+                    };
+
+                    if done {
+                        break 'jars;
+                    }
                 }
             }
 
-            if !reached_limit && cursor.next_row()?.is_some() {
+            if cursor.next_row()?.is_some() {
                 return Err(eyre::eyre!(
                     "Changeset offsets do not cover all rows for {} at range {}",
                     segment,
@@ -230,17 +268,8 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
             }
         } else {
             while let Some(row) = cursor.next_row()? {
-                hash_row_columns(&mut hasher, &row);
-
-                total += 1;
-
-                if total.is_multiple_of(PROGRESS_LOG_INTERVAL) {
-                    info!("Hashed {total} entries.");
-                }
-
-                if total >= limit {
-                    reached_limit = true;
-                    break;
+                if checksummer.write_row(&row) {
+                    break 'jars;
                 }
             }
         }
@@ -248,13 +277,9 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         // Explicitly drop provider before removing from cache to avoid deadlock
         drop(jar_provider);
         static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
-
-        if reached_limit {
-            break;
-        }
     }
 
-    let checksum = hasher.finish();
+    let (checksum, total) = checksummer.finish();
     let elapsed = start_time.elapsed();
 
     info!(
