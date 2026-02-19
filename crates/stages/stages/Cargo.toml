@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec = { workspace = true, optional = true }
+reth-chainspec.workspace = true
 reth-codecs.workspace = true
 reth-config.workspace = true
 reth-consensus.workspace = true
@@ -102,14 +102,13 @@ criterion = { workspace = true, features = ["async_tokio"] }
 
 [features]
 test-utils = [
-    "dep:reth-chainspec",
     "reth-network-p2p/test-utils",
     "reth-db/test-utils",
     "reth-provider/test-utils",
     "reth-stages-api/test-utils",
     "dep:reth-testing-utils",
     "dep:tempfile",
-    "reth-chainspec?/test-utils",
+    "reth-chainspec/test-utils",
     "reth-consensus/test-utils",
     "reth-evm/test-utils",
     "reth-downloaders/test-utils",

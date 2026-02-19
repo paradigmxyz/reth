@@ -9,6 +9,7 @@ use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
@@ -287,7 +288,8 @@ where
         > + StatsReader
         + BlockHashReader
         + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
-        + StorageSettingsCache,
+        + StorageSettingsCache
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -492,9 +494,8 @@ where
                 let start_header = provider
                     .header_by_number(start_block)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(start_block.into()))?;
-                let is_pre_cancun = start_header.excess_blob_gas().is_none();
 
-                if is_pre_cancun {
+                if !provider.chain_spec().is_cancun_active_at_timestamp(start_header.timestamp()) {
                     slot_preimages::inject_plain_wipe_slots(path, provider, &mut state)?;
                 } else if path.exists() {
                     // Post-Cancun: no more self-destructs, preimage db is no longer needed.
