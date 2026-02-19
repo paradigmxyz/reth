@@ -1,11 +1,14 @@
 //! Storage abstractions and implementations for EIP-7928 Block Access Lists (BALs).
 
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
-use std::io;
+use std::{fmt::Debug, io};
 
 pub mod disk;
 mod noop;
-pub use disk::{DiskFileBalStore, DiskFileBalStoreConfig, DEFAULT_MAX_BAL_STORE_ENTRIES};
+pub use disk::{
+    DiskFileBalStore, DiskFileBalStoreConfig, DEFAULT_MAX_BAL_STORE_ENTRIES,
+    DEFAULT_RECENT_BAL_CACHE_ENTRIES,
+};
 pub use noop::NoopBalStore;
 
 /// A store for EIP-7928 Block Access Lists (BALs).
@@ -13,7 +16,7 @@ pub use noop::NoopBalStore;
 /// The store is keyed by block hash and maintains a block-number index for range queries.
 /// Implementations should preserve contiguous-range semantics:
 /// queries by range stop at the first missing block.
-pub trait BalStore: Send + Sync + 'static {
+pub trait BalStore: Debug + Send + Sync + 'static {
     /// Inserts a BAL for the given block hash and number.
     fn insert(
         &self,

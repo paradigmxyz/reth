@@ -230,8 +230,9 @@ where
         validator: Validator,
         accept_execution_requests_hash: bool,
         network: impl NetworkInfo + 'static,
+        bal_store: Arc<dyn BalStore>,
     ) -> Self {
-        Self::with_bal_cache(
+        Self::with_bal_store_and_cache(
             provider,
             chain_spec,
             beacon_consensus,
@@ -243,6 +244,7 @@ where
             validator,
             accept_execution_requests_hash,
             network,
+            bal_store,
             BalCache::new(),
         )
     }
@@ -296,7 +298,7 @@ where
         network: impl NetworkInfo + 'static,
         bal_store: Arc<dyn BalStore>,
     ) -> Self {
-        Self::with_bal_store_and_cache(
+        Self::new(
             provider,
             chain_spec,
             beacon_consensus,
@@ -309,7 +311,6 @@ where
             accept_execution_requests_hash,
             network,
             bal_store,
-            BalCache::new(),
         )
     }
 
@@ -1688,6 +1689,7 @@ mod tests {
             EthereumEngineValidator::new(chain_spec.clone()),
             false,
             NoopNetwork::default(),
+            Arc::new(crate::bal_store::NoopBalStore),
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)
@@ -1793,6 +1795,7 @@ mod tests {
             EthereumEngineValidator::new(chain_spec),
             false,
             TestNetworkInfo { syncing: true },
+            Arc::new(crate::bal_store::NoopBalStore),
         );
 
         let res = api.get_blobs_v3_metered(vec![B256::ZERO]);

@@ -16,7 +16,7 @@ use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
     RpcModuleBuilder, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
 };
-use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
+use reth_rpc_engine_api::{bal_store::NoopBalStore, capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_layer::JwtSecret;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TokioTaskExecutor;
@@ -55,6 +55,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         EthereumEngineValidator::new(MAINNET.clone()),
         false,
         NoopNetwork::default(),
+        std::sync::Arc::new(NoopBalStore),
     );
     let module = AuthRpcModule::new(engine_api);
     module.start_server(config).await.unwrap()

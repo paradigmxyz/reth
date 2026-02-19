@@ -1398,7 +1398,7 @@ where
             commit: version_metadata().vergen_git_sha.to_string(),
         };
 
-        Ok(EngineApi::with_bal_store(
+        Ok(EngineApi::new(
             ctx.node.provider().clone(),
             ctx.config.chain.clone(),
             ctx.beacon_engine_handle.clone(),

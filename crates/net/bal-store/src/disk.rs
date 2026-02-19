@@ -2,7 +2,7 @@
 
 use crate::{BalStore, BalStoreError};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use std::{
     collections::{BTreeMap, HashMap},
     fs, io,
@@ -15,17 +15,24 @@ use tracing::debug;
 ///
 /// Roughly aligns with the weak subjectivity period target discussed in EIP-7928.
 pub const DEFAULT_MAX_BAL_STORE_ENTRIES: u32 = 113_000;
+/// Default number of recent BALs retained in memory to avoid repeated disk reads.
+pub const DEFAULT_RECENT_BAL_CACHE_ENTRIES: u32 = 1024;
 
 /// Configuration for [`DiskFileBalStore`].
 #[derive(Debug, Clone, Copy)]
 pub struct DiskFileBalStoreConfig {
     /// Maximum number of BAL entries to retain.
     pub max_entries: u32,
+    /// Number of most-recent BAL entries retained in memory.
+    pub recent_cache_entries: u32,
 }
 
 impl Default for DiskFileBalStoreConfig {
     fn default() -> Self {
-        Self { max_entries: DEFAULT_MAX_BAL_STORE_ENTRIES }
+        Self {
+            max_entries: DEFAULT_MAX_BAL_STORE_ENTRIES,
+            recent_cache_entries: DEFAULT_RECENT_BAL_CACHE_ENTRIES,
+        }
     }
 }
 
@@ -33,6 +40,12 @@ impl DiskFileBalStoreConfig {
     /// Sets the maximum retained entries.
     pub const fn with_max_entries(mut self, max_entries: u32) -> Self {
         self.max_entries = max_entries;
+        self
+    }
+
+    /// Sets the number of recent entries retained in memory.
+    pub const fn with_recent_cache_entries(mut self, recent_cache_entries: u32) -> Self {
+        self.recent_cache_entries = recent_cache_entries;
         self
     }
 }
@@ -54,12 +67,56 @@ struct IndexState {
 }
 
 #[derive(Debug)]
+struct RecentBalCache {
+    capacity: u32,
+    entries: BTreeMap<BlockNumber, (BlockHash, Bytes)>,
+}
+
+impl RecentBalCache {
+    fn new(capacity: u32) -> Self {
+        Self { capacity, entries: BTreeMap::new() }
+    }
+
+    fn insert(&mut self, block_hash: BlockHash, block_number: BlockNumber, bal: Bytes) {
+        if self.capacity == 0 {
+            return;
+        }
+
+        // Keep a single slot per hash within the recent window, then write the latest position.
+        self.remove_by_hash(block_hash);
+        self.entries.insert(block_number, (block_hash, bal));
+
+        while self.entries.len() as u32 > self.capacity {
+            let Some((&oldest_number, _)) = self.entries.first_key_value() else {
+                break;
+            };
+            self.entries.remove(&oldest_number);
+        }
+    }
+
+    fn get(&self, block_number: BlockNumber, block_hash: BlockHash) -> Option<Bytes> {
+        self.entries.get(&block_number).and_then(|(cached_hash, bal)| {
+            if *cached_hash == block_hash {
+                Some(bal.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn remove_by_hash(&mut self, block_hash: BlockHash) {
+        self.entries.retain(|_, (cached_hash, _)| *cached_hash != block_hash);
+    }
+}
+
+#[derive(Debug)]
 struct DiskFileBalStoreInner {
     root_dir: PathBuf,
     entries_dir: PathBuf,
     index_dir: PathBuf,
     max_entries: u32,
     state: Mutex<IndexState>,
+    recent_cache: RwLock<RecentBalCache>,
 }
 
 impl DiskFileBalStore {
@@ -81,6 +138,7 @@ impl DiskFileBalStore {
             index_dir,
             max_entries: opts.max_entries,
             state: Mutex::new(IndexState::default()),
+            recent_cache: RwLock::new(RecentBalCache::new(opts.recent_cache_entries)),
         };
         inner.rebuild_indexes()?;
 
@@ -208,21 +266,23 @@ impl DiskFileBalStoreInner {
         bal: Bytes,
     ) -> Result<(), BalStoreError> {
         let mut state = self.state.lock();
+        let mut removed_hashes = Vec::new();
 
         // If the hash was previously indexed at another number, move the index.
-        if let Some(old_number) = state.hash_to_block.get(&block_hash).copied() &&
-            old_number != block_number
-        {
-            state.block_to_hash.remove(&old_number);
-            self.remove_if_exists(self.index_file(old_number))?;
+        if let Some(old_number) = state.hash_to_block.get(&block_hash).copied() {
+            if old_number != block_number {
+                state.block_to_hash.remove(&old_number);
+                self.remove_if_exists(self.index_file(old_number))?;
+            }
         }
 
         // Reorg replacement: remove old hash payload at this number.
-        if let Some(old_hash) = state.block_to_hash.get(&block_number).copied() &&
-            old_hash != block_hash
-        {
-            state.hash_to_block.remove(&old_hash);
-            self.remove_if_exists(self.entry_file(old_hash))?;
+        if let Some(old_hash) = state.block_to_hash.get(&block_number).copied() {
+            if old_hash != block_hash {
+                state.hash_to_block.remove(&old_hash);
+                self.remove_if_exists(self.entry_file(old_hash))?;
+                removed_hashes.push(old_hash);
+            }
         }
 
         fs::write(self.entry_file(block_hash), bal.as_ref())?;
@@ -231,7 +291,16 @@ impl DiskFileBalStoreInner {
         state.block_to_hash.insert(block_number, block_hash);
         state.hash_to_block.insert(block_hash, block_number);
 
-        self.evict_over_capacity(&mut state)
+        self.evict_over_capacity(&mut state)?;
+        drop(state);
+
+        let mut recent_cache = self.recent_cache.write();
+        for old_hash in removed_hashes {
+            recent_cache.remove_by_hash(old_hash);
+        }
+        recent_cache.insert(block_hash, block_number, bal);
+
+        Ok(())
     }
 
     /// Returns BAL bytes for each requested hash in request order.
@@ -241,44 +310,107 @@ impl DiskFileBalStoreInner {
         &self,
         block_hashes: &[BlockHash],
     ) -> Result<Vec<Option<Bytes>>, BalStoreError> {
-        block_hashes
-            .iter()
-            .map(|hash| {
-                let path = self.entry_file(*hash);
-                match fs::read(path) {
-                    Ok(bytes) => Ok(Some(Bytes::from(bytes))),
-                    Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-                    Err(err) => Err(err.into()),
+        let block_numbers: Vec<Option<BlockNumber>> = {
+            let state = self.state.lock();
+            block_hashes.iter().map(|hash| state.hash_to_block.get(hash).copied()).collect()
+        };
+
+        let mut results = vec![None; block_hashes.len()];
+        let mut misses = Vec::new();
+
+        {
+            let recent_cache = self.recent_cache.read();
+            for (idx, hash) in block_hashes.iter().copied().enumerate() {
+                if let Some(block_number) = block_numbers[idx] {
+                    if let Some(bal) = recent_cache.get(block_number, hash) {
+                        results[idx] = Some(bal);
+                        continue;
+                    }
                 }
-            })
-            .collect()
+                misses.push((idx, hash, block_numbers[idx]));
+            }
+        }
+
+        if misses.is_empty() {
+            return Ok(results);
+        }
+
+        let mut recovered = Vec::new();
+        for (idx, hash, block_number) in misses {
+            let path = self.entry_file(hash);
+            match fs::read(path) {
+                Ok(bytes) => {
+                    let bal = Bytes::from(bytes);
+                    results[idx] = Some(bal.clone());
+                    if let Some(block_number) = block_number {
+                        recovered.push((hash, block_number, bal));
+                    }
+                }
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+
+        if !recovered.is_empty() {
+            let mut recent_cache = self.recent_cache.write();
+            for (hash, block_number, bal) in recovered {
+                recent_cache.insert(hash, block_number, bal);
+            }
+        }
+
+        Ok(results)
     }
 
     /// Returns contiguous BAL bytes for `[start, start + count)`.
     ///
     /// The method first resolves the contiguous hash sequence from the in-memory block index,
-    /// then reads payload bytes from disk and stops at the first missing payload file.
+    /// then serves from hot cache first and falls back to disk, stopping at the first missing
+    /// payload file.
     fn get_by_range(&self, start: BlockNumber, count: u64) -> Result<Vec<Bytes>, BalStoreError> {
-        let hashes: Vec<BlockHash> = {
+        let numbered_hashes: Vec<(BlockNumber, BlockHash)> = {
             let state = self.state.lock();
             let mut hashes = Vec::new();
             for number in start..start.saturating_add(count) {
                 let Some(hash) = state.block_to_hash.get(&number).copied() else {
                     break;
                 };
-                hashes.push(hash);
+                hashes.push((number, hash));
             }
             hashes
         };
 
-        let mut result = Vec::with_capacity(hashes.len());
-        for hash in hashes {
+        let mut result = Vec::with_capacity(numbered_hashes.len());
+        {
+            let recent_cache = self.recent_cache.read();
+            for (block_number, hash) in &numbered_hashes {
+                let Some(bal) = recent_cache.get(*block_number, *hash) else {
+                    break;
+                };
+                result.push(bal);
+            }
+        }
+
+        let cached_prefix_len = result.len();
+        let mut recovered = Vec::new();
+        for (block_number, hash) in numbered_hashes.into_iter().skip(cached_prefix_len) {
             match fs::read(self.entry_file(hash)) {
-                Ok(bytes) => result.push(Bytes::from(bytes)),
+                Ok(bytes) => {
+                    let bal = Bytes::from(bytes);
+                    recovered.push((hash, block_number, bal.clone()));
+                    result.push(bal);
+                }
                 Err(err) if err.kind() == io::ErrorKind::NotFound => break,
                 Err(err) => return Err(err.into()),
             }
         }
+
+        if !recovered.is_empty() {
+            let mut recent_cache = self.recent_cache.write();
+            for (hash, block_number, bal) in recovered {
+                recent_cache.insert(hash, block_number, bal);
+            }
+        }
+
         Ok(result)
     }
 
@@ -286,6 +418,7 @@ impl DiskFileBalStoreInner {
     ///
     /// Eviction removes both entry payload files and index files to keep disk and memory in sync.
     fn evict_over_capacity(&self, state: &mut IndexState) -> Result<(), BalStoreError> {
+        let mut evicted_hashes = Vec::new();
         while state.block_to_hash.len() as u32 > self.max_entries {
             let Some((&oldest_number, &oldest_hash)) = state.block_to_hash.first_key_value() else {
                 break;
@@ -293,10 +426,19 @@ impl DiskFileBalStoreInner {
 
             state.block_to_hash.remove(&oldest_number);
             state.hash_to_block.remove(&oldest_hash);
+            evicted_hashes.push(oldest_hash);
 
             self.remove_if_exists(self.entry_file(oldest_hash))?;
             self.remove_if_exists(self.index_file(oldest_number))?;
         }
+
+        if !evicted_hashes.is_empty() {
+            let mut recent_cache = self.recent_cache.write();
+            for hash in evicted_hashes {
+                recent_cache.remove_by_hash(hash);
+            }
+        }
+
         Ok(())
     }
 
@@ -335,14 +477,20 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
 
-    fn tmp_store(max_entries: u32) -> (DiskFileBalStore, tempfile::TempDir) {
+    fn tmp_store_with_config(
+        config: DiskFileBalStoreConfig,
+    ) -> (DiskFileBalStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let store = DiskFileBalStore::open(
-            dir.path(),
-            DiskFileBalStoreConfig::default().with_max_entries(max_entries),
-        )
-        .unwrap();
+        let store = DiskFileBalStore::open(dir.path(), config).unwrap();
         (store, dir)
+    }
+
+    fn tmp_store(max_entries: u32) -> (DiskFileBalStore, tempfile::TempDir) {
+        tmp_store_with_config(
+            DiskFileBalStoreConfig::default()
+                .with_max_entries(max_entries)
+                .with_recent_cache_entries(DEFAULT_RECENT_BAL_CACHE_ENTRIES),
+        )
     }
 
     #[test]
@@ -409,5 +557,27 @@ mod tests {
         let reopened = DiskFileBalStore::open(dir.path(), Default::default()).unwrap();
         let got = reopened.get_by_hashes(&[h1, h2]).unwrap();
         assert_eq!(got, vec![Some(Bytes::from_static(b"a")), Some(Bytes::from_static(b"b"))]);
+    }
+
+    #[test]
+    fn recent_cache_keeps_last_blocks() {
+        let (store, _dir) = tmp_store_with_config(
+            DiskFileBalStoreConfig::default().with_max_entries(10).with_recent_cache_entries(2),
+        );
+
+        let h1 = B256::random();
+        let h2 = B256::random();
+        let h3 = B256::random();
+
+        store.insert(h1, 1, Bytes::from_static(b"a")).unwrap();
+        store.insert(h2, 2, Bytes::from_static(b"b")).unwrap();
+        store.insert(h3, 3, Bytes::from_static(b"c")).unwrap();
+
+        fs::remove_file(store.inner.entry_file(h1)).unwrap();
+        fs::remove_file(store.inner.entry_file(h2)).unwrap();
+        fs::remove_file(store.inner.entry_file(h3)).unwrap();
+
+        let got = store.get_by_hashes(&[h1, h2, h3]).unwrap();
+        assert_eq!(got, vec![None, Some(Bytes::from_static(b"b")), Some(Bytes::from_static(b"c"))]);
     }
 }
