@@ -5250,6 +5250,101 @@ mod tests {
     }
 
     #[test]
+    fn test_save_blocks_blocks_only_batches_tx_indices_and_senders() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
+
+        let mut rng = generators::rng();
+        let mut tx_num: TxNumber = 0;
+
+        let mut expected_senders = Vec::new();
+        let mut expected_body_indices = Vec::new();
+        let mut expected_tx_blocks = Vec::new();
+        let mut expected_header_numbers = Vec::new();
+        let mut blocks = Vec::new();
+
+        for (block_number, tx_count) in [(0_u64, 2_u8), (1, 0), (2, 3)] {
+            let block = random_block(
+                &mut rng,
+                block_number,
+                BlockParams { tx_count: Some(tx_count), ..Default::default() },
+            );
+            let recovered = block.try_recover().unwrap();
+
+            let first_tx_num = tx_num;
+            let tx_count_u64 = tx_count as u64;
+            expected_body_indices
+                .push((block_number, StoredBlockBodyIndices { first_tx_num, tx_count: tx_count_u64 }));
+            expected_header_numbers.push((recovered.hash(), block_number));
+
+            if tx_count_u64 > 0 {
+                expected_tx_blocks.push((first_tx_num + tx_count_u64 - 1, block_number));
+            }
+
+            for (idx, sender) in recovered.senders_iter().copied().enumerate() {
+                expected_senders.push((first_tx_num + idx as u64, sender));
+            }
+            tx_num += tx_count_u64;
+
+            blocks.push(ExecutedBlock::new(
+                Arc::new(recovered),
+                Arc::new(BlockExecutionOutput {
+                    result: BlockExecutionResult {
+                        receipts: vec![],
+                        requests: Default::default(),
+                        gas_used: 0,
+                        blob_gas_used: 0,
+                    },
+                    state: Default::default(),
+                }),
+                ComputedTrieData::default(),
+            ));
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(blocks, SaveBlocksMode::BlocksOnly).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+
+        let got_body_indices = provider
+            .tx_ref()
+            .cursor_read::<tables::BlockBodyIndices>()
+            .unwrap()
+            .walk(None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(got_body_indices, expected_body_indices);
+
+        let got_tx_blocks = provider
+            .tx_ref()
+            .cursor_read::<tables::TransactionBlocks>()
+            .unwrap()
+            .walk(None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(got_tx_blocks, expected_tx_blocks);
+
+        let got_senders = provider
+            .tx_ref()
+            .cursor_read::<tables::TransactionSenders>()
+            .unwrap()
+            .walk(None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(got_senders, expected_senders);
+
+        let mut header_numbers_cursor = provider.tx_ref().cursor_read::<tables::HeaderNumbers>().unwrap();
+        for (hash, number) in expected_header_numbers {
+            let entry = header_numbers_cursor.seek_exact(hash).unwrap();
+            assert_eq!(entry.map(|(_, value)| value), Some(number));
+        }
+    }
+
+    #[test]
     fn test_write_and_remove_state_roundtrip_v2() {
         let factory = create_test_provider_factory();
         let storage_settings = StorageSettings::v2();
