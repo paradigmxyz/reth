@@ -1536,7 +1536,7 @@ impl<'a> RocksDBBatch<'a> {
         address: Address,
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
-        let indices: Vec<u64> = indices.into_iter().collect();
+        let mut indices: Vec<u64> = indices.into_iter().collect();
 
         if indices.is_empty() {
             return Ok(());
@@ -1551,6 +1551,16 @@ impl<'a> RocksDBBatch<'a> {
         let last_key = ShardedKey::new(address, u64::MAX);
         let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        // Make appends idempotent for restart/replay scenarios: if the last shard already contains
+        // newer indices (e.g. after a crash between RocksDB and MDBX checkpoint commit), keep only
+        // strictly newer input values.
+        if let Some(current_max) = last_shard.iter().next_back() {
+            indices.retain(|index| *index > current_max);
+            if indices.is_empty() {
+                return Ok(());
+            }
+        }
 
         last_shard.append(indices).map_err(ProviderError::other)?;
 
@@ -1598,7 +1608,7 @@ impl<'a> RocksDBBatch<'a> {
         storage_key: B256,
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
-        let indices: Vec<u64> = indices.into_iter().collect();
+        let mut indices: Vec<u64> = indices.into_iter().collect();
 
         if indices.is_empty() {
             return Ok(());
@@ -1613,6 +1623,16 @@ impl<'a> RocksDBBatch<'a> {
         let last_key = StorageShardedKey::last(address, storage_key);
         let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        // Make appends idempotent for restart/replay scenarios: if the last shard already contains
+        // newer indices (e.g. after a crash between RocksDB and MDBX checkpoint commit), keep only
+        // strictly newer input values.
+        if let Some(current_max) = last_shard.iter().next_back() {
+            indices.retain(|index| *index > current_max);
+            if indices.is_empty() {
+                return Ok(());
+            }
+        }
 
         last_shard.append(indices).map_err(ProviderError::other)?;
 
@@ -3026,6 +3046,32 @@ mod tests {
     }
 
     #[test]
+    fn test_append_account_history_shard_ignores_already_indexed_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x45; 20]);
+        let key = ShardedKey::new(address, u64::MAX);
+
+        {
+            let mut batch = provider.batch();
+            batch.append_account_history_shard(address, [10u64, 20, 30]).unwrap();
+            batch.commit().unwrap();
+        }
+
+        {
+            let mut batch = provider.batch();
+            // All values are <= current max(30), so this must be a no-op.
+            batch.append_account_history_shard(address, [15u64, 20, 30]).unwrap();
+            batch.commit().unwrap();
+        }
+
+        let values: Vec<u64> =
+            provider.get::<tables::AccountsHistory>(key).unwrap().unwrap().iter().collect();
+        assert_eq!(values, vec![10, 20, 30]);
+    }
+
+    #[test]
     fn test_storage_history_shard_split_at_boundary() {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
@@ -3100,6 +3146,33 @@ mod tests {
             provider.get::<tables::StoragesHistory>(sentinel_key).unwrap().is_some(),
             "sentinel shard should exist"
         );
+    }
+
+    #[test]
+    fn test_append_storage_history_shard_ignores_already_indexed_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x47; 20]);
+        let slot = B256::from([0x58; 32]);
+        let key = StorageShardedKey::new(address, slot, u64::MAX);
+
+        {
+            let mut batch = provider.batch();
+            batch.append_storage_history_shard(address, slot, [10u64, 20, 30]).unwrap();
+            batch.commit().unwrap();
+        }
+
+        {
+            let mut batch = provider.batch();
+            // All values are <= current max(30), so this must be a no-op.
+            batch.append_storage_history_shard(address, slot, [15u64, 20, 30]).unwrap();
+            batch.commit().unwrap();
+        }
+
+        let values: Vec<u64> =
+            provider.get::<tables::StoragesHistory>(key).unwrap().unwrap().iter().collect();
+        assert_eq!(values, vec![10, 20, 30]);
     }
 
     #[test]
