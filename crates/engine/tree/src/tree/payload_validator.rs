@@ -1022,14 +1022,10 @@ where
 
                 let seq_overlay = overlay_factory;
                 let seq_hashed_state = hashed_state.clone();
-                self.payload_processor.executor().spawn_blocking_named(
-                    "serial-root",
-                    move || {
-                        let result =
-                            Self::compute_state_root_serial(seq_overlay, &seq_hashed_state);
-                        let _ = seq_tx.send(result);
-                    },
-                );
+                self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
+                    let result = Self::compute_state_root_serial(seq_overlay, &seq_hashed_state);
+                    let _ = seq_tx.send(result);
+                });
 
                 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
 
