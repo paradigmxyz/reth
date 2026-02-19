@@ -142,9 +142,6 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
 pub trait DatabaseHashedPostState: Sized {
     /// Initializes [`HashedPostStateSorted`] from reverts. Iterates over state reverts in the
     /// specified range and aggregates them into sorted hashed state.
-    ///
-    /// Storage keys in changesets are always plain (unhashed) and are hashed via
-    /// `keccak256` for trie use. Addresses are always hashed.
     fn from_reverts(
         provider: &(impl ChangeSetReader + StorageChangeSetReader + BlockNumReader + DBProvider),
         range: impl RangeBounds<BlockNumber>,
@@ -264,8 +261,6 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
 }
 
 /// Calls [`HashedPostStateSorted::from_reverts`].
-///
-/// This is a convenience wrapper kept for backward compatibility.
 pub fn from_reverts_auto(
     provider: &(impl ChangeSetReader
           + StorageChangeSetReader

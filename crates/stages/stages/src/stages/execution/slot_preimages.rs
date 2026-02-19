@@ -1,5 +1,6 @@
 use alloy_primitives::{keccak256, B256};
 use eyre::Context;
+use rayon::slice::ParallelSliceMut;
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -30,14 +31,20 @@ struct SlotPreimages {
 impl SlotPreimages {
     /// Opens (or creates) the slot-preimage MDBX environment at the given `path`.
     ///
-    /// Uses `WriteMap` mode for performance. The geometry allows growth up to 64 GB to
-    /// accommodate chains with many unique storage keys (mapping-derived keys especially).
+    /// Uses the same environment settings as the main reth MDBX database (WriteMap mode,
+    /// matching geometry and page size).
     fn open(path: &Path) -> eyre::Result<Self> {
+        const GIGABYTE: usize = 1024 * 1024 * 1024;
+        const TERABYTE: usize = GIGABYTE * 1024;
+
         let mut builder = Environment::builder();
         builder.set_max_dbs(1);
+        let os_page_size = page_size::get().clamp(4096, 0x10000);
         builder.set_geometry(Geometry {
-            size: Some(256 * 1024..64 * 1024 * 1024 * 1024),
-            ..Default::default()
+            size: Some(0..(8 * TERABYTE)),
+            growth_step: Some(4 * GIGABYTE as isize),
+            shrink_threshold: Some(0),
+            page_size: Some(reth_libmdbx::PageSize::Set(os_page_size)),
         });
         builder.write_map();
         builder.set_flags(EnvironmentFlags {
@@ -140,7 +147,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     }
 
     // Pre-sort entries by hash key for optimal MDBX insert performance.
-    preimage_entries.sort_unstable_by_key(|(hash, _)| *hash);
+    preimage_entries.par_sort_unstable_by_key(|(hash, _)| *hash);
 
     // Lazily open the preimage store and insert entries.
     let preimages = SlotPreimages::open(slot_preimages_path)
