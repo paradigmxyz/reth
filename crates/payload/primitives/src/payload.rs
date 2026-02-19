@@ -2,7 +2,12 @@
 
 use crate::{MessageValidationKind, PayloadAttributes};
 use alloc::vec::Vec;
-use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, eip7685::Requests, BlockNumHash};
+use alloy_eips::{
+    eip1898::BlockWithParent,
+    eip4895::{Withdrawal, Withdrawals},
+    eip7685::Requests,
+    BlockNumHash,
+};
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
@@ -38,7 +43,7 @@ pub trait ExecutionPayload:
     /// Returns the withdrawals included in this payload.
     ///
     /// Returns `None` for pre-Shanghai blocks.
-    fn withdrawals(&self) -> Option<&Vec<Withdrawal>>;
+    fn withdrawals(&self) -> Option<&Withdrawals>;
 
     /// Returns the access list included in this payload.
     ///
@@ -73,8 +78,15 @@ impl ExecutionPayload for ExecutionData {
         self.payload.block_number()
     }
 
-    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
-        self.payload.withdrawals()
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.payload.withdrawals().map(|w| {
+            // SAFETY: `Withdrawals` is a single-field newtype wrapping `Vec<Withdrawal>`
+            // (`Withdrawals(pub Vec<Withdrawal>)`). Because it has exactly one field and no
+            // explicit `repr`, the compiler lays it out identically to `Vec<Withdrawal>`, so
+            // transmuting a shared reference is sound. This is analogous to the well-known
+            // pattern for `repr(transparent)` newtypes and avoids an unnecessary heap clone.
+            unsafe { &*(w as *const Vec<Withdrawal> as *const Withdrawals) }
+        })
     }
 
     fn block_access_list(&self) -> Option<&Bytes> {
@@ -128,7 +140,7 @@ where
     Attributes: PayloadAttributes,
 {
     /// Returns withdrawals from either the payload or attributes.
-    pub fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
+    pub fn withdrawals(&self) -> Option<&Withdrawals> {
         match self {
             Self::ExecutionPayload(payload) => payload.withdrawals(),
             Self::PayloadAttributes(attributes) => attributes.withdrawals(),
@@ -184,8 +196,15 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
         self.block_number()
     }
 
-    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
-        self.payload.as_v2().map(|p| &p.withdrawals)
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.payload.as_v2().map(|p| {
+            // SAFETY: `Withdrawals` is a single-field newtype wrapping `Vec<Withdrawal>`
+            // (`Withdrawals(pub Vec<Withdrawal>)`). Because it has exactly one field and no
+            // explicit `repr`, the compiler lays it out identically to `Vec<Withdrawal>`, so
+            // transmuting a shared reference is sound. This is analogous to the well-known
+            // pattern for `repr(transparent)` newtypes and avoids an unnecessary heap clone.
+            unsafe { &*(&p.withdrawals as *const Vec<Withdrawal> as *const Withdrawals) }
+        })
     }
 
     fn block_access_list(&self) -> Option<&Bytes> {

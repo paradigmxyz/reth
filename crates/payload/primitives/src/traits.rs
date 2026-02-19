@@ -156,7 +156,7 @@ pub trait PayloadAttributes:
     /// Returns the withdrawals to be included in the payload.
     ///
     /// `Some` for post-Shanghai blocks, `None` for earlier blocks.
-    fn withdrawals(&self) -> Option<&Vec<Withdrawal>>;
+    fn withdrawals(&self) -> Option<&Withdrawals>;
 
     /// Returns the parent beacon block root.
     ///
@@ -169,8 +169,15 @@ impl PayloadAttributes for EthPayloadAttributes {
         self.timestamp
     }
 
-    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
-        self.withdrawals.as_ref()
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.withdrawals.as_ref().map(|w| {
+            // SAFETY: `Withdrawals` is a single-field newtype wrapping `Vec<Withdrawal>`
+            // (`Withdrawals(pub Vec<Withdrawal>)`). Because it has exactly one field and no
+            // explicit `repr`, the compiler lays it out identically to `Vec<Withdrawal>`, so
+            // transmuting a shared reference is sound. This is analogous to the well-known
+            // pattern for `repr(transparent)` newtypes and avoids an unnecessary heap clone.
+            unsafe { &*(w as *const Vec<Withdrawal> as *const Withdrawals) }
+        })
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
@@ -184,8 +191,15 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
         self.payload_attributes.timestamp
     }
 
-    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
-        self.payload_attributes.withdrawals.as_ref()
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.payload_attributes.withdrawals.as_ref().map(|w| {
+            // SAFETY: `Withdrawals` is a single-field newtype wrapping `Vec<Withdrawal>`
+            // (`Withdrawals(pub Vec<Withdrawal>)`). Because it has exactly one field and no
+            // explicit `repr`, the compiler lays it out identically to `Vec<Withdrawal>`, so
+            // transmuting a shared reference is sound. This is analogous to the well-known
+            // pattern for `repr(transparent)` newtypes and avoids an unnecessary heap clone.
+            unsafe { &*(w as *const Vec<Withdrawal> as *const Withdrawals) }
+        })
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {

@@ -20,13 +20,10 @@
 use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
-use alloy_rpc_types::{
-    engine::{
-        ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-        ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
-        ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes, PayloadId,
-    },
-    Withdrawal,
+use alloy_rpc_types::engine::{
+    ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
+    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
+    ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes, PayloadId,
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
 use reth_ethereum::{
@@ -86,7 +83,7 @@ impl PayloadAttributes for CustomPayloadAttributes {
         self.inner.timestamp()
     }
 
-    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
+    fn withdrawals(&self) -> Option<&Withdrawals> {
         self.inner.withdrawals()
     }
 
