@@ -179,12 +179,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
 
-                this.evm_config()
-                    .executor_for_block(&mut db, block.sealed_block())
-                    .map_err(RethError::other)
-                    .map_err(Self::Error::from_eth_err)?
-                    .apply_pre_execution_changes()
-                    .map_err(Self::Error::from_eth_err)?;
+                this.apply_pre_execution_changes(&block, &mut db)?;
 
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
@@ -295,12 +290,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 let block_number = evm_env.block_env.number().saturating_to();
                 let base_fee = evm_env.block_env.basefee();
 
-                this.evm_config()
-                    .executor_for_block(&mut db, block.sealed_block())
-                    .map_err(RethError::other)
-                    .map_err(Self::Error::from_eth_err)?
-                    .apply_pre_execution_changes()
-                    .map_err(Self::Error::from_eth_err)?;
+                this.apply_pre_execution_changes(&block, &mut db)?;
 
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
@@ -416,5 +406,24 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
+    }
+
+    /// Applies chain-specific state transitions required before executing a block.
+    ///
+    /// Note: This should only be called when tracing an entire block vs individual transactions.
+    /// When tracing transactions on top of an already committed block state, those transitions are
+    /// already applied.
+    fn apply_pre_execution_changes(
+        &self,
+        block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
+        db: &mut StateCacheDb,
+    ) -> Result<(), Self::Error> {
+        self.evm_config()
+            .executor_for_block(db, block.sealed_block())
+            .map_err(RethError::other)
+            .map_err(Self::Error::from_eth_err)?
+            .apply_pre_execution_changes()
+            .map_err(Self::Error::from_eth_err)?;
+        Ok(())
     }
 }
