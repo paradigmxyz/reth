@@ -132,6 +132,42 @@ async fn test_pipeline_v2_selfdestruct_changesets_use_plain_slots() -> eyre::Res
     Ok(())
 }
 
+/// Regression coverage for single execution-batch behavior:
+/// blocks 1 and 2 are executed together (`1..=2`) where block 1 writes storage and block 2
+/// selfdestructs the account. The resulting block-2 wipe changeset must still contain plain keys.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pipeline_v2_single_batch_write_then_selfdestruct_changesets_plain_slots(
+) -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let scenario = setup_selfdestruct_scenario()?;
+    let pipeline_provider_factory =
+        create_test_provider_factory_with_chain_spec(scenario.chain_spec.clone());
+    init_genesis_with_settings(&pipeline_provider_factory, StorageSettings::v2())
+        .expect("init genesis");
+    pipeline_provider_factory.set_storage_settings_cache(StorageSettings::v2());
+    let pipeline_genesis =
+        pipeline_provider_factory.sealed_header(0)?.expect("genesis should exist");
+
+    run_pipeline_range(
+        pipeline_provider_factory.clone(),
+        create_file_client_from_blocks(vec![
+            scenario.blocks[0].clone(),
+            scenario.blocks[1].clone(),
+        ]),
+        pipeline_genesis,
+        1..=2,
+        2,
+    )
+    .await?;
+
+    let provider = pipeline_provider_factory.provider()?;
+    assert_eq!(provider.last_block_number()?, 2, "pipeline should sync blocks 1..=2");
+    assert_destroyed_changeset_entries(&provider, scenario.selfdestruct_contract)?;
+
+    Ok(())
+}
+
 struct SelfdestructScenario {
     chain_spec: Arc<reth_chainspec::ChainSpec>,
     blocks: Vec<SealedBlock<Block>>,
