@@ -195,26 +195,113 @@ pub(crate) fn dispatch_with_chunking<T, I>(
     available_storage_workers: usize,
     chunker: impl FnOnce(T, usize) -> I,
     mut dispatch: impl FnMut(T),
-) -> usize
-where
+) where
     I: IntoIterator<Item = T>,
 {
-    let should_chunk = chunking_len > max_targets_for_chunking ||
-        available_account_workers > 1 ||
-        available_storage_workers > 1;
+    // Chunking can be explicitly disabled by configuration.
+    let Some(chunk_size) = chunk_size.filter(|&size| size > 0) else {
+        dispatch(items);
+        return;
+    };
 
-    if should_chunk &&
-        let Some(chunk_size) = chunk_size &&
-        chunking_len > chunk_size
-    {
-        let mut num_chunks = 0usize;
-        for chunk in chunker(items, chunk_size) {
-            dispatch(chunk);
-            num_chunks += 1;
-        }
-        return num_chunks;
+    let force_chunking = chunking_len > max_targets_for_chunking;
+    let has_available_workers = available_account_workers > 1 || available_storage_workers > 1;
+
+    if !force_chunking && !has_available_workers {
+        dispatch(items);
+        return;
     }
 
-    dispatch(items);
-    1
+    // If forced chunking is enabled, cap chunk size by the force threshold.
+    // This ensures large configured chunk sizes cannot bypass threshold-based splitting.
+    let effective_chunk_size =
+        if force_chunking { chunk_size.min(max_targets_for_chunking.max(1)) } else { chunk_size };
+
+    if chunking_len <= effective_chunk_size {
+        dispatch(items);
+        return;
+    }
+
+    for chunk in chunker(items, effective_chunk_size) {
+        dispatch(chunk);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dispatch_with_chunking;
+
+    fn chunk_vec(items: Vec<usize>, size: usize) -> Vec<Vec<usize>> {
+        items.chunks(size).map(ToOwned::to_owned).collect()
+    }
+
+    #[test]
+    fn no_chunking_when_disabled() {
+        let items: Vec<_> = (0..10).collect();
+        let mut dispatched = Vec::new();
+
+        dispatch_with_chunking(items.clone(), 10, None, 3, 4, 4, chunk_vec, |chunk| {
+            dispatched.push(chunk);
+        });
+
+        assert_eq!(dispatched.len(), 1);
+        assert_eq!(dispatched[0], items);
+    }
+
+    #[test]
+    fn no_chunking_when_chunk_size_is_zero() {
+        let items: Vec<_> = (0..10).collect();
+        let mut dispatched = Vec::new();
+
+        dispatch_with_chunking(items.clone(), 10, Some(0), 3, 4, 4, chunk_vec, |chunk| {
+            dispatched.push(chunk);
+        });
+
+        assert_eq!(dispatched.len(), 1);
+        assert_eq!(dispatched[0], items);
+    }
+
+    #[test]
+    fn force_chunking_caps_chunk_size_at_threshold() {
+        let items: Vec<_> = (0..400).collect();
+        let mut dispatched = Vec::new();
+
+        dispatch_with_chunking(items.clone(), 400, Some(512), 300, 1, 1, chunk_vec, |chunk| {
+            dispatched.push(chunk);
+        });
+
+        assert_eq!(dispatched.len(), 2);
+        assert_eq!(dispatched[0].len(), 300);
+        assert_eq!(dispatched[1].len(), 100);
+        assert_eq!(dispatched.concat(), items);
+    }
+
+    #[test]
+    fn chunking_requires_capacity_or_force() {
+        let items: Vec<_> = (0..10).collect();
+        let mut dispatched = Vec::new();
+
+        dispatch_with_chunking(items.clone(), 10, Some(4), 300, 1, 1, chunk_vec, |chunk| {
+            dispatched.push(chunk);
+        });
+
+        assert_eq!(dispatched.len(), 1);
+        assert_eq!(dispatched[0], items);
+    }
+
+    #[test]
+    fn chunks_when_workers_available() {
+        let items: Vec<_> = (0..10).collect();
+        let mut dispatched = Vec::new();
+
+        dispatch_with_chunking(items.clone(), 10, Some(4), 300, 2, 1, chunk_vec, |chunk| {
+            dispatched.push(chunk);
+        });
+
+        assert_eq!(dispatched.len(), 3);
+        assert_eq!(dispatched[0].len(), 4);
+        assert_eq!(dispatched[1].len(), 4);
+        assert_eq!(dispatched[2].len(), 2);
+        assert_eq!(dispatched.concat(), items);
+    }
 }

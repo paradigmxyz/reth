@@ -1,6 +1,9 @@
 //! clap [Args](clap::Args) for engine purposes
 
-use clap::{builder::Resettable, Args};
+use clap::{
+    builder::{RangedU64ValueParser, Resettable},
+    Args,
+};
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
     DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
@@ -305,7 +308,11 @@ pub struct EngineArgs {
     pub multiproof_chunking_enabled: bool,
 
     /// Multiproof task chunk size for proof targets.
-    #[arg(long = "engine.multiproof-chunk-size", default_value_t = DefaultEngineValues::get_global().multiproof_chunk_size)]
+    #[arg(
+        long = "engine.multiproof-chunk-size",
+        value_parser = RangedU64ValueParser::<usize>::new().range(1..),
+        default_value_t = DefaultEngineValues::get_global().multiproof_chunk_size
+    )]
     pub multiproof_chunk_size: usize,
 
     /// Configure the number of reserved CPU cores for non-reth processes
@@ -580,5 +587,15 @@ mod tests {
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn rejects_zero_multiproof_chunk_size() {
+        let result = CommandParser::<EngineArgs>::try_parse_from([
+            "reth",
+            "--engine.multiproof-chunk-size",
+            "0",
+        ]);
+        assert!(result.is_err(), "chunk size must be >= 1");
     }
 }
