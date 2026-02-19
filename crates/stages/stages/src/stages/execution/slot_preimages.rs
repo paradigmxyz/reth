@@ -150,13 +150,10 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     preimage_entries.par_sort_unstable_by_key(|(hash, _)| *hash);
 
     // Lazily open the preimage store and insert entries.
-    let preimages = SlotPreimages::open(slot_preimages_path)
-        .map_err(|e| StageError::Fatal(Box::new(std::io::Error::other(e.to_string()))))?;
+    let preimages = SlotPreimages::open(slot_preimages_path).map_err(fatal)?;
 
     if !preimage_entries.is_empty() {
-        preimages
-            .insert_preimages(&preimage_entries)
-            .map_err(|e| StageError::Fatal(Box::new(std::io::Error::other(e.to_string()))))?;
+        preimages.insert_preimages(&preimage_entries).map_err(fatal)?;
     }
 
     // Find all wipe reverts (self-destructed accounts) and inject plain slot keys.
@@ -165,9 +162,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     let mut already_wiped = HashSet::new();
 
     // Open a single RO transaction for all preimage lookups in this batch.
-    let reader = preimages
-        .reader()
-        .map_err(|e| StageError::Fatal(Box::new(std::io::Error::other(e.to_string()))))?;
+    let reader = preimages.reader().map_err(fatal)?;
 
     for block_reverts in state.bundle.reverts.iter_mut() {
         for (address, revert) in block_reverts.iter_mut() {
@@ -211,15 +206,21 @@ fn inject_preimage_entry(
 ) -> Result<(), StageError> {
     let plain_slot = reader
         .get(&hashed_slot)
-        .map_err(|e| StageError::Fatal(Box::new(std::io::Error::other(e.to_string()))))?
+        .map_err(fatal)?
         .ok_or_else(|| {
-            StageError::Fatal(Box::new(std::io::Error::other(format!(
-                "missing slot preimage for {hashed_slot:?} (addr={address:?})"
-            ))))
+            fatal(eyre::eyre!("missing slot preimage for {hashed_slot:?} (addr={address:?})"))
         })?;
 
     // Convert B256 plain slot to U256 StorageKey for the revert map.
     let plain_key = alloy_primitives::U256::from_be_bytes(plain_slot.0);
     revert.storage.entry(plain_key).or_insert(RevertToSlot::Some(value));
     Ok(())
+}
+
+#[inline]
+fn fatal<E>(err: E) -> StageError
+where
+    E: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    StageError::Fatal(err.into())
 }
