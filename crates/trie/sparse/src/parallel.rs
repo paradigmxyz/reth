@@ -1096,27 +1096,48 @@ impl SparseTrie for ParallelSparseTrie {
         let mut curr_subtrie_is_upper = true;
 
         loop {
-            let curr_node = curr_subtrie.nodes.get(&curr_path).unwrap();
-
-            match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
-                FindNextToLeafOutcome::NotFound => return Ok(LeafLookup::NonExistent),
-                FindNextToLeafOutcome::BlindedNode { path, hash } => {
-                    return Err(LeafLookupError::BlindedNode { path, hash });
+            match curr_subtrie.nodes.get(&curr_path).unwrap() {
+                SparseNode::Empty => return Ok(LeafLookup::NonExistent),
+                SparseNode::Leaf { key, .. } => {
+                    let mut found_full_path = curr_path;
+                    found_full_path.extend(key);
+                    assert!(&found_full_path != full_path, "target leaf {full_path:?} found, even though value wasn't in values hashmap");
+                    return Ok(LeafLookup::NonExistent)
                 }
-                FindNextToLeafOutcome::Found => {
-                    panic!("target leaf {full_path:?} found at path {curr_path:?}, even though value wasn't in values hashmap");
-                }
-                FindNextToLeafOutcome::ContinueFrom(next_path) => {
-                    curr_path = next_path;
-                    // If we were previously looking at the upper trie, and the new path is in the
-                    // lower trie, we need to pull out a ref to the lower trie.
-                    if curr_subtrie_is_upper &&
-                        let Some(lower_subtrie) = self.lower_subtrie_for_path(&curr_path)
-                    {
-                        curr_subtrie = lower_subtrie;
-                        curr_subtrie_is_upper = false;
+                SparseNode::Extension { key, .. } => {
+                    if full_path.len() == curr_path.len() {
+                        return Ok(LeafLookup::NonExistent)
+                    }
+                    curr_path.extend(key);
+                    if !full_path.starts_with(&curr_path) {
+                        return Ok(LeafLookup::NonExistent)
                     }
                 }
+                SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
+                    if full_path.len() == curr_path.len() {
+                        return Ok(LeafLookup::NonExistent)
+                    }
+                    let nibble = full_path.get_unchecked(curr_path.len());
+                    if !state_mask.is_bit_set(nibble) {
+                        return Ok(LeafLookup::NonExistent)
+                    }
+                    curr_path.push_unchecked(nibble);
+                    if blinded_mask.is_bit_set(nibble) {
+                        return Err(LeafLookupError::BlindedNode {
+                            path: curr_path,
+                            hash: blinded_hashes[nibble as usize],
+                        })
+                    }
+                }
+            }
+
+            // If we were previously looking at the upper trie, and the new path is in the
+            // lower trie, we need to pull out a ref to the lower trie.
+            if curr_subtrie_is_upper &&
+                let Some(lower_subtrie) = self.lower_subtrie_for_path(&curr_path)
+            {
+                curr_subtrie = lower_subtrie;
+                curr_subtrie_is_upper = false;
             }
         }
     }
