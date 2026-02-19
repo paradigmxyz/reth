@@ -1488,7 +1488,6 @@ where
         trie_output: TrieUpdates,
         overlay_factory: OverlayStateProviderFactory<P>,
     ) -> ExecutedBlock<N> {
-        let hashed_state = hashed_state.into_inner();
         // Capture parent hash and ancestor overlays for deferred trie input construction.
         let (anchor_hash, overlay_blocks) = ctx
             .state()
@@ -1503,7 +1502,7 @@ where
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
         let deferred_trie_data = DeferredTrieData::pending(
-            Arc::new(hashed_state),
+            hashed_state,
             Arc::new(trie_output),
             anchor_hash,
             ancestors,

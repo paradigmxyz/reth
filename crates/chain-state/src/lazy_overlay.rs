@@ -141,11 +141,12 @@ impl LazyOverlay {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_tasks::LazyHandle;
     use reth_trie::{updates::TrieUpdates, HashedPostState};
 
     fn empty_deferred(anchor: B256) -> DeferredTrieData {
         DeferredTrieData::pending(
-            Arc::new(HashedPostState::default()),
+            LazyHandle::ready(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
             anchor,
             Vec::new(),

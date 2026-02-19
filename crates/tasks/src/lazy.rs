@@ -35,6 +35,15 @@ impl<T: Send + Sync + 'static> LazyHandle<T> {
         }
     }
 
+    /// Creates a handle that is already resolved with the given value.
+    pub fn ready(value: T) -> Self {
+        let inner = LazyHandleInner {
+            rx: std::sync::Mutex::new(None),
+            value: OnceLock::from(value),
+        };
+        Self { inner: Arc::new(inner) }
+    }
+
     /// Blocks until the background task completes and returns a reference to the result.
     ///
     /// On the first call this awaits the receiver; subsequent calls return the cached value
