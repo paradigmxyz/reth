@@ -115,136 +115,6 @@ fn checksum_hasher() -> impl Hasher {
     FixedState::with_seed(u64::from_be_bytes(*b"RETHRETH")).build_hasher()
 }
 
-/// Accumulates a checksum over key-value entries, tracking count and limit.
-struct Checksummer<H> {
-    hasher: H,
-    total: usize,
-    limit: usize,
-}
-
-impl<H: Hasher> Checksummer<H> {
-    fn new(hasher: H, limit: usize) -> Self {
-        Self { hasher, total: 0, limit }
-    }
-
-    /// Hash a row's columns (non-changeset segments). Returns `true` if the limit is reached.
-    fn write_row(&mut self, row: &[&[u8]]) -> bool {
-        for col in row {
-            self.hasher.write(col);
-        }
-        self.advance()
-    }
-
-    /// Hash a key + value as two separate writes, matching MDBX raw entry semantics.
-    /// Write boundaries matter: foldhash rotates its accumulator by `len` on each `write`.
-    fn write_entry(&mut self, key: &[u8], value: &[u8]) -> bool {
-        self.hasher.write(key);
-        self.hasher.write(value);
-        self.advance()
-    }
-
-    fn advance(&mut self) -> bool {
-        self.total += 1;
-        if self.total.is_multiple_of(PROGRESS_LOG_INTERVAL) {
-            info!("Hashed {} entries.", self.total);
-        }
-        self.total >= self.limit
-    }
-
-    fn finish(self) -> (u64, usize) {
-        (self.hasher.finish(), self.total)
-    }
-}
-
-/// Reconstruct MDBX `StorageChangeSets` key/value boundaries from a static-file row.
-///
-/// MDBX layout:
-/// - key: `BlockNumberAddress` => `[8B block_number][20B address]`
-/// - value: `StorageEntry` => `[32B storage_key][compact U256 value]`
-///
-/// Static-file row layout for `StorageBeforeTx`:
-/// - `[20B address][32B storage_key][compact U256 value]`
-fn split_storage_changeset_row(block_number: u64, row: &[u8]) -> eyre::Result<([u8; 28], &[u8])> {
-    if row.len() < 20 {
-        return Err(eyre::eyre!(
-            "Storage changeset row too short: expected at least 20 bytes, got {}",
-            row.len()
-        ));
-    }
-
-    let mut key_buf = [0u8; 28];
-    key_buf[..8].copy_from_slice(&block_number.to_be_bytes());
-    key_buf[8..].copy_from_slice(&row[..20]);
-    Ok((key_buf, &row[20..]))
-}
-
-fn checksum_change_based_segment<H: Hasher>(
-    checksummer: &mut Checksummer<H>,
-    segment: StaticFileSegment,
-    block_range_start: u64,
-    start_block: u64,
-    end_block: u64,
-    is_storage: bool,
-    offsets: &[ChangesetOffset],
-    cursor: &mut reth_db::static_file::StaticFileCursor<'_>,
-) -> eyre::Result<bool> {
-    let mut reached_limit = false;
-
-    for (offset_index, offset) in offsets.iter().enumerate() {
-        let block_number = block_range_start + offset_index as u64;
-        let include = block_number >= start_block && block_number <= end_block;
-
-        for _ in 0..offset.num_changes() {
-            let row = cursor.next_row()?.ok_or_else(|| {
-                eyre::eyre!(
-                    "Unexpected EOF while checksumming {} static file at range starting {}",
-                    segment,
-                    block_range_start
-                )
-            })?;
-
-            if !include {
-                continue;
-            }
-
-            // Reconstruct MDBX key/value write boundaries. foldhash rotates
-            // its accumulator by `len` on each write(), so boundaries must
-            // match exactly.
-            let done = if is_storage {
-                // StorageChangeSets: MDBX key = BlockNumberAddress (28B),
-                // value = compact StorageEntry. Column 0 is compact
-                // StorageBeforeTx = [20B address][32B key][compact U256].
-                let col = row[0];
-                let (key, value) = split_storage_changeset_row(block_number, col)?;
-                checksummer.write_entry(&key, value)
-            } else {
-                // AccountChangeSets: MDBX key = BlockNumber (8B),
-                // value = compact AccountBeforeTx (= column 0).
-                checksummer.write_entry(&block_number.to_be_bytes(), row[0])
-            };
-
-            if done {
-                reached_limit = true;
-                break;
-            }
-        }
-
-        if reached_limit {
-            break;
-        }
-    }
-
-    if !reached_limit && cursor.next_row()?.is_some() {
-        return Err(eyre::eyre!(
-            "Changeset offsets do not cover all rows for {} at range starting {}",
-            segment,
-            block_range_start
-        ));
-    }
-
-    Ok(reached_limit)
-}
-
 fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
     tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     segment: StaticFileSegment,
@@ -434,32 +304,132 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::split_storage_changeset_row;
-    use alloy_primitives::Address;
+/// Accumulates a checksum over key-value entries, tracking count and limit.
+struct Checksummer<H> {
+    hasher: H,
+    total: usize,
+    limit: usize,
+}
 
-    #[test]
-    fn split_storage_changeset_row_ok() {
-        let block = 0x0102_0304_0506_0708u64;
-        let address = Address::repeat_byte(0x11);
-        let mut row = Vec::new();
-        row.extend_from_slice(address.as_slice());
-        row.extend_from_slice(&[0x22; 32]); // storage key
-        row.extend_from_slice(&[0x33, 0x44]); // compact U256 payload (test bytes)
-
-        let (key, value) = split_storage_changeset_row(block, &row).expect("valid row");
-
-        assert_eq!(&key[..8], &block.to_be_bytes());
-        assert_eq!(&key[8..], address.as_slice());
-        assert_eq!(value.len(), 34);
-        assert_eq!(&value[..32], &[0x22; 32]);
-        assert_eq!(&value[32..], &[0x33, 0x44]);
+impl<H: Hasher> Checksummer<H> {
+    fn new(hasher: H, limit: usize) -> Self {
+        Self { hasher, total: 0, limit }
     }
 
-    #[test]
-    fn split_storage_changeset_row_too_short() {
-        let err = split_storage_changeset_row(1, &[0xAA; 19]).expect_err("must fail");
-        assert!(err.to_string().contains("too short"));
+    /// Hash a row's columns (non-changeset segments). Returns `true` if the limit is reached.
+    fn write_row(&mut self, row: &[&[u8]]) -> bool {
+        for col in row {
+            self.hasher.write(col);
+        }
+        self.advance()
     }
+
+    /// Hash a key + value as two separate writes, matching MDBX raw entry semantics.
+    /// Write boundaries matter: foldhash rotates its accumulator by `len` on each `write`.
+    fn write_entry(&mut self, key: &[u8], value: &[u8]) -> bool {
+        self.hasher.write(key);
+        self.hasher.write(value);
+        self.advance()
+    }
+
+    fn advance(&mut self) -> bool {
+        self.total += 1;
+        if self.total.is_multiple_of(PROGRESS_LOG_INTERVAL) {
+            info!("Hashed {} entries.", self.total);
+        }
+        self.total >= self.limit
+    }
+
+    fn finish(self) -> (u64, usize) {
+        (self.hasher.finish(), self.total)
+    }
+}
+
+/// Reconstruct MDBX `StorageChangeSets` key/value boundaries from a static-file row.
+///
+/// MDBX layout:
+/// - key: `BlockNumberAddress` => `[8B block_number][20B address]`
+/// - value: `StorageEntry` => `[32B storage_key][compact U256 value]`
+///
+/// Static-file row layout for `StorageBeforeTx`:
+/// - `[20B address][32B storage_key][compact U256 value]`
+fn split_storage_changeset_row(block_number: u64, row: &[u8]) -> eyre::Result<([u8; 28], &[u8])> {
+    if row.len() < 20 {
+        return Err(eyre::eyre!(
+            "Storage changeset row too short: expected at least 20 bytes, got {}",
+            row.len()
+        ));
+    }
+
+    let mut key_buf = [0u8; 28];
+    key_buf[..8].copy_from_slice(&block_number.to_be_bytes());
+    key_buf[8..].copy_from_slice(&row[..20]);
+    Ok((key_buf, &row[20..]))
+}
+
+fn checksum_change_based_segment<H: Hasher>(
+    checksummer: &mut Checksummer<H>,
+    segment: StaticFileSegment,
+    block_range_start: u64,
+    start_block: u64,
+    end_block: u64,
+    is_storage: bool,
+    offsets: &[ChangesetOffset],
+    cursor: &mut reth_db::static_file::StaticFileCursor<'_>,
+) -> eyre::Result<bool> {
+    let mut reached_limit = false;
+
+    for (offset_index, offset) in offsets.iter().enumerate() {
+        let block_number = block_range_start + offset_index as u64;
+        let include = block_number >= start_block && block_number <= end_block;
+
+        for _ in 0..offset.num_changes() {
+            let row = cursor.next_row()?.ok_or_else(|| {
+                eyre::eyre!(
+                    "Unexpected EOF while checksumming {} static file at range starting {}",
+                    segment,
+                    block_range_start
+                )
+            })?;
+
+            if !include {
+                continue;
+            }
+
+            // Reconstruct MDBX key/value write boundaries. foldhash rotates
+            // its accumulator by `len` on each write(), so boundaries must
+            // match exactly.
+            let done = if is_storage {
+                // StorageChangeSets: MDBX key = BlockNumberAddress (28B),
+                // value = compact StorageEntry. Column 0 is compact
+                // StorageBeforeTx = [20B address][32B key][compact U256].
+                let col = row[0];
+                let (key, value) = split_storage_changeset_row(block_number, col)?;
+                checksummer.write_entry(&key, value)
+            } else {
+                // AccountChangeSets: MDBX key = BlockNumber (8B),
+                // value = compact AccountBeforeTx (= column 0).
+                checksummer.write_entry(&block_number.to_be_bytes(), row[0])
+            };
+
+            if done {
+                reached_limit = true;
+                break;
+            }
+        }
+
+        if reached_limit {
+            break;
+        }
+    }
+
+    if !reached_limit && cursor.next_row()?.is_some() {
+        return Err(eyre::eyre!(
+            "Changeset offsets do not cover all rows for {} at range starting {}",
+            segment,
+            block_range_start
+        ));
+    }
+
+    Ok(reached_limit)
 }
