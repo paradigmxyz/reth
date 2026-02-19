@@ -160,15 +160,11 @@ impl<N: NodePrimitives> ExExHandle<N> {
                         return Poll::Ready(Ok(()))
                     }
                 }
-                // Always send reorg/revert notifications, and reset finished_height because the
-                // ExEx will revert its state to an earlier block. Without resetting, subsequent
-                // ChainCommitted notifications could be incorrectly skipped if the new chain's tip
-                // is at or below the stale finished_height from the old chain.
-                ExExNotification::ChainReorged { old: chain, .. } |
-                ExExNotification::ChainReverted { old: chain } => {
-                    let safe_height = chain.fork_block();
-                    self.set_finished_height(safe_height);
-                }
+                // Do not handle [ExExNotification::ChainReorged] and
+                // [ExExNotification::ChainReverted] cases and always send the
+                // notification, because the ExEx should be aware of the reorgs and reverts lower
+                // than its finished height
+                ExExNotification::ChainReorged { .. } | ExExNotification::ChainReverted { .. } => {}
             }
         }
 
