@@ -110,22 +110,23 @@ jobs:
           path: hive_assets
 
   wait-reth-docker:
-  needs:
-    - build-reth-stable-docker
-    - build-reth-edge-docker
-  if: needs.detect-env.outputs.use_docker == 'true'
-  runs-on: ubuntu-latest
-  steps:
-    - run: echo "docker reth ready"
+    needs:
+      - build-reth-stable-docker
+      - build-reth-edge-docker
+    if: needs.detect-env.outputs.use_docker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "docker reth ready"
 
-wait-reth-prepare:
-  needs:
-    - prepare-reth-stable
-    - prepare-reth-edge
-  if: needs.detect-env.outputs.use_docker == 'false'
-  runs-on: ubuntu-latest
-  steps:
-    - run: echo "prepared reth ready"
+  wait-reth-prepare:
+    needs:
+      - prepare-reth-stable
+      - prepare-reth-edge
+    if: needs.detect-env.outputs.use_docker == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "prepared reth ready"
+
 
 
   test:
