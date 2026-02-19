@@ -466,7 +466,10 @@ where
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
         // Process all storage updates in parallel, skipping tries with no pending updates.
-        let span = debug_span!("process_storage_leaf_updates").entered();
+        let num_storage_updates =
+            storage_updates.iter().map(|(_, updates)| updates.len()).sum::<usize>();
+        let span = debug_span!("process_storage_leaf_updates", num_updates = num_storage_updates)
+            .entered();
         for (address, updates) in storage_updates {
             if updates.is_empty() {
                 continue;
