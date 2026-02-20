@@ -62,8 +62,9 @@ RETH_ARGS=(
 )
 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
+  SAMPLY="$(which samply)"
   sudo taskset -c "$RETH_CPUS" nice -n -20 \
-    samply record --save-only --presymbolicate \
+    "$SAMPLY" record --save-only --presymbolicate \
     --output "$OUTPUT_DIR/samply-profile.json.gz" \
     -- "$BINARY" "${RETH_ARGS[@]}" \
     > "$LOG" 2>&1 &
