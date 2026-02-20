@@ -6,6 +6,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     tables,
+    table::DupSort,
     transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::DbTool;
@@ -198,6 +199,24 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
     Ok(())
 }
 
+fn delete_storage_trie_entry_if_exists<C>(
+    cursor: &mut C,
+    account: <tables::StoragesTrie as DupSort>::Key,
+    nibbles: StoredNibblesSubKey,
+) -> eyre::Result<()>
+where
+    C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRW<tables::StoragesTrie>,
+{
+    if cursor
+        .seek_by_key_subkey(account, nibbles.clone())?
+        .filter(|e| e.nibbles == nibbles)
+        .is_some()
+    {
+        cursor.delete_current()?;
+    }
+    Ok(())
+}
+
 fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
     // Get a read-write database provider
     let mut provider_rw = tool.provider_factory.provider_rw()?;
@@ -214,18 +233,6 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     tx.disable_long_read_transaction_safety();
     let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
     let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
-
-    let mut delete_storage_trie_entry_if_exists =
-        |account, nibbles: StoredNibblesSubKey| -> eyre::Result<()> {
-            if storage_trie_cursor
-                .seek_by_key_subkey(account, nibbles.clone())?
-                .filter(|e| e.nibbles == nibbles)
-                .is_some()
-            {
-                storage_trie_cursor.delete_current()?;
-            }
-            Ok(())
-        };
 
     // Create the cursor factories. These cannot accept the `&mut` tx above because they require it
     // to be AsRef.
@@ -276,7 +283,11 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
             }
             Output::StorageExtra(account, path, _node) => {
                 // Extra storage node in trie, remove it
-                delete_storage_trie_entry_if_exists(account, StoredNibblesSubKey(path))?;
+                delete_storage_trie_entry_if_exists(
+                    &mut storage_trie_cursor,
+                    account,
+                    StoredNibblesSubKey(path),
+                )?;
             }
             Output::AccountWrong { path, expected: node, .. } |
             Output::AccountMissing(path, node) => {
@@ -290,7 +301,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
                 // (We can't just use `upsert` method with a dup cursor, it's not properly
                 // supported)
                 let nibbles = StoredNibblesSubKey(path);
-                delete_storage_trie_entry_if_exists(account, nibbles.clone())?;
+                delete_storage_trie_entry_if_exists(&mut storage_trie_cursor, account, nibbles.clone())?;
                 let entry = StorageTrieEntry { nibbles, node };
                 storage_trie_cursor.upsert(account, &entry)?;
             }
