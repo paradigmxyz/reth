@@ -97,6 +97,8 @@ alloy-genesis.workspace = true
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 
+tokio = { workspace = true, features = ["test-util"] }
+
 ## Benchmarks
 criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 

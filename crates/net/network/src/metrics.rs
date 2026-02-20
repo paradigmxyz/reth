@@ -178,10 +178,6 @@ pub struct TransactionsManagerMetrics {
     /* ================ POOL IMPORTS ================ */
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
-    /// Total number of bad imports, imports that fail because the transaction is badly formed
-    /// (i.e. have no chance of passing validation, unlike imports that fail due to e.g. nonce
-    /// gaps).
-    pub(crate) bad_imports: Counter,
     /// Number of inflight requests at which the
     /// [`TransactionPool`](reth_transaction_pool::TransactionPool) is considered to be at
     /// capacity. Note, this is not a limit to the number of inflight requests, but a health
@@ -245,6 +241,9 @@ pub struct TransactionsManagerMetrics {
     ///
     /// Duration in seconds.
     pub(crate) acc_duration_poll_commands: Gauge,
+    /// Number of entries in the `transactions_by_peers` map, tracking pending pool imports
+    /// attributed to their originating peers.
+    pub(crate) transactions_by_peers_len: Gauge,
 }
 
 /// Metrics for the [`TransactionsManager`](crate::transactions::TransactionsManager).
@@ -259,31 +258,44 @@ pub struct TransactionFetcherMetrics {
     /// capacity. Note, this is not a limit to the number of inflight requests, but a health
     /// measure.
     pub(crate) capacity_inflight_requests: Counter,
-    /// Hashes in currently active outgoing
-    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) requests.
-    pub(crate) hashes_inflight_transaction_requests: Gauge,
     /// How often we failed to send a request to the peer because the channel was full.
     pub(crate) egress_peer_channel_full: Counter,
-    /// Total number of hashes pending fetch.
-    pub(crate) hashes_pending_fetch: Gauge,
     /// Total number of fetched transactions.
     pub(crate) fetched_transactions: Counter,
     /// Total number of transactions that were received in
     /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) responses, that weren't
     /// requested.
     pub(crate) unsolicited_transactions: Counter,
-    /* ================ SEARCH DURATION ================ */
-    /// Time spent searching for an idle peer in call to
-    /// [`TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash`](crate::transactions::TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash).
-    ///
-    /// Duration in seconds.
-    pub(crate) duration_find_idle_fallback_peer_for_any_pending_hash: Gauge,
-
-    /// Time spent searching for hashes pending fetch, announced by a given peer in
-    /// [`TransactionFetcher::fill_request_from_hashes_pending_fetch`](crate::transactions::TransactionFetcher::fill_request_from_hashes_pending_fetch).
-    ///
-    /// Duration in seconds.
-    pub(crate) duration_fill_request_from_hashes_pending_fetch: Gauge,
+    /// Total number of hashes in the announced queue (Stage 1).
+    pub(crate) hashes_in_announced: Gauge,
+    /// Total number of hashes currently being fetched (Stage 2).
+    pub(crate) hashes_in_fetching: Gauge,
+    /// Total number of timed-out (dangling) requests.
+    pub(crate) dangling_requests: Gauge,
+    /// Total number of request timeouts.
+    pub(crate) request_timeouts: Counter,
+    /// Total number of stale dangling requests force-removed.
+    pub(crate) stale_dangling_requests_removed: Counter,
+    /// Total number of announcements dropped due to per-peer limit.
+    pub(crate) dropped_announces_per_peer_limit: Counter,
+    /// Total number of announcements dropped due to global Stage 1 capacity limit.
+    pub(crate) dropped_announces_capacity_limit: Counter,
+    /// Total number of bad imports cached (consensus violations).
+    pub(crate) bad_imports: Counter,
+    /// Total number of underpriced transaction imports cached.
+    pub(crate) underpriced_imports: Counter,
+    /// Latency of successful (non-dangling) fetch responses in seconds.
+    pub(crate) fetch_response_latency_seconds: Histogram,
+    /// Latency of dangling (timed-out) responses that eventually arrived, in seconds.
+    pub(crate) dangling_response_latency_seconds: Histogram,
+    /// Number of dangling responses that contained transactions.
+    pub(crate) dangling_completed_useful: Counter,
+    /// Number of dangling responses that were empty or errored.
+    pub(crate) dangling_completed_empty: Counter,
+    /// Broadcasts arriving for hashes in Stage 1 (announced, before fetch).
+    pub(crate) late_broadcast_announced: Counter,
+    /// Broadcasts arriving for hashes in Stage 2 (during active fetch).
+    pub(crate) late_broadcast_inflight: Counter,
 }
 
 /// Measures the duration of executing the given code block. The duration is added to the given
