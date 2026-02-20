@@ -906,6 +906,17 @@ jobs:
               await core.summary.addRaw(body).write();
             }
 
+      - name: Send Slack notification (success)
+        if: success()
+        uses: actions/github-script@v8
+        env:
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const notify = require('./.github/scripts/bench-slack-notify.js');
+            await notify.success({ core, context });
+
       - name: Update status (failed)
         if: failure() && env.BENCH_COMMENT_ID
         uses: actions/github-script@v8
@@ -927,6 +938,26 @@ jobs:
               comment_id: parseInt(process.env.BENCH_COMMENT_ID),
               body: `cc @${process.env.BENCH_ACTOR}\n\n❌ Benchmark failed while ${failedStep}. [View logs](${process.env.BENCH_JOB_URL})`,
             });
+
+      - name: Send Slack notification (failure)
+        if: failure()
+        uses: actions/github-script@v8
+        env:
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const steps_status = [
+              ['building binaries${{ steps.snapshot-check.outputs.needed == 'true' && ' & downloading snapshot' || '' }}', '${{ steps.build.outcome }}'],
+              ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
+              ['running feature benchmark (1/2)', '${{ steps.run-feature-1.outcome }}'],
+              ['running feature benchmark (2/2)', '${{ steps.run-feature-2.outcome }}'],
+              ['running baseline benchmark (2/2)', '${{ steps.run-baseline-2.outcome }}'],
+            ];
+            const failed = steps_status.find(([, o]) => o === 'failure');
+            const failedStep = failed ? failed[0] : 'unknown step';
+            const notify = require('./.github/scripts/bench-slack-notify.js');
+            await notify.failure({ core, context, failedStep });
 
       - name: Update status (cancelled)
         if: cancelled() && env.BENCH_COMMENT_ID
