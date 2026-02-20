@@ -1,5 +1,4 @@
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
@@ -22,14 +21,14 @@ use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
-use reth_revm::{db::State, witness::ExecutionWitnessRecord};
+use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     FromEthApiError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{cache::db::StateProviderTraitObjWrapper, EthApiError};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
@@ -155,6 +154,58 @@ where
                 }
 
                 Ok(results)
+            })
+            .await
+    }
+
+    /// Replays a block and generates the RLP-encoded Block Access List (EIP-7928).
+    pub async fn get_block_access_list(&self, block_id: BlockId) -> Result<Bytes, Eth::Error> {
+        let block_hash = self
+            .provider()
+            .block_hash_for_id(block_id)
+            .map_err(Eth::Error::from_eth_err)?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+
+        let ((evm_env, _), block) = futures::try_join!(
+            self.eth_api().evm_env_at(block_hash.into()),
+            self.eth_api().recovered_block(block_hash.into()),
+        )?;
+
+        let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+
+        self.inner
+            .eth_api
+            .spawn_blocking_io(move |eth_api| {
+                let state = eth_api
+                    .provider()
+                    .state_by_block_id(block.parent_hash().into())
+                    .map_err(Eth::Error::from_eth_err)?;
+
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
+                    .with_bal_builder()
+                    .build();
+
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
+                // Move to tx index 1 before first tx (index 0 is for pre-execution)
+                db.bump_bal_index();
+
+                for tx in block.transactions_recovered() {
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                    db.commit(res.state);
+                    // Advance to next tx index
+                    db.bump_bal_index();
+                }
+
+                // Current index is now n+1 for post-execution
+
+                let bal = db.take_built_alloy_bal().ok_or_else(|| {
+                    EthApiError::Internal(reth_errors::RethError::msg("BAL not built"))
+                })?;
+
+                Ok(alloy_rlp::encode(&bal).into())
             })
             .await
     }
@@ -828,8 +879,9 @@ where
         Self::debug_execution_witness_by_block_hash(self, hash).await.map_err(Into::into)
     }
 
-    async fn debug_get_block_access_list(&self, _block_id: BlockId) -> RpcResult<BlockAccessList> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn debug_get_block_access_list(&self, block_id: BlockId) -> RpcResult<Bytes> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::get_block_access_list(self, block_id).await.map_err(Into::into)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
