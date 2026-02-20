@@ -57,14 +57,15 @@ impl<T: Compact> Compact for AlloyEthereumReceipt<T> {
         }
 
         let flags = flags.into_bytes();
-        total_length += flags.len() + buffer.len();
         buf.put_slice(&flags);
         if zstd {
             reth_zstd_compressors::with_receipt_compressor(|compressor| {
                 let compressed = compressor.compress(&buffer).expect("Failed to compress.");
+                total_length += flags.len() + compressed.len();
                 buf.put(compressed.as_slice());
             });
         } else {
+            total_length += flags.len() + buffer.len();
             buf.put(buffer);
         }
         total_length
