@@ -49,6 +49,11 @@ use tokio::sync::watch;
 type TestProviderFactory =
     reth_provider::ProviderFactory<reth_provider::test_utils::MockNodeTypesWithDB>;
 
+/// Scenario coverage:
+/// 1. Cross-batch pre-Cancun wipe writes plain slot keys into storage changesets.
+/// 2. Preimage DB exists and is usable across multiple stage executions.
+/// 3. Post-Cancun execution removes the preimage DB directory.
+///
 /// Verifies v2 selfdestruct handling across a pre-/post-Cancun boundary.
 ///
 /// Test flow:
@@ -130,9 +135,11 @@ async fn test_pipeline_v2_selfdestruct_changesets_use_plain_slots() -> eyre::Res
     Ok(())
 }
 
-/// Regression coverage for single execution-batch behavior:
-/// blocks 1 and 2 are executed together (`1..=2`) where block 1 writes storage and block 2
-/// selfdestructs the account. The resulting block-2 wipe changeset must still contain plain keys.
+/// Scenario coverage:
+/// 1. Single execution batch (`1..=2`) where block 1 writes and block 2 wipes.
+/// 2. Block-by-block storage changesets still contain plain keys for wipe entries.
+///
+/// Regression coverage for single execution-batch behavior.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pipeline_v2_single_batch_write_then_selfdestruct_changesets_plain_slots(
 ) -> eyre::Result<()> {
@@ -161,6 +168,11 @@ async fn test_pipeline_v2_single_batch_write_then_selfdestruct_changesets_plain_
     Ok(())
 }
 
+/// Scenario coverage:
+/// 1. A slot appears only in intermediate reverts (not final bundle state).
+/// 2. A later block in the same execution batch wipes the account.
+/// 3. Wipe changesets still contain the required plain slot key/value.
+///
 /// Covers the edge case where a slot appears in intermediate block reverts but not in the final
 /// bundle state, then gets wiped by a later selfdestruct in the same execution batch.
 #[tokio::test(flavor = "multi_thread")]
@@ -190,6 +202,80 @@ async fn test_pipeline_v2_single_batch_reverted_slot_then_selfdestruct_changeset
         &[scenario.expected_slot],
     )?;
 
+    Ok(())
+}
+
+/// Scenario coverage:
+/// 1. Same address is destroyed, recreated via CREATE2, then destroyed again in one execution
+///    batch.
+/// 2. Both wipe blocks emit plain storage keys for the destroyed account.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pipeline_v2_single_batch_same_address_double_wipe_changesets_plain_slots(
+) -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let scenario = setup_same_address_double_wipe_scenario()?;
+    let (pipeline_provider_factory, pipeline_genesis) =
+        init_v2_pipeline_provider_factory(scenario.chain_spec.clone())?;
+
+    run_pipeline_range(
+        pipeline_provider_factory.clone(),
+        create_file_client_from_blocks(scenario.blocks),
+        pipeline_genesis,
+        1..=6,
+        6,
+    )
+    .await?;
+
+    let provider = pipeline_provider_factory.provider()?;
+    assert_eq!(provider.last_block_number()?, 6, "pipeline should sync blocks 1..=6");
+    assert_destroyed_changeset_entries_in_block(
+        &provider,
+        3,
+        scenario.child_contract,
+        &scenario.expected_slots,
+    )?;
+    assert_destroyed_changeset_entries_in_block(
+        &provider,
+        6,
+        scenario.child_contract,
+        &scenario.expected_slots,
+    )?;
+
+    Ok(())
+}
+
+/// Scenario coverage:
+/// 1. Intra-block multi-tx net-zero path: tx1 writes slots, tx2 wipes in the same block.
+/// 2. Intra-tx net-zero path: one tx writes, restores, and wipes.
+/// 3. Net-zero wipe paths emit no storage changeset rows for those accounts.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pipeline_v2_single_block_intra_block_and_intra_tx_wipes_use_plain_slots(
+) -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let scenario = setup_intra_block_and_intra_tx_selfdestruct_scenario()?;
+    let (pipeline_provider_factory, pipeline_genesis) =
+        init_v2_pipeline_provider_factory(scenario.chain_spec.clone())?;
+
+    run_pipeline_range(
+        pipeline_provider_factory.clone(),
+        create_file_client_from_blocks(scenario.blocks),
+        pipeline_genesis,
+        1..=1,
+        1,
+    )
+    .await?;
+
+    let provider = pipeline_provider_factory.provider()?;
+    assert_eq!(provider.last_block_number()?, 1, "pipeline should sync block 1");
+    assert_destroyed_changeset_entries_in_block(
+        &provider,
+        1,
+        scenario.multi_tx_contract,
+        &scenario.expected_multi_tx_slots,
+    )?;
+    assert_destroyed_changeset_entries_in_block(&provider, 1, scenario.intra_tx_contract, &[])?;
     Ok(())
 }
 
@@ -298,6 +384,21 @@ struct RevertedSlotSelfdestructScenario {
     expected_slot: (B256, U256),
 }
 
+struct SameAddressDoubleWipeScenario {
+    chain_spec: Arc<reth_chainspec::ChainSpec>,
+    blocks: Vec<SealedBlock<Block>>,
+    child_contract: Address,
+    expected_slots: [(B256, U256); 2],
+}
+
+struct IntraBlockAndIntraTxSelfdestructScenario {
+    chain_spec: Arc<reth_chainspec::ChainSpec>,
+    blocks: Vec<SealedBlock<Block>>,
+    multi_tx_contract: Address,
+    intra_tx_contract: Address,
+    expected_multi_tx_slots: Vec<(B256, U256)>,
+}
+
 fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfdestructScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
@@ -386,6 +487,227 @@ fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfd
         blocks,
         selfdestruct_contract,
         expected_slot: (slot, U256::from(0x07)),
+    })
+}
+
+fn setup_same_address_double_wipe_scenario() -> eyre::Result<SameAddressDoubleWipeScenario> {
+    let mut rng = generators::rng();
+    let key_pair = generate_key(&mut rng);
+    let signer_address = public_key_to_address(key_pair.public_key());
+    let beneficiary = Address::new([0x99; 20]);
+    let factory_contract = Address::new([0xaa; 20]);
+    let salt = B256::with_last_byte(0x42);
+    let child_runtime = write_or_selfdestruct_runtime_code(beneficiary);
+    let child_init = init_code_for_runtime(&child_runtime);
+    let child_contract = create2_address(factory_contract, salt, &child_init);
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(Genesis {
+                alloc: [
+                    (
+                        signer_address,
+                        GenesisAccount {
+                            balance: U256::from(ETH_TO_WEI) * U256::from(1000),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        factory_contract,
+                        GenesisAccount {
+                            code: Some(create2_factory_runtime_code(salt)),
+                            ..Default::default()
+                        },
+                    ),
+                ]
+                .into(),
+                ..MAINNET.genesis.clone()
+            })
+            .shanghai_activated()
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(30))
+            .build(),
+    );
+
+    let blocks = {
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        init_genesis(&provider_factory).expect("init genesis");
+
+        let genesis = provider_factory.sealed_header(0)?.expect("genesis should exist");
+        let evm_config = EthEvmConfig::new(chain_spec.clone());
+        let mut blocks = Vec::new();
+        let mut parent_hash = genesis.hash();
+        let gas_price = INITIAL_BASE_FEE as u128;
+
+        for (block_num, timestamp, nonce, to, input) in [
+            (1_u64, 4_u64, 0_u64, TxKind::Call(factory_contract), child_init.clone()),
+            (2_u64, 8_u64, 1_u64, TxKind::Call(child_contract), Bytes::new()),
+            (3_u64, 12_u64, 2_u64, TxKind::Call(child_contract), Bytes::from(vec![0x01])),
+            (4_u64, 16_u64, 3_u64, TxKind::Call(factory_contract), child_init.clone()),
+            (5_u64, 20_u64, 4_u64, TxKind::Call(child_contract), Bytes::new()),
+            (6_u64, 24_u64, 5_u64, TxKind::Call(child_contract), Bytes::from(vec![0x01])),
+        ] {
+            let tx = sign_tx_with_key_pair(
+                key_pair,
+                Transaction::Eip1559(TxEip1559 {
+                    chain_id: chain_spec.chain.id(),
+                    nonce,
+                    gas_limit: 400_000,
+                    max_fee_per_gas: gas_price,
+                    max_priority_fee_per_gas: 0,
+                    to,
+                    value: U256::ZERO,
+                    input,
+                    ..Default::default()
+                }),
+            );
+            let block = execute_and_commit_block(
+                &provider_factory,
+                &evm_config,
+                signer_address,
+                parent_hash,
+                block_num,
+                timestamp,
+                vec![tx],
+            )?;
+            parent_hash = block.hash();
+            blocks.push(block);
+        }
+
+        blocks
+    };
+
+    Ok(SameAddressDoubleWipeScenario {
+        chain_spec,
+        blocks,
+        child_contract,
+        expected_slots: [
+            (B256::with_last_byte(0x01), U256::from(0x2a)),
+            (B256::with_last_byte(0x02), U256::from(0x99)),
+        ],
+    })
+}
+
+fn setup_intra_block_and_intra_tx_selfdestruct_scenario(
+) -> eyre::Result<IntraBlockAndIntraTxSelfdestructScenario> {
+    let mut rng = generators::rng();
+    let key_pair = generate_key(&mut rng);
+    let signer_address = public_key_to_address(key_pair.public_key());
+    let beneficiary = Address::new([0x88; 20]);
+    let multi_tx_contract = Address::new([0x44; 20]);
+    let intra_tx_contract = Address::new([0x55; 20]);
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(Genesis {
+                alloc: [
+                    (
+                        signer_address,
+                        GenesisAccount {
+                            balance: U256::from(ETH_TO_WEI) * U256::from(1000),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        multi_tx_contract,
+                        GenesisAccount {
+                            code: Some(write_or_selfdestruct_runtime_code(beneficiary)),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        intra_tx_contract,
+                        GenesisAccount {
+                            code: Some(write_restore_then_selfdestruct_runtime_code(beneficiary)),
+                            ..Default::default()
+                        },
+                    ),
+                ]
+                .into(),
+                ..MAINNET.genesis.clone()
+            })
+            .shanghai_activated()
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(30))
+            .build(),
+    );
+
+    let blocks = {
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        init_genesis(&provider_factory).expect("init genesis");
+
+        let genesis = provider_factory.sealed_header(0)?.expect("genesis should exist");
+        let evm_config = EthEvmConfig::new(chain_spec.clone());
+        let gas_price = INITIAL_BASE_FEE as u128;
+
+        // Single pre-Cancun block with three txs:
+        // 1) write slots (contract `multi_tx_contract`)
+        // 2) selfdestruct same contract in same block
+        // 3) write->restore->selfdestruct in one tx (`intra_tx_contract`)
+        let txs = vec![
+            sign_tx_with_key_pair(
+                key_pair,
+                Transaction::Eip1559(TxEip1559 {
+                    chain_id: chain_spec.chain.id(),
+                    nonce: 0,
+                    gas_limit: 120_000,
+                    max_fee_per_gas: gas_price,
+                    max_priority_fee_per_gas: 0,
+                    to: TxKind::Call(multi_tx_contract),
+                    value: U256::ZERO,
+                    input: Bytes::new(),
+                    ..Default::default()
+                }),
+            ),
+            sign_tx_with_key_pair(
+                key_pair,
+                Transaction::Eip1559(TxEip1559 {
+                    chain_id: chain_spec.chain.id(),
+                    nonce: 1,
+                    gas_limit: 120_000,
+                    max_fee_per_gas: gas_price,
+                    max_priority_fee_per_gas: 0,
+                    to: TxKind::Call(multi_tx_contract),
+                    value: U256::ZERO,
+                    input: Bytes::from(vec![0x01]),
+                    ..Default::default()
+                }),
+            ),
+            sign_tx_with_key_pair(
+                key_pair,
+                Transaction::Eip1559(TxEip1559 {
+                    chain_id: chain_spec.chain.id(),
+                    nonce: 2,
+                    gas_limit: 120_000,
+                    max_fee_per_gas: gas_price,
+                    max_priority_fee_per_gas: 0,
+                    to: TxKind::Call(intra_tx_contract),
+                    value: U256::ZERO,
+                    input: Bytes::new(),
+                    ..Default::default()
+                }),
+            ),
+        ];
+
+        let block = execute_and_commit_block(
+            &provider_factory,
+            &evm_config,
+            signer_address,
+            genesis.hash(),
+            1,
+            12,
+            txs,
+        )?;
+
+        vec![block]
+    };
+
+    Ok(IntraBlockAndIntraTxSelfdestructScenario {
+        chain_spec,
+        blocks,
+        multi_tx_contract,
+        intra_tx_contract,
+        expected_multi_tx_slots: Vec::new(),
     })
 }
 
@@ -693,6 +1015,59 @@ fn write_restore_or_selfdestruct_runtime_code(beneficiary: Address) -> Bytes {
     runtime.extend_from_slice(beneficiary.as_slice());
     runtime.extend_from_slice(&[0xff, 0x00]); // SELFDESTRUCT; STOP
     runtime.into()
+}
+
+/// Builds tiny runtime bytecode that performs all actions in one call:
+/// SSTORE(3, 0x2b) -> SSTORE(3, 0x07) -> SELFDESTRUCT.
+fn write_restore_then_selfdestruct_runtime_code(beneficiary: Address) -> Bytes {
+    let mut runtime = Vec::with_capacity(40);
+    runtime.extend_from_slice(&[0x60, 0x2b, 0x60, 0x03, 0x55]); // SSTORE(3, 0x2b)
+    runtime.extend_from_slice(&[0x60, 0x07, 0x60, 0x03, 0x55]); // SSTORE(3, 0x07)
+    runtime.push(0x73); // PUSH20
+    runtime.extend_from_slice(beneficiary.as_slice());
+    runtime.extend_from_slice(&[0xff, 0x00]); // SELFDESTRUCT; STOP
+    runtime.into()
+}
+
+/// Converts contract runtime bytecode into init code that returns the runtime.
+fn init_code_for_runtime(runtime: &Bytes) -> Bytes {
+    let len = u8::try_from(runtime.len()).expect("runtime too large for PUSH1 init-code helper");
+    let mut init = Vec::with_capacity(12 + runtime.len());
+    init.extend_from_slice(&[
+        0x60, len, // PUSH1 runtime_len
+        0x60, 0x0c, // PUSH1 runtime_offset
+        0x60, 0x00, // PUSH1 mem_offset
+        0x39, // CODECOPY
+        0x60, len, // PUSH1 runtime_len
+        0x60, 0x00, // PUSH1 mem_offset
+        0xf3, // RETURN
+    ]);
+    init.extend_from_slice(runtime.as_ref());
+    init.into()
+}
+
+/// Runtime bytecode for a minimal CREATE2 factory:
+/// - calldata is treated as init code
+/// - deploys with fixed `salt`
+fn create2_factory_runtime_code(salt: B256) -> Bytes {
+    let mut runtime = Vec::with_capacity(46);
+    runtime.extend_from_slice(&[0x36, 0x60, 0x00, 0x60, 0x00, 0x37]); // CALLDATACOPY(0, 0, calldatasize)
+    runtime.push(0x7f); // PUSH32
+    runtime.extend_from_slice(salt.as_slice());
+    runtime.extend_from_slice(&[0x36, 0x60, 0x00, 0x60, 0x00, 0xf5, 0x00]); // CREATE2(0, 0, calldatasize, salt); STOP
+    runtime.into()
+}
+
+fn create2_address(factory: Address, salt: B256, init_code: &Bytes) -> Address {
+    let init_hash = keccak256(init_code.as_ref());
+    let mut preimage = [0_u8; 85];
+    preimage[0] = 0xff;
+    preimage[1..21].copy_from_slice(factory.as_slice());
+    preimage[21..53].copy_from_slice(salt.as_slice());
+    preimage[53..85].copy_from_slice(init_hash.as_slice());
+
+    let hash = keccak256(preimage);
+    Address::from_slice(&hash.as_slice()[12..])
 }
 
 fn assert_preimage_rows(preimage_path: &Path, slots: &[B256]) -> eyre::Result<()> {
