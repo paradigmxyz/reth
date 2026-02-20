@@ -9836,7 +9836,6 @@ dependencies = [
  "jsonrpsee",
  "reth-chain-state",
  "reth-engine-primitives",
- "reth-execution-types",
  "reth-network-peers",
  "reth-rpc-eth-api",
  "reth-trie-common",

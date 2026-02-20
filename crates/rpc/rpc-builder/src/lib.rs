@@ -872,7 +872,6 @@ where
     EthApi: FullEthApiServer,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N> + Clone + 'static,
-    N::Receipt: serde::Serialize,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace

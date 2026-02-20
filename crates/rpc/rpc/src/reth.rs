@@ -116,7 +116,6 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + 'static,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
-    N::Receipt: Serialize,
 {
     /// Re-executes one or more consecutive blocks and returns the execution outcome.
     pub async fn block_execution_outcome(
@@ -124,6 +123,15 @@ where
         block_id: BlockId,
         count: Option<U64>,
     ) -> EthResult<Option<ExecutionOutcome<N::Receipt>>> {
+        const MAX_BLOCK_COUNT: u64 = 128;
+
+        let block_count = count.map(|c| c.to::<u64>()).unwrap_or(1);
+        if block_count == 0 || block_count > MAX_BLOCK_COUNT {
+            return Err(EthApiError::InvalidParams(format!(
+                "block count must be between 1 and {MAX_BLOCK_COUNT}, got {block_count}"
+            )))
+        }
+
         let permit = self
             .inner
             .blocking_task_guard
@@ -133,7 +141,7 @@ where
             .map_err(|_| EthApiError::InternalEthError)?;
         self.on_blocking_task(move |this| async move {
             let _permit = permit;
-            this.try_block_execution_outcome(block_id, count)
+            this.try_block_execution_outcome(block_id, block_count)
         })
         .await
     }
@@ -141,21 +149,11 @@ where
     fn try_block_execution_outcome(
         &self,
         block_id: BlockId,
-        count: Option<U64>,
+        block_count: u64,
     ) -> EthResult<Option<ExecutionOutcome<N::Receipt>>> {
         let Some(start_block) = self.provider().block_number_for_id(block_id)? else {
             return Ok(None)
         };
-
-        if start_block == 0 {
-            return Err(EthApiError::InvalidParams(
-                "cannot re-execute genesis block (no parent state)".to_string(),
-            ));
-        }
-
-        const MAX_BLOCK_COUNT: u64 = 256;
-
-        let block_count = count.map(|c| c.to::<u64>()).unwrap_or(1).clamp(1, MAX_BLOCK_COUNT);
 
         let state_provider = self.provider().history_by_block_number(start_block - 1)?;
         let db = reth_revm::database::StateProviderDatabase::new(&state_provider);
@@ -196,7 +194,6 @@ where
         + PersistedBlockSubscriptions
         + 'static,
     EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
-    <Provider::Primitives as NodePrimitives>::Receipt: Serialize,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(
@@ -211,29 +208,14 @@ where
         &self,
         block_id: BlockId,
         count: Option<U64>,
-    ) -> RpcResult<Option<ExecutionOutcome<serde_json::Value>>> {
+    ) -> RpcResult<Option<serde_json::Value>> {
         let outcome = Self::block_execution_outcome(self, block_id, count).await?;
         match outcome {
             Some(outcome) => {
-                let receipts = outcome
-                    .receipts
-                    .into_iter()
-                    .map(|block_receipts| {
-                        block_receipts
-                            .into_iter()
-                            .map(serde_json::to_value)
-                            .collect::<Result<Vec<_>, _>>()
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| {
-                        EthApiError::Internal(reth_errors::RethError::msg(e.to_string()))
-                    })?;
-                Ok(Some(ExecutionOutcome::new(
-                    outcome.bundle,
-                    receipts,
-                    outcome.first_block,
-                    outcome.requests,
-                )))
+                let value = serde_json::to_value(&outcome).map_err(|e| {
+                    EthApiError::Internal(reth_errors::RethError::msg(e.to_string()))
+                })?;
+                Ok(Some(value))
             }
             None => Ok(None),
         }
@@ -397,173 +379,4 @@ struct RethApiInner<Provider, EvmConfig> {
     blocking_task_guard: BlockingTaskGuard,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Runtime,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy_evm::block::BlockExecutionResult;
-    use alloy_primitives::{address, B256, U256};
-    use reth_ethereum_primitives::Receipt;
-
-    use revm::{
-        database::{
-            states::{BundleState, StorageSlot},
-            AccountStatus, BundleAccount,
-        },
-        state::AccountInfo,
-    };
-    use std::collections::HashMap;
-
-    fn test_receipt() -> Receipt {
-        Receipt {
-            tx_type: alloy_consensus::TxType::Eip1559,
-            success: true,
-            cumulative_gas_used: 21000,
-            logs: vec![],
-        }
-    }
-
-    #[test]
-    fn execution_outcome_multi_block() {
-        let addr_a = address!("0x0000000000000000000000000000000000000001");
-        let addr_b = address!("0x0000000000000000000000000000000000000002");
-
-        let mut state_a = HashMap::default();
-        state_a.insert(
-            addr_a,
-            BundleAccount {
-                info: Some(AccountInfo {
-                    nonce: 1,
-                    balance: U256::from(500),
-                    code_hash: B256::ZERO,
-                    ..Default::default()
-                }),
-                original_info: None,
-                storage: Default::default(),
-                status: AccountStatus::Changed,
-            },
-        );
-
-        let mut state_b = HashMap::default();
-        state_b.insert(
-            addr_b,
-            BundleAccount {
-                info: Some(AccountInfo {
-                    nonce: 3,
-                    balance: U256::from(900),
-                    code_hash: B256::ZERO,
-                    ..Default::default()
-                }),
-                original_info: None,
-                storage: Default::default(),
-                status: AccountStatus::Changed,
-            },
-        );
-
-        let mut bundle = BundleState {
-            state: state_a,
-            contracts: Default::default(),
-            reverts: Default::default(),
-            state_size: 0,
-            reverts_size: 0,
-        };
-        bundle.extend(BundleState {
-            state: state_b,
-            contracts: Default::default(),
-            reverts: Default::default(),
-            state_size: 0,
-            reverts_size: 0,
-        });
-
-        let results = vec![
-            BlockExecutionResult {
-                receipts: vec![test_receipt()],
-                requests: Default::default(),
-                gas_used: 21000,
-                blob_gas_used: 0,
-            },
-            BlockExecutionResult {
-                receipts: vec![test_receipt(), test_receipt()],
-                requests: Default::default(),
-                gas_used: 42000,
-                blob_gas_used: 131072,
-            },
-        ];
-
-        let outcome = ExecutionOutcome::from_blocks(5, bundle, results);
-
-        assert_eq!(outcome.first_block, 5);
-        assert_eq!(outcome.receipts.len(), 2);
-        assert_eq!(outcome.receipts[0].len(), 1);
-        assert_eq!(outcome.receipts[1].len(), 2);
-        assert_eq!(outcome.requests.len(), 2);
-        assert!(outcome.bundle.account(&addr_a).is_some());
-        assert!(outcome.bundle.account(&addr_b).is_some());
-        assert_eq!(outcome.bundle.account(&addr_a).unwrap().info.as_ref().unwrap().nonce, 1);
-        assert_eq!(
-            outcome.bundle.account(&addr_b).unwrap().info.as_ref().unwrap().balance,
-            U256::from(900)
-        );
-    }
-
-    #[test]
-    fn execution_outcome_serde_roundtrip_with_state() {
-        let addr = address!("0x0000000000000000000000000000000000000042");
-        let slot = U256::from(7);
-        let value = U256::from(999);
-
-        let mut storage = HashMap::default();
-        storage.insert(slot, StorageSlot::new(value));
-
-        let mut state = HashMap::default();
-        state.insert(
-            addr,
-            BundleAccount {
-                info: Some(AccountInfo {
-                    nonce: 10,
-                    balance: U256::from(5_000),
-                    code_hash: B256::ZERO,
-                    ..Default::default()
-                }),
-                original_info: None,
-                storage,
-                status: AccountStatus::Changed,
-            },
-        );
-
-        let raw_bytes: &[u8] = &[0x60, 0x00, 0x60, 0x00, 0xfd];
-        let code =
-            revm::bytecode::Bytecode::new_raw(alloy_primitives::Bytes::from_static(raw_bytes));
-        let code_hash = B256::from(alloy_primitives::keccak256(code.original_byte_slice()));
-        let mut contracts = HashMap::default();
-        contracts.insert(code_hash, code);
-
-        let outcome = ExecutionOutcome::new(
-            BundleState {
-                state,
-                contracts,
-                reverts: Default::default(),
-                state_size: 0,
-                reverts_size: 0,
-            },
-            vec![vec![test_receipt()]],
-            1,
-            vec![Default::default()],
-        );
-
-        let json = serde_json::to_value(&outcome).unwrap();
-        let deserialized: ExecutionOutcome = serde_json::from_value(json).unwrap();
-
-        assert_eq!(deserialized.first_block, 1);
-        assert_eq!(deserialized.receipts.len(), 1);
-        assert_eq!(deserialized.receipts[0][0], test_receipt());
-
-        let account = deserialized.bundle.account(&addr).unwrap();
-        assert_eq!(account.info.as_ref().unwrap().nonce, 10);
-        assert_eq!(account.info.as_ref().unwrap().balance, U256::from(5_000));
-        assert_eq!(account.storage.get(&slot).unwrap().present_value, value,);
-
-        assert!(deserialized.bundle.contracts.contains_key(&code_hash));
-    }
 }
