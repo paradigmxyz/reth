@@ -115,10 +115,10 @@ pub struct PayloadProcessor<Evm>
 where
     Evm: ConfigureEvm,
 {
-    /// The executor used by to spawn tasks.
-    executor: Runtime,
     /// Shared worker that computes incremental post-execution roots.
     post_exec_coordinator: PostExecCoordinatorFor<Evm>,
+    /// The executor used by to spawn tasks.
+    executor: Runtime,
     /// The most recent cache used for execution.
     execution_cache: PayloadExecutionCache,
     /// Metrics for trie operations
@@ -166,10 +166,10 @@ where
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     ) -> Self {
-        let post_exec_coordinator = post_exec::PostExecCoordinator::new(&executor);
+        let post_exec_coordinator = post_exec::PostExecCoordinator::new();
         Self {
-            executor,
             post_exec_coordinator,
+            executor,
             execution_cache: Default::default(),
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),

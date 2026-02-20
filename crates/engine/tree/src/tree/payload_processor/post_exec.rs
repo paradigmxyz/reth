@@ -1,77 +1,80 @@
 //! Long-lived post-execution worker for incremental receipt-root computation.
 //!
-//! The worker receives per-block events from execution and maintains block-local
-//! accumulators keyed by block id. This avoids per-block task spawning overhead.
+//! This keeps the lifecycle simple: one worker thread per coordinator, sequentially
+//! handling blocks by reusing the existing `ReceiptRootTaskHandle`.
 
-use super::receipt_root_task::IndexedReceipt;
-use alloy_eips::Encodable2718;
+use super::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use alloy_primitives::{Bloom, B256};
+use crossbeam_channel::{self, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_primitives_traits::Receipt;
-use reth_tasks::{LazyHandle, Runtime};
-use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        mpsc::{self, Receiver, Sender},
-    },
+    sync::mpsc::{self, Receiver, Sender},
+    thread::JoinHandle,
 };
 use tokio::sync::oneshot;
-use tracing::{debug, error, warn};
+use tracing::error;
 
 /// Handle to the long-lived post-execution worker.
 pub struct PostExecCoordinator<R> {
-    events_tx: Sender<PostExecEvent<R>>,
-    next_block_id: AtomicU64,
-    _worker_handle: LazyHandle<()>,
+    commands_tx: Sender<WorkerCommand<R>>,
+    worker: Option<JoinHandle<()>>,
 }
 
 impl<R> core::fmt::Debug for PostExecCoordinator<R> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("PostExecCoordinator")
-            .field("next_block_id", &self.next_block_id.load(Ordering::Relaxed))
-            .finish()
+        f.debug_struct("PostExecCoordinator").finish()
     }
 }
 
 impl<R: Receipt + Send + 'static> PostExecCoordinator<R> {
-    /// Create a new worker bound to the given runtime.
-    pub fn new(runtime: &Runtime) -> Self {
-        let (events_tx, events_rx) = mpsc::channel();
-        let worker_handle =
-            runtime.spawn_blocking_named("post-exec", move || PostExecWorker::run(events_rx));
+    /// Create a new coordinator and its worker thread.
+    pub fn new() -> Self {
+        let (commands_tx, commands_rx) = mpsc::channel();
+        let worker = std::thread::Builder::new()
+            .name("post-exec".to_string())
+            .spawn(move || PostExecWorker::run(commands_rx))
+            .expect("failed to spawn post-exec worker");
 
-        Self { events_tx, next_block_id: AtomicU64::new(1), _worker_handle: worker_handle }
+        Self { commands_tx, worker: Some(worker) }
     }
 
     /// Begin receipt-root streaming for a new block.
     pub fn begin_block(&self, receipts_len: usize) -> PostExecBlockHandle<R> {
-        let block_id = self.next_block_id.fetch_add(1, Ordering::Relaxed);
-        if self.events_tx.send(PostExecEvent::BeginBlock { block_id, receipts_len }).is_err() {
+        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = oneshot::channel();
+        if self
+            .commands_tx
+            .send(WorkerCommand::RunBlock { receipts_len, receipt_rx, result_tx })
+            .is_err()
+        {
             error!(
                 target: "engine::tree::payload_processor",
-                block_id,
-                "post-exec worker dropped before BeginBlock event",
+                "post-exec worker dropped before RunBlock command",
             );
         }
 
-        PostExecBlockHandle { block_id, events_tx: self.events_tx.clone(), completed: false }
+        PostExecBlockHandle { receipt_tx: Some(receipt_tx), result_rx: Some(result_rx) }
+    }
+}
+
+impl<R> Drop for PostExecCoordinator<R> {
+    fn drop(&mut self) {
+        let _ = self.commands_tx.send(WorkerCommand::Shutdown);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 
 /// Block-scoped stream handle used by execution to send receipts and finalize.
 pub struct PostExecBlockHandle<R> {
-    block_id: u64,
-    events_tx: Sender<PostExecEvent<R>>,
-    completed: bool,
+    receipt_tx: Option<CrossbeamSender<IndexedReceipt<R>>>,
+    result_rx: Option<oneshot::Receiver<(B256, Bloom)>>,
 }
 
 impl<R> core::fmt::Debug for PostExecBlockHandle<R> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("PostExecBlockHandle")
-            .field("block_id", &self.block_id)
-            .field("completed", &self.completed)
-            .finish()
+        f.debug_struct("PostExecBlockHandle").finish()
     }
 }
 
@@ -79,16 +82,12 @@ impl<R: Receipt + Send + 'static> PostExecBlockHandle<R> {
     /// Stream one receipt to the background worker.
     pub fn push_receipt(&self, index: usize, receipt: R) {
         if self
-            .events_tx
-            .send(PostExecEvent::Receipt {
-                block_id: self.block_id,
-                receipt: IndexedReceipt::new(index, receipt),
-            })
-            .is_err()
+            .receipt_tx
+            .as_ref()
+            .is_some_and(|tx| tx.send(IndexedReceipt::new(index, receipt)).is_err())
         {
             error!(
                 target: "engine::tree::payload_processor",
-                block_id = self.block_id,
                 index,
                 "post-exec worker dropped before Receipt event",
             );
@@ -97,156 +96,31 @@ impl<R: Receipt + Send + 'static> PostExecBlockHandle<R> {
 
     /// Finalize this block and return a receiver for the computed root+bloom.
     pub fn finalize(mut self) -> oneshot::Receiver<(B256, Bloom)> {
-        self.completed = true;
-        let (result_tx, result_rx) = oneshot::channel();
-        if self
-            .events_tx
-            .send(PostExecEvent::FinalizeBlock { block_id: self.block_id, result_tx })
-            .is_err()
-        {
-            error!(
-                target: "engine::tree::payload_processor",
-                block_id = self.block_id,
-                "post-exec worker dropped before FinalizeBlock event",
-            );
-        }
-        result_rx
+        // Close the stream to signal end-of-block to the worker.
+        self.receipt_tx.take();
+        self.result_rx.take().expect("result receiver must be present")
     }
 }
 
-impl<R> Drop for PostExecBlockHandle<R> {
-    fn drop(&mut self) {
-        if self.completed {
-            return;
-        }
-
-        let _ = self.events_tx.send(PostExecEvent::AbortBlock { block_id: self.block_id });
-    }
+enum WorkerCommand<R> {
+    RunBlock {
+        receipts_len: usize,
+        receipt_rx: CrossbeamReceiver<IndexedReceipt<R>>,
+        result_tx: oneshot::Sender<(B256, Bloom)>,
+    },
+    Shutdown,
 }
 
-enum PostExecEvent<R> {
-    BeginBlock { block_id: u64, receipts_len: usize },
-    Receipt { block_id: u64, receipt: IndexedReceipt<R> },
-    FinalizeBlock { block_id: u64, result_tx: oneshot::Sender<(B256, Bloom)> },
-    AbortBlock { block_id: u64 },
-}
-
-#[derive(Debug)]
-struct ReceiptAccumulator {
-    builder: OrderedTrieRootEncodedBuilder,
-    aggregated_bloom: Bloom,
-    expected_count: usize,
-    received_count: usize,
-    encode_buf: Vec<u8>,
-}
-
-impl ReceiptAccumulator {
-    fn new(receipts_len: usize) -> Self {
-        Self {
-            builder: OrderedTrieRootEncodedBuilder::new(receipts_len),
-            aggregated_bloom: Bloom::ZERO,
-            expected_count: receipts_len,
-            received_count: 0,
-            encode_buf: Vec::new(),
-        }
-    }
-
-    fn push<R: Receipt>(&mut self, receipt: IndexedReceipt<R>) {
-        let receipt_with_bloom = receipt.receipt.with_bloom_ref();
-        self.encode_buf.clear();
-        receipt_with_bloom.encode_2718(&mut self.encode_buf);
-        self.aggregated_bloom |= *receipt_with_bloom.bloom_ref();
-
-        match self.builder.push(receipt.index, &self.encode_buf) {
-            Ok(()) => {
-                self.received_count += 1;
-            }
-            Err(err) => {
-                error!(
-                    target: "engine::tree::payload_processor",
-                    index = receipt.index,
-                    ?err,
-                    "post-exec worker received invalid receipt index",
-                );
-            }
-        }
-    }
-
-    fn finalize(self) -> Option<(B256, Bloom)> {
-        let Ok(root) = self.builder.finalize() else {
-            error!(
-                target: "engine::tree::payload_processor",
-                expected = self.expected_count,
-                received = self.received_count,
-                "post-exec worker received incomplete receipts",
-            );
-            return None;
-        };
-
-        Some((root, self.aggregated_bloom))
-    }
-}
-
-struct PostExecWorker {
-    inflight: HashMap<u64, ReceiptAccumulator>,
-}
+struct PostExecWorker;
 
 impl PostExecWorker {
-    fn run<R: Receipt>(events_rx: Receiver<PostExecEvent<R>>) {
-        let mut worker = Self { inflight: HashMap::new() };
-        while let Ok(event) = events_rx.recv() {
-            worker.handle_event(event);
-        }
-
-        if !worker.inflight.is_empty() {
-            debug!(
-                target: "engine::tree::payload_processor",
-                inflight = worker.inflight.len(),
-                "post-exec worker shutting down with unfinished blocks",
-            );
-        }
-    }
-
-    fn handle_event<R: Receipt>(&mut self, event: PostExecEvent<R>) {
-        match event {
-            PostExecEvent::BeginBlock { block_id, receipts_len } => {
-                let previous =
-                    self.inflight.insert(block_id, ReceiptAccumulator::new(receipts_len));
-                if previous.is_some() {
-                    warn!(
-                        target: "engine::tree::payload_processor",
-                        block_id,
-                        "post-exec worker replaced existing inflight block state",
-                    );
+    fn run<R: Receipt>(commands_rx: Receiver<WorkerCommand<R>>) {
+        while let Ok(command) = commands_rx.recv() {
+            match command {
+                WorkerCommand::RunBlock { receipts_len, receipt_rx, result_tx } => {
+                    ReceiptRootTaskHandle::new(receipt_rx, result_tx).run(receipts_len);
                 }
-            }
-            PostExecEvent::Receipt { block_id, receipt } => {
-                let Some(accumulator) = self.inflight.get_mut(&block_id) else {
-                    warn!(
-                        target: "engine::tree::payload_processor",
-                        block_id,
-                        "post-exec worker received receipt for unknown block",
-                    );
-                    return;
-                };
-                accumulator.push(receipt);
-            }
-            PostExecEvent::FinalizeBlock { block_id, result_tx } => {
-                let Some(accumulator) = self.inflight.remove(&block_id) else {
-                    warn!(
-                        target: "engine::tree::payload_processor",
-                        block_id,
-                        "post-exec worker finalized unknown block",
-                    );
-                    return;
-                };
-
-                if let Some(result) = accumulator.finalize() {
-                    let _ = result_tx.send(result);
-                }
-            }
-            PostExecEvent::AbortBlock { block_id } => {
-                self.inflight.remove(&block_id);
+                WorkerCommand::Shutdown => break,
             }
         }
     }
@@ -258,7 +132,6 @@ mod tests {
     use alloy_consensus::{proofs::calculate_receipt_root, TxReceipt};
     use alloy_primitives::{Address, Bytes, Log, B256};
     use reth_ethereum_primitives::{Receipt, TxType};
-    use reth_tasks::Runtime;
 
     fn sample_receipts() -> Vec<Receipt> {
         vec![
@@ -296,8 +169,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_exec_worker_computes_receipt_root_and_bloom() {
-        let runtime = Runtime::test();
-        let coordinator = PostExecCoordinator::<Receipt>::new(&runtime);
+        let coordinator = PostExecCoordinator::<Receipt>::new();
 
         let receipts = sample_receipts();
         let (expected_root, expected_bloom) = expected_root_bloom(&receipts);
@@ -314,8 +186,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_exec_worker_handles_out_of_order_receipts() {
-        let runtime = Runtime::test();
-        let coordinator = PostExecCoordinator::<Receipt>::new(&runtime);
+        let coordinator = PostExecCoordinator::<Receipt>::new();
 
         let receipts = sample_receipts();
         let (expected_root, expected_bloom) = expected_root_bloom(&receipts);
@@ -332,8 +203,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_exec_worker_drops_duplicate_index_blocks() {
-        let runtime = Runtime::test();
-        let coordinator = PostExecCoordinator::<Receipt>::new(&runtime);
+        let coordinator = PostExecCoordinator::<Receipt>::new();
 
         let mut receipts = sample_receipts();
         let first = receipts.remove(0);
@@ -347,9 +217,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_exec_worker_supports_multiple_inflight_blocks() {
-        let runtime = Runtime::test();
-        let coordinator = PostExecCoordinator::<Receipt>::new(&runtime);
+    async fn post_exec_worker_supports_multiple_queued_blocks() {
+        let coordinator = PostExecCoordinator::<Receipt>::new();
 
         let receipts_a = sample_receipts();
         let (expected_root_a, expected_bloom_a) = expected_root_bloom(&receipts_a);
@@ -366,8 +235,8 @@ mod tests {
         handle_b.push_receipt(1, receipts_b[1].clone());
         handle_a.push_receipt(2, receipts_a[2].clone());
 
-        let (root_b, bloom_b) = handle_b.finalize().await.unwrap();
         let (root_a, bloom_a) = handle_a.finalize().await.unwrap();
+        let (root_b, bloom_b) = handle_b.finalize().await.unwrap();
 
         assert_eq!(root_a, expected_root_a);
         assert_eq!(bloom_a, expected_bloom_a);
@@ -377,8 +246,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_exec_worker_aborts_incomplete_blocks() {
-        let runtime = Runtime::test();
-        let coordinator = PostExecCoordinator::<Receipt>::new(&runtime);
+        let coordinator = PostExecCoordinator::<Receipt>::new();
 
         let handle = coordinator.begin_block(2);
         handle.push_receipt(0, Receipt::default());
@@ -387,5 +255,14 @@ mod tests {
         let second = coordinator.begin_block(1);
         second.push_receipt(0, Receipt::default());
         assert!(second.finalize().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn post_exec_worker_handles_shutdown_after_finalize() {
+        let coordinator = PostExecCoordinator::<Receipt>::new();
+        let handle = coordinator.begin_block(1);
+        handle.push_receipt(0, Receipt::default());
+        let _ = handle.finalize().await.unwrap();
+        drop(coordinator);
     }
 }
