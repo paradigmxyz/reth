@@ -6,6 +6,7 @@ use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNodeV2};
+use smallvec::SmallVec;
 use tracing::instrument;
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
@@ -355,10 +356,8 @@ pub enum SparseNode {
         state_mask: TrieMask,
         /// Tracker for the node's state, e.g. cached `RlpNode` tracking.
         state: SparseNodeState,
-        /// The mask of the children that are blinded.
-        blinded_mask: TrieMask,
-        /// The hashes of the children that are blinded.
-        blinded_hashes: Box<[B256; 16]>,
+        /// The blinded children hashes.
+        blinded: BlindedHashes,
     },
 }
 
@@ -366,14 +365,11 @@ impl SparseNode {
     /// Create new [`SparseNode::Branch`] from state mask and blinded nodes.
     #[cfg(test)]
     pub fn new_branch(state_mask: TrieMask, blinded_children: &[(u8, B256)]) -> Self {
-        let mut blinded_mask = TrieMask::default();
-        let mut blinded_hashes = Box::new([B256::ZERO; 16]);
-
+        let mut blinded = BlindedHashes::default();
         for (nibble, hash) in blinded_children {
-            blinded_mask.set_bit(*nibble);
-            blinded_hashes[*nibble as usize] = *hash;
+            blinded.set(*nibble, *hash);
         }
-        Self::Branch { state_mask, state: SparseNodeState::Dirty, blinded_mask, blinded_hashes }
+        Self::Branch { state_mask, state: SparseNodeState::Dirty, blinded }
     }
 
     /// Create new [`SparseNode::Branch`] with two bits set.
@@ -385,8 +381,7 @@ impl SparseNode {
         Self::Branch {
             state_mask,
             state: SparseNodeState::Dirty,
-            blinded_mask: TrieMask::default(),
-            blinded_hashes: Box::new([B256::ZERO; 16]),
+            blinded: BlindedHashes::default(),
         }
     }
 
@@ -498,6 +493,78 @@ impl SparseNodeState {
             Self::Cached { store_in_db_trie, .. } => *store_in_db_trie,
             Self::Dirty => None,
         }
+    }
+}
+
+/// Compact storage for blinded child hashes on a branch node.
+///
+/// Uses bitmap-indexed (HAMT-style) popcount compression: only stores hashes for
+/// nibbles that are actually set in the mask, using `(mask & ((1 << nibble) - 1)).count_ones()`
+/// to map a nibble to its compact index.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BlindedHashes {
+    /// Bitmask indicating which nibbles (0..16) have blinded hashes.
+    mask: TrieMask,
+    /// Compact array of hashes, indexed by popcount of the mask below each nibble.
+    hashes: SmallVec<[B256; 4]>,
+}
+
+impl BlindedHashes {
+    /// Returns the mask of blinded nibbles.
+    #[inline]
+    pub const fn mask(&self) -> TrieMask {
+        self.mask
+    }
+
+    /// Returns `true` if there are no blinded hashes.
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.mask.is_empty()
+    }
+
+    /// Returns `true` if the given nibble is blinded.
+    #[inline]
+    pub const fn is_bit_set(&self, nibble: u8) -> bool {
+        self.mask.is_bit_set(nibble)
+    }
+
+    /// Returns the hash for a given nibble.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the nibble is not set in the mask.
+    #[inline]
+    pub fn get(&self, nibble: u8) -> B256 {
+        debug_assert!(self.mask.is_bit_set(nibble), "nibble {nibble} not set in blinded mask");
+        let idx = (self.mask.get() & ((1u16 << nibble) - 1)).count_ones() as usize;
+        self.hashes[idx]
+    }
+
+    /// Sets the hash for a given nibble. If the nibble is already set, overwrites it.
+    #[inline]
+    pub fn set(&mut self, nibble: u8, hash: B256) {
+        let idx = (self.mask.get() & ((1u16 << nibble) - 1)).count_ones() as usize;
+        if self.mask.is_bit_set(nibble) {
+            self.hashes[idx] = hash;
+        } else {
+            self.mask.set_bit(nibble);
+            self.hashes.insert(idx, hash);
+        }
+    }
+
+    /// Unsets the blinded hash for a given nibble.
+    #[inline]
+    pub fn unset(&mut self, nibble: u8) {
+        if self.mask.is_bit_set(nibble) {
+            let idx = (self.mask.get() & ((1u16 << nibble) - 1)).count_ones() as usize;
+            self.hashes.remove(idx);
+            self.mask.unset_bit(nibble);
+        }
+    }
+
+    /// Returns an iterator over (nibble, hash) pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (u8, B256)> + '_ {
+        self.mask.iter().zip(self.hashes.iter().copied())
     }
 }
 
