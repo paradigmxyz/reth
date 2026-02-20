@@ -15,11 +15,7 @@ use crate::{Layers, Tracer};
 pub struct TestTracer;
 
 impl Tracer for TestTracer {
-    fn init_with_layers_and_reload(
-        self,
-        _layers: Layers,
-        _enable_reload: bool,
-    ) -> eyre::Result<Option<WorkerGuard>> {
+    fn init_with_layers(self, _layers: Layers) -> eyre::Result<Option<WorkerGuard>> {
         let _ = tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_default_env())
             .with_writer(std::io::stderr)

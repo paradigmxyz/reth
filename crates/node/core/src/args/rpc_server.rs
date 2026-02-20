@@ -793,9 +793,7 @@ impl RpcServerArgs {
             return true;
         }
 
-        // IPC is enabled by default unless ipcdisable is true
-        // When IPC is enabled without explicit API config, it uses all standard modules
-        // which includes debug
+        // IPC exposes all modules (including debug) when enabled
         !self.ipcdisable
     }
 

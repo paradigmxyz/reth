@@ -70,6 +70,7 @@ pub mod log_handle;
 mod test_tracer;
 mod throttle;
 
+use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -85,6 +86,9 @@ pub struct RethTracer {
     samply: Option<LayerInfo>,
     #[cfg(feature = "tracy")]
     tracy: Option<LayerInfo>,
+    /// When true, the stdout filter is wrapped in a reload layer so log levels
+    /// can be changed at runtime via RPC (`debug_verbosity`, `debug_vmodule`).
+    enable_reload: bool,
 }
 
 impl RethTracer {
@@ -100,6 +104,7 @@ impl RethTracer {
             samply: None,
             #[cfg(feature = "tracy")]
             tracy: None,
+            enable_reload: false,
         }
     }
 
@@ -141,6 +146,12 @@ impl RethTracer {
     #[cfg(feature = "tracy")]
     pub fn with_tracy(mut self, config: LayerInfo) -> Self {
         self.tracy = Some(config);
+        self
+    }
+
+    /// Enables runtime log filter reloading via RPC (`debug_verbosity`, `debug_vmodule`).
+    pub const fn with_reload(mut self, enable: bool) -> Self {
+        self.enable_reload = enable;
         self
     }
 }
@@ -219,8 +230,7 @@ pub trait Tracer: Sized {
 
     /// Initialize the logging configuration with additional custom layers.
     ///
-    /// This method allows for more customized setup by accepting pre-configured
-    /// `Layers` which can be further customized before initialization.
+    /// This is the primary method that implementors must provide.
     ///
     /// # Arguments
     /// * `layers` - Pre-configured `Layers` instance to use for initialization
@@ -228,55 +238,18 @@ pub trait Tracer: Sized {
     /// # Returns
     /// An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
     /// or an `Err` in case of an error during initialization.
-    fn init_with_layers(self, layers: Layers) -> eyre::Result<Option<WorkerGuard>> {
-        self.init_with_layers_and_reload(layers, false)
-    }
-
-    /// Initialize the logging configuration with optional reload support.
-    ///
-    /// When `enable_reload` is true, the stdout filter can be changed at runtime
-    /// via the returned `LogLevelHandle`. This is useful for RPC methods like
-    /// `debug_verbosity` and `debug_vmodule`.
-    ///
-    /// # Arguments
-    /// * `layers` - Pre-configured `Layers` instance to use for initialization
-    /// * `enable_reload` - If true, enables runtime log level changes
-    ///
-    /// # Returns
-    /// An optional `WorkerGuard` if a file layer is used.
-    fn init_with_layers_and_reload(
-        self,
-        layers: Layers,
-        enable_reload: bool,
-    ) -> eyre::Result<Option<WorkerGuard>>;
+    fn init_with_layers(self, layers: Layers) -> eyre::Result<Option<WorkerGuard>>;
 }
 
 impl Tracer for RethTracer {
-    ///  Initializes the logging system based on the configured layers.
-    ///
-    ///  This method sets up the global tracing subscriber with the specified
-    ///  stdout, journald, and file layers.
-    ///
-    ///  The default layer is stdout.
-    ///
-    ///  # Arguments
-    ///  * `layers` - Pre-configured `Layers` instance to use for initialization
-    ///  * `enable_reload` - If true, installs a global log handle for runtime changes
-    ///
-    ///  # Returns
-    ///  An optional `WorkerGuard` if a file layer is used.
-    fn init_with_layers_and_reload(
-        self,
-        mut layers: Layers,
-        enable_reload: bool,
-    ) -> eyre::Result<Option<WorkerGuard>> {
+    fn init_with_layers(self, mut layers: Layers) -> eyre::Result<Option<WorkerGuard>> {
         // Configure stdout layer - reloadable if requested for runtime log level changes
         if let Some(handle) = layers.stdout(
             self.stdout.format,
             self.stdout.default_directive.parse()?,
             &self.stdout.filters,
             self.stdout.color,
-            enable_reload,
+            self.enable_reload,
         )? {
             install_log_handle(handle);
         }

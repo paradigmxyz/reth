@@ -106,13 +106,20 @@ impl Layers {
         reloadable: bool,
     ) -> eyre::Result<Option<LogFilterReloadHandle>> {
         let filter = build_env_filter(Some(default_directive), filters)?;
+
+        // When reloadable, always show target since the user may switch to DEBUG/TRACE
+        // at runtime via RPC — freezing target=false at init would hide module paths.
+        // Otherwise, only show target when initial level is higher than INFO.
+        let show_target = reloadable ||
+            filter.max_level_hint().is_none_or(|max_level| max_level > tracing::Level::INFO);
+
         if reloadable {
             let (reloadable_filter, handle) = reload::Layer::new(filter);
-            let layer = format.apply_reloadable(reloadable_filter, color);
+            let layer = format.apply(reloadable_filter, color, show_target, None);
             self.add_layer(layer);
             Ok(Some(handle))
         } else {
-            let layer = format.apply(filter, color, None);
+            let layer = format.apply(filter, color, show_target, None);
             self.add_layer(layer);
             Ok(None)
         }
@@ -135,8 +142,11 @@ impl Layers {
     ) -> eyre::Result<FileWorkerGuard> {
         let (writer, guard) = file_info.create_log_writer()?;
         let file_filter = build_env_filter(None, filter)?;
-        let layer = format.apply(file_filter, None, Some(writer));
-        self.add_layer(layer);
+
+        // File layers use their own independent filter — runtime changes via
+        // debug_verbosity/debug_vmodule only affect stdout, not log files.
+        // This prevents RPC-triggered level changes from flooding disk.
+        self.add_layer(format.apply(file_filter, None, true, Some(writer)));
         Ok(guard)
     }
 

@@ -182,7 +182,7 @@ impl LogArgs {
             }
         }
 
-        tracer.init_with_layers_and_reload(layers, enable_reload)
+        tracer.with_reload(enable_reload).init_with_layers(layers)
     }
 }
 

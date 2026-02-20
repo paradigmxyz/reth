@@ -2,7 +2,7 @@ use crate::layers::BoxedLayer;
 use clap::ValueEnum;
 use std::{fmt, fmt::Display};
 use tracing_appender::non_blocking::NonBlocking;
-use tracing_subscriber::{reload, EnvFilter, Layer, Registry};
+use tracing_subscriber::{layer::Filter, Layer, Registry};
 
 /// Represents the logging format.
 ///
@@ -27,40 +27,37 @@ pub enum LogFormat {
 impl LogFormat {
     /// Applies the specified logging format to create a new layer.
     ///
-    /// This method constructs a tracing layer with the selected format,
-    /// along with additional configurations for filtering and output.
-    ///
     /// # Arguments
-    /// * `filter` - An `EnvFilter` used to determine which log records to output.
+    /// * `filter` - A filter layer (either `EnvFilter` or a `reload::Layer` wrapping one).
     /// * `color` - An optional string that enables or disables ANSI color codes in the logs.
-    /// * `file_writer` - An optional `NonBlocking` writer for directing logs to a file.
+    /// * `show_target` - Whether to show the target module path in log output.
+    /// * `file_writer` - An optional [`NonBlocking`] writer for directing logs to a file. When
+    ///   `None`, logs are written to stdout.
     ///
     /// # Returns
     /// A `BoxedLayer<Registry>` that can be added to a tracing subscriber.
-    pub fn apply(
+    pub fn apply<F>(
         &self,
-        filter: EnvFilter,
+        filter: F,
         color: Option<String>,
+        show_target: bool,
         file_writer: Option<NonBlocking>,
-    ) -> BoxedLayer<Registry> {
+    ) -> BoxedLayer<Registry>
+    where
+        F: Filter<Registry> + Send + Sync + 'static,
+    {
         let ansi = if let Some(color) = color {
             std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(color != "never")
         } else {
             false
         };
-        let target = std::env::var("RUST_LOG_TARGET")
-            // `RUST_LOG_TARGET` always overrides default behaviour
-            .map(|val| val != "0")
-            .unwrap_or_else(|_|
-                // If `RUST_LOG_TARGET` is not set, show target in logs only if the max enabled
-                // level is higher than INFO (DEBUG, TRACE)
-                filter.max_level_hint().is_none_or(|max_level| max_level > tracing::Level::INFO));
+
+        let target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(show_target);
 
         match self {
             Self::Json => {
                 let layer =
                     tracing_subscriber::fmt::layer().json().with_ansi(ansi).with_target(target);
-
                 if let Some(writer) = file_writer {
                     layer.with_writer(writer).with_filter(filter).boxed()
                 } else {
@@ -70,52 +67,11 @@ impl LogFormat {
             Self::LogFmt => tracing_logfmt::layer().with_filter(filter).boxed(),
             Self::Terminal => {
                 let layer = tracing_subscriber::fmt::layer().with_ansi(ansi).with_target(target);
-
                 if let Some(writer) = file_writer {
                     layer.with_writer(writer).with_filter(filter).boxed()
                 } else {
                     layer.with_filter(filter).boxed()
                 }
-            }
-        }
-    }
-
-    /// Applies the specified logging format with a reloadable filter.
-    ///
-    /// This method is similar to [`Self::apply`] but accepts a reload layer instead of an
-    /// `EnvFilter`, allowing the filter to be changed at runtime.
-    ///
-    /// # Arguments
-    /// * `filter` - A `reload::Layer` wrapping an `EnvFilter` for dynamic filter updates.
-    /// * `color` - An optional string that enables or disables ANSI color codes in the logs.
-    ///
-    /// # Returns
-    /// A `BoxedLayer<Registry>` that can be added to a tracing subscriber.
-    pub fn apply_reloadable(
-        &self,
-        filter: reload::Layer<EnvFilter, Registry>,
-        color: Option<String>,
-    ) -> BoxedLayer<Registry> {
-        let ansi = if let Some(color) = color {
-            std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(color != "never")
-        } else {
-            false
-        };
-
-        // For reloadable filters, we can't determine max level hint dynamically,
-        // so we default to showing target (consistent with debug/trace level behavior)
-        let target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(true);
-
-        match self {
-            Self::Json => {
-                let layer =
-                    tracing_subscriber::fmt::layer().json().with_ansi(ansi).with_target(target);
-                layer.with_filter(filter).boxed()
-            }
-            Self::LogFmt => tracing_logfmt::layer().with_filter(filter).boxed(),
-            Self::Terminal => {
-                let layer = tracing_subscriber::fmt::layer().with_ansi(ansi).with_target(target);
-                layer.with_filter(filter).boxed()
             }
         }
     }

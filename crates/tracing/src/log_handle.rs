@@ -4,7 +4,7 @@
 //! changing log filters at runtime, used by RPC methods like `debug_verbosity` and
 //! `debug_vmodule`.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{reload, EnvFilter, Registry};
 
@@ -12,12 +12,12 @@ use tracing_subscriber::{reload, EnvFilter, Registry};
 pub type LogFilterReloadHandle = reload::Handle<EnvFilter, Registry>;
 
 /// Global log level handle for runtime filter changes.
-static GLOBAL_LOG_HANDLE: OnceLock<Arc<LogFilterReloadHandle>> = OnceLock::new();
+static GLOBAL_LOG_HANDLE: OnceLock<LogFilterReloadHandle> = OnceLock::new();
 
 /// Installs the global log level handle.
 /// Returns `true` if the handle was installed, `false` if one was already installed.
 pub fn install_log_handle(handle: LogFilterReloadHandle) -> bool {
-    GLOBAL_LOG_HANDLE.set(Arc::new(handle)).is_ok()
+    GLOBAL_LOG_HANDLE.set(handle).is_ok()
 }
 
 /// Returns `true` if a global log handle is available.
@@ -62,17 +62,20 @@ pub fn set_log_verbosity(level: usize) -> Result<(), String> {
 /// - Example: `reth::sync=debug,reth::net=trace`
 /// - Example: `info,reth::stages=debug`
 ///
-/// Returns an error if no log handle is installed, the pattern is empty, or parsing fails.
+/// An empty string resets the filter to the default level (INFO).
+///
+/// Returns an error if no log handle is installed or if parsing fails.
 pub fn set_log_vmodule(pattern: &str) -> Result<(), String> {
     let Some(handle) = GLOBAL_LOG_HANDLE.get() else {
         return Err("Log filter reload not available".to_string());
     };
 
-    if pattern.trim().is_empty() {
-        return Err("Filter pattern cannot be empty".to_string());
-    }
-
-    let filter = EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))?;
+    let filter = if pattern.trim().is_empty() {
+        // Reset to default INFO level when pattern is empty
+        EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).parse_lossy("")
+    } else {
+        EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))?
+    };
 
     handle.reload(filter).map_err(|e| e.to_string())
 }
