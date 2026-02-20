@@ -1932,7 +1932,6 @@ impl PooledTransactionsHashesBuilder {
         }
     }
 
-
     /// Appends all hashes
     fn extend<T: SignedTransaction>(
         &mut self,
