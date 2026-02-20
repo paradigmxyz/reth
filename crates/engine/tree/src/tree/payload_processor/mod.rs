@@ -55,6 +55,7 @@ use tracing::{debug, debug_span, instrument, warn, Span};
 
 pub mod bal;
 pub mod multiproof;
+pub mod post_exec;
 mod preserved_sparse_trie;
 pub mod prewarm;
 pub mod receipt_root_task;
@@ -104,6 +105,10 @@ type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     <N as NodePrimitives>::Receipt,
 >;
 
+/// Type alias for the shared post-execution coordinator.
+type PostExecCoordinatorFor<Evm> =
+    post_exec::PostExecCoordinator<<<Evm as ConfigureEvm>::Primitives as NodePrimitives>::Receipt>;
+
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
 pub struct PayloadProcessor<Evm>
@@ -112,6 +117,8 @@ where
 {
     /// The executor used by to spawn tasks.
     executor: Runtime,
+    /// Shared worker that computes incremental post-execution roots.
+    post_exec_coordinator: PostExecCoordinatorFor<Evm>,
     /// The most recent cache used for execution.
     execution_cache: PayloadExecutionCache,
     /// Metrics for trie operations
@@ -159,8 +166,10 @@ where
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     ) -> Self {
+        let post_exec_coordinator = post_exec::PostExecCoordinator::new(&executor);
         Self {
             executor,
+            post_exec_coordinator,
             execution_cache: Default::default(),
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
@@ -175,6 +184,14 @@ where
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             disable_cache_metrics: config.disable_cache_metrics(),
         }
+    }
+
+    /// Starts a new post-execution receipt-root stream for a block.
+    pub fn begin_post_exec_block(
+        &self,
+        receipts_len: usize,
+    ) -> post_exec::PostExecBlockHandle<N::Receipt> {
+        self.post_exec_coordinator.begin_block(receipts_len)
     }
 }
 
