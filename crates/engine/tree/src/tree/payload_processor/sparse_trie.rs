@@ -234,8 +234,13 @@ where
         let now = Instant::now();
 
         loop {
+            let mut t = Instant::now();
             crossbeam_channel::select_biased! {
                 recv(self.updates) -> message => {
+                    self.metrics
+                        .sparse_trie_channel_wait_duration_histogram
+                        .record(t.elapsed());
+
                     let update = match message {
                         Ok(m) => m,
                         Err(_) => {
@@ -249,17 +254,32 @@ where
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
+                    let phase_end = Instant::now();
+                    self.metrics
+                        .sparse_trie_channel_wait_duration_histogram
+                        .record(phase_end.duration_since(t));
+                    t = phase_end;
+
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
                     };
-                    let mut result = result.result?;
 
+                    let mut result = result.result?;
                     while let Ok(next) = self.proof_result_rx.try_recv() {
                         let res = next.result?;
                         result.extend(res);
                     }
 
+                    let phase_end = Instant::now();
+                    self.metrics
+                        .sparse_trie_proof_coalesce_duration_histogram
+                        .record(phase_end.duration_since(t));
+                    t = phase_end;
+
                     self.on_proof_result(result)?;
+                    self.metrics
+                        .sparse_trie_reveal_multiproof_duration_histogram
+                        .record(t.elapsed());
                 },
             }
 
@@ -267,8 +287,10 @@ where
                 // If we don't have any pending messages, we can spend some time on computing
                 // storage roots and promoting account updates.
                 self.dispatch_pending_targets();
+                t = Instant::now();
                 self.process_new_updates()?;
                 self.promote_pending_account_updates()?;
+                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
                 if self.finished_state_updates &&
                     self.account_updates.is_empty() &&
@@ -281,7 +303,9 @@ where
             } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
                 // If we don't have any pending updates OR we've accumulated a lot already, apply
                 // them to the trie,
+                t = Instant::now();
                 self.process_new_updates()?;
+                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
                 self.dispatch_pending_targets();
             } else if self.pending_targets.len() > self.chunk_size.unwrap_or_default() {
                 // Make sure to dispatch targets if we've accumulated a lot of them.
