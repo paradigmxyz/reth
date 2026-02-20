@@ -507,14 +507,16 @@ jobs:
             rm -rf /tmp/tpt
           fi
 
-          # schelk (snapshot rollback tool)
+          # schelk (snapshot rollback tool, needs sudo so install to /usr/local/bin)
           if ! command -v schelk &>/dev/null; then
             cargo install --git https://github.com/tempoxyz/schelk --locked
+            sudo install "$HOME/.cargo/bin/schelk" /usr/local/bin/
           fi
 
-          # samply (optional CPU profiler)
+          # samply (optional CPU profiler, needs sudo so install to /usr/local/bin)
           if [ "${BENCH_SAMPLY:-false}" = "true" ] && ! command -v samply &>/dev/null; then
             cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
+            sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
           fi
 
           # Clean up git auth
