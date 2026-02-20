@@ -45,7 +45,7 @@ env:
 name: bench
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
 
 jobs:
@@ -693,28 +693,13 @@ jobs:
           name: bench-reth-results
           path: ${{ env.BENCH_WORK_DIR }}
 
-      - name: Push charts
-        id: push-charts
-        if: success() && env.BENCH_PR
-        run: |
-          PR_NUMBER=${{ env.BENCH_PR }}
-          RUN_ID=${{ github.run_id }}
-          CHART_DIR="pr/${PR_NUMBER}/${RUN_ID}"
-
-          if git fetch origin bench-charts 2>/dev/null; then
-            git checkout bench-charts
-          else
-            git checkout --orphan bench-charts
-            git rm -rf . 2>/dev/null || true
-          fi
-
-          mkdir -p "${CHART_DIR}"
-          cp "$BENCH_WORK_DIR"/charts/*.png "${CHART_DIR}/"
-          git add "${CHART_DIR}"
-          git -c user.name="github-actions" -c user.email="github-actions@github.com" \
-            commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
-          git push origin bench-charts
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Upload charts
+        id: upload-charts
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: bench-reth-charts
+          path: ${{ env.BENCH_WORK_DIR }}/charts/*.png
 
       - name: Compare & comment
         if: success()
@@ -730,25 +715,8 @@ jobs:
               comment = '⚠️ Engine benchmark completed but failed to generate comparison.';
             }
 
-            const sha = '${{ steps.push-charts.outputs.sha }}';
-            const prNumber = process.env.BENCH_PR;
-            const runId = '${{ github.run_id }}';
-
-            if (sha && prNumber) {
-              const baseUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${sha}/pr/${prNumber}/${runId}`;
-              const charts = [
-                { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
-                { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
-                { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
-              ];
-              let chartMarkdown = '\n\n### Charts\n\n';
-              for (const chart of charts) {
-                chartMarkdown += `<details><summary>${chart.label}</summary>\n\n`;
-                chartMarkdown += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
-                chartMarkdown += `</details>\n\n`;
-              }
-              comment += chartMarkdown;
-            }
+            const artifactUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts`;
+            comment += `\n\n### Charts\n\n📊 [Download benchmark charts](${artifactUrl}) (bench-reth-charts artifact)\n`;
 
             const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const body = `cc @${process.env.BENCH_ACTOR}\n\n✅ Benchmark complete! [View job](${jobUrl})\n\n${comment}`;
