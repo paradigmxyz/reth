@@ -87,38 +87,43 @@ where
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
-        loop {
-            let indexing_pending =
-                self.deferred_indexer.as_ref().is_some_and(|i| !i.is_caught_up());
+        while self.run_iteration()? {}
 
-            // When indexing work is pending, use try_recv so we can do indexing ticks
-            // between persistence actions. Otherwise block on recv.
-            let action = if indexing_pending {
-                match self.incoming.try_recv() {
-                    Ok(action) => Some(action),
-                    Err(TryRecvError::Empty) => None,
-                    Err(TryRecvError::Disconnected) => break,
-                }
-            } else {
-                match self.incoming.recv() {
-                    Ok(action) => Some(action),
-                    Err(_) => break,
-                }
-            };
-
-            match action {
-                Some(action) => self.handle_action(action)?,
-                None => {
-                    // No persistence work pending — run a deferred indexing tick
-                    if let Some(indexer) = &mut self.deferred_indexer &&
-                        let Err(err) = indexer.tick()
-                    {
-                        warn!(target: "engine::persistence", %err, "Deferred history indexing tick failed, will retry");
-                    }
-                }
-            }
-        }
         Ok(())
+    }
+
+    /// Runs a single persistence-service iteration.
+    ///
+    /// Returns `Ok(false)` when the incoming channel is disconnected and the service should stop.
+    fn run_iteration(&mut self) -> Result<bool, PersistenceError> {
+        let indexing_pending = self.deferred_indexer.as_ref().is_some_and(|i| !i.is_caught_up());
+
+        // When indexing work is pending, use try_recv so we can do indexing ticks between
+        // persistence actions. Otherwise block on recv.
+        if indexing_pending {
+            match self.incoming.try_recv() {
+                Ok(action) => self.handle_action(action)?,
+                Err(TryRecvError::Empty) => self.run_deferred_indexing_tick(),
+                Err(TryRecvError::Disconnected) => return Ok(false),
+            }
+        } else {
+            let action = match self.incoming.recv() {
+                Ok(action) => action,
+                Err(_) => return Ok(false),
+            };
+            self.handle_action(action)?;
+        }
+
+        Ok(true)
+    }
+
+    /// No persistence work pending, opportunistically run one deferred indexing tick.
+    fn run_deferred_indexing_tick(&mut self) {
+        if let Some(indexer) = &mut self.deferred_indexer &&
+            let Err(err) = indexer.tick()
+        {
+            warn!(target: "engine::persistence", %err, "Deferred history indexing tick failed, will retry");
+        }
     }
 
     /// Handle a single persistence action.
