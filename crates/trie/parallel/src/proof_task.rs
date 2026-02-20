@@ -328,6 +328,11 @@ impl ProofWorkerHandle {
         self.inner.get().map(|inner| inner.account_work_tx.len()).unwrap_or(0)
     }
 
+    /// Returns whether the worker pools have been initialized.
+    pub fn is_initialized(&self) -> bool {
+        self.inner.get().is_some()
+    }
+
     /// Returns the total number of storage workers in the pool.
     pub const fn total_storage_workers(&self) -> usize {
         self.storage_worker_count
@@ -341,15 +346,23 @@ impl ProofWorkerHandle {
     /// Returns the number of storage workers currently processing tasks.
     ///
     /// This is calculated as total workers minus available workers.
+    /// Returns 0 if workers have not yet been initialized.
     pub fn active_storage_workers(&self) -> usize {
-        self.storage_worker_count.saturating_sub(self.available_storage_workers())
+        self.inner
+            .get()
+            .map(|_| self.storage_worker_count.saturating_sub(self.available_storage_workers()))
+            .unwrap_or(0)
     }
 
     /// Returns the number of account workers currently processing tasks.
     ///
     /// This is calculated as total workers minus available workers.
+    /// Returns 0 if workers have not yet been initialized.
     pub fn active_account_workers(&self) -> usize {
-        self.account_worker_count.saturating_sub(self.available_account_workers())
+        self.inner
+            .get()
+            .map(|_| self.account_worker_count.saturating_sub(self.available_account_workers()))
+            .unwrap_or(0)
     }
 
     /// Dispatch a storage proof computation to storage worker pool
@@ -1410,9 +1423,10 @@ mod tests {
         ProofTaskCtx::new(factory)
     }
 
-    /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
+    /// Ensures `ProofWorkerHandle::new` does not eagerly spawn workers and that
+    /// initialization is deferred until first dispatch.
     #[test]
-    fn spawn_proof_workers_creates_handle() {
+    fn lazy_init_defers_worker_spawning() {
         let provider_factory = create_test_provider_factory();
         let changeset_cache = reth_trie_db::ChangesetCache::new();
         let factory = reth_provider::providers::OverlayStateProviderFactory::new(
@@ -1423,6 +1437,13 @@ mod tests {
 
         let runtime = reth_tasks::Runtime::test();
         let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false);
+
+        // Workers should NOT be initialized yet
+        assert!(!proof_handle.is_initialized());
+        assert_eq!(proof_handle.available_storage_workers(), 0);
+        assert_eq!(proof_handle.available_account_workers(), 0);
+        assert_eq!(proof_handle.active_storage_workers(), 0);
+        assert_eq!(proof_handle.active_account_workers(), 0);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();
