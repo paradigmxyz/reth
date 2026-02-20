@@ -381,9 +381,6 @@ jobs:
     name: reth-bench
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 120
-    concurrency:
-      group: reth-bench-queue
-      cancel-in-progress: false
     env:
       BENCH_RPC_URL: https://ethereum.reth.rs/rpc
       SCHELK_MOUNT: /reth-bench
