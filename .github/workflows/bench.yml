@@ -35,6 +35,11 @@ on:
         required: false
         default: ""
         type: string
+      samply:
+        description: "Enable samply profiling"
+        required: false
+        default: "false"
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
@@ -104,6 +109,7 @@ jobs:
       feature: ${{ steps.args.outputs.feature }}
       baseline-name: ${{ steps.args.outputs.baseline-name }}
       feature-name: ${{ steps.args.outputs.feature-name }}
+      samply: ${{ steps.args.outputs.samply }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
     steps:
       - name: Check org membership
@@ -131,7 +137,7 @@ jobs:
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            let pr, actor, blocks, warmup, baseline, feature;
+            let pr, actor, blocks, warmup, baseline, feature, samply;
 
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
@@ -139,6 +145,7 @@ jobs:
               warmup = '${{ github.event.inputs.warmup }}' || '100';
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
+              samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
 
               // Find PR for the selected branch
               const branch = '${{ github.ref_name }}';
@@ -160,14 +167,19 @@ jobs:
               const body = context.payload.comment.body.trim();
               const intArgs = new Set(['blocks', 'warmup']);
               const refArgs = new Set(['baseline', 'feature']);
-              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '' };
+              const boolArgs = new Set(['samply']);
+              const defaults = { blocks: '500', warmup: '100', baseline: '', feature: '', samply: 'false' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
               for (const part of args.split(/\s+/).filter(Boolean)) {
                 const eq = part.indexOf('=');
                 if (eq === -1) {
-                  unknown.push(part);
+                  if (boolArgs.has(part)) {
+                    defaults[part] = 'true';
+                  } else {
+                    unknown.push(part);
+                  }
                   continue;
                 }
                 const key = part.slice(0, eq);
@@ -192,7 +204,7 @@ jobs:
               if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
               if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
               if (errors.length) {
-                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF]\``;
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** \`@decofe bench [blocks=N] [warmup=N] [baseline=REF] [feature=REF] [samply]\``;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -206,6 +218,7 @@ jobs:
               warmup = defaults.warmup;
               baseline = defaults.baseline;
               feature = defaults.feature;
+              samply = defaults.samply;
             }
 
             // Resolve display names for baseline/feature
@@ -232,6 +245,7 @@ jobs:
             core.setOutput('feature', feature);
             core.setOutput('baseline-name', baselineName);
             core.setOutput('feature-name', featureName);
+            core.setOutput('samply', samply);
 
       - name: Acknowledge request
         id: ack
@@ -287,7 +301,9 @@ jobs:
             const warmup = '${{ steps.args.outputs.warmup }}';
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``;
+            const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -311,7 +327,9 @@ jobs:
             const warmup = '${{ steps.args.outputs.warmup }}';
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
-            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``;
+            const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            const config = `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             async function getQueuePosition() {
@@ -374,6 +392,7 @@ jobs:
       BENCH_ACTOR: ${{ needs.reth-bench-ack.outputs.actor }}
       BENCH_BLOCKS: ${{ needs.reth-bench-ack.outputs.blocks }}
       BENCH_WARMUP_BLOCKS: ${{ needs.reth-bench-ack.outputs.warmup }}
+      BENCH_SAMPLY: ${{ needs.reth-bench-ack.outputs.samply }}
       BENCH_COMMENT_ID: ${{ needs.reth-bench-ack.outputs.comment-id }}
     steps:
       - name: Resolve checkout ref
@@ -423,7 +442,9 @@ jobs:
             const warmup = process.env.BENCH_WARMUP_BLOCKS;
             const baseline = '${{ needs.reth-bench-ack.outputs.baseline-name }}';
             const feature = '${{ needs.reth-bench-ack.outputs.feature-name }}';
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\``);
+            const samply = process.env.BENCH_SAMPLY === 'true';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocks} blocks, ${warmup} warmup blocks, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -452,6 +473,13 @@ jobs:
             exit 1
           fi
           echo "All dependencies found"
+
+      - name: Install samply
+        if: env.BENCH_SAMPLY == 'true'
+        run: |
+          if ! command -v samply &>/dev/null; then
+            cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
+          fi
 
       # Build binaries
       - name: Resolve PR head branch
@@ -645,6 +673,50 @@ jobs:
         id: run-baseline-2
         run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-2"
 
+      - name: Upload samply profiles
+        if: success() && env.BENCH_SAMPLY == 'true'
+        run: |
+          PROFILER_API="https://api.profiler.firefox.com"
+          PROFILER_ACCEPT="Accept: application/vnd.firefox-profiler+json;version=1.0"
+
+          for run_dir in baseline-1 baseline-2 feature-1 feature-2; do
+            PROFILE="$BENCH_WORK_DIR/$run_dir/samply-profile.json.gz"
+            if [ ! -f "$PROFILE" ]; then continue; fi
+
+            PROFILE_SIZE=$(du -h "$PROFILE" | cut -f1)
+            echo "Uploading $run_dir samply profile (${PROFILE_SIZE}) to Firefox Profiler..."
+
+            # Upload compressed profile and get JWT back
+            JWT=$(curl -sf -X POST \
+              -H "Content-Type: application/octet-stream" \
+              -H "$PROFILER_ACCEPT" \
+              --data-binary "@$PROFILE" \
+              "$PROFILER_API/compressed-store") || {
+              echo "::warning::Failed to upload $run_dir profile to Firefox Profiler"
+              continue
+            }
+
+            # Extract profileToken from JWT payload (header.payload.signature)
+            PAYLOAD=$(echo "$JWT" | cut -d. -f2)
+            # Fix base64 padding
+            case $(( ${#PAYLOAD} % 4 )) in
+              2) PAYLOAD="${PAYLOAD}==" ;;
+              3) PAYLOAD="${PAYLOAD}=" ;;
+            esac
+            PROFILE_TOKEN=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['profileToken'])")
+            PROFILE_URL="https://profiler.firefox.com/public/${PROFILE_TOKEN}"
+            echo "Profile uploaded: $PROFILE_URL"
+
+            # Shorten the URL
+            SHORT_URL=$(curl -sf -X POST \
+              -H "Content-Type: application/json" \
+              -H "$PROFILER_ACCEPT" \
+              -d "{\"longUrl\":\"$PROFILE_URL\"}" \
+              "$PROFILER_API/shorten" | python3 -c "import sys,json; print(json.load(sys.stdin)['shortUrl'])" 2>/dev/null) || SHORT_URL="$PROFILE_URL"
+            echo "$SHORT_URL" > "$BENCH_WORK_DIR/$run_dir/samply-profile-url.txt"
+            echo "Short profile URL for $run_dir: $SHORT_URL"
+          done
+
       # Results & charts
       - name: Parse results
         id: results
@@ -758,6 +830,23 @@ jobs:
                 chartMarkdown += `</details>\n\n`;
               }
               comment += chartMarkdown;
+            }
+
+            // Samply profile links (URLs point directly to Firefox Profiler)
+            if (process.env.BENCH_SAMPLY === 'true') {
+              const runs = ['baseline-1', 'feature-1', 'feature-2', 'baseline-2'];
+              const links = [];
+              for (const run of runs) {
+                try {
+                  const url = fs.readFileSync(`${process.env.BENCH_WORK_DIR}/${run}/samply-profile-url.txt`, 'utf8').trim();
+                  if (url) {
+                    links.push(`- **${run}**: [Firefox Profiler](${url})`);
+                  }
+                } catch (e) {}
+              }
+              if (links.length > 0) {
+                comment += `\n\n### Samply Profiles\n\n${links.join('\n')}\n`;
+              }
             }
 
             const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
