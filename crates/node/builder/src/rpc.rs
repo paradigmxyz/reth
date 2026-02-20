@@ -211,7 +211,7 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         EthApi,
         Node::Evm,
         Node::Consensus,
-        <Node::Types as NodeTypes>::Payload,
+        <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
     >,
 }
 
@@ -227,7 +227,7 @@ where
         EthApi,
         Node::Evm,
         Node::Consensus,
-        <Node::Types as NodeTypes>::Payload,
+        <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
     >;
 
     fn deref(&self) -> &Self::Target {
@@ -829,7 +829,6 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
-    <N::Types as NodeTypes>::Payload: jsonrpsee::core::DeserializeOwned,
 {
     /// Launches only the regular RPC server (HTTP/WS/IPC), without the authenticated Engine API
     /// server.
@@ -1028,7 +1027,7 @@ where
                 engine_api,
                 eth_api,
                 engine_events.clone(),
-                Some(beacon_engine_handle.clone()),
+                Some(Arc::new(beacon_engine_handle.clone())),
             );
 
         // in dev mode we generate 20 random dev-signer accounts
@@ -1136,7 +1135,6 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
-    <N::Types as NodeTypes>::Payload: jsonrpsee::core::DeserializeOwned,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
