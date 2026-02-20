@@ -607,14 +607,10 @@ impl ArenaSparseSubtrie {
 
     /// Computes and caches `RlpNode` for all dirty nodes via iterative post-order DFS.
     /// After this call every node reachable from `self.root` will be in `Cached` state.
-    ///
-    /// `root_path` is the absolute path of the subtrie root (not including its `short_key`).
-    #[expect(dead_code)]
-    fn update_cached_rlp(&mut self, root_path: Nibbles) {
+    fn update_cached_rlp(&mut self) {
         update_cached_rlp(
             &mut self.arena,
             self.root,
-            root_path,
             &mut self.stack,
             &mut self.rlp_buf,
             &mut self.rlp_node_buf,
@@ -631,17 +627,16 @@ impl ArenaSparseSubtrie {
 /// - Dirty branch children are pushed onto `stack` and processed recursively first.
 ///
 /// When a dirty branch child finishes and is popped, the parent resumes iteration after
-/// the child's nibble (determined from the popped path). Once all children of a branch are
-/// processed, the branch is encoded via `BranchNodeRef` using the last N entries on
-/// `rlp_node_buf`, then replaced with a single result `RlpNode`.
+/// the child's nibble. Once all children of a branch are processed, the branch is encoded
+/// via `BranchNodeRef` using the last N entries on `rlp_node_buf`, then replaced with a
+/// single result `RlpNode`.
 fn update_cached_rlp(
     arena: &mut Arena<ArenaSparseNode>,
     root: Index,
-    root_path: Nibbles,
     stack: &mut Vec<ArenaStackEntry>,
     rlp_buf: &mut Vec<u8>,
     rlp_node_buf: &mut Vec<RlpNode>,
-) {
+) -> RlpNode {
     rlp_node_buf.clear();
     stack.clear();
 
@@ -649,18 +644,23 @@ fn update_cached_rlp(
     // EmptyRoot has no state to update. Leaves are encoded in place. Already-cached
     // branches need no work. Only dirty branches enter the main loop below.
     match &arena[root] {
-        ArenaSparseNode::EmptyRoot => return,
+        ArenaSparseNode::EmptyRoot => return RlpNode::word_rlp(&EMPTY_ROOT_HASH),
         ArenaSparseNode::Leaf { .. } => {
             encode_leaf(arena, root, rlp_buf, rlp_node_buf);
-            return;
+            return rlp_node_buf.pop().expect("encode_leaf must push an RlpNode");
         }
         ArenaSparseNode::Branch(b) => {
-            if let ArenaSparseNodeState::Cached { .. } = &b.state {
-                return;
+            if let ArenaSparseNodeState::Cached { rlp_node, .. } = &b.state {
+                return rlp_node.clone();
             }
+            // Unlike reveal_nodes (where ProofTrieNodeV2.path is absolute and compared
+            // against stack paths) and update_leaves (which builds absolute paths for
+            // proof requests via nibbles_to_padded_b256/min_len), this function only uses
+            // paths for child_path building and popped_path.last() resume nibbles, both
+            // of which are frame-independent.
             stack.push(ArenaStackEntry {
                 index: root,
-                path: root_path,
+                path: Nibbles::default(),
                 prev_num_leaves: b.state.num_leaves(),
                 prev_dirty_leaves: b.state.num_dirty_leaves(),
             });
@@ -723,10 +723,19 @@ fn update_cached_rlp(
                                 break;
                             }
                         }
-                        ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie => {
-                            unreachable!(
-                                "Subtrie/TakenSubtrie should not appear inside a subtrie's own arena"
-                            );
+                        ArenaSparseNode::Subtrie(subtrie) => {
+                            let subtrie_root = &subtrie.arena[subtrie.root];
+                            let ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+                                state: ArenaSparseNodeState::Cached { rlp_node, .. },
+                                ..
+                            }) = subtrie_root
+                            else {
+                                panic!("subtrie root must be a cached Branch")
+                            };
+                            rlp_node_buf.push(rlp_node.clone());
+                        }
+                        ArenaSparseNode::TakenSubtrie => {
+                            unreachable!("TakenSubtrie should not appear during update_cached_rlp");
                         }
                     }
                 }
@@ -773,6 +782,8 @@ fn update_cached_rlp(
         }
         start_nibble = popped_path.last().unwrap() + 1;
     }
+
+    rlp_node_buf.pop().expect("root RlpNode must be on rlp_node_buf after update_cached_rlp")
 }
 
 /// Encodes a leaf node's RLP and pushes it onto `rlp_node_buf`. If the leaf is already
@@ -1400,8 +1411,9 @@ pub struct ArenaParallelSparseTrie {
     /// Reusable buffer for collecting update actions.
     update_actions: Vec<SparseTrieUpdatesAction>,
     /// Reusable buffer for RLP encoding.
-    #[expect(dead_code)]
     rlp_buf: Vec<u8>,
+    /// Reusable buffer for child `RlpNode`s during hashing.
+    rlp_node_buf: Vec<RlpNode>,
     /// Pool of cleared `ArenaSparseSubtrie`s available for reuse.
     cleared_subtries: Vec<ArenaSparseSubtrie>,
 }
@@ -1578,6 +1590,7 @@ impl Default for ArenaParallelSparseTrie {
             stack: Vec::new(),
             update_actions: Vec::new(),
             rlp_buf: Vec::new(),
+            rlp_node_buf: Vec::new(),
             cleared_subtries: Vec::new(),
         }
     }
@@ -1745,7 +1758,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn root(&mut self) -> B256 {
-        todo!()
+        self.update_subtrie_hashes();
+        let rlp_node = update_cached_rlp(
+            &mut self.upper_arena,
+            self.root,
+            &mut self.stack,
+            &mut self.rlp_buf,
+            &mut self.rlp_node_buf,
+        );
+        rlp_node.as_hash().expect("root RlpNode must be a hash")
     }
 
     fn is_root_cached(&self) -> bool {
@@ -1759,7 +1780,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn update_subtrie_hashes(&mut self) {
-        todo!()
+        for idx in self.all_subtries() {
+            let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[idx] else {
+                unreachable!()
+            };
+            subtrie.update_cached_rlp();
+        }
     }
 
     fn get_leaf_value(&self, _full_path: &Nibbles) -> Option<&Vec<u8>> {
