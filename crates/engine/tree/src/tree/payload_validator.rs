@@ -1544,6 +1544,46 @@ where
                         .record(anchored.trie_input.state.total_len() as f64);
                 }
 
+                // Measure per-account cached trie node distribution using the
+                // provider and HashedPostState. This avoids double-counting that
+                // occurs when measuring per-proof (same account can appear in
+                // multiple multiproof batches).
+                if let Ok(provider) = overlay_factory.database_provider_ro() {
+                    use reth_trie::{
+                        trie_cursor::{TrieCursor, TrieCursorFactory},
+                        Nibbles,
+                    };
+
+                    for (hashed_address, storage) in &computed.hashed_state.storages {
+                        let cached_nodes =
+                            if let Ok(mut cursor) = provider.storage_trie_cursor(*hashed_address) {
+                                let mut count = 0usize;
+                                const MAX_COUNT: usize = 4096;
+                                if let Ok(Some(_)) = cursor.seek(Nibbles::default()) {
+                                    count = 1;
+                                    while count < MAX_COUNT {
+                                        match cursor.next() {
+                                            Ok(Some(_)) => count += 1,
+                                            Ok(None) | Err(_) => break,
+                                        }
+                                    }
+                                }
+                                count
+                            } else {
+                                continue
+                            };
+
+                        block_validation_metrics
+                            .storage_trie_cached_nodes
+                            .record(cached_nodes as f64);
+                        if cached_nodes == 0 {
+                            block_validation_metrics
+                                .changed_slots_when_no_cached_nodes
+                                .record(storage.storage_slots.len() as f64);
+                        }
+                    }
+                }
+
                 // Compute and cache changesets using the computed trie_updates
                 let changeset_start = Instant::now();
 

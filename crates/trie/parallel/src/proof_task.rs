@@ -48,7 +48,7 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     proof::{ProofBlindedAccountProvider, ProofBlindedStorageProvider},
     proof_v2,
-    trie_cursor::{TrieCursor, TrieCursorFactory},
+    trie_cursor::TrieCursorFactory,
     DecodedMultiProofV2, HashedPostState, Nibbles, ProofTrieNodeV2,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
@@ -781,8 +781,6 @@ where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
         let hashed_address = input.hashed_address;
-        #[cfg(feature = "metrics")]
-        let targets_len = input.targets.len();
         let proof_start = Instant::now();
 
         trace!(
@@ -792,27 +790,6 @@ where
             targets_len = input.targets.len(),
             "Processing V2 storage proof"
         );
-
-        // Count cached trie nodes in StoragesTrie for this account to measure
-        // the distribution of small vs large storage tries per block.
-        #[cfg(feature = "metrics")]
-        if let Ok(mut cursor) = proof_tx.provider.storage_trie_cursor(hashed_address) {
-            const MAX_COUNT: usize = 4096;
-            let mut count = 0usize;
-            if let Ok(Some(_)) = cursor.seek(Nibbles::default()) {
-                count = 1;
-                while count < MAX_COUNT {
-                    match cursor.next() {
-                        Ok(Some(_)) => count += 1,
-                        Ok(None) | Err(_) => break,
-                    }
-                }
-            }
-            self.metrics.record_storage_trie_cached_nodes(count);
-            if count == 0 {
-                self.metrics.record_modified_slots_when_uncached(targets_len);
-            }
-        }
 
         let result = proof_tx.compute_v2_storage_proof(input, v2_calculator);
 

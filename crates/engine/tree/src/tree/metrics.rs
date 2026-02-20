@@ -534,6 +534,11 @@ pub struct BlockValidationMetrics {
     pub anchored_overlay_trie_updates_size: Histogram,
     /// Size of `AnchoredTrieInput` overlay `HashedPostStateSorted` (`total_len`)
     pub anchored_overlay_hashed_state_size: Histogram,
+    /// Histogram of cached trie node count in `StoragesTrie` per modified account.
+    /// 0 means no on-disk intermediate nodes exist for this account's storage trie.
+    pub storage_trie_cached_nodes: Histogram,
+    /// Histogram of changed storage slot count for accounts with zero cached trie nodes.
+    pub changed_slots_when_no_cached_nodes: Histogram,
 }
 
 impl BlockValidationMetrics {
