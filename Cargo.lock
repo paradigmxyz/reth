@@ -10604,6 +10604,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-tasks",
  "reth-trie",
+ "reth-trie-common",
  "reth-trie-db",
  "reth-trie-sparse",
  "thiserror 2.0.18",
