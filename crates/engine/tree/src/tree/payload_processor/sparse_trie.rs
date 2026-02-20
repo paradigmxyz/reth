@@ -31,7 +31,7 @@ use reth_trie_sparse::{
     SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
-use tracing::{debug, debug_span, error, instrument};
+use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
@@ -495,6 +495,7 @@ where
             if updates.is_empty() {
                 continue;
             }
+            let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
 
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
