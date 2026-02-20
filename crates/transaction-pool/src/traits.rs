@@ -784,20 +784,17 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
 
     /// Returns an iterator over all pending [`Recovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.clone_into_consensus())
+        self.pending.iter().map(|tx| tx.to_consensus())
     }
 
     /// Returns an iterator over all queued [`Recovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.clone_into_consensus())
+        self.queued.iter().map(|tx| tx.to_consensus())
     }
 
     /// Returns an iterator over all transactions, both pending and queued.
     pub fn all(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.pending
-            .iter()
-            .chain(self.queued.iter())
-            .map(|tx| tx.transaction.clone_into_consensus())
+        self.pending.iter().chain(self.queued.iter()).map(|tx| tx.to_consensus())
     }
 }
 
