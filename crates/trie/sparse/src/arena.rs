@@ -1261,6 +1261,56 @@ fn remove_leaf(
     }
 }
 
+/// Checks whether a subtrie receiving only removals would cause its parent branch to collapse
+/// onto a single blinded sibling. If so, returns the proof needed to reveal that blinded
+/// sibling so the caller can request it and skip the subtrie's updates.
+///
+/// Returns `Some(proof)` for the blinded sibling when the edge-case applies, `None` otherwise.
+fn check_subtrie_collapse_needs_proof(
+    arena: &Arena<ArenaSparseNode>,
+    stack: &[ArenaStackEntry],
+    child_idx: Index,
+    child_nibble: u8,
+    subtrie_updates: &[(B256, Nibbles, LeafUpdate)],
+) -> Option<ArenaRequiredProof> {
+    let num_removals = subtrie_updates
+        .iter()
+        .filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(v) if v.is_empty()))
+        .count() as u64;
+
+    if num_removals == 0 || num_removals as usize != subtrie_updates.len() {
+        return None;
+    }
+
+    let subtrie_num_leaves = arena[child_idx].num_leaves();
+    if num_removals < subtrie_num_leaves {
+        return None;
+    }
+
+    let parent_entry = stack.last()?;
+    let parent_branch = arena[parent_entry.index].branch_ref();
+    if parent_branch.state_mask.count_bits() != 2 {
+        return None;
+    }
+
+    let dense_idx = child_dense_index(parent_branch.state_mask, child_nibble)
+        .expect("child nibble not in parent state_mask");
+    let sibling_dense_idx = 1 - dense_idx;
+    if !parent_branch.children[sibling_dense_idx].is_blinded() {
+        return None;
+    }
+
+    let sibling_nibble = parent_branch.state_mask.iter().find(|&n| n != child_nibble).unwrap();
+    let mut sibling_path = parent_entry.path;
+    sibling_path.extend(&parent_branch.short_key);
+    sibling_path.push_unchecked(sibling_nibble);
+
+    Some(ArenaRequiredProof {
+        key: nibbles_to_padded_b256(&sibling_path),
+        min_len: (sibling_path.len() as u8).min(64),
+    })
+}
+
 /// Collapses a branch node that has exactly one remaining revealed child. The branch's
 /// `short_key`, the remaining child's nibble, and the child's own key/`short_key` are
 /// concatenated to form the child's new key/`short_key`. The child then replaces the branch
@@ -1950,6 +2000,26 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         update_idx += 1;
                     }
 
+                    let subtrie_updates = &sorted[subtrie_start..update_idx];
+
+                    // Edge-case: if all updates are removals that would empty the
+                    // subtrie and collapse the parent onto a blinded sibling, request
+                    // a proof for the sibling and skip the subtrie's updates.
+                    if let Some(proof) = check_subtrie_collapse_needs_proof(
+                        &self.upper_arena,
+                        &stack,
+                        child_idx,
+                        child_nibble,
+                        subtrie_updates,
+                    ) {
+                        proof_required_fn(proof.key, proof.min_len);
+                        updates.insert(proof.key, LeafUpdate::Touched);
+                        for &(key, _, ref update) in subtrie_updates {
+                            updates.insert(key, update.clone());
+                        }
+                        continue;
+                    }
+
                     let ArenaSparseNode::Subtrie(mut subtrie) = mem::replace(
                         &mut self.upper_arena[child_idx],
                         ArenaSparseNode::TakenSubtrie,
@@ -1957,7 +2027,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         unreachable!()
                     };
 
-                    subtrie.update_leaves(&sorted[subtrie_start..update_idx], subtrie_root_path);
+                    subtrie.update_leaves(subtrie_updates, subtrie_root_path);
 
                     for proof in subtrie.required_proofs.drain(..) {
                         proof_required_fn(proof.key, proof.min_len);
