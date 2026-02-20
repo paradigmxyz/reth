@@ -36,6 +36,11 @@ use tracing::{debug, debug_span, error, instrument};
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
 
+/// Maximum number of proof targets (accounts + storage slots) below which multiproofs are
+/// computed inline on the sparse trie task thread rather than dispatched to the worker pool.
+/// This avoids the channel round-trip overhead that dominates for small blocks.
+const INLINE_PROOF_THRESHOLD: usize = 16;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparseTrie> {
     /// Sender for proof results.
@@ -654,6 +659,24 @@ where
     fn dispatch_pending_targets(&mut self) {
         if !self.pending_targets.is_empty() {
             let chunking_length = self.pending_targets.chunking_length();
+
+            // For small target sets, compute the multiproof inline to avoid
+            // channel round-trip overhead.
+            if chunking_length <= INLINE_PROOF_THRESHOLD {
+                let targets = std::mem::take(&mut self.pending_targets);
+                match self.proof_worker_handle.compute_multiproof_inline(targets) {
+                    Ok(result) => {
+                        if let Err(e) = self.on_proof_result(result) {
+                            error!("failed to process inline proof result: {e:?}");
+                        }
+                    }
+                    Err(e) => {
+                        error!("failed to compute inline multiproof: {e:?}");
+                    }
+                }
+                return;
+            }
+
             dispatch_with_chunking(
                 std::mem::take(&mut self.pending_targets),
                 chunking_length,

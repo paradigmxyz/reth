@@ -87,6 +87,105 @@ type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
     <Provider as HashedCursorFactory>::StorageCursor<'a>,
 >;
 
+/// Trait for computing multiproofs synchronously on the calling thread.
+///
+/// This is used by [`ProofWorkerHandle`] to compute small proofs inline without
+/// dispatching to the worker pool, avoiding channel round-trip overhead.
+trait InlineProofComputer: Send + Sync + std::fmt::Debug {
+    /// Computes a multiproof synchronously for the given targets.
+    fn compute_multiproof(
+        &self,
+        targets: MultiProofTargetsV2,
+    ) -> Result<DecodedMultiProofV2, ParallelStateRootError>;
+}
+
+/// Implementation of [`InlineProofComputer`] backed by a [`DatabaseProviderROFactory`].
+struct InlineProofComputerImpl<Factory> {
+    factory: Factory,
+}
+
+impl<Factory> std::fmt::Debug for InlineProofComputerImpl<Factory> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InlineProofComputerImpl").finish_non_exhaustive()
+    }
+}
+
+impl<Factory> InlineProofComputer for InlineProofComputerImpl<Factory>
+where
+    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    fn compute_multiproof(
+        &self,
+        targets: MultiProofTargetsV2,
+    ) -> Result<DecodedMultiProofV2, ParallelStateRootError> {
+        let provider = self.factory.database_provider_ro().map_err(ParallelStateRootError::from)?;
+
+        let MultiProofTargetsV2 { mut account_targets, mut storage_targets } = targets;
+
+        // Compute storage proofs synchronously.
+        let mut storage_proofs =
+            B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
+
+        let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+
+        // For storage targets with associated account proofs, ensure the first target has
+        // min_len(0) so the root node is returned for storage root computation.
+        for (hashed_address, targets) in &mut storage_targets {
+            if account_target_addresses.contains(hashed_address)
+                && let Some(first) = targets.first_mut()
+            {
+                *first = first.with_min_len(0);
+            }
+        }
+
+        let storage_trie_cursor =
+            provider.storage_trie_cursor(B256::ZERO).map_err(StateProofError::from)?;
+        let storage_hashed_cursor =
+            provider.hashed_storage_cursor(B256::ZERO).map_err(StateProofError::from)?;
+        let mut storage_calculator = proof_v2::StorageProofCalculator::new_storage(
+            storage_trie_cursor,
+            storage_hashed_cursor,
+        );
+
+        // Process explicit storage targets.
+        for (hashed_address, mut slot_targets) in storage_targets {
+            let proof = if slot_targets.is_empty() {
+                let root_node = storage_calculator.storage_root_node(hashed_address)?;
+                vec![root_node]
+            } else {
+                storage_calculator.storage_proof(hashed_address, &mut slot_targets)?
+            };
+            storage_proofs.insert(hashed_address, proof);
+        }
+
+        // Generate root-only storage proofs for account targets without explicit storage targets.
+        for target in &account_targets {
+            let hashed_address = target.key();
+            if storage_proofs.contains_key(&hashed_address) {
+                continue;
+            }
+            let mut root_target = vec![proof_v2::Target::new(B256::ZERO)];
+            let proof = storage_calculator.storage_proof(hashed_address, &mut root_target)?;
+            storage_proofs.insert(hashed_address, proof);
+        }
+
+        // Compute account proofs synchronously using SyncAccountValueEncoder.
+        let account_trie_cursor = provider.account_trie_cursor().map_err(StateProofError::from)?;
+        let account_hashed_cursor =
+            provider.hashed_account_cursor().map_err(StateProofError::from)?;
+        let mut value_encoder = proof_v2::SyncAccountValueEncoder::new(&provider, &provider);
+        let mut account_calculator =
+            proof_v2::ProofCalculator::new(account_trie_cursor, account_hashed_cursor);
+        let account_proofs = account_calculator.proof(&mut value_encoder, &mut account_targets)?;
+
+        Ok(DecodedMultiProofV2 { account_proofs, storage_proofs })
+    }
+}
+
 /// A handle that provides type-safe access to proof worker pools.
 ///
 /// The handle stores direct senders to both storage and account worker pools,
@@ -108,6 +207,8 @@ pub struct ProofWorkerHandle {
     storage_worker_count: usize,
     /// Total number of account workers spawned
     account_worker_count: usize,
+    /// Type-erased inline proof computer for small target sets.
+    inline_computer: Arc<dyn InlineProofComputer>,
 }
 
 impl ProofWorkerHandle {
@@ -201,6 +302,9 @@ impl ProofWorkerHandle {
             });
         });
 
+        let inline_computer: Arc<dyn InlineProofComputer> =
+            Arc::new(InlineProofComputerImpl { factory: task_ctx.factory.clone() });
+
         let account_rt = runtime.clone();
         let account_tx = storage_work_tx.clone();
         let account_avail = account_available_workers.clone();
@@ -247,7 +351,19 @@ impl ProofWorkerHandle {
             account_available_workers,
             storage_worker_count,
             account_worker_count,
+            inline_computer,
         }
+    }
+
+    /// Computes a multiproof synchronously on the calling thread.
+    ///
+    /// This avoids the channel round-trip overhead of dispatching to the worker pool,
+    /// which is beneficial when the number of proof targets is small.
+    pub fn compute_multiproof_inline(
+        &self,
+        targets: MultiProofTargetsV2,
+    ) -> Result<DecodedMultiProofV2, ParallelStateRootError> {
+        self.inline_computer.compute_multiproof(targets)
     }
 
     /// Returns how many storage workers are currently available/idle.
