@@ -249,6 +249,28 @@ struct ArenaStackEntry {
     prev_dirty_leaves: u64,
 }
 
+/// Reusable buffers shared by both [`ArenaSparseSubtrie`] and [`ArenaParallelSparseTrie`].
+#[derive(Debug, Default)]
+struct ArenaTrieBuffers {
+    /// Reusable stack buffer for trie traversals.
+    stack: Vec<ArenaStackEntry>,
+    /// Reusable buffer for collecting update actions.
+    update_actions: Vec<SparseTrieUpdatesAction>,
+    /// Reusable buffer for RLP encoding.
+    rlp_buf: Vec<u8>,
+    /// Reusable buffer for child `RlpNode`s during hashing.
+    rlp_node_buf: Vec<RlpNode>,
+}
+
+impl ArenaTrieBuffers {
+    fn clear(&mut self) {
+        self.stack.clear();
+        self.update_actions.clear();
+        self.rlp_buf.clear();
+        self.rlp_node_buf.clear();
+    }
+}
+
 /// Result of [`find_ancestor`] describing the state at the deepest ancestor node.
 #[derive(Debug)]
 enum FindAncestorResult {
@@ -465,26 +487,17 @@ struct ArenaSparseSubtrie {
     arena: Arena<ArenaSparseNode>,
     /// The root node of this subtrie.
     root: Index,
-    /// Reusable stack buffer for trie traversals.
-    stack: Vec<ArenaStackEntry>,
-    /// Reusable buffer for collecting update actions during hash computations.
-    update_actions: Vec<SparseTrieUpdatesAction>,
+    /// Reusable buffers for traversal, RLP encoding, and update actions.
+    buffers: ArenaTrieBuffers,
     /// Reusable buffer for collecting required proofs during leaf updates.
     required_proofs: Vec<ArenaRequiredProof>,
-    /// Reusable buffer for RLP encoding during hash computation.
-    rlp_buf: Vec<u8>,
-    /// Reusable buffer for accumulating `RlpNode` results during hash computation.
-    rlp_node_buf: Vec<RlpNode>,
 }
 
 impl ArenaSparseSubtrie {
     fn clear(&mut self) {
         self.arena.clear();
-        self.stack.clear();
-        self.update_actions.clear();
+        self.buffers.clear();
         self.required_proofs.clear();
-        self.rlp_buf.clear();
-        self.rlp_node_buf.clear();
     }
 
     /// Applies leaf updates within this subtrie. Uses the same walk-down-with-stack pattern as
@@ -509,9 +522,9 @@ impl ArenaSparseSubtrie {
             "subtrie root must not be EmptyRoot at start of update_leaves"
         );
 
-        self.stack.clear();
+        self.buffers.stack.clear();
         let root_node = &self.arena[self.root];
-        self.stack.push(ArenaStackEntry {
+        self.buffers.stack.push(ArenaStackEntry {
             index: self.root,
             path: root_path,
             prev_num_leaves: root_node.num_leaves(),
@@ -519,11 +532,11 @@ impl ArenaSparseSubtrie {
         });
 
         for &(key, ref full_path, ref update) in sorted_updates {
-            let find_result = find_ancestor(&mut self.arena, &mut self.stack, full_path);
+            let find_result = find_ancestor(&mut self.arena, &mut self.buffers.stack, full_path);
 
             // If the path hits a blinded node, request a proof regardless of update type.
             if matches!(find_result, FindAncestorResult::Blinded) {
-                let head = self.stack.last().unwrap();
+                let head = self.buffers.stack.last().unwrap();
                 let head_branch = self.arena[head.index].branch_ref();
                 let logical_len = head.path.len() + head_branch.short_key.len();
                 self.required_proofs
@@ -536,7 +549,7 @@ impl ArenaSparseSubtrie {
                     // Upsert: insert or update a leaf with the given value.
                     upsert_leaf(
                         &mut self.arena,
-                        &mut self.stack,
+                        &mut self.buffers.stack,
                         &mut self.root,
                         full_path,
                         value,
@@ -546,7 +559,7 @@ impl ArenaSparseSubtrie {
                 LeafUpdate::Changed(_) => {
                     let result = remove_leaf(
                         &mut self.arena,
-                        &mut self.stack,
+                        &mut self.buffers.stack,
                         &mut self.root,
                         key,
                         full_path,
@@ -562,7 +575,7 @@ impl ArenaSparseSubtrie {
         }
 
         // Drain remaining stack entries, propagating num_leaves deltas.
-        drain_stack(&mut self.arena, &mut self.stack);
+        drain_stack(&mut self.arena, &mut self.buffers.stack);
     }
 
     /// Reveals nodes inside this subtrie. Uses [`find_ancestor`] to locate the ancestor
@@ -586,8 +599,8 @@ impl ArenaSparseSubtrie {
 
         let root_num_leaves = self.arena[self.root].num_leaves();
 
-        self.stack.clear();
-        self.stack.push(ArenaStackEntry {
+        self.buffers.stack.clear();
+        self.buffers.stack.push(ArenaStackEntry {
             index: self.root,
             path: root_path,
             prev_num_leaves: root_num_leaves,
@@ -595,12 +608,12 @@ impl ArenaSparseSubtrie {
         });
 
         for node in nodes.iter_mut() {
-            let find_result = find_ancestor(&mut self.arena, &mut self.stack, &node.path);
-            reveal_node(&mut self.arena, &mut self.stack, node, find_result);
+            let find_result = find_ancestor(&mut self.arena, &mut self.buffers.stack, &node.path);
+            reveal_node(&mut self.arena, &mut self.buffers.stack, node, find_result);
         }
 
         // Drain remaining stack entries, propagating num_leaves deltas.
-        drain_stack(&mut self.arena, &mut self.stack);
+        drain_stack(&mut self.arena, &mut self.buffers.stack);
 
         Ok(())
     }
@@ -611,9 +624,9 @@ impl ArenaSparseSubtrie {
         update_cached_rlp(
             &mut self.arena,
             self.root,
-            &mut self.stack,
-            &mut self.rlp_buf,
-            &mut self.rlp_node_buf,
+            &mut self.buffers.stack,
+            &mut self.buffers.rlp_buf,
+            &mut self.buffers.rlp_node_buf,
         );
     }
 }
@@ -1213,7 +1226,7 @@ fn remove_leaf(
 /// head. The branch is freed from the arena.
 fn collapse_branch(
     arena: &mut Arena<ArenaSparseNode>,
-    stack: &mut Vec<ArenaStackEntry>,
+    stack: &mut [ArenaStackEntry],
     root: &mut Index,
     branch_idx: Index,
 ) {
@@ -1406,14 +1419,8 @@ pub struct ArenaParallelSparseTrie {
     root: Index,
     /// Optional tracking of trie updates for database persistence.
     updates: Option<SparseTrieUpdates>,
-    /// Reusable stack buffer for trie traversals.
-    stack: Vec<ArenaStackEntry>,
-    /// Reusable buffer for collecting update actions.
-    update_actions: Vec<SparseTrieUpdatesAction>,
-    /// Reusable buffer for RLP encoding.
-    rlp_buf: Vec<u8>,
-    /// Reusable buffer for child `RlpNode`s during hashing.
-    rlp_node_buf: Vec<RlpNode>,
+    /// Reusable buffers for traversal, RLP encoding, and update actions.
+    buffers: ArenaTrieBuffers,
     /// Pool of cleared `ArenaSparseSubtrie`s available for reuse.
     cleared_subtries: Vec<ArenaSparseSubtrie>,
 }
@@ -1437,11 +1444,8 @@ impl ArenaParallelSparseTrie {
             ArenaSparseSubtrie {
                 arena: Arena::new(),
                 root: Index::DANGLING,
-                stack: Vec::new(),
-                update_actions: Vec::new(),
+                buffers: ArenaTrieBuffers::default(),
                 required_proofs: Vec::new(),
-                rlp_buf: Vec::new(),
-                rlp_node_buf: Vec::new(),
             }
         };
         subtrie.root = subtrie.arena.insert(root);
@@ -1501,7 +1505,7 @@ impl ArenaParallelSparseTrie {
 
     /// Checks whether a subtrie node at `subtrie_idx` (child of `parent_idx` at
     /// `child_nibble`) should still be a subtrie. If the subtrie's root is no longer a branch,
-    /// or if its path + short_key no longer meets the subtrie depth threshold, its root node
+    /// or if its path + `short_key` no longer meets the subtrie depth threshold, its root node
     /// is moved into the upper arena and the subtrie is returned to the pool.
     ///
     /// If the subtrie's root is [`ArenaSparseNode::EmptyRoot`] (all leaves were removed), the
@@ -1513,7 +1517,7 @@ impl ArenaParallelSparseTrie {
         child_nibble: u8,
         parent_path: &Nibbles,
         subtrie_idx: Index,
-        stack: &mut Vec<ArenaStackEntry>,
+        stack: &mut [ArenaStackEntry],
     ) {
         let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[subtrie_idx] else {
             return;
@@ -1587,10 +1591,7 @@ impl Default for ArenaParallelSparseTrie {
             upper_arena,
             root,
             updates: None,
-            stack: Vec::new(),
-            update_actions: Vec::new(),
-            rlp_buf: Vec::new(),
-            rlp_node_buf: Vec::new(),
+            buffers: ArenaTrieBuffers::default(),
             cleared_subtries: Vec::new(),
         }
     }
@@ -1667,7 +1668,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let root_num_leaves = self.upper_arena[self.root].num_leaves();
 
         // Take the stack out to avoid borrow conflicts with `self`.
-        let mut stack = mem::take(&mut self.stack);
+        let mut stack = mem::take(&mut self.buffers.stack);
         stack.clear();
         stack.push(ArenaStackEntry {
             index: self.root,
@@ -1735,7 +1736,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         drain_stack(&mut self.upper_arena, &mut stack);
 
         // Put the stack back.
-        self.stack = stack;
+        self.buffers.stack = stack;
 
         Ok(())
     }
@@ -1762,9 +1763,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let rlp_node = update_cached_rlp(
             &mut self.upper_arena,
             self.root,
-            &mut self.stack,
-            &mut self.rlp_buf,
-            &mut self.rlp_node_buf,
+            &mut self.buffers.stack,
+            &mut self.buffers.rlp_buf,
+            &mut self.buffers.rlp_node_buf,
         );
         rlp_node.as_hash().expect("root RlpNode must be a hash")
     }
@@ -1834,8 +1835,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         if let Some(updates) = self.updates.as_mut() {
             updates.clear()
         }
-        self.stack.clear();
-        self.update_actions.clear();
+        self.buffers.clear();
     }
 
     fn shrink_nodes_to(&mut self, _size: usize) {
@@ -1869,7 +1869,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         sorted.sort_unstable_by(|a, b| a.1.cmp(&b.1));
 
         let root_num_leaves = self.upper_arena[self.root].num_leaves();
-        let mut stack = mem::take(&mut self.stack);
+        let mut stack = mem::take(&mut self.buffers.stack);
         stack.clear();
         stack.push(ArenaStackEntry {
             index: self.root,
@@ -1985,7 +1985,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         // Drain remaining stack entries, propagating num_leaves deltas.
         drain_stack(&mut self.upper_arena, &mut stack);
-        self.stack = stack;
+        self.buffers.stack = stack;
 
         Ok(())
     }
