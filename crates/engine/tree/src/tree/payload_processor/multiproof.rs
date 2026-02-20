@@ -4,7 +4,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use derive_more::derive::Deref;
-use metrics::{Gauge, Histogram};
+use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_revm::state::EvmState;
 use reth_trie::{HashedPostState, HashedStorage};
@@ -189,6 +189,12 @@ pub(crate) struct MultiProofTaskMetrics {
     pub into_trie_for_reuse_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub sparse_trie_cache_wait_duration_histogram: Histogram,
+    /// Number of additional updates drained from the updates channel in a single wakeup.
+    pub sparse_trie_update_drain_count_histogram: Histogram,
+    /// Time spent draining additional updates from the updates channel.
+    pub sparse_trie_update_drain_duration_histogram: Histogram,
+    /// Number of times update draining hits the configured per-tick cap.
+    pub sparse_trie_update_drain_cap_hit_counter: Counter,
 }
 
 /// Dispatches work items as a single unit or in chunks based on target size and worker
