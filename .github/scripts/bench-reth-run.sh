@@ -19,20 +19,21 @@ cleanup() {
   kill "$TAIL_PID" 2>/dev/null || true
   if [ -n "${RETH_PID:-}" ] && sudo kill -0 "$RETH_PID" 2>/dev/null; then
     if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
-      # Send SIGINT to the inner reth process (not samply) so samply can
-      # capture the exit and save the profile
-      sudo pkill -INT -f "reth.*node" 2>/dev/null || true
+      # Send SIGINT to the inner reth process by exact name (not -f which
+      # would also match samply's cmdline containing "reth"). Samply will
+      # capture reth's exit and save the profile.
+      sudo pkill -INT -x reth 2>/dev/null || true
       # Wait for samply to finish writing the profile and exit
       for i in $(seq 1 120); do
-        sudo pgrep -f samply > /dev/null 2>&1 || break
+        sudo pgrep -x samply > /dev/null 2>&1 || break
         if [ $((i % 10)) -eq 0 ]; then
           echo "Waiting for samply to finish writing profile... (${i}s)"
         fi
         sleep 1
       done
-      if sudo pgrep -f samply > /dev/null 2>&1; then
+      if sudo pgrep -x samply > /dev/null 2>&1; then
         echo "Samply still running after 120s, sending SIGTERM..."
-        sudo pkill -f samply 2>/dev/null || true
+        sudo pkill -x samply 2>/dev/null || true
       fi
     else
       sudo kill "$RETH_PID"
