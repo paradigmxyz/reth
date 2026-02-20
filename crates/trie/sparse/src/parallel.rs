@@ -2714,7 +2714,7 @@ impl SparseSubtrie {
                     let child = &children[stack_ptr];
 
                     if let Some(hash) = child.as_hash() {
-                        blinded.set(idx, hash);
+                        blinded.push_ascending(idx, hash);
                     }
                 }
 

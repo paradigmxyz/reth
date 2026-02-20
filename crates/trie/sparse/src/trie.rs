@@ -558,6 +558,23 @@ impl BlindedHashes {
         }
     }
 
+    /// Appends a hash for the given nibble, which must be higher than all previously inserted
+    /// nibbles. This is a fast path that avoids popcount indexing and element shifting.
+    ///
+    /// # Panics
+    ///
+    /// Panics (in debug) if the nibble is already set or not in ascending order.
+    #[inline]
+    pub fn push_ascending(&mut self, nibble: u8, hash: B256) {
+        debug_assert!(!self.mask.is_bit_set(nibble));
+        debug_assert!(
+            self.mask.is_empty() || nibble > (15 - self.mask.get().leading_zeros() as u8),
+            "nibble {nibble} is not ascending"
+        );
+        self.mask.set_bit(nibble);
+        self.hashes.push(hash);
+    }
+
     /// Unsets the blinded hash for a given nibble.
     #[inline]
     pub fn unset(&mut self, nibble: u8) {
