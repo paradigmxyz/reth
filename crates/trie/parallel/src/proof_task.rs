@@ -167,7 +167,7 @@ impl ProofWorkerHandle {
         let storage_avail = storage_available_workers.clone();
         let storage_roots = cached_storage_roots.clone();
         let storage_parent_span = tracing::Span::current();
-        runtime.spawn_blocking(move || {
+        runtime.spawn_blocking_named("proof-storage-workers", move || {
             let worker_id = AtomicUsize::new(0);
             storage_rt.proof_storage_worker_pool().broadcast(storage_worker_count, |_| {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
@@ -205,7 +205,7 @@ impl ProofWorkerHandle {
         let account_tx = storage_work_tx.clone();
         let account_avail = account_available_workers.clone();
         let account_parent_span = tracing::Span::current();
-        runtime.spawn_blocking(move || {
+        runtime.spawn_blocking_named("proof-account-workers", move || {
             let worker_id = AtomicUsize::new(0);
             account_rt.proof_account_worker_pool().broadcast(account_worker_count, |_| {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
