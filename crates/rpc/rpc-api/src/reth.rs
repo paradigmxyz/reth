@@ -1,17 +1,22 @@
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256};
-use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_payload_primitives::PayloadTypes;
 
 use crate::reth_engine::RethPayloadStatus;
 
 // Required for the subscription attributes below
 use reth_chain_state as _;
 
+// NOTE: We can't use associated types in the `RethApi` trait because of jsonrpsee, so we use a
+// generic here. By default, if the trait has a generic, the rpc macro will add
+// `PayloadT: DeserializeOwned` to the trait bounds, which is not what we want. Instead, we
+// specify custom bounds on `PayloadT::ExecutionData`.
+
 /// Reth API namespace for reth-specific methods
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "reth"))]
-pub trait RethApi {
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"), server_bounds(PayloadT::ExecutionData: jsonrpsee::core::DeserializeOwned))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "reth", client_bounds(PayloadT::ExecutionData: jsonrpsee::core::Serialize + Clone), server_bounds(PayloadT::ExecutionData: jsonrpsee::core::DeserializeOwned)))]
+pub trait RethApi<PayloadT: PayloadTypes> {
     /// Returns all ETH balance changes in a block
     #[method(name = "getBalanceChangesInBlock")]
     async fn reth_get_balance_changes_in_block(
@@ -19,11 +24,14 @@ pub trait RethApi {
         block_id: BlockId,
     ) -> RpcResult<AddressMap<U256>>;
 
-    /// Reth-specific newPayload that takes `ExecutionData` directly.
+    /// Reth-specific newPayload that takes execution data directly.
     ///
     /// Waits for persistence, execution cache, and sparse trie locks before processing.
     #[method(name = "newPayload")]
-    async fn reth_new_payload(&self, payload: ExecutionData) -> RpcResult<RethPayloadStatus>;
+    async fn reth_new_payload(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> RpcResult<RethPayloadStatus>;
 
     /// Subscribe to json `ChainNotifications`
     #[subscription(

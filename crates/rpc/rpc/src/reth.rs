@@ -3,7 +3,6 @@ use std::{future::Future, sync::Arc, time::Instant};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256};
-use alloy_rpc_types_engine::ExecutionData;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
@@ -101,14 +100,14 @@ where
 impl<Provider, PayloadT> RethApi<Provider, PayloadT>
 where
     Provider: 'static,
-    PayloadT: PayloadTypes<ExecutionData = ExecutionData>,
+    PayloadT: PayloadTypes,
 {
     /// Waits for persistence, execution cache, and sparse trie locks before processing.
     ///
     /// Used by `reth_newPayload` endpoint.
     pub async fn reth_new_payload(
         &self,
-        payload: ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> Result<RethPayloadStatus, jsonrpsee::types::ErrorObject<'static>> {
         let Some(beacon_engine_handle) = &self.inner.beacon_engine_handle else {
             return Err(jsonrpsee::types::error::ErrorObject::owned(
@@ -138,7 +137,7 @@ where
 }
 
 #[async_trait]
-impl<Provider, PayloadT> RethApiServer for RethApi<Provider, PayloadT>
+impl<Provider, PayloadT> RethApiServer<PayloadT> for RethApi<Provider, PayloadT>
 where
     Provider: BlockReaderIdExt
         + ChangeSetReader
@@ -147,7 +146,7 @@ where
         + ForkChoiceSubscriptions<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
         + PersistedBlockSubscriptions
         + 'static,
-    PayloadT: PayloadTypes<ExecutionData = ExecutionData>,
+    PayloadT: PayloadTypes,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(
@@ -199,7 +198,10 @@ where
     }
 
     /// Handler for `reth_newPayload`
-    async fn reth_new_payload(&self, payload: ExecutionData) -> RpcResult<RethPayloadStatus> {
+    async fn reth_new_payload(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> RpcResult<RethPayloadStatus> {
         Ok(Self::reth_new_payload(self, payload).await?)
     }
 }

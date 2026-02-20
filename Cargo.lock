@@ -9838,6 +9838,7 @@ dependencies = [
  "reth-chain-state",
  "reth-engine-primitives",
  "reth-network-peers",
+ "reth-payload-primitives",
  "reth-rpc-eth-api",
  "reth-trie-common",
  "serde",

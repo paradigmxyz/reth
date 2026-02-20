@@ -22,7 +22,6 @@
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 use alloy_network::{Ethereum, IntoWallet};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
-use alloy_rpc_types_engine::ExecutionData;
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
 use http::{header::AUTHORIZATION, HeaderMap};
@@ -345,7 +344,7 @@ where
     )
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
-        PayloadT: PayloadTypes<ExecutionData = ExecutionData>,
+        PayloadT: PayloadTypes,
     {
         let config = module_config.config.clone().unwrap_or_default();
 
@@ -788,10 +787,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime.
-    pub fn register_reth(&mut self) -> &mut Self
-    where
-        PayloadT: PayloadTypes<ExecutionData = ExecutionData>,
-    {
+    pub fn register_reth(&mut self) -> &mut Self {
         let rethapi = self.reth_api();
         self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
         self
@@ -905,7 +901,7 @@ where
     EthApi: FullEthApiServer,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N> + Clone + 'static,
-    PayloadT: PayloadTypes<ExecutionData = ExecutionData>,
+    PayloadT: PayloadTypes,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace

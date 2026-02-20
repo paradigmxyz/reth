@@ -825,7 +825,6 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> RpcAddOns<N, EthB, PVB, EB, EVB, RpcM
 where
     N: FullNodeComponents,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
-    <N::Types as NodeTypes>::Payload: PayloadTypes<ExecutionData = ExecutionData>,
     EthB: EthApiBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -1131,7 +1130,6 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
 where
     N: FullNodeComponents,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
-    <N::Types as NodeTypes>::Payload: PayloadTypes<ExecutionData = ExecutionData>,
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
