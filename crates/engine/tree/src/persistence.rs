@@ -141,13 +141,27 @@ where
             }
         };
 
-        if let Err(err) = indexer.tick_with_provider(&provider_rw, tip) {
-            warn!(target: "engine::persistence", %err, "Deferred history indexing tick failed, will retry");
-            return;
-        }
+        let tick_started = Instant::now();
+        let progress = match indexer.tick_with_provider(&provider_rw, tip) {
+            Ok(progress) => progress,
+            Err(err) => {
+                warn!(target: "engine::persistence", %err, "Deferred history indexing tick failed, will retry");
+                return;
+            }
+        };
 
         if let Err(err) = provider_rw.commit() {
             warn!(target: "engine::persistence", %err, "Failed to commit deferred indexing tick");
+            return;
+        }
+
+        if let Some(progress) = progress {
+            let _ = self.sync_metrics_tx.send(MetricEvent::StageCheckpoint {
+                stage_id: progress.stage_id,
+                checkpoint: progress.checkpoint,
+                max_block_number: Some(tip),
+                elapsed: tick_started.elapsed(),
+            });
         }
     }
 

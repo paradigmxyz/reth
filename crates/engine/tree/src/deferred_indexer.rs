@@ -9,7 +9,7 @@ use reth_provider::{StageCheckpointReader, StageCheckpointWriter};
 use reth_prune::PruneModes;
 use reth_stages::{
     stages::{IndexAccountHistoryStage, IndexStorageHistoryStage, TransactionLookupStage},
-    ExecInput, Stage, StageId,
+    ExecInput, Stage, StageCheckpoint, StageId,
 };
 use tracing::{debug, info, warn};
 
@@ -36,6 +36,15 @@ impl DeferredHistoryIndexerConfig {
     pub fn new(stages: StageConfig, prune_modes: PruneModes) -> Self {
         Self { stages, prune_modes }
     }
+}
+
+/// Progress information for one deferred indexing batch.
+#[derive(Debug, Clone, Copy)]
+pub struct DeferredStageProgress {
+    /// Deferred stage that advanced in this tick.
+    pub stage_id: StageId,
+    /// Persisted checkpoint after the stage batch completed.
+    pub checkpoint: StageCheckpoint,
 }
 
 /// Deferred history indexer that runs pipeline stages inside the persistence service.
@@ -114,7 +123,7 @@ impl DeferredHistoryIndexer {
         provider_rw: &Provider,
         stage_idx: usize,
         tip: u64,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>
+    ) -> Result<Option<DeferredStageProgress>, Box<dyn std::error::Error + Send + Sync>>
     where
         Provider: StageCheckpointReader + StageCheckpointWriter,
         TransactionLookupStage: Stage<Provider>,
@@ -131,7 +140,7 @@ impl DeferredHistoryIndexer {
         let checkpoint = provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
 
         if checkpoint.block_number >= tip {
-            return Ok(false);
+            return Ok(None);
         }
 
         let batch_size = self.batch_size_for_stage(stage_idx);
@@ -164,7 +173,7 @@ impl DeferredHistoryIndexer {
                     %tip,
                     "Deferred indexing batch complete"
                 );
-                Ok(true)
+                Ok(Some(DeferredStageProgress { stage_id, checkpoint: output.checkpoint }))
             }
             Err(err) => {
                 warn!(
@@ -173,7 +182,7 @@ impl DeferredHistoryIndexer {
                     %err,
                     "Deferred indexing batch failed, will retry"
                 );
-                Ok(false)
+                Ok(None)
             }
         }
     }
@@ -214,7 +223,7 @@ impl DeferredHistoryIndexer {
         &mut self,
         provider_rw: &Provider,
         tip: u64,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    ) -> Result<Option<DeferredStageProgress>, Box<dyn std::error::Error + Send + Sync>>
     where
         Provider: StageCheckpointReader + StageCheckpointWriter,
         TransactionLookupStage: Stage<Provider>,
@@ -222,12 +231,12 @@ impl DeferredHistoryIndexer {
         IndexAccountHistoryStage: Stage<Provider>,
     {
         if tip == 0 {
-            return Ok(());
+            return Ok(None);
         }
 
         // Run one batch for the current stage.
         let current = self.next_stage;
-        let _did_work = self.run_stage_batch(provider_rw, current, tip)?;
+        let progress = self.run_stage_batch(provider_rw, current, tip)?;
 
         // Advance to next stage (round-robin).
         self.next_stage = (self.next_stage + 1) % 3;
@@ -238,7 +247,7 @@ impl DeferredHistoryIndexer {
             self.caught_up = true;
         }
 
-        Ok(())
+        Ok(progress)
     }
 
     /// Returns whether deferred indexing has caught up to the tip.
