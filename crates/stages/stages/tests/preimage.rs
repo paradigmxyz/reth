@@ -14,7 +14,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_ethereum_primitives::{Block, BlockBody, Transaction};
+use reth_ethereum_primitives::{Block, BlockBody, Transaction, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_libmdbx::{Environment, EnvironmentFlags, Mode};
@@ -43,8 +43,11 @@ use reth_storage_api::{StorageChangeSetReader, StorageSettings, StorageSettingsC
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
-use std::{path::Path, sync::Arc};
+use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tokio::sync::watch;
+
+type TestProviderFactory =
+    reth_provider::ProviderFactory<reth_provider::test_utils::MockNodeTypesWithDB>;
 
 /// Verifies v2 selfdestruct handling across a pre-/post-Cancun boundary.
 ///
@@ -65,13 +68,8 @@ async fn test_pipeline_v2_selfdestruct_changesets_use_plain_slots() -> eyre::Res
     // - block 3 is post-Cancun (no storage-destroy semantics; preimage DB should be cleaned up)
     let scenario = setup_selfdestruct_scenario()?;
 
-    let pipeline_provider_factory =
-        create_test_provider_factory_with_chain_spec(scenario.chain_spec.clone());
-    init_genesis_with_settings(&pipeline_provider_factory, StorageSettings::v2())
-        .expect("init genesis");
-    pipeline_provider_factory.set_storage_settings_cache(StorageSettings::v2());
-    let pipeline_genesis =
-        pipeline_provider_factory.sealed_header(0)?.expect("genesis should exist");
+    let (pipeline_provider_factory, pipeline_genesis) =
+        init_v2_pipeline_provider_factory(scenario.chain_spec.clone())?;
 
     run_pipeline_range(
         pipeline_provider_factory.clone(),
@@ -141,13 +139,8 @@ async fn test_pipeline_v2_single_batch_write_then_selfdestruct_changesets_plain_
     reth_tracing::init_test_tracing();
 
     let scenario = setup_selfdestruct_scenario()?;
-    let pipeline_provider_factory =
-        create_test_provider_factory_with_chain_spec(scenario.chain_spec.clone());
-    init_genesis_with_settings(&pipeline_provider_factory, StorageSettings::v2())
-        .expect("init genesis");
-    pipeline_provider_factory.set_storage_settings_cache(StorageSettings::v2());
-    let pipeline_genesis =
-        pipeline_provider_factory.sealed_header(0)?.expect("genesis should exist");
+    let (pipeline_provider_factory, pipeline_genesis) =
+        init_v2_pipeline_provider_factory(scenario.chain_spec.clone())?;
 
     run_pipeline_range(
         pipeline_provider_factory.clone(),
@@ -164,6 +157,38 @@ async fn test_pipeline_v2_single_batch_write_then_selfdestruct_changesets_plain_
     let provider = pipeline_provider_factory.provider()?;
     assert_eq!(provider.last_block_number()?, 2, "pipeline should sync blocks 1..=2");
     assert_destroyed_changeset_entries(&provider, scenario.selfdestruct_contract)?;
+
+    Ok(())
+}
+
+/// Covers the edge case where a slot appears in intermediate block reverts but not in the final
+/// bundle state, then gets wiped by a later selfdestruct in the same execution batch.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pipeline_v2_single_batch_reverted_slot_then_selfdestruct_changesets_plain_slots(
+) -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let scenario = setup_reverted_slot_selfdestruct_scenario()?;
+    let (pipeline_provider_factory, pipeline_genesis) =
+        init_v2_pipeline_provider_factory(scenario.chain_spec.clone())?;
+
+    run_pipeline_range(
+        pipeline_provider_factory.clone(),
+        create_file_client_from_blocks(scenario.blocks),
+        pipeline_genesis,
+        1..=3,
+        3,
+    )
+    .await?;
+
+    let provider = pipeline_provider_factory.provider()?;
+    assert_eq!(provider.last_block_number()?, 3, "pipeline should sync blocks 1..=3");
+    assert_destroyed_changeset_entries_in_block(
+        &provider,
+        3,
+        scenario.selfdestruct_contract,
+        &[scenario.expected_slot],
+    )?;
 
     Ok(())
 }
@@ -242,67 +267,15 @@ fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
                     ..Default::default()
                 }),
             );
-            let transactions = vec![tx];
-            let tx_root = calculate_transaction_root(&transactions);
-            let temp_header = build_execution_header(parent_hash, block_num, timestamp);
-
-            let provider = provider_factory.database_provider_rw()?;
-            let block_with_senders = RecoveredBlock::new_unhashed(
-                Block::new(
-                    temp_header.clone(),
-                    BlockBody {
-                        transactions: transactions.clone(),
-                        ommers: Vec::new(),
-                        withdrawals: None,
-                    },
-                ),
-                vec![signer_address],
-            );
-
-            let output = {
-                let state_provider = provider.latest();
-                let db = StateProviderDatabase::new(&*state_provider);
-                let executor = evm_config.batch_executor(db);
-                executor.execute(&block_with_senders)?
-            };
-
-            let gas_used = output.gas_used;
-            let hashed_state =
-                HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
-            let (state_root, _trie_updates) = StateRoot::overlay_root_with_updates(
-                provider.tx_ref(),
-                &hashed_state.clone().into_sorted(),
-            )?;
-
-            let receipts: Vec<_> = output.receipts.iter().map(|r| r.with_bloom_ref()).collect();
-            let receipts_root = calculate_receipt_root(&receipts);
-
-            let header = Header {
+            let block = execute_and_commit_block(
+                &provider_factory,
+                &evm_config,
+                signer_address,
                 parent_hash,
-                number: block_num,
-                state_root,
-                transactions_root: tx_root,
-                receipts_root,
-                gas_limit: 30_000_000,
-                gas_used,
-                base_fee_per_gas: Some(INITIAL_BASE_FEE),
+                block_num,
                 timestamp,
-                parent_beacon_block_root: (timestamp >= 30).then_some(B256::ZERO),
-                blob_gas_used: (timestamp >= 30).then_some(0),
-                excess_blob_gas: (timestamp >= 30).then_some(0),
-                ..Default::default()
-            };
-
-            let block: SealedBlock<Block> = SealedBlock::seal_parts(
-                header,
-                BlockBody { transactions, ommers: Vec::new(), withdrawals: None },
-            );
-
-            let plain_state = output.state.to_plain_state(OriginalValuesKnown::Yes);
-            provider.write_state_changes(plain_state)?;
-            provider.write_hashed_state(&hashed_state.into_sorted())?;
-            provider.commit()?;
-
+                vec![tx],
+            )?;
             parent_hash = block.hash();
             blocks.push(block);
         }
@@ -316,6 +289,182 @@ fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
         selfdestruct_contract,
         expected_slots: expected_destroyed_slots(),
     })
+}
+
+struct RevertedSlotSelfdestructScenario {
+    chain_spec: Arc<reth_chainspec::ChainSpec>,
+    blocks: Vec<SealedBlock<Block>>,
+    selfdestruct_contract: Address,
+    expected_slot: (B256, U256),
+}
+
+fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfdestructScenario> {
+    let mut rng = generators::rng();
+    let key_pair = generate_key(&mut rng);
+    let signer_address = public_key_to_address(key_pair.public_key());
+    let beneficiary = Address::new([0x55; 20]);
+    let selfdestruct_contract = Address::new([0x33; 20]);
+    let slot = B256::with_last_byte(0x03);
+    let original_value = B256::with_last_byte(0x07);
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(Genesis {
+                alloc: [
+                    (
+                        signer_address,
+                        GenesisAccount {
+                            balance: U256::from(ETH_TO_WEI) * U256::from(1000),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        selfdestruct_contract,
+                        GenesisAccount {
+                            code: Some(write_restore_or_selfdestruct_runtime_code(beneficiary)),
+                            storage: Some(BTreeMap::from([(slot, original_value)])),
+                            ..Default::default()
+                        },
+                    ),
+                ]
+                .into(),
+                ..MAINNET.genesis.clone()
+            })
+            .shanghai_activated()
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(30))
+            .build(),
+    );
+
+    let blocks = {
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        init_genesis(&provider_factory).expect("init genesis");
+
+        let genesis = provider_factory.sealed_header(0)?.expect("genesis should exist");
+        let evm_config = EthEvmConfig::new(chain_spec.clone());
+        let mut blocks = Vec::new();
+        let mut parent_hash = genesis.hash();
+        let gas_price = INITIAL_BASE_FEE as u128;
+
+        for (block_num, timestamp, nonce, value) in [
+            (1_u64, 12_u64, 0_u64, U256::ZERO),
+            (2_u64, 18_u64, 1_u64, U256::from(1_u64)),
+            (3_u64, 24_u64, 2_u64, U256::from(2_u64)),
+        ] {
+            let tx = sign_tx_with_key_pair(
+                key_pair,
+                Transaction::Eip1559(TxEip1559 {
+                    chain_id: chain_spec.chain.id(),
+                    nonce,
+                    gas_limit: 120_000,
+                    max_fee_per_gas: gas_price,
+                    max_priority_fee_per_gas: 0,
+                    to: TxKind::Call(selfdestruct_contract),
+                    value,
+                    input: Bytes::new(),
+                    ..Default::default()
+                }),
+            );
+            let block = execute_and_commit_block(
+                &provider_factory,
+                &evm_config,
+                signer_address,
+                parent_hash,
+                block_num,
+                timestamp,
+                vec![tx],
+            )?;
+            parent_hash = block.hash();
+            blocks.push(block);
+        }
+
+        blocks
+    };
+
+    Ok(RevertedSlotSelfdestructScenario {
+        chain_spec,
+        blocks,
+        selfdestruct_contract,
+        expected_slot: (slot, U256::from(0x07)),
+    })
+}
+
+fn init_v2_pipeline_provider_factory(
+    chain_spec: Arc<reth_chainspec::ChainSpec>,
+) -> eyre::Result<(TestProviderFactory, reth_primitives_traits::SealedHeader<Header>)> {
+    let pipeline_provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+    init_genesis_with_settings(&pipeline_provider_factory, StorageSettings::v2())?;
+    pipeline_provider_factory.set_storage_settings_cache(StorageSettings::v2());
+    let pipeline_genesis = pipeline_provider_factory
+        .sealed_header(0)?
+        .ok_or_else(|| eyre::eyre!("genesis should exist"))?;
+    Ok((pipeline_provider_factory, pipeline_genesis))
+}
+
+fn execute_and_commit_block(
+    provider_factory: &TestProviderFactory,
+    evm_config: &EthEvmConfig,
+    signer_address: Address,
+    parent_hash: B256,
+    block_num: u64,
+    timestamp: u64,
+    transactions: Vec<TransactionSigned>,
+) -> eyre::Result<SealedBlock<Block>> {
+    let tx_root = calculate_transaction_root(&transactions);
+    let temp_header = build_execution_header(parent_hash, block_num, timestamp);
+    let provider = provider_factory.database_provider_rw()?;
+    let block_with_senders = RecoveredBlock::new_unhashed(
+        Block::new(
+            temp_header.clone(),
+            BlockBody { transactions: transactions.clone(), ommers: Vec::new(), withdrawals: None },
+        ),
+        vec![signer_address; transactions.len()],
+    );
+
+    let output = {
+        let state_provider = provider.latest();
+        let db = StateProviderDatabase::new(&*state_provider);
+        let executor = evm_config.batch_executor(db);
+        executor.execute(&block_with_senders)?
+    };
+
+    let gas_used = output.gas_used;
+    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+    let (state_root, _trie_updates) = StateRoot::overlay_root_with_updates(
+        provider.tx_ref(),
+        &hashed_state.clone().into_sorted(),
+    )?;
+
+    let receipts: Vec<_> = output.receipts.iter().map(|r| r.with_bloom_ref()).collect();
+    let receipts_root = calculate_receipt_root(&receipts);
+
+    let header = Header {
+        parent_hash,
+        number: block_num,
+        state_root,
+        transactions_root: tx_root,
+        receipts_root,
+        gas_limit: 30_000_000,
+        gas_used,
+        base_fee_per_gas: Some(INITIAL_BASE_FEE),
+        timestamp,
+        parent_beacon_block_root: (timestamp >= 30).then_some(B256::ZERO),
+        blob_gas_used: (timestamp >= 30).then_some(0),
+        excess_blob_gas: (timestamp >= 30).then_some(0),
+        ..Default::default()
+    };
+
+    let block: SealedBlock<Block> = SealedBlock::seal_parts(
+        header,
+        BlockBody { transactions, ommers: Vec::new(), withdrawals: None },
+    );
+
+    let plain_state = output.state.to_plain_state(OriginalValuesKnown::Yes);
+    provider.write_state_changes(plain_state)?;
+    provider.write_hashed_state(&hashed_state.into_sorted())?;
+    provider.commit()?;
+
+    Ok(block)
 }
 
 fn build_selfdestruct_chain_spec(
@@ -376,7 +525,23 @@ fn assert_destroyed_changeset_entries<P>(
 where
     P: StorageChangeSetReader,
 {
-    let storage_changesets = provider.storage_changesets_range(2..=2)?;
+    let expected = [
+        (B256::with_last_byte(0x01), U256::from(0x2a)),
+        (B256::with_last_byte(0x02), U256::from(0x99)),
+    ];
+    assert_destroyed_changeset_entries_in_block(provider, 2, selfdestruct_contract, &expected)
+}
+
+fn assert_destroyed_changeset_entries_in_block<P>(
+    provider: &P,
+    block: u64,
+    selfdestruct_contract: Address,
+    expected: &[(B256, U256)],
+) -> eyre::Result<()>
+where
+    P: StorageChangeSetReader,
+{
+    let storage_changesets = provider.storage_changesets_range(block..=block)?;
     let destroyed_entries: Vec<_> = storage_changesets
         .into_iter()
         .filter_map(|(key, entry)| {
@@ -386,21 +551,19 @@ where
 
     assert_eq!(
         destroyed_entries.len(),
-        2,
-        "expected exactly 2 storage changeset entries for destroyed account"
+        expected.len(),
+        "expected exactly {} storage changeset entries for destroyed account at block {}",
+        expected.len(),
+        block
     );
 
     for (slot, _) in &destroyed_entries {
         assert_ne!(*slot, keccak256(*slot), "storage changeset key should be plain (not hashed)");
     }
 
-    let expected = vec![
-        (B256::with_last_byte(0x01), U256::from(0x2a)),
-        (B256::with_last_byte(0x02), U256::from(0x99)),
-    ];
     for pair in expected {
         assert!(
-            destroyed_entries.contains(&pair),
+            destroyed_entries.contains(pair),
             "missing expected storage changeset entry for destroyed account: {:?}",
             pair
         );
@@ -414,9 +577,7 @@ fn create_file_client_from_blocks(blocks: Vec<SealedBlock<Block>>) -> Arc<FileCl
 }
 
 fn build_pipeline_without_history<H, B>(
-    provider_factory: reth_provider::ProviderFactory<
-        reth_provider::test_utils::MockNodeTypesWithDB,
-    >,
+    provider_factory: TestProviderFactory,
     header_downloader: H,
     body_downloader: B,
     max_block: u64,
@@ -463,9 +624,7 @@ where
 }
 
 async fn run_pipeline_range(
-    provider_factory: reth_provider::ProviderFactory<
-        reth_provider::test_utils::MockNodeTypesWithDB,
-    >,
+    provider_factory: TestProviderFactory,
     file_client: Arc<FileClient<Block>>,
     local_head: reth_primitives_traits::SealedHeader<Header>,
     download_range: std::ops::RangeInclusive<u64>,
@@ -515,6 +674,24 @@ fn write_or_selfdestruct_runtime_code(beneficiary: Address) -> Bytes {
     runtime.extend_from_slice(&[0x60, 0x2a, 0x60, 0x01, 0x55]); // SSTORE(1, 0x2a)
     runtime.extend_from_slice(&[0x60, 0x99, 0x60, 0x02, 0x55]); // SSTORE(2, 0x99)
     runtime.push(0x00); // STOP
+    runtime.into()
+}
+
+/// Builds tiny runtime bytecode with three value-based paths:
+/// - `msg.value == 0`: SSTORE(3, 0x2b)
+/// - `msg.value == 1`: SSTORE(3, 0x07)
+/// - `msg.value == 2`: SELFDESTRUCT to `beneficiary`
+fn write_restore_or_selfdestruct_runtime_code(beneficiary: Address) -> Bytes {
+    let mut runtime = Vec::with_capacity(64);
+    runtime.extend_from_slice(&[0x34, 0x60, 0x02, 0x14, 0x60, 0x1b, 0x57]); // if callvalue == 2 jump selfdestruct
+    runtime.extend_from_slice(&[0x34, 0x60, 0x01, 0x14, 0x60, 0x14, 0x57]); // if callvalue == 1 jump restore
+    runtime.extend_from_slice(&[0x60, 0x2b, 0x60, 0x03, 0x55, 0x00]); // default: SSTORE(3, 0x2b); STOP
+    runtime.push(0x5b); // JUMPDEST (0x14)
+    runtime.extend_from_slice(&[0x60, 0x07, 0x60, 0x03, 0x55, 0x00]); // restore: SSTORE(3, 0x07); STOP
+    runtime.push(0x5b); // JUMPDEST (0x1b)
+    runtime.push(0x73); // PUSH20
+    runtime.extend_from_slice(beneficiary.as_slice());
+    runtime.extend_from_slice(&[0xff, 0x00]); // SELFDESTRUCT; STOP
     runtime.into()
 }
 
