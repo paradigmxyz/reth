@@ -1,6 +1,9 @@
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256};
+use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+
+use crate::reth_engine::RethPayloadStatus;
 
 // Required for the subscription attributes below
 use reth_chain_state as _;
@@ -15,6 +18,12 @@ pub trait RethApi {
         &self,
         block_id: BlockId,
     ) -> RpcResult<AddressMap<U256>>;
+
+    /// Reth-specific newPayload that takes `ExecutionData` directly.
+    ///
+    /// Waits for persistence, execution cache, and sparse trie locks before processing.
+    #[method(name = "newPayload")]
+    async fn reth_new_payload(&self, payload: ExecutionData) -> RpcResult<RethPayloadStatus>;
 
     /// Subscribe to json `ChainNotifications`
     #[subscription(

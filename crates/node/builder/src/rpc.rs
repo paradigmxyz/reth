@@ -211,6 +211,7 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         EthApi,
         Node::Evm,
         Node::Consensus,
+        <Node::Types as NodeTypes>::Payload,
     >,
 }
 
@@ -226,6 +227,7 @@ where
         EthApi,
         Node::Evm,
         Node::Consensus,
+        <Node::Types as NodeTypes>::Payload,
     >;
 
     fn deref(&self) -> &Self::Target {
@@ -823,6 +825,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> RpcAddOns<N, EthB, PVB, EB, EVB, RpcM
 where
     N: FullNodeComponents,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    <N::Types as NodeTypes>::Payload: PayloadTypes<ExecutionData = ExecutionData>,
     EthB: EthApiBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -1020,7 +1023,13 @@ where
             .with_executor(node.task_executor().clone())
             .with_evm_config(node.evm_config().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(module_config, engine_api, eth_api, engine_events.clone());
+            .build_with_auth_server(
+                module_config,
+                engine_api,
+                eth_api,
+                engine_events.clone(),
+                Some(beacon_engine_handle.clone()),
+            );
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
@@ -1122,6 +1131,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
 where
     N: FullNodeComponents,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    <N::Types as NodeTypes>::Payload: PayloadTypes<ExecutionData = ExecutionData>,
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
