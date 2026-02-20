@@ -49,6 +49,7 @@ pub(crate) fn collect_history_indices<Provider, CS, H, P>(
     sharded_key_factory: impl Fn(P, BlockNumber) -> H::Key,
     partial_key_factory: impl Fn((CS::Key, CS::Value)) -> (u64, P),
     etl_config: &EtlConfig,
+    log_progress: bool,
 ) -> Result<Collector<H::Key, H::Value>, StageError>
 where
     Provider: DBProvider,
@@ -82,7 +83,7 @@ where
         let (block_number, key) = partial_key_factory(entry?);
         cache.entry(key).or_default().push(block_number);
 
-        if idx > 0 && idx.is_multiple_of(interval) && total_changesets > 1000 {
+        if log_progress && idx > 0 && idx.is_multiple_of(interval) && total_changesets > 1000 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
         }
 
@@ -120,6 +121,7 @@ pub(crate) fn collect_account_history_indices<Provider>(
     provider: &Provider,
     range: impl RangeBounds<BlockNumber>,
     etl_config: &EtlConfig,
+    log_progress: bool,
 ) -> Result<Collector<ShardedKey<Address>, BlockNumberList>, StageError>
 where
     Provider: DBProvider + ChangeSetReader + StaticFileProviderFactory,
@@ -155,7 +157,7 @@ where
         let (block_number, AccountBeforeTx { address, .. }) = changeset_result?;
         cache.entry(address).or_default().push(block_number);
 
-        if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
+        if log_progress && idx > 0 && idx % interval == 0 && total_changesets > 1000 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
         }
 
@@ -179,6 +181,7 @@ pub(crate) fn collect_storage_history_indices<Provider>(
     provider: &Provider,
     range: impl RangeBounds<BlockNumber>,
     etl_config: &EtlConfig,
+    log_progress: bool,
 ) -> Result<Collector<StorageShardedKey, BlockNumberList>, StageError>
 where
     Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
@@ -213,7 +216,7 @@ where
             .or_default()
             .push(block_number);
 
-        if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
+        if log_progress && idx > 0 && idx % interval == 0 && total_changesets > 1000 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
         }
 
@@ -248,6 +251,7 @@ pub(crate) fn load_account_history<N, CURSOR>(
     mut collector: Collector<ShardedKey<Address>, BlockNumberList>,
     append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
+    log_progress: bool,
 ) -> Result<(), StageError>
 where
     N: NodePrimitives,
@@ -266,7 +270,7 @@ where
         let sharded_key = ShardedKey::<Address>::decode_owned(k)?;
         let new_list = BlockNumberList::decompress_owned(v)?;
 
-        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+        if log_progress && index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 
@@ -456,6 +460,7 @@ pub(crate) fn load_storage_history<N, CURSOR>(
     mut collector: Collector<StorageShardedKey, BlockNumberList>,
     append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
+    log_progress: bool,
 ) -> Result<(), StageError>
 where
     N: NodePrimitives,
@@ -474,7 +479,7 @@ where
         let sharded_key = StorageShardedKey::decode_owned(k)?;
         let new_list = BlockNumberList::decompress_owned(v)?;
 
-        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+        if log_progress && index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 

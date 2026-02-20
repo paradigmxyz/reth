@@ -13,8 +13,14 @@ use reth_stages::{
 };
 use tracing::{debug, info, warn};
 
-/// Maximum number of blocks to index per tick.
-const DEFAULT_BATCH_SIZE: u64 = 10_000;
+/// Per-stage batch sizes for deferred indexing ticks.
+///
+/// These are tuned to keep lock hold times bounded; storage history is typically the slowest
+/// segment, account history is medium, and tx lookup is often fastest (especially when fully
+/// pruned).
+const TX_LOOKUP_BATCH_SIZE: u64 = 10_000;
+const INDEX_ACCOUNT_HISTORY_BATCH_SIZE: u64 = 3_000;
+const INDEX_STORAGE_HISTORY_BATCH_SIZE: u64 = 1_000;
 
 /// Construction configuration for the deferred history indexer.
 #[derive(Debug, Clone)]
@@ -40,7 +46,9 @@ pub struct DeferredHistoryIndexer {
     tx_lookup: TransactionLookupStage,
     index_storage: IndexStorageHistoryStage,
     index_account: IndexAccountHistoryStage,
-    batch_size: u64,
+    tx_lookup_batch_size: u64,
+    index_storage_batch_size: u64,
+    index_account_batch_size: u64,
     caught_up: bool,
     /// Round-robin index: 0 = tx_lookup, 1 = index_storage, 2 = index_account
     next_stage: usize,
@@ -49,7 +57,9 @@ pub struct DeferredHistoryIndexer {
 impl std::fmt::Debug for DeferredHistoryIndexer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeferredHistoryIndexer")
-            .field("batch_size", &self.batch_size)
+            .field("tx_lookup_batch_size", &self.tx_lookup_batch_size)
+            .field("index_storage_batch_size", &self.index_storage_batch_size)
+            .field("index_account_batch_size", &self.index_account_batch_size)
             .field("caught_up", &self.caught_up)
             .field("next_stage", &self.next_stage)
             .finish()
@@ -66,20 +76,35 @@ impl DeferredHistoryIndexer {
                 stages_config.transaction_lookup,
                 etl.clone(),
                 prune_modes.transaction_lookup,
-            ),
+            )
+            .with_progress_logging(false),
             index_storage: IndexStorageHistoryStage::new(
                 stages_config.index_storage_history,
                 etl.clone(),
                 prune_modes.storage_history,
-            ),
+            )
+            .with_progress_logging(false),
             index_account: IndexAccountHistoryStage::new(
                 stages_config.index_account_history,
                 etl,
                 prune_modes.account_history,
-            ),
-            batch_size: DEFAULT_BATCH_SIZE,
+            )
+            .with_progress_logging(false),
+            tx_lookup_batch_size: TX_LOOKUP_BATCH_SIZE,
+            index_storage_batch_size: INDEX_STORAGE_HISTORY_BATCH_SIZE,
+            index_account_batch_size: INDEX_ACCOUNT_HISTORY_BATCH_SIZE,
             caught_up: false,
             next_stage: 0,
+        }
+    }
+
+    /// Returns the per-stage batch size.
+    fn batch_size_for_stage(&self, stage_idx: usize) -> u64 {
+        match stage_idx {
+            0 => self.tx_lookup_batch_size,
+            1 => self.index_storage_batch_size,
+            2 => self.index_account_batch_size,
+            _ => unreachable!(),
         }
     }
 
@@ -109,7 +134,8 @@ impl DeferredHistoryIndexer {
             return Ok(false);
         }
 
-        let batch_target = std::cmp::min(tip, checkpoint.block_number.saturating_add(self.batch_size));
+        let batch_size = self.batch_size_for_stage(stage_idx);
+        let batch_target = std::cmp::min(tip, checkpoint.block_number.saturating_add(batch_size));
         let input = ExecInput { target: Some(batch_target), checkpoint: Some(checkpoint) };
 
         debug!(

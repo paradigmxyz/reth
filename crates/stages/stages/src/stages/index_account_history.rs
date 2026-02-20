@@ -27,6 +27,8 @@ pub struct IndexAccountHistoryStage {
     pub prune_mode: Option<PruneMode>,
     /// ETL configuration
     pub etl_config: EtlConfig,
+    /// Whether to emit progress/info logs while collecting/writing indices.
+    pub log_progress: bool,
 }
 
 impl IndexAccountHistoryStage {
@@ -36,13 +38,24 @@ impl IndexAccountHistoryStage {
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
     ) -> Self {
-        Self { commit_threshold: config.commit_threshold, etl_config, prune_mode }
+        Self { commit_threshold: config.commit_threshold, etl_config, prune_mode, log_progress: true }
+    }
+
+    /// Enables or disables progress/info logging for this stage execution.
+    pub const fn with_progress_logging(mut self, log_progress: bool) -> Self {
+        self.log_progress = log_progress;
+        self
     }
 }
 
 impl Default for IndexAccountHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000, prune_mode: None, etl_config: EtlConfig::default() }
+        Self {
+            commit_threshold: 100_000,
+            prune_mode: None,
+            etl_config: EtlConfig::default(),
+            log_progress: true,
+        }
     }
 }
 
@@ -120,11 +133,13 @@ where
             range = 0..=*input.next_block_range().end();
         }
 
-        info!(target: "sync::stages::index_account_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
+        if self.log_progress {
+            info!(target: "sync::stages::index_account_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
+        }
 
         let collector = if provider.cached_storage_settings().storage_v2 {
             // Use the provider-based collection that can read from static files.
-            collect_account_history_indices(provider, range.clone(), &self.etl_config)?
+            collect_account_history_indices(provider, range.clone(), &self.etl_config, self.log_progress)?
         } else {
             collect_history_indices::<_, tables::AccountChangeSets, tables::AccountsHistory, _>(
                 provider,
@@ -132,14 +147,17 @@ where
                 ShardedKey::new,
                 |(index, value)| (index, value.address),
                 &self.etl_config,
+                self.log_progress,
             )?
         };
 
-        info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
+        if self.log_progress {
+            info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
+        }
 
         provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
             let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
-            load_account_history(collector, first_sync, &mut writer)
+            load_account_history(collector, first_sync, &mut writer, self.log_progress)
                 .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
