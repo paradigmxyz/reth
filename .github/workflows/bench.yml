@@ -270,20 +270,18 @@ jobs:
             // Count queued/waiting bench runs ahead of this one.
             // With multiple self-hosted runners, a job can start as long as
             // the number of jobs ahead is less than the number of runners.
+            // If we can't query runners (403), skip queue tracking entirely
+            // and let GitHub Actions' built-in runner queue handle it.
             let queueMsg = '';
             let ahead = 0;
-            let numRunners = 1;
             try {
               const { data: { runners } } = await github.rest.actions.listSelfHostedRunnersForRepo({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 per_page: 100,
               });
-              numRunners = runners.filter(r => r.status === 'online').length || 1;
-            } catch (e) {
-              core.info(`Could not fetch runner count, assuming 1: ${e.message}`);
-            }
-            try {
+              const numRunners = runners.filter(r => r.status === 'online').length || 1;
+
               const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
               const allRuns = [];
               for (const status of statuses) {
@@ -306,8 +304,8 @@ jobs:
                 queueMsg = `\n🔢 **Queue position:** ${ahead} job(s) ahead (${numRunners} runner(s))`;
               }
             } catch (e) {
-              // Non-fatal — queue info is best-effort
-              core.info(`Could not fetch queue info: ${e.message}`);
+              // Can't query runners — skip queue tracking, let GitHub handle it
+              core.info(`Skipping queue tracking: ${e.message}`);
             }
 
             const actor = '${{ steps.args.outputs.actor }}';
@@ -347,17 +345,12 @@ jobs:
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             async function getQueuePosition() {
-              let numRunners = 1;
-              try {
-                const { data: { runners } } = await github.rest.actions.listSelfHostedRunnersForRepo({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  per_page: 100,
-                });
-                numRunners = runners.filter(r => r.status === 'online').length || 1;
-              } catch (e) {
-                core.info(`Could not fetch runner count, assuming 1: ${e.message}`);
-              }
+              const { data: { runners } } = await github.rest.actions.listSelfHostedRunnersForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+              });
+              const numRunners = runners.filter(r => r.status === 'online').length || 1;
 
               const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
               const allRuns = [];
