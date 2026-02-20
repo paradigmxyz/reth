@@ -496,13 +496,13 @@ jobs:
             sudo apt-get install -y --no-install-recommends linux-tools-generic
 
           # mc (MinIO client)
-          if ! command -v mc &>/dev/null; then
+          if ! sudo sh -c 'command -v mc' &>/dev/null; then
             curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
             chmod +x "$HOME/.local/bin/mc"
           fi
 
           # uv (Python package manager)
-          if ! command -v uv &>/dev/null; then
+          if ! sudo sh -c 'command -v uv' &>/dev/null; then
             curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME/.local/bin" sh
           fi
 
@@ -510,7 +510,7 @@ jobs:
           git config --global url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf "https://github.com/"
 
           # thin-provisioning-tools (era_invalidate, required by schelk)
-          if ! command -v era_invalidate &>/dev/null; then
+          if ! sudo sh -c 'command -v era_invalidate' &>/dev/null; then
             git clone --depth 1 https://github.com/jthornber/thin-provisioning-tools /tmp/tpt
             sudo make -C /tmp/tpt install
             rm -rf /tmp/tpt
