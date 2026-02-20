@@ -324,64 +324,15 @@ where
         }
 
         #[cfg(feature = "std")]
-        // If std then reveal storage proofs in parallel
+        // Reveal storage proofs serially (parallelism disabled for profiling)
         {
-            use rayon::iter::ParallelIterator;
-            use reth_primitives_traits::ParallelBridgeBuffered;
-
-            let retain_updates = self.retain_updates;
-            let skip_filtering = self.skip_proof_node_filtering;
-
-            // Process all storage trie revealings in parallel, having first removed the
-            // `reveal_nodes` tracking and `RevealableSparseTrie`s for each account from their
-            // HashMaps. These will be returned after processing.
-            let results: Vec<_> = multiproof
-                .storage_proofs
-                .into_iter()
-                .map(|(account, storage_proofs)| {
-                    let revealed_nodes = self.storage.take_or_create_revealed_paths(&account);
-                    let trie = self.storage.take_or_create_trie(&account);
-                    (account, storage_proofs, revealed_nodes, trie)
-                })
-                .par_bridge_buffered()
-                .map(|(account, storage_proofs, mut revealed_nodes, mut trie)| {
-                    let mut bufs = Vec::new();
-                    let result = Self::reveal_storage_v2_proof_nodes_inner(
-                        account,
-                        storage_proofs,
-                        &mut revealed_nodes,
-                        &mut trie,
-                        &mut bufs,
-                        retain_updates,
-                        skip_filtering,
-                    );
-                    (account, result, revealed_nodes, trie, bufs)
-                })
-                .collect();
-
-            let mut any_err = Ok(());
-            for (account, result, revealed_nodes, trie, bufs) in results {
-                self.storage.revealed_paths.insert(account, revealed_nodes);
-                self.storage.tries.insert(account, trie);
+            for (account, storage_proofs) in multiproof.storage_proofs {
+                self.reveal_storage_v2_proof_nodes(account, storage_proofs)?;
                 // Mark this storage trie as hot (accessed this tick)
                 self.storage.modifications.mark_accessed(account);
-                if let Ok(_metric_values) = result {
-                    #[cfg(feature = "metrics")]
-                    {
-                        self.metrics
-                            .increment_total_storage_nodes(_metric_values.total_nodes as u64);
-                        self.metrics
-                            .increment_skipped_storage_nodes(_metric_values.skipped_nodes as u64);
-                    }
-                } else {
-                    any_err = result.map(|_| ());
-                }
-
-                // Keep buffers for deferred dropping
-                self.deferred_drops.proof_nodes_bufs.extend(bufs);
             }
 
-            any_err
+            Ok(())
         }
     }
 
