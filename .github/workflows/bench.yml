@@ -677,38 +677,46 @@ jobs:
 
       - name: Upload samply profiles
         if: success() && env.BENCH_SAMPLY == 'true'
-        env:
-          BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
-          FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
         run: |
-          MC="mc --config-dir /home/ubuntu/.mc"
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          BASELINE_SHORT=$(echo "$BASELINE_REF" | cut -c1-8)
-          FEATURE_SHORT=$(echo "$FEATURE_REF" | cut -c1-8)
+          PROFILER_API="https://api.profiler.firefox.com"
+          PROFILER_ACCEPT="Accept: application/vnd.firefox-profiler+json;version=1.0"
 
           for run_dir in baseline-1 baseline-2 feature-1 feature-2; do
             PROFILE="$BENCH_WORK_DIR/$run_dir/samply-profile.json.gz"
             if [ ! -f "$PROFILE" ]; then continue; fi
 
-            case "$run_dir" in
-              baseline-*) SHORT="$BASELINE_SHORT" ;;
-              feature-*)  SHORT="$FEATURE_SHORT" ;;
-            esac
-
-            FILENAME="${run_dir}-${SHORT}-${TIMESTAMP}.json.gz"
-            MINIO_PATH="minio/samply-profiles/$FILENAME"
             PROFILE_SIZE=$(du -h "$PROFILE" | cut -f1)
-            echo "Uploading $run_dir samply profile (${PROFILE_SIZE})..."
-            $MC cp "$PROFILE" "$MINIO_PATH"
+            echo "Uploading $run_dir samply profile (${PROFILE_SIZE}) to Firefox Profiler..."
 
-            SHARE_OUTPUT=$($MC share download --expire 168h "$MINIO_PATH" 2>&1 || true)
-            URL=$(echo "$SHARE_OUTPUT" | grep '^Share:' | sed 's/^Share: //' | tr -d '[:space:]')
-            if [ -n "$URL" ]; then
-              echo "$URL" > "$BENCH_WORK_DIR/$run_dir/samply-profile-url.txt"
-              echo "Presigned URL for $run_dir (expires in 7 days): $URL"
-            else
-              echo "::warning::Failed to generate presigned URL for $run_dir"
-            fi
+            # Upload compressed profile and get JWT back
+            JWT=$(curl -sf -X POST \
+              -H "Content-Type: application/octet-stream" \
+              -H "$PROFILER_ACCEPT" \
+              --data-binary "@$PROFILE" \
+              "$PROFILER_API/compressed-store") || {
+              echo "::warning::Failed to upload $run_dir profile to Firefox Profiler"
+              continue
+            }
+
+            # Extract profileToken from JWT payload (header.payload.signature)
+            PAYLOAD=$(echo "$JWT" | cut -d. -f2)
+            # Fix base64 padding
+            case $(( ${#PAYLOAD} % 4 )) in
+              2) PAYLOAD="${PAYLOAD}==" ;;
+              3) PAYLOAD="${PAYLOAD}=" ;;
+            esac
+            PROFILE_TOKEN=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['profileToken'])")
+            PROFILE_URL="https://profiler.firefox.com/public/${PROFILE_TOKEN}"
+            echo "Profile uploaded: $PROFILE_URL"
+
+            # Shorten the URL
+            SHORT_URL=$(curl -sf -X POST \
+              -H "Content-Type: application/json" \
+              -H "$PROFILER_ACCEPT" \
+              -d "{\"longUrl\":\"$PROFILE_URL\"}" \
+              "$PROFILER_API/shorten" | python3 -c "import sys,json; print(json.load(sys.stdin)['shortUrl'])" 2>/dev/null) || SHORT_URL="$PROFILE_URL"
+            echo "$SHORT_URL" > "$BENCH_WORK_DIR/$run_dir/samply-profile-url.txt"
+            echo "Short profile URL for $run_dir: $SHORT_URL"
           done
 
       # Results & charts
@@ -826,17 +834,15 @@ jobs:
               comment += chartMarkdown;
             }
 
-            // Samply profile links
+            // Samply profile links (URLs point directly to Firefox Profiler)
             if (process.env.BENCH_SAMPLY === 'true') {
-              const profilerBase = 'https://profiler.firefox.com/from-url/';
               const runs = ['baseline-1', 'feature-1', 'feature-2', 'baseline-2'];
               const links = [];
               for (const run of runs) {
                 try {
                   const url = fs.readFileSync(`${process.env.BENCH_WORK_DIR}/${run}/samply-profile-url.txt`, 'utf8').trim();
                   if (url) {
-                    const profilerUrl = profilerBase + encodeURIComponent(url);
-                    links.push(`- **${run}**: [Firefox Profiler](${profilerUrl}) · [Download](${url})`);
+                    links.push(`- **${run}**: [Firefox Profiler](${url})`);
                   }
                 } catch (e) {}
               }
