@@ -6,7 +6,7 @@
 
 use reth_config::config::StageConfig;
 use reth_provider::{StageCheckpointReader, StageCheckpointWriter};
-use reth_prune::PruneModes;
+use reth_prune::{PruneMode, PruneModes, PrunePurpose, PruneSegment};
 use reth_stages::{
     stages::{IndexAccountHistoryStage, IndexStorageHistoryStage, TransactionLookupStage},
     ExecInput, Stage, StageCheckpoint, StageId,
@@ -55,6 +55,9 @@ pub struct DeferredHistoryIndexer {
     tx_lookup: TransactionLookupStage,
     index_storage: IndexStorageHistoryStage,
     index_account: IndexAccountHistoryStage,
+    tx_lookup_prune_mode: Option<PruneMode>,
+    index_storage_prune_mode: Option<PruneMode>,
+    index_account_prune_mode: Option<PruneMode>,
     tx_lookup_batch_size: u64,
     index_storage_batch_size: u64,
     index_account_batch_size: u64,
@@ -99,6 +102,9 @@ impl DeferredHistoryIndexer {
                 prune_modes.account_history,
             )
             .with_progress_logging(false),
+            tx_lookup_prune_mode: prune_modes.transaction_lookup,
+            index_storage_prune_mode: prune_modes.storage_history,
+            index_account_prune_mode: prune_modes.account_history,
             tx_lookup_batch_size: TX_LOOKUP_BATCH_SIZE,
             index_storage_batch_size: INDEX_STORAGE_HISTORY_BATCH_SIZE,
             index_account_batch_size: INDEX_ACCOUNT_HISTORY_BATCH_SIZE,
@@ -115,6 +121,37 @@ impl DeferredHistoryIndexer {
             2 => self.index_account_batch_size,
             _ => unreachable!(),
         }
+    }
+
+    /// Returns the prune mode/segment pair for the deferred stage index.
+    fn prune_mode_and_segment_for_stage(
+        &self,
+        stage_idx: usize,
+    ) -> (Option<PruneMode>, PruneSegment) {
+        match stage_idx {
+            0 => (self.tx_lookup_prune_mode, PruneSegment::TransactionLookup),
+            1 => (self.index_storage_prune_mode, PruneSegment::StorageHistory),
+            2 => (self.index_account_prune_mode, PruneSegment::AccountHistory),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Computes the prune floor at the provided tip for the deferred stage index.
+    fn prune_floor_for_stage(
+        &self,
+        stage_idx: usize,
+        tip: u64,
+    ) -> Result<Option<u64>, Box<dyn std::error::Error + Send + Sync>> {
+        let (prune_mode, segment) = self.prune_mode_and_segment_for_stage(stage_idx);
+        let Some(prune_mode) = prune_mode else {
+            return Ok(None);
+        };
+
+        let prune_floor = prune_mode
+            .prune_target_block(tip, segment, PrunePurpose::User)?
+            .map(|(target_prunable_block, _)| target_prunable_block);
+
+        Ok(prune_floor)
     }
 
     /// Runs one stage batch and returns whether work was done.
@@ -145,13 +182,29 @@ impl DeferredHistoryIndexer {
 
         let batch_size = self.batch_size_for_stage(stage_idx);
         let batch_target = std::cmp::min(tip, checkpoint.block_number.saturating_add(batch_size));
-        let input = ExecInput { target: Some(batch_target), checkpoint: Some(checkpoint) };
+        let prune_floor = self.prune_floor_for_stage(stage_idx, tip)?;
+        let effective_target = prune_floor.map_or(batch_target, |floor| batch_target.max(floor));
+
+        if effective_target > batch_target && checkpoint.block_number < effective_target {
+            info!(
+                target: "engine::persistence::deferred_indexer",
+                %stage_id,
+                checkpoint = checkpoint.block_number,
+                batch_target,
+                effective_target,
+                prune_floor = prune_floor.unwrap_or_default(),
+                %tip,
+                "Deferred indexing bootstrap: raising target to prune floor"
+            );
+        }
+
+        let input = ExecInput { target: Some(effective_target), checkpoint: Some(checkpoint) };
 
         debug!(
             target: "engine::persistence::deferred_indexer",
             %stage_id,
             from = checkpoint.block_number,
-            to = batch_target,
+            to = effective_target,
             %tip,
             "Running deferred indexing batch"
         );
