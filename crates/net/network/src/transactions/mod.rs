@@ -1927,8 +1927,8 @@ impl PooledTransactionsHashesBuilder {
     /// Returns the number of transactions in the builder.
     fn len(&self) -> usize {
         match self {
-            Self::Eth66(hashes) => hashes.0.len(),
-            Self::Eth68(hashes) => hashes.hashes.len(),
+            Self::Eth66(hashes) => hashes.len(),
+            Self::Eth68(hashes) => hashes.len(),
         }
     }
 
