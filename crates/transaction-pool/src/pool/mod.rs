@@ -1239,11 +1239,11 @@ where
 
     /// Notify about propagated transactions.
     pub fn on_propagated(&self, txs: PropagatedTransactions) {
-        if txs.0.is_empty() {
+        if txs.is_empty() {
             return
         }
         self.with_event_listener(|listener| {
-            txs.0.into_iter().for_each(|(hash, peers)| listener.propagated(&hash, peers));
+            txs.into_iter().for_each(|(hash, peers)| listener.propagated(&hash, peers));
         });
     }
 

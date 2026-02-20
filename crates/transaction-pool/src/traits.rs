@@ -823,6 +823,37 @@ impl<T: PoolTransaction> IntoIterator for AllPoolTransactions<T> {
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct PropagatedTransactions(pub HashMap<TxHash, Vec<PropagateKind>>);
 
+impl PropagatedTransactions {
+    /// Records a propagation of a transaction to a peer.
+    pub fn record(&mut self, hash: TxHash, kind: PropagateKind) {
+        self.0.entry(hash).or_default().push(kind);
+    }
+
+    /// Returns the number of distinct transactions that were propagated.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Returns true if no transactions were propagated.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Returns the propagation info for a specific transaction.
+    pub fn get(&self, hash: &TxHash) -> Option<&[PropagateKind]> {
+        self.0.get(hash).map(Vec::as_slice)
+    }
+}
+
+impl IntoIterator for PropagatedTransactions {
+    type Item = (TxHash, Vec<PropagateKind>);
+    type IntoIter = std::collections::hash_map::IntoIter<TxHash, Vec<PropagateKind>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 /// Represents how a transaction was propagated over the network.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
