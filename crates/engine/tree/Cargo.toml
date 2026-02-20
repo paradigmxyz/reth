@@ -54,7 +54,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 fixed-cache.workspace = true
 moka = { workspace = true, features = ["sync"] }
-smallvec.workspace = true
 
 # metrics
 metrics.workspace = true
@@ -73,6 +72,7 @@ reth-prune-types = { workspace = true, optional = true }
 reth-stages = { workspace = true, optional = true }
 reth-static-file = { workspace = true, optional = true }
 reth-tracing = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
@@ -143,6 +143,7 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
 ]
+trie-debug = ["reth-trie-sparse/trie-debug", "dep:serde_json"]
 rocksdb = [
     "reth-provider/rocksdb",
     "reth-prune/rocksdb",

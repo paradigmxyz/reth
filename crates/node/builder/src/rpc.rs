@@ -1327,9 +1327,9 @@ where
     >,
     EV: PayloadValidatorBuilder<Node>,
     EV::Validator: reth_engine_primitives::PayloadValidator<
-        <Node::Types as NodeTypes>::Payload,
-        Block = BlockTy<Node::Types>,
-    >,
+            <Node::Types as NodeTypes>::Payload,
+            Block = BlockTy<Node::Types>,
+        > + Clone,
 {
     type EngineValidator = BasicEngineValidator<Node::Provider, Node::Evm, EV::Validator>;
 

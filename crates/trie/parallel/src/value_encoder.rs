@@ -1,4 +1,4 @@
-use crate::proof_task::{StorageProofResult, StorageProofResultMessage};
+use crate::proof_task::StorageProofResultMessage;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
@@ -10,7 +10,7 @@ use reth_trie::{
     hashed_cursor::HashedStorageCursor,
     proof_v2::{DeferredValueEncoder, LeafValueEncoder, StorageProofCalculator},
     trie_cursor::TrieStorageCursor,
-    ProofTrieNode,
+    ProofTrieNodeV2,
 };
 use std::{
     rc::Rc,
@@ -59,7 +59,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         proof_result_rx:
             Option<Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>>,
         /// Shared storage proof results.
-        storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>,
+        storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
         /// Shared stats for tracking wait time and counts.
         stats: Rc<RefCell<ValueEncoderStats>>,
         /// Shared storage proof calculator for synchronous fallback when dispatched proof has no
@@ -109,11 +109,7 @@ impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
 
                 stats.borrow_mut().storage_wait_time += wait_start.elapsed();
 
-                let StorageProofResult::V2 { proof, .. } = result else {
-                    panic!("StorageProofResult is not V2: {result:?}")
-                };
-
-                storage_proof_results.borrow_mut().insert(*hashed_address, proof);
+                storage_proof_results.borrow_mut().insert(*hashed_address, result.proof);
                 Ok(())
             })()
         } else {
@@ -159,13 +155,9 @@ where
                     .result?;
                 stats.borrow_mut().storage_wait_time += wait_start.elapsed();
 
-                let StorageProofResult::V2 { root, proof } = result else {
-                    panic!("StorageProofResult is not V2: {result:?}")
-                };
+                storage_proof_results.borrow_mut().insert(hashed_address, result.proof);
 
-                storage_proof_results.borrow_mut().insert(hashed_address, proof);
-
-                let root = match root {
+                let root = match result.root {
                     Some(root) => root,
                     None => {
                         // In `compute_v2_account_multiproof` we ensure that all dispatched storage
@@ -226,7 +218,7 @@ pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     cached_storage_roots: Arc<DashMap<B256, B256>>,
     /// Tracks storage proof results received from the storage workers. [`Rc`] + [`RefCell`] is
     /// required because [`DeferredValueEncoder`] cannot have a lifetime.
-    storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>,
+    storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
     /// Shared storage proof calculator for synchronous computation. Reuses cursors and internal
     /// buffers across multiple storage root calculations.
     storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
@@ -267,7 +259,7 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     /// been dropped.
     pub(crate) fn finalize(
         self,
-    ) -> Result<(B256Map<Vec<ProofTrieNode>>, ValueEncoderStats), StateProofError> {
+    ) -> Result<(B256Map<Vec<ProofTrieNodeV2>>, ValueEncoderStats), StateProofError> {
         let mut storage_proof_results = Rc::into_inner(self.storage_proof_results)
             .expect("no deferred encoders are still allocated")
             .into_inner();
@@ -290,11 +282,7 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
                 .result?;
             stats.storage_wait_time += wait_start.elapsed();
 
-            let StorageProofResult::V2 { proof, .. } = result else {
-                panic!("StorageProofResult is not V2: {result:?}")
-            };
-
-            storage_proof_results.insert(*hashed_address, proof);
+            storage_proof_results.insert(*hashed_address, result.proof);
         }
 
         Ok((storage_proof_results, stats))

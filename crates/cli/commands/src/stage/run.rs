@@ -119,8 +119,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         // Does not do anything on windows.
         let _ = fdlimit::raise_fd_limit();
 
+        let runtime = ctx.task_executor.clone();
         let Environment { provider_factory, config, data_dir } =
-            self.env.init::<N>(AccessRights::RW)?;
+            self.env.init::<N>(AccessRights::RW, ctx.task_executor.clone())?;
 
         let mut provider_rw = provider_factory.database_provider_rw()?;
         let components = components(provider_factory.chain_spec());
@@ -171,6 +172,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             provider_factory.chain_spec(),
                             p2p_secret_key,
                             default_peers_path,
+                            runtime.clone(),
                         )
                         .build(provider_factory.clone())
                         .start_network()
@@ -226,6 +228,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             provider_factory.chain_spec(),
                             p2p_secret_key,
                             default_peers_path,
+                            runtime.clone(),
                         )
                         .build(provider_factory.clone())
                         .start_network()

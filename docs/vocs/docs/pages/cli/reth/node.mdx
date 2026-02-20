@@ -372,7 +372,7 @@ RPC:
 
           This will enforce JWT authentication for all requests coming from the consensus layer.
 
-          If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
+          If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex` by default.
 
       --auth-ipc
           Enable auth engine API over IPC
@@ -685,7 +685,9 @@ TxPool:
 
 Builder:
       --builder.extradata <EXTRA_DATA>
-          Block extra data set by the payload builder
+          Block extra data set by the payload builder.
+
+          If the value is a `0x`-prefixed hex string, it is decoded into raw bytes. Otherwise, the raw UTF-8 bytes of the string are used.
 
           [default: reth/<VERSION>/<OS>]
 
@@ -984,14 +986,8 @@ Engine:
       --engine.prewarming-threads <PREWARMING_THREADS>
           Configure the number of prewarming threads. If not specified, defaults to available parallelism
 
-      --engine.disable-proof-v2
-          Disable V2 storage proofs for state root calculations
-
       --engine.disable-cache-metrics
           Disable cache metrics recording, which can take up to 50ms with large cached state
-
-      --engine.disable-trie-cache
-          Disable sparse trie cache
 
       --engine.sparse-trie-prune-depth <SPARSE_TRIE_PRUNE_DEPTH>
           Sparse trie prune depth
@@ -1106,9 +1102,9 @@ Logging:
           [default: 200]
 
       --log.file.max-files <COUNT>
-          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled.
 
-          [default: 5]
+          Default: 5 for `node` command, 0 for non-node utility subcommands.
 
       --log.journald
           Write logs to journald

@@ -12,7 +12,7 @@ pub(super) type SparseTrie = SparseStateTrie;
 /// Shared handle to a preserved sparse trie that can be reused across payload validations.
 ///
 /// This is stored in [`PayloadProcessor`](super::PayloadProcessor) and cloned to pass to
-/// [`SparseTrieTask`](super::sparse_trie::SparseTrieTask) for trie reuse.
+/// [`SparseTrieCacheTask`](super::sparse_trie::SparseTrieCacheTask) for trie reuse.
 #[derive(Debug, Default, Clone)]
 pub(super) struct SharedPreservedSparseTrie(Arc<Mutex<Option<PreservedSparseTrie>>>);
 
