@@ -7,9 +7,10 @@
 use crate::{
     backfill::PipelineSync,
     chain::ChainOrchestrator,
+    deferred_indexer::StageDeferredHistoryIndexer,
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
-    persistence::{DeferredHistoryIndexer, PersistenceHandle},
+    persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, EngineValidator, TreeConfig, WaitForCaches},
 };
 use futures::Stream;
@@ -64,7 +65,7 @@ pub fn build_engine_orchestrator<N, Client, S, V, C>(
     sync_metrics_tx: MetricEventsSender,
     evm_config: C,
     changeset_cache: ChangesetCache,
-    deferred_indexer: Option<Box<dyn DeferredHistoryIndexer>>,
+    deferred_indexer: Option<StageDeferredHistoryIndexer<N>>,
 ) -> ChainOrchestrator<
     EngineHandler<
         EngineApiRequestHandler<EngineApiRequest<N::Payload, N::Primitives>, N::Primitives>,

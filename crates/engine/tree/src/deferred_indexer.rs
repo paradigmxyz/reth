@@ -1,10 +1,8 @@
 //! Deferred history indexer implementation using pipeline stages.
 //!
-//! This implements
-//! [`DeferredHistoryIndexer`](crate::persistence::DeferredHistoryIndexer) by running the
-//! history indexing stages (`TransactionLookup`, `IndexStorageHistory`, `IndexAccountHistory`)
-//! incrementally inside the persistence service's thread. This eliminates MDBX write-lock
-//! contention that would occur if these stages ran on a separate thread.
+//! Runs history indexing stages (`TransactionLookup`, `IndexStorageHistory`,
+//! `IndexAccountHistory`) incrementally inside the persistence service's thread. This eliminates
+//! MDBX write-lock contention that would occur if these stages ran on a separate thread.
 
 use reth_config::config::StageConfig;
 use reth_provider::{
@@ -17,8 +15,6 @@ use reth_stages::{
     ExecInput, Stage, StageId,
 };
 use tracing::{debug, info, warn};
-
-use crate::persistence::DeferredHistoryIndexer;
 
 /// Maximum number of blocks to index per tick.
 const DEFAULT_BATCH_SIZE: u64 = 10_000;
@@ -181,14 +177,15 @@ impl<N: ProviderNodeTypes> StageDeferredHistoryIndexer<N> {
     }
 }
 
-impl<N> DeferredHistoryIndexer for StageDeferredHistoryIndexer<N>
+impl<N> StageDeferredHistoryIndexer<N>
 where
     N: ProviderNodeTypes,
     TransactionLookupStage: Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
     IndexStorageHistoryStage: Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
     IndexAccountHistoryStage: Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
 {
-    fn tick(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// Runs a single deferred indexing tick.
+    pub fn tick(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Read the current pipeline tip
         let tip = {
             let provider_ro = self.provider_factory.database_provider_ro()?;
@@ -218,11 +215,13 @@ where
         Ok(())
     }
 
-    fn is_caught_up(&self) -> bool {
+    /// Returns whether deferred indexing has caught up to the tip.
+    pub const fn is_caught_up(&self) -> bool {
         self.caught_up
     }
 
-    fn on_reorg(&mut self, _new_tip_num: u64) {
+    /// Marks the indexer as needing catch-up after reorg-related block removal.
+    pub fn on_reorg(&mut self, _new_tip_num: u64) {
         self.caught_up = false;
     }
 }

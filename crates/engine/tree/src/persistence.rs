@@ -1,4 +1,5 @@
 use crate::metrics::PersistenceMetrics;
+use crate::deferred_indexer::StageDeferredHistoryIndexer;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::ExecutedBlock;
@@ -21,35 +22,6 @@ use std::{
 };
 use thiserror::Error;
 use tracing::{debug, error, instrument, warn};
-
-/// Trait for background history indexing integrated into the persistence service.
-///
-/// When deferred history indexing is enabled, the pipeline skips history indexing stages
-/// (IndexAccountHistory, IndexStorageHistory, TransactionLookup). An implementor of this trait
-/// runs those stages incrementally inside the persistence service's thread, eliminating
-/// write-lock contention with the persistence service.
-pub trait DeferredHistoryIndexer: Send + std::fmt::Debug {
-    /// Run a single small batch of deferred indexing work.
-    ///
-    /// This is called opportunistically when the persistence service has no pending actions.
-    /// Implementations should process a bounded amount of work (e.g. 10k blocks) and return
-    /// quickly so the persistence service can handle incoming requests promptly.
-    ///
-    /// Returns `Ok(())` on success or if there's no work to do. Errors are logged but do not
-    /// stop the persistence service.
-    fn tick(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-
-    /// Returns `true` if the indexer has caught up to the persisted chain tip.
-    ///
-    /// When caught up, `save_blocks` resumes writing history indices inline and the persistence
-    /// service switches back to blocking on incoming messages.
-    fn is_caught_up(&self) -> bool;
-
-    /// Notify the indexer that blocks were removed above `new_tip_num` (reorg).
-    ///
-    /// Implementations should mark themselves as not caught up so the tick loop resumes.
-    fn on_reorg(&mut self, new_tip_num: u64);
-}
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -80,7 +52,7 @@ where
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
     /// Optional deferred history indexer that runs inside this service's thread.
-    deferred_indexer: Option<Box<dyn DeferredHistoryIndexer>>,
+    deferred_indexer: Option<StageDeferredHistoryIndexer<N>>,
 }
 
 impl<N> PersistenceService<N>
@@ -93,7 +65,7 @@ where
         incoming: Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
-        deferred_indexer: Option<Box<dyn DeferredHistoryIndexer>>,
+        deferred_indexer: Option<StageDeferredHistoryIndexer<N>>,
     ) -> Self {
         Self {
             provider,
@@ -322,7 +294,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
-        deferred_indexer: Option<Box<dyn DeferredHistoryIndexer>>,
+        deferred_indexer: Option<StageDeferredHistoryIndexer<N>>,
     ) -> PersistenceHandle<N::Primitives>
     where
         N: ProviderNodeTypes,
