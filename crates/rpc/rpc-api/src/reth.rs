@@ -2,6 +2,7 @@ use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_execution_types::ExecutionOutcome;
+use serde_json::Value;
 
 // Required for the subscription attributes below
 use reth_chain_state as _;
@@ -27,7 +28,7 @@ pub trait RethApi {
         &self,
         block_id: BlockId,
         count: Option<U64>,
-    ) -> RpcResult<Option<ExecutionOutcome>>;
+    ) -> RpcResult<Option<ExecutionOutcome<Value>>>;
 
     /// Subscribe to json `ChainNotifications`
     #[subscription(

@@ -9237,7 +9237,6 @@ dependencies = [
  "reth-engine-tree",
  "reth-engine-util",
  "reth-ethereum-engine-primitives",
- "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
  "reth-exex",

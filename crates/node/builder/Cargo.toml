@@ -26,7 +26,6 @@ reth-engine-local.workspace = true
 reth-engine-primitives.workspace = true
 reth-engine-tree.workspace = true
 reth-engine-util.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
@@ -121,7 +120,6 @@ test-utils = [
     "reth-node-ethereum/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-tasks/test-utils",
-    "reth-ethereum-primitives/test-utils",
 ]
 trie-debug = ["reth-engine-tree/trie-debug"]
 op = [

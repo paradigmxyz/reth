@@ -33,7 +33,6 @@ use jsonrpsee::{
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::ConsensusEngineEvent;
-use reth_ethereum_primitives::Receipt;
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::{NodePrimitives, TxTy};
@@ -310,7 +309,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
 impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus>
 where
-    N: NodePrimitives<Receipt = Receipt>,
+    N: NodePrimitives,
     Provider: FullRpcProvider<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
         + CanonStateSubscriptions<Primitives = N>
         + ForkChoiceSubscriptions<Header = N::BlockHeader>
@@ -661,7 +660,7 @@ where
 impl<N, Provider, Pool, Network, EthApi, EvmConfig, Consensus>
     RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
 where
-    N: NodePrimitives<Receipt = Receipt>,
+    N: NodePrimitives,
     Provider: FullRpcProvider<
             Header = N::BlockHeader,
             Block = N::Block,
@@ -861,7 +860,7 @@ where
 impl<N, Provider, Pool, Network, EthApi, EvmConfig, Consensus>
     RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
 where
-    N: NodePrimitives<Receipt = Receipt>,
+    N: NodePrimitives,
     Provider: FullRpcProvider<Block = N::Block>
         + CanonStateSubscriptions<Primitives = N>
         + ForkChoiceSubscriptions<Header = N::BlockHeader>
@@ -873,6 +872,7 @@ where
     EthApi: FullEthApiServer,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N> + Clone + 'static,
+    N::Receipt: serde::Serialize,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace

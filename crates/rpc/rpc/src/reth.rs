@@ -196,7 +196,7 @@ where
         + PersistedBlockSubscriptions
         + 'static,
     EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
-    Provider::Primitives: NodePrimitives<Receipt = reth_ethereum_primitives::Receipt>,
+    <Provider::Primitives as NodePrimitives>::Receipt: Serialize,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(
@@ -211,8 +211,32 @@ where
         &self,
         block_id: BlockId,
         count: Option<U64>,
-    ) -> RpcResult<Option<ExecutionOutcome>> {
-        Ok(Self::block_execution_outcome(self, block_id, count).await?)
+    ) -> RpcResult<Option<ExecutionOutcome<serde_json::Value>>> {
+        let outcome = Self::block_execution_outcome(self, block_id, count).await?;
+        match outcome {
+            Some(outcome) => {
+                let receipts = outcome
+                    .receipts
+                    .into_iter()
+                    .map(|block_receipts| {
+                        block_receipts
+                            .into_iter()
+                            .map(serde_json::to_value)
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| {
+                        EthApiError::Internal(reth_errors::RethError::msg(e.to_string()))
+                    })?;
+                Ok(Some(ExecutionOutcome::new(
+                    outcome.bundle,
+                    receipts,
+                    outcome.first_block,
+                    outcome.requests,
+                )))
+            }
+            None => Ok(None),
+        }
     }
 
     /// Handler for `reth_subscribeChainNotifications`

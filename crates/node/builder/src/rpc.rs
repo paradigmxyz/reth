@@ -822,8 +822,6 @@ where
 impl<N, EthB, PVB, EB, EVB, RpcMiddleware> RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents,
-    <N::Types as NodeTypes>::Primitives:
-        reth_primitives_traits::NodePrimitives<Receipt = reth_ethereum_primitives::Receipt>,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     EB: EngineApiBuilder<N>,
@@ -1123,8 +1121,6 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
     for RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents,
-    <N::Types as NodeTypes>::Primitives:
-        reth_primitives_traits::NodePrimitives<Receipt = reth_ethereum_primitives::Receipt>,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
