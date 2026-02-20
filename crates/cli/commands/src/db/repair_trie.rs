@@ -215,6 +215,18 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
     let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
 
+    let mut delete_storage_trie_entry_if_exists =
+        |account, nibbles: StoredNibblesSubKey| -> eyre::Result<()> {
+            if storage_trie_cursor
+                .seek_by_key_subkey(account, nibbles.clone())?
+                .filter(|e| e.nibbles == nibbles)
+                .is_some()
+            {
+                storage_trie_cursor.delete_current()?;
+            }
+            Ok(())
+        };
+
     // Create the cursor factories. These cannot accept the `&mut` tx above because they require it
     // to be AsRef.
     let tx = provider_rw.tx_ref();
@@ -264,14 +276,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
             }
             Output::StorageExtra(account, path, _node) => {
                 // Extra storage node in trie, remove it
-                let nibbles = StoredNibblesSubKey(path);
-                if storage_trie_cursor
-                    .seek_by_key_subkey(account, nibbles.clone())?
-                    .filter(|e| e.nibbles == nibbles)
-                    .is_some()
-                {
-                    storage_trie_cursor.delete_current()?;
-                }
+                delete_storage_trie_entry_if_exists(account, StoredNibblesSubKey(path))?;
             }
             Output::AccountWrong { path, expected: node, .. } |
             Output::AccountMissing(path, node) => {
@@ -285,13 +290,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
                 // (We can't just use `upsert` method with a dup cursor, it's not properly
                 // supported)
                 let nibbles = StoredNibblesSubKey(path);
-                if storage_trie_cursor
-                    .seek_by_key_subkey(account, nibbles.clone())?
-                    .filter(|v| v.nibbles == nibbles)
-                    .is_some()
-                {
-                    storage_trie_cursor.delete_current()?;
-                }
+                delete_storage_trie_entry_if_exists(account, nibbles.clone())?;
                 let entry = StorageTrieEntry { nibbles, node };
                 storage_trie_cursor.upsert(account, &entry)?;
             }
