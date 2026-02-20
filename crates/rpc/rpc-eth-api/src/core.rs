@@ -920,49 +920,57 @@ where
     }
 
     /// Handler for: `eth_getBlockAccessListByBlockHash`
-    async fn block_access_list_by_block_hash(&self, block_hash: B256) -> RpcResult<Option<Bytes>> {
+    async fn block_access_list_by_block_hash(
+        &self,
+        block_hash: B256,
+    ) -> RpcResult<Option<serde_json::Value>> {
         trace!(target: "rpc::eth", ?block_hash, "Serving eth_getBlockAccessListByBlockHash");
         let ((evm_env, _), block) = futures::try_join!(
             self.evm_env_at(block_hash.into()),
             self.recovered_block(block_hash.into()),
         )?;
 
-        let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let block = block
+            .ok_or_else(|| EthApiError::Internal(reth_errors::RethError::msg("Block Not Found")))?;
 
-        self.spawn_blocking_io(move |eth_api| {
-            let state = eth_api
-                .provider()
-                .state_by_block_id(block.parent_hash().into())
-                .map_err(T::Error::from_eth_err)?;
+        let json = self
+            .spawn_blocking_io(move |eth_api| {
+                let state = eth_api
+                    .provider()
+                    .state_by_block_id(block.parent_hash().into())
+                    .map_err(T::Error::from_eth_err)?;
 
-            let mut db = State::builder()
-                .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
-                .with_bal_builder()
-                .build();
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
+                    .with_bal_builder()
+                    .build();
 
-            eth_api.apply_pre_execution_changes(&block, &mut db)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-            // Move to tx index 1 before first tx (index 0 is for pre-execution)
-            db.bump_bal_index();
-
-            for tx in block.transactions_recovered() {
-                let tx_env = eth_api.evm_config().tx_env(tx);
-                let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                db.commit(res.state);
-                // Advance to next tx index
+                // Move to tx index 1 before first tx (index 0 is for pre-execution)
                 db.bump_bal_index();
-            }
 
-            // Current index is now n+1 for post-execution
+                for tx in block.transactions_recovered() {
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                    db.commit(res.state);
+                    // Advance to next tx index
+                    db.bump_bal_index();
+                }
 
-            let bal = db.take_built_alloy_bal().ok_or_else(|| {
-                EthApiError::Internal(reth_errors::RethError::msg("BAL not built"))
-            })?;
+                // Current index is now n+1 for post-execution
 
-            Ok(alloy_rlp::encode(&bal).into())
-        })
-        .await;
-        Ok(Bytes::default())
+                let bal = db.take_built_alloy_bal().ok_or_else(|| {
+                    EthApiError::Internal(reth_errors::RethError::msg("BAL not built"))
+                })?;
+                let json = serde_json::to_value(&bal).map_err(|e| {
+                    EthApiError::Internal(reth_errors::RethError::msg(e.to_string()))
+                })?;
+
+                Ok(Some(json))
+            })
+            .await;
+        json
     }
 
     /// Handler for: `eth_getBlockAccessListByBlockNumber`
