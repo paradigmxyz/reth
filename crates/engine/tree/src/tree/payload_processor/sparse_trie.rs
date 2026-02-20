@@ -90,8 +90,8 @@ pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparse
     account_rlp_buf: Vec<u8>,
     /// Whether the last state update has been received.
     finished_state_updates: bool,
-    /// Pending targets to be dispatched to the proof workers.
-    pending_targets: MultiProofTargetsV2,
+    /// Pending proof targets queued for dispatch to proof workers.
+    pending_targets: PendingTargets,
     /// Number of pending execution/prewarming updates received but not yet passed to
     /// `update_leaves`.
     pending_updates: usize,
@@ -234,8 +234,13 @@ where
         let now = Instant::now();
 
         loop {
+            let mut t = Instant::now();
             crossbeam_channel::select_biased! {
                 recv(self.updates) -> message => {
+                    self.metrics
+                        .sparse_trie_channel_wait_duration_histogram
+                        .record(t.elapsed());
+
                     let update = match message {
                         Ok(m) => m,
                         Err(_) => {
@@ -249,17 +254,32 @@ where
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
+                    let phase_end = Instant::now();
+                    self.metrics
+                        .sparse_trie_channel_wait_duration_histogram
+                        .record(phase_end.duration_since(t));
+                    t = phase_end;
+
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
                     };
-                    let mut result = result.result?;
 
+                    let mut result = result.result?;
                     while let Ok(next) = self.proof_result_rx.try_recv() {
                         let res = next.result?;
                         result.extend(res);
                     }
 
+                    let phase_end = Instant::now();
+                    self.metrics
+                        .sparse_trie_proof_coalesce_duration_histogram
+                        .record(phase_end.duration_since(t));
+                    t = phase_end;
+
                     self.on_proof_result(result)?;
+                    self.metrics
+                        .sparse_trie_reveal_multiproof_duration_histogram
+                        .record(t.elapsed());
                 },
             }
 
@@ -267,8 +287,10 @@ where
                 // If we don't have any pending messages, we can spend some time on computing
                 // storage roots and promoting account updates.
                 self.dispatch_pending_targets();
+                t = Instant::now();
                 self.process_new_updates()?;
                 self.promote_pending_account_updates()?;
+                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
                 if self.finished_state_updates &&
                     self.account_updates.is_empty() &&
@@ -281,9 +303,11 @@ where
             } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
                 // If we don't have any pending updates OR we've accumulated a lot already, apply
                 // them to the trie,
+                t = Instant::now();
                 self.process_new_updates()?;
+                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
                 self.dispatch_pending_targets();
-            } else if self.pending_targets.chunking_length() > self.chunk_size.unwrap_or_default() {
+            } else if self.pending_targets.len() > self.chunk_size.unwrap_or_default() {
                 // Make sure to dispatch targets if we've accumulated a lot of them.
                 self.dispatch_pending_targets();
             }
@@ -505,7 +529,7 @@ where
             self.trie.insert_storage_trie(*address, trie);
 
             if !targets.is_empty() {
-                self.pending_targets.storage_targets.entry(*address).or_default().extend(targets);
+                self.pending_targets.extend_storage_targets(address, targets);
             }
         }
 
@@ -535,15 +559,13 @@ where
                     if min_len < *entry.get() {
                         entry.insert(min_len);
                         self.pending_targets
-                            .account_targets
-                            .push(Target::new(target).with_min_len(min_len));
+                            .push_account_target(Target::new(target).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
                     self.pending_targets
-                        .account_targets
-                        .push(Target::new(target).with_min_len(min_len));
+                        .push_account_target(Target::new(target).with_min_len(min_len));
                 }
             }
         })?;
@@ -653,9 +675,9 @@ where
     )]
     fn dispatch_pending_targets(&mut self) {
         if !self.pending_targets.is_empty() {
-            let chunking_length = self.pending_targets.chunking_length();
+            let (targets, chunking_length) = self.pending_targets.take();
             dispatch_with_chunking(
-                std::mem::take(&mut self.pending_targets),
+                targets,
                 chunking_length,
                 self.chunk_size,
                 self.max_targets_for_chunking,
@@ -695,6 +717,44 @@ fn encode_account_leaf_value(
     account_rlp_buf.clear();
     account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
     account_rlp_buf.clone()
+}
+
+/// Pending proof targets queued for dispatch to proof workers, along with their count.
+#[derive(Default)]
+struct PendingTargets {
+    /// The proof targets.
+    targets: MultiProofTargetsV2,
+    /// Number of account + storage proof targets currently queued.
+    len: usize,
+}
+
+impl PendingTargets {
+    /// Returns the number of pending targets.
+    const fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns `true` if there are no pending targets.
+    const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Takes the pending targets, replacing with empty defaults.
+    fn take(&mut self) -> (MultiProofTargetsV2, usize) {
+        (std::mem::take(&mut self.targets), std::mem::take(&mut self.len))
+    }
+
+    /// Adds a target to the account targets.
+    fn push_account_target(&mut self, target: Target) {
+        self.targets.account_targets.push(target);
+        self.len += 1;
+    }
+
+    /// Extends storage targets for the given address.
+    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<Target>) {
+        self.len += targets.len();
+        self.targets.storage_targets.entry(*address).or_default().extend(targets);
+    }
 }
 
 /// Message type for the sparse trie task.
