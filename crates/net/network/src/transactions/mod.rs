@@ -25,7 +25,10 @@ use policy::NetworkPolicies;
 
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
 
-use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
+use self::constants::{
+    tx_manager::*, DEFAULT_MAX_FULL_BROADCAST_TX_SIZE,
+    DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
+};
 use crate::{
     budget::{
         DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
@@ -39,7 +42,7 @@ use crate::{
     transactions::config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
     NetworkHandle, TxTypesCounter,
 };
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{Address, TxHash, B256};
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
@@ -294,8 +297,9 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// All currently pending transactions grouped by peers.
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
-    /// transaction
-    transactions_by_peers: HashMap<TxHash, HashSet<PeerId>>,
+    /// transaction. Tracks the originator (first sender) separately from subsequent peers for
+    /// more targeted penalization on bad import.
+    transactions_by_peers: HashMap<TxHash, TxPeerTracking>,
     /// Transactions that are currently imported into the `Pool`.
     ///
     /// The import process includes:
@@ -338,6 +342,8 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     config: TransactionsManagerConfig,
     /// Network Policies
     policies: NetworkPolicies<N>,
+    /// Deterministic peer selection for full transaction broadcasts.
+    broadcast_choice: BroadcastChoice,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
     /// `AnnouncedTxTypes` metrics
@@ -379,6 +385,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         policies: NetworkPolicies<N>,
     ) -> Self {
         let network_events = network.event_listener();
+        let broadcast_choice = BroadcastChoice::new(*network.peer_id());
 
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
@@ -416,6 +423,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             ),
             config: transactions_manager_config,
             policies,
+            broadcast_choice,
             metrics,
             announced_tx_types_metrics: AnnouncedTxTypesMetrics::default(),
         }
@@ -495,12 +503,9 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         if !err.is_bad_transaction() || self.network.is_syncing() {
             return
         }
-        // otherwise we penalize the peer that sent the bad transaction, with the assumption that
-        // the peer should have known that this transaction is bad (e.g. violating consensus rules)
-        if let Some(peers) = peers {
-            for peer_id in peers {
-                self.report_peer_bad_transactions(peer_id);
-            }
+        // Only penalize the originator.
+        if let Some(tracking) = peers {
+            self.report_peer_bad_transactions(tracking.originator);
         }
         self.metrics.bad_imports.increment(1);
         self.bad_imports.insert(err.hash);
@@ -1011,75 +1016,85 @@ where
             return propagated
         }
 
-        // send full transactions to a set of the connected peers based on the configured mode
-        let max_num_full = self.config.propagation_mode.full_peer_count(self.peers.len());
+        // Pre-compute sender → full_peers map using SipHash scoring.
+        // Each sender's transactions are deterministically routed to the same sqrt(N) peers.
+        let mut sender_full_peers: HashMap<Address, Vec<PeerId>> = HashMap::default();
+        if !propagation_mode.is_forced() {
+            let peer_ids: Vec<PeerId> = self.peers.keys().copied().collect();
+            let mode = &self.config.propagation_mode;
+            for tx in &to_propagate {
+                sender_full_peers.entry(tx.sender).or_insert_with(|| {
+                    self.broadcast_choice.choose_full_peers(&peer_ids, &tx.sender, mode)
+                });
+            }
+        }
 
-        // Note: Assuming ~random~ order due to random state of the peers map hasher
-        for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
+        for (peer_id, peer) in &mut self.peers {
             if !self.policies.propagation_policy().can_propagate(peer) {
-                // skip peers we should not propagate to
                 continue
             }
-            // determine whether to send full tx objects or hashes.
-            let mut builder = if peer_idx > max_num_full {
-                PropagateTransactionsBuilder::pooled(peer.version)
-            } else {
-                PropagateTransactionsBuilder::full(peer.version)
-            };
+
+            // Each peer gets both a full builder and a hash builder since different txs
+            // in the same batch may have different sender→peer mappings.
+            let mut full_builder = FullTransactionsBuilder::new(peer.version);
+            let mut hash_builder = PooledTransactionsHashesBuilder::new(peer.version);
 
             if propagation_mode.is_forced() {
-                builder.extend(to_propagate.iter());
+                full_builder.extend(to_propagate.iter().cloned());
             } else {
-                // Iterate through the transactions to propagate and fill the hashes and full
-                // transaction lists, before deciding whether or not to send full transactions to
-                // the peer.
                 for tx in &to_propagate {
-                    // Only proceed if the transaction is not in the peer's list of seen
-                    // transactions
-                    if !peer.seen_transactions.contains(tx.tx_hash()) {
-                        builder.push(tx);
+                    if peer.seen_transactions.contains(tx.tx_hash()) {
+                        continue
+                    }
+                    if sender_full_peers
+                        .get(&tx.sender)
+                        .is_some_and(|full_peers| full_peers.contains(peer_id))
+                    {
+                        full_builder.push(tx);
+                    } else {
+                        hash_builder.push(tx);
                     }
                 }
             }
 
-            if builder.is_empty() {
+            if full_builder.is_empty() && hash_builder.is_empty() {
                 trace!(target: "net::tx", ?peer_id, "Nothing to propagate to peer; has seen all transactions");
                 continue
             }
 
-            let PropagateTransactions { pooled, full } = builder.build();
+            let PropagateTransactions { pooled: overflow_pooled, full } = full_builder.build();
 
-            // send hashes if any
-            if let Some(mut new_pooled_hashes) = pooled {
-                // enforce tx soft limit per message for the (unlikely) event the number of
-                // hashes exceeds it
-                new_pooled_hashes
-                    .truncate(SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE);
-
-                for hash in new_pooled_hashes.iter_hashes().copied() {
-                    propagated.record(hash, PropagateKind::Hash(*peer_id));
-                    // mark transaction as seen by peer
-                    peer.seen_transactions.insert(hash);
-                }
-
-                trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
-
-                // send hashes of transactions
-                self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
-            }
+            // Track propagation: mark hash as seen and record the propagation kind.
+            let mut track = |hash: TxHash, kind: PropagateKind| {
+                propagated.record(hash, kind);
+                peer.seen_transactions.insert(hash);
+            };
 
             // send full transactions, if any
             if let Some(new_full_transactions) = full {
                 for tx in &new_full_transactions {
-                    propagated.record(*tx.tx_hash(), PropagateKind::Full(*peer_id));
-                    // mark transaction as seen by peer
-                    peer.seen_transactions.insert(*tx.tx_hash());
+                    track(*tx.tx_hash(), PropagateKind::Full(*peer_id));
                 }
-
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
-
-                // send full transactions
                 self.network.send_transactions(*peer_id, new_full_transactions);
+            }
+
+            // Send overflow hashes from full builder (e.g. 4844 txs, large txs, size limit)
+            if let Some(overflow_hashes) = overflow_pooled {
+                for hash in overflow_hashes.iter_hashes() {
+                    track(*hash, PropagateKind::Hash(*peer_id));
+                }
+                self.network.send_transactions_hashes(*peer_id, overflow_hashes);
+            }
+
+            // Send hash-only announcements
+            let new_pooled_hashes = hash_builder.build();
+            if !new_pooled_hashes.is_empty() {
+                for hash in new_pooled_hashes.iter_hashes() {
+                    track(*hash, PropagateKind::Hash(*peer_id));
+                }
+                trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
+                self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
             }
         }
 
@@ -1248,6 +1263,14 @@ where
                     self.policies.propagation_policy_mut().on_session_closed(&mut peer);
                 }
                 self.transaction_fetcher.remove_peer(&peer_id);
+
+                // Clean disconnected peer from transactions_by_peers. Remove entries
+                // where this peer was the originator since there's nobody left to
+                // penalize on bad import.
+                self.transactions_by_peers.retain(|_, tracking| {
+                    tracking.remove_peer(&peer_id);
+                    tracking.originator != peer_id
+                });
             }
             NetworkEvent::ActivePeerSession { info, messages } => {
                 // process active peer session and broadcast available transaction from the pool
@@ -1381,7 +1404,7 @@ where
         // Remove known and invalid transactions
         transactions.retain(|tx| {
             if let Entry::Occupied(mut entry) = self.transactions_by_peers.entry(*tx.tx_hash()) {
-                entry.get_mut().insert(peer_id);
+                entry.get_mut().add_peer(peer_id);
                 return false
             }
             if self.bad_imports.contains(tx.tx_hash()) {
@@ -1431,7 +1454,7 @@ where
 
         // Record the transactions as seen by the peer
         for tx in &new_txs {
-            self.transactions_by_peers.insert(*tx.hash(), HashSet::from([peer_id]));
+            self.transactions_by_peers.insert(*tx.hash(), TxPeerTracking::new(peer_id));
         }
 
         // 3. import new transactions as a batch to minimize lock contention on the underlying
@@ -1714,18 +1737,80 @@ impl PropagationMode {
     }
 }
 
+/// Deterministic peer selection for full transaction broadcasts.
+///
+/// Instead of picking a random sqrt(N) peers per broadcast, each peer's eligibility for receiving
+/// the full body is determined by hashing `(local_id, peer_id, tx_sender)`. This ensures:
+/// - Per-sender determinism: same sender → same peer subset, reducing network-wide duplicate
+///   full-body sends and avoiding nonce gaps.
+/// - Per-node variation: different nodes select different subsets.
+#[derive(Debug)]
+struct BroadcastChoice {
+    local_id: PeerId,
+    key: [u8; 16],
+}
+
+impl BroadcastChoice {
+    /// Create a new instance with a random key.
+    fn new(local_id: PeerId) -> Self {
+        use rand::RngCore;
+        let mut key = [0u8; 16];
+        rand::rng().fill_bytes(&mut key);
+        Self { local_id, key }
+    }
+
+    /// Compute the `SipHash` score for a `(local_id, peer_id, tx_sender)` tuple.
+    fn score(&self, peer_id: &PeerId, tx_sender: &Address) -> u64 {
+        use std::hash::Hasher;
+
+        let mut hasher = std::hash::DefaultHasher::new();
+        hasher.write(&self.key);
+        hasher.write(self.local_id.as_slice());
+        hasher.write(peer_id.as_slice());
+        hasher.write(tx_sender.as_slice());
+        hasher.finish()
+    }
+
+    /// Select the peers that should receive full transaction bodies for a given sender.
+    ///
+    /// The `mode` controls how many peers are selected:
+    /// - `Sqrt`: ceil(sqrt(N)) peers (default, matches geth)
+    /// - `All`: every peer gets full txs (useful for private networks)
+    /// - `Max(n)`: at most `n` peers
+    ///
+    /// `SipHash` scoring determines *which* peers are chosen from the candidate set.
+    fn choose_full_peers(
+        &self,
+        peers: &[PeerId],
+        tx_sender: &Address,
+        mode: &TransactionPropagationMode,
+    ) -> Vec<PeerId> {
+        let count = match mode {
+            TransactionPropagationMode::Sqrt => (peers.len() as f64).sqrt().ceil() as usize,
+            TransactionPropagationMode::All => return peers.to_vec(),
+            TransactionPropagationMode::Max(max) => peers.len().min(*max),
+        };
+        let mut scored: Vec<(PeerId, u64)> =
+            peers.iter().map(|pid| (*pid, self.score(pid, tx_sender))).collect();
+        scored.sort_unstable_by_key(|&(_, score)| score);
+        scored.into_iter().take(count).map(|(pid, _)| pid).collect()
+    }
+}
+
 /// A transaction that's about to be propagated to multiple peers.
 #[derive(Debug, Clone)]
 struct PropagateTransaction<T = TransactionSigned> {
     size: usize,
     transaction: Arc<T>,
+    /// Sender address, used for deterministic peer selection via [`BroadcastChoice`].
+    sender: Address,
 }
 
 impl<T: SignedTransaction> PropagateTransaction<T> {
     /// Create a new instance from a transaction.
     pub fn new(transaction: T) -> Self {
         let size = transaction.length();
-        Self { size, transaction: Arc::new(transaction) }
+        Self { size, sender: Address::ZERO, transaction: Arc::new(transaction) }
     }
 
     /// Create a new instance from a pooled transaction
@@ -1734,68 +1819,14 @@ impl<T: SignedTransaction> PropagateTransaction<T> {
         P: PoolTransaction<Consensus = T>,
     {
         let size = tx.encoded_length();
+        let sender = tx.sender();
         let transaction = tx.transaction.clone_into_consensus();
         let transaction = Arc::new(transaction.into_inner());
-        Self { size, transaction }
+        Self { size, transaction, sender }
     }
 
     fn tx_hash(&self) -> &TxHash {
         self.transaction.tx_hash()
-    }
-}
-
-/// Helper type to construct the appropriate message to send to the peer based on whether the peer
-/// should receive them in full or as pooled
-#[derive(Debug, Clone)]
-enum PropagateTransactionsBuilder<T> {
-    Pooled(PooledTransactionsHashesBuilder),
-    Full(FullTransactionsBuilder<T>),
-}
-
-impl<T> PropagateTransactionsBuilder<T> {
-    /// Create a builder for pooled transactions
-    fn pooled(version: EthVersion) -> Self {
-        Self::Pooled(PooledTransactionsHashesBuilder::new(version))
-    }
-
-    /// Create a builder that sends transactions in full and records transactions that don't fit.
-    fn full(version: EthVersion) -> Self {
-        Self::Full(FullTransactionsBuilder::new(version))
-    }
-
-    /// Returns true if no transactions are recorded.
-    fn is_empty(&self) -> bool {
-        match self {
-            Self::Pooled(builder) => builder.is_empty(),
-            Self::Full(builder) => builder.is_empty(),
-        }
-    }
-
-    /// Consumes the type and returns the built messages that should be sent to the peer.
-    fn build(self) -> PropagateTransactions<T> {
-        match self {
-            Self::Pooled(pooled) => {
-                PropagateTransactions { pooled: Some(pooled.build()), full: None }
-            }
-            Self::Full(full) => full.build(),
-        }
-    }
-}
-
-impl<T: SignedTransaction> PropagateTransactionsBuilder<T> {
-    /// Appends all transactions
-    fn extend<'a>(&mut self, txs: impl IntoIterator<Item = &'a PropagateTransaction<T>>) {
-        for tx in txs {
-            self.push(tx);
-        }
-    }
-
-    /// Appends a transaction to the list.
-    fn push(&mut self, transaction: &PropagateTransaction<T>) {
-        match self {
-            Self::Pooled(builder) => builder.push(transaction),
-            Self::Full(builder) => builder.push(transaction),
-        }
     }
 }
 
@@ -1871,6 +1902,13 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
         //
         // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
         if !transaction.transaction.is_broadcastable_in_full() {
+            self.pooled.push(transaction);
+            return
+        }
+
+        // Large transactions are only announced as hashes to save bandwidth.
+        // Interested peers will fetch them via GetPooledTransactions.
+        if transaction.size > DEFAULT_MAX_FULL_BROADCAST_TX_SIZE {
             self.pooled.push(transaction);
             return
         }
@@ -2048,6 +2086,37 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
     /// Returns the peer's kind.
     pub const fn peer_kind(&self) -> PeerKind {
         self.peer_kind
+    }
+}
+
+/// Tracks which peers sent a transaction pending pool import.
+///
+/// Separates the originator (first peer to send us the tx) from subsequent peers.
+/// On bad import, only the originator is penalized.
+#[derive(Debug)]
+struct TxPeerTracking {
+    originator: PeerId,
+    others: HashSet<PeerId>,
+}
+
+impl TxPeerTracking {
+    fn new(originator: PeerId) -> Self {
+        Self { originator, others: HashSet::default() }
+    }
+
+    fn add_peer(&mut self, peer_id: PeerId) {
+        if peer_id != self.originator {
+            self.others.insert(peer_id);
+        }
+    }
+
+    #[cfg(test)]
+    fn contains(&self, peer_id: &PeerId) -> bool {
+        self.originator == *peer_id || self.others.contains(peer_id)
+    }
+
+    fn remove_peer(&mut self, peer_id: &PeerId) {
+        self.others.remove(peer_id);
     }
 }
 
@@ -2803,8 +2872,7 @@ mod tests {
 
     #[test]
     fn test_transaction_builder_empty() {
-        let mut builder =
-            PropagateTransactionsBuilder::<TransactionSigned>::pooled(EthVersion::Eth68);
+        let mut builder = PooledTransactionsHashesBuilder::new(EthVersion::Eth68);
         assert!(builder.is_empty());
 
         let mut factory = MockTransactionFactory::default();
@@ -2812,6 +2880,25 @@ mod tests {
         builder.push(&tx);
         assert!(!builder.is_empty());
 
+        let msg = builder.build();
+        assert_eq!(msg.len(), 1);
+    }
+
+    #[test]
+    fn test_transaction_builder_large_exceeds_per_tx_limit() {
+        let mut builder = FullTransactionsBuilder::<TransactionSigned>::new(EthVersion::Eth68);
+        assert!(builder.is_empty());
+
+        let mut factory = MockTransactionFactory::default();
+        let mut tx = factory.create_eip1559();
+        // create a transaction that exceeds per-tx size limit
+        tx.transaction.set_size(DEFAULT_MAX_FULL_BROADCAST_TX_SIZE + 1);
+        let tx = Arc::new(tx);
+        let tx = PropagateTransaction::pool_tx(tx);
+        builder.push(&tx);
+        assert!(!builder.is_empty());
+
+        // should be demoted to hash-only due to size limit
         let txs = builder.build();
         assert!(txs.full.is_none());
         let txs = txs.pooled.unwrap();
@@ -2819,38 +2906,39 @@ mod tests {
     }
 
     #[test]
-    fn test_transaction_builder_large() {
-        let mut builder =
-            PropagateTransactionsBuilder::<TransactionSigned>::full(EthVersion::Eth68);
-        assert!(builder.is_empty());
+    fn test_transaction_builder_soft_limit() {
+        let mut builder = FullTransactionsBuilder::<TransactionSigned>::new(EthVersion::Eth68);
 
         let mut factory = MockTransactionFactory::default();
-        let mut tx = factory.create_eip1559();
-        // create a transaction that still fits
-        tx.transaction.set_size(DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE + 1);
-        let tx = Arc::new(tx);
-        let tx = PropagateTransaction::pool_tx(tx);
-        builder.push(&tx);
-        assert!(!builder.is_empty());
 
+        // create two transactions that together exceed the broadcast soft limit
+        let mut tx1 = factory.create_eip1559();
+        tx1.transaction.set_size(DEFAULT_MAX_FULL_BROADCAST_TX_SIZE / 2);
+        let tx1 = PropagateTransaction::pool_tx(Arc::new(tx1));
+
+        // First tx fits
+        builder.push(&tx1);
         let txs = builder.clone().build();
         assert!(txs.pooled.is_none());
-        let txs = txs.full.unwrap();
-        assert_eq!(txs.len(), 1);
+        assert_eq!(txs.full.unwrap().len(), 1);
 
-        builder.push(&tx);
+        // Manually set total_size to just below the broadcast soft limit
+        builder.total_size = DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE;
 
-        let txs = builder.clone().build();
-        let pooled = txs.pooled.unwrap();
-        assert_eq!(pooled.len(), 1);
-        let txs = txs.full.unwrap();
-        assert_eq!(txs.len(), 1);
+        // Next tx exceeds broadcast soft limit → goes to pooled
+        let mut tx2 = factory.create_eip1559();
+        tx2.transaction.set_size(100);
+        let tx2 = PropagateTransaction::pool_tx(Arc::new(tx2));
+        builder.push(&tx2);
+
+        let txs = builder.build();
+        assert!(txs.pooled.is_some(), "overflow tx should go to pooled");
+        assert!(txs.full.is_some(), "earlier txs should still be full");
     }
 
     #[test]
     fn test_transaction_builder_eip4844() {
-        let mut builder =
-            PropagateTransactionsBuilder::<TransactionSigned>::full(EthVersion::Eth68);
+        let mut builder = FullTransactionsBuilder::<TransactionSigned>::new(EthVersion::Eth68);
         assert!(builder.is_empty());
 
         let mut factory = MockTransactionFactory::default();
@@ -3030,5 +3118,326 @@ mod tests {
         );
 
         network_service_handle.abort();
+    }
+
+    #[test]
+    fn test_broadcast_choice_deterministic() {
+        let local_id = PeerId::new([1; 64]);
+        let bc = BroadcastChoice { local_id, key: [42u8; 16] };
+        let peers: Vec<PeerId> = (1..=20).map(|i| PeerId::new([i; 64])).collect();
+        let sender = Address::new([0xAA; 20]);
+        let mode = TransactionPropagationMode::Sqrt;
+
+        let chosen1 = bc.choose_full_peers(&peers, &sender, &mode);
+        let chosen2 = bc.choose_full_peers(&peers, &sender, &mode);
+        assert_eq!(chosen1, chosen2, "same sender should always select same peers");
+    }
+
+    #[test]
+    fn test_broadcast_choice_sqrt_count() {
+        let local_id = PeerId::new([1; 64]);
+        let bc = BroadcastChoice { local_id, key: [7u8; 16] };
+        let sender = Address::new([0xBB; 20]);
+        let mode = TransactionPropagationMode::Sqrt;
+
+        for n in [1, 4, 9, 16, 25, 100, 130] {
+            let peers: Vec<PeerId> = (0..n).map(|i| PeerId::new([(i as u8); 64])).collect();
+            let chosen = bc.choose_full_peers(&peers, &sender, &mode);
+            let expected = (n as f64).sqrt().ceil() as usize;
+            assert_eq!(
+                chosen.len(),
+                expected,
+                "for {n} peers, should select ceil(sqrt({n})) = {expected} peers"
+            );
+        }
+    }
+
+    #[test]
+    fn test_broadcast_choice_different_senders_different_peers() {
+        let local_id = PeerId::new([1; 64]);
+        let bc = BroadcastChoice { local_id, key: [99u8; 16] };
+        let peers: Vec<PeerId> = (1..=100).map(|i| PeerId::new([i; 64])).collect();
+        let mode = TransactionPropagationMode::Sqrt;
+
+        let sender_a = Address::new([0xAA; 20]);
+        let sender_b = Address::new([0xBB; 20]);
+
+        let chosen_a = bc.choose_full_peers(&peers, &sender_a, &mode);
+        let chosen_b = bc.choose_full_peers(&peers, &sender_b, &mode);
+        // Different senders should (with high probability) select different peer subsets
+        assert_ne!(chosen_a, chosen_b, "different senders should select different peer subsets");
+    }
+
+    #[test]
+    fn test_broadcast_choice_empty_peers() {
+        let local_id = PeerId::new([1; 64]);
+        let bc = BroadcastChoice { local_id, key: [0u8; 16] };
+        let sender = Address::new([0xCC; 20]);
+        let mode = TransactionPropagationMode::Sqrt;
+
+        let chosen = bc.choose_full_peers(&[], &sender, &mode);
+        assert!(chosen.is_empty());
+    }
+
+    #[test]
+    fn test_broadcast_choice_single_peer() {
+        let local_id = PeerId::new([1; 64]);
+        let bc = BroadcastChoice { local_id, key: [0u8; 16] };
+        let peers = vec![PeerId::new([2; 64])];
+        let sender = Address::new([0xDD; 20]);
+        let mode = TransactionPropagationMode::Sqrt;
+
+        let chosen = bc.choose_full_peers(&peers, &sender, &mode);
+        assert_eq!(chosen.len(), 1);
+        assert!(chosen.contains(&peers[0]));
+    }
+
+    #[test]
+    fn test_broadcast_choice_mode_all() {
+        let local_id = PeerId::new([1; 64]);
+        let bc = BroadcastChoice { local_id, key: [0u8; 16] };
+        let peers: Vec<PeerId> = (1..=10).map(|i| PeerId::new([i; 64])).collect();
+        let sender = Address::new([0xEE; 20]);
+        let mode = TransactionPropagationMode::All;
+
+        let chosen = bc.choose_full_peers(&peers, &sender, &mode);
+        assert_eq!(chosen.len(), peers.len(), "All mode should select every peer");
+    }
+
+    #[test]
+    fn test_broadcast_choice_mode_max() {
+        let local_id = PeerId::new([1; 64]);
+        let bc = BroadcastChoice { local_id, key: [0u8; 16] };
+        let peers: Vec<PeerId> = (1..=20).map(|i| PeerId::new([i; 64])).collect();
+        let sender = Address::new([0xFF; 20]);
+
+        let mode = TransactionPropagationMode::Max(5);
+        let chosen = bc.choose_full_peers(&peers, &sender, &mode);
+        assert_eq!(chosen.len(), 5, "Max(5) should select exactly 5 peers");
+
+        // Max larger than peer count → all peers
+        let mode = TransactionPropagationMode::Max(100);
+        let chosen = bc.choose_full_peers(&peers, &sender, &mode);
+        assert_eq!(chosen.len(), peers.len());
+    }
+
+    #[tokio::test]
+    async fn test_propagate_routes_full_and_hash_via_broadcast_choice() {
+        let (mut tx_manager, network) = new_tx_manager().await;
+        network.handle().update_sync_state(SyncState::Idle);
+
+        // Add many peers so sqrt(N) < N — some get full, others get hashes
+        for i in 0..20u8 {
+            let pid = PeerId::new([i + 1; 64]);
+            let (tx, _rx) = mpsc::channel::<PeerRequest>(1);
+            let session_info = SessionInfo {
+                peer_id: pid,
+                remote_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+                client_version: Arc::from(""),
+                capabilities: Arc::new(vec![].into()),
+                status: Arc::new(Default::default()),
+                version: EthVersion::Eth68,
+                peer_kind: PeerKind::Basic,
+            };
+            let messages = PeerRequestSender::new(pid, tx);
+            tx_manager
+                .on_network_event(NetworkEvent::ActivePeerSession { info: session_info, messages });
+        }
+
+        assert_eq!(tx_manager.peers.len(), 20, "precondition: all 20 peers registered");
+
+        let mut factory = MockTransactionFactory::default();
+        let eip1559_tx = Arc::new(factory.create_eip1559());
+        let tx_hash = *eip1559_tx.transaction.hash();
+        let propagate = vec![PropagateTransaction::pool_tx(eip1559_tx)];
+
+        let propagated = tx_manager.propagate_transactions(propagate, PropagationMode::Basic);
+        let prop = propagated.0.get(&tx_hash).unwrap();
+
+        // sqrt(20) = 5 peers should get full, the rest should get hash
+        let full_peers: HashSet<PeerId> =
+            prop.iter().filter(|p| p.is_full()).map(|p| PeerId::from(*p)).collect();
+        let hash_peers: HashSet<PeerId> =
+            prop.iter().filter(|p| p.is_hash()).map(|p| PeerId::from(*p)).collect();
+
+        assert_eq!(full_peers.len(), 5, "ceil(sqrt(20)) = 5 peers should receive full tx");
+        assert_eq!(hash_peers.len(), 15, "remaining 15 peers should receive hash-only");
+        assert!(
+            full_peers.is_disjoint(&hash_peers),
+            "no peer should receive both full and hash for the same tx"
+        );
+        assert_eq!(prop.len(), 20, "all 20 peers should be propagated to");
+
+        // Every peer should have the tx marked as seen
+        for (pid, peer) in &tx_manager.peers {
+            assert!(
+                peer.seen_transactions.contains(&tx_hash),
+                "peer {pid:?} should have tx marked as seen after propagation"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_propagate_forced_bypasses_seen_and_broadcast_choice() {
+        let (mut tx_manager, network) = new_tx_manager().await;
+        network.handle().update_sync_state(SyncState::Idle);
+
+        let peer_id = PeerId::random();
+        let (tx, _rx) = mpsc::channel::<PeerRequest>(1);
+        let session_info = SessionInfo {
+            peer_id,
+            remote_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            client_version: Arc::from(""),
+            capabilities: Arc::new(vec![].into()),
+            status: Arc::new(Default::default()),
+            version: EthVersion::Eth68,
+            peer_kind: PeerKind::Basic,
+        };
+        let messages = PeerRequestSender::new(peer_id, tx);
+        tx_manager
+            .on_network_event(NetworkEvent::ActivePeerSession { info: session_info, messages });
+
+        let mut factory = MockTransactionFactory::default();
+        let eip1559_tx = Arc::new(factory.create_eip1559());
+        let propagate = vec![PropagateTransaction::pool_tx(eip1559_tx.clone())];
+
+        let tx_hash = *eip1559_tx.transaction.hash();
+
+        // First propagation in Basic mode marks tx as seen
+        let propagated =
+            tx_manager.propagate_transactions(propagate.clone(), PropagationMode::Basic);
+        assert_eq!(propagated.0.len(), 1, "first Basic propagation should send the tx");
+        let prop = propagated.0.get(&tx_hash).unwrap();
+        assert_eq!(prop.len(), 1, "should propagate to exactly 1 peer");
+        assert!(prop[0].is_full(), "Basic mode should send full tx to sqrt(1) = 1 peer");
+
+        let peer = tx_manager.peers.get(&peer_id).unwrap();
+        assert!(
+            peer.seen_transactions.contains(&tx_hash),
+            "tx should be marked as seen after Basic propagation"
+        );
+
+        // Basic propagation again: nothing to send (already seen)
+        let propagated =
+            tx_manager.propagate_transactions(propagate.clone(), PropagationMode::Basic);
+        assert!(propagated.0.is_empty(), "Basic mode should skip already-seen txs");
+
+        // Forced propagation: should still send despite being seen
+        let propagated = tx_manager.propagate_transactions(propagate, PropagationMode::Forced);
+        let prop = propagated
+            .0
+            .get(&tx_hash)
+            .expect("Forced mode should bypass seen_transactions and still propagate");
+        assert_eq!(prop.len(), 1, "Forced mode should propagate to exactly 1 peer");
+        assert!(prop[0].is_full(), "Forced mode should send full tx");
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_cleans_transactions_by_peers() {
+        let (mut tx_manager, network) = new_tx_manager().await;
+        network.handle().update_sync_state(SyncState::Idle);
+
+        let peer_a = PeerId::new([1; 64]);
+        let peer_b = PeerId::new([2; 64]);
+
+        let (tx_a, _rx_a) = mpsc::channel::<PeerRequest>(1);
+        let (tx_b, _rx_b) = mpsc::channel::<PeerRequest>(1);
+
+        for (pid, sender) in [(peer_a, tx_a), (peer_b, tx_b)] {
+            let session_info = SessionInfo {
+                peer_id: pid,
+                remote_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+                client_version: Arc::from(""),
+                capabilities: Arc::new(vec![].into()),
+                status: Arc::new(Default::default()),
+                version: EthVersion::Eth68,
+                peer_kind: PeerKind::Basic,
+            };
+            let messages = PeerRequestSender::new(pid, sender);
+            tx_manager
+                .on_network_event(NetworkEvent::ActivePeerSession { info: session_info, messages });
+        }
+
+        // Simulate both peers broadcasting the same tx
+        let tx_hash = B256::random();
+        let mut tracking = TxPeerTracking::new(peer_a);
+        tracking.add_peer(peer_b);
+        tx_manager.transactions_by_peers.insert(tx_hash, tracking);
+
+        assert!(tx_manager.transactions_by_peers[&tx_hash].contains(&peer_a));
+        assert!(tx_manager.transactions_by_peers[&tx_hash].contains(&peer_b));
+
+        // Disconnect peer_b
+        tx_manager.on_network_event(NetworkEvent::Peer(PeerEvent::SessionClosed {
+            peer_id: peer_b,
+            reason: None,
+        }));
+
+        // peer_b removed from tracking, peer_a (originator) remains
+        assert!(
+            tx_manager.transactions_by_peers[&tx_hash].contains(&peer_a),
+            "originator should still be tracked"
+        );
+        assert!(
+            !tx_manager.transactions_by_peers[&tx_hash].contains(&peer_b),
+            "disconnected peer should be removed from tracking"
+        );
+        assert!(tx_manager.peers.contains_key(&peer_a), "peer_a should still be in peers map");
+        assert!(
+            !tx_manager.peers.contains_key(&peer_b),
+            "disconnected peer should be removed from peers map"
+        );
+
+        // Disconnect peer_a (the originator) — entry should be fully removed
+        tx_manager.on_network_event(NetworkEvent::Peer(PeerEvent::SessionClosed {
+            peer_id: peer_a,
+            reason: None,
+        }));
+
+        assert!(
+            !tx_manager.transactions_by_peers.contains_key(&tx_hash),
+            "entry should be removed when originator disconnects"
+        );
+    }
+
+    #[test]
+    fn test_tx_peer_tracking_originator_only() {
+        let peer_a = PeerId::new([1; 64]);
+        let tracking = TxPeerTracking::new(peer_a);
+        assert!(tracking.contains(&peer_a));
+        assert_eq!(tracking.originator, peer_a);
+        assert!(tracking.others.is_empty());
+    }
+
+    #[test]
+    fn test_tx_peer_tracking_add_peers() {
+        let peer_a = PeerId::new([1; 64]);
+        let peer_b = PeerId::new([2; 64]);
+        let peer_c = PeerId::new([3; 64]);
+
+        let mut tracking = TxPeerTracking::new(peer_a);
+        tracking.add_peer(peer_b);
+        tracking.add_peer(peer_c);
+        // Adding originator again should be a no-op
+        tracking.add_peer(peer_a);
+
+        assert!(tracking.contains(&peer_a));
+        assert!(tracking.contains(&peer_b));
+        assert!(tracking.contains(&peer_c));
+        assert_eq!(tracking.others.len(), 2);
+    }
+
+    #[test]
+    fn test_tx_peer_tracking_remove_peer() {
+        let peer_a = PeerId::new([1; 64]);
+        let peer_b = PeerId::new([2; 64]);
+
+        let mut tracking = TxPeerTracking::new(peer_a);
+        tracking.add_peer(peer_b);
+
+        tracking.remove_peer(&peer_b);
+        assert!(!tracking.contains(&peer_b));
+        // Originator is never removed by remove_peer
+        assert!(tracking.contains(&peer_a));
     }
 }
