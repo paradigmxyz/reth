@@ -301,7 +301,11 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
                 // (We can't just use `upsert` method with a dup cursor, it's not properly
                 // supported)
                 let nibbles = StoredNibblesSubKey(path);
-                delete_storage_trie_entry_if_exists(&mut storage_trie_cursor, account, nibbles.clone())?;
+                delete_storage_trie_entry_if_exists(
+                    &mut storage_trie_cursor,
+                    account,
+                    nibbles.clone(),
+                )?;
                 let entry = StorageTrieEntry { nibbles, node };
                 storage_trie_cursor.upsert(account, &entry)?;
             }
