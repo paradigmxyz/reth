@@ -290,9 +290,7 @@ where
                 t = Instant::now();
                 self.process_new_updates()?;
                 self.promote_pending_account_updates()?;
-                self.metrics
-                    .sparse_trie_process_updates_duration_histogram
-                    .record(t.elapsed());
+                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
                 if self.finished_state_updates &&
                     self.account_updates.is_empty() &&
@@ -307,9 +305,7 @@ where
                 // them to the trie,
                 t = Instant::now();
                 self.process_new_updates()?;
-                self.metrics
-                    .sparse_trie_process_updates_duration_histogram
-                    .record(t.elapsed());
+                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
                 self.dispatch_pending_targets();
             } else if self.pending_targets.chunking_length() > self.chunk_size.unwrap_or_default() {
                 // Make sure to dispatch targets if we've accumulated a lot of them.
