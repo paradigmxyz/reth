@@ -221,8 +221,13 @@ where
             self;
         let hash = env.hash;
 
+        // For small blocks, skip the expensive cache state insertion since the
+        // cache warmth benefit is minimal relative to the serialization cost.
+        const SMALL_BLOCK_CACHE_TX_THRESHOLD: usize = 5;
+        let skip_state_insert = env.transaction_count <= SMALL_BLOCK_CACHE_TX_THRESHOLD;
+
         if let Some(saved_cache) = saved_cache {
-            debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
+            debug!(target: "engine::caching", parent_hash=?hash, skip_state_insert, "Updating execution cache");
             // Perform all cache operations atomically under the lock
             execution_cache.update_with_guard(|cached| {
                 // consumes the `SavedCache` held by the prewarming task, which releases its usage
@@ -231,13 +236,15 @@ where
                 let new_cache = SavedCache::new(hash, caches, cache_metrics)
                     .with_disable_cache_metrics(disable_cache_metrics);
 
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
-                    // Clear the cache on error to prevent having a polluted cache
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
+                if !skip_state_insert {
+                    // Insert state into cache while holding the lock
+                    // Access the BundleState through the shared ExecutionOutcome
+                    if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                        // Clear the cache on error to prevent having a polluted cache
+                        *cached = None;
+                        debug!(target: "engine::caching", "cleared execution cache on update error");
+                        return;
+                    }
                 }
 
                 new_cache.update_metrics();
