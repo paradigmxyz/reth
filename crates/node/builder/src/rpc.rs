@@ -829,6 +829,7 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
+    <N::Types as NodeTypes>::Payload: jsonrpsee::core::DeserializeOwned,
 {
     /// Launches only the regular RPC server (HTTP/WS/IPC), without the authenticated Engine API
     /// server.
@@ -1135,6 +1136,7 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
+    <N::Types as NodeTypes>::Payload: jsonrpsee::core::DeserializeOwned,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 

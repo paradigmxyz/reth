@@ -344,7 +344,7 @@ where
     )
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
-        PayloadT: PayloadTypes,
+        PayloadT: PayloadTypes + serde::de::DeserializeOwned,
     {
         let config = module_config.config.clone().unwrap_or_default();
 
@@ -787,7 +787,10 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime.
-    pub fn register_reth(&mut self) -> &mut Self {
+    pub fn register_reth(&mut self) -> &mut Self
+    where
+        PayloadT: serde::de::DeserializeOwned,
+    {
         let rethapi = self.reth_api();
         self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
         self
@@ -921,7 +924,10 @@ where
     }
 
     /// Helper function to create a [`RpcModule`] if it's not `None`
-    fn maybe_module(&mut self, config: Option<&RpcModuleSelection>) -> Option<RpcModule<()>> {
+    fn maybe_module(&mut self, config: Option<&RpcModuleSelection>) -> Option<RpcModule<()>>
+    where
+        PayloadT: serde::de::DeserializeOwned,
+    {
         config.map(|config| self.module_for(config))
     }
 
@@ -931,7 +937,10 @@ where
     pub fn create_transport_rpc_modules(
         &mut self,
         config: TransportRpcModuleConfig,
-    ) -> TransportRpcModules<()> {
+    ) -> TransportRpcModules<()>
+    where
+        PayloadT: serde::de::DeserializeOwned,
+    {
         let mut modules = TransportRpcModules::default();
         let http = self.maybe_module(config.http.as_ref());
         let ws = self.maybe_module(config.ws.as_ref());
@@ -946,7 +955,10 @@ where
 
     /// Populates a new [`RpcModule`] based on the selected [`RethRpcModule`]s in the given
     /// [`RpcModuleSelection`]
-    pub fn module_for(&mut self, config: &RpcModuleSelection) -> RpcModule<()> {
+    pub fn module_for(&mut self, config: &RpcModuleSelection) -> RpcModule<()>
+    where
+        PayloadT: serde::de::DeserializeOwned,
+    {
         let mut module = RpcModule::new(());
         let all_methods = self.reth_methods(config.iter_selection());
         for methods in all_methods {
@@ -963,10 +975,10 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn reth_methods(
-        &mut self,
-        namespaces: impl Iterator<Item = RethRpcModule>,
-    ) -> Vec<Methods> {
+    pub fn reth_methods(&mut self, namespaces: impl Iterator<Item = RethRpcModule>) -> Vec<Methods>
+    where
+        PayloadT: serde::de::DeserializeOwned,
+    {
         let EthHandlers { api: eth_api, filter: eth_filter, pubsub: eth_pubsub, .. } =
             self.eth_handlers().clone();
 
