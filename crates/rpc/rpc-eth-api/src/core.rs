@@ -421,7 +421,7 @@ pub trait EthApi<
     async fn block_access_list_by_block_number(
         &self,
         number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Bytes>>;
+    ) -> RpcResult<Option<Value>>;
 }
 
 #[async_trait::async_trait]
@@ -975,8 +975,14 @@ where
     async fn block_access_list_by_block_number(
         &self,
         number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Bytes>> {
+    ) -> RpcResult<Option<Value>> {
         trace!(target: "rpc::eth", ?number, "Serving eth_getBlockAccessListByBlockNumber");
-        Err(internal_rpc_err("unimplemented"))
+        let block_hash = self
+            .provider()
+            .block_hash_for_id(number.into())
+            .map_err(T::Error::from_eth_err)?
+            .ok_or(EthApiError::HeaderNotFound(number.into()))?;
+
+        self.block_access_list_by_block_hash(block_hash).await
     }
 }
