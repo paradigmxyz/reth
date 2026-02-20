@@ -3,7 +3,7 @@
 use alloy_consensus::{constants::ETH_TO_WEI, Header, TxEip1559, TxReceipt};
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
 use alloy_genesis::{Genesis, GenesisAccount};
-use alloy_primitives::{keccak256, Address, Bytes, TxKind, B256, U256};
+use alloy_primitives::{bytes, keccak256, Address, Bytes, TxKind, B256, U256};
 use reth_chainspec::{
     ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, ForkCondition, MAINNET,
 };
@@ -988,14 +988,18 @@ async fn run_pipeline_range(
 /// The known slot/value pairs are used for deterministic assertions in changesets and preimages.
 fn write_or_selfdestruct_runtime_code(beneficiary: Address) -> Bytes {
     let mut runtime = Vec::with_capacity(40);
-    runtime.extend_from_slice(&[0x36, 0x15, 0x60, 0x1c, 0x57]); // CALLDATASIZE; ISZERO; PUSH1 0x1c; JUMPI
+    runtime.extend_from_slice(&bytes!(
+        "3615601c57" // CALLDATASIZE; ISZERO; PUSH1 0x1c; JUMPI
+    ));
     runtime.push(0x73); // PUSH20
     runtime.extend_from_slice(beneficiary.as_slice());
-    runtime.extend_from_slice(&[0xff, 0x00]); // SELFDESTRUCT; STOP
-    runtime.push(0x5b); // JUMPDEST (0x1c)
-    runtime.extend_from_slice(&[0x60, 0x2a, 0x60, 0x01, 0x55]); // SSTORE(1, 0x2a)
-    runtime.extend_from_slice(&[0x60, 0x99, 0x60, 0x02, 0x55]); // SSTORE(2, 0x99)
-    runtime.push(0x00); // STOP
+    runtime.extend_from_slice(&bytes!(
+        "ff00" // SELFDESTRUCT; STOP
+        "5b" // JUMPDEST (0x1c)
+        "602a600155" // SSTORE(1, 0x2a)
+        "6099600255" // SSTORE(2, 0x99)
+        "00" // STOP
+    ));
     runtime.into()
 }
 
@@ -1005,15 +1009,19 @@ fn write_or_selfdestruct_runtime_code(beneficiary: Address) -> Bytes {
 /// - `msg.value == 2`: SELFDESTRUCT to `beneficiary`
 fn write_restore_or_selfdestruct_runtime_code(beneficiary: Address) -> Bytes {
     let mut runtime = Vec::with_capacity(64);
-    runtime.extend_from_slice(&[0x34, 0x60, 0x02, 0x14, 0x60, 0x1b, 0x57]); // if callvalue == 2 jump selfdestruct
-    runtime.extend_from_slice(&[0x34, 0x60, 0x01, 0x14, 0x60, 0x14, 0x57]); // if callvalue == 1 jump restore
-    runtime.extend_from_slice(&[0x60, 0x2b, 0x60, 0x03, 0x55, 0x00]); // default: SSTORE(3, 0x2b); STOP
-    runtime.push(0x5b); // JUMPDEST (0x14)
-    runtime.extend_from_slice(&[0x60, 0x07, 0x60, 0x03, 0x55, 0x00]); // restore: SSTORE(3, 0x07); STOP
-    runtime.push(0x5b); // JUMPDEST (0x1b)
+    runtime.extend_from_slice(&bytes!(
+        "34600214601b57" // if callvalue == 2 jump selfdestruct
+        "34600114601457" // if callvalue == 1 jump restore
+        "602b60035500" // default: SSTORE(3, 0x2b); STOP
+        "5b" // JUMPDEST (0x14)
+        "600760035500" // restore: SSTORE(3, 0x07); STOP
+        "5b" // JUMPDEST (0x1b)
+    ));
     runtime.push(0x73); // PUSH20
     runtime.extend_from_slice(beneficiary.as_slice());
-    runtime.extend_from_slice(&[0xff, 0x00]); // SELFDESTRUCT; STOP
+    runtime.extend_from_slice(&bytes!(
+        "ff00" // SELFDESTRUCT; STOP
+    ));
     runtime.into()
 }
 
@@ -1021,11 +1029,15 @@ fn write_restore_or_selfdestruct_runtime_code(beneficiary: Address) -> Bytes {
 /// SSTORE(3, 0x2b) -> SSTORE(3, 0x07) -> SELFDESTRUCT.
 fn write_restore_then_selfdestruct_runtime_code(beneficiary: Address) -> Bytes {
     let mut runtime = Vec::with_capacity(40);
-    runtime.extend_from_slice(&[0x60, 0x2b, 0x60, 0x03, 0x55]); // SSTORE(3, 0x2b)
-    runtime.extend_from_slice(&[0x60, 0x07, 0x60, 0x03, 0x55]); // SSTORE(3, 0x07)
+    runtime.extend_from_slice(&bytes!(
+        "602b600355" // SSTORE(3, 0x2b)
+        "6007600355" // SSTORE(3, 0x07)
+    ));
     runtime.push(0x73); // PUSH20
     runtime.extend_from_slice(beneficiary.as_slice());
-    runtime.extend_from_slice(&[0xff, 0x00]); // SELFDESTRUCT; STOP
+    runtime.extend_from_slice(&bytes!(
+        "ff00" // SELFDESTRUCT; STOP
+    ));
     runtime.into()
 }
 
@@ -1051,10 +1063,14 @@ fn init_code_for_runtime(runtime: &Bytes) -> Bytes {
 /// - deploys with fixed `salt`
 fn create2_factory_runtime_code(salt: B256) -> Bytes {
     let mut runtime = Vec::with_capacity(46);
-    runtime.extend_from_slice(&[0x36, 0x60, 0x00, 0x60, 0x00, 0x37]); // CALLDATACOPY(0, 0, calldatasize)
+    runtime.extend_from_slice(&bytes!(
+        "366000600037" // CALLDATACOPY(0, 0, calldatasize)
+    ));
     runtime.push(0x7f); // PUSH32
     runtime.extend_from_slice(salt.as_slice());
-    runtime.extend_from_slice(&[0x36, 0x60, 0x00, 0x60, 0x00, 0xf5, 0x00]); // CREATE2(0, 0, calldatasize, salt); STOP
+    runtime.extend_from_slice(&bytes!(
+        "3660006000f500" // CREATE2(0, 0, calldatasize, salt); STOP
+    ));
     runtime.into()
 }
 

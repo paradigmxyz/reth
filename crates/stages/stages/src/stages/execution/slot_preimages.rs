@@ -7,8 +7,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, Error as MdbxError, Geometry, Mode, SyncMode,
-    WriteFlags, RO,
+    DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, WriteFlags, RO,
 };
 use reth_provider::{DBProvider, ExecutionOutcome};
 use reth_revm::revm::database::states::RevertToSlot;
@@ -72,21 +71,17 @@ impl SlotPreimages {
     /// Batch-insert `hashed_slot → plain_slot` preimage entries.
     ///
     /// Entries must be pre-sorted by key for optimal insert performance.
-    /// Duplicate keys are silently skipped via [`WriteFlags::NO_OVERWRITE`].
+    /// Existing keys are skipped after cursor lookup.
     fn insert_preimages(&self, entries: &[(B256, B256)]) -> eyre::Result<()> {
         let tx = self.env.begin_rw_txn()?;
         let db = tx.open_db(None)?;
+        let mut cursor = tx.cursor(db.dbi())?;
 
         for (hashed_slot, plain_slot) in entries {
-            match tx.put(
-                db.dbi(),
-                hashed_slot.as_slice(),
-                plain_slot.as_slice(),
-                WriteFlags::NO_OVERWRITE,
-            ) {
-                Ok(()) | Err(MdbxError::KeyExist) => {}
-                Err(e) => return Err(e.into()),
+            if cursor.set_key::<[u8; 32], [u8; 32]>(hashed_slot.as_slice())?.is_some() {
+                continue;
             }
+            cursor.put(hashed_slot.as_slice(), plain_slot.as_slice(), WriteFlags::empty())?;
         }
 
         tx.commit()?;
