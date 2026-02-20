@@ -258,7 +258,7 @@ impl SparseTrie for ParallelSparseTrie {
         #[cfg(feature = "std")]
         // Reveal lower subtrie nodes in parallel
         {
-            use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+            use rayon::iter::{IntoParallelIterator, ParallelIterator};
             use tracing::Span;
 
             // Capture the current span so it can be propagated to rayon worker threads
@@ -267,23 +267,39 @@ impl SparseTrie for ParallelSparseTrie {
             // Capture reference to upper subtrie nodes for boundary leaf reachability checks
             let upper_nodes = &self.upper_subtrie.nodes;
 
-            // Group the nodes by lower subtrie. This must be collected into a Vec in order for
-            // rayon's `zip` to be happy.
-            let node_groups: Vec<_> = lower_nodes
+            // Group the nodes by lower subtrie.
+            let results = lower_nodes
                 .chunk_by(|node_a, node_b| {
                     SparseSubtrieType::from_path(&node_a.path) ==
                         SparseSubtrieType::from_path(&node_b.path)
                 })
-                .collect();
-
-            // Take the lower subtries in the same order that the nodes were grouped into, so that
-            // the two can be zipped together. This also must be collected into a Vec for rayon's
-            // `zip` to be happy.
-            let lower_subtries: Vec<_> = node_groups
-                .iter()
+                // Filter out chunks for unreachable subtries.
                 .filter_map(|nodes| {
-                    // NOTE: chunk_by won't produce empty groups
-                    let node = &nodes[0];
+                    let mut nodes = nodes
+                        .iter()
+                        .filter(|node| {
+                            // For boundary leaves, check reachability from upper subtrie's parent
+                            // branch.
+                            if node.path.len() == UPPER_TRIE_MAX_DEPTH &&
+                                !Self::is_boundary_leaf_reachable(
+                                    upper_nodes,
+                                    &node.path,
+                                    &node.node,
+                                )
+                            {
+                                trace!(
+                                    target: "trie::parallel_sparse",
+                                    path = ?node.path,
+                                    "Boundary leaf not reachable from upper subtrie, skipping",
+                                );
+                                false
+                            } else {
+                                true
+                            }
+                        })
+                        .peekable();
+
+                    let node = nodes.peek()?;
                     let idx =
                         SparseSubtrieType::from_path(&node.path).lower_index().unwrap_or_else(
                             || panic!("upper subtrie node {node:?} found amongst lower nodes"),
@@ -303,41 +319,24 @@ impl SparseTrie for ParallelSparseTrie {
                     // shortest path being revealed for each subtrie. Therefore we can reveal the
                     // subtrie itself using this path and retain correct behavior.
                     self.lower_subtries[idx].reveal(&node.path);
-                    Some((idx, self.lower_subtries[idx].take_revealed().expect("just revealed")))
+                    Some((
+                        idx,
+                        self.lower_subtries[idx].take_revealed().expect("just revealed"),
+                        nodes,
+                    ))
                 })
-                .collect();
-
-            // Zip the lower subtries and their corresponding node groups, and reveal lower subtrie
-            // nodes in parallel
-            let results: Vec<_> = lower_subtries
+                .collect::<Vec<_>>()
                 .into_par_iter()
-                .zip(node_groups.into_par_iter())
-                .map(|((subtrie_idx, mut subtrie), nodes)| {
+                .map(|(subtrie_idx, mut subtrie, nodes)| {
                     // Enter the parent span to propagate context (e.g., hashed_address for storage
                     // tries) to the worker thread
                     let _guard = parent_span.enter();
 
                     // reserve space in the HashMap ahead of time; doing it on a node-by-node basis
                     // can cause multiple re-allocations as the hashmap grows.
-                    subtrie.nodes.reserve(nodes.len());
+                    subtrie.nodes.reserve(nodes.size_hint().1.unwrap_or(0));
 
                     for node in nodes {
-                        // For boundary leaves, check reachability from upper subtrie's parent
-                        // branch
-                        if node.path.len() == UPPER_TRIE_MAX_DEPTH &&
-                            !Self::is_boundary_leaf_reachable(
-                                upper_nodes,
-                                &node.path,
-                                &node.node,
-                            )
-                        {
-                            trace!(
-                                target: "trie::parallel_sparse",
-                                path = ?node.path,
-                                "Boundary leaf not reachable from upper subtrie, skipping",
-                            );
-                            continue;
-                        }
                         // Reveal each node in the subtrie, returning early on any errors
                         let res = subtrie.reveal_node(node.path, &node.node, node.masks);
                         if res.is_err() {
@@ -346,7 +345,7 @@ impl SparseTrie for ParallelSparseTrie {
                     }
                     (subtrie_idx, subtrie, Ok(()))
                 })
-                .collect();
+                .collect::<Vec<_>>();
 
             // Put subtries back which were processed in the rayon pool, collecting the last
             // seen error in the process and returning that.
