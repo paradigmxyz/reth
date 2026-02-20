@@ -2706,7 +2706,7 @@ impl SparseSubtrie {
                         None => SparseNodeState::Dirty,
                     };
 
-                let mut blinded = BlindedHashes::default();
+                let mut blinded = BlindedHashes::with_capacity(children.len());
 
                 for (stack_ptr, idx) in state_mask.iter().enumerate() {
                     let mut child_path = path;

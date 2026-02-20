@@ -510,6 +510,12 @@ pub struct BlindedHashes {
 }
 
 impl BlindedHashes {
+    /// Creates a new `BlindedHashes` with pre-allocated capacity.
+    #[inline]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { mask: TrieMask::default(), hashes: SmallVec::with_capacity(capacity) }
+    }
+
     /// Returns the mask of blinded nibbles.
     #[inline]
     pub const fn mask(&self) -> TrieMask {
