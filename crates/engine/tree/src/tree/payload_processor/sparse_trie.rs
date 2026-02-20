@@ -208,7 +208,7 @@ where
 }
 
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
-const MAX_PENDING_UPDATES: usize = 100;
+const MAX_PENDING_UPDATES: usize = 10;
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ParallelSparseTrie, S = ParallelSparseTrie> {
