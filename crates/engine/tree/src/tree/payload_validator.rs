@@ -214,7 +214,7 @@ where
     ///
     /// This spawns a background thread that inserts accounts with non-zero storage and removes
     /// destroyed accounts. Called immediately after state root computation completes successfully.
-    fn update_storage_filter(&self, hashed_state: LazyHashedPostState) {
+    fn update_storage_filter(&self, hashed_state: Arc<HashedPostState>) {
         let Some(filter) = self.storage_filter.clone() else { return };
 
         self.payload_processor.executor().spawn_blocking_named(
@@ -224,8 +224,6 @@ where
                 let mut inserted = 0usize;
                 let mut removed = 0usize;
                 let mut failures = 0usize;
-
-                let hashed_state = hashed_state.get();
 
                 // Process destroyed accounts (accounts with None value)
                 for (addr, account) in &hashed_state.accounts {
@@ -769,10 +767,6 @@ where
             )
             .into())
         }
-
-        // Update storage filter now that state root is computed and validated.
-        // This uses the already-hashed state to avoid re-hashing addresses.
-        self.update_storage_filter(hashed_state.clone());
 
         if let Some(valid_block_tx) = valid_block_tx {
             let _ = valid_block_tx.send(());
@@ -1569,6 +1563,10 @@ where
             Ok(state) => Arc::new(state),
             Err(handle) => Arc::new(handle.get().clone()),
         };
+
+        // Update storage filter now that state root is computed and validated.
+        // This uses the already-hashed state to avoid re-hashing addresses.
+        self.update_storage_filter(hashed_state.clone());
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
         let deferred_trie_data =
