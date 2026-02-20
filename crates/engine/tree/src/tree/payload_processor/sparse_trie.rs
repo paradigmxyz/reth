@@ -445,7 +445,7 @@ where
                     self.pending_updates += 1;
                     drained += 1;
                 }
-                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }
         }
 
