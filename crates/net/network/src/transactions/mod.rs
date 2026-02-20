@@ -1236,7 +1236,7 @@ where
             msg_builder.push_pooled(pooled_tx);
         }
 
-        debug!(target: "net::tx", ?peer_id, tx_count = msg_builder.is_empty(), "Broadcasting transaction hashes");
+        debug!(target: "net::tx", ?peer_id, tx_count = msg_builder.len(), "Broadcasting transaction hashes");
         let msg = msg_builder.build();
         self.network.send_transactions_hashes(peer_id, msg);
     }
@@ -1921,6 +1921,14 @@ impl PooledTransactionsHashesBuilder {
         match self {
             Self::Eth66(hashes) => hashes.is_empty(),
             Self::Eth68(hashes) => hashes.is_empty(),
+        }
+    }
+
+    /// Returns the number of transactions in the builder.
+    fn len(&self) -> usize {
+        match self {
+            Self::Eth66(hashes) => hashes.len(),
+            Self::Eth68(hashes) => hashes.len(),
         }
     }
 
