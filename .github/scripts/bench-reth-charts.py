@@ -73,20 +73,20 @@ def plot_latency_and_throughput(
         for r in baseline:
             lat_s = r["new_payload_latency_us"] / 1_000_000
             base_ggas.append(r["gas_used"] / lat_s / GIGAGAS if lat_s > 0 else 0)
-        ax1.plot(base_x, base_lat, linewidth=0.8, label=baseline_name, alpha=0.7)
-        ax1.axhline(np.median(base_lat), linestyle="--", linewidth=1, alpha=0.7, label=f"{baseline_name} median")
-        ax2.plot(base_x, base_ggas, linewidth=0.8, label=baseline_name, alpha=0.7)
-        ax2.axhline(np.median(base_ggas), linestyle="--", linewidth=1, alpha=0.7, label=f"{baseline_name} median")
+        l, = ax1.plot(base_x, base_lat, linewidth=0.8, label=baseline_name, alpha=0.7)
+        ax1.axhline(np.median(base_lat), color=l.get_color(), linestyle="--", linewidth=1, alpha=0.7, label=f"{baseline_name} median")
+        l, = ax2.plot(base_x, base_ggas, linewidth=0.8, label=baseline_name, alpha=0.7)
+        ax2.axhline(np.median(base_ggas), color=l.get_color(), linestyle="--", linewidth=1, alpha=0.7, label=f"{baseline_name} median")
 
-    ax1.plot(feat_x, feat_lat, linewidth=0.8, label=feature_name)
-    ax1.axhline(np.median(feat_lat), linestyle="--", linewidth=1, label=f"{feature_name} median")
+    l, = ax1.plot(feat_x, feat_lat, linewidth=0.8, label=feature_name)
+    ax1.axhline(np.median(feat_lat), color=l.get_color(), linestyle="--", linewidth=1, label=f"{feature_name} median")
     ax1.set_ylabel("Latency (ms)")
     ax1.set_title("newPayload Latency per Block")
     ax1.grid(True, alpha=0.3)
     ax1.legend()
 
-    ax2.plot(feat_x, feat_ggas, linewidth=0.8, label=feature_name)
-    ax2.axhline(np.median(feat_ggas), linestyle="--", linewidth=1, label=f"{feature_name} median")
+    l, = ax2.plot(feat_x, feat_ggas, linewidth=0.8, label=feature_name)
+    ax2.axhline(np.median(feat_ggas), color=l.get_color(), linestyle="--", linewidth=1, label=f"{feature_name} median")
     ax2.set_ylabel("Ggas/s")
     ax2.set_title("Execution Throughput per Block")
     ax2.grid(True, alpha=0.3)
