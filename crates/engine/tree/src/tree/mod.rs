@@ -62,6 +62,8 @@ pub mod payload_validator;
 mod persistence_state;
 pub mod precompile_cache;
 #[cfg(test)]
+mod cache_race_poc;
+#[cfg(test)]
 mod tests;
 mod trie_updates;
 
