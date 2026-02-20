@@ -50,7 +50,7 @@ use tracing::{debug, debug_span, instrument, trace, warn, Span};
 /// wastes CPU on context setup and creates contention with the sparse trie's critical path.
 /// Capping to fewer workers still emits `PrefetchProofs` targets (keeping the sparse trie fed)
 /// while avoiding the overhead.
-const SMALL_BLOCK_PREWARM_WORKER_THRESHOLD: usize = 16;
+const SMALL_BLOCK_PREWARM_WORKER_THRESHOLD: usize = 50;
 
 /// Maximum number of prewarm workers for blocks at or below
 /// [`SMALL_BLOCK_PREWARM_WORKER_THRESHOLD`] transactions.
