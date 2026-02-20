@@ -196,12 +196,6 @@ jobs:
                   } else {
                     defaults[key] = value;
                   }
-                } else if (boolArgs.has(key)) {
-                  if (value !== 'true' && value !== 'false') {
-                    invalid.push(`\`${key}=${value}\` (must be \`true\` or \`false\`)`);
-                  } else {
-                    defaults[key] = value;
-                  }
                 } else {
                   unknown.push(key);
                 }
