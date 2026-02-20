@@ -7,6 +7,7 @@
 //   BENCH_PR               – PR number (may be empty)
 //   BENCH_ACTOR            – GitHub user who triggered the bench
 //   BENCH_JOB_URL          – URL to the Actions job page
+//   BENCH_SAMPLY           – 'true' if samply profiling was enabled
 //
 // Usage from actions/github-script:
 //   const notify = require('./.github/scripts/bench-slack-notify.js');
@@ -35,117 +36,184 @@ function loadSlackUsers(repoRoot) {
   }
 }
 
-async function postToSlack(token, channel, blocks, core) {
+async function postToSlack(token, channel, blocks, text, core, threadTs) {
+  const payload = { channel, blocks, text, unfurl_links: false };
+  if (threadTs) payload.thread_ts = threadTs;
   const resp = await fetch(SLACK_API, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ channel, blocks, unfurl_links: false }),
+    body: JSON.stringify(payload),
   });
   const data = await resp.json();
   if (!data.ok) {
-    core.warning(`Slack API error (channel ${channel}): ${data.error}`);
+    core.warning(`Slack API error (channel ${channel}): ${JSON.stringify(data)}`);
   }
   return data;
 }
 
-function buildSuccessBlocks({ summary, prNumber, actor, jobUrl, repo }) {
+function cell(text) {
+  const s = String(text);
+  return { type: 'raw_text', text: s || ' ' };
+}
+
+function buildSuccessBlocks({ summary, prNumber, actor, jobUrl, repo, samplyUrls }) {
   const b = summary.baseline.stats;
   const f = summary.feature.stats;
   const c = summary.changes;
 
-  const sigEmoji = { good: ':white_check_mark:', bad: ':x:', neutral: ':white_circle:' };
+  const sigEmoji = { good: '\u2705', bad: '\u274c', neutral: '\u26aa' };
 
+  function fmtMs(v) { return v.toFixed(2) + 'ms'; }
+  function fmtMgas(v) { return v.toFixed(2); }
   function fmtChange(ch) {
-    const e = sigEmoji[ch.sig];
-    return `${ch.pct >= 0 ? '+' : ''}${ch.pct.toFixed(2)}% ${e}`;
+    if (!ch.pct && !ch.ci_pct) return ' ';
+    return `${ch.pct >= 0 ? '+' : ''}${ch.pct.toFixed(2)}% ${sigEmoji[ch.sig]}`;
+  }
+
+  // Overall result for header
+  const vals = Object.values(c);
+  const hasBad = vals.some(v => v.sig === 'bad');
+  const hasGood = vals.some(v => v.sig === 'good');
+  let headerEmoji, headerResult;
+  if (hasBad && hasGood) {
+    headerEmoji = ':warning:';
+    headerResult = 'Mixed Results';
+  } else if (hasBad) {
+    headerEmoji = ':x:';
+    headerResult = 'Regression';
+  } else if (hasGood) {
+    headerEmoji = ':white_check_mark:';
+    headerResult = 'Improvement';
+  } else {
+    headerEmoji = ':white_circle:';
+    headerResult = 'No Difference';
   }
 
   const prUrl = prNumber ? `https://github.com/${repo}/pull/${prNumber}` : '';
-  const meta = prNumber
-    ? `*<${prUrl}|PR #${prNumber}>* by @${actor} | <${jobUrl}|View job> | ${summary.blocks} blocks`
-    : `Triggered by @${actor} | <${jobUrl}|View job> | ${summary.blocks} blocks`;
+  const commitUrl = `https://github.com/${repo}/commit`;
+  const baselineLink = `<${commitUrl}/${summary.baseline.ref}|${summary.baseline.name}>`;
+  const featureLink = `<${commitUrl}/${summary.feature.ref}|${summary.feature.name}>`;
+
+  // Meta line
+  const metaParts = [];
+  if (prNumber) metaParts.push(`*<${prUrl}|PR #${prNumber}>*`);
+  metaParts.push(`triggered by @${actor}`);
+
+  // Baseline/feature lines with samply profile links
+  let baselineLine = `*Baseline:* ${baselineLink}`;
+  const bl1 = samplyUrls['baseline-1'];
+  const bl2 = samplyUrls['baseline-2'];
+  if (bl1) baselineLine += ` | <${bl1}|Samply 1>`;
+  if (bl2) baselineLine += ` | <${bl2}|Samply 2>`;
+
+  let featureLine = `*Feature:* ${featureLink}`;
+  const fl1 = samplyUrls['feature-1'];
+  const fl2 = samplyUrls['feature-2'];
+  if (fl1) featureLine += ` | <${fl1}|Samply 1>`;
+  if (fl2) featureLine += ` | <${fl2}|Samply 2>`;
+
+  const warmup = summary.warmup_blocks || process.env.BENCH_WARMUP_BLOCKS || '';
+  const countsLine = warmup
+    ? `*Warmup:* ${warmup} | *Blocks:* ${summary.blocks}`
+    : `*Blocks:* ${summary.blocks}`;
+
+  const sectionText = [metaParts.join(' | '), '', baselineLine, featureLine, countsLine].join('\n');
+
+  // Action buttons
+  const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
+  const buttons = [
+    {
+      type: 'button',
+      text: { type: 'plain_text', text: 'CI :github:', emoji: true },
+      url: jobUrl,
+      action_id: 'ci_button',
+    },
+    {
+      type: 'button',
+      text: { type: 'plain_text', text: 'Diff :github:', emoji: true },
+      url: diffUrl,
+      action_id: 'diff_button',
+    },
+  ];
 
   const blocks = [
     {
       type: 'header',
-      text: { type: 'plain_text', text: `Bench: ${summary.baseline.name} vs ${summary.feature.name}`, emoji: true },
+      text: { type: 'plain_text', text: `${headerEmoji} ${headerResult}`, emoji: true },
     },
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: meta },
+      text: { type: 'mrkdwn', text: sectionText },
     },
-    { type: 'divider' },
     {
-      type: 'section',
-      text: { type: 'mrkdwn', text: '*Latency (newPayload)*' },
-      fields: [
-        { type: 'mrkdwn', text: '*Metric*' },
-        { type: 'mrkdwn', text: '*Change*' },
-        { type: 'mrkdwn', text: `Mean: ${b.mean_ms.toFixed(2)} \u2192 ${f.mean_ms.toFixed(2)} ms` },
-        { type: 'mrkdwn', text: fmtChange(c.mean) },
-        { type: 'mrkdwn', text: `P50: ${b.p50_ms.toFixed(2)} \u2192 ${f.p50_ms.toFixed(2)} ms` },
-        { type: 'mrkdwn', text: fmtChange(c.p50) },
-        { type: 'mrkdwn', text: `P90: ${b.p90_ms.toFixed(2)} \u2192 ${f.p90_ms.toFixed(2)} ms` },
-        { type: 'mrkdwn', text: fmtChange(c.p90) },
-        { type: 'mrkdwn', text: `P99: ${b.p99_ms.toFixed(2)} \u2192 ${f.p99_ms.toFixed(2)} ms` },
-        { type: 'mrkdwn', text: fmtChange(c.p99) },
+      type: 'table',
+      column_settings: [
+        { align: 'left' },
+        { align: 'right' },
+        { align: 'right' },
+        { align: 'right' },
+      ],
+      rows: [
+        [cell('Metric'),  cell('Baseline'), cell('Feature'), cell('Change')],
+        [cell('Mean'),     cell(fmtMs(b.mean_ms)),      cell(fmtMs(f.mean_ms)),      cell(fmtChange(c.mean))],
+        [cell('StdDev'),   cell(fmtMs(b.stddev_ms)),    cell(fmtMs(f.stddev_ms)),    cell(' ')],
+        [cell('P50'),      cell(fmtMs(b.p50_ms)),       cell(fmtMs(f.p50_ms)),       cell(fmtChange(c.p50))],
+        [cell('P90'),      cell(fmtMs(b.p90_ms)),       cell(fmtMs(f.p90_ms)),       cell(fmtChange(c.p90))],
+        [cell('P99'),      cell(fmtMs(b.p99_ms)),       cell(fmtMs(f.p99_ms)),       cell(fmtChange(c.p99))],
+        [cell('Mgas/s'),   cell(fmtMgas(b.mean_mgas_s)), cell(fmtMgas(f.mean_mgas_s)), cell(fmtChange(c.mgas_s))],
       ],
     },
-    { type: 'divider' },
     {
-      type: 'section',
-      fields: [
-        { type: 'mrkdwn', text: '*Throughput*' },
-        { type: 'mrkdwn', text: '*Change*' },
-        { type: 'mrkdwn', text: `Mgas/s: ${b.mean_mgas_s.toFixed(2)} \u2192 ${f.mean_mgas_s.toFixed(2)}` },
-        { type: 'mrkdwn', text: fmtChange(c.mgas_s) },
-      ],
+      type: 'actions',
+      elements: buttons,
     },
   ];
 
-  // Wait times
+  // Wait times as a separate table block (sent as threaded reply due to Slack one-table limit)
+  const threadBlocks = [];
   const waitTimes = summary.wait_times || {};
   const waitKeys = Object.keys(waitTimes);
   if (waitKeys.length > 0) {
-    const waitFields = [
-      { type: 'mrkdwn', text: '*Wait Time*' },
-      { type: 'mrkdwn', text: '*Base \u2192 Feature (mean)*' },
+    const waitRows = [
+      [cell('Wait Time'), cell('Baseline'), cell('Feature')],
     ];
     for (const key of waitKeys) {
       const wt = waitTimes[key];
-      waitFields.push({ type: 'mrkdwn', text: wt.title });
-      waitFields.push({
-        type: 'mrkdwn',
-        text: `${wt.baseline.mean_ms.toFixed(2)} \u2192 ${wt.feature.mean_ms.toFixed(2)} ms`,
-      });
+      waitRows.push([cell(wt.title), cell(fmtMs(wt.baseline.mean_ms)), cell(fmtMs(wt.feature.mean_ms))]);
     }
-    blocks.push({ type: 'divider' });
-    blocks.push({ type: 'section', fields: waitFields });
+    threadBlocks.push({
+      type: 'table',
+      column_settings: [
+        { align: 'left' },
+        { align: 'right' },
+        { align: 'right' },
+      ],
+      rows: waitRows,
+    });
   }
 
-  // Footer
-  blocks.push({
-    type: 'context',
-    elements: [{
-      type: 'mrkdwn',
-      text: `${repo} | ${summary.baseline.name} (\`${summary.baseline.ref.slice(0, 8)}\`) vs ${summary.feature.name} (\`${summary.feature.ref.slice(0, 8)}\`)`,
-    }],
-  });
-
-  return blocks;
+  return { blocks, threadBlocks };
 }
 
 function buildFailureBlocks({ prNumber, actor, jobUrl, repo, failedStep }) {
   const prUrl = prNumber ? `https://github.com/${repo}/pull/${prNumber}` : '';
   const parts = [
     prNumber ? `*<${prUrl}|PR #${prNumber}>*` : '',
-    `Triggered by @${actor}`,
-    `Failed while *${failedStep}*`,
-    `<${jobUrl}|View logs>`,
+    `by @${actor}`,
+    `failed while *${failedStep}*`,
   ].filter(Boolean);
+
+  const buttons = [
+    {
+      type: 'button',
+      text: { type: 'plain_text', text: 'CI :github:', emoji: true },
+      url: jobUrl,
+      action_id: 'ci_button',
+    },
+  ];
 
   return [
     {
@@ -155,6 +223,10 @@ function buildFailureBlocks({ prNumber, actor, jobUrl, repo, failedStep }) {
     {
       type: 'section',
       text: { type: 'mrkdwn', text: parts.join(' | ') },
+    },
+    {
+      type: 'actions',
+      elements: buttons,
     },
   ];
 }
@@ -180,13 +252,34 @@ async function success({ core, context }) {
   const jobUrl = process.env.BENCH_JOB_URL ||
     `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
-  const blocks = buildSuccessBlocks({ summary, prNumber, actor, jobUrl, repo });
+  // Load samply profile URLs (files exist when samply profiling was enabled)
+  const samplyUrls = {};
+  for (const run of ['baseline-1', 'baseline-2', 'feature-1', 'feature-2']) {
+    try {
+      const url = fs.readFileSync(
+        path.join(process.env.BENCH_WORK_DIR, run, 'samply-profile-url.txt'), 'utf8'
+      ).trim();
+      if (url) samplyUrls[run] = url;
+    } catch {}
+  }
+
+  const { blocks, threadBlocks } = buildSuccessBlocks({ summary, prNumber, actor, jobUrl, repo, samplyUrls });
+  const text = `Bench: ${summary.baseline.name} vs ${summary.feature.name}`;
   const slackUsers = loadSlackUsers(process.env.GITHUB_WORKSPACE || '.');
+
+  async function sendWithThread(ch) {
+    const res = await postToSlack(token, ch, blocks, text, core);
+    if (res.ok && res.ts && threadBlocks.length > 0) {
+      for (const tb of threadBlocks) {
+        await postToSlack(token, ch, [tb], 'Wait time breakdown', core, res.ts);
+      }
+    }
+  }
 
   // Always DM the actor
   const actorSlackId = slackUsers[actor];
   if (actorSlackId) {
-    await postToSlack(token, actorSlackId, blocks, core);
+    await sendWithThread(actorSlackId);
   } else {
     core.info(`No Slack user mapping for GitHub user '${actor}', skipping DM`);
   }
@@ -197,7 +290,7 @@ async function success({ core, context }) {
     const changes = summary.changes || {};
     const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
     if (hasImprovement) {
-      await postToSlack(token, channel, blocks, core);
+      await sendWithThread(channel);
     } else {
       core.info('No significant improvement, skipping public channel notification');
     }
@@ -218,12 +311,13 @@ async function failure({ core, context, failedStep }) {
     `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
   const blocks = buildFailureBlocks({ prNumber, actor, jobUrl, repo, failedStep });
+  const text = `Bench failed while ${failedStep}`;
   const slackUsers = loadSlackUsers(process.env.GITHUB_WORKSPACE || '.');
 
   // Always DM the actor
   const actorSlackId = slackUsers[actor];
   if (actorSlackId) {
-    await postToSlack(token, actorSlackId, blocks, core);
+    await postToSlack(token, actorSlackId, blocks, text, core);
   } else {
     core.info(`No Slack user mapping for GitHub user '${actor}', skipping DM`);
   }
@@ -231,7 +325,7 @@ async function failure({ core, context, failedStep }) {
   // Always post failures to public channel
   const channel = process.env.SLACK_BENCH_CHANNEL;
   if (channel) {
-    await postToSlack(token, channel, blocks, core);
+    await postToSlack(token, channel, blocks, text, core);
   }
 }
 
