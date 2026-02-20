@@ -272,14 +272,18 @@ jobs:
             // the number of jobs ahead is less than the number of runners.
             let queueMsg = '';
             let ahead = 0;
+            let numRunners = 1;
             try {
               const { data: { runners } } = await github.rest.actions.listSelfHostedRunnersForRepo({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 per_page: 100,
               });
-              const numRunners = runners.filter(r => r.status === 'online').length || 1;
-
+              numRunners = runners.filter(r => r.status === 'online').length || 1;
+            } catch (e) {
+              core.info(`Could not fetch runner count, assuming 1: ${e.message}`);
+            }
+            try {
               const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
               const allRuns = [];
               for (const status of statuses) {
@@ -343,12 +347,17 @@ jobs:
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             async function getQueuePosition() {
-              const { data: { runners } } = await github.rest.actions.listSelfHostedRunnersForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                per_page: 100,
-              });
-              const numRunners = runners.filter(r => r.status === 'online').length || 1;
+              let numRunners = 1;
+              try {
+                const { data: { runners } } = await github.rest.actions.listSelfHostedRunnersForRepo({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  per_page: 100,
+                });
+                numRunners = runners.filter(r => r.status === 'online').length || 1;
+              } catch (e) {
+                core.info(`Could not fetch runner count, assuming 1: ${e.message}`);
+              }
 
               const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
               const allRuns = [];
