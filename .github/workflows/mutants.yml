@@ -3,6 +3,8 @@
 # Mutation testing injects small faults (operator swaps, deleted lines, etc.)
 # and checks whether existing tests catch them. Surviving mutants indicate
 # test gaps where bugs could land without any test failing.
+#
+# Tests are scoped to only the changed crates to keep run times reasonable.
 
 name: mutants
 
@@ -25,13 +27,59 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate diff from last 24h
+      - name: Generate diff and find changed crates
         run: |
-          git diff $(git log --since="24 hours ago" --format="%H" | tail -1)..HEAD | tee git.diff
+          SINCE=$(git log --since="24 hours ago" --format="%H" | tail -1)
+          if [ -z "$SINCE" ]; then
+            echo "No commits in the last 24 hours, skipping"
+            echo "SKIP=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          git diff "$SINCE"..HEAD > git.diff
           if [ ! -s git.diff ]; then
             echo "No changes in the last 24 hours, skipping"
             echo "SKIP=true" >> "$GITHUB_ENV"
+            exit 0
           fi
+
+          # Extract changed file paths from the diff
+          FILES=$(grep "^diff --git" git.diff | sed 's|diff --git a/||;s| b/.*||')
+
+          # For each file, walk up to find the nearest Cargo.toml and extract the package name
+          PKGS=""
+          for f in $FILES; do
+            dir=$(dirname "$f")
+            while [ "$dir" != "." ]; do
+              if [ -f "$dir/Cargo.toml" ]; then
+                pkg=$(grep '^name\s*=' "$dir/Cargo.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+                if [ -n "$pkg" ]; then
+                  PKGS="$PKGS $pkg"
+                fi
+                break
+              fi
+              dir=$(dirname "$dir")
+            done
+          done
+
+          # Deduplicate
+          PKGS=$(echo "$PKGS" | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
+
+          if [ -z "$PKGS" ]; then
+            echo "No crate changes detected, skipping"
+            echo "SKIP=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "Changed crates: $PKGS"
+
+          # Build -p flags for cargo test
+          PKG_FLAGS=""
+          for pkg in $PKGS; do
+            PKG_FLAGS="$PKG_FLAGS -p $pkg"
+          done
+
+          echo "PKG_FLAGS=$PKG_FLAGS" >> "$GITHUB_ENV"
 
       - uses: rui314/setup-mold@v1
         if: env.SKIP != 'true'
@@ -53,7 +101,7 @@ jobs:
           cargo mutants --no-shuffle -vV --in-diff git.diff \
             --timeout=300 \
             --build-timeout=300 \
-            -- --all-targets
+            -- --all-targets $PKG_FLAGS
 
       - name: Archive results
         uses: actions/upload-artifact@v4
