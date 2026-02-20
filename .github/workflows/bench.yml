@@ -474,6 +474,8 @@ jobs:
         continue-on-error: true
 
       - name: Install dependencies
+        env:
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
         run: |
           mkdir -p "$HOME/.local/bin"
 
@@ -495,6 +497,9 @@ jobs:
             curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME/.local/bin" sh
           fi
 
+          # Configure git auth for private repos
+          git config --global url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf "https://github.com/"
+
           # thin-provisioning-tools (era_invalidate, required by schelk)
           if ! command -v era_invalidate &>/dev/null; then
             git clone --depth 1 https://github.com/jthornber/thin-provisioning-tools /tmp/tpt
@@ -506,6 +511,9 @@ jobs:
           if ! command -v schelk &>/dev/null; then
             cargo install --git https://github.com/tempoxyz/schelk --locked
           fi
+
+          # Clean up git auth
+          git config --global --unset url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf
 
       # Verify all required tools are available
       - name: Check dependencies
