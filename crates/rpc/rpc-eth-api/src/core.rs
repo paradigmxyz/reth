@@ -4,6 +4,7 @@ use crate::{
     helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
+use alloy_consensus::BlockHeader;
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
@@ -16,10 +17,16 @@ use alloy_rpc_types_eth::{
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_evm::ConfigureEvm;
 use reth_primitives_traits::TxTy;
+use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_types::FillTransaction;
+use reth_rpc_eth_types::{
+    cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError, FillTransaction,
+};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
+use reth_storage_api::{BlockIdReader, StateProviderFactory};
+use revm::DatabaseCommit;
 use std::collections::HashMap;
 use tracing::trace;
 
@@ -913,9 +920,49 @@ where
     }
 
     /// Handler for: `eth_getBlockAccessListByBlockHash`
-    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Bytes>> {
-        trace!(target: "rpc::eth", ?hash, "Serving eth_getBlockAccessListByBlockHash");
-        Err(internal_rpc_err("unimplemented"))
+    async fn block_access_list_by_block_hash(&self, block_hash: B256) -> RpcResult<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?block_hash, "Serving eth_getBlockAccessListByBlockHash");
+        let ((evm_env, _), block) = futures::try_join!(
+            self.evm_env_at(block_hash.into()),
+            self.recovered_block(block_hash.into()),
+        )?;
+
+        let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+
+        self.spawn_blocking_io(move |eth_api| {
+            let state = eth_api
+                .provider()
+                .state_by_block_id(block.parent_hash().into())
+                .map_err(T::Error::from_eth_err)?;
+
+            let mut db = State::builder()
+                .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
+                .with_bal_builder()
+                .build();
+
+            eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
+            // Move to tx index 1 before first tx (index 0 is for pre-execution)
+            db.bump_bal_index();
+
+            for tx in block.transactions_recovered() {
+                let tx_env = eth_api.evm_config().tx_env(tx);
+                let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                db.commit(res.state);
+                // Advance to next tx index
+                db.bump_bal_index();
+            }
+
+            // Current index is now n+1 for post-execution
+
+            let bal = db.take_built_alloy_bal().ok_or_else(|| {
+                EthApiError::Internal(reth_errors::RethError::msg("BAL not built"))
+            })?;
+
+            Ok(alloy_rlp::encode(&bal).into())
+        })
+        .await;
+        Ok(Bytes::default())
     }
 
     /// Handler for: `eth_getBlockAccessListByBlockNumber`
