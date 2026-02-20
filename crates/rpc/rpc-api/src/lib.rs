@@ -47,7 +47,7 @@ pub mod servers {
         miner::MinerApiServer,
         net::NetApiServer,
         otterscan::OtterscanServer,
-        reth::RethApiServer,
+        reth::{AccountStateChanges, BlockExecutionOutcomeResponse, RethApiServer},
         reth_engine::{RethEngineApiServer, RethPayloadStatus},
         rpc::RpcApiServer,
         testing::TestingApiServer,
