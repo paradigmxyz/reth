@@ -144,9 +144,12 @@ impl<T: TransactionOrdering> BestTransactions<T> {
 
                 // the cost of ignoring this error is allowing old transactions to get
                 // overwritten after the chan buffer size is met
-                Err(TryRecvError::Lagged(_)) => {
-                    // Handle the case where the receiver lagged too far behind.
-                    // `num_skipped` indicates the number of messages that were skipped.
+                Err(TryRecvError::Lagged(skipped)) => {
+                    debug!(
+                        target: "txpool",
+                        skipped,
+                        "best transactions iterator lagged behind broadcast channel"
+                    );
                 }
 
                 // this case is still better than the existing iterator behavior where no new
