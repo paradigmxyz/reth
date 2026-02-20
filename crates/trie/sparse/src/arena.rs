@@ -6,7 +6,10 @@ use alloy_primitives::{map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::mem;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
+use reth_trie_common::{
+    BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
+    RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
+};
 use smallvec::SmallVec;
 use thunderdome::{Arena, Index};
 
@@ -411,11 +414,12 @@ fn debug_assert_branch_consistency(arena: &Arena<ArenaSparseNode>, branch_idx: I
 }
 
 /// Pops the top entry from the stack and propagates its `num_leaves` and dirty state/count
-/// deltas to the new top (its parent). Returns the popped entry.
+/// deltas to the new top (its parent). Returns the popped entry's path, or `None` if the
+/// stack was empty.
 fn pop_and_propagate(
     arena: &mut Arena<ArenaSparseNode>,
     stack: &mut Vec<ArenaStackEntry>,
-) -> Option<ArenaStackEntry> {
+) -> Option<Nibbles> {
     let entry = stack.pop()?;
 
     #[cfg(debug_assertions)]
@@ -442,7 +446,7 @@ fn pop_and_propagate(
             parent_state.add_num_leaves(leaves_delta);
         }
     }
-    Some(entry)
+    Some(entry.path)
 }
 
 /// Drains the stack, propagating `num_leaves` deltas from each entry to its parent.
@@ -467,6 +471,10 @@ struct ArenaSparseSubtrie {
     update_actions: Vec<SparseTrieUpdatesAction>,
     /// Reusable buffer for collecting required proofs during leaf updates.
     required_proofs: Vec<ArenaRequiredProof>,
+    /// Reusable buffer for RLP encoding during hash computation.
+    rlp_buf: Vec<u8>,
+    /// Reusable buffer for accumulating `RlpNode` results during hash computation.
+    rlp_node_buf: Vec<RlpNode>,
 }
 
 impl ArenaSparseSubtrie {
@@ -475,6 +483,8 @@ impl ArenaSparseSubtrie {
         self.stack.clear();
         self.update_actions.clear();
         self.required_proofs.clear();
+        self.rlp_buf.clear();
+        self.rlp_node_buf.clear();
     }
 
     /// Applies leaf updates within this subtrie. Uses the same walk-down-with-stack pattern as
@@ -594,6 +604,202 @@ impl ArenaSparseSubtrie {
 
         Ok(())
     }
+
+    /// Computes and caches `RlpNode` for all dirty nodes via iterative post-order DFS.
+    /// After this call every node reachable from `self.root` will be in `Cached` state.
+    ///
+    /// `root_path` is the absolute path of the subtrie root (not including its `short_key`).
+    #[expect(dead_code)]
+    fn update_cached_rlp(&mut self, root_path: Nibbles) {
+        update_cached_rlp(
+            &mut self.arena,
+            self.root,
+            root_path,
+            &mut self.stack,
+            &mut self.rlp_buf,
+            &mut self.rlp_node_buf,
+        );
+    }
+}
+
+/// Computes and caches `RlpNode` for all dirty nodes reachable from `root` in `arena`.
+///
+/// Uses the `ArenaStackEntry` stack to walk dirty branches depth-first. For each branch,
+/// children are iterated left-to-right:
+/// - Blinded, cached, leaf, and `EmptyRoot` children have their `RlpNode` pushed directly onto
+///   `rlp_node_buf`.
+/// - Dirty branch children are pushed onto `stack` and processed recursively first.
+///
+/// When a dirty branch child finishes and is popped, the parent resumes iteration after
+/// the child's nibble (determined from the popped path). Once all children of a branch are
+/// processed, the branch is encoded via `BranchNodeRef` using the last N entries on
+/// `rlp_node_buf`, then replaced with a single result `RlpNode`.
+fn update_cached_rlp(
+    arena: &mut Arena<ArenaSparseNode>,
+    root: Index,
+    root_path: Nibbles,
+    stack: &mut Vec<ArenaStackEntry>,
+    rlp_buf: &mut Vec<u8>,
+    rlp_node_buf: &mut Vec<RlpNode>,
+) {
+    rlp_node_buf.clear();
+    stack.clear();
+
+    // Step 1: Handle trivial roots that don't need the stack-based walk.
+    // EmptyRoot has no state to update. Leaves are encoded in place. Already-cached
+    // branches need no work. Only dirty branches enter the main loop below.
+    match &arena[root] {
+        ArenaSparseNode::EmptyRoot => return,
+        ArenaSparseNode::Leaf { .. } => {
+            encode_leaf(arena, root, rlp_buf, rlp_node_buf);
+            return;
+        }
+        ArenaSparseNode::Branch(b) => {
+            if let ArenaSparseNodeState::Cached { .. } = &b.state {
+                return;
+            }
+            stack.push(ArenaStackEntry {
+                index: root,
+                path: root_path,
+                prev_num_leaves: b.state.num_leaves(),
+                prev_dirty_leaves: b.state.num_dirty_leaves(),
+            });
+        }
+        ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie => {
+            unreachable!("Subtrie/TakenSubtrie should not appear inside a subtrie's own arena");
+        }
+    }
+
+    // Step 2: Walk dirty branches depth-first. Each iteration of the outer loop
+    // processes the branch at the top of the stack. `start_nibble` tracks where to
+    // resume iteration when returning from a child branch: 0 on first visit, or the
+    // nibble after the child that was just popped.
+    let mut start_nibble: u8 = 0;
+
+    loop {
+        let head_idx = stack.last().unwrap().index;
+        let state_mask = arena[head_idx].branch_ref().state_mask;
+
+        // Step 2a: Iterate children of the current branch left-to-right, starting
+        // from `start_nibble`. We re-borrow the branch on each iteration rather than
+        // holding a reference, so `arena` can be mutably borrowed for leaf encoding.
+        //
+        // Each child's RlpNode is pushed onto `rlp_node_buf` in order, except for
+        // dirty branch children which cause us to descend (push onto stack and restart
+        // the outer loop).
+        let mut descended = false;
+        for (dense_idx, nibble) in state_mask.iter().enumerate() {
+            if nibble < start_nibble {
+                continue;
+            }
+            match &arena[head_idx].branch_ref().children[dense_idx] {
+                ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
+                    rlp_node_buf.push(rlp_node.clone());
+                }
+                ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                    let child_idx = *child_idx;
+                    match &arena[child_idx] {
+                        ArenaSparseNode::EmptyRoot => {
+                            rlp_node_buf.push(RlpNode::word_rlp(&EMPTY_ROOT_HASH));
+                        }
+                        ArenaSparseNode::Leaf { .. } => {
+                            encode_leaf(arena, child_idx, rlp_buf, rlp_node_buf);
+                        }
+                        ArenaSparseNode::Branch(child_b) => {
+                            if let ArenaSparseNodeState::Cached { rlp_node, .. } = &child_b.state {
+                                rlp_node_buf.push(rlp_node.clone());
+                            } else {
+                                // Dirty branch child: descend into it. The parent will
+                                // resume from nibble+1 when this child is popped.
+                                let path = child_path(arena, stack, nibble);
+                                stack.push(ArenaStackEntry {
+                                    index: child_idx,
+                                    path,
+                                    prev_num_leaves: child_b.state.num_leaves(),
+                                    prev_dirty_leaves: child_b.state.num_dirty_leaves(),
+                                });
+                                start_nibble = 0;
+                                descended = true;
+                                break;
+                            }
+                        }
+                        ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie => {
+                            unreachable!(
+                                "Subtrie/TakenSubtrie should not appear inside a subtrie's own arena"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        if descended {
+            continue;
+        }
+
+        // Step 2b: All children of the current branch have been processed and their
+        // RlpNodes are the last N entries on `rlp_node_buf`. Encode the branch using
+        // `BranchNodeRef` (which reads children from the end of the slice), optionally
+        // wrap in an extension if the branch has a `short_key`, then replace the N
+        // children with the single resulting RlpNode.
+        let b = arena[head_idx].branch_ref();
+        let num_children = b.children.len();
+        let state_mask = b.state_mask;
+        let short_key = b.short_key;
+        let num_leaves = b.state.num_leaves();
+
+        rlp_buf.clear();
+        let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
+
+        let rlp_node = if short_key.is_empty() {
+            rlp_node
+        } else {
+            rlp_buf.clear();
+            ExtensionNodeRef::new(&short_key, &rlp_node).rlp(rlp_buf)
+        };
+
+        rlp_node_buf.truncate(rlp_node_buf.len() - num_children);
+
+        arena[head_idx].branch_mut().state =
+            ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), num_leaves };
+        rlp_node_buf.push(rlp_node);
+
+        // Step 2c: Pop this branch from the stack, propagating leaf-count deltas to
+        // the parent. If the stack is now empty, the root is done. Otherwise resume
+        // the parent branch from the nibble after the child that was just completed.
+        let popped_path = pop_and_propagate(arena, stack).unwrap();
+        if stack.is_empty() {
+            break;
+        }
+        start_nibble = popped_path.last().unwrap() + 1;
+    }
+}
+
+/// Encodes a leaf node's RLP and pushes it onto `rlp_node_buf`. If the leaf is already
+/// cached, its existing `RlpNode` is reused.
+fn encode_leaf(
+    arena: &mut Arena<ArenaSparseNode>,
+    idx: Index,
+    rlp_buf: &mut Vec<u8>,
+    rlp_node_buf: &mut Vec<RlpNode>,
+) {
+    let (key, value, state) = match &arena[idx] {
+        ArenaSparseNode::Leaf { key, value, state } => (key, value, state),
+        _ => unreachable!("encode_leaf called on non-Leaf node"),
+    };
+
+    if let ArenaSparseNodeState::Cached { rlp_node, .. } = state {
+        rlp_node_buf.push(rlp_node.clone());
+        return;
+    }
+
+    rlp_buf.clear();
+    let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
+
+    let num_leaves = arena[idx].num_leaves();
+    *arena[idx].state_mut() =
+        ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), num_leaves };
+    rlp_node_buf.push(rlp_node);
 }
 
 /// Creates a new leaf and a new branch that splits an existing child from the new leaf at
@@ -1222,6 +1428,8 @@ impl ArenaParallelSparseTrie {
                 stack: Vec::new(),
                 update_actions: Vec::new(),
                 required_proofs: Vec::new(),
+                rlp_buf: Vec::new(),
+                rlp_node_buf: Vec::new(),
             }
         };
         subtrie.root = subtrie.arena.insert(root);
