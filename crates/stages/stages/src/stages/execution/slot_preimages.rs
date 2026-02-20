@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{keccak256, map::HashSet, B256};
 use eyre::Context;
 use rayon::slice::ParallelSliceMut;
 use reth_db::tables;
@@ -12,7 +12,7 @@ use reth_libmdbx::{
 use reth_provider::{DBProvider, ExecutionOutcome};
 use reth_revm::revm::database::states::RevertToSlot;
 use reth_stages_api::StageError;
-use std::{collections::HashSet, path::Path};
+use std::path::Path;
 use tracing::trace;
 
 /// Separate MDBX environment for storing `keccak256(slot) → slot` preimage mappings.
@@ -163,9 +163,6 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     }
 
     // Find all wipe reverts (self-destructed accounts) and inject plain slot keys.
-    // Track addresses already wiped within this batch to handle the case where an
-    // account is destroyed, re-created, and destroyed again in the same batch.
-    let mut already_wiped = HashSet::new();
 
     // Open a single RO transaction for all preimage lookups in this batch.
     let reader = preimages.reader().map_err(fatal)?;
@@ -173,13 +170,6 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     for block_reverts in state.bundle.reverts.iter_mut() {
         for (address, revert) in block_reverts.iter_mut() {
             if !revert.wipe_storage {
-                continue;
-            }
-
-            if !already_wiped.insert(*address) {
-                // Second (or subsequent) destruction within the same batch: skip the DB walk.
-                // All slots from re-creation are already in `revert.storage` as explicit
-                // changes from execution.
                 continue;
             }
 

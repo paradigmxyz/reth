@@ -253,6 +253,48 @@ async fn test_pipeline_v2_single_batch_same_address_double_wipe_changesets_plain
 }
 
 /// Scenario coverage:
+/// 1. Same address is destroyed at block N.
+/// 2. In block N+1, it is recreated and writes new storage in the same block (multi-tx block).
+/// 3. At block N+2, it is destroyed again.
+/// 4. Both wipe blocks emit plain storage keys for the destroyed account.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pipeline_v2_single_batch_same_address_recreate_and_write_same_block_then_wipe_plain_slots(
+) -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let scenario = setup_same_address_recreate_and_write_same_block_then_wipe_scenario()?;
+    let (pipeline_provider_factory, pipeline_genesis) =
+        init_v2_pipeline_provider_factory(scenario.chain_spec.clone())?;
+
+    run_pipeline_range(
+        pipeline_provider_factory.clone(),
+        create_file_client_from_blocks(scenario.blocks),
+        pipeline_genesis,
+        1..=5,
+        5,
+    )
+    .await?;
+
+    let provider = pipeline_provider_factory.provider()?;
+    assert_eq!(provider.last_block_number()?, 5, "pipeline should sync blocks 1..=5");
+    assert_preimage_rows_for_provider(&provider, &scenario.expected_preimage_slots)?;
+    assert_destroyed_changeset_entries_in_block(
+        &provider,
+        3,
+        scenario.child_contract,
+        &scenario.expected_slots_first_wipe,
+    )?;
+    assert_destroyed_changeset_entries_in_block(
+        &provider,
+        5,
+        scenario.child_contract,
+        &scenario.expected_slots_second_wipe,
+    )?;
+
+    Ok(())
+}
+
+/// Scenario coverage:
 /// 1. Intra-block multi-tx net-zero path: tx1 writes slots, tx2 wipes in the same block.
 /// 2. Intra-tx net-zero path: one tx writes, restores, and wipes.
 /// 3. Net-zero wipe paths emit no storage changeset rows for those accounts.
@@ -396,6 +438,15 @@ struct SameAddressDoubleWipeScenario {
     blocks: Vec<SealedBlock<Block>>,
     child_contract: Address,
     expected_slots: [(B256, U256); 2],
+}
+
+struct SameAddressDifferentSlotsDoubleWipeScenario {
+    chain_spec: Arc<reth_chainspec::ChainSpec>,
+    blocks: Vec<SealedBlock<Block>>,
+    child_contract: Address,
+    expected_slots_first_wipe: [(B256, U256); 2],
+    expected_slots_second_wipe: [(B256, U256); 2],
+    expected_preimage_slots: [B256; 4],
 }
 
 struct IntraBlockAndIntraTxSelfdestructScenario {
@@ -588,6 +639,152 @@ fn setup_same_address_double_wipe_scenario() -> eyre::Result<SameAddressDoubleWi
         expected_slots: [
             (B256::with_last_byte(0x01), U256::from(0x2a)),
             (B256::with_last_byte(0x02), U256::from(0x99)),
+        ],
+    })
+}
+
+fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
+) -> eyre::Result<SameAddressDifferentSlotsDoubleWipeScenario> {
+    let mut rng = generators::rng();
+    let key_pair = generate_key(&mut rng);
+    let signer_address = public_key_to_address(key_pair.public_key());
+    let factory_contract = Address::new([0xaa; 20]);
+    let child_runtime = WRITE_TWO_SLOT_SETS_OR_SELFDESTRUCT_RUNTIME_CODE.clone();
+    let child_init = init_code_for_runtime(&child_runtime);
+    let child_contract = create2_address(factory_contract, TEST_CREATE2_SALT, &child_init);
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(Genesis {
+                alloc: [
+                    (
+                        signer_address,
+                        GenesisAccount {
+                            balance: U256::from(ETH_TO_WEI) * U256::from(1000),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        factory_contract,
+                        GenesisAccount {
+                            code: Some(CREATE2_FACTORY_RUNTIME_CODE.clone()),
+                            ..Default::default()
+                        },
+                    ),
+                ]
+                .into(),
+                ..MAINNET.genesis.clone()
+            })
+            .shanghai_activated()
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(30))
+            .build(),
+    );
+
+    let blocks = {
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        init_genesis(&provider_factory).expect("init genesis");
+
+        let genesis = provider_factory.sealed_header(0)?.expect("genesis should exist");
+        let evm_config = EthEvmConfig::new(chain_spec.clone());
+        let gas_price = INITIAL_BASE_FEE as u128;
+
+        let mut parent_hash = genesis.hash();
+        let mk_tx = |nonce: u64, to: TxKind, value: U256, input: Bytes| {
+            sign_tx_with_key_pair(
+                key_pair,
+                Transaction::Eip1559(TxEip1559 {
+                    chain_id: chain_spec.chain.id(),
+                    nonce,
+                    gas_limit: 400_000,
+                    max_fee_per_gas: gas_price,
+                    max_priority_fee_per_gas: 0,
+                    to,
+                    value,
+                    input,
+                    ..Default::default()
+                }),
+            )
+        };
+
+        let block1 = execute_and_commit_block(
+            &provider_factory,
+            &evm_config,
+            signer_address,
+            parent_hash,
+            1,
+            4,
+            vec![mk_tx(0, TxKind::Call(factory_contract), U256::ZERO, child_init.clone())],
+        )?;
+        parent_hash = block1.hash();
+
+        let block2 = execute_and_commit_block(
+            &provider_factory,
+            &evm_config,
+            signer_address,
+            parent_hash,
+            2,
+            8,
+            vec![mk_tx(1, TxKind::Call(child_contract), U256::ZERO, Bytes::new())],
+        )?;
+        parent_hash = block2.hash();
+
+        let block3 = execute_and_commit_block(
+            &provider_factory,
+            &evm_config,
+            signer_address,
+            parent_hash,
+            3,
+            12,
+            vec![mk_tx(2, TxKind::Call(child_contract), U256::from(1), Bytes::new())],
+        )?;
+        parent_hash = block3.hash();
+
+        // Recreate and write new slots in the same block (N+1).
+        let block4 = execute_and_commit_block(
+            &provider_factory,
+            &evm_config,
+            signer_address,
+            parent_hash,
+            4,
+            16,
+            vec![
+                mk_tx(3, TxKind::Call(factory_contract), U256::ZERO, child_init.clone()),
+                mk_tx(4, TxKind::Call(child_contract), U256::from(2), Bytes::new()),
+            ],
+        )?;
+        parent_hash = block4.hash();
+
+        let block5 = execute_and_commit_block(
+            &provider_factory,
+            &evm_config,
+            signer_address,
+            parent_hash,
+            5,
+            20,
+            vec![mk_tx(5, TxKind::Call(child_contract), U256::from(1), Bytes::new())],
+        )?;
+
+        vec![block1, block2, block3, block4, block5]
+    };
+
+    Ok(SameAddressDifferentSlotsDoubleWipeScenario {
+        chain_spec,
+        blocks,
+        child_contract,
+        expected_slots_first_wipe: [
+            (B256::with_last_byte(0x01), U256::from(0x2a)),
+            (B256::with_last_byte(0x02), U256::from(0x99)),
+        ],
+        expected_slots_second_wipe: [
+            (B256::with_last_byte(0x04), U256::from(0xab)),
+            (B256::with_last_byte(0x05), U256::from(0xcd)),
+        ],
+        expected_preimage_slots: [
+            B256::with_last_byte(0x01),
+            B256::with_last_byte(0x02),
+            B256::with_last_byte(0x04),
+            B256::with_last_byte(0x05),
         ],
     })
 }
@@ -996,6 +1193,28 @@ const WRITE_OR_SELFDESTRUCT_RUNTIME_CODE: Bytes = bytes!(
     "602a600155" // SSTORE(1, 0x2a)
     "6099600255" // SSTORE(2, 0x99)
     "00" // STOP
+);
+
+/// Builds tiny runtime bytecode with three callvalue-based paths:
+/// - `msg.value == 0`: write slot-set A (`(1, 0x2a)`, `(2, 0x99)`)
+/// - `msg.value == 2`: write slot-set B (`(4, 0xab)`, `(5, 0xcd)`)
+/// - `msg.value == 1`: selfdestruct to `beneficiary`
+///
+/// Used by the recreate-and-write-in-same-block scenario to ensure first and second wipes
+/// restore different slot sets for the same address.
+const WRITE_TWO_SLOT_SETS_OR_SELFDESTRUCT_RUNTIME_CODE: Bytes = bytes!(
+    "34600114602557" // if callvalue == 1 jump selfdestruct
+    "34600214601957" // if callvalue == 2 jump write slot-set B
+    "602a600155" // write slot-set A: SSTORE(1, 0x2a)
+    "6099600255" // write slot-set A: SSTORE(2, 0x99)
+    "00" // STOP
+    "5b" // JUMPDEST (0x19)
+    "60ab600455" // write slot-set B: SSTORE(4, 0xab)
+    "60cd600555" // write slot-set B: SSTORE(5, 0xcd)
+    "00" // STOP
+    "5b" // JUMPDEST (0x25)
+    "737777777777777777777777777777777777777777" // PUSH20 beneficiary
+    "ff00" // SELFDESTRUCT; STOP
 );
 
 /// Builds tiny runtime bytecode with three value-based paths:
