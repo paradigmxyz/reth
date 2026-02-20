@@ -1,5 +1,5 @@
 use crate::metrics::PersistenceMetrics;
-use crate::deferred_indexer::StageDeferredHistoryIndexer;
+use crate::deferred_indexer::DeferredHistoryIndexer;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::ExecutedBlock;
@@ -52,7 +52,7 @@ where
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
     /// Optional deferred history indexer that runs inside this service's thread.
-    deferred_indexer: Option<StageDeferredHistoryIndexer<N>>,
+    deferred_indexer: Option<DeferredHistoryIndexer<N>>,
 }
 
 impl<N> PersistenceService<N>
@@ -65,7 +65,7 @@ where
         incoming: Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
-        deferred_indexer: Option<StageDeferredHistoryIndexer<N>>,
+        deferred_indexer: Option<DeferredHistoryIndexer<N>>,
     ) -> Self {
         Self {
             provider,
@@ -294,7 +294,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
-        deferred_indexer: Option<StageDeferredHistoryIndexer<N>>,
+        deferred_indexer: Option<DeferredHistoryIndexer<N>>,
     ) -> PersistenceHandle<N::Primitives>
     where
         N: ProviderNodeTypes,

@@ -23,7 +23,7 @@ const DEFAULT_BATCH_SIZE: u64 = 10_000;
 ///
 /// Processes history indexing in small batches, round-robining between the three deferred
 /// stages (`TransactionLookup`, `IndexStorageHistory`, `IndexAccountHistory`).
-pub struct StageDeferredHistoryIndexer<N: ProviderNodeTypes> {
+pub struct DeferredHistoryIndexer<N: ProviderNodeTypes> {
     provider_factory: ProviderFactory<N>,
     tx_lookup: TransactionLookupStage,
     index_storage: IndexStorageHistoryStage,
@@ -34,9 +34,9 @@ pub struct StageDeferredHistoryIndexer<N: ProviderNodeTypes> {
     next_stage: usize,
 }
 
-impl<N: ProviderNodeTypes> std::fmt::Debug for StageDeferredHistoryIndexer<N> {
+impl<N: ProviderNodeTypes> std::fmt::Debug for DeferredHistoryIndexer<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StageDeferredHistoryIndexer")
+        f.debug_struct("DeferredHistoryIndexer")
             .field("batch_size", &self.batch_size)
             .field("caught_up", &self.caught_up)
             .field("next_stage", &self.next_stage)
@@ -44,7 +44,7 @@ impl<N: ProviderNodeTypes> std::fmt::Debug for StageDeferredHistoryIndexer<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> StageDeferredHistoryIndexer<N> {
+impl<N: ProviderNodeTypes> DeferredHistoryIndexer<N> {
     /// Creates a new deferred history indexer.
     pub fn new(
         provider_factory: ProviderFactory<N>,
@@ -177,7 +177,7 @@ impl<N: ProviderNodeTypes> StageDeferredHistoryIndexer<N> {
     }
 }
 
-impl<N> StageDeferredHistoryIndexer<N>
+impl<N> DeferredHistoryIndexer<N>
 where
     N: ProviderNodeTypes,
     TransactionLookupStage: Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>,
