@@ -675,6 +675,42 @@ jobs:
         id: run-baseline-2
         run: taskset -c 0 .github/scripts/bench-reth-run.sh baseline ../reth-baseline/target/profiling/reth "$BENCH_WORK_DIR/baseline-2"
 
+      - name: Upload samply profiles
+        if: success() && env.BENCH_SAMPLY == 'true'
+        env:
+          BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+          FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
+        run: |
+          MC="mc --config-dir /home/ubuntu/.mc"
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          BASELINE_SHORT=$(echo "$BASELINE_REF" | cut -c1-8)
+          FEATURE_SHORT=$(echo "$FEATURE_REF" | cut -c1-8)
+
+          for run_dir in baseline-1 baseline-2 feature-1 feature-2; do
+            PROFILE="$BENCH_WORK_DIR/$run_dir/samply-profile.json.gz"
+            if [ ! -f "$PROFILE" ]; then continue; fi
+
+            case "$run_dir" in
+              baseline-*) SHORT="$BASELINE_SHORT" ;;
+              feature-*)  SHORT="$FEATURE_SHORT" ;;
+            esac
+
+            FILENAME="${run_dir}-${SHORT}-${TIMESTAMP}.json.gz"
+            MINIO_PATH="minio/samply-profiles/$FILENAME"
+            PROFILE_SIZE=$(du -h "$PROFILE" | cut -f1)
+            echo "Uploading $run_dir samply profile (${PROFILE_SIZE})..."
+            $MC cp "$PROFILE" "$MINIO_PATH"
+
+            SHARE_OUTPUT=$($MC share download --expire 168h "$MINIO_PATH" 2>&1 || true)
+            URL=$(echo "$SHARE_OUTPUT" | grep '^Share:' | sed 's/^Share: //' | tr -d '[:space:]')
+            if [ -n "$URL" ]; then
+              echo "$URL" > "$BENCH_WORK_DIR/$run_dir/samply-profile-url.txt"
+              echo "Presigned URL for $run_dir (expires in 7 days): $URL"
+            else
+              echo "::warning::Failed to generate presigned URL for $run_dir"
+            fi
+          done
+
       # Results & charts
       - name: Parse results
         id: results
@@ -788,6 +824,25 @@ jobs:
                 chartMarkdown += `</details>\n\n`;
               }
               comment += chartMarkdown;
+            }
+
+            // Samply profile links
+            if (process.env.BENCH_SAMPLY === 'true') {
+              const profilerBase = 'https://profiler.firefox.com/from-url/';
+              const runs = ['baseline-1', 'feature-1', 'feature-2', 'baseline-2'];
+              const links = [];
+              for (const run of runs) {
+                try {
+                  const url = fs.readFileSync(`${process.env.BENCH_WORK_DIR}/${run}/samply-profile-url.txt`, 'utf8').trim();
+                  if (url) {
+                    const profilerUrl = profilerBase + encodeURIComponent(url);
+                    links.push(`- **${run}**: [Firefox Profiler](${profilerUrl}) · [Download](${url})`);
+                  }
+                } catch (e) {}
+              }
+              if (links.length > 0) {
+                comment += `\n\n### Samply Profiles\n\n${links.join('\n')}\n`;
+              }
             }
 
             const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
