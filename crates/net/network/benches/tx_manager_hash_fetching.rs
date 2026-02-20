@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{map::HashMap, B256, U256};
 use criterion::{measurement::WallTime, *};
 use rand::SeedableRng;
 use reth_eth_wire::EthVersion;
@@ -18,7 +18,6 @@ use reth_network::{
 use reth_network_peers::PeerId;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
-use std::collections::HashMap;
 use tokio::runtime::Runtime as TokioRuntime;
 
 criterion_group!(
@@ -40,14 +39,14 @@ pub fn benchmark_fetch_pending_hashes(group: &mut BenchmarkGroup<'_, WallTime>, 
         peer_data.seen_transactions_mut().insert(hash);
         peers.insert(peer, peer_data);
 
-        buffer_hash_to_tx_fetcher(&mut tx_fetcher, hash, peer, 0, None);
+        buffer_hash_to_tx_fetcher(&mut tx_fetcher, hash, peer);
     }
 
     let group_id = format!("fetch pending hashes, peers num: {peers_num}");
 
     group.bench_function(group_id, |b| {
         b.iter(|| {
-            tx_fetcher.on_fetch_pending_hashes(&peers, |_| true);
+            tx_fetcher.schedule_fetches(&peers);
         });
     });
 }

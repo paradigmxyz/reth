@@ -6,6 +6,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Not,
     path::PathBuf,
+    time::Duration,
 };
 
 use crate::version::version_metadata;
@@ -26,7 +27,7 @@ use reth_network::{
         constants::{
             tx_fetcher::{
                 DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
-                DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
+                DEFAULT_MAX_TX_ANNOUNCES_PER_PEER, DEFAULT_TX_FETCH_TIMEOUT,
             },
             tx_manager::{
                 DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
@@ -136,13 +137,9 @@ pub struct NetworkArgs {
     #[arg(long = "max-tx-reqs", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, verbatim_doc_comment)]
     pub max_concurrent_tx_requests: u32,
 
-    /// Max concurrent `GetPooledTransactions` requests per peer.
-    #[arg(long = "max-tx-reqs-peer", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER, verbatim_doc_comment)]
-    pub max_concurrent_tx_requests_per_peer: u8,
-
     /// Max number of seen transactions to remember per peer.
     ///
-    /// Default is 320 transaction hashes.
+    /// Default is 32768 transaction hashes.
     #[arg(long = "max-seen-tx-history", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER, verbatim_doc_comment)]
     pub max_seen_tx_history: u32,
 
@@ -173,6 +170,14 @@ pub struct NetworkArgs {
     /// Max capacity of cache of hashes for transactions pending fetch.
     #[arg(long = "max-tx-pending-fetch", value_name = "COUNT", default_value_t = DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, verbatim_doc_comment)]
     pub max_capacity_cache_txns_pending_fetch: u32,
+
+    /// Time in milliseconds to wait for a peer to respond before timing out.
+    #[arg(long = "tx-fetch-timeout", value_name = "MS", default_value_t = DEFAULT_TX_FETCH_TIMEOUT.as_millis() as u64, verbatim_doc_comment)]
+    pub tx_fetch_timeout_ms: u64,
+
+    /// Max announcements tracked per peer across all stages.
+    #[arg(long = "max-announces-per-peer", value_name = "COUNT", default_value_t = DEFAULT_MAX_TX_ANNOUNCES_PER_PEER, verbatim_doc_comment)]
+    pub max_announces_per_peer: usize,
 
     /// Name of network interface used to communicate with peers.
     ///
@@ -299,10 +304,11 @@ impl NetworkArgs {
         TransactionsManagerConfig {
             transaction_fetcher_config: TransactionFetcherConfig::new(
                 self.max_concurrent_tx_requests,
-                self.max_concurrent_tx_requests_per_peer,
                 self.soft_limit_byte_size_pooled_transactions_response,
                 self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
                 self.max_capacity_cache_txns_pending_fetch,
+                Duration::from_millis(self.tx_fetch_timeout_ms),
+                self.max_announces_per_peer,
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             propagation_mode: self.propagation_mode,
@@ -487,13 +493,14 @@ impl Default for NetworkArgs {
             max_inbound_peers: None,
             max_peers: None,
             max_concurrent_tx_requests: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
-            max_concurrent_tx_requests_per_peer: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             soft_limit_byte_size_pooled_transactions_response:
                 SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
             max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+            tx_fetch_timeout_ms: DEFAULT_TX_FETCH_TIMEOUT.as_millis() as u64,
+            max_announces_per_peer: DEFAULT_MAX_TX_ANNOUNCES_PER_PEER,
             net_if: None,
             tx_propagation_policy: TransactionPropagationKind::default(),
             tx_ingress_policy: TransactionIngressPolicy::default(),
